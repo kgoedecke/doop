@@ -34,6 +34,7 @@ import * as workspaces from './workspaces.ts'
 import { auth, getUserName, isBanned } from './auth.ts'
 import { capture, captureThrottled } from './analytics.ts'
 import { renderFrame } from './screenshot.ts'
+import { renderedHeight } from './renderLimits.ts'
 import {
   MAX_PDF_FRAMES,
   PDF_UNAVAILABLE_MESSAGE,
@@ -162,6 +163,12 @@ function withEscapeNote<T extends { content: { type: 'text' | 'image'; [k: strin
 
 /** A PDF returned inline as base64; beyond this, export fewer frames. */
 const MAX_MCP_PDF_BYTES = 15_000_000
+
+/** Tells the agent a very tall frame's screenshot stops short of its bottom. */
+function croppedNote(frame: Frame, scale: number): string {
+  const height = renderedHeight(frame, scale)
+  return height < Math.round(frame.height) ? ` — cropped to the top ${height}px (pixel budget)` : ''
+}
 
 function err(message: string) {
   return { content: [{ type: 'text' as const, text: `Error: ${message}` }], isError: true }
@@ -1808,23 +1815,29 @@ export function buildMcpServer(
           })
         type ResultBlock = { type: 'text'; text: string } | { type: 'image'; data: string; mimeType: string }
         const content: ResultBlock[] = [{ type: 'text' as const, text: `Logo results for "${query}":` }]
+        const brandBlocks: ResultBlock[] = []
         if (brands.length > 0) {
-          const thumbs = await Promise.all(brands.map((b) => imageSearch.fetchThumb(b.thumb_url)))
+          const thumbs = await Promise.all(brands.map((b) => b.thumb ?? imageSearch.fetchThumb(b.thumb_url)))
           brands.forEach((b, i) => {
             const thumb = thumbs[i]
-            if (thumb) content.push({ type: 'image' as const, data: thumb.data, mimeType: thumb.mime })
-            content.push({
+            if (thumb) brandBlocks.push({ type: 'image' as const, data: thumb.data, mimeType: thumb.mime })
+            brandBlocks.push({
               type: 'text' as const,
-              text: `#${i + 1} — ${b.name} (${b.domain})\nlogo_url: ${b.logo_url}`,
+              text: `#${i + 1} — ${b.name} (${b.domain})${b.source === 'favicon' ? ' · favicon' : ''}\nlogo_url: ${b.logo_url}`,
             })
           })
         }
-        if (vector.length > 0) {
-          content.push({
-            type: 'text' as const,
-            text: `Open-source vector marks:\n${vector.map((v) => `${v.id} → ${v.svg_url}`).join('\n')}`,
-          })
-        }
+        const vectorBlocks: ResultBlock[] =
+          vector.length > 0
+            ? [
+                {
+                  type: 'text' as const,
+                  text: `Open-source vector marks:\n${vector.map((v) => `${v.id} → ${v.svg_url}`).join('\n')}`,
+                },
+              ]
+            : []
+        if (imageSearch.vectorFirst(brands, vector)) content.push(...vectorBlocks, ...brandBlocks)
+        else content.push(...brandBlocks, ...vectorBlocks)
         content.push({ type: 'text' as const, text: imageSearch.LOGO_USAGE_NOTE })
         const result = { content }
         return canvas_id ? withFeedbackNotice(result, canvas_id, actorFrom(agent_name)) : result
@@ -2015,7 +2028,7 @@ export function buildMcpServer(
                 { type: 'image' as const, data: png.toString('base64'), mimeType: 'image/png' },
                 {
                   type: 'text' as const,
-                  text: `Screenshot of “${f.name}” (${f.width}×${f.height}@${scale ?? 1}x, html ${f.html.length} bytes)`,
+                  text: `Screenshot of “${f.name}” (${f.width}×${f.height}@${scale ?? 1}x, html ${f.html.length} bytes)${croppedNote(f, scale ?? 1)}`,
                 },
               ],
             },

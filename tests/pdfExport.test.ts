@@ -1,7 +1,16 @@
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import fs from 'node:fs'
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { decodePDFRawStream, PDFArray, PDFDocument, PDFName, PDFRawStream } from 'pdf-lib'
 import { readingOrder } from '../shared/frameOrder.ts'
-import { mapLimited, pageSizeFor, renderFramePdfPage, selectPdfFrames, takePdfExportSlot } from '../server/pdfExport.ts'
+import {
+  mapLimited,
+  pageSizeFor,
+  pdfRendererAvailable,
+  renderFramePdfPage,
+  selectPdfFrames,
+  takePdfExportSlot,
+} from '../server/pdfExport.ts'
+import { reloadEnv } from '../server/env.ts'
 import { findBrowserPath } from '../server/screenshot.ts'
 import type { Canvas, Frame } from '../shared/types.ts'
 import { Client, startServer, type Server } from './harness.ts'
@@ -135,6 +144,27 @@ function visibleFills(pdf: PDFDocument, color: string): Box[] {
   }
   return fills
 }
+
+describe('pdfRendererAvailable', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+    vi.unstubAllEnvs()
+    reloadEnv()
+  })
+
+  it('counts a remote browser on a server with no local Chrome', () => {
+    vi.spyOn(fs, 'accessSync').mockImplementation(() => {
+      throw new Error('ENOENT')
+    })
+    vi.stubEnv('REMOTE_BROWSER_URL', undefined)
+    reloadEnv()
+    expect(pdfRendererAvailable()).toBe(false)
+
+    vi.stubEnv('REMOTE_BROWSER_URL', 'wss://browser.example/devtools/browser')
+    reloadEnv()
+    expect(pdfRendererAvailable()).toBe(true)
+  })
+})
 
 describe('renderFramePdfPage', () => {
   it.skipIf(!findBrowserPath())(

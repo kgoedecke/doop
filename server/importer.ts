@@ -510,6 +510,12 @@ export async function importPage(rawUrl: string, options: { includePreview?: boo
   else await assertPublicNetworkUrl(requestedUrl)
   const isolated = await openIsolatedPage()
   const { page } = isolated
+  let captureOpen = true
+  const releaseCapture = async () => {
+    if (!captureOpen) return
+    captureOpen = false
+    await isolated.close()
+  }
   try {
     await guardPublicPageRequests(page)
     await page.setViewport({ width: VIEWPORT_WIDTH, height: 900 })
@@ -655,6 +661,10 @@ export async function importPage(rawUrl: string, options: { includePreview?: boo
       throw new WebsiteCaptureUnavailableError('The captured webpage is too large to import safely')
     }
 
+    /* the capture is done: give its render slot back before the preview asks
+       for one, or a one-slot renderer waits on itself */
+    await releaseCapture()
+
     let preview: ImportedPage['preview']
     let renderedHeight = snap.height
     if (options.includePreview) {
@@ -736,6 +746,6 @@ export async function importPage(rawUrl: string, options: { includePreview?: boo
     if (error instanceof WebsiteCaptureUnavailableError) throw error
     throw new WebsiteCaptureUnavailableError('Doop could not finish rendering the webpage HTML')
   } finally {
-    await isolated.close()
+    await releaseCapture()
   }
 }

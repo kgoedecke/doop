@@ -248,6 +248,16 @@ const schema = {
   /* ---------------------------------------------------- screenshots */
   CHROME_PATH: str({ default: undefined }),
   CHROME_NO_SANDBOX: bool({ default: false }),
+  /* pages the shared Chromium renders at once (renderBrowser.ts) */
+  RENDER_CONCURRENCY: nonNegativeInt({ default: 4 }),
+  /* a remote Chrome over the DevTools protocol instead of the local one
+     (Cloudflare Browser Run, browserless, a renderer service) */
+  REMOTE_BROWSER_URL: str({ default: undefined }),
+  REMOTE_BROWSER_TOKEN: str({ default: undefined }),
+  /* the remote browser cannot reach this server's private network (a hosted
+     provider such as Cloudflare): it may fetch public URLs itself instead of
+     through the DNS-pinned proxy. Never set it for a self-hosted renderer */
+  REMOTE_BROWSER_ISOLATED: bool({ default: false }),
 
   /* ------------------------------------------------------ analytics */
   POSTHOG_KEY: str({ default: undefined }),

@@ -1,4 +1,6 @@
 import { env } from './env.ts'
+import { createAsset, fetchRemote } from './assets.ts'
+import { readImage } from './icoImage.ts'
 /**
  * Image sourcing for design agents: stock photo search (Pexels) and icon /
  * brand-logo search (Iconify). Both power the search_images / search_icons
@@ -130,6 +132,10 @@ export interface LogoResult {
   logo_url: string
   /** Small square icon rendition used for the visual thumbnail. */
   thumb_url: string
+  /** `favicon`: a small raster, the fallback when nothing better exists. */
+  source: 'brandfetch' | 'favicon'
+  /** The thumbnail's bytes when already in hand, so callers need not fetch thumb_url. */
+  thumb?: { data: string; mime: string }
 }
 
 interface BrandfetchHit {
@@ -157,14 +163,51 @@ export async function searchLogos(query: string, count = 5): Promise<LogoResult[
       domain: b.domain!,
       logo_url: `https://cdn.brandfetch.io/${b.domain}?c=${clientId}`,
       thumb_url: b.icon || `https://cdn.brandfetch.io/${b.domain}/w/128/h/128?c=${clientId}`,
+      source: 'brandfetch' as const,
     }))
 }
 
 const DDG_ICON_ENDPOINT = 'https://icons.duckduckgo.com/ip3'
+const MAX_FAVICON_BYTES = 1024 * 1024
+const FAVICON_CACHE_SIZE = 500
+
+interface StoredFavicon {
+  url: string
+  png: Buffer
+}
+
+/** One stored PNG per domain for this process, so repeated searches reuse an asset instead of piling up copies. */
+const storedFavicons = new Map<string, Promise<StoredFavicon | null>>()
+
+/** DuckDuckGo serves .ico, which few renderers and exporters read; agents get a PNG on our own origin instead. */
+function storeFavicon(domain: string): Promise<StoredFavicon | null> {
+  const cached = storedFavicons.get(domain)
+  if (cached) return cached
+  const stored = (async () => {
+    let bytes: Buffer
+    try {
+      bytes = await fetchRemote(`${DDG_ICON_ENDPOINT}/${domain}.ico`, MAX_FAVICON_BYTES)
+    } catch {
+      return null // DDG 404s for unknown domains
+    }
+    const png = await readImage(bytes).png().toBuffer()
+    const asset = await createAsset(png, { uploadedBy: 'search_logos' })
+    return { url: `${env.BETTER_AUTH_URL}/a/${asset.id}.${asset.ext}`, png }
+  })()
+  storedFavicons.set(domain, stored)
+  stored.then(
+    (result) => {
+      if (!result) storedFavicons.delete(domain)
+    },
+    () => storedFavicons.delete(domain),
+  )
+  if (storedFavicons.size > FAVICON_CACHE_SIZE) storedFavicons.delete(storedFavicons.keys().next().value!)
+  return stored
+}
 
 /** Keyless any-company fallback: the DuckDuckGo favicon service. Resolves the
- *  query to a domain (used directly if it looks like one, else <name>.com) and
- *  verifies the icon exists — DDG 404s for unknown domains. Favicons are small
+ *  query to a domain (used directly if it looks like one, else <name>.com),
+ *  converts the icon to PNG and stores it as an asset. Favicons are small
  *  raster images (16–48px), so callers should render them small. */
 export async function faviconLogos(query: string): Promise<LogoResult[]> {
   const q = query
@@ -175,14 +218,37 @@ export async function faviconLogos(query: string): Promise<LogoResult[]> {
   const wasDomain = /^[a-z0-9][a-z0-9.-]*\.[a-z]{2,}$/.test(q)
   const domain = wasDomain ? q : `${q.replace(/[^a-z0-9]/g, '')}.com`
   if (domain === '.com') return []
-  const url = `${DDG_ICON_ENDPOINT}/${domain}.ico`
   try {
-    const res = await fetch(url, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) })
-    if (!res.ok) return []
-    return [{ name: wasDomain ? domain : query.trim(), domain, logo_url: url, thumb_url: url }]
+    const stored = await storeFavicon(domain)
+    if (!stored) return []
+    return [
+      {
+        name: wasDomain ? domain : query.trim(),
+        domain,
+        logo_url: stored.url,
+        thumb_url: stored.url,
+        source: 'favicon',
+        thumb: { data: stored.png.toString('base64'), mime: 'image/png' },
+      },
+    ]
   } catch {
     return []
   }
+}
+
+/** Favicons are the last resort: when an open-source vector mark exists, agents should see it first. */
+export function vectorFirst(brands: LogoResult[], vector: IconResult[]): boolean {
+  return vector.length > 0 && brands.every((b) => b.source === 'favicon')
+}
+
+/** The brand in a query, for the vector icon search, which matches names, not domains: "visa.com" → "visa". */
+export function brandName(query: string): string {
+  const q = query
+    .trim()
+    .replace(/^https?:\/\//i, '')
+    .replace(/\/.*$/, '')
+    .replace(/^www\./i, '')
+  return /^[a-z0-9][a-z0-9-]*\.[a-z.]{2,}$/i.test(q) ? q.split('.')[0]! : query.trim()
 }
 
 /** The full logo lookup behind search_logos: Brandfetch when configured
@@ -196,10 +262,10 @@ export async function lookupLogos(
     (logoSearchEnabled() ? searchLogos(query, count).catch(() => [] as LogoResult[]) : Promise.resolve([])).then((b) =>
       b.length > 0 ? b : faviconLogos(query),
     ),
-    searchIcons(query, { logos: true, limit: 6 }).catch(() => [] as IconResult[]),
+    searchIcons(brandName(query), { logos: true, limit: 6 }).catch(() => [] as IconResult[]),
   ])
   return { brands, vector }
 }
 
 export const LOGO_USAGE_NOTE =
-  'Hotlink logo_url directly in <img src>. URLs from icons.duckduckgo.com are the company\'s favicon — a SMALL raster (16–48px): display at 32px or less (logo rows, avatars, list bullets) and never scale up; if the design needs a large logo, prefer a vector mark below or ask your human for a logo file. URLs from cdn.brandfetch.io are high-res and stay current if the brand rebrands; size with CSS (height + width: auto). Vector marks are open-source SVG: "logos:" ids are full-color, "simple-icons:" ids are monochrome glyphs that take ?color=%23<hex>.'
+  'Hotlink logo_url directly in <img src>. Prefer a vector mark over a result marked "favicon" whenever one exists. A favicon is a SMALL raster (16–48px PNG): display it at 32px or less (logo rows, avatars, list bullets) and never scale up; if the design needs a large logo and no vector mark exists, ask your human for a logo file. URLs from cdn.brandfetch.io are high-res and stay current if the brand rebrands; size with CSS (height + width: auto). Vector marks are open-source SVG: "logos:" ids are full-color, "simple-icons:" ids are monochrome glyphs that take ?color=%23<hex>.'

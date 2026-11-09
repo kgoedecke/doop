@@ -254,6 +254,29 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   fallback. Tests: `exportScale.test.ts`, the scale and SVG cases in `frameExport.test.ts`,
   `frameRasterBrowser.test.ts` (the SVG opened as a page in a wide window), `exportOptions.test.tsx`
   and `mcpPdfExport.test.ts`.
+- Server-side renderer (`server/renderBrowser.ts`, used by `server/screenshot.ts`): every headless
+  Chromium page (frame images, MCP screenshots, the resident's checks, PDF
+  exports, website imports) goes through one gate of `RENDER_CONCURRENCY` pages (default 4;
+  background thumbnails get at most 2, a waiting agent goes before a waiting thumbnail), a bounded
+  queue that refuses with `RendererBusyError` (HTTP 503 + Retry-After) and a lease that closes a
+  page held past 120s. A browser that cannot open a page within 15s is killed with its process
+  group and the open retried once on a fresh launch; a render that fails like a browser failure
+  runs a health probe outside the gate and is retried once if the probe kills the browser; a
+  browser is recycled after 500 pages or an hour. DevTools commands time out at 60s, not 180s.
+  Screenshots are capped at 50M device px (`server/renderLimits.ts`; MCP says when it cropped).
+  `GET /healthz/renderer` reports the counters (`kills`, `lastOpenedAt`, `failedOpensInARow`,
+  queue depth) for an uptime check. Context: the 2026-11-05 wedge, where one browser stopped
+  making pages for two hours. Tests: `renderBrowser.test.ts`.
+  `REMOTE_BROWSER_URL` (+ `REMOTE_BROWSER_TOKEN`, sent as a Bearer header) swaps the local launch
+  for `puppeteer.connect` to a remote Chrome over CDP: Cloudflare Browser Run
+  (`wss://api.cloudflare.com/client/v4/accounts/<id>/browser-run/devtools/browser`), browserless
+  or a renderer service; everything past the connect is unchanged, so switching provider is an env
+  change. A remote browser is closed 30s after its last page (`idleCloseMs`; providers bill open
+  sessions), and one whose close stalls is disconnected, having no process to kill. Assets load
+  from `BETTER_AUTH_URL`, which the remote browser must reach. `REMOTE_BROWSER_ISOLATED` declares the
+  browser cannot reach our private network (a hosted provider): it then fetches public URLs itself
+  instead of through `guardPublicPageRequests`' DNS-pinned proxy; never set it for a self-hosted
+  renderer.
 - `pdf-lib` 1.17.1 - joins the vector PDF export (`server/pdfExport.ts`): headless Chrome prints
   each frame onto a page of its own size (inside an iframe of the frame's size, as the canvas shows
   it, so content taller than the frame is clipped rather than paginated: bare, Chrome moved a block

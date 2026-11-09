@@ -52,6 +52,8 @@ async function render(frame: Frame): Promise<Buffer> {
       type: 'jpeg',
       quality: 70,
       maxHeight: PREVIEW_MAX_HEIGHT,
+      /* a dashboard tile can wait; an agent's screenshot should not */
+      priority: 'background',
     })
   } finally {
     active--
