@@ -952,7 +952,13 @@ export const FrameView = memo(function FrameView({
 
   function commentOnFrame() {
     closeElementPopovers()
-    setProbe(frameCommentHit(FRAME_NAME_COMMENT_AT, FRAME_NAME_COMMENT_AT))
+    /* a frame smaller than the inset keeps the pin on itself, at its middle */
+    setProbe(
+      frameCommentHit(
+        Math.min(FRAME_NAME_COMMENT_AT, frame.width / 2),
+        Math.min(FRAME_NAME_COMMENT_AT, frame.height / 2),
+      ),
+    )
     setComposePrefill('')
     setComposing(true)
   }
