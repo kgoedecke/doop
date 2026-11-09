@@ -234,8 +234,9 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   `ExportOptions.tsx`): the Inspector's Export group and the Export… dialog (frames, and elements
   from their menu) pick 0.5x / 1x / 2x / 3x / 4x or a typed multiplier (0.1-4, two decimals) and
   PNG / JPG / SVG, remembered per browser under `doop:export-settings` (2x PNG by default) and
-  named `Name@2x.png` as Figma does. Up to 2x a scale is honoured as before; above it,
-  `fitExportScale` brings a huge frame down to 16,384 px a side and 64 MP, the same limit
+  named `Name@2x.png` as Figma does. `fitExportScale` brings any scale a huge frame cannot
+  take down to 16,384 px a side and 50 MP (below 2x too), the budget the server's renderer
+  cuts a screenshot at (`renderedHeight`), so no export is cut short; the same limit
   for the browser render, `/i/<id>.png?scale=` (any parsed scale, 1x when unreadable) and MCP
   `export_frame`'s `scale`, and the toast says so. SVG is `frameSvg`: the inlined document
   `inlineDocument` already builds, cropped by `viewBox` for an element, on white, settled for
