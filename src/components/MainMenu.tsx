@@ -37,7 +37,7 @@ function MenuRows({ menu }: { menu: MenuId }) {
 
 function ActionRow({ action, label, icon }: { action: CanvasAction; label: string; icon?: ReactNode }) {
   const chord = firstChord(action.keys)
-  const hint = chord && <MenuHint className="font-mono">{chordHint(chord)}</MenuHint>
+  const hint = chord && <MenuHint>{chordHint(chord)}</MenuHint>
   const disabled = !isEnabled(action)
   if (action.checked) {
     return (

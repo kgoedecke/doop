@@ -4,6 +4,24 @@
 
 @custom-variant dark (&:where(.dark, .dark *));
 
+/* Key symbols (⌘ ⌥ ⇧ ⌃ ⌫ ↩ ⇥ ⎋ and the arrows) cut from the full Inter: the
+   Google Fonts builds of Inter and Geist Mono leave them out, so shortcut hints
+   fell back to the OS mono font, whose ⌘⌥⇧ sit far smaller than the letters.
+   Every stack below lists this family after its face, so it draws only those glyphs.
+   Rebuild: Inter 4.1 InterVariable.woff2, `fonttools varLib.instancer opsz=14`,
+   then `pyftsubset --unicodes=<this unicode-range> --layout-features='*'
+   --flavor=woff2`. Licence: inter-LICENSE.txt (OFL). */
+@font-face {
+  font-family: 'Doop Keys';
+  src: url('./assets/fonts/inter-keys.woff2') format('woff2');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: block;
+  unicode-range:
+    U+2190-2193, U+2196, U+2198, U+21A9, U+21B5, U+21DE-21DF, U+21E4-21E5, U+21E7, U+21EA, U+2303, U+2305, U+2318,
+    U+2325-2326, U+232B, U+238B, U+23CE, U+2423;
+}
+
 /* Tailwind is the utility API for Doop's existing design system. Keep the
    semantic CSS variables below as the source of truth while the legacy
    component rules are migrated incrementally. */
@@ -165,12 +183,12 @@
   --warning-ink: #a8481a;
   /* the silver hairline an active agent's avatar wears in the presence pill */
   --glaze-ring: #c9c9cd;
-  --font-ui: 'Inter', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+  --font-ui: 'Inter', 'Doop Keys', 'Helvetica Neue', Helvetica, Arial, sans-serif;
   /* Display is the SAME sans as the UI — the chrome is quiet by design. The
      home greeting's Hanken Grotesk Light is the one other face (`font-hero`). */
-  --font-display: 'Inter', 'Helvetica Neue', Helvetica, Arial, sans-serif;
-  --font-hero: 'Hanken Grotesk', 'Inter', 'Helvetica Neue', Helvetica, Arial, sans-serif;
-  --font-mono: 'Geist Mono', ui-monospace, monospace;
+  --font-display: 'Inter', 'Doop Keys', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+  --font-hero: 'Hanken Grotesk', 'Inter', 'Doop Keys', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+  --font-mono: 'Geist Mono', 'Doop Keys', ui-monospace, monospace;
   /* Ring system: no CSS borders on controls and panels — a 1px shadow ring
      draws the edge, and a soft two-step drop lifts it. --shadow-ring is a
      resting control (inputs, chips, buttons), --shadow-float a panel that
