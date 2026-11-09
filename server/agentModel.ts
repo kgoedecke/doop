@@ -9,7 +9,15 @@ import { withFreshToken, accountModelFor, accountVisionFor, accountWithPick } fr
 import type { AccountKind, ModelAccount } from './modelAccounts.ts'
 import { ModelAuthError, ModelUnavailableError, effortFor, runAzureTurn, runOpenAiTurn } from './openaiAgent.ts'
 import type { StopReason, TurnBlock } from './openaiAgent.ts'
-import { geminiConfig, openrouterConfig, runChatCompletionsTurn } from './chatCompletionsAgent.ts'
+import {
+  deepseekConfig,
+  geminiConfig,
+  kimiCodeConfig,
+  kimiConfig,
+  openrouterConfig,
+  runChatCompletionsTurn,
+  type ChatCompletionsConfig,
+} from './chatCompletionsAgent.ts'
 
 /**
  * Which model runs a Doop Agent turn, and on whose bill.
@@ -203,6 +211,20 @@ const BYO_LABELS: Record<AccountKind, string> = {
   'anthropic-key': 'Claude API',
   'openrouter-key': 'OpenRouter',
   'gemini-key': 'Gemini',
+  'deepseek-key': 'DeepSeek',
+  'kimi-key': 'Kimi',
+  'kimi-code': 'Kimi Code',
+}
+
+/* the account kinds that run on the Chat Completions transport */
+const CHAT_COMPLETIONS_CONFIGS: Partial<
+  Record<AccountKind, (apiKey: string, model: string, vision: boolean) => ChatCompletionsConfig>
+> = {
+  'openrouter-key': openrouterConfig,
+  'gemini-key': geminiConfig,
+  'deepseek-key': deepseekConfig,
+  'kimi-key': kimiConfig,
+  'kimi-code': kimiCodeConfig,
 }
 
 /* the OpenAI-shaped transports take one system string; cache breakpoints are
@@ -241,14 +263,12 @@ function byoModel(account: ModelAccount): AgentModel {
       },
     }
   }
-  if (account.kind === 'openrouter-key' || account.kind === 'gemini-key') {
+  const chatCompletionsConfig = CHAT_COMPLETIONS_CONFIGS[account.kind]
+  if (chatCompletionsConfig) {
     if (!account.apiKey) throw new ModelAuthError(`Reconnect your ${BYO_LABELS[account.kind]} key in Settings.`)
     const model = accountModelFor(account)
     const vision = accountVisionFor(account)
-    const config =
-      account.kind === 'openrouter-key'
-        ? openrouterConfig(account.apiKey, model, vision)
-        : geminiConfig(account.apiKey, model, vision)
+    const config = chatCompletionsConfig(account.apiKey, model, vision)
     return {
       provider: account.kind,
       label: `${BYO_LABELS[account.kind]} (${model})`,

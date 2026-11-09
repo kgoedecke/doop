@@ -23,6 +23,18 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
     vSheet.replaceSync('html,body{overscroll-behavior-x:none}[data-v-path-hidden]{visibility:hidden!important}')
     document.adoptedStyleSheets = document.adoptedStyleSheets.concat(vSheet)
   } catch (e) {}
+  /* ⌘Y outline mode: every box drawn as a hairline, fills and shadows off.
+     Adopted like the sheet above, so no save or export ever carries it. */
+  var vOutlineSheet = null
+  try {
+    vOutlineSheet = new CSSStyleSheet()
+    vOutlineSheet.replaceSync('html,body{background:transparent!important}body *{outline:1px solid rgba(1,119,211,.6)!important;outline-offset:-1px!important;background:transparent!important;box-shadow:none!important;text-shadow:none!important}body img,body video,body canvas,body svg{opacity:.25!important}')
+  } catch (e) {}
+  function setOutlines(on) {
+    if (!vOutlineSheet) return
+    var rest = document.adoptedStyleSheets.filter(function (s) { return s !== vOutlineSheet })
+    document.adoptedStyleSheets = on ? rest.concat(vOutlineSheet) : rest
+  }
   function syncAttrs(from, to) {
     for (var i = from.attributes.length - 1; i >= 0; i--) {
       var name = from.attributes[i].name
@@ -350,7 +362,7 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
     }
     var adopted = document.adoptedStyleSheets || []
     for (var t = 0; t < adopted.length; t++) {
-      if (adopted[t] === vSheet) continue // the runtime's own
+      if (adopted[t] === vSheet || adopted[t] === vOutlineSheet) continue // the runtime's own
       var adoptedText = rulesText(adopted[t])
       if (adoptedText === null) continue
       var adoptedStyle = document.createElement('style')
@@ -1244,6 +1256,17 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
     if (!d) return
     if (d.type === 'doop:inspect') {
       parent.postMessage({ type: 'doop:inspect-result', reqId: d.reqId, info: inspect(d.selector) }, '*')
+    }
+    if (d.type === 'doop:outlines') setOutlines(d.on === true)
+    if (d.type === 'doop:computed' && Array.isArray(d.properties)) {
+      var computedEl = styleTarget(d.selector)
+      var values = null
+      if (computedEl) {
+        var cs = getComputedStyle(computedEl)
+        values = {}
+        d.properties.forEach(function (name) { values[name] = cs.getPropertyValue(name) })
+      }
+      parent.postMessage({ type: 'doop:computed-result', reqId: d.reqId, values: values }, '*')
     }
     if (d.type === 'doop:settle') {
       if (styleTimer) {

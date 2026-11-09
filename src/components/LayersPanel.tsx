@@ -285,6 +285,14 @@ export function LayersPanel({
     }
   }
 
+  /* ⌥L (Collapse layers) folds every row */
+  const collapseAt = useStore((s) => s.layersCollapseAt)
+  const [seenCollapse, setSeenCollapse] = useState(collapseAt)
+  if (seenCollapse !== collapseAt) {
+    setSeenCollapse(collapseAt)
+    setExpanded(new Set())
+  }
+
   function setOpen(key: string, open: boolean) {
     setExpanded((prev) => {
       if (prev.has(key) === open) return prev
