@@ -212,9 +212,11 @@ export async function getAsset(id: string, signal?: AbortSignal): Promise<{ meta
 }
 
 /** Fetch a remote image through the SSRF guard, validating every redirect
- *  hop, with a hard size cap enforced while streaming. */
-export async function fetchRemote(rawUrl: string): Promise<Buffer> {
+ *  hop, with a hard size cap enforced while streaming. A caller that only
+ *  reads a small file (a favicon) may pass a tighter cap than the store's. */
+export async function fetchRemote(rawUrl: string, maxBytes: number = MAX_ASSET_BYTES): Promise<Buffer> {
   const { fetchPinnedPublicUrl, parsePublicHttpUrl } = await import('./publicUrl.ts')
+  const tooBig = new Error(`file exceeds the ${Math.round(maxBytes / 1024 / 1024)} MB limit`)
   let url = parsePublicHttpUrl(rawUrl)
   for (let hop = 0; hop < 4; hop++) {
     const res = await fetchPinnedPublicUrl(url, {
@@ -229,7 +231,7 @@ export async function fetchRemote(rawUrl: string): Promise<Buffer> {
       continue
     }
     if (!res.ok) throw new Error(`fetch failed: HTTP ${res.status}`)
-    if (Number(res.headers.get('content-length') || 0) > MAX_ASSET_BYTES) throw new Error('file exceeds the 5 MB limit')
+    if (Number(res.headers.get('content-length') || 0) > maxBytes) throw tooBig
     if (!res.body) throw new Error('empty response')
     const chunks: Uint8Array[] = []
     let total = 0
@@ -238,9 +240,9 @@ export async function fetchRemote(rawUrl: string): Promise<Buffer> {
       const { done, value } = await reader.read()
       if (done) break
       total += value.byteLength
-      if (total > MAX_ASSET_BYTES) {
+      if (total > maxBytes) {
         await reader.cancel()
-        throw new Error('file exceeds the 5 MB limit')
+        throw tooBig
       }
       chunks.push(value)
     }

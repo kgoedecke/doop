@@ -2,6 +2,15 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { reloadEnv } from '../server/env.ts'
+
+// search_logos' favicon fallback downloads through fetchRemote and stores an asset; keep both offline.
+const fetchRemote = vi.hoisted(() => vi.fn(async () => Promise.reject(new Error('fetch failed: HTTP 404'))))
+const createAsset = vi.hoisted(() => vi.fn())
+vi.mock('../server/assets.ts', async (original) => ({
+  ...(await original<typeof import('../server/assets.ts')>()),
+  fetchRemote,
+  createAsset,
+}))
 import { buildMcpServer } from '../server/mcp.ts'
 import {
   clearInspirationCache,
@@ -195,6 +204,8 @@ describe('search_logos without an inspiration key', () => {
         arguments: { query: 'vercel.com', agent_name: 'Tester' },
       })) as { content: { text?: string }[] }
       expect(JSON.stringify(result.content)).not.toContain(INSPIRATION_UNAVAILABLE_NOTE)
+      expect(fetchRemote).toHaveBeenCalledWith('https://icons.duckduckgo.com/ip3/vercel.com.ico', expect.any(Number))
+      expect(createAsset).not.toHaveBeenCalled()
     } finally {
       await client.close()
       await server.close()
