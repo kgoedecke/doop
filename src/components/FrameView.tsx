@@ -212,6 +212,10 @@ function frameCommentHit(x: number, y: number): ProbeHit {
   return { selector: FRAME_COMMENT_SELECTOR, tag: 'frame', text: '', snippet: '', rect: { x, y, width: 0, height: 0 } }
 }
 
+/* where a comment made from the frame's name is pinned: just inside its
+   top-left corner, under the name it was made from */
+const FRAME_NAME_COMMENT_AT = 12
+
 /* `doop:locate` request ids for the outlines of a multi-element pick */
 const PICK_REQ = '__pick__:'
 
@@ -345,6 +349,10 @@ export const FrameView = memo(function FrameView({
       if (probeOnClick) {
         const at = designOffset(e, frame.rotation)
         probeAt(at.x, at.y, 'comment')
+      } else if (panelOnClick) {
+        /* the frame's name: a comment on the frame as a whole, the one a
+           frame filled edge to edge by its layers leaves no background for */
+        commentOnFrame()
       }
       return
     }
@@ -823,6 +831,10 @@ export const FrameView = memo(function FrameView({
   const [activeHit, setActiveHit] = useState<ProbeHit | null>(null)
   const [textFormat, setTextFormat] = useState<TextFormatState>({})
   const [composing, setComposing] = useState(false)
+  /* the Comment tool over the frame's name: the whole frame is outlined,
+     as an element under the pointer is */
+  const [nameHovered, setNameHovered] = useState(false)
+  const frameCommentHover = nameHovered && tool === 'comment'
   const [openThread, setOpenThread] = useState<string | null>(null)
   const [linkedThread, setLinkedThread] = useState<string | null>(deepLinkedThread)
   const [pinPos, setPinPos] = useState<Record<string, { x: number; y: number } | null>>({})
@@ -936,6 +948,19 @@ export const FrameView = memo(function FrameView({
   function closePopovers() {
     closeElementPopovers()
     setProbe(null)
+  }
+
+  function commentOnFrame() {
+    closeElementPopovers()
+    /* a frame smaller than the inset keeps the pin on itself, at its middle */
+    setProbe(
+      frameCommentHit(
+        Math.min(FRAME_NAME_COMMENT_AT, frame.width / 2),
+        Math.min(FRAME_NAME_COMMENT_AT, frame.height / 2),
+      ),
+    )
+    setComposePrefill('')
+    setComposing(true)
   }
 
   /* delayed slightly so the second click of a double-click (→ edit mode)
@@ -1566,6 +1591,8 @@ export const FrameView = memo(function FrameView({
                 zIndex: selected ? stack : undefined,
               }}
               onPointerDown={(e) => startDrag(e, 'move', false, true)}
+              onPointerEnter={() => setNameHovered(true)}
+              onPointerLeave={() => setNameHovered(false)}
             >
               {frame.locked && (
                 <Tooltip label={t('stage.lockedTip')} side="top" align="start">
@@ -1776,6 +1803,12 @@ export const FrameView = memo(function FrameView({
               covers the surface, where the document starts, so a rect in
               design px lands on the element it measures */}
             <div data-element-furniture="" className="pointer-events-none absolute inset-0">
+              {frameCommentHover && (
+                <div
+                  data-frame-comment-hover=""
+                  className="pointer-events-none absolute inset-0 z-[4] bg-[rgba(60,130,246,0.06)] shadow-[inset_0_0_0_calc(1px/var(--zoom,1))_#3c82f6]"
+                />
+              )}
               {/* above the selection outline (z-[3]), or that outline covers the
               hovered element's tag */}
               {hover && !hoverOnSelected && !editing && !pathEdit && !dragging && !elementMove.moving && !resizing && (
