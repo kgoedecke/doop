@@ -2679,8 +2679,8 @@ wss.on('connection', (ws, upgradeReq) => {
         ws.close(4404, 'not found')
         return
       }
-      const role = canvasRole(session.user.id, canvas)
-      if (!role) {
+      /* checked before loading, so a denied join never loads the canvas */
+      if (!canvasRole(session.user.id, canvas)) {
         ws.close(4403, 'no access')
         return
       }
@@ -2688,8 +2688,16 @@ wss.on('connection', (ws, upgradeReq) => {
       /* a socket that closed while it waited must not join: its close
          already ran, so it would sit in the room and pin the canvas */
       if (ws.readyState !== WebSocket.OPEN) return
-      if (!store.getCanvas(msg.canvasId)) {
+      canvas = store.getCanvas(msg.canvasId)
+      if (!canvas) {
         ws.close(4404, 'not found')
+        return
+      }
+      /* and again after: access removed while the canvas loaded must not
+         still receive its designs and conversation */
+      const role = canvasRole(session.user.id, canvas)
+      if (!role) {
+        ws.close(4403, 'no access')
         return
       }
       const presence: Presence = {
