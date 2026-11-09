@@ -22,6 +22,8 @@ fn main() {
             "codex_add_mcp",
             "fonts_choose_local",
             "fonts_read_local",
+            "server_status",
+            "server_choose",
             "view_menu_state",
             "app_menu_set",
             "app_menu_state",

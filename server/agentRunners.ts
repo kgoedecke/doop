@@ -18,7 +18,15 @@ import {
   type AccountStatus,
 } from './modelAccounts.ts'
 import { CLAUDE_EFFORT_OPTIONS, CLAUDE_MODELS } from '../shared/localAgent.ts'
-import { ANTHROPIC_MODELS, GEMINI_MODELS, OPENROUTER_MODELS, reasoningEffortOptions } from '../shared/modelMenu.ts'
+import {
+  ANTHROPIC_MODELS,
+  DEEPSEEK_MODELS,
+  GEMINI_MODELS,
+  KIMI_CODE_MODELS,
+  KIMI_MODELS,
+  OPENROUTER_MODELS,
+  reasoningEffortOptions,
+} from '../shared/modelMenu.ts'
 import type { ModelOption } from '../shared/modelMenu.ts'
 import { RUNNER_NAMES, type AgentRunner, type AgentRunners, type RunnerProvider } from '../shared/agentRunner.ts'
 
@@ -29,6 +37,9 @@ export const MODEL_MENUS: Record<AccountKind, ModelOption[]> = {
   'anthropic-key': ANTHROPIC_MODELS,
   'openrouter-key': OPENROUTER_MODELS,
   'gemini-key': GEMINI_MODELS,
+  'deepseek-key': DEEPSEEK_MODELS,
+  'kimi-key': KIMI_MODELS,
+  'kimi-code': KIMI_CODE_MODELS,
 }
 
 export async function listRunners(userId: string): Promise<AgentRunners> {

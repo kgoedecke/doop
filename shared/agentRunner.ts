@@ -2,7 +2,7 @@
  * Which connection a Doop Agent task runs on.
  *
  * A person can have two connections at once: the one model account
- * (ChatGPT, or an OpenAI / Claude / OpenRouter / Gemini key) and the Claude
+ * (ChatGPT, or an OpenAI / Claude / OpenRouter / Gemini / DeepSeek / Kimi key) and the Claude
  * Plan on their desktop. The composer offers every connected one and the
  * card carries the pick, so a task runs on what the person chose for it.
  * Work the resident picks up on its own — @mention comments, automations —

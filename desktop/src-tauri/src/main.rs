@@ -52,6 +52,7 @@ mod claude;
 mod claude_extension;
 mod codex;
 mod fonts;
+mod server;
 mod updates;
 mod view_menu;
 #[cfg(all(chromium, target_os = "macos"))]
@@ -81,8 +82,9 @@ fn focus_main_window(app: &AppHandle) {
     }
 }
 
-/// The hosted app this shell wraps. Self-hosters can point release builds at
-/// their own instance without patching the source:
+/// The hosted app this shell wraps unless the person picks another server
+/// (src/server.rs). Self-hosters can also build a shell that opens their own
+/// instance by default:
 ///   DOOP_APP_URL=https://doop.example.com npm run build
 /// (When overriding, also put the origin in capabilities/default.json or the
 /// page cannot reach the shell's IPC — external links then open in-window.)
@@ -91,18 +93,9 @@ const APP_URL: &str = match option_env!("DOOP_APP_URL") {
     None => "https://doop.design",
 };
 
+/// The server this launch opens (src/server.rs), without a trailing slash.
 fn base_url() -> String {
-    if cfg!(debug_assertions) {
-        // A second worktree runs its dev pair on other ports (vite.config.ts);
-        // DOOP_DEV_URL points a dev shell at it. Keep tauri.conf.json's devUrl
-        // in step so IPC keeps treating the pages as local.
-        option_env!("DOOP_DEV_URL")
-            .unwrap_or("http://localhost:4300")
-            .trim_end_matches('/')
-            .to_string()
-    } else {
-        APP_URL.trim_end_matches('/').to_string()
-    }
+    server::active_url()
 }
 
 /// Where the traffic lights sit: on the tab strip's content line. The strip
@@ -189,22 +182,30 @@ fn app_submenu(app: &AppHandle) -> tauri::Result<Submenu<ShellRuntime>> {
         version: Some(pkg.version.to_string()),
         ..Default::default()
     };
-    Submenu::with_items(
-        app,
-        pkg.name.clone(),
-        true,
-        &[
-            &PredefinedMenuItem::about(app, None, Some(about))?,
-            &updates::menu::item(app)?,
-            &PredefinedMenuItem::separator(app)?,
-            &PredefinedMenuItem::services(app, None)?,
-            &PredefinedMenuItem::separator(app)?,
-            &PredefinedMenuItem::hide(app, None)?,
-            &PredefinedMenuItem::hide_others(app, None)?,
-            &PredefinedMenuItem::separator(app)?,
-            &PredefinedMenuItem::quit(app, None)?,
-        ],
-    )
+    let about = PredefinedMenuItem::about(app, None, Some(about))?;
+    let check_updates = updates::menu::item(app)?;
+    let server_reset = server::menu::item(app)?;
+    let separator = PredefinedMenuItem::separator(app)?;
+    let services = PredefinedMenuItem::services(app, None)?;
+    let hide = PredefinedMenuItem::hide(app, None)?;
+    let hide_others = PredefinedMenuItem::hide_others(app, None)?;
+    let quit = PredefinedMenuItem::quit(app, None)?;
+    let mut app_items: Vec<&dyn IsMenuItem<ShellRuntime>> = vec![&about, &check_updates];
+    // only while another server is chosen: the way back from one that no
+    // longer loads (src/server.rs)
+    if let Some(item) = &server_reset {
+        app_items.push(item);
+    }
+    app_items.extend([
+        &separator as &dyn IsMenuItem<ShellRuntime>,
+        &services,
+        &separator,
+        &hide,
+        &hide_others,
+        &separator,
+        &quit,
+    ]);
+    Submenu::with_items(app, pkg.name.clone(), true, &app_items)
 }
 
 /// File's Close Tab (Cmd+W), relayed to the page as `close-tab`.
@@ -330,6 +331,8 @@ fn main() {
             codex::codex_add_mcp,
             fonts::fonts_choose_local,
             fonts::fonts_read_local,
+            server::server_status,
+            server::server_choose,
             view_menu::view_menu_state,
             app_menu::app_menu_set,
             app_menu::app_menu_state,
@@ -348,6 +351,8 @@ fn main() {
             let _ = app.emit(CLOSE_TAB, ());
         } else if event.id() == updates::menu::MENU_ID {
             updates::menu::check(app);
+        } else if event.id() == server::menu::MENU_ID {
+            server::menu::reset(app);
         } else {
             view_menu::relay(app, event.id().as_ref());
             app_menu::relay(app, event.id().as_ref());
@@ -381,9 +386,10 @@ fn main() {
             let focus_handle = app.handle().clone();
             app.deep_link().on_open_url(move |_event| focus_main_window(&focus_handle));
             updates::start(app.handle());
+            server::grant(app.handle())?;
 
             let handle = app.handle().clone();
-            let entry = format!("{}/auth", base_url());
+            let entry = format!("{}/auth", server::active(app.handle()));
             // The first Chromium launch after the WebKit app opens hidden on
             // the app's origin and brings the WebKit storage over before the
             // app loads (src/webkit_migration.rs).
@@ -408,22 +414,14 @@ fn main() {
             // in — sandboxed frame content depends on them — but mailto: and
             // tel: are hostless too and WKWebView drops them silently, so they
             // go to the system handler (Mail) instead.
-            let mut app_hosts: Vec<String> =
-                vec!["localhost".into(), "127.0.0.1".into()];
-            if let Some(host) = Url::parse(APP_URL)?.host_str() {
-                app_hosts.push(host.to_string());
-                app_hosts.push(match host.strip_prefix("www.") {
-                    Some(bare) => bare.to_string(),
-                    None => format!("www.{host}"),
-                });
-            }
+            let app_hosts = server::app_hosts(server::active(app.handle()));
             // Marks every page loaded in the shell so the app can tell desktop
             // sessions from browser ones (src/lib/shell.ts) and render the
             // tab strip; the version lets the app adapt to shell capabilities
             // (traffic-light inset arrived with the overlay title bar, 0.1.2)
             // and the platform tells it which window framing it lives under.
             let desktop_marker = format!(
-                "window.__DOOP_DESKTOP__ = '{}'; window.__DOOP_DESKTOP_PLATFORM__ = '{}'; window.__DOOP_CLAUDE_CLI__ = true; window.__DOOP_CLAUDE_INSTALL__ = true; window.__DOOP_CLAUDE_CHOOSE__ = true; window.__DOOP_CLAUDE_EXTENSION__ = {}; window.__DOOP_CODEX_SETUP__ = true; window.__DOOP_VIEW_MENU__ = true; window.__DOOP_APP_MENU__ = {}; window.__DOOP_LOCAL_FONTS__ = true; window.__DOOP_UPDATE_CARD__ = true;",
+                "window.__DOOP_DESKTOP__ = '{}'; window.__DOOP_DESKTOP_PLATFORM__ = '{}'; window.__DOOP_CLAUDE_CLI__ = true; window.__DOOP_CLAUDE_INSTALL__ = true; window.__DOOP_CLAUDE_CHOOSE__ = true; window.__DOOP_CLAUDE_EXTENSION__ = {}; window.__DOOP_CODEX_SETUP__ = true; window.__DOOP_VIEW_MENU__ = true; window.__DOOP_APP_MENU__ = {}; window.__DOOP_LOCAL_FONTS__ = true; window.__DOOP_UPDATE_CARD__ = true; window.__DOOP_SERVER_CHOOSE__ = true;",
                 app.package_info().version,
                 std::env::consts::OS,
                 cfg!(any(target_os = "macos", target_os = "windows")),
@@ -527,6 +525,7 @@ fn main() {
                 .title_bar_style(tauri::TitleBarStyle::Overlay)
                 .hidden_title(true);
             let _webview_window = builder.build()?;
+            server::check_on_launch(app.handle(), entry.parse()?);
             #[cfg(target_os = "macos")]
             if let Ok(ns_window) = _webview_window.ns_window() {
                 place_traffic_lights(ns_window);
