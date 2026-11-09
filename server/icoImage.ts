@@ -37,6 +37,32 @@ function entries(buf: Buffer): Entry[] {
   return list
 }
 
+interface ChannelMasks {
+  r: number
+  g: number
+  b: number
+  a: number
+}
+
+/** The BI_BITFIELDS masks, at offset 40 whether they trail a 40-byte header or sit inside a V4/V5 one.
+ *  Only V4 and V5 headers carry an alpha mask; under a 40-byte header alpha is the bits left over. */
+function channelMasks(dib: Buffer, headerSize: number): ChannelMasks {
+  if (dib.length < 52 || (headerSize !== 40 && headerSize < 52)) throw new Error('Truncated icon image')
+  const r = dib.readUInt32LE(40)
+  const g = dib.readUInt32LE(44)
+  const b = dib.readUInt32LE(48)
+  const a = headerSize >= 56 ? dib.readUInt32LE(52) : ~(r | g | b) >>> 0
+  return { r, g, b, a }
+}
+
+/** One channel of a pixel by its mask, scaled to 0-255. */
+function channel(value: number, mask: number): number {
+  if (!mask) return 0
+  const shift = 31 - Math.clz32(mask & -mask)
+  const max = mask >>> shift
+  return Math.round((((value & mask) >>> shift) * 255) / max)
+}
+
 /** RGBA pixels of a DIB entry, top row first. */
 function decodeDib(dib: Buffer): { data: Buffer; width: number; height: number } {
   if (dib.length < 40) throw new Error('Truncated icon image')
@@ -51,7 +77,9 @@ function decodeDib(dib: Buffer): { data: Buffer; width: number; height: number }
   if (![1, 4, 8, 24, 32].includes(bitCount) || (compression !== 0 && !(compression === 3 && bitCount === 32)))
     throw new Error('Unsupported icon encoding')
 
-  const paletteAt = headerSize + (compression === 3 ? 12 : 0)
+  const masks = compression === 3 ? channelMasks(dib, headerSize) : null
+  /* a 40-byte header is followed by its three masks; a V4 or V5 header holds them */
+  const paletteAt = headerSize + (masks && headerSize === 40 ? 12 : 0)
   const paletteSize = bitCount <= 8 ? colorsUsed || 1 << bitCount : 0
   const pixelsAt = paletteAt + paletteSize * 4
   const stride = Math.ceil((width * bitCount) / 32) * 4
@@ -67,7 +95,13 @@ function decodeDib(dib: Buffer): { data: Buffer; width: number; height: number }
     for (let x = 0; x < width; x++) {
       const out = (y * width + x) * 4
       let b: number, g: number, r: number, a: number
-      if (bitCount === 32 || bitCount === 24) {
+      if (masks) {
+        const value = dib.readUInt32LE(row + x * 4)
+        r = channel(value, masks.r)
+        g = channel(value, masks.g)
+        b = channel(value, masks.b)
+        a = channel(value, masks.a)
+      } else if (bitCount === 32 || bitCount === 24) {
         const at = row + x * (bitCount / 8)
         b = dib[at]!
         g = dib[at + 1]!
