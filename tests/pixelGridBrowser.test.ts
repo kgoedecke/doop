@@ -137,7 +137,22 @@ describe.skipIf(!findBrowserPath())('pixel grid', { timeout: 30_000 }, () => {
     }
   })
 
-  it('fades out with the zoom and the view option', async () => {
+  it("goes away with ⇧' and comes back, frames included", async () => {
+    const frameOpacity = () => page.$eval('[data-pixel-grid="frame"]', (el) => getComputedStyle(el).opacity)
+    const toggle = async () => {
+      await page.keyboard.down('Shift')
+      await page.keyboard.press('Quote')
+      await page.keyboard.up('Shift')
+    }
+    await toggle()
+    await page.waitForSelector('[data-pixel-grid="paper"][hidden]')
+    expect(await frameOpacity()).toBe('0')
+    await toggle()
+    await page.waitForSelector('[data-pixel-grid="paper"]:not([hidden])')
+    expect(await frameOpacity()).toBe('1')
+  })
+
+  it('fades out with the zoom', async () => {
     await page.evaluate(() => window.rulersHarness.viewport({ x: 40, y: 40, zoom: 2 }))
     await page.waitForSelector('[data-pixel-grid="paper"][hidden]')
     expect(await page.$eval('[data-pixel-grid="frame"]', (el) => getComputedStyle(el).opacity)).toBe('0')
