@@ -77,7 +77,11 @@ HTML/CSS engine (Stylo + Taffy + Parley), compiled into the app as a static libr
   as browsers' `font-optical-sizing: auto` does. Empty inputs paint their `placeholder`
   in the `::placeholder` style. `doopblitz_doc_loading` stays true while a fetched
   resource waits to be applied, since applying a stylesheet starts its font and image
-  fetches. `tests/fonts_and_inputs.rs` covers these with macOS's own variable fonts.
+  fetches. Symbols a page writes as text (★ ✓ → ⌘) fall back to the system's symbol
+  families (System Font, Apple Symbols, Hiragino Sans, Menlo, Zapf Dingbats), appended to
+  the Latin and common-script fallbacks: fontique picks fallbacks per script, symbols have
+  none, and iOS's Latin fallback lacks them, so they drew as LastResort boxes.
+  `tests/fonts_and_inputs.rs` covers these with macOS's own variable fonts.
 - **Device-pixel layout**: Taffy rounds every box to whole CSS pixels after layout,
   which at a paint scale above 1 puts a different number of device pixels on each
   side of a box sitting on a half pixel (a 1.5px outline, a handle centred on it),
