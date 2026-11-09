@@ -14,7 +14,8 @@ import slackLogo from './brand/slack.svg'
  * Claude's default is Anthropic's terracotta; `color` overrides any of the
  * single-colour marks.
  *
- * Paths: Simple Icons (CC0) for Claude, OpenAI, Cursor and GitHub; the
+ * Paths: Simple Icons (CC0) for Claude, OpenAI, Cursor and GitHub; Lobe Icons
+ * (MIT) for OpenCode; the
  * providers' own sign-in branding assets for Google, Apple and Microsoft;
  * each company's brand page for the rest. Wordmarks and tiles that belong to
  * a feature (the automation chain's clock, the integration tiles) stay with
@@ -31,6 +32,7 @@ export type Brand =
   | 'cursor'
   | 'gemini'
   | 'openrouter'
+  | 'opencode'
   | 'google'
   | 'apple'
   | 'microsoft'
@@ -58,6 +60,9 @@ const OPENAI_PATH =
 /** OpenRouter's "OR" mark, the one its site and app icon wear (Iconify logos, MIT). */
 const OPENROUTER_PATH =
   'M198.973 0c29.97 0 54.265 24.296 54.265 54.265s-24.294 54.266-54.265 54.266l53.826 53.826c6.838 6.837 1.995 18.528-7.673 18.528H90.442C40.492 180.885 0 140.392 0 90.442S40.492 0 90.442 0zM90.443 36.177c-29.97 0-54.266 24.295-54.266 54.265s24.295 54.265 54.265 54.265s54.265-24.295 54.265-54.265s-24.295-54.265-54.265-54.265'
+
+/** OpenCode's open square (Lobe Icons, MIT). */
+const OPENCODE_PATH = 'M16 6H8v12h8V6zm4 16H4V2h16v20z'
 
 /** ByteDance's four bars, which its Seed lab (Seedream) wears in a blue-teal blend. */
 const BYTEDANCE_PATH =
@@ -238,6 +243,7 @@ const MARKS: Record<Brand, (props: GlyphProps) => JSX.Element> = {
   cursor: path(CURSOR_PATH),
   gemini: Gemini,
   openrouter: OpenRouter,
+  opencode: path(OPENCODE_PATH),
   google: Google,
   apple: path(APPLE_PATH),
   microsoft: Microsoft,
@@ -260,6 +266,7 @@ export type AppIconBrand =
   | 'openai'
   | 'gemini'
   | 'openrouter'
+  | 'opencode'
   | 'seedream'
   | 'codex'
   | 'cursor'
@@ -323,6 +330,7 @@ const APP_TILES: Record<AppIconBrand, AppTile> = {
     tile: '#111',
     glyph: () => <path fill="#fff" transform="translate(0 3.52) scale(0.09375)" d={OPENROUTER_PATH} />,
   },
+  opencode: { tile: '#111', glyph: () => <path fill="#fff" d={OPENCODE_PATH} /> },
   /* the knot reversed out of black, beside ChatGPT's black on white */
   codex: { tile: '#111', glyph: () => <path fill="#fff" d={OPENAI_PATH} /> },
   cursor: { tile: '#14120b', glyph: () => <path fill="#fff" d={CURSOR_PATH} /> },
