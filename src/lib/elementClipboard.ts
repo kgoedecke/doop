@@ -3,7 +3,7 @@ import { elementsHtml, insertElements, isElementLocked } from './layers'
 import { deleteSelection, isStandalonePick, saveFrameHtml } from './layerEdits'
 import { copyFrames } from './frameClipboard'
 import { canEditOpenCanvas, pickedSelectors, useStore } from './store'
-import { writeCanvasClipboard } from './canvasClipboard'
+import { cutWith, writeCanvasClipboard } from './canvasClipboard'
 import { ELEMENT_CLIP_KEY, ELEMENT_CLIP_STYLE_KEY, FRAME_CLIP_KEY } from './clipboardKeys'
 import { carriedCss, newScope, renameInCss, SCOPE_ATTR, withCarriedCss } from './styleCarry'
 
@@ -23,38 +23,30 @@ export function copyPicked(frame: Frame, selectors: string[]): boolean {
   return copyLayers(frame, selectors)
 }
 
-/** What ⌘C copies now: the picked elements, else the selected frames;
- *  null when nothing is selected. */
-function selectionCopy(): (() => boolean | void) | null {
+/** Copy the picked elements, else the selected frames. False when nothing is selected. */
+function copySelectionNow(): boolean {
   const state = useStore.getState()
   const picked = state.selectedElement
   if (picked) {
     const frame = state.canvas?.frames.find((f) => f.id === picked.frameId)
-    if (!frame) return null
-    const selectors = pickedSelectors(state)
-    return () => copyPicked(frame, selectors)
+    return !!frame && copyPicked(frame, pickedSelectors(state))
   }
   const frames = state.canvas?.frames.filter((f) => state.selectedIds.includes(f.id)) ?? []
-  return frames.length ? () => copyFrames(frames) : null
+  if (!frames.length) return false
+  copyFrames(frames)
+  return true
 }
 
 /** ⌘C: put the selection on the clipboard. False when there was nothing to copy. */
-export function copySelection(data?: DataTransfer): boolean {
-  const copy = selectionCopy()
-  return !!copy && writeCanvasClipboard(copy, data)
+export function copySelection(data: DataTransfer): boolean {
+  return writeCanvasClipboard(copySelectionNow, data)
 }
 
 /** ⌘X: copy the selection, then remove it the way ⌫ does (one undo step;
  *  locked frames and layers stay, copied). Editors only, and nothing is
  *  removed unless the copy landed. */
-export function cutSelection(data?: DataTransfer): boolean {
-  if (!canEditOpenCanvas(useStore.getState())) return false
-  const copy = selectionCopy()
-  if (!copy) return false
-  return writeCanvasClipboard(() => {
-    if (copy() === false) return false
-    deleteSelection()
-  }, data)
+export function cutSelection(data: DataTransfer): boolean {
+  return canEditOpenCanvas(useStore.getState()) && cutWith(copySelectionNow, deleteSelection, data)
 }
 
 /** Copy the elements in document order; a paste lands them together. */

@@ -4,7 +4,7 @@ import { copyElementLink } from '../lib/elementLink'
 import { copyElementPng, type ElementTarget } from '../lib/frameExport'
 import { useExportSettings } from '../lib/exportSettings'
 import { copyPicked, hasElementClip, pasteLayer } from '../lib/elementClipboard'
-import { writeCanvasClipboard } from '../lib/canvasClipboard'
+import { cutWith, writeCanvasClipboard } from '../lib/canvasClipboard'
 import { hasFrameClip, pasteFrameCentered } from '../lib/frameClipboard'
 import { deleteLayer, duplicateLayer, setLayerHidden, setLayerLocked, shiftLayer } from '../lib/layerEdits'
 import { buildLayerTree, elementHtml, findLayer, isElementHidden, isElementLocked, layerName } from '../lib/layers'
@@ -95,11 +95,11 @@ function ElementMenuItems({ frame, selector, hit, onRename, onExport }: ElementI
       <ContextMenuItem
         disabled={!canEdit || !exists || locked}
         onSelect={() => {
-          if (!selector) return
-          writeCanvasClipboard(() => {
-            if (!copyPicked(frame, [selector])) return false
-            deleteLayer(frame, selector)
-          })
+          if (selector)
+            cutWith(
+              () => copyPicked(frame, [selector]),
+              () => deleteLayer(frame, selector),
+            )
         }}
       >
         {t('common.cut')}

@@ -420,6 +420,11 @@ export function CanvasPage({
         e.preventDefault()
         if (canEdit && !e.repeat) deleteSelection()
       }
+      /* the same for a held ⌘X: cancelling its repeats stops their cut events */
+      if (e.repeat && (e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'x') {
+        e.preventDefault()
+        return
+      }
       /* Figma's walk of the selection: ↩ into it, ⇧↩ out to the parent, Tab
          and ⇧Tab along the siblings. Only the bare keys, and only when no
          control (a button, a menu, the Layers tree) has the keyboard — there
@@ -521,11 +526,6 @@ export function CanvasPage({
   /* Native copy/cut/paste events let us write the selection's token and read
      clipboard images without asking for clipboard-read permission. */
   useEffect(() => {
-    /* a ClipboardEvent carries no repeat flag, so the keydown behind it is
-       remembered: a held ⌘X must not cut the element and then the frame
-       under it, as a held ⌫ must not delete them */
-    let held = false
-    const onKeyDown = (e: KeyboardEvent) => void (held = e.repeat)
     /* the event's clipboard when the canvas owns it, not a field or a text selection */
     const canvasClipboard = (e: ClipboardEvent) =>
       isTypingTarget(e.target) || window.getSelection()?.toString() ? null : e.clipboardData
@@ -535,7 +535,7 @@ export function CanvasPage({
     }
     function onCut(e: ClipboardEvent) {
       const data = canvasClipboard(e)
-      if (data && (held || cutSelection(data))) e.preventDefault()
+      if (data && cutSelection(data)) e.preventDefault()
     }
     function onPaste(e: ClipboardEvent) {
       if (isTypingTarget(e.target)) return
@@ -569,12 +569,10 @@ export function CanvasPage({
         pasteFrameCentered(canvasId)
       }
     }
-    window.addEventListener('keydown', onKeyDown, true)
     window.addEventListener('copy', onCopy)
     window.addEventListener('cut', onCut)
     window.addEventListener('paste', onPaste)
     return () => {
-      window.removeEventListener('keydown', onKeyDown, true)
       window.removeEventListener('copy', onCopy)
       window.removeEventListener('cut', onCut)
       window.removeEventListener('paste', onPaste)

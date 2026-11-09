@@ -37,6 +37,14 @@ export function writeCanvasClipboard(copy: () => boolean | void, data?: DataTran
   }
 }
 
+/** Cut: `remove` runs only once `copy` landed on the clipboard. */
+export function cutWith(copy: () => boolean | void, remove: () => unknown, data?: DataTransfer): boolean {
+  return writeCanvasClipboard(() => {
+    if (copy() === false) return false
+    remove()
+  }, data)
+}
+
 export function isCanvasClipboard(data: DataTransfer | null): boolean {
   const token = localStorage.getItem(TOKEN_KEY)
   return !!token && data?.getData('text/plain') === token

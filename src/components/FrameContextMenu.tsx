@@ -2,7 +2,7 @@ import { useRef, useState, type MutableRefObject } from 'react'
 import type { Frame } from '../../shared/types'
 import { errorMessage } from '../lib/api'
 import { copyFrames, duplicateFrames, hasFrameClip, pasteFrameAtScreen } from '../lib/frameClipboard'
-import { writeCanvasClipboard } from '../lib/canvasClipboard'
+import { cutWith, writeCanvasClipboard } from '../lib/canvasClipboard'
 import { copyFramePng } from '../lib/frameExport'
 import { deleteFramesTracked } from '../lib/history'
 import { isStackLocked, setFramesHidden, setFramesLocked } from '../lib/layerEdits'
@@ -114,11 +114,7 @@ export function FrameContextMenu({
               disabled={allLocked}
               onSelect={() => {
                 const frames = groupFrames()
-                if (!frames.length) return
-                writeCanvasClipboard(() => {
-                  copyFrames(frames)
-                  deleteSelection()
-                })
+                if (frames.length) cutWith(() => copyFrames(frames), deleteSelection)
               }}
             >
               {groupSize > 1 ? t('stage.cutFrames', { count: groupSize }) : t('common.cut')}
