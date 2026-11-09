@@ -3,7 +3,7 @@ import { frameDesignPoint, frameWorldPoint, rotateVector } from '../../shared/fr
 import { createPortal } from 'react-dom'
 import type { Frame } from '../../shared/types'
 import { isCanvasElement } from '../lib/drawing'
-import { duplicateElements, elementPath } from '../lib/layers'
+import { elementPath } from '../lib/layers'
 import {
   drawingDropFrame,
   drawingPreview,
@@ -28,7 +28,14 @@ import { FRAME_DOCUMENTS_TAKE_ZOOM_AS_DENSITY, counterZoom } from '../lib/layout
 import { visibleGuides } from '../lib/guides'
 import { snapFrame } from '../lib/snap'
 import { useT } from '../lib/i18n'
-import { copyLayerOut, dropLayer, dropLayerCopy, layerCopyDocument, type WorldRect } from '../lib/layerEdits'
+import {
+  copyLayerOut,
+  dropLayer,
+  dropLayerCopy,
+  layerCopyDocument,
+  styledCopy,
+  type WorldRect,
+} from '../lib/layerEdits'
 import { currentPageCanvas } from '../lib/pages'
 import { useStore } from '../lib/store'
 
@@ -171,15 +178,28 @@ export function useElementMove(frame: Frame, layoutZoom: number) {
     /* the copy's document beside the original, worked out once */
     const planCopy = () => {
       if (copy || !layer) return copy
-      const duplicated = duplicateElements(frame.html, [layer.selector])
-      const at = duplicated?.selectors[0]
-      if (duplicated && at) copy = { selector: at, html: duplicated.html }
+      const duplicated = styledCopy(frame.html, layer.selector)
+      if (duplicated) copy = duplicated
       return copy
     }
     /* an ⌥⇧ copy dragged past its frame's edge rides over the canvas as a
        floating preview (the frame would clip it) and lands where it is let
        go: in the frame under the pointer, else on the canvas */
     let dropOut: { rect: WorldRect; into: Frame | null } | null = null
+    /* the layer's box on the canvas, around the spot its centre has in its
+       (maybe turned) frame and unturned: a copy leaving the frame leaves
+       the frame's turn behind */
+    let canvasBox: DrawingRect | null = null
+    const outsideBox = (hitLayer: ElementMoveHit): DrawingRect => {
+      if (canvasBox) return canvasBox
+      const { width, height } = hitLayer.rect
+      const centre = frameWorldPoint(
+        { x: contentOffset.x + hitLayer.rect.x + width / 2, y: contentOffset.y + hitLayer.rect.y + height / 2 },
+        frame,
+      )
+      canvasBox = { x: centre.x - width / 2, y: centre.y - height / 2, width, height }
+      return canvasBox
+    }
     let outsidePreview: string | null = null
     /* the frame and, once the hit test names the element, its parent and
        siblings, in world px */
@@ -352,10 +372,11 @@ export function useElementMove(frame: Frame, layoutZoom: number) {
         locked = Math.abs(point.x - origin.x) >= Math.abs(point.y - origin.y) ? 'y' : 'x'
         point[locked] = origin[locked]
       }
-      rect = { ...bounds, x: bounds.x + point.x - origin.x, y: bounds.y + point.y - origin.y }
       const local = frameDesignPoint(point, frame)
       const outside =
         duplicating && !!layer && (local.x < 0 || local.y < 0 || local.x > frame.width || local.y > frame.height)
+      const start = outside && layer ? outsideBox(layer) : bounds
+      rect = { ...start, x: start.x + point.x - origin.x, y: start.y + point.y - origin.y }
       /* off its frame, the copy lines up with the frames on the page */
       const targets = outside ? (currentPageCanvas()?.frames.filter((f) => !f.hidden) ?? []) : snapTargets
       /* edges and center pull onto the ruler guides (⌥ moves freely, except

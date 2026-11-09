@@ -1017,11 +1017,13 @@ describe.skipIf(!findBrowserPath())('drawing on the canvas', { timeout: 30_000 }
   })
 
   it.each(['canvas', 'frame'])('⌥⇧-drags a copy of the picked layer off its frame onto the %s', async (onto) => {
+    /* a source rule with !important, carried along, must not beat the drop's placement */
     const source = layerFrame(
-      '<div id="rect" data-doop-id="keep" style="position:absolute;left:40px;top:40px;width:100px;height:80px;background:coral"></div>',
+      '<style>.card { position:absolute !important; left:40px !important }</style><div id="rect" class="card" data-doop-id="keep" style="position:absolute;left:40px;top:40px;width:100px;height:80px;background:coral"></div>',
     )
+    /* a positioned, margined body must not shift a copy dropped into it */
     const other: Frame = {
-      ...layerFrame('<p style="margin:0">Other</p>'),
+      ...layerFrame('<style>body { position:relative; margin:20px !important }</style><p style="margin:0">Other</p>'),
       id: 'other',
       name: 'Other',
       x: 900,
@@ -1053,10 +1055,15 @@ describe.skipIf(!findBrowserPath())('drawing on the canvas', { timeout: 30_000 }
       expect(copy.html).not.toContain('data-doop-id')
     } else {
       await expect.poll(() => patchRequests).toBe(1)
-      const html = saved.find((f) => f.id === 'other')!.html
-      expect(html).toContain('left: -37px')
-      expect(html).toContain('top: 70px')
-      expect(html).not.toContain('data-doop-id')
+      expect(saved.find((f) => f.id === 'other')!.html).not.toContain('data-doop-id')
+      const dest = (await (await page.$('iframe[title="Other"]'))!.contentFrame())!
+      await dest.waitForSelector('#rect')
+      expect(
+        await dest.$eval('#rect', (el) => {
+          const box = el.getBoundingClientRect()
+          return { x: box.x, y: box.y, width: box.width, height: box.height }
+        }),
+      ).toEqual({ x: -37, y: 70, width: 100, height: 80 })
     }
     /* the source never changed: the original is still there, in its place */
     expect(saved.find((f) => f.id === 'layers')!.html).toBe(source.html)
@@ -1065,6 +1072,53 @@ describe.skipIf(!findBrowserPath())('drawing on the canvas', { timeout: 30_000 }
     await page.evaluate(() => window.drawingHarness.undo())
     if (onto === 'canvas') await expect.poll(() => saved.length).toBe(1)
     else await expect.poll(() => saved.find((f) => f.id === 'other')!.html).toBe(other.html)
+  })
+
+  it('⌥⇧-drags a copy out of a turned frame from where the layer shows', async () => {
+    const source: Frame = {
+      ...layerFrame(
+        '<div id="rect" style="position:absolute;left:40px;top:40px;width:100px;height:80px;background:coral"></div>',
+      ),
+      rotation: 90,
+    }
+    await seedFrames([source])
+    await page.evaluate(() => window.drawingHarness.viewport({ x: 40, y: 20, zoom: 1 }))
+    await page.evaluate(() => window.drawingHarness.pick({ frameId: 'layers', selector: '#rect' }))
+    /* the frame turns a quarter about its centre (420, 300): the layer's
+       centre (90, 80) in it shows at (590, 40) on the canvas, screen (630, 60) */
+    await visibleDrawing('Layers', '#rect')
+    await page.keyboard.down('Alt')
+    await page.keyboard.down('Shift')
+    await drag([630, 60], [1080, 60])
+    await page.keyboard.up('Shift')
+    await page.keyboard.up('Alt')
+    await expect.poll(() => saved.length).toBe(2)
+    /* unturned, centred where it was let go: 450px right of where it showed */
+    expect(saved[1]).toMatchObject({ x: 990, y: 0, width: 100, height: 80 })
+  })
+
+  it('⌥⇧-drags a copy that keeps the rules styling the original by its id', async () => {
+    const source = layerFrame(
+      '<style>#rect { position:absolute; left:40px; top:40px; width:100px; height:80px; background:coral }</style><div id="rect"></div>',
+    )
+    await seedFrames([source])
+    await page.evaluate(() => window.drawingHarness.viewport({ x: 40, y: 20, zoom: 1 }))
+    await page.evaluate(() => window.drawingHarness.pick({ frameId: 'layers', selector: '#rect' }))
+    const before = await visibleDrawing('Layers', '#rect')
+    await page.keyboard.down('Alt')
+    await page.keyboard.down('Shift')
+    await drag([before.x + 50, before.y + 40], [before.x + 250, before.y + 140])
+    await page.keyboard.up('Shift')
+    await page.keyboard.up('Alt')
+    await expect.poll(() => patchRequests).toBe(1)
+    /* styled from the start, the copy moves freely to where it was let go */
+    const copy = await visibleDrawing('Layers', '#rect-copy')
+    expect(copy.x - before.x).toBeCloseTo(200, 0)
+    expect(copy.y - before.y).toBeCloseTo(100, 0)
+    expect(copy.width).toBeCloseTo(100, 0)
+    expect(copy.height).toBeCloseTo(80, 0)
+    const iframe = (await (await page.$('iframe[title="Layers"]'))!.contentFrame())!
+    expect(await iframe.$eval('#rect-copy', (el) => getComputedStyle(el).backgroundColor)).toBe('rgb(255, 127, 80)')
   })
 
   it('⌥⇧-drags a copy of a flow layer onto the room it takes below the original', async () => {

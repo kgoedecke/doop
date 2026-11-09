@@ -429,15 +429,21 @@ export function setElementsHidden(html: string, selectors: string[], hidden: boo
  *  and the copies' paths in document order; a picked element inside another
  *  picked one is copied with its box. The copies share one id renaming, so
  *  a label copied with its input points at the copied input. */
-export function duplicateElements(html: string, selectors: string[]): { html: string; selectors: string[] } | null {
+export function duplicateElements(
+  html: string,
+  selectors: string[],
+  /** an attribute set on every copy's root, such as a carried-style scope */
+  mark?: { name: string; value: string },
+): { html: string; selectors: string[]; renamed: Record<string, string> } | null {
   const doc = parse(html)
   const els = findAll(doc, selectors)
   if (!els?.length) return null
   const originals = inDocumentOrder(els)
   const copies = originals.map((el) => el.cloneNode(true) as Element)
-  renameIds(doc, copies)
+  const renamed = renameIds(doc, copies)
+  if (mark) for (const copy of copies) copy.setAttribute(mark.name, mark.value)
   originals.forEach((el, i) => el.after(copies[i]!))
-  return { html: serialize(doc), selectors: copies.map(elementPath) }
+  return { html: serialize(doc), selectors: copies.map(elementPath), renamed }
 }
 
 /** Rename, in `el` and its descendants, every id `doc` already uses, and

@@ -9,7 +9,7 @@ import { api, ApiError, errorMessage } from './api'
 import { formatElementText, inspectElement, nudgeElements, requestFrame } from './frameBridge'
 import { isCanvasElement } from './drawing'
 import { duplicateFrames } from './frameClipboard'
-import { carriedCss, newScope, renameInCss, scopeMarkup, withCarriedCss } from './styleCarry'
+import { carriedCss, newScope, renameInCss, scopeMarkup, SCOPE_ATTR, withCarriedCss } from './styleCarry'
 import {
   deleteFramesTracked,
   dropEntry,
@@ -498,8 +498,8 @@ export function dropLayer(pressed: Frame, selector: string, target: DropTarget, 
 export function dropLayerCopy(pressed: Frame, selector: string, target: DropTarget, flow?: FlowPlacement): boolean {
   const frame = useStore.getState().canvas?.frames.find((f) => f.id === pressed.id)
   if (!frame || frame.html !== pressed.html || isLayerLocked(frame, selector)) return false
-  const duplicated = duplicateElements(frame.html, [selector])
-  const copy = duplicated?.selectors[0]
+  const duplicated = styledCopy(frame.html, selector)
+  const copy = duplicated?.selector
   if (!duplicated || !copy) return false
   /* the copy takes room in the flow right after the original, so a drag
      that ends on that room is no move: the copy stays there */
@@ -507,6 +507,26 @@ export function dropLayerCopy(pressed: Frame, selector: string, target: DropTarg
     moveElement(duplicated.html, copy, target, flow) ??
     (inOwnSlot(duplicated.html, copy, target) ? { html: duplicated.html, selector: copy } : null)
   return commitMove(frame, moved)
+}
+
+/** The frame's HTML with a copy of the element right after it, and the
+ *  copy's path. A copy takes fresh HTML ids, so the rules that styled the
+ *  original by its ids would miss it: when any id was renamed, the rules
+ *  the original relies on come along, scoped to the copy and renamed with
+ *  it, as they would for a copy into another frame. */
+export function styledCopy(html: string, selector: string): { html: string; selector: string } | null {
+  const scope = newScope()
+  const duplicated = duplicateElements(html, [selector], { name: SCOPE_ATTR, value: scope })
+  const copy = duplicated?.selectors[0]
+  if (!duplicated || !copy) return null
+  const css = Object.keys(duplicated.renamed).length
+    ? renameInCss(carriedCss(html, selector, scope), duplicated.renamed)
+    : ''
+  if (css.trim()) return { html: withCarriedCss(duplicated.html, css, scope), selector: copy }
+  /* nothing to carry: the copy needs no scope mark either */
+  const plain = duplicateElements(html, [selector])
+  const at = plain?.selectors[0]
+  return plain && at ? { html: plain.html, selector: at } : null
 }
 
 /* a drop that would put the element where it already is */
@@ -550,10 +570,10 @@ export function layerCopyDocument(html: string, selector: string): string | null
  *  as a standalone element of its own. One undo step; the source keeps its
  *  layer. False when the source or destination changed during the gesture,
  *  either is locked, or the copy could not be made. */
-export async function copyLayerOut(pressed: Frame, selector: string, rect: WorldRect, into?: Frame): Promise<boolean> {
+export function copyLayerOut(pressed: Frame, selector: string, rect: WorldRect, into?: Frame): Promise<boolean> {
   const frames = useStore.getState().canvas?.frames ?? []
   const source = frames.find((f) => f.id === pressed.id)
-  if (!source || source.html !== pressed.html || isLayerLocked(source, selector)) return false
+  if (!source || source.html !== pressed.html || isLayerLocked(source, selector)) return Promise.resolve(false)
   const box = {
     x: Math.round(rect.x),
     y: Math.round(rect.y),
@@ -562,43 +582,51 @@ export async function copyLayerOut(pressed: Frame, selector: string, rect: World
   }
   if (into) {
     const dest = frames.find((f) => f.id === into.id)
-    if (!dest || dest.html !== into.html || dest.locked) return false
+    if (!dest || dest.html !== into.html || dest.locked) return Promise.resolve(false)
     const placed = placedCopy(source.html, selector, dest, box)
-    if (!placed) return false
+    if (!placed) return Promise.resolve(false)
     saveFrameHtml(dest, placed.html)
     const store = useStore.getState()
     store.select(dest.id)
     store.setSelectedElement({ frameId: dest.id, selector: placed.selector })
-    return true
+    return Promise.resolve(true)
   }
   const html = layerCopyDocument(source.html, selector)
-  if (!html) return false
+  if (!html) return Promise.resolve(false)
   const [node] = buildLayerTree(`<body>${elementHtml(source.html, selector) ?? ''}</body>`)
-  let created: Frame
-  try {
-    created = await api.createFrame(source.canvasId, {
-      name: node?.label ?? 'Layer',
-      pageId: source.pageId,
-      ...box,
-      html,
-    })
-  } catch (err) {
-    useStore.getState().pushNotice(errorMessage(err, 'Couldn’t copy the layer onto the canvas'))
-    return false
-  }
-  const store = useStore.getState()
-  if (store.canvas?.id !== source.canvasId) return true
-  store.upsertFrame(created)
-  recordCreate(created)
-  store.select(created.id)
-  const [shape] = buildLayerTree(created.html)
-  if (shape) store.setSelectedElement({ frameId: created.id, selector: shape.selector })
-  return true
+  /* an undo pressed while the copy is on its way waits for it, so it takes
+     the copy back rather than the edit before it */
+  const landed = (async () => {
+    let created: Frame
+    try {
+      created = await api.createFrame(source.canvasId, {
+        name: node?.label ?? 'Layer',
+        pageId: source.pageId,
+        ...box,
+        html,
+      })
+    } catch (err) {
+      useStore.getState().pushNotice(errorMessage(err, 'Couldn’t copy the layer onto the canvas'))
+      return false
+    }
+    const store = useStore.getState()
+    if (store.canvas?.id !== source.canvasId) return true
+    store.upsertFrame(created)
+    recordCreate(created)
+    store.select(created.id)
+    const [shape] = buildLayerTree(created.html)
+    if (shape) store.setSelectedElement({ frameId: created.id, selector: shape.selector })
+    return true
+  })()
+  trackSave(landed)
+  return landed
 }
 
 /* the destination's HTML with a copy of the layer placed at `box`, the
    rendered box the drag measured (transforms are baked into it), and the
-   copy's selector there */
+   copy's selector there. It is placed against the document's viewport, as
+   a drawing dropped into a frame is, so a positioned or margined body does
+   not shift it, and its placement outranks the rules it carries */
 function placedCopy(
   sourceHtml: string,
   selector: string,
@@ -615,7 +643,8 @@ function placedCopy(
   if (!el) return null
   for (const name of ['transform', 'translate', 'scale', 'rotate']) el.style.setProperty(name, 'none', 'important')
   for (const [name, value] of [
-    ['position', 'absolute'],
+    ['position', 'fixed'],
+    ['inset', 'auto'],
     ['left', `${box.x - dest.x}px`],
     ['top', `${box.y - dest.y}px`],
     ['width', `${box.width}px`],
@@ -623,7 +652,7 @@ function placedCopy(
     ['margin', '0'],
     ['box-sizing', 'border-box'],
   ] as const)
-    el.style.setProperty(name, value)
+    el.style.setProperty(name, value, 'important')
   const css = renameInCss(carriedCss(sourceHtml, selector, scope), uniqueIdsIn(doc, el))
   doc.body.append(el)
   const html = withCarriedCss('<!doctype html>\n' + doc.documentElement.outerHTML, css, scope)
