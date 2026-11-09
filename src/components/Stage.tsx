@@ -1198,8 +1198,6 @@ export function Stage({
               style={pixelGridLines(1)}
               ref={pixelGridRef}
             />
-            {/* the selected frame's size badge, in screen px (FrameLabelLayer) */}
-            <div className="pointer-events-none absolute inset-0" ref={setLabelLayer} />
             {/* `world` is likewise a behaviour hook: pan hit-testing checks
             classList.contains('world') to tell background from frame */}
             <div
@@ -1224,6 +1222,9 @@ export function Stage({
                 />
               )}
             </div>
+            {/* the selected frame's size badge, in screen px (FrameLabelLayer); after
+                the world so no frame, however it stacks, covers it */}
+            <div className="pointer-events-none absolute inset-0" ref={setLabelLayer} />
             {showRulers && <Rulers stage={ref} />}
           </div>
         </ContextMenuTrigger>
