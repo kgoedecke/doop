@@ -434,6 +434,11 @@ export function pasteFramesOver(canvasId: string, over: Frame[]): boolean {
   return true
 }
 
+/* the frame as the canvas holds it now */
+function liveFrame(id: string): Frame | undefined {
+  return useStore.getState().canvas?.frames.find((f) => f.id === id)
+}
+
 /** ⇧⌘R on frames: the copied frames land at each selected frame's top-left,
  *  and each selected frame goes once all of its replacements have landed.
  *  One whose replacements did not all land stays, and the copies that did
@@ -468,34 +473,41 @@ export function replaceFramesWithClip(canvasId: string, targets: Frame[]): boole
       const leftovers = created.filter((_, i) => removed[i]?.status === 'rejected')
       return { target, created: null, leftovers }
     }),
-  ).then((outcomes) => {
+  ).then(async (outcomes) => {
     const finished = outcomes.flatMap((o) => (o.created ? [{ target: o.target, created: o.created }] : []))
     const leftovers = outcomes.flatMap((o) => o.leftovers)
     if (!finished.length && !leftovers.length) return
-    if (useStore.getState().canvas?.id !== canvasId || historyEpoch() !== started) {
-      /* the person moved on (another canvas, history cleared): no undo step
-         could take this back, so the replacements go and the originals stay */
+    const movedOn = () => useStore.getState().canvas?.id !== canvasId || historyEpoch() !== started
+    /* the person moved on (another canvas, history cleared): no undo step
+       could take this back, so the replacements go and the originals stay */
+    const dropAll = () => {
       for (const f of finished.flatMap((o) => o.created)) api.deleteFrame(f.id).catch(console.error)
-      return
     }
-    /* each target as it is now: one edited while its replacements were made
-       keeps that edit, and its replacements go; one deleted meanwhile has
-       nothing left to remove, so its replacements stay as plain copies */
-    const live = new Map((useStore.getState().canvas?.frames ?? []).map((f) => [f.id, f]))
+    if (movedOn()) return dropAll()
+    /* a target a teammate edited while its replacements were made keeps that
+       edit, and its replacements go; a copy that cannot go stays in the undo
+       step, so Undo still takes it back */
+    const stale = finished.filter(({ target }) => liveFrame(target.id)?.updatedAt !== target.updatedAt)
+    const ready = finished.filter((o) => !stale.includes(o))
+    const staleCopies = stale.filter(({ target }) => liveFrame(target.id)).flatMap((o) => o.created)
+    const cleanup = await Promise.allSettled(staleCopies.map((f) => api.deleteFrame(f.id)))
+    leftovers.push(...staleCopies.filter((_, i) => cleanup[i]?.status === 'rejected'))
+    /* one deleted meanwhile has nothing left to remove: its copies stay */
+    leftovers.push(...stale.filter(({ target }) => !liveFrame(target.id)).flatMap((o) => o.created))
+    if (movedOn()) return dropAll()
+    /* read once more after the cleanup: a target edited during it keeps its
+       edit too, and its copies stay as plain copies */
     const done: { target: Frame; created: Frame[] }[] = []
-    for (const { target, created } of finished) {
-      const now = live.get(target.id)
-      if (!now) leftovers.push(...created)
-      else if (now.updatedAt === target.updatedAt) done.push({ target: now, created })
-      else for (const f of created) api.deleteFrame(f.id).catch(console.error)
+    for (const { target, created } of ready) {
+      const now = liveFrame(target.id)
+      if (now?.updatedAt === target.updatedAt) done.push({ target: now, created })
+      else leftovers.push(...created)
     }
     const created = [...done.flatMap((o) => o.created), ...leftovers]
     if (!created.length) return
     replaceFramesTracked(done, leftovers)
-    if (created.length) {
-      useStore.getState().selectMany(created.map((f) => f.id))
-      posthog.capture('frame_pasted', { count: created.length })
-    }
+    useStore.getState().selectMany(created.map((f) => f.id))
+    posthog.capture('frame_pasted', { count: created.length })
   })
   return true
 }

@@ -280,6 +280,9 @@ function unchangedFrame(picked: Frame): Frame | null {
   return null
 }
 
+/* the body's path, as the runtime's cssPath writes it */
+const BODY_PATH = 'body:nth-of-type(1)'
+
 /* Where the layer at `selector` sits: the row holding it (null for a root
    layer) and the rows beside it, itself included. Walked on the tree rather
    than read off the selector, since a path anchored on an #id says nothing
@@ -295,8 +298,7 @@ function placeOf(tree: LayerNode[], selector: string): { parent: LayerNode | nul
  *  a flex parent's flow, carried onto the box (the box itself becomes one
  *  flex item); none for a parent in normal flow. Null for a grid, whose
  *  tracks a wrapper cannot keep. */
-async function inheritedLayout(frameId: string, parent: string | null): Promise<string | null | undefined> {
-  if (!parent) return undefined
+async function inheritedLayout(frameId: string, parent: string): Promise<string | null | undefined> {
   const cs = await computedStyles(frameId, parent, [
     'display',
     'flex-direction',
@@ -320,8 +322,9 @@ async function inheritedLayout(frameId: string, parent: string | null): Promise<
 }
 
 async function groupKeepingLayout(p: Picked, name: string) {
+  /* a root layer's box is the body, which the tree does not list */
   const parent = placeOf(buildLayerTree(p.frame.html), p.selectors[0]!)?.parent
-  const style = await inheritedLayout(p.frame.id, parent?.selector ?? null)
+  const style = await inheritedLayout(p.frame.id, parent?.selector ?? BODY_PATH)
   if (style === null) {
     notice(t('actions.groupGridFailed'))
     return

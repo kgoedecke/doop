@@ -112,6 +112,31 @@ describe('paste to replace', () => {
     expect(db.has('a')).toBe(true)
   })
 
+  it("keeps a copy it could not clean up after a teammate's edit in the undo step", async () => {
+    copyFrames([db.get('copied')!])
+    let release!: () => void
+    const gate = new Promise<void>((r) => (release = r))
+    const create = vi.mocked(api.createFrame).getMockImplementation()!
+    vi.mocked(api.createFrame).mockImplementation(async (...args) => {
+      await gate
+      return create(...args)
+    })
+    let refuse = true
+    vi.mocked(api.deleteFrame).mockImplementation(async (id) => {
+      if (refuse) throw new Error('offline')
+      db.delete(id)
+    })
+    replaceFramesWithClip('c', [db.get('a')!])
+    useStore.getState().upsertFrame({ ...db.get('a')!, html: '<p>edited</p>', updatedAt: 5 })
+    release()
+    await vi.waitFor(() => expect(useStore.getState().selectedIds).toEqual(['new-1']))
+    expect(db.has('new-1') && db.has('a')).toBe(true)
+    refuse = false
+    await undo()
+    expect(db.has('new-1')).toBe(false)
+    expect(db.has('a')).toBe(true)
+  })
+
   it('deletes each target only as it was checked, and undoes nothing the server refused', async () => {
     copyFrames([db.get('copied')!])
     vi.mocked(api.deleteFrame).mockImplementation(async (id) => {
