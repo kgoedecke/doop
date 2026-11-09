@@ -212,6 +212,7 @@ describe.skipIf(!findBrowserPath())('frame and element context menus', () => {
     await page.keyboard.press('Escape')
     await rightClick('#text')
     expect(await items()).toEqual([
+      'Cut',
       'Copy',
       'Paste',
       'Duplicate',
@@ -269,8 +270,8 @@ describe.skipIf(!findBrowserPath())('frame and element context menus', () => {
 
   it('does not open the frame or background menu in empty frame space', async () => {
     await page.mouse.click(500, 440, { button: 'right' })
-    await page.waitForFunction(() => document.querySelector('[role="menuitem"]')?.textContent?.startsWith('Copy'))
-    expect(await items()).toEqual(['Copy', 'Paste'])
+    await page.waitForFunction(() => document.querySelector('[role="menuitem"]')?.textContent?.startsWith('Cut'))
+    expect(await items()).toEqual(['Cut', 'Copy', 'Paste'])
     expect(await page.evaluate(() => window.contextMenuHarness.selection())).toBeNull()
   })
 

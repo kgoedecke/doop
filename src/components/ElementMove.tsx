@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
-import { frameDesignPoint, frameWorldPoint, rotateVector } from '../../shared/frameRotation'
+import { frameDesignPoint, frameWorldPoint, rotateVector, turnedDropRect } from '../../shared/frameRotation'
 import { createPortal } from 'react-dom'
 import type { Frame } from '../../shared/types'
 import { isCanvasElement } from '../lib/drawing'
@@ -452,6 +452,11 @@ export function useElementMove(frame: Frame, layoutZoom: number) {
       const into = target?.id === frame.id ? null : target
       setPreview({ rect, html, target: into, world: world!, owner, selector: hit!.selector })
     }
+    /* a standalone shape left on the canvas moves its own frame by the
+       drag's world travel; a drawing written into a frame's document goes
+       through the turns of the frame it left and the frame it lands in */
+    const dropRect = (start: DrawingRect, moved: DrawingRect) =>
+      standalone && !target ? moved : turnedDropRect(start, moved, frame, target ?? undefined)
     function onUp(ev: PointerEvent) {
       if (ev.pointerId !== pointerId || closed) return
       released = ev
@@ -470,7 +475,9 @@ export function useElementMove(frame: Frame, layoutZoom: number) {
         return
       }
       const landed =
-        !layer && hit && complete && rect ? moveDrawing(frame, hit.selector, rect, target?.id, hit) : undefined
+        !layer && hit && complete && rect && bounds
+          ? moveDrawing(frame, hit.selector, dropRect(bounds, rect), target?.id, hit)
+          : undefined
       cancel(complete && !!layer, landed?.then(shown))
       // A Shift press remains a selection toggle until it actually drags.
       if (!complete && press.shiftKey) {
