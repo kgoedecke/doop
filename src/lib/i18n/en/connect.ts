@@ -5,6 +5,8 @@ export const connect = {
   blurbChatgpt: 'Connect in your browser',
   blurbCodex: 'ChatGPT desktop and Codex CLI',
   blurbCursor: 'Add Doop to Cursor',
+  blurbKimiCode: 'Moonshot’s coding agent',
+  blurbDeepseekHarness: 'DeepSeek’s agent (dsh), with an agent key',
   otherClientName: 'Other MCP client',
   headlessName: 'Headless agent or server',
   blurbHeadless: 'n8n, Mastra, CI and scripts, with an agent key',
@@ -90,6 +92,18 @@ export const connect = {
     'Enable the doop server in Cursor and complete its browser sign-in. Your agent can then work on the canvases you can access.',
   cursorPointWithPrompt: 'Open the Agent chat and send this as your first message.',
   cursorPointNoPrompt: 'Open the Agent chat and tell it which canvas to work on.',
+
+  kimiCodeLede: 'Three steps, about a minute. Kimi Code then designs on this canvas as you.',
+  kimiCodeAddBefore: 'Add this to ',
+  kimiCodeAddAfter: ' (or run /mcp-config inside Kimi Code and enter the same address).',
+  kimiCodeSignInTitle: 'Sign in from Kimi Code',
+  kimiCodeSignInBody: 'Run this inside Kimi Code. A browser tab opens so you can approve the connection.',
+
+  deepseekHarnessLede:
+    'DeepSeek Harness connects with an agent key instead of a browser sign-in. The key acts as you, on the canvases you can reach.',
+  deepseekHarnessAddTitle: 'Add Doop as an MCP server',
+  deepseekHarnessAddBody:
+    'Add a Streamable HTTP server in DeepSeek Harness’s Settings with these values, or paste the entry under servers in your cordis.yml. Replace dpk_… with your key.',
 
   mcpLede: 'Doop is a streamable-HTTP MCP server with OAuth. Any client that supports that can design here.',
   mcpConfigTitle: "Add this server to your client's MCP config",

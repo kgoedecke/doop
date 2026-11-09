@@ -23,13 +23,15 @@ import { isDesktopShell } from '../lib/shell'
 
 /**
  * "Connect AI" is about agents that join the canvas from outside: Claude Code,
- * Codex, Cursor, the Claude or ChatGPT apps, or any MCP client. Pick the agent,
+ * Codex, Cursor, Kimi Code, DeepSeek Harness, the Claude or ChatGPT apps, or
+ * any MCP client. Pick the agent,
  * then follow its own three steps. Running the built-in Doop Agent on your own
  * ChatGPT or Claude plan is an account setting and lives in Settings, next to
  * the prompt bar's allowance meter — not here.
  */
 
-type AgentId = 'claude-code' | 'claude' | 'chatgpt' | 'codex' | 'cursor' | 'mcp' | 'headless'
+type AgentId =
+  'claude-code' | 'claude' | 'chatgpt' | 'codex' | 'cursor' | 'kimi-code' | 'deepseek-harness' | 'mcp' | 'headless'
 type View = 'agents' | AgentId
 type ClaudeConnection = 'desktop' | 'web'
 /** how a generic MCP client signs in: a person approves it in a browser, or it sends an agent key */
@@ -49,6 +51,8 @@ const AGENTS: AgentOption[] = [
   { id: 'chatgpt', name: 'ChatGPT', blurb: 'connect.blurbChatgpt', icon: 'openai' },
   { id: 'codex', name: 'Codex', blurb: 'connect.blurbCodex', icon: 'codex' },
   { id: 'cursor', name: 'Cursor', blurb: 'connect.blurbCursor', icon: 'cursor' },
+  { id: 'kimi-code', name: 'Kimi Code', blurb: 'connect.blurbKimiCode', icon: 'kimi' },
+  { id: 'deepseek-harness', name: 'DeepSeek Harness', blurb: 'connect.blurbDeepseekHarness', icon: 'deepseek' },
   { id: 'mcp', nameKey: 'connect.otherClientName', blurb: 'connect.blurbOtherClient', icon: 'mcp' },
   { id: 'headless', nameKey: 'connect.headlessName', blurb: 'connect.blurbHeadless', icon: 'headless' },
 ]
@@ -128,6 +132,34 @@ interface StepOptions {
   canvasId?: string | undefined
   /** opens Settings → Agent keys, coming back to this canvas */
   openAgentKeys: () => void
+}
+
+/** DeepSeek Harness's MCP servers take headers but no OAuth: an agent key, as the
+ *  server entry its Settings and `cordis.yml` both accept. */
+function deepseekHarnessSteps(t: Translate, mcpUrl: string, pointAt: Step, openAgentKeys: () => void) {
+  const entry = [
+    'doop:',
+    '  transport: streamable-http',
+    `  url: ${mcpUrl}`,
+    '  headers:',
+    '    Authorization: Bearer dpk_…',
+  ].join('\n')
+  return {
+    lede: t('connect.deepseekHarnessLede'),
+    steps: [
+      {
+        title: t('connect.agentKeyCreateTitle'),
+        body: t('connect.agentKeyCreateBody'),
+        action: (
+          <Button variant="solid" className="mt-2.5" onClick={openAgentKeys}>
+            {t('connect.agentKeyOpen')}
+          </Button>
+        ),
+      },
+      { title: t('connect.deepseekHarnessAddTitle'), body: t('connect.deepseekHarnessAddBody'), code: entry },
+      pointAt,
+    ],
+  }
 }
 
 /** An agent with no browser to sign in with: an agent key, sent as a bearer header. */
@@ -369,6 +401,31 @@ function agentSteps(
           },
         ],
       }
+    case 'kimi-code':
+      return {
+        lede: t('connect.kimiCodeLede'),
+        steps: [
+          {
+            title: t('connect.claudeCodeAddTitle'),
+            body: (
+              <>
+                {t('connect.kimiCodeAddBefore')}
+                <code>~/.kimi-code/mcp.json</code>
+                {t('connect.kimiCodeAddAfter')}
+              </>
+            ),
+            code: JSON.stringify({ mcpServers: { doop: { url: mcpUrl } } }, null, 2),
+          },
+          {
+            title: t('connect.kimiCodeSignInTitle'),
+            body: t('connect.kimiCodeSignInBody'),
+            code: '/mcp-config login doop',
+          },
+          pointAt,
+        ],
+      }
+    case 'deepseek-harness':
+      return deepseekHarnessSteps(t, mcpUrl, pointAt, openAgentKeys)
     case 'headless':
       return agentKeySteps(t, mcpUrl, pointAt, openAgentKeys)
     case 'mcp':
