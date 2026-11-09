@@ -48,7 +48,15 @@ import { ElementResizeHandles, type ElementGeometry } from './ElementResizeHandl
 import { selectionBox } from '../lib/elementRotate'
 import { FrameResizeHandles } from './FrameResizeHandles'
 import { keepAnchorTurned, keepRatioAfterSnap, resizeFrameRect } from '../lib/frameResize'
-import { pointerAngle, rotateVector, rotatedBounds, rotatedBy, unrotatePoint } from '../../shared/frameRotation'
+import {
+  pointerAngle,
+  rotateVector,
+  rotatedBounds,
+  rotatedBy,
+  turnedDropRect,
+  unrotatePoint,
+} from '../../shared/frameRotation'
+import { framePageId } from '../../shared/pages'
 import { sizeLabel, type ResizeHandle } from '../lib/elementResize'
 import { withFontFaces } from '../../shared/fonts'
 import { withWebFontLinks } from '../../shared/webFonts'
@@ -606,7 +614,9 @@ export const FrameView = memo(function FrameView({
         const into = drawingDropFrame(toWorld(last.x, last.y), frame.id)
         const current = live.find((x) => x.id === frame.id)
         if (into && current) {
-          const rect = { x: current.x, y: current.y, width: current.width, height: current.height }
+          const box = { x: current.x, y: current.y, width: current.width, height: current.height }
+          /* written into the frame's document, so carried through its turn */
+          const rect = turnedDropRect(box, box, current, into)
           /* the transfer starts from where the element was before the drag,
              so undo puts it back there rather than where it was let go */
           useStore.getState().patchFrameLocal(frame.id, orig)
@@ -692,11 +702,15 @@ export const FrameView = memo(function FrameView({
     setDragging(true)
     clearHover()
     let cancelled = false
+    const pageId = s.activePageId
+    const framePage = s.canvas ? framePageId(s.canvas, frame) : undefined
+    let unsubscribe = () => {}
     const stop = () => {
       window.removeEventListener('pointermove', onMove)
       window.removeEventListener('pointerup', onUp)
       window.removeEventListener('pointercancel', cancel)
       window.removeEventListener('keydown', onKey, true)
+      unsubscribe()
       setDragging(false)
     }
     const cancel = () => {
@@ -728,7 +742,9 @@ export const FrameView = memo(function FrameView({
       if (cancelled) return
       stop()
       const live = useStore.getState().canvas?.frames.find((x) => x.id === frame.id)
-      const rotation = live?.rotation ?? 0
+      /* a frame gone from the store (deleted by a peer) has nothing to save */
+      if (!live) return
+      const rotation = live.rotation ?? 0
       /* a click leaves the frame as it was: nothing to save */
       if (rotation === startRotation) return
       trackSave(api.updateFrame(frame.id, { rotation }).catch(console.error))
@@ -739,6 +755,19 @@ export const FrameView = memo(function FrameView({
     window.addEventListener('pointerup', onUp)
     window.addEventListener('pointercancel', cancel)
     window.addEventListener('keydown', onKey, true)
+    /* leaving the page or the canvas, or the frame going (deleted, or moved
+       to another page by a peer), ends the turn unsaved: a release later
+       must not write to a frame no longer in view */
+    unsubscribe = useStore.subscribe((state) => {
+      const live = state.canvas?.frames.find((f) => f.id === frame.id)
+      if (
+        state.activePageId !== pageId ||
+        state.canvas?.id !== frame.canvasId ||
+        !live ||
+        framePageId(state.canvas, live) !== framePage
+      )
+        cancel()
+    })
   }
 
   const html = useThrottledValue(frame.html, 150)

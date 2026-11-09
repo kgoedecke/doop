@@ -247,6 +247,50 @@ describe.skipIf(!findBrowserPath())('frame rotate zones', () => {
     expect(saves).toBe(before)
     expect(saved.rotation).toBeUndefined()
   })
+  it('ends the turn unsaved when the frame goes mid-drag', async () => {
+    await reset()
+    saved = { ...saved, rotation: 30, updatedAt: saved.updatedAt + 1 }
+    await page.evaluate((frame) => window.elementPanelHarness.seed(frame), saved)
+    await page.evaluate(() => window.elementPanelHarness.selectFrame())
+    await page.waitForSelector('[data-frame-rotate-handle]')
+    const before = saves
+    const z = await zone('se')
+    const from = { x: z.left + z.width / 2, y: z.top + z.height / 2 }
+    const to = swung(await centre(), from, 40)
+    await page.mouse.move(from.x, from.y)
+    await page.mouse.down()
+    await page.mouse.move(to.x, to.y, { steps: 4 })
+    /* a peer deletes the frame while the pointer is still down */
+    await page.evaluate((frame) => window.elementPanelHarness.remote(frame), { ...saved, id: 'other' })
+    await page.mouse.up()
+    await new Promise((r) => setTimeout(r, 100))
+    /* the release used to read the missing frame as unturned and save 0° */
+    expect(saves).toBe(before)
+    expect(saved.rotation).toBe(30)
+  })
+
+  it('ends the turn unsaved when a peer moves the frame to another page mid-drag', async () => {
+    await reset()
+    saved = { ...saved, rotation: 30, updatedAt: saved.updatedAt + 1 }
+    await page.evaluate((frame) => window.elementPanelHarness.seed(frame), saved)
+    await page.evaluate(() => window.elementPanelHarness.selectFrame())
+    await page.waitForSelector('[data-frame-rotate-handle]')
+    const before = saves
+    const z = await zone('se')
+    const from = { x: z.left + z.width / 2, y: z.top + z.height / 2 }
+    const to = swung(await centre(), from, 40)
+    await page.mouse.move(from.x, from.y)
+    await page.mouse.down()
+    await page.mouse.move(to.x, to.y, { steps: 4 })
+    /* still in the canvas, but on a page nobody here is looking at */
+    await page.evaluate((frame) => window.elementPanelHarness.remote(frame), { ...saved, pageId: 'elsewhere' })
+    await page.mouse.move(to.x + 30, to.y + 30, { steps: 2 })
+    await page.mouse.up()
+    await new Promise((r) => setTimeout(r, 100))
+    expect(saves).toBe(before)
+    expect(saved.rotation).toBe(30)
+  })
+
   it('keeps the rotation on the copy left behind by Alt+Shift-drag', async () => {
     await reset()
     saved = { ...saved, rotation: 30, updatedAt: saved.updatedAt + 1 }

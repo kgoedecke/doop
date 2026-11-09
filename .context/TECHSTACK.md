@@ -561,7 +561,9 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   its axes with the far corner held still (`keepAnchorTurned`) and do not snap while turned. MCP `update_frame`
   takes `rotation` through `server/pageTools.ts` (normalisation and page validation), and
   `get_canvas` lists it when set; copy, paste and duplicate
-  (`frameClipboard.ts`) carry it. Not yet turned: marquee selection,
+  (`frameClipboard.ts`) carry it. A drawing dragged in, out of or between turned frames lands
+  through `turnedDropRect` (its centre carried through each frame's turn), and a turn whose frame,
+  page or canvas goes mid-drag ends unsaved. Not yet turned: marquee selection,
   snapping and exports read the unrotated box. Tests: `frameRotation.test.ts`,
   `frameRotationHttp.test.ts`, `frameRotateBrowser.test.ts`.
 - Element rotation (`src/lib/elementRotate.ts`): an element inside a frame wears the same rotate
