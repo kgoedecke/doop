@@ -95,11 +95,13 @@ function ElementMenuItems({ frame, selector, hit, onRename, onExport }: ElementI
       <ContextMenuItem
         disabled={!canEdit || !exists || locked}
         onSelect={() => {
-          if (selector)
-            cutWith(
-              () => copyPicked(frame, [selector]),
-              () => deleteLayer(frame, selector),
-            )
+          if (!selector) return
+          /* the clipboard answers later; a frame edited meanwhile is not saved over */
+          const live = () => useStore.getState().canvas?.frames.find((f) => f.id === frame.id)
+          cutWith(
+            () => live()?.html === frame.html && copyPicked(frame, [selector]),
+            () => deleteLayer(frame, selector),
+          )
         }}
       >
         {t('common.cut')}

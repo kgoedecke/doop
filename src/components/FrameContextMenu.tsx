@@ -68,9 +68,10 @@ export function FrameContextMenu({
     const group = s.canvas?.frames.filter((f) => ids.includes(f.id)) ?? [frame]
     return group.every((f) => f.locked)
   })
-  function deleteSelection() {
-    /* locked frames stay, as they do on ⌫ */
-    deleteFramesTracked(groupFrames().filter((f) => !f.locked))
+  function deleteFrames(frames: Frame[]) {
+    /* locked frames stay, as they do on ⌫; the lock is read now, not when the menu opened */
+    const ids = new Set(frames.map((f) => f.id))
+    deleteFramesTracked(useStore.getState().canvas?.frames.filter((f) => ids.has(f.id) && !f.locked) ?? [])
   }
   const allReady = useStore((s) => {
     const ids = s.selectedIds.includes(frame.id) ? s.selectedIds : [frame.id]
@@ -114,7 +115,11 @@ export function FrameContextMenu({
               disabled={allLocked}
               onSelect={() => {
                 const frames = groupFrames()
-                if (frames.length) cutWith(() => copyFrames(frames), deleteSelection)
+                if (frames.length)
+                  cutWith(
+                    () => copyFrames(frames),
+                    () => deleteFrames(frames),
+                  )
               }}
             >
               {groupSize > 1 ? t('stage.cutFrames', { count: groupSize }) : t('common.cut')}
@@ -172,7 +177,7 @@ export function FrameContextMenu({
               <MenuHint>{MOD_KEY}⇧L</MenuHint>
             </ContextMenuItem>
             <ContextMenuSeparator />
-            <ContextMenuItem tone="danger" disabled={allLocked} onSelect={deleteSelection}>
+            <ContextMenuItem tone="danger" disabled={allLocked} onSelect={() => deleteFrames(groupFrames())}>
               {groupSize > 1 ? t('stage.deleteFrames', { count: groupSize }) : t('stage.deleteFrame')}
               <MenuHint>⌫</MenuHint>
             </ContextMenuItem>
