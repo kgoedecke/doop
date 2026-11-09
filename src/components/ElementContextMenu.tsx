@@ -9,6 +9,7 @@ import { hasFrameClip, pasteFrameCentered } from '../lib/frameClipboard'
 import { deleteLayer, duplicateLayer, setLayerHidden, setLayerLocked, shiftLayer } from '../lib/layerEdits'
 import { buildLayerTree, elementHtml, findLayer, isElementHidden, isElementLocked, layerName } from '../lib/layers'
 import { MOD_KEY } from '../lib/keys'
+import { canEditOpenCanvas, useStore } from '../lib/store'
 import { useT } from '../lib/i18n'
 import { useStore } from '../lib/store'
 import {
@@ -77,6 +78,21 @@ export function ElementContextMenu({ frame, selector, hit, onRename }: ElementMe
   )
 }
 
+/** Copy the element, then remove it once the clipboard took the copy. The
+ *  menu writes the clipboard asynchronously; a selector is a position in the
+ *  frame's HTML, so if the frame changed meanwhile the element stays, rather
+ *  than deleting whatever now sits at that position. */
+function cutLayer(frame: Frame, selector: string) {
+  writeCanvasClipboard(
+    () => copyPicked(frame, [selector]),
+    undefined,
+    () => {
+      const live = useStore.getState().canvas?.frames.find((f) => f.id === frame.id)
+      if (live?.html === frame.html) deleteLayer(live, selector)
+    },
+  )
+}
+
 /** Radix mounts these children only while the menu is open. Closed layer
  *  rows must not parse their frame HTML just to render a dormant menu. */
 function ElementMenuItems({ frame, selector, hit, onRename, onExport }: ElementItemsProps) {
@@ -92,8 +108,20 @@ function ElementMenuItems({ frame, selector, hit, onRename, onExport }: ElementI
   /* a copied standalone shape is a frame on the clipboard: its paste lands
      a second element on the canvas, as ⌘V does, not a layer in this frame */
   const frameClip = hasFrameClip()
+  const readOnly = useStore((s) => !canEditOpenCanvas(s))
   return (
     <>
+      {!readOnly && (
+        <ContextMenuItem
+          disabled={!exists || locked}
+          onSelect={() => {
+            if (selector) cutLayer(frame, selector)
+          }}
+        >
+          {t('common.cut')}
+          <MenuHint>{MOD_KEY}X</MenuHint>
+        </ContextMenuItem>
+      )}
       <ContextMenuItem
         disabled={!exists}
         onSelect={() => {
