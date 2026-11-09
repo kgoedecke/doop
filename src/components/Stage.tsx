@@ -235,6 +235,11 @@ export function Stage({
   const gridRef = useRef<HTMLDivElement>(null)
   const pixelGridRef = useRef<HTMLDivElement>(null)
   const [labelLayer, setLabelLayer] = useState<HTMLDivElement | null>(null)
+  const labelLayerRef = useRef<HTMLDivElement | null>(null)
+  const attachLabelLayer = useCallback((el: HTMLDivElement | null) => {
+    labelLayerRef.current = el
+    setLabelLayer(el)
+  }, [])
   const zoomLabelRef = useRef<HTMLSpanElement>(null)
   const setViewport = useStore((s) => s.setViewport)
   const canvas = usePageCanvas()
@@ -294,18 +299,27 @@ export function Stage({
   /* Viewport → DOM without React: no component subscribes to the viewport, so
      pan/zoom never renders anything. A store subscription writes the world
      transform, the grid layer, the --zoom variable (which counter-scales
-     labels/pins/cursors from CSS), and the zoom pill's % directly. */
+     labels/pins/cursors from CSS), and the zoom pill's % directly.
+     The variables go on the only two subtrees that read them, the world and
+     the label layer: a custom property changed on an element restyles
+     everything under it, so --vx/--vy on the stage restyled every frame's
+     chrome on each pan step though only the label layer uses them. */
   useLayoutEffect(() => {
+    let zoomVar = ''
     function apply(vp: { x: number; y: number; zoom: number }) {
       const world = worldRef.current
       const grid = gridRef.current
-      const stage = ref.current
-      if (!world || !grid || !stage) return
+      const labels = labelLayerRef.current
+      if (!world || !grid || !labels) return
       world.style.transform = worldTransform(vp, layoutZoomRef.current)
-      stage.style.setProperty('--zoom', String(vp.zoom))
+      if (zoomVar !== String(vp.zoom)) {
+        zoomVar = String(vp.zoom)
+        world.style.setProperty('--zoom', zoomVar)
+        labels.style.setProperty('--zoom', zoomVar)
+      }
       /* the camera's offset, for chrome drawn in screen px (FrameLabelLayer) */
-      stage.style.setProperty('--vx', `${vp.x}px`)
-      stage.style.setProperty('--vy', `${vp.y}px`)
+      labels.style.setProperty('--vx', `${vp.x}px`)
+      labels.style.setProperty('--vy', `${vp.y}px`)
       const period = 26 * vp.zoom
       grid.style.backgroundSize = `${period}px ${period}px`
       /* one period of overhang: the layer slides back by up to a period */
@@ -1185,7 +1199,7 @@ export function Stage({
               ref={gridRef}
             />
             {/* the selected frame's size badge, in screen px (FrameLabelLayer) */}
-            <div className="pointer-events-none absolute inset-0" ref={setLabelLayer} />
+            <div className="pointer-events-none absolute inset-0" ref={attachLabelLayer} />
             {/* `world` is likewise a behaviour hook: pan hit-testing checks
             classList.contains('world') to tell background from frame */}
             <div
