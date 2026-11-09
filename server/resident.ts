@@ -1981,15 +1981,15 @@ export async function execTool(
             `no logo found for "${query}" — retry with the company's exact domain (e.g. "acme.io"); if that also fails, search a different real brand instead of drawing a placeholder or guessing a logo URL`,
           )
         }
-        const blocks: NonNullable<Exclude<Anthropic.ToolResultBlockParam['content'], string>> = [
-          { type: 'text', text: `Logo results for "${query}":` },
-        ]
+        type Blocks = NonNullable<Exclude<Anthropic.ToolResultBlockParam['content'], string>>
+        const blocks: Blocks = [{ type: 'text', text: `Logo results for "${query}":` }]
+        const brandBlocks: Blocks = []
         if (brands.length > 0) {
-          const thumbs = await Promise.all(brands.map((b) => imageSearch.fetchThumb(b.thumb_url)))
+          const thumbs = await Promise.all(brands.map((b) => b.thumb ?? imageSearch.fetchThumb(b.thumb_url)))
           brands.forEach((b, i) => {
             const thumb = thumbs[i]
             if (thumb)
-              blocks.push({
+              brandBlocks.push({
                 type: 'image',
                 source: {
                   type: 'base64',
@@ -1997,15 +1997,23 @@ export async function execTool(
                   data: thumb.data,
                 },
               })
-            blocks.push({ type: 'text', text: `#${i + 1} — ${b.name} (${b.domain})\nlogo_url: ${b.logo_url}` })
+            brandBlocks.push({
+              type: 'text',
+              text: `#${i + 1} — ${b.name} (${b.domain})${b.source === 'favicon' ? ' · favicon' : ''}\nlogo_url: ${b.logo_url}`,
+            })
           })
         }
-        if (vector.length > 0) {
-          blocks.push({
-            type: 'text',
-            text: `Open-source vector marks:\n${vector.map((v) => `${v.id} → ${v.svg_url}`).join('\n')}`,
-          })
-        }
+        const vectorBlocks: Blocks =
+          vector.length > 0
+            ? [
+                {
+                  type: 'text',
+                  text: `Open-source vector marks:\n${vector.map((v) => `${v.id} → ${v.svg_url}`).join('\n')}`,
+                },
+              ]
+            : []
+        if (imageSearch.vectorFirst(brands, vector)) blocks.push(...vectorBlocks, ...brandBlocks)
+        else blocks.push(...brandBlocks, ...vectorBlocks)
         blocks.push({ type: 'text', text: imageSearch.LOGO_USAGE_NOTE })
         return ok(blocks)
       }
