@@ -9,12 +9,15 @@ export const MAX_EXPORT_SCALE = 4
 /** Every export before the picker was 2x, and it stays the default. */
 export const DEFAULT_EXPORT_SCALE = 2
 
-/* What one render may cost above the old 2x: a canvas side engines still
-   draw, and a pixel budget (about 256 MB of RGBA) that keeps the public
-   image route from rendering anything vast. 4x of a 1080 x 1350 poster is
-   23 MP, of a 1920 x 1080 slide 33 MP. */
+/* What one render may cost: a canvas side engines still draw, and a pixel
+   budget (about 200 MB of RGBA) that keeps the public image route from
+   rendering anything vast. The server's renderer cuts a screenshot at the
+   same budget (`renderedHeight`), so an export fitted here is never cut.
+   4x of a 1080 x 1350 poster is 23 MP, of a 1920 x 1080 slide 33 MP. */
 export const MAX_EXPORT_SIDE = 16_384
-export const MAX_EXPORT_PIXELS = 64_000_000
+export const MAX_EXPORT_PIXELS = 50_000_000
+/* the floor a vast frame comes down to; its render is cut below that */
+const MIN_FITTED_SCALE = 0.01
 
 /** A multiplier as typed or sent: `2`, `"2"`, `"1.5x"`, `"3×"`, and a
  *  decimal comma as Portuguese writes it (`"0,5"`). Kept to two decimals
@@ -29,16 +32,16 @@ export function parseExportScale(raw: unknown): number | null {
   return scale
 }
 
-/** The scale a box of this size actually renders at. Up to 2x it is what
- *  was asked, as every export was before; above, it comes down until the
- *  image fits `MAX_EXPORT_SIDE` and `MAX_EXPORT_PIXELS`, never below 2x. */
+/** The scale a box of this size actually renders at: what was asked, or
+ *  less until the image fits `MAX_EXPORT_SIDE` and `MAX_EXPORT_PIXELS`, so
+ *  the whole frame is in it rather than a top cut off at the budget. */
 export function fitExportScale(size: { width: number; height: number }, wanted: number): number {
-  if (wanted <= DEFAULT_EXPORT_SCALE) return wanted
-  const width = Math.max(1, size.width)
-  const height = Math.max(1, size.height)
+  /* rounded as the renderers round, so a fitted scale stays within their budget */
+  const width = Math.max(1, Math.round(size.width))
+  const height = Math.max(1, Math.round(size.height))
   const largest = Math.min(MAX_EXPORT_SIDE / Math.max(width, height), Math.sqrt(MAX_EXPORT_PIXELS / (width * height)))
-  const fitted = Math.floor(Math.min(wanted, largest) * 100) / 100
-  return Math.max(DEFAULT_EXPORT_SCALE, fitted)
+  if (wanted <= largest) return wanted
+  return Math.max(MIN_FITTED_SCALE, Math.floor(largest * 100) / 100)
 }
 
 /** `2x`, `1.5x`: how the picker, the toast and the hints name a scale. */

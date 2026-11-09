@@ -8,6 +8,7 @@ import {
   MAX_EXPORT_SIDE,
   parseExportScale,
 } from '../shared/exportScale'
+import { renderedHeight } from '../server/renderLimits'
 import { readExportSettings } from '../src/lib/exportSettings'
 
 describe('parseExportScale', () => {
@@ -34,8 +35,8 @@ describe('parseExportScale', () => {
 })
 
 describe('fitExportScale', () => {
-  it('gives what was asked up to 2x, however large the frame, as every export did before', () => {
-    expect(fitExportScale({ width: 1440, height: 30_000 }, 2)).toBe(2)
+  it('gives an ordinary frame what was asked', () => {
+    expect(fitExportScale({ width: 1440, height: 900 }, 2)).toBe(2)
     expect(fitExportScale({ width: 1440, height: 30_000 }, 0.5)).toBe(0.5)
   })
 
@@ -44,20 +45,43 @@ describe('fitExportScale', () => {
     expect(fitExportScale({ width: 1920, height: 1080 }, 4)).toBe(4)
   })
 
-  it('brings a large pick down to the pixel budget, never below 2x', () => {
-    const page = { width: 1440, height: 6000 }
+  it('brings a large pick down to the pixel budget', () => {
+    const page = { width: 1440, height: 2560 }
     const fitted = fitExportScale(page, 4)
     expect(fitted).toBeLessThan(4)
     expect(fitted).toBeGreaterThan(2)
     const { width, height } = exportPixelSize(page, fitted)
     expect(width * height).toBeLessThanOrEqual(MAX_EXPORT_PIXELS)
-    expect(fitExportScale({ width: 1440, height: 20_000 }, 4)).toBe(2)
+  })
+
+  it('goes below 2x for a frame too tall for it, rather than leaving the renderer to cut it', () => {
+    const tall = { width: 1440, height: 20_000 }
+    const fitted = fitExportScale(tall, 2)
+    expect(fitted).toBeLessThan(2)
+    const { width, height } = exportPixelSize(tall, fitted)
+    expect(width * height).toBeLessThanOrEqual(MAX_EXPORT_PIXELS)
   })
 
   it('keeps the longest side drawable', () => {
     const strip = { width: 100, height: 5000 }
     const fitted = fitExportScale(strip, 4)
     expect(exportPixelSize(strip, fitted).height).toBeLessThanOrEqual(MAX_EXPORT_SIDE)
+  })
+
+  it('never hands the server renderer a scale it would crop', () => {
+    const sizes = [
+      { width: 1440, height: 2560 },
+      { width: 1440, height: 9000 },
+      { width: 1440, height: 40_000 },
+      { width: 375.4, height: 12_345.6 },
+      { width: 3000, height: 3000 },
+    ]
+    for (const size of sizes) {
+      for (const wanted of [0.5, 1, 2, 3, 4]) {
+        const scale = fitExportScale(size, wanted)
+        expect(renderedHeight(size, scale)).toBe(Math.round(size.height))
+      }
+    }
   })
 })
 
