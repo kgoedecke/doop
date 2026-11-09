@@ -526,14 +526,16 @@ export function CanvasPage({
        under it, as a held ⌫ must not delete them */
     let held = false
     const onKeyDown = (e: KeyboardEvent) => void (held = e.repeat)
-    const ours = (e: ClipboardEvent) =>
-      !isTypingTarget(e.target) && !window.getSelection()?.toString() && !!e.clipboardData
+    /* the event's clipboard when the canvas owns it, not a field or a text selection */
+    const canvasClipboard = (e: ClipboardEvent) =>
+      isTypingTarget(e.target) || window.getSelection()?.toString() ? null : e.clipboardData
     function onCopy(e: ClipboardEvent) {
-      if (ours(e) && copySelection(e.clipboardData!)) e.preventDefault()
+      const data = canvasClipboard(e)
+      if (data && copySelection(data)) e.preventDefault()
     }
     function onCut(e: ClipboardEvent) {
-      if (!ours(e)) return
-      if (held || cutSelection(e.clipboardData!)) e.preventDefault()
+      const data = canvasClipboard(e)
+      if (data && (held || cutSelection(data))) e.preventDefault()
     }
     function onPaste(e: ClipboardEvent) {
       if (isTypingTarget(e.target)) return

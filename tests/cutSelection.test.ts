@@ -30,14 +30,6 @@ const frame = (id: string, extra: Partial<Frame> = {}): Frame => ({
   ...extra,
 })
 
-function clipboardData() {
-  const store = new Map<string, string>()
-  return {
-    setData: (type: string, value: string) => void store.set(type, value),
-    getData: (type: string) => store.get(type) ?? '',
-  } as unknown as DataTransfer
-}
-
 let db: Map<string, Frame>
 
 function open(frames: Frame[], role: 'edit' | 'view' = 'edit') {
@@ -69,7 +61,7 @@ describe('cut', () => {
   it('puts the selected frames on the clipboard and removes them as one undo step', async () => {
     open([frame('a'), frame('b'), frame('c')])
     useStore.getState().selectMany(['a', 'b'])
-    const data = clipboardData()
+    const data = new DataTransfer()
 
     expect(cutSelection(data)).toBe(true)
 
@@ -84,7 +76,7 @@ describe('cut', () => {
     open([frame('a', { locked: true })])
     useStore.getState().select('a')
 
-    expect(cutSelection(clipboardData())).toBe(true)
+    expect(cutSelection(new DataTransfer())).toBe(true)
 
     expect(hasFrameClip()).toBe(true)
     expect(api.deleteFrame).not.toHaveBeenCalled()
@@ -95,7 +87,7 @@ describe('cut', () => {
     useStore.getState().select('a')
     useStore.getState().pickElement({ frameId: 'a', selector: 'body > p:nth-of-type(1)' })
 
-    expect(cutSelection(clipboardData())).toBe(true)
+    expect(cutSelection(new DataTransfer())).toBe(true)
 
     expect(hasElementClip()).toBe(true)
     expect(api.deleteFrame).not.toHaveBeenCalled()
@@ -107,7 +99,7 @@ describe('cut', () => {
     open([frame('a')], 'view')
     useStore.getState().select('a')
 
-    expect(cutSelection(clipboardData())).toBe(false)
+    expect(cutSelection(new DataTransfer())).toBe(false)
 
     expect(hasFrameClip()).toBe(false)
     expect(api.deleteFrame).not.toHaveBeenCalled()
@@ -115,7 +107,7 @@ describe('cut', () => {
 
   it('does nothing with nothing selected', () => {
     open([frame('a')])
-    expect(cutSelection(clipboardData())).toBe(false)
+    expect(cutSelection(new DataTransfer())).toBe(false)
     expect(api.deleteFrame).not.toHaveBeenCalled()
   })
 })
