@@ -344,6 +344,13 @@
       "when": 1794106479747,
       "tag": "0049_image_descriptions",
       "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "7",
+      "when": 1794299332162,
+      "tag": "0050_instance_settings",
+      "breakpoints": true
     }
   ]
 }

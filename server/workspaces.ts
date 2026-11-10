@@ -175,6 +175,13 @@ export function summaryFor(ws: WorkspaceRecord, viewerId: string): WorkspaceSumm
   }
 }
 
+/** Every workspace on the instance, for the admin's default-workspace pick. */
+export function listAll(): { id: string; name: string; memberCount: number }[] {
+  return [...records.values()]
+    .sort((a, b) => a.createdAt - b.createdAt)
+    .map((ws) => ({ id: ws.id, name: ws.name, memberCount: members.get(ws.id)?.size ?? 0 }))
+}
+
 export function listFor(userId: string): WorkspaceSummary[] {
   return workspaceIdsFor(userId)
     .map((id) => records.get(id))
@@ -342,6 +349,20 @@ export function addMember(workspaceId: string, userId: string, role: WorkspaceRo
   reconcileSeats(ws)
   notifyUsers([userId], { type: 'canvases' })
   return true
+}
+
+/** A new account joins the instance's default workspace (Admin → Sign-in)
+ *  as a member. Nothing to do without one, with one that cannot grow
+ *  (billing), or for someone already in it. */
+export function joinDefaultWorkspace(userId: string, workspaceId: string | null): boolean {
+  if (!workspaceId) return false
+  const ws = records.get(workspaceId)
+  if (!ws) return false
+  if (!isActive(ws)) {
+    console.warn(`[workspaces] default workspace ${ws.name} is inactive — ${userId} not added`)
+    return false
+  }
+  return addMember(workspaceId, userId, 'member', ws.ownerId)
 }
 
 export function setRole(workspaceId: string, userId: string, role: WorkspaceRole): boolean {

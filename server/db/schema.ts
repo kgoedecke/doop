@@ -950,3 +950,15 @@ export const agentFeedback = pgTable(
   },
   (t) => [index('agent_feedback_at_idx').on(t.at)],
 )
+
+/** The instance's sign-in policy (shared/instanceSettings.ts): one row, id
+ *  'instance', written by admins in Admin → Sign-in and read into memory at
+ *  boot. Absent row = the defaults. */
+export const instanceSettings = pgTable('instance_settings', {
+  id: text('id').primaryKey(),
+  emailPasswordSignup: boolean('email_password_signup').notNull().default(true),
+  ssoAutoRedirect: boolean('sso_auto_redirect').notNull().default(false),
+  defaultWorkspaceId: text('default_workspace_id'),
+  updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
+  updatedBy: text('updated_by'),
+})

@@ -100,12 +100,12 @@
   `shared/imageDescriptions.ts`): raster uploads emit `asset.stored` and get an asynchronous
   description. Billing resolves uploader → eligible canvas owner → server; Off on either
   person stops analysis, and a server-only uploader bypasses both accounts. The stable uploader
-  ID is `assets.owner_id`; migration 0049 persists `describe_payer_id` and `describe_provider`
+  ID is `assets.owner_id`; migration 0050 persists `describe_payer_id` and `describe_provider`
   before work so retries never change payer. Runtime errors do not trigger billing fallback.
   The in-memory queue defaults to two concurrent jobs, three attempts 30s apart, and 200
   attempts per canvas per UTC day (counter resets on restart). A 20s deadline bounds storage,
   resizing and model work. Deleted canvases are skipped. Startup recovers unfinished assets;
-  migration 0049 excludes pre-feature history. Settings uses `image_description_prefs` and
+  migration 0050 excludes pre-feature history. Settings uses `image_description_prefs` and
   `GET`/`PUT /api/image-descriptions`. Agents read `images` on frame summaries and in resident
   kickoff; only standalone image layers are marked pasted references. Success broadcasts
   `asset:described` without changing frame HTML. Tests: `imageDescriptions.test.ts`,
@@ -184,7 +184,7 @@
   switches with `data-doop-theme="dark"` on its `<html>`). `withTokenBlock` writes the values a
   frame names into its own `<style data-doop-tokens>` block wherever `withFontFaces` runs, and a
   token change rewrites that block in every frame naming it as an annotation (sign-off stands, no
-  version). Stored in `design_tokens` + `canvases.token_themes` (migration 0044); REST under
+  version). Stored in `design_tokens` + `canvases.token_themes` (migration 0050); REST under
   `/api/canvases/:id/tokens`, `/token-themes` and `/styleguide.md` (tokens + guidelines as one
   markdown); MCP `get_tokens` (json / css / tailwind / markdown), `create_tokens`, `set_tokens`,
   `set_token_themes`, mirrored on the resident agent; the Layers panel's Tokens tab
@@ -705,6 +705,20 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   not a string matches nothing, and such a message (`Application failed to respond`) becomes a
   plain try-again rather than being shown. Tests: `authError.test.ts`,
   `authFormBrowser.test.ts` (the real form in Chromium, against that exact edge body).
+
+- Sign-in policy (`shared/instanceSettings.ts`, `server/instanceSettings.ts`): instance admins set,
+  in Admin → Sign-in, whether visitors may sign up with email and password (off hides the form and
+  the `/api/auth/*` mount refuses `sign-up/email` with `SIGNUP_DISABLED`; existing accounts still
+  sign in, provider sign-ups are untouched), whether signed-out visitors go straight to the OIDC
+  provider (`AuthPage` starts the round trip on mount; never after a provider error, under
+  `?manual=1`, or in the desktop shell), and a default workspace every new account joins as a member
+  (`joinDefaultWorkspace`, in the user-create hook, or on verification when SMTP is on, like
+  invites). One row in `instance_settings` (migration 0050), read into memory at boot;
+  `GET /api/oidc-config` adds the public half as `emailPasswordSignup` / `ssoAutoRedirect`;
+  `GET`/`PATCH /api/admin/instance-settings` edit it (409 with a `refusal`). Auto-redirect is
+  refused until an admin has signed in through SSO, so a provider nobody has proven cannot lock the
+  instance out. Env keeps secrets and provider wiring only. Tests: `instanceSettings.test.ts`, the
+  policy cases in `authFormBrowser.test.ts`.
 
 - MCP OAuth (better-auth `mcp()` plugin): 1h access tokens, 30-day refresh tokens
   (`MCP_REFRESH_TOKEN_TTL_S` in `server/mcpTokens.ts`; the plugin neither rotates nor revokes
