@@ -51,7 +51,8 @@ A new workspace starts `inactive`; the client opens the plan picker immediately 
    `checkout.session.completed` and `customer.subscription.{created,updated,deleted}`, finds the
    workspace by `metadata.workspaceId`, applies the same `subscriptionPatch`.
 4. Seat changes: `addMember`/`removeMember` call `billing.syncSeats` in the background (updates
-   the subscription item quantity; Stripe prorates). Never blocks the invite.
+   the subscription item quantity; an added seat is invoiced at once with `always_invoice`, a
+   removed one is a credit on the next invoice). Never blocks the invite.
 5. Portal: `POST …/billing/portal` opens Stripe's hosted portal for cards, invoices, cancel,
    interval switches.
 

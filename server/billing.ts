@@ -155,16 +155,23 @@ export async function fetchSubscription(
   return subscriptionPatch(sub)
 }
 
-/** Keep the billed quantity equal to the member count. Stripe prorates the
- *  difference on the next invoice. Silently nothing without a live
- *  subscription — a workspace that never paid has no quantity to keep. */
+/** Keep the billed quantity equal to the member count. An added seat is
+ *  invoiced and charged at once for the rest of the period; a removed seat
+ *  becomes a credit on the next invoice, so nobody gets a negative invoice
+ *  per departure. Silently nothing without a live subscription — a
+ *  workspace that never paid has no quantity to keep. */
 export async function syncSeats(ws: BillableWorkspace, seats: number): Promise<void> {
   if (!ws.stripeSubscriptionId) return
   const sub = await stripe().subscriptions.retrieve(ws.stripeSubscriptionId)
   if (sub.status === 'canceled' || sub.status === 'incomplete_expired') return
   const item = sub.items.data[0]
   if (!item || item.quantity === seats) return
-  await stripe().subscriptionItems.update(item.id, { quantity: Math.max(1, seats) })
+  const quantity = Math.max(1, seats)
+  const growing = quantity > (item.quantity ?? 0)
+  await stripe().subscriptionItems.update(item.id, {
+    quantity,
+    proration_behavior: growing ? 'always_invoice' : 'create_prorations',
+  })
 }
 
 /** Deleting a workspace ends its subscription now — nobody should keep
