@@ -21,10 +21,13 @@ declare global {
         tool: string
         selectedIds: string[]
         selectedElement: { frameId: string; selector: string } | null
+        selectedElements: string[]
       }
       undo: () => Promise<void>
       redo: () => Promise<void>
       pick: (el: { frameId: string; selector: string } | null) => void
+      /** several Layers rows picked, the last the primary */
+      pickMany: (frameId: string, selectors: string[]) => void
       formatText: (command: TextFormatCommand) => boolean
       /** an SVG file read the way a paste reads it, with the browser's computed styles */
       importSvg: (markup: string, name: string) => ImportedSvg | null
@@ -955,6 +958,91 @@ describe.skipIf(!findBrowserPath())('drawing on the canvas', { timeout: 30_000 }
     await expect.poll(async () => (await visibleDrawing('Layers', '#rect')).x).toBeCloseTo(before.x, 0)
     await page.evaluate(() => window.drawingHarness.redo())
     await expect.poll(async () => (await visibleDrawing('Layers', '#rect')).x).toBeCloseTo(moved.x, 0)
+  })
+
+  it('drags every picked layer together, as one save and one undo step, from a press inside one of them', async () => {
+    const source = layerFrame(
+      rectangle +
+        '<div id="box" style="position:absolute;left:300px;top:60px;width:120px;height:90px;background:teal">' +
+        '<p id="label" style="margin:0;padding:20px">Two</p></div>' +
+        '<p id="sibling" style="margin:0">Keep me</p>',
+    )
+    await seedFrames([source])
+    await page.evaluate(() => {
+      window.drawingHarness.viewport({ x: 40, y: 20, zoom: 1 })
+      window.drawingHarness.selectFrames(['layers'])
+      window.drawingHarness.pickMany('layers', ['#box', '#rect'])
+    })
+    const rect = await visibleDrawing('Layers', '#rect')
+    const box = await visibleDrawing('Layers', '#box')
+    /* the press lands on the label inside the picked box */
+    await page.mouse.move(box.x + 30, box.y + 30)
+    await page.mouse.down()
+    await page.mouse.move(box.x + 70, box.y + 55, { steps: 5 })
+    await expect.poll(async () => (await visibleDrawing('Layers', '#box')).x).toBeCloseTo(box.x + 40, 0)
+    /* the other picked layer previews the same travel, with no save yet */
+    expect((await visibleDrawing('Layers', '#rect')).x).toBeCloseTo(rect.x + 40, 0)
+    expect(patchRequests).toBe(0)
+    await page.mouse.up()
+    await expect.poll(() => patchRequests).toBe(1)
+    expect((await visibleDrawing('Layers', '#box')).y).toBeCloseTo(box.y + 25, 0)
+    expect((await visibleDrawing('Layers', '#rect')).y).toBeCloseTo(rect.y + 25, 0)
+    expect(saved[0]!.html).toContain('<p id="sibling" style="margin:0">Keep me</p>')
+    /* the pick stands, the pressed layer now its primary */
+    const state = await page.evaluate(() => window.drawingHarness.state())
+    expect(state.selectedElement?.selector).toBe('#box')
+    expect(state.selectedElements).toEqual(['#rect', '#box'])
+    await page.evaluate(() => window.drawingHarness.undo())
+    await expect.poll(async () => (await visibleDrawing('Layers', '#rect')).x).toBeCloseTo(rect.x, 0)
+    expect((await visibleDrawing('Layers', '#box')).x).toBeCloseTo(box.x, 0)
+  })
+
+  it('leaves the rest of a pick where it is when Escape cancels the drag', async () => {
+    const source = layerFrame(
+      rectangle +
+        '<div id="box" style="position:absolute;left:300px;top:60px;width:120px;height:90px;background:teal"></div>',
+    )
+    await seedFrames([source])
+    await page.evaluate(() => {
+      window.drawingHarness.viewport({ x: 40, y: 20, zoom: 1 })
+      window.drawingHarness.selectFrames(['layers'])
+      window.drawingHarness.pickMany('layers', ['#rect', '#box'])
+    })
+    const rect = await visibleDrawing('Layers', '#rect')
+    const box = await visibleDrawing('Layers', '#box')
+    await page.mouse.move(rect.x + 40, rect.y + 40)
+    await page.mouse.down()
+    await page.mouse.move(rect.x + 80, rect.y + 40, { steps: 5 })
+    await expect.poll(async () => (await visibleDrawing('Layers', '#box')).x).toBeCloseTo(box.x + 40, 0)
+    await page.keyboard.press('Escape')
+    await expect.poll(async () => (await visibleDrawing('Layers', '#box')).x).toBeCloseTo(box.x, 0)
+    expect((await visibleDrawing('Layers', '#rect')).x).toBeCloseTo(rect.x, 0)
+    await page.mouse.up()
+    await page.evaluate(() => new Promise((resolve) => setTimeout(resolve, 300)))
+    expect(patchRequests).toBe(0)
+    expect(saved[0]!.html).toBe(source.html)
+  })
+
+  it('moves only the layer pressed when it is not part of the pick', async () => {
+    const source = layerFrame(
+      rectangle +
+        '<div id="box" style="position:absolute;left:300px;top:60px;width:120px;height:90px;background:teal"></div>' +
+        '<div id="loose" style="position:absolute;left:50px;top:300px;width:80px;height:80px;background:plum"></div>',
+    )
+    await seedFrames([source])
+    await page.evaluate(() => {
+      window.drawingHarness.viewport({ x: 40, y: 20, zoom: 1 })
+      window.drawingHarness.selectFrames(['layers'])
+      window.drawingHarness.pickMany('layers', ['#rect', '#box'])
+    })
+    const rect = await visibleDrawing('Layers', '#rect')
+    const loose = await visibleDrawing('Layers', '#loose')
+    await drag([loose.x + 40, loose.y + 40], [loose.x + 80, loose.y + 40])
+    await expect.poll(() => patchRequests).toBe(1)
+    expect((await visibleDrawing('Layers', '#loose')).x).toBeCloseTo(loose.x + 40, 0)
+    expect((await visibleDrawing('Layers', '#rect')).x).toBeCloseTo(rect.x, 0)
+    const state = await page.evaluate(() => window.drawingHarness.state())
+    expect(state.selectedElements).toEqual(['#loose'])
   })
 
   it('moves a transformed layer in screen space without changing its transform or siblings', async () => {

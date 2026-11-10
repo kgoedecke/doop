@@ -416,7 +416,11 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   stay hidden. Drawings and layers snap to their frame's edges and centre, their parent box and
   their siblings (`snapRects` on the runtime's hit replies) as well as the ruler guides.
   Ordinary HTML/SVG layers move in place through the runtime's geometry/style gesture bridge,
-  preserving layout and transforms and committing one undo step per drag.
+  preserving layout and transforms and committing one undo step per drag. A drag on one of
+  several picked layers (or inside one) moves them all: the rest ride the gesture as `followers`
+  (`styleGesture` `begin`), each translated by the pressed layer's delta, put back on Escape and
+  saved with it as one step; a multi-pick never takes a layout drop, and the pressed layer
+  becomes the pick's primary.
   The iframe runtime hit-tests the pointer in browser paint order and measures CSS layout
   size separately from transformed bounds. Pending pointer events are buffered until its
   reply, so fast drags and cancellation remain reliable. `src/lib/drawingMove.ts` preserves markup and translates coordinates when

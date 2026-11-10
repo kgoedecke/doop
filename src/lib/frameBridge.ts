@@ -327,13 +327,16 @@ export async function scanHotspots(frameId: string): Promise<ScannedHotspot[]> {
   return Array.isArray(reply?.items) ? (reply.items as ScannedHotspot[]) : []
 }
 
-/** Preview a whole scrub locally, then save once or restore its original CSS. */
+/** Preview a whole scrub locally, then save once or restore its original CSS.
+ *  `followers` (a `begin` only) are the rest of a multi-pick: a `move` of the
+ *  element carries them by the same delta, and a cancel puts them back too. */
 export async function styleGesture(
   frameId: string,
   selector: string,
   phase: 'begin' | 'commit' | 'cancel',
+  followers: string[] = [],
 ): Promise<ElementInfo | null> {
-  return infoOf(await requestFrame(frameId, 'doop:style-gesture', { selector, phase }))
+  return infoOf(await requestFrame(frameId, 'doop:style-gesture', { selector, phase, followers }))
 }
 
 /** Toggle a text format over whole layers, as ⌘B does with a text layer

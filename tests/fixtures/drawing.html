@@ -34,11 +34,14 @@
           tool: useStore.getState().tool,
           selectedIds: useStore.getState().selectedIds,
           selectedElement: useStore.getState().selectedElement,
+          selectedElements: useStore.getState().selectedElements,
         }),
         undo,
         redo,
         /* a Layers row pick */
         pick: (el) => useStore.getState().pickElement(el),
+        /* several Layers rows picked, the last the primary */
+        pickMany: (frameId, selectors) => useStore.getState().pickElements(frameId, selectors),
         formatText: (command) => formatSelectionText(command),
         /* an SVG file read the way a paste reads it, with the browser's computed styles */
         importSvg: (markup, name) => importSvgInBrowser(markup, name, { key: 'k' }),

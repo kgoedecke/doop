@@ -37,7 +37,7 @@ import {
   type WorldRect,
 } from '../lib/layerEdits'
 import { currentPageCanvas } from '../lib/pages'
-import { useStore } from '../lib/store'
+import { pickedSelectors, useStore } from '../lib/store'
 
 interface Preview {
   rect: DrawingRect
@@ -166,6 +166,9 @@ export function useElementMove(frame: Frame, layoutZoom: number) {
     let html = ''
     let target: Frame | null = null
     let layer: ElementMoveHit | null = null
+    /* the rest of a multi-pick that holds the layer pressed: they travel with
+       it, as one gesture and one undo step */
+    let followers: string[] = []
     let layerReady: Promise<ElementInfo | null> | null = null
     let layerPoint: { x: number; y: number; pointerX: number; pointerY: number } | null = null
     let layerWork: Promise<void> = Promise.resolve()
@@ -214,7 +217,10 @@ export function useElementMove(frame: Frame, layoutZoom: number) {
       picked = true
       useStore.getState().select(frame.id)
       if (layer) {
-        useStore.getState().pickElement({ frameId: frame.id, selector: layer.selector })
+        /* a drag of one of several picked layers keeps the pick, the pressed
+           layer now its primary */
+        if (followers.length) useStore.getState().pickElements(frame.id, [...followers, layer.selector])
+        else useStore.getState().pickElement({ frameId: frame.id, selector: layer.selector })
         onLayerHit(layer)
       } else if (hit && !standalone) useStore.getState().pickElement({ frameId: frame.id, selector: hit.selector })
     }
@@ -269,6 +275,13 @@ export function useElementMove(frame: Frame, layoutZoom: number) {
       noteFrameDocument(frame.id, null)
       if (await requestFrame(frame.id, 'doop:html', { html })) noteFrameDocument(frame.id, html)
     }
+    /* where the pressed layer may go: a layout drop (a new place in the
+       flow) is for one layer alone, so several picked layers always move
+       freely, by translation */
+    const moveTarget = (selector: string, pointerX: number, pointerY: number) =>
+      followers.length
+        ? Promise.resolve({ free: true, drop: null })
+        : elementMoveTarget(frame.id, selector, pointerX, pointerY)
     function previewLayer() {
       if (closed || !layer || !layerPoint || inFlight) return
       if (!layerReady) {
@@ -276,7 +289,7 @@ export function useElementMove(frame: Frame, layoutZoom: number) {
         layerReady = finishing.current.then(async () => {
           if (!sourceUnchanged()) return null
           const moving = duplicating ? await insertCopy() : selector
-          return moving ? styleGesture(frame.id, moving, 'begin') : null
+          return moving ? styleGesture(frame.id, moving, 'begin', followers) : null
         })
       }
       inFlight = true
@@ -287,7 +300,7 @@ export function useElementMove(frame: Frame, layoutZoom: number) {
         const selector = movingSelector()
         updateLayer(await editElementGeometry(frame.id, selector, { kind: 'move', x: point.x, y: point.y }))
         if (closed) return
-        const result = await elementMoveTarget(frame.id, selector, point.pointerX, point.pointerY)
+        const result = await moveTarget(selector, point.pointerX, point.pointerY)
         if (closed) return
         if (layerPoint === point)
           setLayoutDrop(result?.drop && !dropOut ? { drop: result.drop, world: world!, origin: contentOrigin } : null)
@@ -328,7 +341,7 @@ export function useElementMove(frame: Frame, layoutZoom: number) {
           await layerWork
           const result =
             commit && final && sourceUnchanged()
-              ? await elementMoveTarget(frame.id, selector, final.pointerX, final.pointerY)
+              ? await moveTarget(selector, final.pointerX, final.pointerY)
               : undefined
           if (commit && final && sourceUnchanged() && result?.free) {
             updateLayer(await editElementGeometry(frame.id, selector, { kind: 'move', x: final.x, y: final.y }))
@@ -521,6 +534,9 @@ export function useElementMove(frame: Frame, layoutZoom: number) {
     surface.addEventListener('lostpointercapture', onLostCapture)
     cleanup.current = cancel
     const selected = s.selectedElement?.frameId === frame.id ? s.selectedElement.selector : undefined
+    /* every picked layer of this frame: a press on one of them, or inside one,
+       moves them all (an ⌥⇧ copy is of the pressed layer alone) */
+    const pickedHere = selected ? pickedSelectors(s) : []
     /* hit-test the document this gesture checks against, not the one the
        frame still shows while a newer version is on its way in */
     const drawingHit = finishing.current.then(async () => {
@@ -530,7 +546,7 @@ export function useElementMove(frame: Frame, layoutZoom: number) {
         ? requestFrame(frame.id, 'doop:drawing-hit', {
             ...frameDesignPoint(origin, frame),
             standalone,
-            selected,
+            selected: pickedHere.length > 1 ? pickedHere : selected,
           })
         : null
     })
@@ -541,11 +557,13 @@ export function useElementMove(frame: Frame, layoutZoom: number) {
       if (!hit) {
         const response = await requestFrame(frame.id, 'doop:move-hit', {
           ...frameDesignPoint(origin, frame),
-          selected,
+          selected: pickedHere.length > 1 ? pickedHere : selected,
         })
         if (closed) return
         layer = (response?.hit ?? null) as ElementMoveHit | null
         if (layer) {
+          const pressed = layer.selector
+          followers = duplicating || !pickedHere.includes(pressed) ? [] : pickedHere.filter((x) => x !== pressed)
           bounds = { ...layer.rect, x: frame.x + layer.rect.x, y: frame.y + layer.rect.y }
           snapTargets = toSnapTargets(layer.snapRects)
           if (!press.shiftKey) pickHit()
