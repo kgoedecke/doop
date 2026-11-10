@@ -19,12 +19,16 @@
       import { clearHistory, undo, redo } from '/src/lib/history.ts'
       import { TooltipProvider } from '/src/components/ui/tooltip.tsx'
       import '/src/styles.css'
+      import { installActionKeys } from '/tests/fixtures/actionKeys.ts'
+      /* the canvas page dispatches the registry's chords (⇧R among them) */
+      installActionKeys()
       window.rulersHarness = {
         seed: (canvas) => {
           clearHistory()
           useStore.getState().setCanvas(canvas)
         },
         viewport: (viewport) => useStore.getState().setViewport(viewport),
+        comments: (comments) => useStore.getState().setComments(comments),
         select: (ids) => useStore.getState().selectMany(ids),
         state: () => ({
           rulers: useStore.getState().rulers,

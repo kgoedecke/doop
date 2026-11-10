@@ -84,6 +84,41 @@ export async function rasterizeFrame(frame: Frame, opts: RasterOptions): Promise
   }
 }
 
+/** The frame as an SVG file: the same self-contained document the raster
+ *  draws (an HTML page inside a `foreignObject`, every resource inlined), so
+ *  it opens anywhere a browser renders SVG but is not editable vector art.
+ *  `clip` crops it by its viewBox; the white ground matches the PNG. */
+export async function frameSvg(
+  frame: Frame,
+  opts: { clip?: ClipRect; signal?: AbortSignal; materialize?: PrivateMaterializer } = {},
+): Promise<Blob> {
+  assertRenderPixels(frame.width, frame.height)
+  const operation = new PrivateExportOperation(
+    frame,
+    opts.signal ?? AbortSignal.timeout(RESOURCE_FETCH_MS),
+    opts.materialize,
+  )
+  try {
+    const snapshot = await snapshotFrame(frame.id)
+    if (snapshot && snapshot.html === null) throw new Error('the frame cannot be drawn here')
+    const svg = await inlineDocument(snapshot?.html ?? frame.html, {
+      width: frame.width,
+      height: frame.height,
+      signal: operation.signal,
+      operation,
+      clip: opts.clip,
+      background: '#fff',
+      standalone: true,
+    })
+    const blob = new Blob([svg], { type: 'image/svg+xml;charset=utf-8' })
+    if (blob.size > PRIVATE_MEDIA_LIMITS.encodedBytes) throw new PrivateMaterializationError('limit')
+    await operation.revalidate()
+    return blob
+  } finally {
+    operation.close()
+  }
+}
+
 /** The part of the frame a rendered box covers, in whole frame pixels
  *  (rounded outward, so an edge at a fraction is kept), or null when the
  *  box lies outside the frame: what the frame clips away is not in any
@@ -127,6 +162,135 @@ interface InlineOptions {
   height: number
   signal: AbortSignal
   operation: PrivateExportOperation
+  /** the part of the document the SVG shows, by its viewBox; all of it when unset */
+  clip?: ClipRect
+  /** painted under the document; transparent when unset */
+  background?: string
+  /** the SVG is a file someone opens as a page (a browser tab, Quick
+   *  Look), not an image drawn here: there the viewer's window is the
+   *  viewport, so viewport units and media queries are settled against the
+   *  frame first (`FrameViewport`) */
+  standalone?: boolean
+}
+
+/* a number glued to a viewport unit, not inside a word or a base64 run */
+const VIEWPORT_UNIT = /(?<![\w+/=.-])(-?\d*\.?\d+)(s|l|d)?(vh|vw|vmin|vmax)(?![\w+/=])/gi
+
+/** `100vh` as the frame's px, `50vw` as half its width, and so on. */
+export function pinViewportUnits(css: string, size: { width: number; height: number }): string {
+  return css.replace(VIEWPORT_UNIT, (_whole, amount: string, _kind: string | undefined, unit: string) => {
+    const lower = unit.toLowerCase()
+    const side =
+      lower === 'vh'
+        ? size.height
+        : lower === 'vw'
+          ? size.width
+          : lower === 'vmin'
+            ? Math.min(size.width, size.height)
+            : Math.max(size.width, size.height)
+    return `${Math.round(Number(amount) * side * 100) / 10_000}px`
+  })
+}
+
+/* CSSRule.MEDIA_RULE: the rules come from another window, so `instanceof`
+   cannot tell them apart */
+const MEDIA_RULE = 4
+
+/** The frame's own viewport, for CSS that will be laid out somewhere else:
+ *  viewport units become the frame's px, and `@media` rules are kept or
+ *  dropped by what a window of the frame's size matches. A hidden iframe of
+ *  that size answers the queries, so every feature (width, orientation,
+ *  aspect ratio, the person's colour scheme) is judged as the canvas does. */
+class FrameViewport {
+  private frame: HTMLIFrameElement | null = null
+  constructor(private readonly size: { width: number; height: number }) {}
+
+  /** before url()s are inlined, so no data: URL is ever rewritten */
+  units(css: string): string {
+    return pinViewportUnits(css, this.size)
+  }
+
+  matches(query: string): boolean {
+    return !query.trim() || this.window().matchMedia(query).matches
+  }
+
+  /** `css` with each top-level `@media` rule unwrapped when the frame
+   *  matches it and dropped when not; the rest is the CSSOM's own text. */
+  media(css: string): string {
+    if (!/@media/i.test(css)) return css
+    const doc = this.window().document
+    const style = doc.createElement('style')
+    style.textContent = css
+    doc.head.append(style)
+    try {
+      const rules = style.sheet?.cssRules
+      return rules ? this.serialize(rules) : css
+    } finally {
+      style.remove()
+    }
+  }
+
+  dispose(): void {
+    this.frame?.remove()
+    this.frame = null
+  }
+
+  private serialize(rules: CSSRuleList): string {
+    return Array.from(rules, (rule) => {
+      if (rule.type !== MEDIA_RULE) return rule.cssText
+      const media = rule as CSSMediaRule
+      return this.matches(media.media.mediaText) ? this.serialize(media.cssRules) : ''
+    }).join('\n')
+  }
+
+  private window(): Window {
+    if (!this.frame) {
+      const frame = document.createElement('iframe')
+      frame.setAttribute('aria-hidden', 'true')
+      frame.setAttribute('sandbox', 'allow-same-origin')
+      frame.referrerPolicy = 'no-referrer'
+      frame.tabIndex = -1
+      frame.style.cssText = `position:fixed;left:-100000px;top:0;border:0;visibility:hidden;width:${this.size.width}px;height:${this.size.height}px`
+      document.body.append(frame)
+      /* laid out now, so its media queries see its size */
+      void frame.offsetWidth
+      this.frame = frame
+      const doc = frame.contentDocument
+      if (!doc) throw new Error('no viewport document')
+      const policy = doc.createElement('meta')
+      policy.httpEquiv = 'Content-Security-Policy'
+      policy.content =
+        "default-src 'none'; style-src 'unsafe-inline' data:; img-src data:; font-src data:; form-action 'none'; base-uri 'none'"
+      doc.head.append(policy)
+    }
+    const win = this.frame.contentWindow
+    if (!win) throw new Error('no viewport to match media against')
+    return win
+  }
+}
+
+/* what would run once the SVG is opened as a page: inline handlers, and
+   links or forms into script */
+const SCRIPT_URL = /^\s*(javascript|vbscript):/i
+const URL_ATTRS = ['href', 'xlink:href', 'src', 'action', 'formaction'] as const
+
+function stripExecutable(doc: Document): void {
+  // Export a static document: SMIL can otherwise restore a script URL or start an unadmitted fetch.
+  for (const animation of doc.querySelectorAll('animate, animateTransform, animateMotion, set, discard'))
+    animation.remove()
+  for (const el of doc.querySelectorAll('*')) {
+    for (const attr of Array.from(el.attributes)) {
+      if (attr.name.toLowerCase().startsWith('on')) el.removeAttribute(attr.name)
+    }
+    for (const name of URL_ATTRS) {
+      // HTML entity decoding has already run. Browsers also discard embedded
+      // ASCII controls when interpreting URL schemes (for example java&#10;script:).
+      const value = Array.from(el.getAttribute(name) ?? '')
+        .filter((character) => character.charCodeAt(0) > 0x20 && character.charCodeAt(0) !== 0x7f)
+        .join('')
+      if (SCRIPT_URL.test(value)) el.removeAttribute(name)
+    }
+  }
 }
 
 /** One SVG, sized to the frame, holding the document with every external
@@ -136,8 +300,11 @@ export async function inlineDocument(html: string, opts: InlineOptions): Promise
   const prepared = await opts.operation.document(html)
   // A detached document has no ambient network permission while public media
   // awaits explicit anonymous fetch/admission in its trusted parent.
-  const policy = `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src data:">`
-  const resources = new ResourceCache(opts.operation, prepared)
+  const policy = `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline' data:; img-src data:; font-src data:; form-action 'none'; base-uri 'none'">`
+  const viewport = opts.standalone ? new FrameViewport(opts) : null
+  const resources = new ResourceCache(opts.operation, prepared, viewport)
+  const units = (css: string) => viewport?.units(css) ?? css
+  const settleMedia = (css: string) => viewport?.media(css) ?? css
   try {
     const masked = resources.mask(html)
     const doc = new DOMParser().parseFromString(policy + masked, 'text/html')
@@ -148,14 +315,17 @@ export async function inlineDocument(html: string, opts: InlineOptions): Promise
      in the picture, so a frame holding one is for the server's browser */
     if (doc.querySelector('iframe, object, embed')) throw new Error('the frame embeds a document')
     /* nothing runs inside one either: scripts, and the <base> that has done its job */
-    for (const el of doc.querySelectorAll('script, base, link:not([rel~="stylesheet"])')) el.remove()
+    for (const el of doc.querySelectorAll('script, base, meta[http-equiv="refresh" i], link:not([rel~="stylesheet"])'))
+      el.remove()
+
+    stripExecutable(doc)
 
     // Serial source preparation keeps each admission's remaining limits current.
     const styles = [...doc.querySelectorAll('style')]
     for (const link of doc.querySelectorAll('link[rel~="stylesheet"][href]')) {
       const href = resources.resolve(link.getAttribute('href') ?? '', base)
       const css = await resources.text(href)
-      const inlined = await inlineCssUrls(css, href, resources, new Set([href]), 'external')
+      const inlined = settleMedia(await inlineCssUrls(units(css), href, resources, new Set([href]), 'external'))
       resources.replaceValue(link.outerHTML, `<style>${inlined}</style>`, 'text')
       const style = doc.createElement('style')
       const media = link.getAttribute('media')
@@ -165,13 +335,13 @@ export async function inlineDocument(html: string, opts: InlineOptions): Promise
     }
     for (const style of styles) {
       const old = style.textContent ?? ''
-      const next = await inlineCssUrls(old, base, resources)
+      const next = settleMedia(await inlineCssUrls(units(old), base, resources))
       resources.replaceValue(old, next, 'text')
       style.textContent = next
     }
     for (const el of doc.querySelectorAll('[style]')) {
       const old = el.getAttribute('style') ?? ''
-      const next = await inlineCssUrls(old, base, resources, new Set(), 'prepared', 'declarationList')
+      const next = await inlineCssUrls(units(old), base, resources, new Set(), 'prepared', 'declarationList')
       resources.replaceValue(old, next, 'attribute')
       el.setAttribute('style', next)
     }
@@ -207,17 +377,27 @@ export async function inlineDocument(html: string, opts: InlineOptions): Promise
         element.setAttribute(name, next)
       }
     }
+    if (viewport) {
+      for (const style of doc.querySelectorAll('style[media]')) {
+        if (viewport.matches(style.getAttribute('media') ?? '')) style.removeAttribute('media')
+        else style.remove()
+      }
+    }
+    resources.restoreNavigation(doc)
     resources.assertResolved(doc)
     resources.beforeSerialize(doc.documentElement)
     /* the XML serializer gives an HTML document's root its xhtml namespace */
     const body = new XMLSerializer().serializeToString(doc.documentElement)
-    const { width, height } = opts
+    const { width, height, clip } = opts
+    const box = clip ? ` viewBox="${clip.x} ${clip.y} ${clip.width} ${clip.height}"` : ''
+    const ground = opts.background ? `<rect width="${width}" height="${height}" fill="${opts.background}"/>` : ''
     return (
-      `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">` +
-      `<foreignObject width="${width}" height="${height}">${body}</foreignObject></svg>`
+      `<svg xmlns="http://www.w3.org/2000/svg" width="${clip?.width ?? width}" height="${clip?.height ?? height}"${box}>` +
+      `${ground}<foreignObject width="${width}" height="${height}">${body}</foreignObject></svg>`
     )
   } finally {
     resources.close()
+    viewport?.dispose()
   }
 }
 
@@ -307,6 +487,7 @@ class ResourceCache {
   constructor(
     readonly operation: PrivateExportOperation,
     prepared: PrivateMaterialization,
+    private readonly viewport: FrameViewport | null = null,
   ) {
     this.signal = operation.signal
     for (const row of prepared.replacements) {
@@ -399,6 +580,22 @@ class ResourceCache {
     else this.operation.budget.assertExpansion(extra)
   }
 
+  /** Navigation links do not fetch during preparation; preserve their canonical targets. */
+  restoreNavigation(doc: Document): void {
+    for (const element of doc.querySelectorAll('a, area')) {
+      for (const name of ['href', 'xlink:href']) {
+        this.operation.budget.chargeWork(1)
+        const old = element.getAttribute(name)
+        if (!old) continue
+        const alias = this.aliases.get(old)
+        if (!alias || alias.kind !== 'other' || !/^https?:/.test(alias.url)) continue
+        const target = /^https?:/i.test(alias.raw) ? alias.raw : alias.url
+        this.replaceValue(old, target, 'attribute')
+        element.setAttribute(name, target)
+      }
+    }
+  }
+
   /** An unsupported visual carrier must trigger the authorized fallback,
    * never become a blank raster merely because its URL stayed masked. */
   assertResolved(doc: Document): void {
@@ -481,7 +678,8 @@ class ResourceCache {
       if (chain.size >= PRIVATE_REFERENCE_LIMITS.depth) throw new PrivateMaterializationError('limit')
       const media = url.startsWith('data:') ? inlineMedia(url, 'stylesheet') : undefined
       if (media && media.syntax !== 'stylesheet') throw new PrivateMaterializationError('unsupported')
-      const text = media ? new TextDecoder().decode(media.bytes) : await this.text(url)
+      const rawText = media ? new TextDecoder().decode(media.bytes) : await this.text(url)
+      const text = this.viewport ? this.viewport.units(rawText) : rawText
       const nextOrigin = url.startsWith('data:') ? origin : 'external'
       const inlined = await inlineCssUrls(
         text,
@@ -490,9 +688,10 @@ class ResourceCache {
         new Set(chain).add(url),
         nextOrigin,
       )
-      const bytes = new TextEncoder().encode(inlined).byteLength
+      const css = this.viewport ? this.viewport.media(inlined) : inlined
+      const bytes = new TextEncoder().encode(css).byteLength
       this.operation.budget.assertExpansion(4 * Math.ceil(bytes / 3) + 64)
-      return toDataUrl(new Blob([inlined], { type: 'text/css' }))
+      return toDataUrl(new Blob([css], { type: 'text/css' }))
     }
     if (url.startsWith('data:')) {
       if (origin === 'prepared' || this.knownData.has(url)) return url

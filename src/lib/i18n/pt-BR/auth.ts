@@ -83,6 +83,17 @@ export const auth: Catalog['auth'] = {
   desktopConnectBody: 'O doop conclui a conexão no app, para a conta conectada lá. Você pode fechar esta aba depois.',
   desktopConnectFailed: 'Não foi possível passar a conexão para o app do doop. Volte ao app e tente de novo.',
 
+  serverSettings: 'Configurações do servidor',
+  serverTitle: 'Servidor do Doop',
+  serverLede: 'Este app está conectado a {host}. Informe outro endereço para usar um servidor Doop auto-hospedado.',
+  serverLedeLoading: 'Informe o endereço do servidor Doop que este app deve usar.',
+  serverAddress: 'Endereço do servidor',
+  serverHint: 'O app verifica o servidor, pede sua confirmação e reinicia.',
+  serverConnect: 'Conectar',
+  serverConnecting: 'Verificando…',
+  serverUseDefault: 'Usar {host}',
+  serverFailed: 'Não foi possível trocar o servidor. Tente de novo.',
+
   viewingAsBefore: 'Visualizando como',
   viewingAsAfter: '— somente leitura, expira em 15 minutos.',
   stopViewing: 'Parar de visualizar',

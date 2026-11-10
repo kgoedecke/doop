@@ -2,7 +2,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Frame } from '../shared/types'
 import type { ResourceCopyEntry, ResourceCopyResult } from '../shared/resourceCopies'
-import { copyLayer, copyLayers, copyPicked, hasElementClip, pasteLayer } from '../src/lib/elementClipboard'
+import {
+  copyLayer,
+  copyLayers,
+  copyPicked,
+  hasElementClip,
+  pasteLayer,
+  replaceWithClip,
+} from '../src/lib/elementClipboard'
 import { copyFrames, hasFrameClip } from '../src/lib/frameClipboard'
 import { insertElement } from '../src/lib/layers'
 import { useStore } from '../src/lib/store'
@@ -107,6 +114,52 @@ describe('explicit cross-canvas layer clipboard', () => {
     expect(updateFrame).not.toHaveBeenCalled()
     expect(useStore.getState().canvas!.frames[0]!.html).toBe('<p>new target revision</p>')
   })
+
+  it('replaces layers only after source-version admission and owned HTML/CSS remapping', async () => {
+    const target = prepare()
+    expect(replaceWithClip(target, ['#target'])).toBe(true)
+    expect(updateFrame).not.toHaveBeenCalled()
+    await vi.waitFor(() => expect(updateFrame).toHaveBeenCalledTimes(1))
+    expect(copyResources.mock.calls[0]![1][0]).toMatchObject({ sourceFrameId: 'source', sourceVersion: 7 })
+    const html = useStore.getState().canvas!.frames[0]!.html
+    expect(html).toContain('/a/owned.png')
+    expect(html).not.toContain('/a/source.png')
+    expect(html).not.toContain('>Target<')
+    await undo()
+    expect(useStore.getState().canvas!.frames[0]!.html).toBe(target.html)
+  })
+
+  it('keeps layers and history unchanged when replacement source admission is refused', async () => {
+    const target = prepare()
+    copyResources.mockRejectedValueOnce(new Error('Source file is not available'))
+    expect(replaceWithClip(target, ['#target'])).toBe(true)
+    await vi.waitFor(() => expect(useStore.getState().notice?.text).toBe('Source file is not available'))
+    expect(copyResources).toHaveBeenCalledTimes(1)
+    expect(updateFrame).not.toHaveBeenCalled()
+    expect(useStore.getState().canvas!.frames[0]!.html).toBe(target.html)
+  })
+
+  for (const changed of ['revision', 'navigation', 'history', 'lock'] as const) {
+    it(`refuses replacement after a delayed copy and destination ${changed} change`, async () => {
+      const target = prepare()
+      let release!: (value: ResourceCopyResult) => void
+      copyResources.mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            release = resolve
+          }),
+      )
+      expect(replaceWithClip(target, ['#target'])).toBe(true)
+      if (changed === 'revision') useStore.getState().patchFrameLocal(target.id, { html: '<p>new revision</p>' })
+      if (changed === 'navigation')
+        useStore.getState().setCanvas({ id: 'other', name: 'Other', frames: [], createdAt: 1, updatedAt: 1 })
+      if (changed === 'history') clearHistory()
+      if (changed === 'lock') useStore.getState().patchFrameLocal(target.id, { locked: true })
+      release({ canvasId: target.canvasId, entries: [{ html: '<img src="/a/owned.png">', css: '' }], assets: [] })
+      await vi.waitFor(() => expect(useStore.getState().notice?.text).toContain('destination changed'))
+      expect(updateFrame).not.toHaveBeenCalled()
+    })
+  }
 })
 
 /* a shape drawn on the canvas: a transparent shell holding its one layer */

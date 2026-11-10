@@ -4,6 +4,9 @@ import { useStore } from '../lib/store'
 import { api, errorMessage } from '../lib/api'
 import { beginFrameSave } from '../lib/frameSaves'
 import { copyFramePng, downloadFrameExport, downloadFrameHtml } from '../lib/frameExport'
+import { setExportSettings, useExportSettings } from '../lib/exportSettings'
+import { fitExportScale, formatExportScale } from '../../shared/exportScale'
+import { ExportOptions } from './ExportOptions'
 import { deleteFrameTracked, recordUpdate, trackSave } from '../lib/history'
 import { setFramesLocked } from '../lib/layerEdits'
 import { FrameHistoryModal } from './FrameHistoryModal'
@@ -16,6 +19,7 @@ import { Button } from './ui/button'
 import { Input } from './ui/input'
 import { Textarea } from './ui/textarea'
 import { NumberField, PropertyScrubContext } from './ui/property-field'
+import { normalizeRotation } from '../../shared/frameRotation'
 import { MIN_FRAME_SIZE } from '../lib/frameResize'
 import { t as translate, useT } from '../lib/i18n'
 
@@ -26,12 +30,12 @@ const fillBtn = 'h-7 rounded-[7px] bg-sub px-2 text-[12px] font-normal text-ink 
 /* the position and size fields, tall enough to hit on a phone */
 const boxField = 'max-md:h-10 max-md:min-h-10'
 
-type BoxKey = 'x' | 'y' | 'width' | 'height'
+type BoxKey = 'x' | 'y' | 'width' | 'height' | 'rotation'
 type FrameBox = Pick<Frame, BoxKey>
-const BOX_KEYS: readonly BoxKey[] = ['x', 'y', 'width', 'height']
+const BOX_KEYS: readonly BoxKey[] = ['x', 'y', 'width', 'height', 'rotation']
 
 function boxOf(frame: Frame): FrameBox {
-  return { x: frame.x, y: frame.y, width: frame.width, height: frame.height }
+  return { x: frame.x, y: frame.y, width: frame.width, height: frame.height, rotation: frame.rotation ?? 0 }
 }
 
 export function Inspector({
@@ -54,6 +58,9 @@ export function Inspector({
   const [draft, setDraft] = useState(frame.html)
   const [saveState, setSaveState] = useState<'idle' | 'dirty' | 'saved'>('idle')
   const [copiedUrl, setCopiedUrl] = useState(false)
+  const exportSettings = useExportSettings()
+  /* what the frame actually renders at: a huge frame caps a large pick */
+  const exportScale = fitExportScale(frame, exportSettings.scale)
   const [historyOpen, setHistoryOpen] = useState(false)
   const [htmlCopy, setHtmlCopy] = useState<'idle' | 'copied' | 'failed'>('idle')
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -267,32 +274,37 @@ export function Inspector({
                 className={boxField}
                 onCommit={(height) => editBox({ height })}
               />
+              <NumberField
+                label={t('inspector.rotation')}
+                prefix="∠"
+                unit="°"
+                min={-Infinity}
+                value={frame.rotation ?? 0}
+                className={boxField}
+                onCommit={(rotation) => editBox({ rotation: normalizeRotation(rotation) ?? 0 })}
+              />
             </div>
           </InspectorGroup>
         </PropertyScrubContext.Provider>
         <InspectorGroup title={t('inspector.groupExport')}>
           <div className="grid grid-cols-2 gap-1.5">
+            <div className="col-span-2">
+              <ExportOptions value={exportSettings} onChange={setExportSettings} />
+            </div>
             <Button
               variant="bare"
-              className={fillBtn}
-              title={t('inspector.downloadPng')}
-              onClick={() => void downloadFrameExport(frame, 'png')}
+              className={cn(fillBtn, 'col-span-2 gap-1.5')}
+              title={t('inspector.exportImageTitle')}
+              onClick={() => void downloadFrameExport(frame, exportSettings.format, exportSettings.scale)}
             >
-              PNG
-            </Button>
-            <Button
-              variant="bare"
-              className={fillBtn}
-              title={t('inspector.downloadJpg')}
-              onClick={() => void downloadFrameExport(frame, 'jpg')}
-            >
-              JPG
+              <DownloadIcon className="size-3.5" />
+              {t('inspector.export')}
             </Button>
             <Button
               variant="bare"
               className={cn(fillBtn, 'col-span-2')}
-              title={t('inspector.copyPngTitle')}
-              onClick={() => void copyFramePng(frame)}
+              title={t('inspector.copyPngTitle', { scale: formatExportScale(exportScale) })}
+              onClick={() => void copyFramePng(frame, exportSettings.scale)}
             >
               {t('inspector.copyPng')}
             </Button>
@@ -301,7 +313,7 @@ export function Inspector({
               className={cn(fillBtn, 'col-span-2')}
               title={t('inspector.copyImageUrlTitle')}
               onClick={() => {
-                navigator.clipboard.writeText(`${location.origin}/i/${frame.id}.png?scale=2`).then(() => {
+                navigator.clipboard.writeText(`${location.origin}/i/${frame.id}.png?scale=${exportScale}`).then(() => {
                   setCopiedUrl(true)
                   window.setTimeout(() => setCopiedUrl(false), 1500)
                 }, console.error)

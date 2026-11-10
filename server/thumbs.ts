@@ -21,6 +21,8 @@ let screenshot: Promise<typeof import('./screenshot.ts')> | undefined
 const loadScreenshot = () => (screenshot ??= import('./screenshot.ts'))
 
 export async function create(input: Frame, scope: PrivateRenderScope): Promise<Buffer> {
+  // The preview owner has already loaded the content and keyed its cache from it.
+  // Retain that exact snapshot through thumbnail lookup, rendering and persistence.
   const frame = { ...input }
   await assertRenderRead(scope, frame)
   if (scope.kind !== 'frame' || dead.has(frame.id)) throw new Error('thumbnail is unavailable')

@@ -1,4 +1,5 @@
 import { env } from './env.ts'
+import { MAX_DECISION_CHARS } from '../shared/designDecisions.ts'
 import type Anthropic from '@anthropic-ai/sdk'
 import { store } from './store.ts'
 import { fontsForCanvas } from './fonts.ts'
@@ -45,7 +46,8 @@ import {
   searchInspiration,
 } from './inspiration.ts'
 import type { Actor, AgentTask, Canvas, ElementComment, Frame } from '../shared/types.ts'
-import { canvasPages, framePageId, pageFrames } from '../shared/pages.ts'
+import { canvasPages, framePageId, MAX_PAGE_NAME, pageFrames, samePages } from '../shared/pages.ts'
+import { addPage, pageList, parsePageList, savePages, updateFrameMeta } from './pageTools.ts'
 import { isCanvasComment, isFrameComment } from '../shared/comments.ts'
 import { websiteAccessErrorMessage } from './websiteAccess.ts'
 import { executeGuardedBatch } from './guardedBatch.ts'
@@ -116,7 +118,15 @@ async function sweep(canvasId: string) {
   /* Agents whose whole queue is stalled. Skipped rather than breaking the
      sweep, so one unpayable queue cannot hide another agent's runnable work. */
   const idle = new Set<string>()
+  /* the canvas stays loaded for every run of the sweep, however long a
+     model turn takes (store.evictIdle) */
+  let release = () => {}
   try {
+    /* only a canvas with work is loaded: wake() sweeps every canvas a person
+       can edit, and loading them all would undo the per-canvas load */
+    if (!actions.pendingWorkAgents(canvasId).length) return
+    await store.load(canvasId)
+    release = store.hold(canvasId)
     for (let i = 0; i < MAX_SWEEP_RUNS; i++) {
       const next = actions.pendingWorkAgents(canvasId).find((name) => !idle.has(name))
       if (!next) break
@@ -130,6 +140,7 @@ async function sweep(canvasId: string) {
       idle.clear()
     }
   } finally {
+    release()
     running.delete(canvasId)
     if (queued.delete(canvasId)) onFeedback(canvasId)
   }
@@ -153,7 +164,7 @@ Rules:
 - Call set_status when you start ("Fixing: …") and when your focus shifts. One line, under 80 chars, present tense. People watch this live.
 - Never leave a frame worse than you found it.
 - Reference sites: when a request names a site or URL — a redesign of it, or "like acme.com" — call import_webpage with as_reference=true FIRST so an editable HTML snapshot lands on the canvas, then call screenshot_frame on that imported source and design from what is actually there: its real copy, nav labels, product facts, and imagery direction. Leave the imported source unchanged and deliver your work in a separate frame. If importing or editing the snapshot itself is the requested deliverable, use as_reference=false. view_website is read-only; use it only when you need to inspect a live page without adding it to the canvas. A redesign that invents content is wrong even when it looks good. If automated access is blocked and there is no existing source frame or attached screenshot, stop and ask the user to attach screenshots; never approximate the site from guesses.
-- Real imagery: when a design calls for photography, use search_images (you see thumbnails — pick the one whose mood and palette fit) and embed its image_url with object-fit: cover and a real alt text. For a hero, section band or bento tile that wants atmosphere or a focal glow, list_backgrounds shows a page of the curated library as thumbnails (filter by tone; judge by eye which one fits the frame's style and palette, paste its css line, put copy in the text_zone); a quiet typographic design may be better on a flat surface, but never settle for a default two-stop gradient, and draw the background yourself when nothing in the library genuinely fits. For UI icons use search_icons and hotlink the SVG URL. For company logos (customer walls, integration rows, press bars, payment methods, testimonial cards) call search_logos once per brand BEFORE writing that section, and use real, recognizable brands — never a gray tile, "LOGO" text, initials or an invented wordmark. When the design needs a visual that stock cannot supply — a full-bleed hero background in the frame's exact palette (a monochrome mountain range behind the product window, say), brand-specific illustration, a product render, a mascot — or the card asks for a generated image, call generate_image with ONE considered prompt (subject, style, composition, palette hexes, lighting, exclusions; for a hero background: aspect landscape, low contrast, and name the empty region where the copy or product window will sit) and embed the returned url with object-fit: cover and a legibility scrim over the copy; it spends the requester's quota or money, so refine a near miss by prompt rather than regenerating blind. Never fake a photo with a gray box or a made-up URL; if search is unavailable, draw the visual as inline SVG/CSS.
+- Real imagery: when a design calls for photography, use search_images (you see thumbnails — pick the one whose mood and palette fit) and embed its image_url with object-fit: cover and a real alt text. For a hero, section band or bento tile that wants atmosphere or a focal glow, list_backgrounds shows a page of the curated library as thumbnails (filter by tone; judge by eye which one fits the frame's style and palette, paste its css line, put copy in the text_zone); a quiet typographic design may be better on a flat surface, but never settle for a default two-stop gradient, and draw the background yourself when nothing in the library genuinely fits. For UI icons use search_icons and hotlink the SVG URL (or draw an inline SVG); never use emoji or Unicode symbols (✕ □ ▸ ⟶ ↗) as icons, since they depend on the viewer's fonts and render as empty boxes or colour emoji. For company logos (customer walls, integration rows, press bars, payment methods, testimonial cards) call search_logos once per brand BEFORE writing that section, and use real, recognizable brands — never a gray tile, "LOGO" text, initials or an invented wordmark. When the design needs a visual that stock cannot supply — a full-bleed hero background in the frame's exact palette (a monochrome mountain range behind the product window, say), brand-specific illustration, a product render, a mascot — or the card asks for a generated image, call generate_image with ONE considered prompt (subject, style, composition, palette hexes, lighting, exclusions; for a hero background: aspect landscape, low contrast, and name the empty region where the copy or product window will sit) and embed the returned url with object-fit: cover and a legibility scrim over the copy; it spends the requester's quota or money, so refine a near miss by prompt rather than regenerating blind. Never fake a photo with a gray box or a made-up URL; if search is unavailable, draw the visual as inline SVG/CSS.
 - If a request is unclear or impossible (missing frame, contradictory ask), do the closest reasonable thing and say what you did in your final message.
 - A comment is a conversation. Each comment in the request carries its id: when the ask needs a decision only the person can make, ask with reply_to_comment (awaiting_answer: true) in that thread instead of guessing, then finish without changing the frame — the thread is handed back to them and stays open for their answer; resolve_comment closes a thread you have fully dealt with. When you finish, your final message is posted into every thread you worked on as your reply, so write it to the person who asked — what you changed and where, in a sentence or two, plain prose and no @mentions.
 - Your final message should be one or two sentences: what you changed and where.
@@ -214,6 +225,10 @@ interface RunState {
   /** token writes that took (a token created, changed or deleted, the theme
    *  list set): work a card can ask for on its own, delivered without a frame */
   tokenWrites: number
+  /** page and frame-arrangement writes that took (a page added, renamed,
+   *  reordered or deleted, a frame renamed or moved): work a card can ask
+   *  for on its own, delivered without a design change */
+  arrangeWrites: number
 }
 
 export interface FramePlacement {
@@ -282,9 +297,12 @@ function deliverableFrameIds(runState: RunState): string[] {
 }
 
 /** Whether the run has delivered anything a card can ask for: a frame of its
- *  own changed or created, or a token write that took. Exported for tests. */
-export function deliveredWork(runState: Pick<RunState, 'mutatedFrames' | 'sourceFrames' | 'tokenWrites'>): boolean {
-  return deliverableFrameIds(runState as RunState).length > 0 || runState.tokenWrites > 0
+ *  own changed or created, or a token or arrangement write that took.
+ *  Exported for tests. */
+export function deliveredWork(
+  runState: Pick<RunState, 'mutatedFrames' | 'sourceFrames' | 'tokenWrites' | 'arrangeWrites'>,
+): boolean {
+  return deliverableFrameIds(runState as RunState).length > 0 || runState.tokenWrites > 0 || runState.arrangeWrites > 0
 }
 
 /** How many of a token call's results took. Exported for tests. */
@@ -396,7 +414,7 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
   const actor = actions.resolveActor({ name: role.name, kind: 'agent' })
   if (!model.userId && RESIDENT_TASK_LIMIT <= 0) {
     const reason =
-      'The Doop Agent needs a connected account — connect your ChatGPT subscription or an OpenAI, OpenRouter, Gemini or Claude API key in Settings, then retry.'
+      'The Doop Agent needs a connected account — connect your ChatGPT subscription or an OpenAI, OpenRouter, Gemini, DeepSeek, Kimi or Claude API key in Settings, then retry.'
     for (const f of actions.takeFeedbackFor(canvasId, role.name, payer, runnerFilter))
       actions.failTaskFeedback(f.id, reason)
     for (const c of actions.takeAgentCommentsFor(canvasId, role.name, payer, runnerFilter))
@@ -472,10 +490,11 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
        content, not user work — hidden so agents never mistake them for
        the canvas's established style */
     const visibleFrames = (canvas?.frames ?? []).filter((f) => !f.demo)
+    const pages = canvas ? pageList(canvas) : []
     const frameList = visibleFrames
       .map(
         (f, index) =>
-          `- Frame ${index + 1}: id=${f.id}, name="${f.name}", ${Math.round(f.width)}x${Math.round(f.height)} (last edit: ${f.updatedBy}, ${f.html.length} bytes${f.html.length > LARGE_HTML_CHARS ? '; large document — avoid a full read for visual-reference work' : ''}); approval=${JSON.stringify(f.approval ?? { status: 'draft' })}`,
+          `- Frame ${index + 1}: id=${f.id}, name="${f.name}", page=${canvas ? framePageId(canvas, f) : '?'}, at (${Math.round(f.x)}, ${Math.round(f.y)}), ${Math.round(f.width)}x${Math.round(f.height)} (last edit: ${f.updatedBy}, ${f.html.length} bytes${f.html.length > LARGE_HTML_CHARS ? '; large document — avoid a full read for visual-reference work' : ''}); approval=${JSON.stringify(f.approval ?? { status: 'draft' })}`,
       )
       .join('\n')
 
@@ -586,6 +605,7 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
         : ''
     const kickoff =
       sections.join('\n\n') +
+      `\n\nPages, in order (pass this exact list as expectedPages to set_canvas_pages):\n${JSON.stringify(pages)}` +
       `\n\nFrames currently on the canvas:\n${frameList}` +
       referenceList +
       `\n\nExecution strategy selected by the harness:\n${strategyFor(workText, visibleFrames)}` +
@@ -619,6 +639,7 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
       repliedThreads: new Set(),
       awaitingThreads: new Set(),
       tokenWrites: 0,
+      arrangeWrites: 0,
     }
     let refused = false
     let crashed = false
@@ -890,7 +911,7 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
     if (noMutation) actions.setAgentStatus(canvasId, actor, 'Nothing changed — waiting for a retry')
     if (unverifiedMutation) actions.setAgentStatus(canvasId, actor, 'Change not verified — waiting for a retry')
     console.log(
-      `[resident] run end canvas=${canvasId} agent=${role.name} turns=${turnsUsed} finished=${finished} refused=${refused} crashed=${crashed} mutations=${runState.mutatedFrames.size} sources=${runState.sourceFrames.size} deliverables=${deliverableFrames.length} tokenWrites=${runState.tokenWrites} verified=${runState.verifiedFrames.size}`,
+      `[resident] run end canvas=${canvasId} agent=${role.name} turns=${turnsUsed} finished=${finished} refused=${refused} crashed=${crashed} mutations=${runState.mutatedFrames.size} sources=${runState.sourceFrames.size} deliverables=${deliverableFrames.length} tokenWrites=${runState.tokenWrites} arrangeWrites=${runState.arrangeWrites} verified=${runState.verifiedFrames.size}`,
     )
     let summary = ''
     if (finished) {
@@ -1288,8 +1309,7 @@ const TOOLS: Anthropic.Tool[] = [
   },
   {
     name: 'save_decision',
-    description:
-      'Persist a design decision to the canvas Memory so humans and later agents see what was committed to — this is how you post your design brief (mood, the one exemplar followed, palette roles, type). Keep it under 500 chars. Design taste only, never one-off content edits.',
+    description: `Persist a design decision to the canvas Memory so humans and later agents see what was committed to — this is how you post your design brief (mood, the one exemplar followed, palette roles, type). Save one decision and its rationale per call, at most ${MAX_DECISION_CHARS} characters. Split longer briefs or feedback into separate calls by topic (exemplar, palette, typography, layout), preserving the reason for each choice. Design taste only, never one-off content edits.`,
     input_schema: {
       type: 'object',
       properties: {
@@ -1472,6 +1492,56 @@ const TOOLS: Anthropic.Tool[] = [
         },
       },
       required: ['themes'],
+    },
+  },
+  {
+    name: 'update_frame',
+    description:
+      "Change a frame's metadata in one call, without touching its design: rename it (name), move it on its page (x, y), resize it (width, height), lock or unlock it, or move it to another page (pageId; it keeps its x/y unless you pass new ones and lands in front of that page's frames). Pass only what changes. To reorganize a canvas, move frames with this and reorder pages with set_canvas_pages — never recreate a frame to move it.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        frame_id: { type: 'string' },
+        pageId: { type: 'string', description: 'The page to move the frame to, from the page list' },
+        name: { type: 'string' },
+        x: { type: 'number', description: 'Canvas position in px' },
+        y: { type: 'number', description: 'Canvas position in px' },
+        width: { type: 'number', description: 'px; the design is not rescaled' },
+        height: { type: 'number', description: 'px; the design is not rescaled' },
+        locked: { type: 'boolean', description: 'true keeps humans from selecting, moving or deleting it' },
+      },
+      required: ['frame_id'],
+    },
+  },
+  {
+    name: 'create_canvas_page',
+    description:
+      'Add a new, empty page at the end of this canvas and get its id back. Use a page when a body of work deserves its own board (a second product surface, web vs. mobile, a round of explorations) and a frame when it is one screen. Move frames onto it with update_frame, or reorder it with set_canvas_pages.',
+    input_schema: {
+      type: 'object',
+      properties: { name: { type: 'string', description: 'The page name shown in the Pages panel' } },
+      required: ['name'],
+    },
+  },
+  {
+    name: 'set_canvas_pages',
+    description:
+      'Rename, reorder or delete pages by sending the complete ordered page list. expectedPages is the list as you last saw it (the kickoff, or the last page tool result); if a collaborator changed it since, the call is refused with the current list. A page that still holds frames cannot be deleted: move its frames with update_frame first. To add a page, use create_canvas_page.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        expectedPages: {
+          type: 'array',
+          description: 'The ordered pages as you last saw them',
+          items: { type: 'object', properties: { id: { type: 'string' }, name: { type: 'string' } } },
+        },
+        pages: {
+          type: 'array',
+          description: 'The new ordered list; keep each page id, change names and order, leave out a page to delete it',
+          items: { type: 'object', properties: { id: { type: 'string' }, name: { type: 'string' } } },
+        },
+      },
+      required: ['expectedPages', 'pages'],
     },
   },
   {
@@ -2116,6 +2186,71 @@ export async function execTool(
         } catch (e) {
           return fail(e instanceof Error ? e.message : 'invalid themes')
         }
+      }
+      case 'update_frame': {
+        const raw = block.input as Record<string, unknown>
+        const canvas = store.getCanvas(canvasId)
+        const f = store.getFrame(input.frame_id)
+        if (!canvas || !f || f.canvasId !== canvasId) return fail('frame not found on this canvas')
+        /* the store updates the frame object in place, so what it was is read first */
+        const arrangement = (frame: typeof f) =>
+          [frame.name, framePageId(canvas, frame), frame.x, frame.y, frame.width, frame.height, !!frame.locked].join(
+            '\u0000',
+          )
+        const before = { width: f.width, height: f.height, arrangement: arrangement(f) }
+        const text = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim() : undefined)
+        const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : undefined)
+        const updated = updateFrameMeta(
+          canvas,
+          f.id,
+          {
+            name: text(raw.name),
+            pageId: text(raw.pageId),
+            x: num(raw.x),
+            y: num(raw.y),
+            width: num(raw.width),
+            height: num(raw.height),
+            locked: typeof raw.locked === 'boolean' ? raw.locked : undefined,
+          },
+          actor,
+        )
+        if (!updated.ok) return fail(updated.error)
+        const frame = updated.value
+        /* a new size changes what renders, so it is a design change to verify */
+        if (frame.width !== before.width || frame.height !== before.height) {
+          runState.mutatedFrames.add(frame.id)
+          runState.verifiedFrames.delete(frame.id)
+        }
+        /* a save that changed nothing has not delivered anything */
+        if (arrangement(frame) !== before.arrangement) runState.arrangeWrites += 1
+        return ok(
+          `frame ${frame.id} is now "${frame.name}" on page ${framePageId(canvas, frame)} at (${Math.round(frame.x)}, ${Math.round(frame.y)}), ${Math.round(frame.width)}x${Math.round(frame.height)}${frame.locked ? ', locked' : ''}`,
+        )
+      }
+      case 'create_canvas_page': {
+        const name = typeof input.name === 'string' ? input.name.trim() : ''
+        if (!name || name.length > MAX_PAGE_NAME) return fail(`name must be 1-${MAX_PAGE_NAME} characters`)
+        const created = addPage(canvasId, name, actor)
+        if (!created.ok) return fail(created.error)
+        runState.arrangeWrites += 1
+        return ok(
+          JSON.stringify({
+            page: created.value.page,
+            pages: created.value.pages.map(({ id, name }) => ({ id, name })),
+          }),
+        )
+      }
+      case 'set_canvas_pages': {
+        const canvas = store.getCanvas(canvasId)
+        if (!canvas) return fail('canvas not found')
+        const raw = block.input as { expectedPages?: unknown; pages?: unknown }
+        const pages = parsePageList(raw.pages)
+        if (typeof pages === 'string') return fail(pages)
+        const previous = pageList(canvas)
+        const saved = savePages(canvas, raw.expectedPages, pages, actor)
+        if (!saved.ok) return fail(saved.error)
+        if (!samePages(previous, saved.value)) runState.arrangeWrites += 1
+        return ok(JSON.stringify({ pages: saved.value.map(({ id, name }) => ({ id, name })) }))
       }
       case 'get_prototype': {
         const canvas = store.getCanvas(canvasId)

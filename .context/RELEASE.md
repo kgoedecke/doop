@@ -53,7 +53,13 @@ in `.github/actions/setup-desktop`:
   emits signed updater packages, and the `release` job writes `latest.json`, attaches it and copies
   it onto the fixed `desktop-updates` prerelease, which `doop.design/desktop/latest.json`
   redirects to (served by the hosted deployment). A tag fails without the key. Installed official
-  shells check at launch and daily, download in the background and offer a restart. The key
+  shells check at launch and daily, download in the background and offer a restart: in the
+  page's "Update available" card (`src/components/UpdateCard.tsx`, `src/lib/desktopUpdate.ts`;
+  bottom right above the zoom pill, shaped like the canvas's getting-started card),
+  which claims the offer through `update_card_ready` once it listens for `update-ready` and answers
+  with `update_restart`, or in a native dialog while no page has claimed it (each page load resets
+  the claim, so an older web build still gets the dialog). Its ✕ (Not now) keeps the download for the
+  next check and, on macOS, installs it on quit. The key
   pair lives in the signing backup; its public half is `plugins.updater.pubkey`.
 - `workflow_dispatch` or a PR touching the workflow file itself -> same builds, uploaded as
   workflow artifacts instead (keeps the pipeline validated without cutting a release).
@@ -72,15 +78,47 @@ in `.github/actions/setup-desktop`:
   provider in the system browser and returns over a `doop://integration/<id>` link; the app
   finishes it under its own session (`shared/desktopConnect.ts`). This is web-only: shells from
   0.2.1 already deliver any `doop://` link, and older shells open Integrations in the browser.
-- The macOS View menu (`desktop/src-tauri/src/view_menu.rs`) holds the canvas toggles (Rulers,
-  Show/Hide UI, Layers and Agents panels) and zoom. Items reach the page as `view-command`
-  events; the page mirrors its state back through `view_menu_state` (`src/lib/viewMenu.ts`,
-  gated on `window.__DOOP_VIEW_MENU__`), so checkmarks follow it and canvas items are disabled
-  off a canvas. Only ⌘ shortcuts are bound in the menu; ⇧R / ⇧1 / ⇧2 stay with the page.
+- The macOS menu bar is the page's (`desktop/src-tauri/src/app_menu.rs`, `src/lib/appMenu.ts`, gated
+  on `window.__DOOP_APP_MENU__`, macOS only): the page sends File, Edit, View, Object, Text, Arrange
+  and Help from the action registry (`app_menu_set`, labels in its language, each chord as the key
+  equivalent) and then only changed enabled/checked state (`app_menu_state`); the shell keeps the
+  app menu, Close Tab, the system Undo/Cut/Copy/Paste/Select All that text fields need, Full Screen
+  and Window. A pick returns as `app-menu` `{ id, key }`; the webview sees a key before the menu, and
+  a key the menu does get keeps the canvas keyboard's rules (nothing while typing or presenting).
+  Until a page sets it the bar is the old fixed one, whose View menu (`view_menu.rs`,
+  `src/lib/viewMenu.ts`, `__DOOP_VIEW_MENU__`) an older page still drives. Needs a desktop release.
+- Server choice (`desktop/src-tauri/src/server.rs`, `src/components/ServerSettings.tsx`): the
+  sign-in screen's cog (shells advertising `__DOOP_SERVER_CHOOSE__`) points an official build at a
+  self-hosted server. `server_choose` normalizes the address to an origin (https, or http on loopback only),
+  checks `/api/locale-config` answers and takes the origin any redirect lands on, confirms natively, writes `server.json` in the app data dir and
+  restarts; at launch the chosen origin gets `capabilities/default.json` as a runtime capability
+  and the navigation allowlist. A chosen server that does not answer at launch gets a native Try Again / Use doop.design dialog
+  (`check_on_launch`, every platform); macOS also has "Use doop.design…" in the app menu. Official builds
+  keep updating from the doop.design feed whatever server is chosen. Tests: the Rust unit tests in
+  `server.rs`, `serverSettings.test.tsx`.
 - The shell tells the page its platform via `window.__DOOP_DESKTOP_PLATFORM__` (read in
   `src/lib/shell.ts`); only macOS gets the overlay title bar / traffic-light inset.
 - Desktop app version is tracked separately from the root `package.json` and bumped by
   release-please (see above); after the release PR merges, tag as `desktop-vX.Y.Z`.
+- The macOS app is the Chromium (CEF) build in `desktop/src-tauri-chromium`; Windows and Linux
+  stay on the WebKit build. It ships as `doop` / `design.doop.desktop` with the executable
+  `doop-desktop`, exactly as the WebKit app did, so the updater swaps the bundle in place and
+  relaunches it by its old path. The Tauri 3 CLI bundles CEF for one architecture at a time
+  (its universal target ships one architecture's framework), so `dmg-macos` runs
+  `desktop/scripts/macos-universal.sh` as Electron apps do: an unsigned app per architecture
+  (`bun run build:chromium --target … --no-sign`, ninja from brew, CEF cached under
+  `~/Library/Caches/tauri-cef`), merged by `@electron/universal` (`scripts/universal-app.mjs`),
+  signed inside out (framework libraries, framework, five helpers, app) with the CEF entitlements
+  (allow-jit, allow-unsigned-executable-memory, disable-library-validation) under the hardened
+  runtime, notarized, packed with `create-dmg`, and tarred and signed with `tauri signer` for the
+  updater. The outputs keep the WebKit build's names (`doop_<version>_universal.dmg`,
+  `doop.app.tar.gz`), so the release job and the download link are unchanged; the app is about
+  600 MB, Chromium for both architectures. The first Chromium launch brings the
+  WebKit app's cookies and localStorage over (`src/webkit_migration.rs`), so the switch keeps
+  people signed in. Each Chromium security release needs a CEF bump (`tauri-runtime-cef`) and a
+  desktop release. Rolling back means publishing a WebKit macOS build with a higher version to
+  the feed; it starts from its old WebKit store, as it was before the switch.
+  release-please bumps the Chromium `tauri.conf.json` and `Cargo.toml` with the WebKit shell's.
 
 ## Claude Desktop extension
 

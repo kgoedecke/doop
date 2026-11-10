@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { MIN_FRAME_SIZE, keepRatioAfterSnap, movingEdges, resizeFrameRect } from '../src/lib/frameResize'
+import {
+  MIN_FRAME_SIZE,
+  keepAnchorTurned,
+  keepRatioAfterSnap,
+  movingEdges,
+  resizeFrameRect,
+} from '../src/lib/frameResize'
 import { snapFrame } from '../src/lib/snap'
 import type { CanvasGuide } from '../shared/types'
 
@@ -89,5 +95,22 @@ describe('keepRatioAfterSnap', () => {
   it('leaves an unsnapped rect alone', () => {
     const raw = resizeFrameRect('se', orig, { dx: 10, dy: 0 }, { keepRatio: true })
     expect(keepRatioAfterSnap('se', orig, raw, { ...raw, guides: [] })).toEqual({ ...raw, guides: [] })
+  })
+})
+
+describe('keepAnchorTurned', () => {
+  it('leaves an unturned resize alone', () => {
+    const next = resizeFrameRect('e', orig, { dx: 40, dy: 0 })
+    expect(keepAnchorTurned('e', orig, next, 0)).toBe(next)
+  })
+  it('keeps the far edge of a quarter-turned frame where it was', () => {
+    /* 200×100 at (100,50) turned 90°: its west edge's middle sits at (200, 0) on the canvas */
+    const next = resizeFrameRect('e', orig, { dx: 40, dy: 0 })
+    expect(keepAnchorTurned('e', orig, next, 90)).toEqual({ x: 80, y: 70, width: 240, height: 100 })
+  })
+  it('keeps the far corner of a half-turned frame where it was', () => {
+    const next = resizeFrameRect('se', orig, { dx: 20, dy: 10 })
+    /* turned 180°, the north-west corner sits at the box's south-east on the canvas */
+    expect(keepAnchorTurned('se', orig, next, 180)).toEqual({ x: 80, y: 40, width: 220, height: 110 })
   })
 })

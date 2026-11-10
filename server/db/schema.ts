@@ -193,6 +193,8 @@ export const frames = pgTable(
     locked: boolean('locked'),
     /** stacking order on the page (shared/frameStack.ts); null = by created_at */
     z: doublePrecision('z'),
+    /** degrees clockwise about the centre (shared/frameRotation.ts); null = 0 */
+    rotation: doublePrecision('rotation'),
     approval: jsonb('approval').$type<FrameApproval>(),
   },
   (t) => [index('frames_canvas_idx').on(t.canvasId), uniqueIndex('frames_parent_idx').on(t.id, t.canvasId)],
@@ -665,7 +667,7 @@ export const modelAccounts = pgTable(
   'model_accounts',
   {
     userId: text('user_id').notNull(),
-    /** 'chatgpt' (subscription, OAuth) | 'openai-key' | 'anthropic-key' | 'openrouter-key' | 'gemini-key' */
+    /** 'chatgpt' (subscription, OAuth) | 'openai-key' | 'anthropic-key' | 'openrouter-key' | 'gemini-key' | 'deepseek-key' | 'kimi-key' | 'kimi-code' */
     kind: text('kind').notNull(),
     /** off keeps the credential but takes the account out of the composer and the default */
     enabled: boolean('enabled').notNull().default(true),

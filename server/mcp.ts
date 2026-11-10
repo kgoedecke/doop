@@ -1,10 +1,12 @@
 import { env } from './env.ts'
 import { companyPolicy } from './companyPolicy.ts'
+import { MAX_DECISION_CHARS } from '../shared/designDecisions.ts'
+import packageJson from '../package.json' with { type: 'json' }
 import { createHash } from 'node:crypto'
 import { eq } from 'drizzle-orm'
 import { db } from './db/index.ts'
 import * as authSchema from './db/auth-schema.ts'
-import { canvasPages, framePageId, MAX_PAGE_NAME, samePages } from '../shared/pages.ts'
+import { canvasPages, framePageId, MAX_PAGE_NAME } from '../shared/pages.ts'
 import { normalizePageBackground } from '../shared/pageBackground.ts'
 import { prototypeReport, prototypeUrl, setPrototypeStart } from './prototypeTools.ts'
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
@@ -13,7 +15,8 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import type { Request, Response } from 'express'
 import { fromNodeHeaders } from 'better-auth/node'
 import { z } from 'zod/v4'
-import { CanvasCreationUncertainError, PageLimitError, store } from './store.ts'
+import { CanvasCreationUncertainError, store } from './store.ts'
+import { addPage, savePages, updateFrameMeta } from './pageTools.ts'
 import { fontsForCanvas } from './fonts.ts'
 import { describeLibrary, libraryBrief } from '../shared/fonts.ts'
 import {
@@ -55,6 +58,13 @@ import {
   PrivateResourceError,
   type ResourceReader,
 } from './privateResources.ts'
+import {
+  DEFAULT_EXPORT_SCALE,
+  MAX_EXPORT_SCALE,
+  MIN_EXPORT_SCALE,
+  fitExportScale,
+  parseExportScale,
+} from '../shared/exportScale.ts'
 import { DOOP_GUIDE, GUIDE_TOPICS } from './guide.ts'
 import {
   describeInspiration,
@@ -140,6 +150,7 @@ const REVIEW_NUDGE =
   'You have not seen this design yet. Call get_frame_screenshot on it now, judge it against the review checkpoints (fit, spacing, hierarchy, contrast, alignment, realism), and fix any issues before moving on.'
 
 import type { Actor, Frame } from '../shared/types.ts'
+import { loadToolTargets, ToolTargetRefusal } from './toolLoads.ts'
 
 /** Reaches agents whose session predates set_status (or who skipped the guide). */
 type ToolContent = { content: { type: 'text' | 'image'; [k: string]: unknown }[] }
@@ -285,6 +296,7 @@ function frameSummary(f: {
   demo?: boolean
   hidden?: boolean
   locked?: boolean
+  rotation?: number
   approval?: FrameApproval | null
 }) {
   return {
@@ -300,6 +312,7 @@ function frameSummary(f: {
     y: f.y,
     width: f.width,
     height: f.height,
+    ...(f.rotation ? { rotation: f.rotation } : {}),
     updatedAt: new Date(f.updatedAt).toISOString(),
     updatedBy: f.updatedBy,
     htmlBytes: f.html.length,
@@ -412,7 +425,17 @@ export function buildMcpServer(
   const arrive = (canvasId: string, agent_name?: string) => {
     if (agent_name) actions.heartbeatAgent(canvasId, actorFrom(agent_name))
   }
-  const server = new WorkflowMcpServer({ name: 'doop-canvas', version: '0.1.0' }, { instructions: INSTRUCTIONS })
+  const server = new WorkflowMcpServer(
+    { name: 'doop-canvas', version: packageJson.version },
+    { instructions: INSTRUCTIONS },
+  )
+  loadToolTargets(server, async (canvasId, args) => {
+    if (privateReader) await requireReadActor(privateReader)
+    if (!canvasFor(canvasId, 'view')) {
+      const frameId = (args as { frame_id?: unknown } | null)?.frame_id
+      throw new ToolTargetRefusal(typeof frameId === 'string' ? noFrame(frameId) : noCanvas(canvasId))
+    }
+  })
   registerFramePreview(server)
 
   server.registerTool(
@@ -998,15 +1021,19 @@ export function buildMcpServer(
     'save_decision',
     {
       title: 'Save a design decision',
-      description:
-        'Record a design decision your human made while talking to YOU — style feedback you carried out ("rounder corners", "less purple, more white and blue", "stop using italic serif"). Doop\'s UI feedback is captured automatically, but you are the only one who hears your own conversation, so report it with this tool AFTER you have addressed it. It lands in the canvas\'s Memory; recurring preferences become suggested style rules. Record design taste only — not one-off content edits like typo fixes or copy changes.',
+      description: `Record a design decision your human made while talking to YOU — style feedback you carried out ("rounder corners", "less purple, more white and blue", "stop using italic serif"). Doop's UI feedback is captured automatically, but you are the only one who hears your own conversation, so report it with this tool AFTER you have addressed it. It lands in the canvas's Memory; recurring preferences become suggested style rules. Save one decision and its rationale per call, at most ${MAX_DECISION_CHARS} characters. Split longer feedback or briefs into separate calls by topic (palette, typography, layout), preserving the reason for each choice. Record design taste only — not one-off content edits like typo fixes or copy changes.`,
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
       inputSchema: {
         canvas_id: z.string(),
         decision: z
           .string()
-          .max(actions.MAX_DECISION_CHARS)
-          .describe('The feedback in the human\'s own words, e.g. "make it less claude-esque, more white and blue"'),
+          .max(
+            MAX_DECISION_CHARS,
+            `Save one decision and its rationale per call, at most ${MAX_DECISION_CHARS} characters; split longer feedback into separate calls by topic.`,
+          )
+          .describe(
+            `One decision and its rationale in the human's own words, at most ${MAX_DECISION_CHARS} characters. Split longer feedback into separate calls by topic.`,
+          ),
         agent_name: agentName,
       },
     },
@@ -1303,14 +1330,10 @@ export function buildMcpServer(
     async ({ canvas_id, pages, expectedPages, agent_name }) => {
       const canvas = canvasFor(canvas_id, 'edit')
       if (!canvas) return noCanvas(canvas_id)
-      if (!samePages(expectedPages, canvasPages(canvas)))
-        return err('Pages changed. Read get_canvas again before saving.')
-      if (new Set(pages.map((p) => p.id)).size !== pages.length) return err('Page IDs must be unique')
-      const firstId = canvas.pages?.[0]?.id ?? `${canvas.id}:page1`
-      if (canvas.frames.some((f) => !pages.some((p) => p.id === (f.pageId ?? firstId))))
-        return err('Move frames before deleting their page')
       const actor = actorFrom(agent_name)
-      return withFeedback(text({ ok: true, pages: actions.setCanvasPages(canvas_id, pages, actor) }), canvas_id, actor)
+      const saved = savePages(canvas, expectedPages, pages, actor)
+      if (!saved.ok) return err(saved.error)
+      return withFeedback(text({ ok: true, pages: saved.value }), canvas_id, actor)
     },
   )
 
@@ -1330,18 +1353,13 @@ export function buildMcpServer(
     async ({ canvas_id, name, agent_name }) => {
       const canvas = canvasFor(canvas_id, 'edit')
       if (!canvas) return noCanvas(canvas_id)
-      try {
-        const created = actions.createCanvasPage(canvas_id, name, actorFrom(agent_name))
-        if (!created) return noCanvas(canvas_id)
-        return withFeedback(
-          text({ ok: true, page: created.page, pages: created.pages }),
-          canvas_id,
-          actorFrom(agent_name),
-        )
-      } catch (e) {
-        if (e instanceof PageLimitError) return err(e.message)
-        throw e
-      }
+      const created = addPage(canvas_id, name, actorFrom(agent_name))
+      if (!created.ok) return err(created.error)
+      return withFeedback(
+        text({ ok: true, page: created.value.page, pages: created.value.pages }),
+        canvas_id,
+        actorFrom(agent_name),
+      )
     },
   )
 
@@ -1521,12 +1539,20 @@ export function buildMcpServer(
     {
       title: 'Export frame as image or PDF',
       description:
-        "Export the frame's CURRENT design. PNG/JPG return a bounded real image (a JPEG thumbnail when the full file is too large) and authenticated full-download metadata. PDF embeds the full file only when it fits the inline limit; otherwise it returns an authenticated download location. Downloads require a current normal browser session; an MCP bearer alone cannot fetch them. URLs render current stored designs when fetched. PDF has one selectable-text page per frame; frame_ids adds same-canvas pages in order after frame_id. A preview or URL does not establish full visual verification.",
+        "Export the frame's CURRENT design. PNG/JPG at the requested bounded scale return a bounded real image (a JPEG thumbnail when the full file is too large) and authenticated full-download metadata. PDF embeds the full file only when it fits the inline limit; otherwise it returns an authenticated download location. Downloads require a current normal browser session; an MCP bearer alone cannot fetch them. URLs render current stored designs when fetched. PDF has one selectable-text page per frame; frame_ids adds same-canvas pages in order after frame_id. A preview or URL does not establish full visual verification.",
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
       inputSchema: {
         frame_id: z.string(),
         format: z.enum(['png', 'jpg', 'pdf']).optional().describe('default png'),
         quality: z.number().min(1).max(100).optional().describe('jpg only, default 90'),
+        scale: z
+          .number()
+          .min(MIN_EXPORT_SCALE)
+          .max(MAX_EXPORT_SCALE)
+          .optional()
+          .describe(
+            `png/jpg only: pixel density, default ${DEFAULT_EXPORT_SCALE} (a 1080x1350 frame at 2 is 2160x2700). Above 2 a very large frame comes down to fit the render limit; the returned width and height are what you get.`,
+          ),
         frame_ids: z
           .array(z.string())
           .max(MAX_PDF_FRAMES)
@@ -1536,20 +1562,21 @@ export function buildMcpServer(
           ),
       },
     },
-    async ({ frame_id, format, quality, frame_ids }) => {
+    async ({ frame_id, format, quality, scale, frame_ids }) => {
       const live = frameFor(frame_id, 'view')
       if (!live) return noFrame(frame_id)
       const f = { ...live }
       if (format === 'pdf') return exportPdf(f, frame_ids ?? [])
       const ext = format === 'jpg' ? 'jpg' : 'png'
       const q = ext === 'jpg' ? `&quality=${quality ?? 90}` : ''
+      const density = fitExportScale(f, parseExportScale(scale ?? DEFAULT_EXPORT_SCALE) ?? DEFAULT_EXPORT_SCALE)
       try {
         if (!privateReader) throw new PrivateResourceError()
         const scope = frameReadScope(privateReader, f)
-        const full = await getImage(f, { ext, scale: 2, quality: quality ?? 90, preview: false, scope })
+        const full = await getImage(f, { ext, scale: density, quality: quality ?? 90, preview: false, scope })
         const image = await privateMcpImage(full.buf, scope)
         await assertRenderRead(scope, f)
-        const imageUrl = `${env.BETTER_AUTH_URL}/i/${frame_id}.${ext}?scale=2${q}`
+        const imageUrl = `${env.BETTER_AUTH_URL}/i/${frame_id}.${ext}?scale=${density}${q}`
         return {
           content: [
             { type: 'image' as const, data: Buffer.from(image.bytes).toString('base64'), mimeType: image.mime },
@@ -1558,6 +1585,7 @@ export function buildMcpServer(
               text: JSON.stringify({
                 image_url: imageUrl,
                 download_url: `${imageUrl}&download`,
+                scale: density,
                 width: image.fullWidth,
                 height: image.fullHeight,
                 format: ext,
@@ -2232,7 +2260,7 @@ export function buildMcpServer(
       title: 'Rename, move or resize a frame',
       _meta: previewToolMeta('Updating the frame…', 'Frame updated'),
       description:
-        'Update frame metadata: rename it, move/resize it, or move it to another page using pageId. Set locked to true to lock the frame on the canvas (humans cannot select, move, resize or delete it from the stage until it is unlocked) or false to unlock it.',
+        "Update frame metadata in one call: rename it (name), move it on its page (x, y), resize it (width, height), turn it (rotation: degrees clockwise about its centre; 0 straightens it), or move it to another page (pageId from get_canvas; it keeps its x/y unless you pass new ones and lands in front of that page's frames). Set locked to true to lock the frame on the canvas (humans cannot select, move, resize or delete it from the stage until it is unlocked) or false to unlock it.",
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
       inputSchema: {
         frame_id: z.string(),
@@ -2243,15 +2271,17 @@ export function buildMcpServer(
         width: z.number().optional(),
         height: z.number().optional(),
         locked: z.boolean().optional(),
+        rotation: z.number().optional(),
         agent_name: agentName,
       },
     },
     async ({ frame_id, agent_name, ...patch }) => {
-      const clean = Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined))
-      if (!Object.keys(clean).length) return err('nothing to update')
-      if (!frameFor(frame_id, 'edit')) return noFrame(frame_id)
-      const frame = actions.updateFrame(frame_id, clean, actorFrom(agent_name))
-      if (!frame) return noFrame(frame_id)
+      const found = frameFor(frame_id, 'edit')
+      const canvas = found && store.getCanvas(found.canvasId)
+      if (!canvas) return noFrame(frame_id)
+      const updated = updateFrameMeta(canvas, frame_id, patch, actorFrom(agent_name))
+      if (!updated.ok) return err(updated.error)
+      const frame = updated.value
       return withPreview(
         withFeedback(text({ ok: true, frame: frameSummary(frame) }), frame.canvasId, actorFrom(agent_name)),
         frame.canvasId,

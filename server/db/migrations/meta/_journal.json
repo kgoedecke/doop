@@ -334,8 +334,15 @@
     {
       "idx": 48,
       "version": "7",
-      "when": 1794178977327,
-      "tag": "0048_private_canvas_resources",
+      "when": 1794104742941,
+      "tag": "0048_frame_rotation",
+      "breakpoints": true
+    },
+    {
+      "idx": 49,
+      "version": "7",
+      "when": 1794104742942,
+      "tag": "0049_private_canvas_resources",
       "breakpoints": true
     }
   ]

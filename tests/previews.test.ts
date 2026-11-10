@@ -8,6 +8,8 @@ const mocks = vi.hoisted(() => ({
   deleteObject: vi.fn(),
   assertRead: vi.fn(),
 }))
+// This cache-only rig supplies loaded snapshots; cold-source/auth behavior is exercised by privateLazyLoading.
+vi.mock('../server/store.ts', () => ({ store: { renderSource: async (frame: Frame) => ({ ...frame }) } }))
 vi.mock('../server/screenshot.ts', () => ({ renderFrame: mocks.renderFrame }))
 vi.mock('../server/storage.ts', () => ({
   putObject: mocks.putObject,

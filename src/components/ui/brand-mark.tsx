@@ -1,6 +1,6 @@
 import { useId, type JSX } from 'react'
 import { cn } from '@/lib/utils'
-import { ImageIcon, PdfIcon, PuzzleIcon, RadioTowerIcon, ServerIcon, WebIcon } from './icons'
+import { ImageIcon, PdfIcon, PuzzleIcon, RadioTowerIcon, ServerIcon, VectorIcon, WebIcon } from './icons'
 import canvaLogo from './brand/canva.svg'
 import linearLogo from './brand/linear.svg'
 import slackLogo from './brand/slack.svg'
@@ -11,10 +11,13 @@ import slackLogo from './brand/slack.svg'
  * brand's own colours where it has them (Figma, Google, Gemini, Meta,
  * Photoshop, Canva, Slack, Linear, Microsoft) and in `currentColor` where the brand
  * itself asks for the text colour (GitHub, OpenAI, Cursor, OpenRouter, Apple).
+ * DeepSeek wears its whale blue; Kimi's K takes the text colour beside its
+ * blue dot.
  * Claude's default is Anthropic's terracotta; `color` overrides any of the
  * single-colour marks.
  *
- * Paths: Simple Icons (CC0) for Claude, OpenAI, Cursor and GitHub; the
+ * Paths: Simple Icons (CC0) for Claude, OpenAI, Cursor and GitHub; Lobe Icons
+ * (MIT) for DeepSeek and Kimi; the
  * providers' own sign-in branding assets for Google, Apple and Microsoft;
  * each company's brand page for the rest. Wordmarks and tiles that belong to
  * a feature (the automation chain's clock, the integration tiles) stay with
@@ -31,6 +34,8 @@ export type Brand =
   | 'cursor'
   | 'gemini'
   | 'openrouter'
+  | 'deepseek'
+  | 'kimi'
   | 'google'
   | 'apple'
   | 'microsoft'
@@ -58,6 +63,22 @@ const OPENAI_PATH =
 /** OpenRouter's "OR" mark, the one its site and app icon wear (Iconify logos, MIT). */
 const OPENROUTER_PATH =
   'M198.973 0c29.97 0 54.265 24.296 54.265 54.265s-24.294 54.266-54.265 54.266l53.826 53.826c6.838 6.837 1.995 18.528-7.673 18.528H90.442C40.492 180.885 0 140.392 0 90.442S40.492 0 90.442 0zM90.443 36.177c-29.97 0-54.266 24.295-54.266 54.265s24.295 54.265 54.265 54.265s54.265-24.295 54.265-54.265s-24.295-54.265-54.265-54.265'
+
+/** DeepSeek's whale (Lobe Icons, MIT). */
+const DEEPSEEK_PATH =
+  'M23.748 4.482c-.254-.124-.364.113-.512.234-.051.039-.094.09-.137.136-.372.397-.806.657-1.373.626-.829-.046-1.537.214-2.163.848-.133-.782-.575-1.248-1.247-1.548-.352-.156-.708-.311-.955-.65-.172-.241-.219-.51-.305-.774-.055-.16-.11-.323-.293-.35-.2-.031-.278.136-.356.276-.313.572-.434 1.202-.422 1.84.027 1.436.633 2.58 1.838 3.393.137.093.172.187.129.323-.082.28-.18.552-.266.833-.055.179-.137.217-.329.14a5.526 5.526 0 01-1.736-1.18c-.857-.828-1.631-1.742-2.597-2.458a11.365 11.365 0 00-.689-.471c-.985-.957.13-1.743.388-1.836.27-.098.093-.432-.779-.428-.872.004-1.67.295-2.687.684a3.055 3.055 0 01-.465.137 9.597 9.597 0 00-2.883-.102c-1.885.21-3.39 1.102-4.497 2.623C.082 8.606-.231 10.684.152 12.85c.403 2.284 1.569 4.175 3.36 5.653 1.858 1.533 3.997 2.284 6.438 2.14 1.482-.085 3.133-.284 4.994-1.86.47.234.962.327 1.78.397.63.059 1.236-.03 1.705-.128.735-.156.684-.837.419-.961-2.155-1.004-1.682-.595-2.113-.926 1.096-1.296 2.746-2.642 3.392-7.003.05-.347.007-.565 0-.845-.004-.17.035-.237.23-.256a4.173 4.173 0 001.545-.475c1.396-.763 1.96-2.015 2.093-3.517.02-.23-.004-.467-.247-.588zM11.581 18c-2.089-1.642-3.102-2.183-3.52-2.16-.392.024-.321.471-.235.763.09.288.207.486.371.739.114.167.192.416-.113.603-.673.416-1.842-.14-1.897-.167-1.361-.802-2.5-1.86-3.301-3.307-.774-1.393-1.224-2.887-1.298-4.482-.02-.386.093-.522.477-.592a4.696 4.696 0 011.529-.039c2.132.312 3.946 1.265 5.468 2.774.868.86 1.525 1.887 2.202 2.891.72 1.066 1.494 2.082 2.48 2.914.348.292.625.514.891.677-.802.09-2.14.11-3.054-.614zm1-6.44a.306.306 0 01.415-.287.302.302 0 01.2.288.306.306 0 01-.31.307.303.303 0 01-.304-.308zm3.11 1.596c-.2.081-.399.151-.59.16a1.245 1.245 0 01-.798-.254c-.274-.23-.47-.358-.552-.758a1.73 1.73 0 01.016-.588c.07-.327-.008-.537-.239-.727-.187-.156-.426-.199-.688-.199a.559.559 0 01-.254-.078c-.11-.054-.2-.19-.114-.358.028-.054.16-.186.192-.21.356-.202.767-.136 1.146.016.352.144.618.408 1.001.782.391.451.462.576.685.914.176.265.336.537.445.848.067.195-.019.354-.25.452z'
+
+/** DeepSeek's whale blue. */
+const DEEPSEEK_COLOR = '#4D6BFE'
+
+/** Kimi's K and the dot over it (Lobe Icons, MIT). */
+const KIMI_K_PATH =
+  'M11.065 11.199l7.257-7.2c.137-.136.06-.41-.116-.41H14.3a.164.164 0 00-.117.051l-7.82 7.756c-.122.12-.302.013-.302-.179V3.82c0-.127-.083-.23-.185-.23H3.186c-.103 0-.186.103-.186.23V19.77c0 .128.083.23.186.23h2.69c.103 0 .186-.102.186-.23v-3.25c0-.069.025-.135.069-.178l2.424-2.406a.158.158 0 01.205-.023l6.484 4.772a7.677 7.677 0 003.453 1.283c.108.012.2-.095.2-.23v-3.06c0-.117-.07-.212-.164-.227a5.028 5.028 0 01-2.027-.807l-5.613-4.064c-.117-.078-.132-.279-.028-.381z'
+const KIMI_DOT_PATH =
+  'M21.846 0a1.923 1.923 0 110 3.846H20.15a.226.226 0 01-.227-.226V1.923C19.923.861 20.784 0 21.846 0z'
+
+/** The blue of Kimi's dot. */
+const KIMI_COLOR = '#1783FF'
 
 /** ByteDance's four bars, which its Seed lab (Seedream) wears in a blue-teal blend. */
 const BYTEDANCE_PATH =
@@ -215,6 +236,16 @@ function OpenRouter({ size, color = 'currentColor', className }: GlyphProps) {
   )
 }
 
+/** Kimi's K in the text colour under its blue dot. */
+function Kimi({ size, color = 'currentColor', className }: GlyphProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" className={cn('flex-none', className)} aria-hidden>
+      <path fill={color} d={KIMI_K_PATH} />
+      <path fill={KIMI_COLOR} d={KIMI_DOT_PATH} />
+    </svg>
+  )
+}
+
 /** Adobe's Ps app mark (the 2025 icon from adobe.com): the dark tile with
  *  the two letters as a vector. */
 function Photoshop({ size, className }: GlyphProps) {
@@ -238,6 +269,8 @@ const MARKS: Record<Brand, (props: GlyphProps) => JSX.Element> = {
   cursor: path(CURSOR_PATH),
   gemini: Gemini,
   openrouter: OpenRouter,
+  deepseek: path(DEEPSEEK_PATH, DEEPSEEK_COLOR),
+  kimi: Kimi,
   google: Google,
   apple: path(APPLE_PATH),
   microsoft: Microsoft,
@@ -260,6 +293,8 @@ export type AppIconBrand =
   | 'openai'
   | 'gemini'
   | 'openrouter'
+  | 'deepseek'
+  | 'kimi'
   | 'seedream'
   | 'codex'
   | 'cursor'
@@ -274,6 +309,7 @@ export type AppIconBrand =
   | 'pdf'
   | 'png'
   | 'jpg'
+  | 'svg'
 
 /* the tile's light: a hairline edge, a highlight along the top, a soft drop */
 const APP_TILE_SHADOW =
@@ -322,6 +358,17 @@ const APP_TILES: Record<AppIconBrand, AppTile> = {
     tile: '#111',
     glyph: () => <path fill="#fff" transform="translate(0 3.52) scale(0.09375)" d={OPENROUTER_PATH} />,
   },
+  deepseek: { tile: DEEPSEEK_COLOR, glyph: () => <path fill="#fff" d={DEEPSEEK_PATH} /> },
+  /* Kimi's app icon: the white K and its blue dot on black */
+  kimi: {
+    tile: '#111',
+    glyph: () => (
+      <>
+        <path fill="#fff" d={KIMI_K_PATH} />
+        <path fill={KIMI_COLOR} d={KIMI_DOT_PATH} />
+      </>
+    ),
+  },
   /* the knot reversed out of black, beside ChatGPT's black on white */
   codex: { tile: '#111', glyph: () => <path fill="#fff" d={OPENAI_PATH} /> },
   cursor: { tile: '#14120b', glyph: () => <path fill="#fff" d={CURSOR_PATH} /> },
@@ -351,6 +398,7 @@ const APP_TILES: Record<AppIconBrand, AppTile> = {
   pdf: { tile: '#e5322d', art: chromeGlyph(PdfIcon) },
   png: { tile: '#6e56cf', art: chromeGlyph(ImageIcon) },
   jpg: { tile: '#0891b2', art: chromeGlyph(ImageIcon) },
+  svg: { tile: '#d97706', art: chromeGlyph(VectorIcon) },
 }
 
 export const APP_ICON_BRANDS = Object.keys(APP_TILES) as AppIconBrand[]

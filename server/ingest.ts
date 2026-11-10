@@ -288,12 +288,19 @@ export async function handleIngest(req: express.Request, res: express.Response) 
   if (!/^dk_[\w-]{20,}$/.test(secret)) return res.status(404).json({ error: 'unknown sync key' })
   const [key] = await db.select().from(syncKeys).where(eq(syncKeys.secret, secret))
   if (!key) return res.status(404).json({ error: 'unknown sync key' })
-  const canvas = store.getCanvas(key.canvasId)
+  let canvas = store.getCanvas(key.canvasId)
   if (!canvas) return res.status(410).json({ error: 'the canvas this key points at no longer exists' })
   // Any old/listed bearer is inactive for this purpose, regardless of its creator.
   if (companyPolicy.isPrivate(canvas.workspaceId)) {
     return res.status(403).json({ error: 'design sync is unavailable for company canvases' })
   }
+
+  canvas = await store.load(key.canvasId)
+  if (!canvas) return res.status(410).json({ error: 'the canvas this key points at no longer exists' })
+  if (companyPolicy.isPrivate(canvas.workspaceId))
+    return res.status(403).json({ error: 'design sync is unavailable for company canvases' })
+  const [currentKey] = await db.select({ id: syncKeys.id }).from(syncKeys).where(eq(syncKeys.secret, secret))
+  if (!currentKey || currentKey.id !== key.id) return res.status(404).json({ error: 'unknown sync key' })
 
   const page = cleanPage(req.body?.page)
   const html = typeof req.body?.html === 'string' ? req.body.html : ''

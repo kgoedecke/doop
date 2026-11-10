@@ -1,3 +1,4 @@
+import { store } from './store.ts'
 import type { Frame } from '../shared/types.ts'
 import * as thumbs from './thumbs.ts'
 import {
@@ -15,7 +16,8 @@ const IMG_CACHE_BYTES = 64 * 1024 * 1024
 
 export interface ImageRequest {
   ext: 'png' | 'jpg'
-  scale: 1 | 2
+  /** output density, already parsed and fitted (shared/exportScale.ts) */
+  scale: number
   quality: number
   preview: boolean
   scope: PrivateRenderScope
@@ -24,7 +26,8 @@ export interface ImageRequest {
 export type ImageResult = { status: 'ok'; buf: Buffer }
 
 export async function getImage(input: Frame, req: ImageRequest): Promise<ImageResult> {
-  const frame = { ...input }
+  await assertRenderRead(req.scope, input)
+  const frame = await store.renderSource(input)
   await assertRenderRead(req.scope, frame)
   if (req.scope.kind !== 'frame') throw new Error('a preview requires a stored frame')
   const preview = req.preview && req.ext === 'jpg'
@@ -56,12 +59,12 @@ export async function getImage(input: Frame, req: ImageRequest): Promise<ImageRe
   return { status: 'ok', buf }
 }
 
-function imageKey(frame: Frame, ext: 'png' | 'jpg', scale: 1 | 2, quality: number | '', preview: boolean): string {
+function imageKey(frame: Frame, ext: 'png' | 'jpg', scale: number, quality: number | '', preview: boolean): string {
   return `${frameContentKey(frame)}:${ext}:${scale}:${quality}:${preview ? 'p' : ''}`
 }
 
 /** A private MCP render may prime the same cache; URL readers still need their own session. */
-export async function primeImage(input: Frame, scope: PrivateRenderScope, scale: 1 | 2, png: Buffer): Promise<void> {
+export async function primeImage(input: Frame, scope: PrivateRenderScope, scale: number, png: Buffer): Promise<void> {
   const frame = { ...input }
   assertPrivateRenderBytes(png)
   await assertRenderRead(scope, frame)

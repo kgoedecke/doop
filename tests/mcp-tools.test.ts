@@ -3,6 +3,7 @@ import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
 import { describe, expect, it, vi } from 'vitest'
 import { buildMcpServer } from '../server/mcp.ts'
 import { FRAME_PREVIEW_URI } from '../server/chatgptApp.ts'
+import packageJson from '../package.json' with { type: 'json' }
 
 vi.mock('../server/db/persist.ts', () => ({
   insertCanvas: async () => {},
@@ -15,6 +16,23 @@ interface ToolInputSchema {
   properties?: Record<string, unknown>
   required?: string[]
 }
+
+describe('MCP server info', () => {
+  it('reports the running release as its version', async () => {
+    const server = buildMcpServer('Test Owner', 'test-owner-id')
+    const client = new Client({ name: 'doop-version-test', version: '1.0.0' })
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair()
+
+    await server.connect(serverTransport)
+    await client.connect(clientTransport)
+
+    try {
+      expect(client.getServerVersion()).toEqual({ name: 'doop-canvas', version: packageJson.version })
+    } finally {
+      await client.close()
+    }
+  })
+})
 
 describe('MCP website tool contract', () => {
   it('separates read-only website viewing from editable webpage imports', async () => {
@@ -372,4 +390,39 @@ describe('MCP ChatGPT app contract', () => {
       await close()
     }
   })
+})
+
+it('update_frame normalizes and clears rotation while retaining page validation', async () => {
+  const canvasId = 'mcp-frame-rotation'
+  const { client, close, body } = await pagesClient({
+    id: canvasId,
+    ownerId: 'test-owner-id',
+    name: 'Rotation',
+    pages: [
+      { id: 'first', name: 'Main' },
+      { id: 'second', name: 'Mobile' },
+    ],
+    frames: [],
+  })
+  const { store } = await import('../server/store.ts')
+  const frame = store.createFrame(canvasId, { name: 'Turn', pageId: 'first', width: 100, height: 50 }, 'Agent')!
+  const update = (patch: Record<string, unknown>) =>
+    client.callTool({
+      name: 'update_frame',
+      arguments: { frame_id: frame.id, agent_name: 'Agent', ...patch },
+    })
+  try {
+    const moved = await update({ rotation: 630, pageId: 'second' })
+    expect(moved.isError).not.toBe(true)
+    expect(body(moved).frame).toMatchObject({ rotation: -90, pageId: 'second' })
+    const invalid = await update({ rotation: 45, pageId: 'missing' })
+    expect(invalid.isError).toBe(true)
+    expect(frame).toMatchObject({ rotation: -90, pageId: 'second' })
+    const straight = await update({ rotation: 0 })
+    expect(straight.isError).not.toBe(true)
+    expect(body(straight).frame).not.toHaveProperty('rotation')
+    expect(frame).toHaveProperty('rotation', undefined)
+  } finally {
+    await close()
+  }
 })

@@ -288,7 +288,13 @@ class StepError extends Error {
   }
 }
 
-async function runPull(row: AutomationRow, step: Extract<Step, { type: 'pull' }>, actorName: string): Promise<string> {
+/** A pull reads and writes its canvas's frames: loaded and held for the
+ *  length of the pull (store.withCanvas). */
+function runPull(row: AutomationRow, step: Extract<Step, { type: 'pull' }>, actorName: string): Promise<string> {
+  return store.withCanvas(step.canvasId, () => pullInto(row, step, actorName))
+}
+
+async function pullInto(row: AutomationRow, step: Extract<Step, { type: 'pull' }>, actorName: string): Promise<string> {
   const connection = await meta.getConnection(row.ownerId)
   if (!connection) throw new StepError('Meta is not connected', 'reconnect')
   try {

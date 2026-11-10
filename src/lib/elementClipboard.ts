@@ -1,10 +1,11 @@
 import type { Frame } from '../../shared/types'
-import { elementsHtml, insertElements, isElementLocked } from './layers'
+import { elementsHtml, insertElements, isElementLocked, replaceElementsWith } from './layers'
 import { isStandalonePick, saveFrameHtml } from './layerEdits'
 import { copyFrames } from './frameClipboard'
 import { useStore } from './store'
 import { ELEMENT_CLIP_KEY, ELEMENT_CLIP_STYLE_KEY, FRAME_CLIP_KEY } from './clipboardKeys'
 import { carriedCss, newScope, renameInCss, SCOPE_ATTR, withCarriedCss } from './styleCarry'
+import { historyEpoch } from './history'
 import { api, errorMessage } from './api'
 
 export function copyLayer(frame: Frame, selector: string): boolean {
@@ -117,10 +118,26 @@ export function pasteLayer(frame: Frame, selector: string | null): boolean {
      share rules or animations */
   const styles = clipStyles()
   if (!styles) return false
+  return withPreparedClip(live, html, styles, selector ? [selector] : [], (current, content, prepared) =>
+    pasteContent(current, selector, content, prepared),
+  )
+}
+
+/** Both insertion and replacement use the same source admission and destination guard. */
+function withPreparedClip(
+  live: Frame,
+  html: string,
+  styles: ClipStyles,
+  selectors: readonly string[],
+  apply: (current: Frame, html: string, styles: ClipStyles) => boolean,
+): boolean {
+  if (selectors.some((selector) => isElementLocked(live.html, selector))) return false
   if (styles.canvasId !== live.canvasId) {
     const canvasId = live.canvasId
     const pageId = useStore.getState().activePageId
     const version = live.updatedAt
+    const sourceHtml = live.html
+    const epoch = historyEpoch()
     void api
       .copyResources(canvasId, [
         { sourceFrameId: styles.frameId, sourceVersion: styles.sourceVersion, html, css: styles.css },
@@ -131,15 +148,17 @@ export function pasteLayer(frame: Frame, selector: string | null): boolean {
         if (
           state.canvas?.id !== canvasId ||
           state.activePageId !== pageId ||
+          historyEpoch() !== epoch ||
           !current ||
           current.updatedAt !== version ||
+          current.html !== sourceHtml ||
           current.locked ||
-          (selector && isElementLocked(current.html, selector))
+          selectors.some((selector) => isElementLocked(current.html, selector))
         )
           throw new Error('The destination changed. Paste again where you want the content.')
         if (result.canvasId !== canvasId || result.entries.length !== 1)
           throw new Error('The copied files did not match this destination.')
-        if (!pasteContent(current, selector, result.entries[0]!.html, { ...styles, css: result.entries[0]!.css ?? '' }))
+        if (!apply(current, result.entries[0]!.html, { ...styles, css: result.entries[0]!.css ?? '' }))
           throw new Error('The destination layer is no longer available. Choose where to paste again.')
       })
       .catch((error: unknown) =>
@@ -147,7 +166,7 @@ export function pasteLayer(frame: Frame, selector: string | null): boolean {
       )
     return true
   }
-  return pasteContent(live, selector, html, styles)
+  return apply(live, html, styles)
 }
 
 function pasteContent(live: Frame, selector: string | null, html: string, styles: ClipStyles): boolean {
@@ -161,5 +180,29 @@ function pasteContent(live: Frame, selector: string | null, html: string, styles
   const store = useStore.getState()
   store.pickElement(null)
   for (const pasted of inserted.selectors) store.toggleElement({ frameId: live.id, selector: pasted })
+  return true
+}
+
+/** ⇧⌘R on layers: the picked layers give way to the copied ones, which
+ *  land where the first of them was and end up picked. */
+export function replaceWithClip(frame: Frame, selectors: string[]): boolean {
+  const live = useStore.getState().canvas?.frames.find((f) => f.id === frame.id)
+  const html = localStorage.getItem(ELEMENT_CLIP_KEY)
+  if (!live || live.locked || !html || !selectors.length) return false
+  const styles = clipStyles()
+  if (!styles) return false
+  return withPreparedClip(live, html, styles, selectors, (current, content, prepared) =>
+    replaceContent(current, selectors, content, prepared),
+  )
+}
+
+function replaceContent(live: Frame, selectors: string[], html: string, styles: ClipStyles): boolean {
+  const fresh = new Map(styles.scopes.map((old) => [old, newScope()]))
+  const rescope = (text: string) => [...fresh].reduce((t, [old, next]) => t.split(old).join(next), text)
+  const replaced = replaceElementsWith(live.html, selectors, rescope(html))
+  if (!replaced) return false
+  const pasted = withCarriedCss(replaced.html, renameInCss(rescope(styles.css), replaced.renamed), [...fresh.values()])
+  saveFrameHtml(live, pasted)
+  useStore.getState().pickElements(live.id, replaced.selectors)
   return true
 }

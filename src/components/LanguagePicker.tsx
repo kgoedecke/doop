@@ -1,7 +1,7 @@
 import { LOCALES, LOCALE_NAMES, isLocale, useLocale, useT } from '../lib/i18n'
 import { ToggleChipGroup, ToggleChipItem } from './ui/toggle-chip'
 
-/** The chip row on the Appearance settings pane. Each language is named in
+/** The chip row on the General settings pane. Each language is named in
  *  itself, so someone who cannot read the current one still finds theirs. */
 export function LanguagePicker() {
   const { locale, setLocale } = useLocale()

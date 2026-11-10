@@ -15,7 +15,8 @@ import {
   type PathEditSource,
   type PathMatrix,
 } from '../lib/pathEditing'
-import { nearestT, segments, splitSegment, subpathsData } from '../lib/svgPath'
+import { multiply, nearestT, segments, splitSegment, subpathsData } from '../lib/svgPath'
+import { frameTurnMatrix } from '../../shared/frameRotation'
 import { useStore } from '../lib/store'
 import { useT } from '../lib/i18n'
 
@@ -69,9 +70,12 @@ export function PathEditor({
   const stage = document.querySelector<HTMLElement>('.stage')
   const world = stage?.querySelector('.world')
   const border = isCanvasElement(frame.html) ? 0 : 1
-  const matrix: PathMatrix = [...source.matrix]
-  matrix[4] += frame.x + border
-  matrix[5] += frame.y + border
+  /* the path's place on the canvas: its own matrix, moved to the frame
+     and turned with the frame about the frame's centre */
+  const placed: PathMatrix = [...source.matrix]
+  placed[4] += frame.x + border
+  placed[5] += frame.y + border
+  const matrix: PathMatrix = multiply(frameTurnMatrix(frame), placed)
   const anchors = anchorsOf(path)
   const current = selected === null ? undefined : anchors[selected]
 

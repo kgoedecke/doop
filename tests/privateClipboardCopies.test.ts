@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, expect, it } from 'vitest'
 import { Client } from './harness.ts'
 import { startPrivateServer } from './privateServer.ts'
+import { woff2 } from './fontFiles.ts'
 import { visitPrivateReferences } from '../shared/privateReferences.ts'
 import type { Frame } from '../shared/types.ts'
 import type { ResourceCopyEntry, ResourceCopyResult } from '../shared/resourceCopies.ts'
@@ -69,6 +70,92 @@ async function copy(ctx: Awaited<ReturnType<typeof context>>, entries = [ctx.ent
 async function targetCount(id: string) {
   return (await fixture.db.query('SELECT id FROM assets WHERE canvas_id=$1', [id])).rowCount
 }
+
+it('copies cold image/font carriers on the first request after restart and releases every hold', async () => {
+  const ctx = await context()
+  const fontBytes = woff2({ family: 'Cold Clipboard Face' })
+  const uploaded = await owner.req(`/api/fonts?canvas=${ctx.sourceId}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/octet-stream', 'X-File-Name': 'cold.woff2' },
+    body: new Uint8Array(fontBytes),
+  })
+  expect(uploaded.status).toBe(200)
+  const font = await uploaded.json()
+  const created = await owner.post(`/api/canvases/${ctx.sourceId}/frames`, {
+    name: 'Cold font/image',
+    html: `<style>@font-face{font-family:'Cold Clipboard Face';src:url('${font.url}')}</style><p style="font-family:'Cold Clipboard Face';background-image:url('${ctx.url}')">Cold</p>`,
+  })
+  expect(created.status).toBe(200)
+  const frame = (await created.json()) as Frame
+  await fixture.restart()
+  const response = await copy(ctx, [{ sourceFrameId: frame.id, sourceVersion: frame.updatedAt, html: frame.html }])
+  expect(response.status).toBe(200)
+  const result = (await response.json()) as ResourceCopyResult
+  expect(result.assets).toHaveLength(2)
+  expect(result.entries[0]!.html).not.toContain(ctx.url)
+  expect(result.entries[0]!.html).not.toContain(font.url)
+  expect(await targetCount(ctx.destinationId)).toBe(2)
+  for (const asset of result.assets) {
+    const bytes = Buffer.from(await (await copier.get(new URL(asset.url).pathname)).arrayBuffer())
+    expect(bytes).toEqual(asset.from === new URL(ctx.url).pathname.split('/').at(-1)!.split('.')[0] ? PNG : fontBytes)
+  }
+  await expect.poll(async () => (await (await fetch(fixture.server.base + '/healthz/store')).json()).held).toBe(0)
+}, 30_000)
+
+it('copies plain cold markup on its first request without creating any file', async () => {
+  const ctx = await context()
+  const created = await owner.post(`/api/canvases/${ctx.sourceId}/frames`, {
+    name: 'Plain',
+    html: '<p>Plain cold content</p>',
+  })
+  const frame = (await created.json()) as Frame
+  await fixture.restart()
+  const response = await copy(ctx, [{ sourceFrameId: frame.id, sourceVersion: frame.updatedAt, html: frame.html }])
+  expect(response.status).toBe(200)
+  expect((await response.json()).assets).toEqual([])
+  expect(await targetCount(ctx.destinationId)).toBe(0)
+})
+
+it('refuses a denied cold source before loading it or copying files', async () => {
+  const ctx = await context()
+  expect((await owner.delete(`/api/canvases/${ctx.sourceId}/members/${ctx.userId}`)).status).toBe(200)
+  await fixture.restart()
+  expect((await copier.get(`/api/canvases/${ctx.destinationId}`)).status).toBe(200)
+  const health = async () => await (await fetch(fixture.server.base + '/healthz/store')).json()
+  const before = await health()
+  expect((await copy(ctx)).status).toBe(404)
+  expect((await health()).loaded).toBe(before.loaded)
+  await expect.poll(async () => (await health()).held).toBe(0)
+  expect(await targetCount(ctx.destinationId)).toBe(0)
+})
+
+it('refuses copying when source membership is revoked during its blocked load', async () => {
+  const workspace = await (await owner.post('/api/workspaces', { name: 'Delayed copy source' })).json()
+  const added = await owner.post(`/api/workspaces/${workspace.id}/members`, { email: 'clip-target@test.dev' })
+  expect(added.status).toBe(200)
+  const { id: userId } = await (await copier.get('/api/me')).json()
+  const source = await (await owner.post('/api/canvases', { name: 'Delayed source', workspaceId: workspace.id })).json()
+  const destination = await (await copier.post('/api/canvases', { name: 'Delayed destination' })).json()
+  const frame = (await (
+    await owner.post(`/api/canvases/${source.id}/frames`, { name: 'Source', html: '<p>Refused after load</p>' })
+  ).json()) as Frame
+  await fixture.restart()
+  expect((await copier.get(`/api/canvases/${destination.id}`)).status).toBe(200)
+  await fixture.db.query('BEGIN')
+  await fixture.db.query('LOCK TABLE frames IN ACCESS EXCLUSIVE MODE')
+  const pending = copier.post(`/api/canvases/${destination.id}/resource-copies`, {
+    entries: [{ sourceFrameId: frame.id, sourceVersion: frame.updatedAt, html: frame.html }],
+  })
+  try {
+    await expect.poll(async () => (await (await fetch(fixture.server.base + '/healthz/store')).json()).loading).toBe(1)
+    expect((await owner.delete(`/api/workspaces/${workspace.id}/members/${userId}`)).status).toBe(200)
+  } finally {
+    await fixture.db.query('ROLLBACK')
+  }
+  expect((await pending).status).toBe(404)
+  await expect.poll(async () => (await (await fetch(fixture.server.base + '/healthz/store')).json()).held).toBe(0)
+  expect(await targetCount(destination.id)).toBe(0)
+}, 30_000)
 
 it('does not publish a failed metadata copy and reports uncertainty without SQL details', async () => {
   const ctx = await context()

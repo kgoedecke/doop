@@ -14,8 +14,16 @@ export async function handleGeminiCloudMcp(req: Request, res: Response) {
   const run = geminiCloudRuns.authorized(id, token)
   const canExecute = async () => {
     if (!run || !geminiCloudWorkerFor(run.userId)) return false
-    const canvas = store.getCanvas(run.request.canvasId)
-    return !!canvas && canEditCanvas(run.userId, canvas) && !(await isBanned(run.userId))
+    const initial = store.getCanvas(run.request.canvasId)
+    if (!initial || !canEditCanvas(run.userId, initial) || (await isBanned(run.userId))) return false
+    const canvas = await store.load(run.request.canvasId)
+    return (
+      !!canvas &&
+      geminiCloudRuns.authorized(id, token) === run &&
+      !!geminiCloudWorkerFor(run.userId) &&
+      canEditCanvas(run.userId, canvas) &&
+      !(await isBanned(run.userId))
+    )
   }
   if (!run || !(await canExecute())) {
     res.status(403).json({ error: 'Gemini cloud run unavailable' })

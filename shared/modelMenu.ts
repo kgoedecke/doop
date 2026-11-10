@@ -100,6 +100,71 @@ export const GEMINI_MODELS: ModelOption[] = [
 export const DEFAULT_GEMINI_MODEL = 'gemini-3.7-flash'
 
 /**
+ * DeepSeek direct (a platform.deepseek.com key). A curated roster like
+ * OpenRouter's, since the vision flag differs within it and DeepSeek's
+ * catalog does not say which model sees images. Checked against
+ * api-docs.deepseek.com; Pro stays text-only until its image input is
+ * confirmed, a degraded run being safer than a 400 on the first screenshot.
+ */
+export const DEEPSEEK_MODELS: ModelOption[] = [
+  {
+    id: 'deepseek-flash',
+    name: 'DeepSeek V4.1 Flash',
+    blurb: 'Cheap and capable, with vision. A good default.',
+    vision: true,
+  },
+  {
+    id: 'deepseek-v4-pro',
+    name: 'DeepSeek V4 Pro',
+    blurb: 'DeepSeek’s strongest. Text-only: no visual review of frames.',
+    vision: false,
+  },
+]
+
+export const DEFAULT_DEEPSEEK_MODEL = 'deepseek-flash'
+
+/** Kimi direct (a platform.moonshot.ai key). Checked against
+ *  platform.kimi.ai/docs/models; every K3 tier sees images. */
+export const KIMI_MODELS: ModelOption[] = [
+  {
+    id: 'kimi-k3.1-pro',
+    name: 'Kimi K3.1 Pro',
+    blurb: 'Moonshot’s flagship — strong agentic design work.',
+    vision: true,
+  },
+  {
+    id: 'kimi-k3.1-pro-highspeed',
+    name: 'Kimi K3.1 Pro Highspeed',
+    blurb: 'The flagship, faster and pricier per token.',
+    vision: true,
+  },
+  { id: 'kimi-k3', name: 'Kimi K3', blurb: 'The previous flagship, still dependable.', vision: true },
+]
+
+export const DEFAULT_KIMI_MODEL = 'kimi-k3.1-pro'
+
+/** Kimi Code (a key from a Kimi membership's Kimi Code console, billed to the
+ *  membership). Its own endpoint and ids, per kimi.com/code/docs; the K3
+ *  tiers are the platform's, which see images. */
+export const KIMI_CODE_MODELS: ModelOption[] = [
+  {
+    id: 'k3.1-pro',
+    name: 'Kimi K3.1 Pro',
+    blurb: 'Moonshot’s flagship, on your membership.',
+    vision: true,
+  },
+  {
+    id: 'k3.1-pro-highspeed',
+    name: 'Kimi K3.1 Pro Highspeed',
+    blurb: 'The flagship, faster; uses the plan’s quota quicker.',
+    vision: true,
+  },
+  { id: 'k3', name: 'Kimi K3', blurb: 'The previous flagship, still dependable.', vision: true },
+]
+
+export const DEFAULT_KIMI_CODE_MODEL = 'k3.1-pro'
+
+/**
  * The image-model registry. `provider` names the credential family that can
  * run it — imageGen resolves a generator per provider (user account first,
  * then a server key). Adding a model later is one entry here, plus a new
@@ -197,6 +262,9 @@ export const ACCOUNT_KIND_LABELS = {
   'anthropic-key': 'Claude API',
   'openrouter-key': 'OpenRouter',
   'gemini-key': 'Gemini',
+  'deepseek-key': 'DeepSeek',
+  'kimi-key': 'Kimi',
+  'kimi-code': 'Kimi Code',
 } as const
 
 export type AccountKindName = keyof typeof ACCOUNT_KIND_LABELS

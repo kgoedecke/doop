@@ -280,6 +280,37 @@ export async function copyClipboardResources(
 ): Promise<ResourceCopyResult> {
   await requireResourceActor(actorId)
   requirePrivateCanvas(canvasId, actorId)
+  // Authorize every source before loading any of them. Holds cover both the
+  // load and the copy transaction, including refusal/revocation/error paths.
+  const parents = new Map(
+    request.entries.map((entry) => [
+      entry.sourceFrameId,
+      sourceFrame(entry.sourceFrameId, entry.sourceVersion, actorId).canvasId,
+    ]),
+  )
+  const canvasIds = [...new Set(parents.values())]
+  const releases = canvasIds.map((id) => store.hold(id))
+  try {
+    await Promise.all(canvasIds.map((id) => store.load(id)))
+    await requireResourceActor(actorId)
+    requirePrivateCanvas(canvasId, actorId)
+    for (const entry of request.entries) {
+      const current = sourceFrame(entry.sourceFrameId, entry.sourceVersion, actorId)
+      if (current.canvasId !== parents.get(current.id)) throw new ResourceCopyConflict()
+    }
+    return await copyLoadedClipboardResources(canvasId, actorId, request)
+  } finally {
+    for (const release of releases) release()
+  }
+}
+
+async function copyLoadedClipboardResources(
+  canvasId: string,
+  actorId: string,
+  request: ResourceCopyRequest,
+): Promise<ResourceCopyResult> {
+  await requireResourceActor(actorId)
+  requirePrivateCanvas(canvasId, actorId)
   const claims = new Map<string, { version: number; canvasId: string; ids: Set<string>; private: boolean }>()
   const wanted = new Map<string, Readonly<AssetRow>>()
   for (const entry of request.entries) {

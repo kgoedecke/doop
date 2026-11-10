@@ -2,7 +2,7 @@
 // @vitest-environment-options { "happyDOM": { "settings": { "disableCSSFileLoading": true } } }
 import { afterEach, expect, it, vi } from 'vitest'
 import * as css from 'css-tree'
-import { clipToFrame, inlineDocument } from '../src/lib/frameRaster'
+import { clipToFrame, inlineDocument, pinViewportUnits } from '../src/lib/frameRaster'
 import { PrivateExportOperation } from '../src/lib/privateExport'
 import { fixturePrivateMaterializer } from './privateMediaAdapter'
 
@@ -60,6 +60,20 @@ it('wraps the document in a frame-sized SVG with scripts removed', async () => {
   expect(svg).toContain('<html xmlns="http://www.w3.org/1999/xhtml">')
   expect(svg).toContain('<h1>Hi</h1>')
   expect(svg).not.toContain('<script')
+})
+
+it('crops to a clip by its viewBox and paints a ground under the document', async () => {
+  serve({})
+  const svg = await inlineDocument('<html><body><h1>Hi</h1></body></html>', {
+    ...opts(),
+    clip: { x: 10, y: 20, width: 40, height: 30 },
+    background: '#fff',
+  })
+  expect(svg.startsWith('<svg xmlns="http://www.w3.org/2000/svg" width="40" height="30" viewBox="10 20 40 30">')).toBe(
+    true,
+  )
+  /* the document is still laid out at the frame's size */
+  expect(svg).toContain('<rect width="300" height="200" fill="#fff"/><foreignObject width="300" height="200">')
 })
 
 it('rejects a document that embeds another, so the server renders it whole', async () => {
@@ -275,5 +289,67 @@ it('rejects unhandled visual carriers and srcset-only images instead of silently
     await expect(inlineDocument(source, opts())).rejects.toThrow(
       'the local renderer cannot inline this visual resource',
     )
+  expect(calls).toEqual([])
+})
+
+it('writes viewport units as the frame px, leaving words and data URLs alone', () => {
+  const size = { width: 400, height: 200 }
+  expect(pinViewportUnits('body{height:100vh;width:50vw}', size)).toBe('body{height:200px;width:200px}')
+  expect(pinViewportUnits('a{margin:-10vh 25vmin;padding:calc(100dvh - 2px) 1.5vmax}', size)).toBe(
+    'a{margin:-20px 50px;padding:calc(200px - 2px) 6px}',
+  )
+  const data = 'src:url(data:font/woff2;base64,AAb3vh+Q9vw/AA==)'
+  expect(pinViewportUnits(data, size)).toBe(data)
+  expect(pinViewportUnits('.x3vh{} @media (min-width: 1px)', size)).toBe('.x3vh{} @media (min-width: 1px)')
+})
+
+it('pins viewport units only when asked, in sheets and style attributes', async () => {
+  serve({})
+  const html = '<html><head><style>body{height:100vh}</style></head><body><p style="width:50vw">x</p></body></html>'
+  const pinned = await inlineDocument(html, { ...opts(), standalone: true })
+  expect(pinned).toContain('body{height:200px}')
+  expect(pinned).toContain('style="width:150px"')
+  expect(await inlineDocument(html, opts())).toContain('body{height:100vh}')
+})
+
+it('drops what would run once the file is opened as a page', async () => {
+  serve({})
+  const svg = await inlineDocument(
+    '<html><body onload="go()"><a href="javascript:alert(1)" onclick="go()">x</a>' +
+      '<a href=" JavaScript:go()">y</a><a href="https://doop.design">z</a>' +
+      '<form action="javascript:go()"><button formaction="javascript:go()">b</button></form>' +
+      '<svg><a xlink:href="javascript:go()"><rect onmouseover="go()"/></a></svg></body></html>',
+    opts(),
+  )
+  expect(svg).not.toMatch(/javascript:|onload|onclick|onmouseover/i)
+  expect(svg).toContain('href="https://doop.design"')
+})
+
+it('removes entity-decoded tab/LF/CR script schemes while retaining navigation and CSP', async () => {
+  serve({})
+  const svg = await inlineDocument(
+    '<a href="java&#9;script:go()">tab</a><a href="java&#10;script:go()">LF</a>' +
+      '<svg><a xlink:href="vb&#13;script:go()">CR</a></svg>' +
+      '<a href="https://doop.design/safe">safe</a>',
+    opts(),
+  )
+  const doc = new DOMParser().parseFromString(svg, 'text/html')
+  expect(
+    [...doc.querySelectorAll('a')]
+      .slice(0, 3)
+      .every((node) => !node.hasAttribute('href') && !node.hasAttribute('xlink:href')),
+  ).toBe(true)
+  expect(svg).not.toContain('script:go()')
+  expect(svg).toContain('href="https://doop.design/safe"')
+  expect(svg).toContain("default-src 'none'")
+})
+
+it('does not let SVG animation restore a script link or initiate an unadmitted image request', async () => {
+  const calls = serve({})
+  const svg = await inlineDocument(
+    '<html><body><svg><a><animate attributeName="href" to="javascript:go()"/></a><image><set attributeName="href" to="https://unadmitted.invalid/private.png"/></image></svg></body></html>',
+    { ...opts(), standalone: true },
+  )
+  expect(svg).not.toMatch(/javascript:|unadmitted.invalid|<animate|<set/)
   expect(calls).toEqual([])
 })

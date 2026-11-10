@@ -1,0 +1,104 @@
+<!doctype html>
+<html>
+  <body>
+    <script type="module">
+      import { FRAME_BOOTSTRAP } from '/src/lib/frameRuntime.ts'
+      import { registerFrameWindow, computedStyles } from '/src/lib/frameBridge.ts'
+      import { useStore } from '/src/lib/store.ts'
+      import { api } from '/src/lib/api.ts'
+      import { copyProperties, pasteProperties } from '/src/lib/actions/edits.ts'
+      window.styleScenario = async () => {
+        localStorage.clear()
+        const data =
+          'data:image/png;doop-resource=fixture;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aM9sAAAAASUVORK5CYII='
+        const font = 'data:font/woff2;doop-resource=font;base64,d09GMg=='
+        const sourceHtml =
+          '<html><head><style>@font-face{font-family:Private;src:url(/a/source.woff2)}</style></head><body><div id="piece" style="font-family:Private;background-image:url(/a/source.png)">Source</div></body></html>'
+        const frame = document.createElement('iframe')
+        frame.sandbox = 'allow-scripts'
+        frame.srcdoc = FRAME_BOOTSTRAP
+        const reply = (type, send) =>
+          new Promise((resolve) => {
+            const listener = (event) => {
+              if (event.source === frame.contentWindow && event.data?.type === type) {
+                window.removeEventListener('message', listener)
+                resolve(event.data)
+              }
+            }
+            window.addEventListener('message', listener)
+            send()
+          })
+        await reply('doop:frame-ready', () => document.body.append(frame))
+        await reply('doop:html-result', () =>
+          frame.contentWindow.postMessage(
+            {
+              type: 'doop:html',
+              reqId: 711,
+              html: sourceHtml.replaceAll('/a/source.png', data).replaceAll('/a/source.woff2', font),
+              replacements: [
+                { inline: data, canonical: '/a/source.png' },
+                { inline: font, canonical: '/a/source.woff2' },
+              ],
+              privateMedia: true,
+            },
+            '*',
+          ),
+        )
+        registerFrameWindow('frame', frame.contentWindow)
+        const source = {
+          id: 'frame',
+          canvasId: 'source',
+          name: 'Source',
+          html: sourceHtml,
+          x: 0,
+          y: 0,
+          width: 320,
+          height: 240,
+          createdAt: 1,
+          updatedAt: 7,
+          updatedBy: 'Owner',
+        }
+        const select = (value) => {
+          useStore
+            .getState()
+            .setCanvas({ id: value.canvasId, name: 'Canvas', frames: [value], createdAt: 1, updatedAt: 1 })
+          useStore.getState().pickElement({ frameId: value.id, selector: '#piece' })
+        }
+        select(source)
+        const values = await computedStyles('frame', '#piece', ['background-image'])
+        const copied = await copyProperties()
+        const retained = localStorage.getItem('doop:style-clip')
+        const destinationHtml =
+          '<style>@font-face{font-family:Private;src:url(/a/existing.woff2)}</style><div id="piece" style="width:99px">Destination</div>'
+        await reply('doop:html-result', () =>
+          frame.contentWindow.postMessage(
+            { type: 'doop:html', reqId: 712, html: destinationHtml, replacements: [], privateMedia: false },
+            '*',
+          ),
+        )
+        select({ ...source, canvasId: 'destination', html: destinationHtml, updatedAt: 11 })
+        const calls = [],
+          updates = []
+        api.copyResources = async (canvasId, entries) => {
+          calls.push({ canvasId, entries })
+          return {
+            canvasId,
+            assets: [],
+            entries: entries.map((entry) => ({
+              html: entry.html.replaceAll('/a/source.png', '/a/owned.png'),
+              css: entry.css.replaceAll('/a/source.woff2', '/a/owned.woff2'),
+            })),
+          }
+        }
+        api.updateFrame = async (id, patch) => {
+          updates.push(patch)
+          return { ...source, ...patch, id }
+        }
+        const pasted = await pasteProperties()
+        const html = useStore.getState().canvas.frames[0].html
+        frame.remove()
+        return { values, copied, retained, pasted, calls, updates, html }
+      }
+    </script>
+  </body>
+</html>

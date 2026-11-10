@@ -118,6 +118,17 @@ export function useAgentCatalogs(
  * "Prolite". Known slugs get their real product name; anything new falls back
  * to title case so an unreleased tier still reads sensibly.
  */
+/* the key kinds' connect calls; ChatGPT signs in instead */
+const KEY_CONNECTS: Partial<Record<ModelAccountKind, (apiKey: string) => Promise<ModelAccounts>>> = {
+  'openai-key': api.connectOpenAiKey,
+  'anthropic-key': api.connectAnthropicKey,
+  'openrouter-key': api.connectOpenRouterKey,
+  'gemini-key': api.connectGeminiKey,
+  'deepseek-key': api.connectDeepSeekKey,
+  'kimi-key': api.connectKimiKey,
+  'kimi-code': api.connectKimiCodeKey,
+}
+
 const PLAN_NAMES: Record<string, string> = {
   free: 'Free',
   go: 'Go',
@@ -320,14 +331,7 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
 
   const saveKey = () => {
     const kind = showKey || 'openai-key'
-    const connect =
-      kind === 'anthropic-key'
-        ? api.connectAnthropicKey
-        : kind === 'openrouter-key'
-          ? api.connectOpenRouterKey
-          : kind === 'gemini-key'
-            ? api.connectGeminiKey
-            : api.connectOpenAiKey
+    const connect = KEY_CONNECTS[kind] ?? api.connectOpenAiKey
     return act(
       kind,
       () => connect(apiKey),
@@ -728,6 +732,27 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
       short: t('models.geminiKeyShort'),
       mark: <AppIcon brand="gemini" />,
       placeholder: 'AIza…',
+    }),
+    keyRow({
+      kind: 'deepseek-key',
+      title: t('models.deepseekKeyTitle'),
+      short: t('models.deepseekKeyShort'),
+      mark: <AppIcon brand="deepseek" />,
+      placeholder: 'sk-…',
+    }),
+    keyRow({
+      kind: 'kimi-key',
+      title: t('models.kimiKeyTitle'),
+      short: t('models.kimiKeyShort'),
+      mark: <AppIcon brand="kimi" />,
+      placeholder: 'sk-…',
+    }),
+    keyRow({
+      kind: 'kimi-code',
+      title: t('models.kimiCodeTitle'),
+      short: t('models.kimiCodeShort'),
+      mark: <AppIcon brand="kimi" />,
+      placeholder: t('models.kimiCodePlaceholder'),
     }),
     /* the Plan's row decides for itself whether it is a row or a card; the
        pane only needs to know which part it belongs in */

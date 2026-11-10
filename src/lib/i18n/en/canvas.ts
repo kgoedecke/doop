@@ -9,6 +9,7 @@ export const canvas = {
   toolPath: 'Vector path',
   toolText: 'Text',
   toolComment: 'Comment',
+  toolZoom: 'Zoom',
 
   /* top bar */
   untitled: 'Untitled',
@@ -82,8 +83,8 @@ export const canvas = {
   contactSupport: 'Contact support',
   youAre: 'You are “{name}” — click to change your name',
   changeDisplayName: 'Change your display name',
-  agents: 'Agents · ⌘K to ask the Doop Agent',
-  agentsWorking: 'Agents · {working} working · ⌘K to ask the Doop Agent',
+  agents: 'Agents · ⌘/ to ask the Doop Agent',
+  agentsWorking: 'Agents · {working} working · ⌘/ to ask the Doop Agent',
   comments: 'Comments',
   commentsOpen: 'Comments · {open} open',
   activity: 'Activity',
@@ -108,6 +109,12 @@ export const canvas = {
   zoomTo: 'Zoom to {percent}%',
   showRulers: 'Show rulers',
   hideRulers: 'Hide rulers',
+  showPixelGrid: 'Show pixel grid',
+  hidePixelGrid: 'Hide pixel grid',
+  showCursors: 'Show multiplayer cursors',
+  hideCursors: 'Hide multiplayer cursors',
+  showComments: 'Show comments',
+  hideComments: 'Hide comments',
 
   /* onboarding */
   gettingStarted: 'Getting started',

@@ -33,7 +33,11 @@ White system (Doop UI v2, canvas guideline `doop-ui-system`): neutral greys, no 
   aliases). `--font-mono`: `'Geist Mono', ui-monospace, monospace` - values only (ids, sizes,
   numbers, key caps, code); the mono-uppercase caption voice is retired, captions and field labels
   are `text-caption` / `text-label` in sentence case. `--font-hero`: `'Hanken Grotesk'` Light - the
-  home greeting, and nothing else (loaded in `index.html`). There is no
+  home greeting, and nothing else (loaded in `index.html`). Every font stack lists `'Doop Keys'`
+  after its face: a 5 KB cut of the full Inter, inlined in `src/styles.css`, carrying only
+  the key symbols (⌘ ⌥ ⇧ ⌃ ⌫ ↩ ⇥ ⎋, arrows) the Google Fonts builds of Inter and Geist Mono drop, so
+  shortcut hints never fall back to the OS font's undersized glyphs. A new symbol in a hint goes
+  into its `unicode-range` and the subset (rebuild steps in `src/styles.css`). There is no
   serif: Instrument Serif was retired, and page-level headings outside the dashboard (sign-in,
   not-found, the desktop handoff) use `DashTitle` like every other page title.
 - **The scale** is named by role, as `--text-*` tokens in `src/styles.css` (each carries its line
@@ -182,10 +186,11 @@ density="rail"` (the group caption with its chevron) and `DashNavItem density="r
   component under the canvas chrome's name. `AvatarStack` (the first `max` people plus a "+N"
   disc), `tone="ink"` (the account's own face: initials on an ink disc, no collar), `initials()`
   (the one first-and-last-letter rule), `BrandMark` - every third-party logo (`<BrandMark brand="figma" size={16} />`; figma, github,
-  canva, photoshop, meta, claude, openai, cursor, gemini, google, apple, microsoft, slack, linear, openrouter);
+  canva, photoshop, meta, claude, openai, cursor, gemini, google, apple, microsoft, slack, linear, openrouter,
+  deepseek, kimi);
   `AppIcon` is a model provider, import source or export format as doop.design's "Works with" row draws it:
   the brand tile (23% corners, inset edge and soft drop) with its glyph at 56% (`claude`, `claude-code`, `openai`,
-  `gemini`, `openrouter`, `seedream`, `codex`, `cursor`, `mcp`, `headless`, `github`, `figma`, `photoshop`, `canva`, `website`, `live-app`, `pdf`, `png`,
+  `gemini`, `openrouter`, `deepseek`, `kimi`, `seedream`, `codex`, `cursor`, `mcp`, `headless`, `github`, `figma`, `photoshop`, `canva`, `website`, `live-app`, `pdf`, `png`, `svg`,
   `jpg`), 32px in a list row and 40px beside a modal title,
   `Wordmark`, `Logo` / `DoopMark` (the bare Disc-D; `animated` hops its dot, as the home greeting
   wears it), `icons.tsx` - identity. Feature tiles (`FigmaTile`, `MetaTile`, the integrations'

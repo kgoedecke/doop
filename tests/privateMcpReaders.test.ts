@@ -143,3 +143,60 @@ it('async private metadata failures expose neither driver SQL nor already-read f
   expect(JSON.stringify(response)).not.toContain('secret-synthetic-marker')
   expect(JSON.stringify(response)).not.toContain(family)
 })
+
+it('rejects a foreign tool target before lazy loading its private canvas', async () => {
+  const existing = store.getCanvas('mcp-read-canvas')!
+  store.init([
+    {
+      ...existing,
+      id: 'foreign-lazy-canvas',
+      ownerId: 'another-owner',
+      frames: existing.frames.map((frame) => ({ ...frame, id: 'foreign-lazy-frame', canvasId: 'foreign-lazy-canvas' })),
+    },
+  ])
+  const load = vi.spyOn(store, 'load')
+  try {
+    await connected(reader, async (client) => {
+      for (const call of [
+        { name: 'get_canvas', arguments: { canvas_id: 'foreign-lazy-canvas' } },
+        { name: 'get_frame', arguments: { frame_id: 'foreign-lazy-frame' } },
+      ]) {
+        const result = await client.callTool(call)
+        expect(result.isError).toBe(true)
+        expect(JSON.stringify(result)).not.toContain('<p>frame</p>')
+      }
+    })
+    expect(load).not.toHaveBeenCalled()
+  } finally {
+    load.mockRestore()
+  }
+})
+
+it('rechecks tool-target authority after lazy loading and releases its hold on refusal', async () => {
+  let release!: () => void
+  const wait = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  const original = store.load.bind(store)
+  const canvas = store.getCanvas('mcp-read-canvas')!
+  const load = vi.spyOn(store, 'load').mockImplementation(async (id) => {
+    await wait
+    return original(id)
+  })
+  try {
+    await connected(reader, async (client) => {
+      const pending = client.callTool({ name: 'get_frame', arguments: { frame_id: 'mcp-read-frame' } })
+      await vi.waitFor(() => expect(load).toHaveBeenCalled())
+      canvas.ownerId = 'revoked-owner'
+      release()
+      const result = await pending
+      expect(result.isError).toBe(true)
+      expect(JSON.stringify(result)).not.toContain('<p>frame</p>')
+      expect(store.stats().held).toBe(0)
+    })
+  } finally {
+    release()
+    canvas.ownerId = actorId
+    load.mockRestore()
+  }
+})

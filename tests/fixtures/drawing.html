@@ -21,6 +21,9 @@
       import { TooltipProvider } from '/src/components/ui/tooltip.tsx'
       import { importSvgInBrowser } from '/src/lib/svgImport.ts'
       import '/src/styles.css'
+      import { installActionKeys } from '/tests/fixtures/actionKeys.ts'
+      /* the canvas page dispatches the registry's chords (⇧C among them) */
+      installActionKeys()
       window.drawingHarness = {
         seed: (canvas) => useStore.getState().setCanvas(canvas),
         comments: (comments) => useStore.getState().setComments(comments),

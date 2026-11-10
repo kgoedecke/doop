@@ -1,6 +1,9 @@
 # Builds the distributable desktop installers: a universal macOS DMG (Apple
 # Silicon + Intel), a Windows NSIS setup .exe and x64 Linux packages
-# (AppImage, .deb, .rpm).
+# (AppImage, .deb, .rpm). The macOS app is the Chromium build
+# (desktop/src-tauri-chromium, Tauri 3's CEF runtime) under the same name and
+# bundle id as the WebKit build it replaced, so installed WebKit apps update
+# into it; Windows and Linux stay on the WebKit build (desktop/src-tauri).
 # - Tag `desktop-v*` → builds all three, then one release job attaches them to
 #   a GitHub Release. The release is only created once every build succeeded,
 #   so a tag never ends up published with an installer missing.
@@ -44,6 +47,10 @@ jobs:
       - uses: ./.github/actions/setup-desktop
         with:
           targets: aarch64-apple-darwin,x86_64-apple-darwin
+          workspace: desktop/src-tauri-chromium
+      # macos-universal.sh packs the DMG with create-dmg (the Tauri CLI's own
+      # DMG step only sees one architecture's app)
+      - run: brew install create-dmg
       - name: Build DMG (signed + notarized when APPLE_* secrets are set)
         working-directory: desktop
         env:
@@ -64,19 +71,20 @@ jobs:
           if [ -z "${APPLE_SIGNING_IDENTITY:-}" ]; then
             echo "::warning::APPLE_* secrets not set — building an UNSIGNED dmg (System Settings → Open Anyway required)"
           fi
-          updater=$(bash scripts/updater-config.sh)
-          bunx tauri build --target universal-apple-darwin --bundles app,dmg --config "$updater"
+          # one app per architecture, merged into a universal one, signed,
+          # notarized, packed (the Tauri 3 CLI cannot bundle CEF universal)
+          bash scripts/macos-universal.sh
       - uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1 # v4.6.1
         with:
           name: doop-dmg
-          path: desktop/src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg
+          path: desktop/src-tauri-chromium/target/universal-apple-darwin/release/bundle/dmg/*.dmg
           if-no-files-found: error
       - uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1 # v4.6.1
         with:
           name: doop-macos-update
           path: |
-            desktop/src-tauri/target/universal-apple-darwin/release/bundle/macos/*.app.tar.gz
-            desktop/src-tauri/target/universal-apple-darwin/release/bundle/macos/*.app.tar.gz.sig
+            desktop/src-tauri-chromium/target/universal-apple-darwin/release/bundle/macos/*.app.tar.gz
+            desktop/src-tauri-chromium/target/universal-apple-darwin/release/bundle/macos/*.app.tar.gz.sig
           if-no-files-found: ignore
 
   nsis-windows:

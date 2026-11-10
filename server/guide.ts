@@ -4,6 +4,7 @@
  */
 
 import { AGENT_ROLES } from '../shared/agents.ts'
+import { MAX_DECISION_CHARS } from '../shared/designDecisions.ts'
 
 export const GUIDE_TOPICS = ['doop-instructions'] as const
 
@@ -63,8 +64,11 @@ brief. It is part of the deliverable, not private scratch work:
    why it won — or state that none fit and the brief derives from the design-quality
    principles alone.
 3. **Post it.** Summarize in set_status ("Designing grocery landing — candlelit mood,
-   after Oatside") and persist the full brief with save_decision so humans and later
-   agents see what you committed to.
+   after Oatside") and persist the brief as separate save_decision calls so humans
+   and later agents see what you committed to. Each call holds one decision and its
+   rationale, at most ${MAX_DECISION_CHARS} characters. Split by topic (exemplar, palette, typography,
+   layout), keeping the reason for each choice with that choice; do not split sentences
+   into arbitrary chunks or discard rationale to squeeze the whole brief into one call.
 
 Skip the brief only when the canvas already dictates the style — established frames,
 style guides or pinned references — or when the human handed you a complete design
@@ -234,8 +238,11 @@ Viewers watch designs assemble live. Stream with append_frame_html:
 - Pages: a canvas is a set of pages, each its own board, listed by get_canvas with every
   frame's pageId. Put one screen in a frame and a body of work on a page: a second product
   surface, a platform (web vs. mobile), a round of explorations. create_canvas_page adds one
-  and returns its id for create_frame's pageId; get_canvas with page_id reads one page; a
-  frame moves between pages with update_frame; set_canvas_pages renames, reorders or deletes.
+  and returns its id for create_frame's pageId; get_canvas with page_id reads one page;
+  set_canvas_pages renames, reorders or deletes pages.
+- Rearranging: update_frame is one call for a frame's name, x/y, size, lock, or its page
+  (pageId; it keeps its x/y unless you pass new ones). Move a frame with it; never recreate
+  or copy a frame's HTML to move it, which loses its comments, versions and approval.
 
 ## GitHub-imported frames — the repo is the source of truth
 
@@ -334,9 +341,11 @@ any public image URL. Source images in this order:
 - **When to use them.** Enumerated content — feature cards, step lists, capability
   grids, value rows — needs a visual anchor per item: an icon (search_icons), a big
   number, or a mono label. Naked text lists read as drafts. Pick ONE anchor style per
-  section and never use emoji as icons. Logos: always real marks from search_logos —
-  integrations, platforms, payment methods, and the customer walls and testimonial
-  cards too. Pick real brands the product's audience would recognize; invented quotes
+  section and never use emoji or Unicode symbols (✕ □ ▸ ⟶ ↗) as icons: they draw from
+  whatever fonts the viewer has, so they show up as empty boxes or colour emoji in
+  screenshots and exports — use search_icons or an inline SVG. Logos: always real marks
+  from search_logos — integrations, platforms, payment methods, and the customer walls
+  and testimonial cards too. Pick real brands the product's audience would recognize; invented quotes
   can sit beside a real company mark, but a placeholder mark is never acceptable.
 - **Nothing fits — draw it.** Inline SVG or pure CSS (gradients, patterns, shapes) in
   the frame. Never ship a gray "image goes here" box, and never guess an image URL
@@ -373,7 +382,9 @@ Memory also learns from feedback. Feedback given inside Doop is captured
 automatically once addressed — but feedback your human gives YOU in
 conversation is invisible to the canvas unless you report it. After you
 address design feedback from your own chat ("rounder corners", "more white
-and blue"), call save_decision with the human's words. Design taste only —
+and blue"), call save_decision with the human's words. Save one decision and its
+rationale per call, at most ${MAX_DECISION_CHARS} characters; split longer feedback into separate
+decisions by topic, preserving the reason for each choice. Design taste only —
 never one-off content edits like typos or copy tweaks.
 
 ## Redesigns — audit first, then two drafts
@@ -459,4 +470,19 @@ publication needs a separate authorized mechanism.
   counts as being asked).
 - Put new work in new frames beside existing ones; omit x/y to auto-place.
 - Keep the SAME agent_name for your whole session. It is your identity in the room.
+
+## Problems with Doop itself — report_issue and share_feedback
+
+Two tools reach the Doop team, never the humans on the canvas, and change no canvas:
+
+- report_issue — Doop got in your way: a tool errored or did something other than its
+  description says, this guide or a tool description left you guessing, a capability you
+  needed was missing, or you had to invent a workaround. Call it after a retry fails, when
+  you fall back to a workaround, or when you give up on part of a task, then carry on.
+  Say what you tried (tool and arguments in brief), what happened and what you expected.
+- share_feedback — what would make Doop better for agents (a tool you wish existed, a
+  result field that would have saved calls, a clumsy workflow) or something that worked
+  well and should stay.
+
+Never include secrets. A human's design feedback is not this: record that with save_decision.
 `

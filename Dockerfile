@@ -29,7 +29,7 @@ RUN node -e "const fs=require('node:fs');fs.mkdirSync('/etc/ssl/certs',{recursiv
     'deb [check-valid-until=no] https://snapshot.debian.org/archive/debian-security/20261106T000000Z bookworm-security main' \
     > /etc/apt/sources.list \
   && apt-get update \
-  && apt-get install -y --no-install-recommends ca-certificates chromium chromium-sandbox fonts-liberation fonts-noto-color-emoji \
+  && apt-get install -y --no-install-recommends ca-certificates chromium chromium-sandbox fonts-liberation fonts-dejavu-core=2.37-6 fonts-noto-color-emoji \
   && rm -rf /var/lib/apt/lists/* \
   && mkdir -p /app/data \
   && chown node:node /app/data
@@ -44,7 +44,7 @@ ARG DOOP_SOURCE_FINGERPRINT
 RUN test "${#DOOP_SOURCE_FINGERPRINT}" -eq 64 \
   && case "$DOOP_SOURCE_FINGERPRINT" in *[!0-9a-f]*) exit 1;; esac
 LABEL org.opencontainers.image.source="https://github.com/kgoedecke/doop" \
-  org.opencontainers.image.revision="01584b34f6cadcf21767127280cc6e320a6d748a" \
+  org.opencontainers.image.revision="8b08ca2cbe5c7510b2cfa9f01475227441580476" \
   io.openbot.doop.source-fingerprint="$DOOP_SOURCE_FINGERPRINT"
 
 ENV NODE_ENV=production CHROME_PATH=/usr/bin/chromium CHROME_NO_SANDBOX=false \

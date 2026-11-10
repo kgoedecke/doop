@@ -5,7 +5,7 @@ import { posthog } from '../lib/posthog'
 import { useMe } from '../lib/me'
 import { isDesktopShell } from '../lib/shell'
 import { isTheme, useTheme } from '../lib/theme'
-import { LOCALES, LOCALE_NAMES, isLocale, useLocale, useT } from '../lib/i18n'
+import { useT } from '../lib/i18n'
 import { colorFor } from '../../shared/types'
 import { avatarUrl } from '../../shared/avatar'
 import { themeOptions } from './ThemePicker'
@@ -44,7 +44,6 @@ export function AccountMenu({
   const { data: session } = authClient.useSession()
   const me = useMe(session?.user.id)
   const { theme, setTheme } = useTheme()
-  const { locale, setLocale } = useLocale()
   const t = useT()
   const name = session?.user.name ?? ''
   const image = avatarUrl(session?.user.image)
@@ -144,17 +143,6 @@ export function AccountMenu({
           {themeOptions.map(({ value, label, Icon }) => (
             <DropdownMenuRadioItem key={value} value={value} onSelect={(e) => e.preventDefault()}>
               <Icon size="rail" /> {t(label)}
-            </DropdownMenuRadioItem>
-          ))}
-        </DropdownMenuRadioGroup>
-        <DropdownMenuSeparator />
-        {/* the language sits beside the theme for the same reason, each named
-            in itself so someone who cannot read the current one finds theirs */}
-        <DropdownMenuCaption>{t('shell.language')}</DropdownMenuCaption>
-        <DropdownMenuRadioGroup value={locale} onValueChange={(next) => isLocale(next) && setLocale(next)}>
-          {LOCALES.map((value) => (
-            <DropdownMenuRadioItem key={value} value={value} lang={value} onSelect={(e) => e.preventDefault()}>
-              {LOCALE_NAMES[value]}
             </DropdownMenuRadioItem>
           ))}
         </DropdownMenuRadioGroup>

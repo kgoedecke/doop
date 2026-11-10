@@ -1,13 +1,16 @@
 {
   "name": "doop-desktop",
   "private": true,
-  "version": "0.12.0",
+  "version": "0.13.0",
   "scripts": {
     "tauri": "tauri",
     "dev": "tauri dev",
-    "build": "tauri build"
+    "build": "tauri build",
+    "dev:chromium": "cd src-tauri-chromium && bunx @tauri-apps/cli@3.0.0-alpha.5 dev",
+    "build:chromium": "cd src-tauri-chromium && bunx @tauri-apps/cli@3.0.0-alpha.5 build"
   },
   "devDependencies": {
+    "@electron/universal": "3.0.6",
     "@tauri-apps/cli": "^2.9.0"
   }
 }

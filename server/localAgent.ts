@@ -94,11 +94,22 @@ export async function handleLocalAgentMcp(req: Request, res: Response) {
   const token = req.headers.authorization?.replace(/^Bearer /, '') ?? ''
   const id = req.params.id ?? ''
   const run = localAgentRuns.authorized(id, token)
-  const canvas = run && store.getCanvas(run.request.canvasId)
-  if (!run || !canvas || !canEditCanvas(run.userId, canvas) || (await isBanned(run.userId))) {
+  const initial = run && store.getCanvas(run.request.canvasId)
+  if (!run || !initial || !canEditCanvas(run.userId, initial) || (await isBanned(run.userId))) {
     res.status(403).json({ error: 'Local run unavailable' })
     return
   }
+  const canvas = await store.load(run.request.canvasId)
+  if (
+    !canvas ||
+    localAgentRuns.authorized(id, token) !== run ||
+    !canEditCanvas(run.userId, canvas) ||
+    (await isBanned(run.userId))
+  ) {
+    res.status(403).json({ error: 'Local run unavailable' })
+    return
+  }
+  if (res.destroyed) return
   if (req.method !== 'POST') {
     res.status(405).end()
     return

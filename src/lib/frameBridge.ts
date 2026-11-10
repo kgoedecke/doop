@@ -13,6 +13,8 @@ export interface LayoutDrop {
   styles: FlowPlacement
   container: ElementInfo['rect']
   line: ElementInfo['rect']
+  /** the drop leaves the element's parent: only then is the container marked */
+  reparent?: boolean
 }
 
 export async function elementMoveTarget(frameId: string, selector: string, x: number, y: number) {
@@ -55,6 +57,9 @@ export interface ElementInfo {
   }
   /** rendered box over layout box: the element's own and inherited scale */
   scale: { x: number; y: number }
+  /** the rendered box before the element's own turn, which `rect` (its
+   *  bounds) grows past; the selection furniture is drawn on this box */
+  box?: { width: number; height: number }
   position: string
   display: string
   flexDirection: string
@@ -139,6 +144,8 @@ interface PendingAsk {
 const REPLY_TIMEOUT_MS = 2000
 
 const windows = new Map<string, Window>()
+/* ⌘Y outline mode, which a frame mounted later picks up when it registers */
+let outlines = false
 const changeListeners = new Map<string, Set<() => void>>()
 const selectionListeners = new Map<string, Set<() => void>>()
 const pending = new Map<number, PendingAsk>()
@@ -169,6 +176,7 @@ function listen() {
 
 export function registerFrameWindow(frameId: string, win: Window) {
   windows.set(frameId, win)
+  if (outlines) win.postMessage({ type: 'doop:outlines', on: true }, '*')
   changeListeners.get(frameId)?.forEach((cb) => cb())
 }
 
@@ -344,4 +352,25 @@ export async function formatElementText(
 ): Promise<string[] | null> {
   const reply = await requestFrame(frameId, 'doop:text-format', { selectors, command })
   return Array.isArray(reply?.selectors) ? (reply.selectors as string[]) : null
+}
+
+/** The element's computed values for `properties`, or null when the selector
+ *  no longer resolves or the frame is not mounted. */
+export async function computedStyles(
+  frameId: string,
+  selector: string,
+  properties: readonly string[],
+): Promise<Record<string, string> | null> {
+  const reply = await requestFrame(frameId, 'doop:computed', { selector, properties: [...properties] })
+  return reply && reply.values && typeof reply.values === 'object' ? (reply.values as Record<string, string>) : null
+}
+
+/** ⌘Y: draw every mounted frame (and any frame mounted later, through
+ *  `outlinesOn`) as outlines. Nothing is saved. */
+export function setOutlines(on: boolean) {
+  outlines = on
+  for (const win of windows.values()) win.postMessage({ type: 'doop:outlines', on }, '*')
+}
+export function outlinesOn() {
+  return outlines
 }

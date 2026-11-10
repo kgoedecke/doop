@@ -143,6 +143,7 @@ describe('explicit cross-canvas frame clipboard', () => {
         }),
     )
     clipboard.pasteFrameCentered('c1')
+    await vi.waitFor(() => expect(release).toBeTypeOf('function'))
     useStore.getState().setCanvas({
       id: 'next',
       name: 'Next',
@@ -240,5 +241,57 @@ describe('multi-frame copy and paste', () => {
     expect(api.createFrame.mock.calls[0]![1]).toMatchObject({ name: 'a copy', x: 140, y: 140 })
     expect(api.createFrame.mock.calls[1]![1]).toMatchObject({ name: 'b copy', x: 340, y: 190 })
     expect(useStore.getState().selectedIds).toEqual(['new1', 'new2'])
+  })
+})
+
+describe('private resources in the new frame replacement action', () => {
+  function prepareReplacement() {
+    clipboard.copyFrames([{ ...frame('replacement-source'), html: '<img src="/a/source.png">', updatedAt: 7 }])
+    const target = { ...frame('replacement-target'), canvasId: 'destination' }
+    useStore
+      .getState()
+      .setCanvas({ id: 'destination', name: 'Destination', frames: [target], createdAt: 1, updatedAt: 1 })
+    return target
+  }
+
+  it('uses the authorized destination-owned resource carrier before creating a cross-canvas replacement', async () => {
+    const target = prepareReplacement()
+    expect(clipboard.replaceFramesWithClip('destination', [target])).toBe(true)
+    await vi.waitFor(() => expect(api.createFrame).toHaveBeenCalledTimes(1))
+    expect(api.copyResources).toHaveBeenCalledExactlyOnceWith('destination', [
+      { sourceFrameId: 'replacement-source', sourceVersion: 7, html: '<img src="/a/source.png">' },
+    ])
+    expect(api.createFrame.mock.calls[0]![0]).toBe('destination')
+    expect(api.createFrame.mock.calls[0]![1].html).toBe('<img src="/a/owned.png">')
+    await flush()
+  })
+
+  it('preserves the target when its copied source is no longer available', async () => {
+    const target = prepareReplacement()
+    api.copyResources.mockRejectedValueOnce(new Error('Source access was removed'))
+    expect(clipboard.replaceFramesWithClip('destination', [target])).toBe(true)
+    await vi.waitFor(() => expect(useStore.getState().notice?.text).toBe('Source access was removed'))
+    expect(api.createFrame).not.toHaveBeenCalled()
+    expect(api.deleteFrame).not.toHaveBeenCalled()
+    expect(useStore.getState().canvas?.frames).toEqual([target])
+  })
+
+  it('does not create or remove frames after navigation while the private copy is pending', async () => {
+    const target = prepareReplacement()
+    let release!: (value: Awaited<ReturnType<typeof api.copyResources>>) => void
+    api.copyResources.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          release = resolve
+        }),
+    )
+    expect(clipboard.replaceFramesWithClip('destination', [target])).toBe(true)
+    await vi.waitFor(() => expect(release).toBeTypeOf('function'))
+    useStore.getState().setCanvas({ id: 'next', name: 'Next', frames: [], createdAt: 1, updatedAt: 1 })
+    release({ canvasId: 'destination', entries: [{ html: '<img src="/a/owned.png">' }], assets: [] })
+    await flush()
+    expect(api.createFrame).not.toHaveBeenCalled()
+    expect(api.deleteFrame).not.toHaveBeenCalled()
+    expect(useStore.getState().canvas?.id).toBe('next')
   })
 })

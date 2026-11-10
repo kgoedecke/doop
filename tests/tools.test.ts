@@ -29,6 +29,12 @@ describe('resolvePointerAction', () => {
     expect(resolvePointerAction(mouse({ tool: 'hand', target: 'frame' }))).toBe('pan')
   })
 
+  it('Zoom: zooms wherever the press lands, frames included', () => {
+    expect(resolvePointerAction(mouse({ tool: 'zoom', target: 'background' }))).toBe('zoom')
+    expect(resolvePointerAction(mouse({ tool: 'zoom', target: 'frame' }))).toBe('zoom')
+    expect(resolvePointerAction(mouse({ tool: 'zoom', target: 'background', pointerType: 'touch' }))).toBe('zoom')
+  })
+
   it('Comment: a press on a frame starts an element comment, one on the background a canvas comment', () => {
     expect(resolvePointerAction(mouse({ tool: 'comment', target: 'frame' }))).toBe('comment')
     expect(resolvePointerAction(mouse({ tool: 'comment', target: 'background' }))).toBe('comment-canvas')
@@ -76,6 +82,7 @@ describe('toolForKey', () => {
     expect(toolForKey('v')).toBe('select')
     expect(toolForKey('H')).toBe('hand')
     expect(toolForKey('c')).toBe('comment')
+    expect(toolForKey('z')).toBe('zoom')
   })
 
   it('knows nothing about other keys', () => {

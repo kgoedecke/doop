@@ -14,11 +14,11 @@ import { posthog } from './posthog'
  *  remote actors' work is never undone from here. */
 
 type Patch = Partial<
-  Pick<Frame, 'name' | 'pageId' | 'html' | 'x' | 'y' | 'width' | 'height' | 'hidden' | 'locked' | 'z'>
+  Pick<Frame, 'name' | 'pageId' | 'html' | 'x' | 'y' | 'width' | 'height' | 'hidden' | 'locked' | 'z' | 'rotation'>
 >
 type Snapshot = Pick<
   Frame,
-  'canvasId' | 'pageId' | 'name' | 'html' | 'x' | 'y' | 'width' | 'height' | 'hidden' | 'locked' | 'z'
+  'canvasId' | 'pageId' | 'name' | 'html' | 'x' | 'y' | 'width' | 'height' | 'hidden' | 'locked' | 'z' | 'rotation'
 >
 
 type Entry =
@@ -111,6 +111,7 @@ function snapshot(f: Frame): Snapshot {
     /* a hidden or locked frame comes back as it was when its deletion is undone */
     hidden: f.hidden,
     locked: f.locked,
+    rotation: f.rotation,
     /* and back to its place in the stack */
     z: stackOf(f),
   }
@@ -438,6 +439,37 @@ export function recordCreates(frames: Frame[]) {
   push(entries.length === 1 && first ? first : { type: 'group', entries })
 }
 
+/** Paste to replace, as one undo step: the replacements, already created,
+ *  then the targets, deleted now, as a single transfer. A transfer runs its
+ *  members in turn and stops where one fails, keeping the rest on the stack
+ *  to retry, so undo brings every original back before it removes any
+ *  replacement, however many frames were replaced. `leftovers` are copies
+ *  that replace nothing (a failed replacement could not take them back, or
+ *  their target was deleted meanwhile): undo removes them last. Each target
+ *  goes only as it was checked: one edited since is refused by the server
+ *  and stays, and the step then has no copy of it to bring back. */
+export function replaceFramesTracked(replacements: { target: Frame; created: Frame[] }[], leftovers: Frame[] = []) {
+  const created = [...leftovers, ...replacements.flatMap((r) => r.created)]
+  const removed = replacements.map((r) => r.target)
+  const first = removed[0] ?? created[0]
+  if (!first) return
+  const entry: Entry & { type: 'transfer' } = {
+    type: 'transfer',
+    canvasId: first.canvasId,
+    entries: [
+      ...created.map((f): Entry => ({ type: 'create', frameId: f.id, snapshot: snapshot(f) })),
+      ...removed.map((f): Entry => ({ type: 'delete', frameId: f.id, snapshot: snapshot(f) })),
+    ],
+  }
+  push(entry)
+  for (const f of removed) {
+    api.deleteFrame(f.id, f.updatedAt).catch((err: unknown) => {
+      console.error(err)
+      entry.entries = entry.entries.filter((e) => e.type !== 'delete' || e.frameId !== f.id)
+    })
+  }
+}
+
 /** Delete a frame through the API, remembering enough to bring it back. */
 export function deleteFrameTracked(frame: Frame) {
   deleteFramesTracked([frame])
@@ -619,6 +651,9 @@ async function apply(e: Entry, direction: 'undo' | 'redo'): Promise<Entry | null
     )
   } else if (e.type === 'update') {
     const patch = { ...(forward ? e.after : e.before) }
+    /* a frame that was straight has no rotation to go back to: JSON drops
+       an undefined field, so the server is told 0 to clear the turn */
+    if ('rotation' in patch && patch.rotation === undefined) patch.rotation = 0
     const canvas = useStore.getState().canvas
     if (patch.pageId !== undefined && canvas) {
       const pages = canvasPages(canvas)
