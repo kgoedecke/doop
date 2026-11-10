@@ -752,9 +752,12 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   with `NODE_ENV=production`) into a temp directory and served by `vite preview`; there is no dev
   server and no live-reload client. A file calls `pagePerTest()` for a page per test in its own
   context (focus emulated, 30s navigation bound) and `fixtureUrl()` for its page. A fixture
-  exposes what a test needs on `window`; a test cannot import `/src/...` from the page. A test that
-  puts the app in front of a real backend starts its own server over the same build with
-  `serveBuilt(proxy)`.
+  exposes what a test needs on `window`; a test cannot import `/src/...` from the page. A test of
+  what the canvas page itself does mounts the real `CanvasPage` with no backend
+  (`tests/canvasPageFixture.ts`: the room's socket stubbed, the session and API answered by the
+  test). Only a test about what the server does starts one, and serves the same build in front of
+  it with `serveBuilt(proxy)`: `pageControlsBrowser.test.ts`, whose subject is the room's broadcasts
+  racing the HTTP responses and undo against the stored pages.
 - CI runs the browser tests on the Chrome for Testing build named in `.chrome-version`, installed
   by the `test` job and passed as `CHROME_PATH`, so a runner image update cannot change the
   browser without a commit. `bun run test:linux [vitest args]` (`scripts/test-linux.sh`,
