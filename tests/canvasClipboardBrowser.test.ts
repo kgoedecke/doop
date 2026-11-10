@@ -203,6 +203,10 @@ describe.skipIf(!findBrowserPath() || !CLIPBOARD_IS_RELIABLE)('canvas clipboard 
     await copyImage()
     await chord('v')
     await expect.poll(() => uploads).toBe(1)
+    /* the picture lands as a frame of its own once it has uploaded. The test
+       waits for that request: left in flight, it arrived during the next
+       test, after `created` was emptied, and was counted as that test's */
+    await expect.poll(() => created.length).toBe(1)
     expect(await count('section')).toBe(1)
   })
 

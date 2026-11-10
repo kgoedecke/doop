@@ -34,11 +34,7 @@ declare global {
   }
 }
 
-/* a tab Chromium lost on a CI runner is not a failure of the canvas: the test
-   runs again there on a fresh page, and a real failure fails all three times */
-const RETRIES = process.env.CI ? 2 : 0
-
-describe.skipIf(!findBrowserPath())('drawing on the canvas', { timeout: 30_000, retry: RETRIES }, () => {
+describe.skipIf(!findBrowserPath())('drawing on the canvas', { timeout: 30_000 }, () => {
   let browser: TestBrowser
   let page: Page
   let saved: Frame[] = []
