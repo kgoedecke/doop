@@ -1766,6 +1766,8 @@ function prepareWrite(canvasId: string, frameId: string, html: string, priorHtml
   const prepared = prepareFrameHtml(canvas, frameId, html, by, priorHtml)
   if (prepared.issues.length) componentIssues.set(frameId, prepared.issues)
   else componentIssues.delete(frameId)
+  /* no new revision, so no propagation either: only "Go to main" needs to hear of it */
+  for (const def of prepared.moved) broadcastComponent(canvasId, def, resolveActor({ name: by, kind: 'user' }))
   /* faces after the components: an expanded <doop-use> may name a library family */
   return { ...prepared, html: withLibraryFaces(canvasId, prepared.html) }
 }

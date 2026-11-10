@@ -131,6 +131,7 @@ export function bumpRevision(def: ComponentDef, by: string): ComponentDef {
 
 function prepareMains(canvas: Canvas, frameId: string, html: string, by: string, ctx: EngineContext) {
   const changed: ComponentDef[] = []
+  const moved: ComponentDef[] = []
   const claimed = new Set<string>()
   const edits: { start: number; end: number; text: string }[] = []
   const sheet = () => frameStylesheets(html)
@@ -188,6 +189,7 @@ function prepareMains(canvas: Canvas, frameId: string, html: string, by: string,
     const saved = { ...next, template, css, rawCss, head, props, slots, mainFrameId: frameId }
     store.saveComponent(canvas.id, saved)
     if (!same) changed.push(saved)
+    else moved.push(saved)
   }
   /* a main this frame held and no longer does: the component lives on without one */
   for (const def of store.getComponents(canvas.id)) {
@@ -195,8 +197,9 @@ function prepareMains(canvas: Canvas, frameId: string, html: string, by: string,
     if (html.includes(`${COMPONENT_ATTR}="${def.id}"`)) continue
     const saved = { ...def, mainFrameId: null, updatedAt: Date.now(), updatedBy: by }
     store.saveComponent(canvas.id, saved)
+    moved.push(saved)
   }
-  return { html: edits.length ? splice(html, edits) : html, changed }
+  return { html: edits.length ? splice(html, edits) : html, changed, moved }
 }
 
 function prepareInstances(html: string, ctx: EngineContext) {
@@ -226,6 +229,8 @@ export interface PreparedHtml {
   issues: ComponentIssue[]
   /** components whose main changed in this write: their other instances need updating */
   changed: ComponentDef[]
+  /** components whose main only moved (here, or out of this frame): the room needs the new location */
+  moved: ComponentDef[]
 }
 
 export function prepareFrameHtml(
@@ -237,8 +242,8 @@ export function prepareFrameHtml(
 ): PreparedHtml {
   if (!touchesComponents(incoming)) {
     const lost = frameId && priorHtml.includes(`${COMPONENT_ATTR}="`)
-    if (lost) prepareMains(canvas, frameId, incoming, by, contextFor(canvas.id))
-    return { html: incoming, issues: removedInstanceIssues(priorHtml, incoming), changed: [] }
+    const moved = lost ? prepareMains(canvas, frameId, incoming, by, contextFor(canvas.id)).moved : []
+    return { html: incoming, issues: removedInstanceIssues(priorHtml, incoming), changed: [], moved }
   }
   const ctx = contextFor(canvas.id)
   try {
@@ -250,6 +255,7 @@ export function prepareFrameHtml(
       html,
       issues: dedupeIssues([...ctx.issues, ...removedInstanceIssues(priorHtml, html)]),
       changed: mains.changed,
+      moved: mains.moved,
     }
   } catch (error) {
     /* markup nested past the call stack: the write itself still has to land */
@@ -258,6 +264,7 @@ export function prepareFrameHtml(
       html: incoming,
       issues: [{ code: 'too_deep', message: 'this markup is nested too deeply for its components to be updated' }],
       changed: [],
+      moved: [],
     }
   }
 }
