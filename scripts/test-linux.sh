@@ -2,7 +2,7 @@
 # Run the test suite the way CI does: in a Linux container on two CPUs.
 #
 #   bun run test:linux                              the whole suite
-#   bun run test:linux tests/drawingBrowser.test.ts one file
+#   bun run test:linux tests/rulersBrowser.test.ts  one file
 #   bun run test:linux --shard=3/4                  one CI shard
 #
 # Browser tests that pass on a Mac and fail on CI usually fail here too, and

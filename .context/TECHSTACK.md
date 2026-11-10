@@ -628,9 +628,14 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   Path tool wears the nib, with a ring over the first anchor (close) and a square over one it
   already placed (`penCursor` from `useCanvasDrawing`, forced over frames by `Stage`); the editor
   shows a node badge on anchors, a dot badge on handles and the pen with + on the outline.
-- `tests/drawing.test.ts` covers geometry, serialization and persistence; `drawingBrowser.test.ts`
-  exercises the toolbar and gestures in Chromium, including Bézier paths, frame transfers,
-  cancellation, mobile input, and coexistence with canvas comment pins and reply fields.
+- `tests/drawing.test.ts` covers geometry, serialization and persistence. Four browser files
+  exercise the toolbar and gestures in Chromium on one shared page setup (`tests/drawingPage.ts`):
+  `drawingShapesBrowser.test.ts` (the tools, Bézier paths, text, mobile input),
+  `drawingMoveBrowser.test.ts` (dragging and copying layers, cancellation),
+  `drawingReorderBrowser.test.ts` (groups, reparenting, reordering, delayed hit-test replies) and
+  `drawingGeometryBrowser.test.ts` (transformed shapes, stacking, canvas comment pins and reply
+  fields). They are separate files so CI's shards can share them out: vitest assigns a file to a
+  shard by the hash of its path, and these four names land in four different shards.
   `tests/drawingMove.test.ts` covers transfer persistence, locks, failed saves and rollbacks,
   creation queued with transfers, and undo/redo. Browser regressions cover transformed shapes,
   stacking contexts, covered shapes, and delayed hit-test replies.
@@ -668,7 +673,7 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   `PATCH /api/comments/:id/anchor` (comment role; `CommentAnchorInput` in `shared/comments.ts`)
   re-anchors the root and its replies together and broadcasts each; a drop on the same anchor
   sends nothing, Esc mid-drag puts the pin back. Tests: `commentMove.test.ts`,
-  `canvasCommentsRoute.test.ts`, `elementIds.test.ts`, the drag case in `drawingBrowser.test.ts`.
+  `canvasCommentsRoute.test.ts`, `elementIds.test.ts`, the drag case in `drawingGeometryBrowser.test.ts`.
 - Prototypes (`.context/specs/prototyping.md`): interactions are `data-doop-on` /
   `data-doop-action` (or the JSON `data-doop-interactions`) attributes in frame HTML, parsed by
   `shared/prototype.ts`, whose parser the frame runtime inlines by source. `PrototypePlayer.tsx`
