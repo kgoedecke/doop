@@ -1,4 +1,5 @@
 import { nanoid } from 'nanoid'
+import { MAX_DECISION_CHARS } from '../shared/designDecisions.ts'
 import { MAX_PAGES, PageLimitError, store } from './store.ts'
 import * as persist from './db/persist.ts'
 import * as thumbs from './thumbs.ts'
@@ -2621,8 +2622,6 @@ export function setDecisionSummary(canvasId: string, id: string, summary: string
   persist.saveDecision(canvasId, decision)
   broadcast(canvasId, { type: 'decision', decision })
 }
-
-export const MAX_DECISION_CHARS = 500
 
 /** A connected agent reports a design decision its human made in conversation
  *  (the save_decision MCP tool) — the only party that hears that channel is

@@ -4,6 +4,7 @@
  */
 
 import { AGENT_ROLES } from '../shared/agents.ts'
+import { MAX_DECISION_CHARS } from '../shared/designDecisions.ts'
 
 export const GUIDE_TOPICS = ['doop-instructions'] as const
 
@@ -65,7 +66,7 @@ brief. It is part of the deliverable, not private scratch work:
 3. **Post it.** Summarize in set_status ("Designing grocery landing — candlelit mood,
    after Oatside") and persist the brief as separate save_decision calls so humans
    and later agents see what you committed to. Each call holds one decision and its
-   rationale, at most 500 characters. Split by topic (exemplar, palette, typography,
+   rationale, at most ${MAX_DECISION_CHARS} characters. Split by topic (exemplar, palette, typography,
    layout), keeping the reason for each choice with that choice; do not split sentences
    into arbitrary chunks or discard rationale to squeeze the whole brief into one call.
 
@@ -376,7 +377,7 @@ automatically once addressed — but feedback your human gives YOU in
 conversation is invisible to the canvas unless you report it. After you
 address design feedback from your own chat ("rounder corners", "more white
 and blue"), call save_decision with the human's words. Save one decision and its
-rationale per call, at most 500 characters; split longer feedback into separate
+rationale per call, at most ${MAX_DECISION_CHARS} characters; split longer feedback into separate
 decisions by topic, preserving the reason for each choice. Design taste only —
 never one-off content edits like typos or copy tweaks.
 
