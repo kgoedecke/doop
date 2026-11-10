@@ -22,15 +22,14 @@ import {
 import {
   ArrowUpIcon,
   AttachmentIcon,
-  CalendarIcon,
+  BlocksIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
   CirclePlusIcon,
   CopyIcon,
-  HistoryIcon,
   LayoutTemplateIcon,
-  MessageSquareIcon,
   UploadIcon,
+  WebIcon,
   XIcon,
 } from './ui/icons'
 import { useT, type PlainMessageKey } from '../lib/i18n'
@@ -51,6 +50,7 @@ export interface HeroActions {
   onConnectAgents: () => void
   onAutomations: () => void
   onIntegrations: () => void
+  onCommunity: () => void
 }
 
 /** a chip either fills the composer with a brief or runs an action */
@@ -72,18 +72,6 @@ const CHIPS: Chip[] = [
     prompt: 'home.chipLandingPrompt',
   },
   {
-    id: 'recap',
-    label: 'home.chipRecap',
-    icon: <CalendarIcon {...chipIcon} />,
-    prompt: 'home.chipRecapPrompt',
-  },
-  {
-    id: 'changed',
-    label: 'home.chipChanged',
-    icon: <HistoryIcon {...chipIcon} />,
-    prompt: 'home.chipChangedPrompt',
-  },
-  {
     id: 'automation',
     label: 'home.chipAutomation',
     icon: <span className="font-mono text-caption">/</span>,
@@ -92,11 +80,12 @@ const CHIPS: Chip[] = [
   { id: 'agents', label: 'home.chipAgents', icon: <CirclePlusIcon {...chipIcon} />, action: 'onConnectAgents' },
   { id: 'import', label: 'home.chipImport', icon: <UploadIcon {...chipIcon} />, action: 'onImport' },
   {
-    id: 'comments',
-    label: 'home.chipComments',
-    icon: <MessageSquareIcon {...chipIcon} />,
-    prompt: 'home.chipCommentsPrompt',
+    id: 'integrations',
+    label: 'home.chipIntegrations',
+    icon: <BlocksIcon {...chipIcon} />,
+    action: 'onIntegrations',
   },
+  { id: 'templates', label: 'home.chipTemplates', icon: <WebIcon {...chipIcon} />, action: 'onCommunity' },
 ]
 
 /** the beam walks the strip while nobody hovers, like a slow carousel */
