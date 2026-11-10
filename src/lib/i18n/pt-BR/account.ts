@@ -51,4 +51,20 @@ export const account: Catalog['account'] = {
   updatingPassword: 'Atualizando…',
   updatePassword: 'Atualizar senha',
   passwordMinLength: 'Pelo menos 8 caracteres',
+
+  deleteTitle: 'Excluir conta',
+  deleteDescription: 'Exclui sua conta neste servidor permanentemente. Esta ação não pode ser desfeita.',
+  deleteRow: 'Excluir conta',
+  deleteHint:
+    'Os canvases que só você acessa são excluídos junto; os compartilhados com outras pessoas ou que estão em um workspace ficam com elas.',
+  deleteButton: 'Excluir conta…',
+  deleteCheckFailed: 'Não foi possível verificar sua conta — tente novamente',
+  deleteDialogTitle: 'Excluir sua conta?',
+  deleteDialogLede:
+    'Sua conta, seus acessos e todos os canvases que só você acessa são excluídos para sempre. Você sai dos seus workspaces e dos canvases compartilhados. Esta ação não pode ser desfeita.',
+  deletePasswordLabel: 'Digite sua senha para confirmar',
+  deleteConfirm: 'Excluir conta',
+  deleting: 'Excluindo…',
+  deleteFailed: 'Não foi possível excluir sua conta',
+  deleteNeedsFreshSession: 'Saia, entre novamente e então exclua sua conta.',
 }
