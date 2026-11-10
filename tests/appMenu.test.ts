@@ -21,6 +21,9 @@ function stubHost(overrides: Partial<ActionHost> = {}): ActionHost {
     openPalette: vi.fn(),
     openAgent: vi.fn(),
     openShortcuts: vi.fn(),
+    goToFiles: vi.fn(),
+    openDocs: vi.fn(),
+    contactSupport: vi.fn(),
     openFind: vi.fn(),
     findStep: vi.fn(),
     openExport: vi.fn(),
@@ -90,11 +93,18 @@ describe('nativeMenus', () => {
     })
   })
 
-  it('leaves Undo and Redo to the system items and opens Help with the palette and the agent', () => {
+  it('leaves Undo and Redo to the system items and opens Help with the palette', () => {
     const [edit, help] = ['edit', 'help'].map((id) => nativeMenus().find((m) => m.id === id)!)
     expect(items(edit!).map((i) => i.id)).not.toContain('undo')
     expect(items(edit!).map((i) => i.id)).not.toContain('redo')
-    expect(help!.items.slice(0, 3).map((i) => i?.id ?? null)).toEqual(['palette', 'ask-agent', null])
+    expect(help!.items.map((i) => i?.id ?? null)).toEqual([
+      'palette',
+      null,
+      'shortcuts',
+      null,
+      'docs',
+      'customer-support',
+    ])
   })
 
   it('marks toggles as checkable', () => {

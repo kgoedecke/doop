@@ -383,7 +383,7 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   label key in the `actions` catalog, menu and section, chords, `edit`, `enabled`, `checked`,
   `run`), and the keyboard (`dispatchActionKey`, called first by `CanvasPage`'s keydown), the ⌘K
   palette (`CommandPalette.tsx`, cmdk through `ui/command.tsx`; text that names no command goes to
-  the agent's composer as a prompt), the main menu off the bar's Doop mark (`MainMenu.tsx`: File,
+  the agent's composer as a prompt), the main menu off the bar's Doop mark (`MainMenu.tsx`: Go to files, then File,
   Edit, View, Object, Text, Arrange, Help) and the ⌃⇧? sheet (`ShortcutsSheet.tsx`) all read it.
   `CanvasPage` lends the registry its modals and panels as the `ActionHost`. Chords (`chords.ts`)
   are `mod` (⌘ on a Mac, Ctrl elsewhere), ⌥ chords by `code`, `macOnly` / `notMac` per platform (⌘Y

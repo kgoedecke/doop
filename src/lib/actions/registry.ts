@@ -68,6 +68,10 @@ export interface ActionHost {
   openPalette(): void
   openAgent(): void
   openShortcuts(): void
+  /** leave the canvas for the list of canvases */
+  goToFiles(): void
+  openDocs(): void
+  contactSupport(): void
   openFind(mode: 'find' | 'replace'): void
   findStep(dir: 1 | -1): void
   openExport(): void
@@ -175,7 +179,15 @@ const mod = (key: string, extra: Partial<Chord> = {}): Chord => ({ key, mod: tru
 const code = (c: string, extra: Partial<Chord> = {}): Chord => ({ code: c, ...extra })
 
 export const ACTIONS: readonly CanvasAction[] = [
-  /* ---- the palette's own line and the agent ---- */
+  /* ---- the way out, the palette's own line and the agent ---- */
+  {
+    id: 'go-to-files',
+    label: 'actions.goToFiles',
+    menu: 'general',
+    section: 0,
+    enabled: () => !h()?.guest,
+    run: () => h()?.goToFiles(),
+  },
   {
     id: 'palette',
     label: 'actions.palette',
@@ -1019,6 +1031,20 @@ export const ACTIONS: readonly CanvasAction[] = [
     section: 0,
     keys: [{ code: 'Slash', ctrl: true, shift: true }],
     run: () => h()?.openShortcuts(),
+  },
+  {
+    id: 'docs',
+    label: 'actions.docs',
+    menu: 'help',
+    section: 1,
+    run: () => h()?.openDocs(),
+  },
+  {
+    id: 'customer-support',
+    label: 'actions.customerSupport',
+    menu: 'help',
+    section: 1,
+    run: () => h()?.contactSupport(),
   },
 ]
 

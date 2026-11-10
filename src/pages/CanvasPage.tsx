@@ -31,7 +31,7 @@ import {
   barPrimaryCompactBtn,
 } from '../components/TopBar'
 import { LivePresence } from '../components/LivePresence'
-import { ensureTab } from '../lib/desktop'
+import { ensureTab, openExternal } from '../lib/desktop'
 import { Stage } from '../components/Stage'
 import { Inspector } from '../components/Inspector'
 import { PagePanel } from '../components/PagePanel'
@@ -75,7 +75,7 @@ import { copyPicked, hasElementClip, pasteLayer } from '../lib/elementClipboard'
 import { isCanvasClipboard, writeCanvasClipboard } from '../lib/canvasClipboard'
 import { authClient } from '../lib/auth'
 import { avatarUrl } from '../../shared/avatar'
-import { posthog } from '../lib/posthog'
+import { openSupportChat, posthog } from '../lib/posthog'
 import { useIsMobile } from '../hooks/use-mobile'
 import { cn } from '@/lib/utils'
 import { Button } from '../components/ui/button'
@@ -86,7 +86,6 @@ import {
   BrainIcon,
   CopyIcon,
   ExportIcon,
-  FolderIcon,
   GearIcon,
   GithubIcon,
   ImportIcon,
@@ -589,6 +588,12 @@ export function CanvasPage({
       openPalette: () => setPaletteOpen(true),
       openAgent,
       openShortcuts: () => setShortcutsOpen(true),
+      goToFiles: () => navigate('/'),
+      openDocs: () => {
+        /* the desktop shell drops window.open, so it hands the page to the system browser */
+        if (!openExternal(`${location.origin}/docs`)) window.open('/docs', '_blank', 'noopener,noreferrer')
+      },
+      contactSupport: () => void openSupportChat(),
       openFind: (mode) => setFind((open) => (open === 'replace' ? open : mode)),
       findStep: (dir) => {
         setFind((open) => open ?? 'find')
@@ -833,19 +838,6 @@ export function CanvasPage({
                 </Button>
               }
             />
-            {!guest && (
-              <Tooltip label={t('canvas.allCanvases')} side="bottom" align="start">
-                <Button
-                  variant="bare"
-                  size="icon-sm"
-                  className={barPillIconBtn}
-                  aria-label={t('canvas.allCanvases')}
-                  onClick={() => navigate('/')}
-                >
-                  <FolderIcon className="size-3.5" />
-                </Button>
-              </Tooltip>
-            )}
             <CanvasName readOnly={readOnly} />
             {readOnly && (
               <Badge tone="outline" title={t('canvas.readOnlyBadgeTitle')}>
