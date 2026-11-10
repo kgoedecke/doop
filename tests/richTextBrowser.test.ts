@@ -303,6 +303,63 @@ describe.skipIf(!findBrowserPath())('rich text editing', { timeout: 30_000 }, ()
     expect((await inspect())?.textMixed).toEqual({})
   })
 
+  it('copies the type of a layer formatted with ⌘B / ⌘I and pastes it over the formatting of another', async () => {
+    await send({
+      type: 'doop:html',
+      html:
+        '<p id="source" style="margin:0;font:24px Arial;text-decoration:underline"><b><i><s>Bold</s></i></b></p>' +
+        '<p id="text" style="margin:0;font:16px Arial;background:red">Plain <b>and</b> <u>marked</u></p>',
+      reqId: 'render',
+    })
+    await frame.waitForSelector('#source')
+    const reqId = `computed-${++nextReq}`
+    await send({
+      type: 'doop:computed',
+      selector: '#source',
+      properties: ['font-weight', 'font-style', 'font-size', 'text-decoration-line'],
+      fromTextRun: true,
+      reqId,
+    })
+    await page.waitForFunction(
+      (reqId) => (window as unknown as Fixture).messages.some((m) => m.reqId === reqId),
+      {},
+      reqId,
+    )
+    const copied = await page.evaluate(
+      (reqId) =>
+        (
+          (window as unknown as Fixture).messages.find((m) => m.reqId === reqId) as unknown as {
+            values: Record<string, string>
+          }
+        ).values,
+      reqId,
+    )
+    // The paragraph's underline is painted on the run too, though not inherited.
+    expect(copied).toEqual({
+      'font-weight': '700',
+      'font-style': 'italic',
+      'font-size': '24px',
+      'text-decoration-line': 'line-through underline',
+    })
+
+    await ask('doop:style', {
+      selector: '#text',
+      styles: {
+        'background-color': 'blue',
+        'font-weight': '400',
+        'font-style': 'italic',
+        'text-decoration-line': 'none',
+      },
+      uniformText: true,
+    })
+    expect(await frame.$eval('#text', (el) => el.innerHTML)).toBe('Plain <span>and</span> <span>marked</span>')
+    expect(await frame.$$eval('#text span', (runs) => runs.map((r) => getComputedStyle(r).fontWeight))).toEqual([
+      '400',
+      '400',
+    ])
+    expect(await frame.$eval('#text', (el) => getComputedStyle(el).backgroundColor)).toBe('rgb(0, 0, 255)')
+  })
+
   it('restores a cancelled size scrub on selected words and saves a committed one once', async () => {
     await render('<p id="text" style="margin:0;font:24px Arial">Hello world</p>')
     await select(0, 5)
