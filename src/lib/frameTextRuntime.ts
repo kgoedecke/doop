@@ -375,6 +375,47 @@ export const FRAME_TEXT_RUNTIME = `
     return layers.map(function (layer) { return retagged && layer.el ? cssPath(layer.el) : layer.selector })
   }
 
+  /* Markdown shortcuts, as Notion and Google Docs have them: "- ", "* " or
+     "1. " typed at the start of a line outside a list makes that line one.
+     The marker is deleted and the list made through native commands, so ⌘Z
+     brings the typed marker back. */
+  var LIST_MARKERS = { '-': 'insertUnorderedList', '*': 'insertUnorderedList', '1.': 'insertOrderedList' }
+  document.addEventListener('input', function (ev) {
+    if (ev.inputType !== 'insertText' || ev.data !== ' ' || !editing || !activeEl || isLocked(activeEl)) return
+    var selection = getSelection()
+    if (!selection.rangeCount || !selection.isCollapsed) return
+    var node = selection.anchorNode
+    var offset = selection.anchorOffset
+    if (!node || node.nodeType !== 3 || !activeEl.contains(node)) return
+    var item = node.parentElement && node.parentElement.closest('li')
+    if (item && activeEl.contains(item)) return
+    var match = /^(-|\\*|1\\.)[ \\u00a0]$/.exec(node.nodeValue.slice(0, offset))
+    if (!match || !startsLine(node)) return
+    var marker = document.createRange()
+    marker.setStart(node, 0)
+    marker.setEnd(node, offset)
+    selection.removeAllRanges()
+    selection.addRange(marker)
+    document.execCommand('delete', false, null)
+    textRange = selection.getRangeAt(0).cloneRange()
+    formatText(LIST_MARKERS[match[1]])
+  })
+
+  /* Whether nothing is drawn before a text node on its line: walking back to
+     the text root, only empty text may come before it, and a line break or
+     block ends the walk. */
+  function startsLine(node) {
+    for (var n = node; n && n !== activeEl; n = n.parentNode) {
+      for (var prev = n.previousSibling; prev; prev = prev.previousSibling) {
+        if (prev.nodeType === 3 && !prev.nodeValue.trim()) continue
+        if (prev.nodeType === 1 && (prev.tagName === 'BR' || getComputedStyle(prev).display !== 'inline')) return true
+        return false
+      }
+      if (n.parentNode !== activeEl && getComputedStyle(n.parentNode).display !== 'inline') return true
+    }
+    return true
+  }
+
   document.addEventListener('selectionchange', postTextState)
   document.addEventListener('keydown', function (ev) {
     if (!editing || !activeEl || !(ev.metaKey || ev.ctrlKey) || ev.altKey) return

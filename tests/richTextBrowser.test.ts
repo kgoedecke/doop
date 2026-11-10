@@ -155,6 +155,53 @@ describe.skipIf(!findBrowserPath())('rich text editing', { timeout: 30_000 }, ()
     expect(await frame.$eval('#text', (el) => el.textContent)).toContain('Outside')
   })
 
+  it.each([
+    ['- ', 'ul'],
+    ['* ', 'ul'],
+    ['1. ', 'ol'],
+  ] as const)('turns "%s" typed at the start of a line into a list', async (marker, tag) => {
+    await render('<p id="text" style="margin:0;font:24px Arial">One</p>')
+    await page.keyboard.press('End')
+    await page.keyboard.press('Enter')
+    await page.keyboard.type(marker)
+    expect(await frame.$$eval(`#text ${tag} li`, (items) => items.map((li) => li.textContent))).toEqual([''])
+    // The list is saved as one discrete edit, not left to the typing debounce.
+    await page.waitForFunction(
+      (tag) =>
+        (window as unknown as Fixture).messages.some((m) => m.type === 'doop:edited' && m.html?.includes(`<${tag}`)),
+      {},
+      tag,
+    )
+    await page.keyboard.type('Two')
+    expect(await frame.$$eval(`#text ${tag} li`, (items) => items.map((li) => li.textContent))).toEqual(['Two'])
+    expect(await frame.$eval('#text', (el) => el.textContent)).toBe('OneTwo')
+    // Undo takes the typing, then the list, then gives the typed marker back.
+    for (let i = 0; i < 3; i++) await frame.evaluate(() => document.execCommand('undo'))
+    expect(await frame.$(`#text ${tag}`)).toBeNull()
+    expect(await frame.$eval('#text', (el) => el.textContent?.replace(/\u00a0/g, ' '))).toBe(`One${marker}`)
+  })
+
+  it('leaves a marker typed mid-line or inside a list as text', async () => {
+    await render('<p id="text" style="margin:0;font:24px Arial">One</p>')
+    await page.keyboard.press('End')
+    await page.keyboard.type(' - 1. * x')
+    expect(await frame.$('#text ul, #text ol')).toBeNull()
+    await format('insertUnorderedList')
+    await frame.evaluate(() => {
+      const range = document.createRange()
+      range.selectNodeContents(document.querySelector('#text li')!)
+      range.collapse(false)
+      getSelection()!.removeAllRanges()
+      getSelection()!.addRange(range)
+    })
+    await page.keyboard.press('Enter')
+    await page.keyboard.type('1. Two')
+    expect(await frame.$('#text ol')).toBeNull()
+    expect(
+      await frame.$$eval('#text li', (items) => items.map((li) => li.textContent?.replace(/\u00a0/g, ' '))),
+    ).toEqual(['One - 1. * x', '1. Two'])
+  })
+
   it('keeps the text root when clicking formatted words, and supports native undo and redo', async () => {
     await render('<p id="text" style="margin:0;font:24px Arial">Hello world</p>')
     await select(0, 5)
