@@ -23,6 +23,18 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
     vSheet.replaceSync('html,body{overscroll-behavior-x:none}[data-v-path-hidden]{visibility:hidden!important}')
     document.adoptedStyleSheets = document.adoptedStyleSheets.concat(vSheet)
   } catch (e) {}
+  /* ⌘Y outline mode: every box drawn as a hairline, fills and shadows off.
+     Adopted like the sheet above, so no save or export ever carries it. */
+  var vOutlineSheet = null
+  try {
+    vOutlineSheet = new CSSStyleSheet()
+    vOutlineSheet.replaceSync('html,body{background:transparent!important}body *{outline:1px solid rgba(1,119,211,.6)!important;outline-offset:-1px!important;background:transparent!important;box-shadow:none!important;text-shadow:none!important}body img,body video,body canvas,body svg{opacity:.25!important}')
+  } catch (e) {}
+  function setOutlines(on) {
+    if (!vOutlineSheet) return
+    var rest = document.adoptedStyleSheets.filter(function (s) { return s !== vOutlineSheet })
+    document.adoptedStyleSheets = on ? rest.concat(vOutlineSheet) : rest
+  }
   function syncAttrs(from, to) {
     for (var i = from.attributes.length - 1; i >= 0; i--) {
       var name = from.attributes[i].name
@@ -350,7 +362,7 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
     }
     var adopted = document.adoptedStyleSheets || []
     for (var t = 0; t < adopted.length; t++) {
-      if (adopted[t] === vSheet) continue // the runtime's own
+      if (adopted[t] === vSheet || adopted[t] === vOutlineSheet) continue // the runtime's own
       var adoptedText = rulesText(adopted[t])
       if (adoptedText === null) continue
       var adoptedStyle = document.createElement('style')
@@ -619,12 +631,27 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
   /* Ask the browser which element is actually on top, including stacking
      contexts, clipping, and transformed hit regions. Keep layout dimensions
      separate from the rendered rectangle so a move does not apply scale twice. */
+  /* the picked element (one selector, or every selector of a multi-pick)
+     that holds the element pressed, so a press on a child moves the pick */
+  function pickedAround(selected, el) {
+    var selectors = Array.isArray(selected) ? selected : selected ? [selected] : []
+    for (var i = 0; i < selectors.length; i++) {
+      var picked = styleTarget(selectors[i])
+      if (picked && picked !== el && picked.contains(el) && !isLocked(picked)) return picked
+    }
+    return null
+  }
+
   function drawingHit(x, y, standalone, selected) {
     var top = elementAt(x, y)
     var el = standalone ? document.body.firstElementChild : top && top.closest('[data-doop-drawing]')
     if (!el || !el.matches('[data-doop-drawing]') || isLocked(el)) return null
-    var picked = styleTarget(selected)
-    if (!standalone && picked && picked !== el && picked.contains(el) && elementGeometry(picked).enabled) return null
+    var picked = pickedAround(selected, el)
+    if (!standalone && picked && elementGeometry(picked).enabled) return null
+    // A drawing picked with other layers moves with them, through the layer
+    // gesture, not on its own.
+    if (!standalone && Array.isArray(selected) && selected.length > 1 && elementGeometry(el).enabled
+      && selected.some(function (sel) { return styleTarget(sel) === el })) return null
     var rect = designRect(el)
     var css = getComputedStyle(el)
     var width = parseFloat(css.width)
@@ -752,9 +779,9 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
 
   function moveHit(x, y, selected) {
     var el = elementAt(x, y)
-    var picked = styleTarget(selected)
     // A selected group moves as a whole even when the press hits a child.
-    if (el && picked && picked.contains(el) && !isLocked(picked)) el = picked
+    var picked = el && pickedAround(selected, el)
+    if (picked) el = picked
     while (el && el !== document.body && el !== document.documentElement) {
       if (elementGeometry(el).enabled) {
         var info = hitInfo(el)
@@ -893,6 +920,13 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
       } else return false
       dx = axis === 'x' ? target - rect.x : 0
       dy = axis === 'y' ? target - rect.y : 0
+    }
+    // The rest of a multi-pick travels by the same design-px delta as the
+    // element pressed, each through its own translation basis.
+    if (styleEdit && styleEdit.selector === selector && (edit.kind === 'move' || edit.kind === 'nudge')) {
+      styleEdit.followers.forEach(function (follower) {
+        editGeometry(follower.selector, { kind: 'nudge', dx: dx, dy: dy })
+      })
     }
     // Probe the local translation basis. This handles scaled/rotated ancestors and
     // percentage translations without flattening the element's existing transform.
@@ -1136,7 +1170,34 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
           before.getPropertyPriority(name) !== el.style.getPropertyPriority(name)) styleEdit.touched[name] = true
     }
   }
-  function beginStyleEdit(selector) {
+  /* flush an element's restored position with transitions off, so the next
+     read is where it is and not the first frame of a transition there */
+  function settleGeometry(el) {
+    var restoredStyle = el.getAttribute('style')
+    el.style.setProperty('transition', 'none', 'important')
+    designRect(el)
+    if (restoredStyle === null) el.removeAttribute('style')
+    else el.setAttribute('style', restoredStyle)
+  }
+  /* the other elements of a multi-pick a geometry gesture carries along: each
+     movable on its own, none inside the pressed element or another follower,
+     none holding the pressed element */
+  function gestureFollowers(el, selectors) {
+    var movable = []
+    ;(Array.isArray(selectors) ? selectors : []).forEach(function (selector) {
+      var other = styleTarget(selector)
+      if (!other || other === el || other.contains(el) || el.contains(other) || isLocked(other)) return
+      if (!elementGeometry(other).enabled) return
+      if (movable.some(function (m) { return m.el === other })) return
+      movable.push({ selector: selector, el: other, original: other.getAttribute('style') })
+    })
+    // A picked parent carries its picked descendants, whatever order the pick
+    // names them in (as doop:nudge does).
+    return movable.filter(function (m) {
+      return !movable.some(function (other) { return other.el !== m.el && other.el.contains(m.el) })
+    })
+  }
+  function beginStyleEdit(selector, followers) {
     var el = styleTarget(selector)
     if (!el || isLocked(el)) return false
     if (styleEdit) endStyleEdit(styleEdit.selector, false)
@@ -1153,7 +1214,8 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
       editTimer = null
       postEdited()
     }
-    styleEdit = { selector: selector, original: el.style.cssText, styles: {}, touched: {}, runs: [], created: [], renamed: [] }
+    styleEdit = { selector: selector, original: el.style.cssText, styles: {}, touched: {}, runs: [], created: [], renamed: [],
+      followers: gestureFollowers(el, followers) }
     return true
   }
   function endStyleEdit(selector, cancel) {
@@ -1164,6 +1226,11 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
     if (!el) return false
     if (cancel) {
       restoreTextRuns(edit)
+      edit.followers.forEach(function (follower) {
+        if (follower.original === null) follower.el.removeAttribute('style')
+        else follower.el.setAttribute('style', follower.original)
+        settleGeometry(follower.el)
+      })
       var original = document.createElement('div').style
       original.cssText = edit.original
       for (var name in edit.touched) {
@@ -1172,15 +1239,9 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
         else el.style.removeProperty(name)
       }
       if (!el.getAttribute('style')) el.removeAttribute('style')
-      if (edit.touched.translate || edit.touched.rotate || edit.touched.scale) {
-        // A cancelled geometry drag must report its restored coordinates,
-        // rather than the first frame of a transition back to them.
-        var restoredStyle = el.getAttribute('style')
-        el.style.setProperty('transition', 'none', 'important')
-        designRect(el)
-        if (restoredStyle === null) el.removeAttribute('style')
-        else el.setAttribute('style', restoredStyle)
-      }
+      // A cancelled geometry drag must report its restored coordinates,
+      // rather than the first frame of a transition back to them.
+      if (edit.touched.translate || edit.touched.rotate || edit.touched.scale) settleGeometry(el)
     } else if (edit.range) {
       // The preview was outside the undo history: put it back and apply the
       // gesture's final styles through the undoable path, as one entry.
@@ -1196,6 +1257,14 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
     if (!el || isLocked(el)) return false
     var textPatch = isTextPatch(styles)
     var gesture = styleEdit && styleEdit.selector === selector
+    var following = styleEdit && !gesture && styleEdit.followers.some(function (f) { return f.selector === selector })
+    if (following) {
+      // A follower's move previews with the gesture and is restored, or saved,
+      // with it: never a save of its own mid-drag.
+      patchStyle(el.style, styles)
+      if (!el.getAttribute('style')) el.removeAttribute('style')
+      return true
+    }
     function noteRuns(change) {
       if (!gesture) return
       change.before.forEach(function (run) {
@@ -1245,6 +1314,17 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
     if (d.type === 'doop:inspect') {
       parent.postMessage({ type: 'doop:inspect-result', reqId: d.reqId, info: inspect(d.selector) }, '*')
     }
+    if (d.type === 'doop:outlines') setOutlines(d.on === true)
+    if (d.type === 'doop:computed' && Array.isArray(d.properties)) {
+      var computedEl = styleTarget(d.selector)
+      var values = null
+      if (computedEl) {
+        var cs = getComputedStyle(computedEl)
+        values = {}
+        d.properties.forEach(function (name) { values[name] = cs.getPropertyValue(name) })
+      }
+      parent.postMessage({ type: 'doop:computed-result', reqId: d.reqId, values: values }, '*')
+    }
     if (d.type === 'doop:settle') {
       if (styleTimer) {
         clearTimeout(styleTimer)
@@ -1275,7 +1355,7 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
       parent.postMessage({ type: 'doop:geometry-result', reqId: d.reqId, ok: changed, info: changed ? inspect(d.selector) : null }, '*')
     }
     if (d.type === 'doop:style-gesture') {
-      var changed = d.phase === 'begin' ? beginStyleEdit(d.selector)
+      var changed = d.phase === 'begin' ? beginStyleEdit(d.selector, d.followers)
         : d.phase === 'commit' || d.phase === 'cancel' ? endStyleEdit(d.selector, d.phase === 'cancel') : false
       parent.postMessage({ type: 'doop:style-gesture-result', reqId: d.reqId, info: changed ? inspect(d.selector) : null }, '*')
     }

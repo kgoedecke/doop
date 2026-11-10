@@ -81,8 +81,15 @@
   catalog, `CHATGPT_MODELS_URL`, asked with the account's token as Codex CLI
   `CHATGPT_CODEX_CLIENT_VERSION`; the route refreshes the token first) have loaders, each with a
   family filter for reasoning chat models with tools, images and a 16k output window; a picked id
-  only has to be shaped like the provider's, and the run is the final check. OpenRouter stays on
-  its curated roster (the run-time vision check knows only the roster's flags).
+  only has to be shaped like the provider's, and the run is the final check. OpenRouter, DeepSeek,
+  Kimi and Kimi Code stay on their curated rosters (the run-time vision check knows only the roster's flags).
+- DeepSeek and Kimi keys (`deepseek-key`, `kimi-key`) and the Kimi Code plan (`kimi-code`, a
+  Kimi membership's key, sent with a `Doop/<version>` User-Agent as Kimi Code's terms require)
+  run on the Chat Completions transport (`server/chatCompletionsAgent.ts`) against fixed URLs
+  (`DEEPSEEK_CHAT_URL`, `KIMI_CHAT_URL`, `KIMI_CODE_CHAT_URL`, an operator's override only). Both refuse a tool-calling conversation that drops an earlier turn's
+  `reasoning_content`, so the transport keeps it as a `thinking` block in the run's history and
+  sends it back where the config sets `echoReasoning`. Tests: the `reasoning_content` cases in
+  `chatCompletionsAgent.test.ts`, `rosterRouting.test.ts`, `providerKeyAccounts.test.ts`.
 - Reasoning effort on a user's OpenAI account (ChatGPT subscription or OpenAI key): the pick lives
   in `model_accounts.reasoning_effort` (`REASONING_EFFORTS` in `shared/modelMenu.ts`: low / medium /
   high / xhigh), set through `PATCH /api/model-account/:kind { effort }`, read by `effortFor` in
@@ -279,6 +286,26 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
 - `@electric-sql/pglite` 0.5.4 - embedded Postgres so `bun run dev` works with zero external
   services.
 - `pg` 8.22.0 - Postgres driver for the real-database path.
+- Frame HTML in memory (`server/store.ts`, `server/frameHtml.ts`): the store keeps every canvas
+  and frame, but frame HTML (most of the data) loads per canvas. Boot reads `frames` without `html`;
+  `store.load(canvasId)` reads one canvas's (concurrent calls share the read) and `evictIdle` drops
+  it after `CANVAS_IDLE_MS` (10 min) unused, never while a room, an MCP agent's presence, a stream,
+  a `store.hold` or an unsaved frame is on it (`persist.frameWritePending`: dirty from a save until
+  a write at that state succeeds, so a debounce, a write in flight and a failed write all count; the
+  sweep retries a failed one). Entry points load and hold for their length, and the rest stays
+  synchronous: the REST middleware for `/api/canvases/:id`, `/api/frames/:id` and
+  `/api/comments/:id` (behind the session gate, held until the response closes), the room `join`,
+  every MCP tool naming `canvas_id`, `frame_id` or `frame_ids` (`server/toolLoads.ts` wraps
+  `registerTool`), resident sweeps and automation pulls, ingest, the local and Gemini agent
+  endpoints. `/i/` renders
+  read the one frame's HTML (`store.renderableFrame`) instead of loading its canvas. Reading an
+  unloaded frame's `html` throws `FrameHtmlNotLoadedError` and starts loading that canvas, so a
+  missed entry point fails loudly rather than seeing an empty design; assigning it always works. The
+  boot asset-ref reconcile pages through Postgres. Context: by 2026-11-09 frame HTML was 6.4 GB on
+  disk and ~11.7 GB of V8 heap (60% of frames hold a non-Latin-1 character, which makes V8 store
+  the whole string at two bytes a character), against a 12 GB heap cap. Tests:
+  `lazyFrameHtml.test.ts`, `lazyFrameHtmlHttp.test.ts` (a restart, then REST, the room, MCP and an
+  idle drop).
 - Automations (`shared/automations.ts`, `server/automations.ts`) support schedules and
   approval triggers scoped to one canvas. The five-second worker groups up to ten signed-off
   frames per run. `automation_approvals` retains dispatch receipts independently of the
@@ -306,7 +333,10 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   float32 whose inverse multiplies back to exactly 1, since engines multiply zoom in float32.
   WebKit (the desktop app) rasterizes a composited layer at its CSS size, so a transform-only
   scale went soft past 100%. Both engines tile what is on screen, so backing memory follows the
-  viewport, not k. From 300% a 1px pixel grid fades in over the frames (full at 500%). Frame
+  viewport, not k. From 300% a 1px pixel grid fades in over the frames (full at 500%): the
+  Stage draws it over the bare paper, under the world, and each frame draws its own over its
+  document and under its chrome (`PixelGrid.tsx`, faded by `--pixel-grid`), so pins, threads,
+  grips, cursors and guides stay above it. Tests: `pixelGridBrowser.test.ts`. Frame
   names sit inside their frame, counter-scaled by `--zoom`, so they keep size and gap at every
   zoom and stack with their own frame (a later frame covers an earlier frame's name, never the
   reverse). The selected frame's size badge lives in a screen-space layer (`FrameLabelLayer`),
@@ -314,6 +344,11 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   fly-tos fit into the stage area the top bar and floating panels leave open: `CanvasPage` passes
   `Stage` the `insets` its chrome covers and `fitBox` (`src/lib/viewFit.ts`) centres there.
   Tests: `viewFit.test.ts`, `fitSelectionBrowser.test.ts`.
+- View options (`src/lib/viewOptions.ts`, per browser under `doop:view-options`): the zoom pill's
+  menu opens on a field for a typed level (`150`, `150%`; `parseZoomPercent`) and switches the
+  pixel grid (⇧'), other people's cursors (⌘⌥\ / Ctrl+Alt+\) and the comment pins (⇧C), each read
+  by `code` (registry actions `pixel-grid`, `comments`, `cursors`). Hidden pins still show under
+  the Comment tool and for a thread that is open. Tests: `viewOptions.test.ts`, `zoomMenu.test.tsx`.
 - Canvas panel layout (Settings → Appearance → Canvas panels, `src/lib/panelLayout.ts`, per
   browser under `doop:panel-layout`): `floating` (the default) keeps the islands over a
   full-window stage; `docked` makes Layers, the tool rail, the icon islands, the Inspector /
@@ -359,9 +394,44 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   the brackets treat it as a frame, and ⌘A skips stack-locked shapes (`isStackLocked`). ↩ and Tab act only when no control has the keyboard (`isControlTarget`) and
   something is selected, so buttons, menus and the Layers tree keep theirs. The bracket chords are
   read by `code` too, since ⌥ changes the typed character on macOS. Tests: `selectionKeys.test.ts`.
+- Canvas commands (`src/lib/actions/`): every editor command is one entry in `registry.ts` (id,
+  label key in the `actions` catalog, menu and section, chords, `edit`, `enabled`, `checked`,
+  `run`), and the keyboard (`dispatchActionKey`, called first by `CanvasPage`'s keydown), the ⌘K
+  palette (`CommandPalette.tsx`, cmdk through `ui/command.tsx`; text that names no command goes to
+  the agent's composer as a prompt), the main menu off the bar's Doop mark (`MainMenu.tsx`: Go to files, then File,
+  Edit, View, Object, Text, Arrange, Help) and the ⌃⇧? sheet (`ShortcutsSheet.tsx`) all read it.
+  `CanvasPage` lends the registry its modals and panels as the `ActionHost`. Chords (`chords.ts`)
+  are `mod` (⌘ on a Mac, Ctrl elsewhere), ⌥ chords by `code`, `macOnly` / `notMac` per platform (⌘Y
+  is outlines on a Mac, redo elsewhere), `global` for the two that act from fields (⌘K palette, ⌘/
+  agent; a bare `/` opens the agent outside fields). A chord whose command is disabled or finds
+  nothing falls through to the browser. ⌫, Esc, ↩/Tab and the arrows stay in `CanvasPage`'s own
+  handler (their rules are shown, `hintOnly`). What the commands do lives in `edits.ts`: align /
+  distribute / tidy / pack (`arrange.ts`, pure geometry) move frames as one undo step
+  (`patchFrames`) and layers through the runtime's `move` geometry edit; ⌘G / ⌥⌘G wrap sibling
+  layers in a `div` (carrying a flex parent's flow; grid children are refused; a frame edited while
+  its layout is read is left alone) and ⇧⌘G / ⌘⌫ unwrap (`groupElements` / `ungroupElements` in
+  `layers.ts`); ⇧A makes a box a flex container, or wraps the pick in one, turning the space between
+  the layers into `gap` and dropping their flow margins so nothing moves; ⌥⌘C / ⌥⌘V copy and paste
+  computed looks (`doop:computed`), text styles only between text layers; ⇧⌘V / ⇧⌘R paste over or
+  replace the selection from the canvas clip (a frame goes only once all its replacements land; one
+  undo step, a single `transfer` (`replaceFramesTracked`), so undo never removes a replacement
+  before its original is back; tests in `replaceFrames.test.ts`); ⇧⌘U links (`setElementLink`: an
+  image or SVG is wrapped in the link, other layers' content is); ⌃C is the EyeDropper. ⌘F / ⌥⌘F is
+  the find bar (`FindBar.tsx`, `findText.ts`: text nodes only, locked layers found but never
+  replaced, replace-all is one undo step across frames). View toggles: ⇧' / ⇧C / ⌥⌘\ switch the view
+  options (pixel grid, comment pins, cursors), ⌘Y outline mode (an adopted sheet in each frame's
+  runtime, never saved or exported), ⌥L collapses the Layers tree. N / ⇧N zoom to the next frame in
+  reading order, Home / End bring it into view, PgUp / PgDn change page. Tests:
+  `actionRegistry.test.ts` (no chord bound twice per platform, nor over a tool key),
+  `actionChords.test.ts`, `arrange.test.ts`, `groupLayers.test.ts`, `findText.test.ts`.
 - `src/lib/tools.ts` defines bottom-toolbar tools and shortcuts. `Stage.tsx` delegates drawing
   gestures and world-space previews to `CanvasDrawing.tsx`; Space/middle-button panning takes
   precedence over drawing.
+- Zoom tool (Z, keyboard only; math in `src/lib/zoomTool.ts`): a click doubles the
+  zoom about the pointer, ⌥-click halves it (the cursor turns to zoom-out while ⌥ is down), and a
+  drag zooms onto the box it draws, filling the stage's open area. Z is the tool only while held:
+  letting go returns to the previous tool, and the tool rail has no button for it.
+  Tests: `zoomTool.test.ts`, the Zoom cases in `tools.test.ts`.
 - `src/lib/drawing.ts` creates rectangles, circles, straight and cubic Bézier SVG paths, text and empty
   frames through the existing frame API. Drawing inside a frame appends a positioned HTML/SVG
   layer. Standalone elements use frame persistence with a `data-doop-canvas-element` body marker
@@ -411,7 +481,11 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   stay hidden. Drawings and layers snap to their frame's edges and centre, their parent box and
   their siblings (`snapRects` on the runtime's hit replies) as well as the ruler guides.
   Ordinary HTML/SVG layers move in place through the runtime's geometry/style gesture bridge,
-  preserving layout and transforms and committing one undo step per drag.
+  preserving layout and transforms and committing one undo step per drag. A drag on one of
+  several picked layers (or inside one) moves them all: the rest ride the gesture as `followers`
+  (`styleGesture` `begin`), each translated by the pressed layer's delta, put back on Escape and
+  saved with it as one step; a multi-pick never takes a layout drop, and the pressed layer
+  becomes the pick's primary.
   The iframe runtime hit-tests the pointer in browser paint order and measures CSS layout
   size separately from transformed bounds. Pending pointer events are buffered until its
   reply, so fast drags and cancellation remain reliable. `src/lib/drawingMove.ts` preserves markup and translates coordinates when
@@ -563,7 +637,8 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
 
 - Comment anchors (`shared/comments.ts`): an element comment is `frameId` + `elementId` (the
   element's `data-doop-id`) + `snippet`; a frame comment is `frameId` + design-px `x`/`y` and no
-  `elementId`; a canvas comment is `pageId` + world `x`/`y`. One whose element is gone keeps the
+  `elementId` (the Comment tool makes one on the frame's background, or from its name, which
+  outlines the whole frame on hover and pins the comment just inside its top-left corner); a canvas comment is `pageId` + world `x`/`y`. One whose element is gone keeps the
   frame and snippet only and is listed without a pin. The browser still sends the runtime's
   positional selector (plus `elementId` when the element already wears one, and always the
   point); the server stamps and stores the id. `FrameView` places pins by
@@ -656,6 +731,12 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   worker runs; a file calls `openBrowser()` for its own context (focus emulated, 30s navigation
   bound) and `fixtureUrl()` for its page. A test that needs its own Vite server (a proxy) builds it
   from `fixtureServerConfig()`, so every server shares one dependency hash and cache directory.
+- CI runs the browser tests on the Chrome for Testing build named in `.chrome-version`, installed
+  by the `test` job and passed as `CHROME_PATH`, so a runner image update cannot change the
+  browser without a commit. `bun run test:linux [vitest args]` (`scripts/test-linux.sh`,
+  `tests/linux.Dockerfile`, needs Docker) runs the suite in a two-CPU Linux container, for a
+  test that fails on CI and passes on a Mac, and for the clipboard tests a Mac skips; on Apple
+  Silicon the container uses Debian's Chromium, since Chrome for Testing has no Linux arm64 build.
 
 ## 8. CI/CD and Delivery
 
@@ -702,7 +783,7 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   key fails typecheck). Components call `useT()` and `t('namespace.key', vars)`; `{name}`
   placeholders are type-checked, `{ one, other }` values pick a plural by `{count}`, and a key kept
   in a table is a `PlainMessageKey` translated at render. The active language is this browser's pick
-  (`doop-locale` in `localStorage`, Settings -> Appearance or the account menu), else the server's
+  (`doop-locale` in `localStorage`, Settings -> General), else the server's
   `DEFAULT_LOCALE` (`GET /api/locale-config`, asked once before React mounts), else `en`; the list
   lives in `shared/locales.ts`. `tests/i18n.test.ts` checks every catalog against English. Screens
   not yet converted still render English.

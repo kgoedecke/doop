@@ -34,6 +34,7 @@ import { DEFAULT_ROLE_ID } from '../../shared/agents'
 import { posthog } from '../lib/posthog'
 import { isResidentLimit } from './TeamAllowance'
 import { CommentComposer, CommentPin, CommentThread } from './CommentPopovers'
+import { PixelGrid } from './PixelGrid'
 import { FRAME_COMMENT_SELECTOR, isElementComment, isFrameComment, elementCommentPosition } from '../../shared/comments'
 import { elementIdSelector } from '../../shared/elementId'
 import { cn } from '@/lib/utils'
@@ -212,6 +213,10 @@ function frameCommentHit(x: number, y: number): ProbeHit {
   return { selector: FRAME_COMMENT_SELECTOR, tag: 'frame', text: '', snippet: '', rect: { x, y, width: 0, height: 0 } }
 }
 
+/* where a comment made from the frame's name is pinned: just inside its
+   top-left corner, under the name it was made from */
+const FRAME_NAME_COMMENT_AT = 12
+
 /* `doop:locate` request ids for the outlines of a multi-element pick */
 const PICK_REQ = '__pick__:'
 
@@ -345,6 +350,10 @@ export const FrameView = memo(function FrameView({
       if (probeOnClick) {
         const at = designOffset(e, frame.rotation)
         probeAt(at.x, at.y, 'comment')
+      } else if (panelOnClick) {
+        /* the frame's name: a comment on the frame as a whole, the one a
+           frame filled edge to edge by its layers leaves no background for */
+        commentOnFrame()
       }
       return
     }
@@ -785,6 +794,10 @@ export const FrameView = memo(function FrameView({
   const frameComments = useStore((s) => s.comments).filter((c) => c.frameId === frame.id)
   /* only thread roots get a pin; replies live inside the root's popover */
   const comments = frameComments.filter((c) => !c.parentId && !c.resolvedAt)
+  /* ⇧C hides the pins (an open thread stays); the Comment tool shows them */
+  const pinsShown = useStore((s) => s.viewOptions.comments || s.tool === 'comment')
+  /* a pin being dragged stays mounted: its release listeners live on it */
+  const draggedPin = useStore((s) => s.commentDrag?.id)
   const [probe, setProbe] = useState<ProbeHit | null>(null)
   useEffect(() => {
     // The request also distinguishes a return to previously rendered HTML
@@ -819,6 +832,10 @@ export const FrameView = memo(function FrameView({
   const [activeHit, setActiveHit] = useState<ProbeHit | null>(null)
   const [textFormat, setTextFormat] = useState<TextFormatState>({})
   const [composing, setComposing] = useState(false)
+  /* the Comment tool over the frame's name: the whole frame is outlined,
+     as an element under the pointer is */
+  const [nameHovered, setNameHovered] = useState(false)
+  const frameCommentHover = nameHovered && tool === 'comment'
   const [openThread, setOpenThread] = useState<string | null>(null)
   const [linkedThread, setLinkedThread] = useState<string | null>(deepLinkedThread)
   const [pinPos, setPinPos] = useState<Record<string, { x: number; y: number } | null>>({})
@@ -873,7 +890,16 @@ export const FrameView = memo(function FrameView({
     /* the old outline's key must match no answer, not even "nothing here",
        so the reply always redraws */
     hoverKey.current = 'stale'
-    if (editing || pathEdit || dragging || elementMove.moving || resizing || frame.locked || tool === 'hand') {
+    if (
+      editing ||
+      pathEdit ||
+      dragging ||
+      elementMove.moving ||
+      resizing ||
+      frame.locked ||
+      tool === 'hand' ||
+      tool === 'zoom'
+    ) {
       clearHover()
       return
     }
@@ -923,6 +949,19 @@ export const FrameView = memo(function FrameView({
   function closePopovers() {
     closeElementPopovers()
     setProbe(null)
+  }
+
+  function commentOnFrame() {
+    closeElementPopovers()
+    /* a frame smaller than the inset keeps the pin on itself, at its middle */
+    setProbe(
+      frameCommentHit(
+        Math.min(FRAME_NAME_COMMENT_AT, frame.width / 2),
+        Math.min(FRAME_NAME_COMMENT_AT, frame.height / 2),
+      ),
+    )
+    setComposePrefill('')
+    setComposing(true)
   }
 
   /* delayed slightly so the second click of a double-click (→ edit mode)
@@ -1553,6 +1592,8 @@ export const FrameView = memo(function FrameView({
                 zIndex: selected ? stack : undefined,
               }}
               onPointerDown={(e) => startDrag(e, 'move', false, true)}
+              onPointerEnter={() => setNameHovered(true)}
+              onPointerLeave={() => setNameHovered(false)}
             >
               {frame.locked && (
                 <Tooltip label={t('stage.lockedTip')} side="top" align="start">
@@ -1635,7 +1676,11 @@ export const FrameView = memo(function FrameView({
             ref={surfaceRef}
             className={cn(
               'absolute inset-0 overflow-hidden',
-              isCanvasElement(frame.html) ? 'bg-transparent' : 'bg-white',
+              /* the white a design without a background sits on, one screen
+                 pixel in from the edge: painted to the edge, it showed past the
+                 scaled iframe's antialiased edge as a light seam */
+              !isCanvasElement(frame.html) &&
+                "before:absolute before:inset-[calc(1px/var(--zoom,1))] before:bg-white before:content-['']",
               /* Select keeps the arrow, like Figma: the frame is a thing to
                  point at, not a handle. The Hand tool's grab and the Comment
                  tool's bubble come from the Stage, which overrides every
@@ -1676,7 +1721,7 @@ export const FrameView = memo(function FrameView({
                  at the pointer's spot, which the gesture has moved */
               const at = designPoint(e, e.currentTarget, frame.rotation)
               hoverAt.current = at
-              /* the Hand only pans, and a locked frame has nothing to pick: no
+              /* the Hand only pans, the Zoom only zooms, and a locked frame has nothing to pick: no
                  element outlines in either case */
               if (
                 editing ||
@@ -1687,7 +1732,8 @@ export const FrameView = memo(function FrameView({
                 frame.locked ||
                 !frame.html ||
                 !runtimeReady ||
-                tool === 'hand'
+                tool === 'hand' ||
+                tool === 'zoom'
               )
                 return
               sendHover(at.x, at.y)
@@ -1696,7 +1742,7 @@ export const FrameView = memo(function FrameView({
           >
             <iframe
               ref={iframeRef}
-              className={cn('block border-none', isCanvasElement(frame.html) ? 'bg-transparent' : 'bg-white')}
+              className="relative block border-none bg-transparent"
               title={frame.name}
               data-doop-frame=""
               sandbox="allow-scripts"
@@ -1724,6 +1770,8 @@ export const FrameView = memo(function FrameView({
                 ...(isCanvasElement(frame.html) ? { colorScheme: 'light' } : null),
               }}
             />
+            {/* a standalone element is see-through: the paper's grid shows */}
+            {!isCanvasElement(frame.html) && <PixelGrid layoutZoom={layoutZoom} />}
             {!frame.html && (
               <div className="absolute inset-0 grid place-items-center bg-[repeating-linear-gradient(45deg,transparent_0_10px,rgba(28,26,21,0.025)_10px_20px)] text-[13px] text-ink-faint">
                 empty frame — add HTML
@@ -1762,6 +1810,12 @@ export const FrameView = memo(function FrameView({
               covers the surface, where the document starts, so a rect in
               design px lands on the element it measures */}
             <div data-element-furniture="" className="pointer-events-none absolute inset-0">
+              {frameCommentHover && (
+                <div
+                  data-frame-comment-hover=""
+                  className="pointer-events-none absolute inset-0 z-[4] bg-[rgba(60,130,246,0.06)] shadow-[inset_0_0_0_calc(1px/var(--zoom,1))_#3c82f6]"
+                />
+              )}
               {/* above the selection outline (z-[3]), or that outline covers the
               hovered element's tag */}
               {hover && !hoverOnSelected && !editing && !pathEdit && !dragging && !elementMove.moving && !resizing && (
@@ -1902,8 +1956,8 @@ export const FrameView = memo(function FrameView({
                 <div data-comment-ui className="pointer-events-none absolute inset-0">
                   {comments.map((c) => {
                     const pos = isFrameComment(c) ? { x: c.x, y: c.y } : elementCommentPosition(c, pinPos[c.id])
-                    if (!pos) return null
                     const open = openThread === c.id
+                    if (!pos || (!pinsShown && !open && draggedPin !== c.id)) return null
                     const replies = frameComments.filter((r) => r.parentId === c.id).reverse() // store is newest-first
                     const thread: [ElementComment, ...ElementComment[]] = [c, ...replies.sort((a, b) => a.at - b.at)]
                     return (

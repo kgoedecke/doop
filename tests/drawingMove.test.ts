@@ -127,7 +127,8 @@ describe('moving drawings between frames and canvas', () => {
     expect(carried).toContain(
       `:is([data-doop-carried-scope="${scope}"], [data-doop-carried-scope="${scope}"] *):is(#title) {`,
     )
-    expect(carried).not.toContain('old')
+    /* the old scope as a value: a fresh random scope may contain the letters */
+    expect(carried).not.toContain('"old"')
     expect(frames().some((f) => f.id === 'lifted')).toBe(false)
   })
 

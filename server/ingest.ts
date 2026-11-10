@@ -285,7 +285,7 @@ export async function handleIngest(req: express.Request, res: express.Response) 
   if (!/^dk_[\w-]{20,}$/.test(secret)) return res.status(404).json({ error: 'unknown sync key' })
   const [key] = await db.select().from(syncKeys).where(eq(syncKeys.secret, secret))
   if (!key) return res.status(404).json({ error: 'unknown sync key' })
-  const canvas = store.getCanvas(key.canvasId)
+  const canvas = await store.load(key.canvasId)
   if (!canvas) return res.status(410).json({ error: 'the canvas this key points at no longer exists' })
 
   const page = cleanPage(req.body?.page)

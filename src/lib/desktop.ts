@@ -23,6 +23,7 @@ import { codexSetupTarget } from './codexConnection'
 import { forgetPendingConnect, isPendingConnect, parseDesktopConnectLink } from './desktopConnect'
 import { safeRelativeTarget } from './safeTarget'
 import { NO_CANVAS, isViewCommand, runViewCommand, syncViewMenu } from './viewMenu'
+import { initAppMenu } from './appMenu'
 
 export type CanvasTab = { id: string; name: string }
 
@@ -299,8 +300,11 @@ export function initDesktopShell() {
      it as an event — the page never sees the keystroke. Windows has no menu
      bar, so Ctrl+W arrives as a plain keydown. Both close the active tab. */
   shellWindow.__TAURI__?.event?.listen?.('close-tab', closeActiveTab).catch(console.error)
-  /* the macOS View menu (view_menu.rs): a reload leaves it showing the last
-     canvas until a canvas reports in again, so start it out closed */
+  /* the macOS menu bar, built from the action registry (appMenu.ts); a shell
+     older than that has only the View menu (view_menu.rs), which a reload
+     leaves showing the last canvas until a canvas reports in again, so it
+     starts out closed */
+  initAppMenu()
   syncViewMenu(NO_CANVAS)
   shellWindow.__TAURI__?.event
     ?.listen?.<unknown>('view-command', (e) => {

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-app-menu-state"
+description = "Enables the app_menu_state command without any pre-configured scope."
+commands.allow = ["app_menu_state"]
+
+[[permission]]
+identifier = "deny-app-menu-state"
+description = "Denies the app_menu_state command without any pre-configured scope."
+commands.deny = ["app_menu_state"]

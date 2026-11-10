@@ -3,6 +3,7 @@ import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
 import { describe, expect, it, vi } from 'vitest'
 import { buildMcpServer } from '../server/mcp.ts'
 import { FRAME_PREVIEW_URI } from '../server/chatgptApp.ts'
+import packageJson from '../package.json' with { type: 'json' }
 
 vi.mock('../server/db/persist.ts', () => ({ saveCanvas: () => {}, saveFrame: () => {}, saveActivity: () => {} }))
 
@@ -10,6 +11,23 @@ interface ToolInputSchema {
   properties?: Record<string, unknown>
   required?: string[]
 }
+
+describe('MCP server info', () => {
+  it('reports the running release as its version', async () => {
+    const server = buildMcpServer('Test Owner', 'test-owner-id')
+    const client = new Client({ name: 'doop-version-test', version: '1.0.0' })
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair()
+
+    await server.connect(serverTransport)
+    await client.connect(clientTransport)
+
+    try {
+      expect(client.getServerVersion()).toEqual({ name: 'doop-canvas', version: packageJson.version })
+    } finally {
+      await client.close()
+    }
+  })
+})
 
 describe('MCP website tool contract', () => {
   it('separates read-only website viewing from editable webpage imports', async () => {

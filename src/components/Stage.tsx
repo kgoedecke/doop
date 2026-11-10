@@ -42,14 +42,17 @@ import {
   PrototypeModeIcon,
   TextIcon,
   VectorIcon,
+  ZoomInIcon,
 } from './ui/icons'
 import { TOOLS, isDrawingTool, resolvePointerAction, toolForKey, type Tool } from '../lib/tools'
 import { useCanvasDrawing } from './CanvasDrawing'
 import { FrameLabelLayer } from './FrameLabelLayer'
+import { pixelGridLines } from './PixelGrid'
 import { layoutZoomFor } from '../lib/layoutZoom'
 import { useT, type PlainMessageKey } from '../lib/i18n'
 import { NO_INSETS, fitBox, type StageInsets } from '../lib/viewFit'
 import { spaceWouldScroll } from '../lib/spaceScroll'
+import { ZOOM_DRAG_MIN, ZOOM_TOOL_STEP, zoomAtPoint, zoomToBox } from '../lib/zoomTool'
 
 const MIN_ZOOM = 0.08
 /* The settled world is laid out at up to this zoom too (layoutZoomFor), so
@@ -63,6 +66,11 @@ const MAX_ZOOM = 16
    included, like the Hand tool's grab — except inside the comment UI itself
    (pins, composer, threads: `data-comment-ui`), which keeps its own cursors. */
 const COMMENT_CURSOR = 'cursor-comment! [&_:not([data-comment-ui]_*)]:cursor-comment!'
+/* the Zoom tool's magnifier, forced over the frames the same way */
+const ZOOM_CURSOR = {
+  in: 'cursor-zoom-in! [&_:not([data-comment-ui]_*)]:cursor-zoom-in!',
+  out: 'cursor-zoom-out! [&_:not([data-comment-ui]_*)]:cursor-zoom-out!',
+} as const
 /* The Path tool's pen, forced over the frames the same way; the badge follows
    what a press would do (src/styles.css draws them) */
 const PEN_CURSOR = {
@@ -140,6 +148,7 @@ function zoomCentered(el: HTMLElement, next: number) {
 const TOOL_ICONS: Record<Tool, React.ReactNode> = {
   select: <CursorIcon />,
   hand: <HandIcon />,
+  zoom: <ZoomInIcon />,
   comment: <CommentIcon />,
   rectangle: <BoxIcon />,
   circle: <CircleIcon />,
@@ -234,6 +243,7 @@ export function Stage({
   const paper = usePaper()
   const select = useStore((s) => s.select)
   const panMode = useStore((s) => s.panMode)
+  const showCursors = useStore((s) => s.viewOptions.cursors)
   /* ⌘. — the tool pill and the zoom pill go with the rest of the chrome */
   const uiHidden = useStore((s) => s.uiHidden)
   /* ⇧R — phones have no room for rulers (nor a keyboard to ask for them) */
@@ -247,6 +257,12 @@ export function Stage({
   const setTool = useStore((s) => s.setTool)
   const [panning, setPanning] = useState(false)
   /* the selection rectangle being dragged out, in world coordinates */
+  /* Z held down: the tool to go back to on release */
+  const zoomHeld = useRef<{ previous: Tool } | null>(null)
+  /* a zoom drag under way, ended without zooming if the stage goes away */
+  const endZoomGesture = useRef<(() => void) | null>(null)
+  useEffect(() => () => endZoomGesture.current?.(), [])
+  const [altHeld, setAltHeld] = useState(false)
   const [marquee, setMarquee] = useState<{ x: number; y: number; width: number; height: number } | null>(null)
   /* where the Comment tool was clicked on empty canvas: the composer opens there */
   const [composeAt, setComposeAt] = useState<CanvasComposeAt | null>(null)
@@ -299,9 +315,11 @@ export function Stage({
       grid.style.transform = `translate(${gx}px, ${gy}px)`
       const pixels = pixelGridRef.current
       if (pixels) {
-        const opacity = pixelGridOpacity(vp.zoom)
+        const opacity = useStore.getState().viewOptions.pixelGrid ? pixelGridOpacity(vp.zoom) : 0
         pixels.hidden = opacity === 0
         pixels.style.opacity = String(opacity)
+        /* the frames' own grids read the same fade */
+        stage.style.setProperty('--pixel-grid', String(opacity))
         pixels.style.backgroundSize = `${vp.zoom}px ${vp.zoom}px`
         const px = (((vp.x % vp.zoom) + vp.zoom) % vp.zoom) - vp.zoom
         const py = (((vp.y % vp.zoom) + vp.zoom) % vp.zoom) - vp.zoom
@@ -315,6 +333,7 @@ export function Stage({
       /* a (re)connect needs the camera announced afresh — the server only
          knows what this socket has sent */
       if (s.connected && !prev.connected && ref.current) sendViewport(s.viewport, ref.current)
+      if (s.viewOptions.pixelGrid !== prev.viewOptions.pixelGrid) apply(s.viewport)
       if (s.viewport === prev.viewport) return
       apply(s.viewport)
       if (ref.current) sendViewport(s.viewport, ref.current)
@@ -696,43 +715,11 @@ export function Stage({
     }
   }, [])
 
-  /* ⌘0 → 100%, ⌘+ / ⌘− → step zoom, all pivoting on the view center —
-     preventDefault keeps the browser's own page zoom out of it. ⇧1 / ⇧2 fit
-     everything / the selection and ⇧R shows or hides the rulers, as in Figma. */
-  useEffect(() => {
-    function onKey(e: KeyboardEvent) {
-      const t = e.target as HTMLElement
-      if (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable) return
-      if (e.shiftKey && !e.metaKey && !e.ctrlKey && !e.altKey) {
-        if (e.key.toLowerCase() === 'r') {
-          e.preventDefault()
-          if (!e.repeat) useStore.getState().toggleRulers()
-          return
-        }
-        /* by code: ⇧1 types '!' on most layouts, so the key name is no use */
-        if (e.code !== 'Digit1' && e.code !== 'Digit2') return
-        e.preventDefault()
-        if (e.code === 'Digit1') fit()
-        else fitSelection()
-        return
-      }
-      if (!(e.metaKey || e.ctrlKey) || e.altKey) return
-      if (e.key !== '0' && e.key !== '=' && e.key !== '+' && e.key !== '-') return
-      /* '+' arrives as ⇧= on most layouts; any other shifted combo isn't ours */
-      if (e.shiftKey && e.key !== '+') return
-      const el = ref.current
-      if (!el) return
-      e.preventDefault()
-      const zoom = useStore.getState().viewport.zoom
-      if (e.key === '0') zoomCentered(el, 1)
-      else if (e.key === '-') zoomCentered(el, zoom / 1.25)
-      else zoomCentered(el, zoom * 1.25)
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [fit, fitSelection])
-
-  /* the same zooms from the desktop shell's View menu */
+  /* zooms by command: ⌘0 → 100%, ⌘+ / ⌘− step, ⇧1 / ⇧2 fit everything / the
+     selection, all pivoting on the view centre. (⇧R, ⇧' / ⇧C / ⌘⌥\ and the
+     other canvas chords live in the action registry.) The action registry sends the
+     keyboard's here (⌘ chords claimed so the browser's own page zoom stays out
+     of it), and the desktop shell's View menu its menu items. */
   useEffect(
     () =>
       onViewCommand((command) => {
@@ -829,8 +816,21 @@ export function Stage({
   /* Bare shortcut keys pick a tool, Esc returns to Select — bare keys
      only (no modifiers), and never while typing in a field. Esc is the one
      exception for canvas composers: it drops their draft and returns to Select.
-     Other fields keep Escape for their own editing behavior. */
+     Other fields keep Escape for their own editing behavior. Z is the Zoom
+     tool only while it is held: letting go returns to the tool
+     before it. The key-up is read by `code` too, since ⌥ held for a zoom-out
+     changes the typed character on macOS. */
   useEffect(() => {
+    function release() {
+      const held = zoomHeld.current
+      if (!held) return
+      zoomHeld.current = null
+      const s = useStore.getState()
+      if (s.tool === 'zoom') s.setTool(held.previous)
+    }
+    function onKeyUp(e: KeyboardEvent) {
+      if (e.code === 'KeyZ' || e.key.toLowerCase() === 'z') release()
+    }
     function onKey(e: KeyboardEvent) {
       if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey || e.repeat) return
       if (e.key === 'Escape') {
@@ -842,11 +842,36 @@ export function Stage({
       const next = toolForKey(e.key)
       if (!next) return
       e.preventDefault()
+      const previous = useStore.getState().tool
+      if (next === 'zoom') zoomHeld.current ??= { previous }
+      else zoomHeld.current = null
       useStore.getState().setTool(next)
     }
     window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
+    window.addEventListener('keyup', onKeyUp)
+    window.addEventListener('blur', release)
+    return () => {
+      window.removeEventListener('keydown', onKey)
+      window.removeEventListener('keyup', onKeyUp)
+      window.removeEventListener('blur', release)
+    }
   }, [])
+
+  /* ⌥ turns the Zoom tool's cursor into zoom-out, the way a click would go */
+  useEffect(() => {
+    if (tool !== 'zoom') return
+    const sync = (e: KeyboardEvent) => setAltHeld(e.altKey)
+    const reset = () => setAltHeld(false)
+    window.addEventListener('keydown', sync)
+    window.addEventListener('keyup', sync)
+    window.addEventListener('blur', reset)
+    return () => {
+      window.removeEventListener('keydown', sync)
+      window.removeEventListener('keyup', sync)
+      window.removeEventListener('blur', reset)
+      reset()
+    }
+  }, [tool])
 
   function onPointerDown(e: React.PointerEvent) {
     const target = e.target as HTMLElement
@@ -866,6 +891,7 @@ export function Stage({
        (Hand, space held) — anything but a pan on it is the frame's own business */
     if (action === 'pan') return startPan(e, isBackground)
     if (action === 'marquee') startMarquee(e)
+    if (action === 'zoom') startZoom(e)
     if (action === 'comment-canvas') {
       /* a finger that moves is a pan, a finger that lifts in place is a
          comment: the pan follows the movement, the comment checks the
@@ -932,6 +958,78 @@ export function Stage({
     window.addEventListener('pointermove', onMove)
     window.addEventListener('pointerup', onUp)
     window.addEventListener('pointercancel', onCancel)
+  }
+
+  /* the Zoom tool: a click zooms in on the point (⌥ out), a drag draws a box
+     (shown as the marquee) and zooms onto it on release */
+  function startZoom(e: React.PointerEvent) {
+    /* a second finger is a pinch, which zooms on its own */
+    if (!e.isPrimary || gesture.pinching) return
+    const el = e.currentTarget as HTMLElement
+    el.setPointerCapture(e.pointerId)
+    const unlockSelection = lockTextSelection()
+    const rect = el.getBoundingClientRect()
+    const origin = { x: e.clientX - rect.left, y: e.clientY - rect.top }
+    let box: { x: number; y: number; width: number; height: number } | null = null
+
+    function onMove(ev: PointerEvent) {
+      if (ev.pointerId !== e.pointerId) return
+      /* a pinch took over: it owns the camera, and lifting a finger after
+         it must not zoom again */
+      if (gesture.pinching) return end()
+      const x = ev.clientX - rect.left
+      const y = ev.clientY - rect.top
+      const width = Math.abs(x - origin.x)
+      const height = Math.abs(y - origin.y)
+      box =
+        Math.max(width, height) >= ZOOM_DRAG_MIN
+          ? { x: Math.min(x, origin.x), y: Math.min(y, origin.y), width, height }
+          : null
+      if (!box) return setMarquee(null)
+      const vp = useStore.getState().viewport
+      setMarquee({
+        x: (box.x - vp.x) / vp.zoom,
+        y: (box.y - vp.y) / vp.zoom,
+        width: width / vp.zoom,
+        height: height / vp.zoom,
+      })
+    }
+    function onCancel(ev: PointerEvent) {
+      if (ev.pointerId === e.pointerId) end()
+    }
+    /* Esc drops the box without zooming */
+    function onKey(ev: KeyboardEvent) {
+      if (ev.key === 'Escape') end()
+    }
+    function end() {
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+      window.removeEventListener('pointercancel', onCancel)
+      window.removeEventListener('keydown', onKey)
+      endZoomGesture.current = null
+      setMarquee(null)
+      unlockSelection()
+    }
+    function onUp(ev: PointerEvent) {
+      if (ev.pointerId !== e.pointerId) return
+      end()
+      if (gesture.pinching) return
+      const vp = useStore.getState().viewport
+      const limits = { min: MIN_ZOOM, max: MAX_ZOOM }
+      const stage = { width: el.clientWidth, height: el.clientHeight }
+      useStore
+        .getState()
+        .setViewport(
+          box
+            ? zoomToBox(vp, box, stage, insetsRef.current, limits)
+            : zoomAtPoint(vp, origin, ev.altKey ? 1 / ZOOM_TOOL_STEP : ZOOM_TOOL_STEP, limits),
+        )
+    }
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+    window.addEventListener('pointercancel', onCancel)
+    window.addEventListener('keydown', onKey)
+    endZoomGesture.current = end
   }
 
   function startMarquee(e: React.PointerEvent) {
@@ -1011,15 +1109,17 @@ export function Stage({
                 ? 'cursor-grabbing! [&_*]:cursor-grabbing!'
                 : panMode || tool === 'hand'
                   ? 'cursor-grab! [&_*]:cursor-grab!'
-                  : tool === 'comment'
-                    ? COMMENT_CURSOR
-                    : isDrawingTool(tool)
-                      ? tool === 'text'
-                        ? 'cursor-text! [&_:not([data-comment-ui]_*)]:cursor-text!'
-                        : tool === 'path'
-                          ? PEN_CURSOR[drawing.penCursor]
-                          : 'cursor-crosshair! [&_:not([data-comment-ui]_*)]:cursor-crosshair!'
-                      : 'cursor-default',
+                  : tool === 'zoom'
+                    ? ZOOM_CURSOR[altHeld ? 'out' : 'in']
+                    : tool === 'comment'
+                      ? COMMENT_CURSOR
+                      : isDrawingTool(tool)
+                        ? tool === 'text'
+                          ? 'cursor-text! [&_:not([data-comment-ui]_*)]:cursor-text!'
+                          : tool === 'path'
+                            ? PEN_CURSOR[drawing.penCursor]
+                            : 'cursor-crosshair! [&_:not([data-comment-ui]_*)]:cursor-crosshair!'
+                        : 'cursor-default',
             )}
             style={{ ...bounds, ...paperStyle(paper) }}
             onPointerDownCapture={drawing.onPointerDown}
@@ -1046,8 +1146,17 @@ export function Stage({
               className="pointer-events-none absolute left-0 top-0 origin-top-left will-change-transform [background-image:radial-gradient(circle,var(--dot)_1.2px,transparent_1.2px)]"
               ref={gridRef}
             />
-            {/* the selected frame's size badge, in screen px (FrameLabelLayer) */}
-            <div className="pointer-events-none absolute inset-0" ref={setLabelLayer} />
+            {/* the pixel grid over the bare paper. Each frame draws its own over
+                its document (FrameView's PixelGrid), under its pins, threads and
+                grips, so nothing the canvas puts over the frames is gridded;
+                it never takes the pointer */}
+            <div
+              hidden
+              data-pixel-grid="paper"
+              className="pointer-events-none absolute left-0 top-0 h-[calc(100%+16px)] w-[calc(100%+16px)] origin-top-left will-change-transform"
+              style={pixelGridLines(1)}
+              ref={pixelGridRef}
+            />
             {/* `world` is likewise a behaviour hook: pan hit-testing checks
             classList.contains('world') to tell background from frame */}
             <div
@@ -1063,7 +1172,7 @@ export function Stage({
               <PrototypeOverlay />
               <SnapGuides />
               <CanvasComments composeAt={composeAt} onComposeDone={dismissCompose} />
-              <Cursors />
+              {showCursors && <Cursors />}
               {drawing.preview}
               {marquee && (
                 <div
@@ -1072,13 +1181,9 @@ export function Stage({
                 />
               )}
             </div>
-            {/* the pixel grid lies over the frames, not under them, so it lines
-                up their content; it never takes the pointer */}
-            <div
-              hidden
-              className="pointer-events-none absolute left-0 top-0 h-[calc(100%+16px)] w-[calc(100%+16px)] origin-top-left will-change-transform [--pixel-line:rgb(128_128_128/0.16)] [background-image:linear-gradient(to_right,var(--pixel-line)_1px,transparent_1px),linear-gradient(to_bottom,var(--pixel-line)_1px,transparent_1px)]"
-              ref={pixelGridRef}
-            />
+            {/* the selected frame's size badge, in screen px (FrameLabelLayer); after
+                the world so no frame, however it stacks, covers it */}
+            <div className="pointer-events-none absolute inset-0" ref={setLabelLayer} />
             {showRulers && <Rulers stage={ref} />}
           </div>
         </ContextMenuTrigger>
@@ -1136,22 +1241,24 @@ export function Stage({
             {/* one fill slides between tools; the buttons themselves stay
                 transparent so the pill is the only thing that moves */}
             <ToolbarHighlight activeKey={tool} />
-            {TOOLS.filter((entry) => entry.id !== 'comment' && toolAllowed(entry.id, role)).map((entry) => (
-              <Tooltip
-                key={entry.id}
-                label={t('stage.toolTooltip', { label: t(entry.label), key: entry.key })}
-                side="right"
-              >
-                <ToolbarButton
-                  aria-label={t(entry.label)}
-                  aria-pressed={tool === entry.id}
-                  className="relative z-[1] hover:bg-transparent aria-pressed:text-ink"
-                  onClick={() => setTool(entry.id)}
+            {TOOLS.filter((entry) => entry.id !== 'comment' && entry.id !== 'zoom' && toolAllowed(entry.id, role)).map(
+              (entry) => (
+                <Tooltip
+                  key={entry.id}
+                  label={t('stage.toolTooltip', { label: t(entry.label), key: entry.key })}
+                  side="right"
                 >
-                  {TOOL_ICONS[entry.id]}
-                </ToolbarButton>
-              </Tooltip>
-            ))}
+                  <ToolbarButton
+                    aria-label={t(entry.label)}
+                    aria-pressed={tool === entry.id}
+                    className="relative z-[1] hover:bg-transparent aria-pressed:text-ink"
+                    onClick={() => setTool(entry.id)}
+                  >
+                    {TOOL_ICONS[entry.id]}
+                  </ToolbarButton>
+                </Tooltip>
+              ),
+            )}
             <ToolbarDivider className="md:mx-0 md:my-1 md:h-px md:w-[18px]" />
             <ModeSwitch canComment={toolAllowed('comment', role)} />
           </Toolbar>

@@ -1,4 +1,5 @@
 import { nanoid } from 'nanoid'
+import { MAX_DECISION_CHARS } from '../shared/designDecisions.ts'
 import { MAX_PAGES, PageLimitError, store } from './store.ts'
 import * as persist from './db/persist.ts'
 import * as thumbs from './thumbs.ts'
@@ -725,7 +726,8 @@ export async function backfillElementIds(
   for (const [frameId, rows] of byFrame) {
     const found: Array<{ comment: ElementComment; id: string }> = []
     const lost: ElementComment[] = []
-    let html = store.getFrame(frameId)?.html
+    /* one frame's canvas at a time; the idle sweep gives it back afterwards */
+    let html = (await store.loadFrame(frameId))?.html
     if (html === undefined) continue
     for (const { comment, selector } of rows) {
       try {
@@ -1982,6 +1984,15 @@ export function isFrameStreaming(frameId: string): boolean {
   return streams.has(frameId) || reveals.has(frameId)
 }
 
+/** Whether any frame on the canvas has a stream or playback open, which
+ *  keeps the canvas's frame HTML in memory (store.evictIdle). */
+export function isCanvasStreaming(canvasId: string): boolean {
+  for (const frameId of [...streams.keys(), ...reveals.keys()]) {
+    if (store.getFrame(frameId)?.canvasId === canvasId) return true
+  }
+  return false
+}
+
 export function deleteFrame(frameId: string, actor: Actor): Frame | undefined {
   /* close any live stream or playback while the frame still exists,
      so their auto “Designing…” tasks end with it */
@@ -2612,8 +2623,6 @@ export function setDecisionSummary(canvasId: string, id: string, summary: string
   broadcast(canvasId, { type: 'decision', decision })
 }
 
-export const MAX_DECISION_CHARS = 500
-
 /** A connected agent reports a design decision its human made in conversation
  *  (the save_decision MCP tool) — the only party that hears that channel is
  *  the agent, so it is the reporter. Throws on bad input; returns undefined
@@ -2624,7 +2633,7 @@ export function recordChatDecision(canvasId: string, text: string, actor: Actor)
   if (!clean) throw new Error('decision text is empty')
   if (clean.length > MAX_DECISION_CHARS)
     throw new Error(
-      `decision is ${clean.length} chars — keep it under ${MAX_DECISION_CHARS} (the human's words, not an essay)`,
+      `decision is ${clean.length} chars — save one decision and its rationale per call, at most ${MAX_DECISION_CHARS} characters; split longer feedback into separate calls by topic`,
     )
   /* agents re-tell things; the same words land in Memory once */
   if (getDecisions(canvasId).some((d) => d.text === clean)) return null

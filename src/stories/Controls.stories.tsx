@@ -13,11 +13,9 @@ import { Toolbar, ToolbarControl, ToolbarDot } from '@/components/ui/toolbar'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import {
   ArrowUpIcon,
-  CalendarIcon,
   CommentIcon,
   CopyIcon,
   GridIcon,
-  HistoryIcon,
   LayoutTemplateIcon,
   MoreHorizontalIcon,
   PanelCollapseIcon,
@@ -99,8 +97,6 @@ function ChipDemo() {
   const [on, setOn] = useState(0)
   const chips = [
     { label: 'Draft a landing page', icon: <LayoutTemplateIcon width={13} height={13} /> },
-    { label: 'Recap a session', icon: <CalendarIcon width={13} height={13} /> },
-    { label: 'What changed', icon: <HistoryIcon width={13} height={13} /> },
     { label: 'Run an automation', icon: <span className="font-mono text-caption">/</span> },
   ]
   return (

@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import type { Page } from 'puppeteer-core'
 import type { TextFormatCommand } from '../src/lib/richText'
 import { findBrowserPath } from '../server/screenshot'
@@ -21,10 +21,13 @@ declare global {
         tool: string
         selectedIds: string[]
         selectedElement: { frameId: string; selector: string } | null
+        selectedElements: string[]
       }
       undo: () => Promise<void>
       redo: () => Promise<void>
       pick: (el: { frameId: string; selector: string } | null) => void
+      /** several Layers rows picked, the last the primary */
+      pickMany: (frameId: string, selectors: string[]) => void
       formatText: (command: TextFormatCommand) => boolean
       /** an SVG file read the way a paste reads it, with the browser's computed styles */
       importSvg: (markup: string, name: string) => ImportedSvg | null
@@ -43,12 +46,22 @@ describe.skipIf(!findBrowserPath())('drawing on the canvas', { timeout: 30_000 }
   /* the anchors sent by PATCH /api/comments/:id/anchor, in order */
   let commentMoves: Record<string, unknown>[] = []
   const errors: string[] = []
+  /** why Chromium gave up on this test's tab, when it did */
+  let crashed: string | null = null
 
   beforeAll(async () => {
     browser = await openBrowser()
-    page = await browser.newPage()
+  }, 60_000)
+
+  /* Every test gets its own page. One page for the whole file meant that a
+     tab Chromium lost (a renderer that died on a CI runner) took every later
+     test with it: each one's setup waited 30s on a page that would never
+     answer. */
+  async function openPage(): Promise<Page> {
+    const page = await browser.newPage()
     page.setDefaultTimeout(10_000)
     page.on('pageerror', (err) => errors.push(String(err)))
+    page.on('error', (err) => (crashed = String(err)))
     /* holds the frames' hit-test answers while a test sets heldMoveHits; it
        must listen before the app does, since a window's own listeners run in
        the order they were added */
@@ -89,11 +102,12 @@ describe.skipIf(!findBrowserPath())('drawing on the canvas', { timeout: 30_000 }
         await req.respond({ status: 200, contentType: 'application/json', body: '{}' })
       } else await req.continue()
     })
-  }, 60_000)
+    return page
+  }
 
   beforeEach(async () => {
-    await page.mouse.reset()
-    await page.keyboard.up('Shift')
+    crashed = null
+    page = await openPage()
     saved = []
     nextId = 0
     patchRequests = 0
@@ -119,8 +133,13 @@ describe.skipIf(!findBrowserPath())('drawing on the canvas', { timeout: 30_000 }
     await page.evaluate(() => window.drawingHarness.viewport({ x: 40, y: 20, zoom: 2 }))
   })
 
+  afterEach(async () => {
+    /* a crashed tab can no longer be closed politely; the context closes it */
+    if (!crashed) await page?.close()
+    expect(crashed, 'Chromium lost the tab during this test').toBeNull()
+  })
+
   afterAll(async () => {
-    await page?.close()
     await browser?.close()
     expect(errors).toEqual([])
   })
@@ -957,6 +976,137 @@ describe.skipIf(!findBrowserPath())('drawing on the canvas', { timeout: 30_000 }
     await expect.poll(async () => (await visibleDrawing('Layers', '#rect')).x).toBeCloseTo(moved.x, 0)
   })
 
+  it('drags every picked layer together, as one save and one undo step, from a press inside one of them', async () => {
+    const source = layerFrame(
+      rectangle +
+        '<div id="box" style="position:absolute;left:300px;top:60px;width:120px;height:90px;background:teal">' +
+        '<p id="label" style="margin:0;padding:20px">Two</p></div>' +
+        '<p id="sibling" style="margin:0">Keep me</p>',
+    )
+    await seedFrames([source])
+    await page.evaluate(() => {
+      window.drawingHarness.viewport({ x: 40, y: 20, zoom: 1 })
+      window.drawingHarness.selectFrames(['layers'])
+      window.drawingHarness.pickMany('layers', ['#box', '#rect'])
+    })
+    const rect = await visibleDrawing('Layers', '#rect')
+    const box = await visibleDrawing('Layers', '#box')
+    /* the press lands on the label inside the picked box */
+    await page.mouse.move(box.x + 30, box.y + 30)
+    await page.mouse.down()
+    await page.mouse.move(box.x + 70, box.y + 55, { steps: 5 })
+    await expect.poll(async () => (await visibleDrawing('Layers', '#box')).x).toBeCloseTo(box.x + 40, 0)
+    /* the other picked layer previews the same travel, with no save yet */
+    expect((await visibleDrawing('Layers', '#rect')).x).toBeCloseTo(rect.x + 40, 0)
+    expect(patchRequests).toBe(0)
+    await page.mouse.up()
+    await expect.poll(() => patchRequests).toBe(1)
+    expect((await visibleDrawing('Layers', '#box')).y).toBeCloseTo(box.y + 25, 0)
+    expect((await visibleDrawing('Layers', '#rect')).y).toBeCloseTo(rect.y + 25, 0)
+    expect(saved[0]!.html).toContain('<p id="sibling" style="margin:0">Keep me</p>')
+    /* the pick stands, the pressed layer now its primary */
+    const state = await page.evaluate(() => window.drawingHarness.state())
+    expect(state.selectedElement?.selector).toBe('#box')
+    expect(state.selectedElements).toEqual(['#rect', '#box'])
+    await page.evaluate(() => window.drawingHarness.undo())
+    await expect.poll(async () => (await visibleDrawing('Layers', '#rect')).x).toBeCloseTo(rect.x, 0)
+    expect((await visibleDrawing('Layers', '#box')).x).toBeCloseTo(box.x, 0)
+  })
+
+  it('drags a drawing picked with other layers together with them', async () => {
+    const source = layerFrame(
+      rectangle +
+        '<div id="shape" data-doop-drawing="rectangle" data-name="Rectangle" style="position:absolute;left:300px;top:60px;width:60px;height:40px;background:red"></div>',
+    )
+    await seedFrames([source])
+    await page.evaluate(() => {
+      window.drawingHarness.viewport({ x: 40, y: 20, zoom: 1 })
+      window.drawingHarness.selectFrames(['layers'])
+      window.drawingHarness.pickMany('layers', ['#rect', '#shape'])
+    })
+    const rect = await visibleDrawing('Layers', '#rect')
+    const shape = await visibleDrawing('Layers', '#shape')
+    /* a travel that lines the shape up with none of its sibling's edges, so no snap */
+    await drag([shape.x + 20, shape.y + 20], [shape.x + 60, shape.y + 50])
+    await expect.poll(() => patchRequests).toBe(1)
+    expect((await visibleDrawing('Layers', '#shape')).x).toBeCloseTo(shape.x + 40, 0)
+    expect((await visibleDrawing('Layers', '#rect')).x).toBeCloseTo(rect.x + 40, 0)
+    expect((await visibleDrawing('Layers', '#rect')).y).toBeCloseTo(rect.y + 30, 0)
+    const state = await page.evaluate(() => window.drawingHarness.state())
+    expect(state.selectedElements).toEqual(['#rect', '#shape'])
+  })
+
+  it('moves a picked parent once with its picked child, whatever order the pick names them in', async () => {
+    const source = layerFrame(
+      rectangle +
+        '<div id="box" style="position:absolute;left:300px;top:60px;width:120px;height:90px;background:teal">' +
+        '<div id="child" style="position:absolute;left:10px;top:10px;width:30px;height:30px;background:gold"></div></div>',
+    )
+    await seedFrames([source])
+    await page.evaluate(() => {
+      window.drawingHarness.viewport({ x: 40, y: 20, zoom: 1 })
+      window.drawingHarness.selectFrames(['layers'])
+      window.drawingHarness.pickMany('layers', ['#child', '#box', '#rect'])
+    })
+    const rect = await visibleDrawing('Layers', '#rect')
+    const box = await visibleDrawing('Layers', '#box')
+    const child = await visibleDrawing('Layers', '#child')
+    await drag([rect.x + 40, rect.y + 40], [rect.x + 80, rect.y + 40])
+    await expect.poll(() => patchRequests).toBe(1)
+    expect((await visibleDrawing('Layers', '#box')).x).toBeCloseTo(box.x + 40, 0)
+    /* the child rides its parent and is not moved a second time on its own */
+    expect((await visibleDrawing('Layers', '#child')).x).toBeCloseTo(child.x + 40, 0)
+    expect(saved[0]!.html).not.toMatch(/id="child"[^>]*translate/)
+  })
+
+  it('leaves the rest of a pick where it is when Escape cancels the drag', async () => {
+    const source = layerFrame(
+      rectangle +
+        '<div id="box" style="position:absolute;left:300px;top:60px;width:120px;height:90px;background:teal"></div>',
+    )
+    await seedFrames([source])
+    await page.evaluate(() => {
+      window.drawingHarness.viewport({ x: 40, y: 20, zoom: 1 })
+      window.drawingHarness.selectFrames(['layers'])
+      window.drawingHarness.pickMany('layers', ['#rect', '#box'])
+    })
+    const rect = await visibleDrawing('Layers', '#rect')
+    const box = await visibleDrawing('Layers', '#box')
+    await page.mouse.move(rect.x + 40, rect.y + 40)
+    await page.mouse.down()
+    await page.mouse.move(rect.x + 80, rect.y + 40, { steps: 5 })
+    await expect.poll(async () => (await visibleDrawing('Layers', '#box')).x).toBeCloseTo(box.x + 40, 0)
+    await page.keyboard.press('Escape')
+    await expect.poll(async () => (await visibleDrawing('Layers', '#box')).x).toBeCloseTo(box.x, 0)
+    expect((await visibleDrawing('Layers', '#rect')).x).toBeCloseTo(rect.x, 0)
+    await page.mouse.up()
+    await page.evaluate(() => new Promise((resolve) => setTimeout(resolve, 300)))
+    expect(patchRequests).toBe(0)
+    expect(saved[0]!.html).toBe(source.html)
+  })
+
+  it('moves only the layer pressed when it is not part of the pick', async () => {
+    const source = layerFrame(
+      rectangle +
+        '<div id="box" style="position:absolute;left:300px;top:60px;width:120px;height:90px;background:teal"></div>' +
+        '<div id="loose" style="position:absolute;left:50px;top:300px;width:80px;height:80px;background:plum"></div>',
+    )
+    await seedFrames([source])
+    await page.evaluate(() => {
+      window.drawingHarness.viewport({ x: 40, y: 20, zoom: 1 })
+      window.drawingHarness.selectFrames(['layers'])
+      window.drawingHarness.pickMany('layers', ['#rect', '#box'])
+    })
+    const rect = await visibleDrawing('Layers', '#rect')
+    const loose = await visibleDrawing('Layers', '#loose')
+    await drag([loose.x + 40, loose.y + 40], [loose.x + 80, loose.y + 40])
+    await expect.poll(() => patchRequests).toBe(1)
+    expect((await visibleDrawing('Layers', '#loose')).x).toBeCloseTo(loose.x + 40, 0)
+    expect((await visibleDrawing('Layers', '#rect')).x).toBeCloseTo(rect.x, 0)
+    const state = await page.evaluate(() => window.drawingHarness.state())
+    expect(state.selectedElements).toEqual(['#loose'])
+  })
+
   it('moves a transformed layer in screen space without changing its transform or siblings', async () => {
     const source =
       layerFrame(`<section style="position:absolute;left:100px;top:80px;transform:rotate(20deg) scale(1.2);transform-origin:0 0">
@@ -980,6 +1130,196 @@ describe.skipIf(!findBrowserPath())('drawing on the canvas', { timeout: 30_000 }
     expect(after.width).toBeCloseTo(before.width, 0)
     expect(await visibleDrawing('Layers', '#sibling')).toEqual(sibling)
     expect(saved[0]!.html).toContain('transform: rotate(10deg)')
+  })
+
+  it('⌥⇧-drags a copy of the picked layer, leaving the original, as one undo step', async () => {
+    const source = layerFrame(
+      '<div id="rect" data-doop-id="keep" style="position:absolute;left:40px;top:40px;width:100px;height:80px;background:coral"></div>',
+    )
+    await seedFrames([source])
+    await page.evaluate(() => window.drawingHarness.viewport({ x: 40, y: 20, zoom: 1 }))
+    await page.evaluate(() => window.drawingHarness.pick({ frameId: 'layers', selector: '#rect' }))
+    const before = await visibleDrawing('Layers', '#rect')
+    await page.keyboard.down('Alt')
+    await page.keyboard.down('Shift')
+    // 2px short of the frame's centre line: the copy snaps onto it, ⌥ held or not
+    await drag([before.x + 50, before.y + 40], [before.x + 308, before.y + 140])
+    await page.keyboard.up('Shift')
+    await page.keyboard.up('Alt')
+    await expect.poll(() => patchRequests).toBe(1)
+    expect(saved).toHaveLength(1)
+    const [original, copy] = await page.evaluate((html) => {
+      const divs = [...new DOMParser().parseFromString(html, 'text/html').querySelectorAll('div')]
+      return divs.map((el) => ({ id: el.id, doopId: el.getAttribute('data-doop-id'), style: el.getAttribute('style') }))
+    }, saved[0]!.html)
+    expect(original).toMatchObject({ id: 'rect', doopId: 'keep' })
+    expect(original!.style).toContain('left:40px')
+    expect(copy).toMatchObject({ id: 'rect-copy', doopId: null })
+    const moved = await visibleDrawing('Layers', '#rect-copy')
+    expect(moved.x - before.x).toBeCloseTo(260, 0)
+    expect(moved.y - before.y).toBeCloseTo(100, 0)
+    expect(await visibleDrawing('Layers', '#rect')).toEqual(before)
+    const state = await page.evaluate(() => window.drawingHarness.state())
+    expect(state.frames).toHaveLength(1)
+    expect(state.selectedElement?.selector).not.toBe('#rect')
+    await page.evaluate(() => window.drawingHarness.undo())
+    await expect.poll(() => saved[0]!.html).toBe(source.html)
+  })
+
+  it.each(['canvas', 'frame'])('⌥⇧-drags a copy of the picked layer off its frame onto the %s', async (onto) => {
+    /* a source rule with !important, carried along, must not beat the drop's placement */
+    const source = layerFrame(
+      '<style>.card { position:absolute !important; left:40px !important }</style><div id="rect" class="card" data-doop-id="keep" style="position:absolute;left:40px;top:40px;width:100px;height:80px;background:coral"></div>',
+    )
+    /* a positioned, margined body must not shift a copy dropped into it */
+    const other: Frame = {
+      ...layerFrame('<style>body { position:relative; margin:20px !important }</style><p style="margin:0">Other</p>'),
+      id: 'other',
+      name: 'Other',
+      x: 900,
+      y: 50,
+      width: 250,
+      height: 300,
+    }
+    await seedFrames(onto === 'frame' ? [source, other] : [source])
+    await page.evaluate(() => window.drawingHarness.viewport({ x: 40, y: 20, zoom: 1 }))
+    await page.evaluate(() => window.drawingHarness.pick({ frameId: 'layers', selector: '#rect' }))
+    const before = await visibleDrawing('Layers', '#rect')
+    await page.keyboard.down('Alt')
+    await page.keyboard.down('Shift')
+    await page.mouse.move(before.x + 50, before.y + 40)
+    await page.mouse.down()
+    // world x 110 → 863: clear of every edge, so nothing snaps
+    await page.mouse.move(before.x + 803, before.y + 70, { steps: 8 })
+    await page.waitForSelector(
+      onto === 'frame' ? '[data-drawing-drop-target="other"]' : 'iframe[title="Moving drawing"]',
+    )
+    await page.mouse.up()
+    await page.keyboard.up('Shift')
+    await page.keyboard.up('Alt')
+    if (onto === 'canvas') {
+      await expect.poll(() => saved.length).toBe(2)
+      const copy = saved[1]!
+      expect(copy).toMatchObject({ x: 863, y: 120, width: 100, height: 80, pageId: 'first' })
+      expect(copy.html).toContain('data-doop-canvas-element')
+      expect(copy.html).not.toContain('data-doop-id')
+    } else {
+      await expect.poll(() => patchRequests).toBe(1)
+      expect(saved.find((f) => f.id === 'other')!.html).not.toContain('data-doop-id')
+      const dest = (await (await page.$('iframe[title="Other"]'))!.contentFrame())!
+      await dest.waitForSelector('#rect')
+      expect(
+        await dest.$eval('#rect', (el) => {
+          const box = el.getBoundingClientRect()
+          return { x: box.x, y: box.y, width: box.width, height: box.height }
+        }),
+      ).toEqual({ x: -37, y: 70, width: 100, height: 80 })
+    }
+    /* the source never changed: the original is still there, in its place */
+    expect(saved.find((f) => f.id === 'layers')!.html).toBe(source.html)
+    expect(await visibleDrawing('Layers', '#rect')).toEqual(before)
+    expect(await (await (await page.$('iframe[title="Layers"]'))!.contentFrame())!.$$('#rect-copy')).toHaveLength(0)
+    await page.evaluate(() => window.drawingHarness.undo())
+    if (onto === 'canvas') await expect.poll(() => saved.length).toBe(1)
+    else await expect.poll(() => saved.find((f) => f.id === 'other')!.html).toBe(other.html)
+  })
+
+  it('⌥⇧-drags a copy out of a turned frame from where the layer shows', async () => {
+    const source: Frame = {
+      ...layerFrame(
+        '<div id="rect" style="position:absolute;left:40px;top:40px;width:100px;height:80px;background:coral"></div>',
+      ),
+      rotation: 90,
+    }
+    await seedFrames([source])
+    await page.evaluate(() => window.drawingHarness.viewport({ x: 40, y: 20, zoom: 1 }))
+    await page.evaluate(() => window.drawingHarness.pick({ frameId: 'layers', selector: '#rect' }))
+    /* the frame turns a quarter about its centre (420, 300): the layer's
+       centre (90, 80) in it shows at (590, 40) on the canvas, screen (630, 60) */
+    await visibleDrawing('Layers', '#rect')
+    await page.keyboard.down('Alt')
+    await page.keyboard.down('Shift')
+    await drag([630, 60], [1080, 60])
+    await page.keyboard.up('Shift')
+    await page.keyboard.up('Alt')
+    await expect.poll(() => saved.length).toBe(2)
+    /* unturned, centred where it was let go: 450px right of where it showed */
+    expect(saved[1]).toMatchObject({ x: 990, y: 0, width: 100, height: 80 })
+  })
+
+  it('⌥⇧-drags a copy that keeps the rules styling the original by its id', async () => {
+    const source = layerFrame(
+      '<style>#rect { position:absolute; left:40px; top:40px; width:100px; height:80px; background:coral }</style><div id="rect"></div>',
+    )
+    await seedFrames([source])
+    await page.evaluate(() => window.drawingHarness.viewport({ x: 40, y: 20, zoom: 1 }))
+    await page.evaluate(() => window.drawingHarness.pick({ frameId: 'layers', selector: '#rect' }))
+    const before = await visibleDrawing('Layers', '#rect')
+    await page.keyboard.down('Alt')
+    await page.keyboard.down('Shift')
+    await drag([before.x + 50, before.y + 40], [before.x + 250, before.y + 140])
+    await page.keyboard.up('Shift')
+    await page.keyboard.up('Alt')
+    await expect.poll(() => patchRequests).toBe(1)
+    /* styled from the start, the copy moves freely to where it was let go */
+    const copy = await visibleDrawing('Layers', '#rect-copy')
+    expect(copy.x - before.x).toBeCloseTo(200, 0)
+    expect(copy.y - before.y).toBeCloseTo(100, 0)
+    expect(copy.width).toBeCloseTo(100, 0)
+    expect(copy.height).toBeCloseTo(80, 0)
+    const iframe = (await (await page.$('iframe[title="Layers"]'))!.contentFrame())!
+    expect(await iframe.$eval('#rect-copy', (el) => getComputedStyle(el).backgroundColor)).toBe('rgb(255, 127, 80)')
+  })
+
+  it('⌥⇧-drags a copy of a flow layer onto the room it takes below the original', async () => {
+    const source = layerFrame(`<style>body { display:flex; flex-direction:column; padding:40px }</style>
+      <h1 data-doop-id="keep" style="margin:0;font-size:40px">Title</h1><p style="margin:0">Lede</p>`)
+    await seedFrames([source])
+    await page.evaluate(() => window.drawingHarness.viewport({ x: 40, y: 20, zoom: 1 }))
+    await page.evaluate(() => window.drawingHarness.pick({ frameId: 'layers', selector: 'body > h1' }))
+    const title = await visibleDrawing('Layers', 'body > h1')
+    await page.keyboard.down('Alt')
+    await page.keyboard.down('Shift')
+    await drag([title.x + 20, title.y + 10], [title.x + 20, title.y + 10 + title.height])
+    await page.keyboard.up('Shift')
+    await page.keyboard.up('Alt')
+    await expect.poll(() => patchRequests).toBe(1)
+    const [original, copy] = await page.evaluate((html) => {
+      const h1s = [...new DOMParser().parseFromString(html, 'text/html').querySelectorAll('h1')]
+      return h1s.map((el) => ({ doopId: el.getAttribute('data-doop-id'), next: el.nextElementSibling?.tagName }))
+    }, saved[0]!.html)
+    expect(original).toEqual({ doopId: 'keep', next: 'H1' })
+    expect(copy).toEqual({ doopId: null, next: 'P' })
+    expect((await page.evaluate(() => window.drawingHarness.state())).selectedElement?.selector).toMatch(
+      /h1:nth-of-type\(2\)$/,
+    )
+  })
+
+  it('⌥⇧-drags a copy of a flow layer into another box, and Escape leaves nothing behind', async () => {
+    const source = layerFrame(flowBoxes)
+    await seedFrames([source])
+    await page.evaluate(() => window.drawingHarness.viewport({ x: 0, y: 0, zoom: 1 }))
+    await page.evaluate(() => window.drawingHarness.pick({ frameId: 'layers', selector: '#photo' }))
+    const photo = await visibleDrawing('Layers', '#photo')
+    const into = await visibleDrawing('Layers', '#into')
+    const iframe = (await (await page.$('iframe[title="Layers"]'))!.contentFrame())!
+    await page.keyboard.down('Alt')
+    await page.keyboard.down('Shift')
+    await page.mouse.move(photo.x + 30, photo.y + 20)
+    await page.mouse.down()
+    await page.mouse.move(into.x + 50, into.y + 40, { steps: 5 })
+    await page.waitForSelector('[data-element-drop-indicator]')
+    await page.keyboard.press('Escape')
+    await page.mouse.up()
+    await expect.poll(() => iframe.$$eval('img', (imgs) => imgs.length)).toBe(1)
+    expect(patchRequests).toBe(0)
+    await drag([photo.x + 30, photo.y + 20], [into.x + 50, into.y + 40])
+    await page.keyboard.up('Shift')
+    await page.keyboard.up('Alt')
+    await expect.poll(() => patchRequests).toBe(1)
+    await iframe.waitForSelector('#into > img')
+    expect(await iframe.$$eval('#from > img#photo', (imgs) => imgs.length)).toBe(1)
+    expect(saved).toHaveLength(1)
   })
 
   it("drags a layer inside a turned frame along the document's own axes, picking the layer under the pointer", async () => {
@@ -1947,6 +2287,44 @@ describe.skipIf(!findBrowserPath())('drawing on the canvas', { timeout: 30_000 }
     expect(await page.evaluate(() => window.drawingHarness.state().selectedElement?.selector)).toBe('#a')
   })
 
+  it("comments on a frame filled by its layers from the frame's name", async () => {
+    await seedFrames([
+      {
+        id: 'full',
+        updatedBy: 'User',
+        canvasId: 'c',
+        pageId: 'first',
+        name: 'Full',
+        x: 30,
+        y: 30,
+        width: 400,
+        height: 300,
+        createdAt: 0,
+        updatedAt: 0,
+        html: '<body style="margin:0"><div id="hero" style="width:400px;height:300px;background:#eee"></div></body>',
+      },
+    ])
+    await page.waitForSelector('iframe[title="Full"]')
+    await page.keyboard.press('c')
+    const title = (await (await page.waitForSelector('[data-frame-title]'))!.boundingBox())!
+    /* hovering the name outlines the whole frame */
+    await page.mouse.move(title.x + 4, title.y + title.height / 2)
+    await page.waitForSelector('[data-frame-comment-hover]')
+    await page.mouse.down()
+    await page.mouse.up()
+    await page.waitForSelector('textarea[placeholder="Leave a comment on this frame…"]')
+    expect(await page.evaluate(() => window.drawingHarness.state().selectedElement)).toBeNull()
+    const posted = page.waitForRequest((req) => req.url().endsWith('/api/frames/full/comments'))
+    await page.keyboard.type('The whole hero')
+    await page.keyboard.down('Control')
+    await page.keyboard.press('Enter')
+    await page.keyboard.up('Control')
+    expect(JSON.parse((await posted).postData()!)).toMatchObject({ selector: 'body', x: 12, y: 12 })
+    /* leaving the name takes the outline away */
+    await page.mouse.move(title.x + 4, title.y - 40)
+    await page.waitForFunction(() => !document.querySelector('[data-frame-comment-hover]'))
+  })
+
   it('drags a comment pin off its element onto the canvas, onto the frame, and back onto an element', async () => {
     await seedFrames([
       {
@@ -2075,6 +2453,25 @@ describe.skipIf(!findBrowserPath())('drawing on the canvas', { timeout: 30_000 }
     await page.waitForSelector('textarea[placeholder="Reply… (@doop to ask the agent)"]')
     await page.keyboard.press('Escape')
     await page.waitForFunction(() => !document.querySelector('textarea[placeholder="Reply… (@doop to ask the agent)"]'))
+
+    /* ⇧C mid-drag hides the pins, but the one in hand finishes its move and
+       leaves no ghost behind; ⇧C again brings the pins back */
+    const toggleComments = async () => {
+      await page.keyboard.down('Shift')
+      await page.keyboard.press('KeyC')
+      await page.keyboard.up('Shift')
+    }
+    await page.mouse.move(pin.x + pin.width / 2, pin.y + pin.height / 2)
+    await page.mouse.down()
+    await page.mouse.move(box.x + box.width + 100, box.y + 100, { steps: 4 })
+    await page.waitForSelector('[data-comment-drag]')
+    await toggleComments()
+    await page.mouse.up()
+    await page.waitForFunction(() => !document.querySelector('[data-comment-drag]'))
+    expect(commentMoves).toHaveLength(4)
+    await page.waitForFunction(() => !document.querySelector('[title="Alice: Move me"]'))
+    await toggleComments()
+    await page.waitForSelector('[title="Alice: Move me"]')
   })
 
   it('keeps all tools reachable on phones, clear of zoom, and accepts touch drawing', async () => {

@@ -81,6 +81,13 @@ describe.skipIf(!findBrowserPath() || !CLIPBOARD_IS_RELIABLE)('canvas clipboard 
     })
   }
 
+  /* the frame's name at its left end: a picked element near the frame's
+     top wears its toolbar over the middle of the name, clear of the rotate
+     zones, and a centre click would land on the toolbar */
+  async function clickFrameTitle(button: 'left' | 'right' = 'left') {
+    await page.click('[data-frame-title]', { button, offset: { x: 4, y: 9 } })
+  }
+
   async function choose(label: string) {
     const handle = await page.waitForFunction(
       (label) =>
@@ -196,6 +203,10 @@ describe.skipIf(!findBrowserPath() || !CLIPBOARD_IS_RELIABLE)('canvas clipboard 
     await copyImage()
     await chord('v')
     await expect.poll(() => uploads).toBe(1)
+    /* the picture lands as a frame of its own once it has uploaded. The test
+       waits for that request: left in flight, it arrived during the next
+       test, after `created` was emptied, and was counted as that test's */
+    await expect.poll(() => created.length).toBe(1)
     expect(await count('section')).toBe(1)
   })
 
@@ -259,7 +270,7 @@ describe.skipIf(!findBrowserPath() || !CLIPBOARD_IS_RELIABLE)('canvas clipboard 
 
   it('copies a frame through its menu and pastes with the keyboard', async () => {
     await copyImage()
-    await page.click('[data-frame-title]', { button: 'right' })
+    await clickFrameTitle('right')
     await choose('Copy')
     /* the menu's copy writes the clipboard asynchronously: paste once the
        token has replaced the image, or the paste lands the image instead */
@@ -273,7 +284,7 @@ describe.skipIf(!findBrowserPath() || !CLIPBOARD_IS_RELIABLE)('canvas clipboard 
   it('replaces an element copy with an entire frame copied through the keyboard', async () => {
     await page.evaluate(() => window.canvasClipboardHarness.pick('#card'))
     await chord('c')
-    await page.click('[data-frame-title]')
+    await clickFrameTitle()
     await chord('c')
     await chord('v')
     await expect.poll(() => created.length).toBe(1)
@@ -290,7 +301,7 @@ describe.skipIf(!findBrowserPath() || !CLIPBOARD_IS_RELIABLE)('canvas clipboard 
         value: () => Promise.reject(new DOMException('Clipboard denied', 'NotAllowedError')),
       }),
     )
-    if (kind === 'frame') await page.click('[data-frame-title]', { button: 'right' })
+    if (kind === 'frame') await clickFrameTitle('right')
     else {
       const doc = (await (await page.$('iframe[data-doop-frame]'))!.contentFrame())!
       await doc.click('#other', { button: 'right' })
