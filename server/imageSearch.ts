@@ -1,4 +1,5 @@
 import { env } from './env.ts'
+import { iconAssetUrl } from './iconAssets.ts'
 /**
  * Image sourcing for design agents: stock photo search (Pexels) and icon /
  * brand-logo search (Iconify). Both power the search_images / search_icons
@@ -9,7 +10,7 @@ import { env } from './env.ts'
  * PEXELS_API_KEY; the Pexels license allows hotlinking, rehosting and
  * modification without attribution. Icon search is keyless: the Iconify API
  * indexes 200k+ open-source icons, including the simple-icons and logos
- * collections (brand marks), served as hotlinkable SVGs.
+ * collections (brand marks), served through Doop's persisted SVG cache.
  */
 
 const PEXELS_ENDPOINT = 'https://api.pexels.com/v1/search'
@@ -93,7 +94,7 @@ export async function fetchThumb(url: string): Promise<{ data: string; mime: str
 export interface IconResult {
   /** Iconify id, e.g. "mdi:home" or "logos:stripe". */
   id: string
-  /** Hotlinkable SVG URL for frame HTML. */
+  /** Doop-hosted, cached SVG URL for frame HTML. */
   svg_url: string
 }
 
@@ -111,13 +112,12 @@ export async function searchIcons(
   if (!res.ok) throw new Error(`icon search failed: HTTP ${res.status}`)
   const body = (await res.json()) as { icons?: string[] }
   return (body.icons ?? []).slice(0, limit).map((id) => {
-    const [prefix, name] = id.split(':')
-    return { id, svg_url: `${ICONIFY_ENDPOINT}/${prefix}/${name}.svg` }
+    return { id, svg_url: iconAssetUrl(id, env.BETTER_AUTH_URL) }
   })
 }
 
 export const ICON_USAGE_NOTE =
-  'Hotlink svg_url in <img src> or CSS. Monochrome icons render black by default — append ?color=%23<hex> (URL-encoded #) to recolor, and &height=<px> to size. For company/brand logos use search_logos instead.'
+  'Embed the Doop-hosted svg_url in <img src> or CSS; icons are cached on first use. Monochrome icons render black by default — append ?color=%23<hex> (URL-encoded #) to recolor, and &height=<px> to size. Each variant is cached separately. For company/brand logos use search_logos instead.'
 
 export function logoSearchEnabled(): boolean {
   return Boolean(env.BRANDFETCH_CLIENT_ID)

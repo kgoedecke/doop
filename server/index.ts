@@ -29,6 +29,7 @@ import { notificationsRouter } from './notifications.ts'
 import * as webhooks from './webhooks.ts'
 import { webhooksRouter } from './webhookRoutes.ts'
 import { fontsRouter } from './fontRoutes.ts'
+import { iconAssetsRouter } from './iconAssets.ts'
 import { AvatarInputError, clearAvatar, setAvatar } from './avatars.ts'
 import { MAX_AVATAR_BYTES, avatarUrl } from '../shared/avatar.ts'
 import { fontsForCanvas, hydrateFonts } from './fonts.ts'
@@ -477,6 +478,8 @@ app.get('/i/:id.:ext', async (req, res) => {
 /* by the same unguessable-id logic as /i/ (frame HTML embedding these    */
 /* URLs renders for anyone who can see the canvas).                       */
 /* ------------------------------------------------------------------ */
+
+app.use('/a/iconify', iconAssetsRouter)
 
 app.get('/a/:id.:ext', async (req, res) => {
   const { id, ext } = req.params as { id: string; ext: string }

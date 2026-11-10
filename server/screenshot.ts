@@ -3,7 +3,8 @@ import fs from 'node:fs'
 import path from 'node:path'
 import puppeteer, { type Browser, type Page } from 'puppeteer-core'
 import type { Frame } from '../shared/types.ts'
-import { guardPublicPageRequests } from './publicUrl.ts'
+import { fetchPinnedPublicUrl, guardPublicPageRequests } from './publicUrl.ts'
+import { getIconAsset, iconAssetSource } from './iconAssets.ts'
 
 /**
  * Render a frame's HTML in headless Chrome so agents can *see* their work.
@@ -116,6 +117,15 @@ export async function loadFramePage(frame: Frame): Promise<IsolatedPage> {
   try {
     const assetOrigin = new URL(env.BETTER_AUTH_URL).origin
     await guardPublicPageRequests(page, {
+      /* Existing frames still hotlink Iconify. Serve the same persisted SVG
+         cache as new search results, including their color/size variants. */
+      fetchUrl: async (raw, init) => {
+        const icon = iconAssetSource(String(raw))
+        if (!icon || (init?.method && init.method !== 'GET')) return fetchPinnedPublicUrl(raw, init)
+        return new Response(new Uint8Array(await getIconAsset(icon)), {
+          headers: { 'content-type': 'image/svg+xml', 'access-control-allow-origin': '*' },
+        })
+      },
       allowUrl: (url) =>
         (url.origin === assetOrigin && url.pathname.startsWith('/a/')) ||
         /* webfonts referenced by imported frames (imports request the
