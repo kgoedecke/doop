@@ -4,7 +4,11 @@ import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import type { Canvas, CanvasPageInfo } from '../shared/types'
 
-const savePages = vi.fn((_canvas: Canvas, _next: CanvasPageInfo[]) => Promise.resolve())
+/* resolves like the real one: the store holds the saved list afterwards */
+const savePages = vi.fn((canvas: Canvas, next: CanvasPageInfo[]) => {
+  useStore.getState().setPages(next, canvas.id)
+  return Promise.resolve()
+})
 vi.mock('../src/lib/pageEdits', () => ({
   savePages: (canvas: Canvas, next: CanvasPageInfo[]) => savePages(canvas, next),
   duplicatePage: () => Promise.resolve(),
@@ -47,6 +51,33 @@ async function blur() {
     await Promise.resolve()
   })
 }
+
+const names = () => (useStore.getState().canvas?.pages ?? []).map((p) => p.name)
+
+/* happy-dom has no layout: the row under the pointer is the one the test names */
+function dragPage(from: string, onto: string, after: boolean) {
+  const target = container.querySelector<HTMLElement>(`[data-page-id="${onto}"]`)!
+  document.elementFromPoint = () => target
+  target.getBoundingClientRect = () => ({ x: 0, y: 0, top: 0, height: 28 }) as DOMRect
+  const y = after ? 26 : 2
+  act(() => {
+    pageButton(from).dispatchEvent(
+      new PointerEvent('pointerdown', { bubbles: true, button: 0, clientX: 0, clientY: 0 }),
+    )
+  })
+  return {
+    drop: () =>
+      act(() => {
+        window.dispatchEvent(new PointerEvent('pointermove', { clientX: 10, clientY: y }))
+        window.dispatchEvent(new PointerEvent('pointerup', { clientX: 10, clientY: y }))
+      }),
+  }
+}
+
+const settle = () =>
+  act(async () => {
+    for (let i = 0; i < 10; i++) await Promise.resolve()
+  })
 
 describe('PagesPanel rename', () => {
   beforeEach(() => {
@@ -112,5 +143,40 @@ describe('PagesPanel rename', () => {
       await Promise.resolve()
     })
     expect(savePages).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps the field open after a failed save, and saves the retry once', async () => {
+    let fail!: (error: Error) => void
+    savePages.mockImplementationOnce(() => new Promise<void>((_resolve, reject) => (fail = reject)))
+    startRenaming('Adjust')
+    type('Breakdown')
+    await blur()
+    /* a second blur while the first save is in flight sends nothing */
+    await blur()
+    expect(savePages).toHaveBeenCalledTimes(1)
+    await act(async () => {
+      fail(new Error('offline'))
+    })
+    await settle()
+    expect(field()?.value).toBe('Breakdown')
+    expect(field()?.disabled).toBe(false)
+
+    await blur()
+    await settle()
+    expect(savePages).toHaveBeenCalledTimes(2)
+    expect(names()).toEqual(['Breakdown', 'Purchasing'])
+    expect(field()).toBeNull()
+  })
+
+  it('keeps a rename committed by the press that starts a page drag', async () => {
+    startRenaming('Adjust')
+    type('Breakdown')
+    /* the press lands before the field loses focus */
+    const drag = dragPage('Purchasing', 'p1', false)
+    await blur()
+    drag.drop()
+    await settle()
+    expect(savePages).toHaveBeenCalledTimes(2)
+    expect(names()).toEqual(['Purchasing', 'Breakdown'])
   })
 })
