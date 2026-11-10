@@ -1252,7 +1252,7 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
     } else if (Object.keys(edit.touched).length || edit.runs.length || edit.created.length || edit.renamed.length) postEdited(true)
     return true
   }
-  function applyStyle(selector, styles) {
+  function applyStyle(selector, styles, uniformText) {
     var el = styleTarget(selector)
     if (!el || isLocked(el)) return false
     var textPatch = isTextPatch(styles)
@@ -1291,6 +1291,7 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
       return true
     }
     if (textPatch) noteRuns(clearTextRuns(el, styles))
+    else if (uniformText) noteRuns(clearTextRuns(el, layerTextPatch(styles)))
     if (styleEdit && styleEdit.selector === selector) {
       Object.assign(styleEdit.styles, styles)
       previewStyle(el, styles)
@@ -1319,7 +1320,7 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
       var computedEl = styleTarget(d.selector)
       var values = null
       if (computedEl) {
-        var cs = getComputedStyle(computedEl)
+        var cs = getComputedStyle(d.fromTextRun === true ? firstTextRun(computedEl) : computedEl)
         values = {}
         d.properties.forEach(function (name) { values[name] = cs.getPropertyValue(name) })
       }
@@ -1334,7 +1335,7 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
       parent.postMessage({ type: 'doop:settle-result', reqId: d.reqId }, '*')
     }
     if (d.type === 'doop:style' && d.styles && typeof d.styles === 'object') {
-      var applied = applyStyle(d.selector, d.styles)
+      var applied = applyStyle(d.selector, d.styles, d.uniformText === true)
       parent.postMessage({ type: 'doop:style-result', reqId: d.reqId, ok: applied, info: applied ? inspect(d.selector) : null }, '*')
     }
     if (d.type === 'doop:replace-image') {

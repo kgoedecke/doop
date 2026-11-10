@@ -12,6 +12,7 @@ import { api } from '../api'
 import { t } from '../i18n'
 import { canEditOpenCanvas, pickedSelectors, useStore } from '../store'
 import { currentPageCanvas } from '../pages'
+import { LAYER_TEXT_PROPERTIES } from '../richText'
 import { recordUpdates, trackSave } from '../history'
 import { isCanvasElement } from '../drawing'
 import {
@@ -511,19 +512,6 @@ const VISUAL_PROPERTIES = [
   'mix-blend-mode',
 ] as const
 
-const TEXT_PROPERTIES = [
-  'color',
-  'font-family',
-  'font-size',
-  'font-weight',
-  'font-style',
-  'line-height',
-  'letter-spacing',
-  'text-transform',
-  'text-decoration-line',
-  'text-align',
-] as const
-
 const STYLE_CLIP_KEY = 'doop:style-clip'
 
 interface StyleClip {
@@ -538,12 +526,13 @@ export async function copyProperties(): Promise<boolean> {
   const s = useStore.getState()
   const picked = s.selectedElement
   if (!picked) return false
-  const [visual, info] = await Promise.all([
-    computedStyles(picked.frameId, picked.selector, [...VISUAL_PROPERTIES, ...TEXT_PROPERTIES]),
+  const [visual, type, info] = await Promise.all([
+    computedStyles(picked.frameId, picked.selector, VISUAL_PROPERTIES),
+    computedStyles(picked.frameId, picked.selector, LAYER_TEXT_PROPERTIES, { fromTextRun: true }),
     inspectElement(picked.frameId, picked.selector),
   ])
-  if (!visual || !info) return false
-  const text = info.hasText ? Object.fromEntries(TEXT_PROPERTIES.map((k) => [k, visual[k] ?? ''])) : null
+  if (!visual || !type || !info) return false
+  const text = info.hasText ? Object.fromEntries(LAYER_TEXT_PROPERTIES.map((k) => [k, type[k] ?? ''])) : null
   const clip: StyleClip = { visual: Object.fromEntries(VISUAL_PROPERTIES.map((k) => [k, visual[k] ?? ''])), text }
   try {
     localStorage.setItem(STYLE_CLIP_KEY, JSON.stringify(clip))
@@ -569,7 +558,16 @@ export const hasStyleClip = () => !!styleClip()
 export function pasteProperties(): boolean {
   const clip = styleClip()
   if (!clip) return false
-  return styleEach((info) => ({ ...clip.visual, ...(clip.text && info.hasText ? clip.text : {}) }))
+  const p = pickedLayers()
+  if (!p || p.frame.locked) return false
+  for (const selector of p.selectors) {
+    void inspectElement(p.frame.id, selector).then((info) => {
+      if (!info) return
+      const text = clip.text && info.hasText ? clip.text : null
+      void styleElement(p.frame.id, selector, { ...clip.visual, ...text }, { uniformText: !!text })
+    })
+  }
+  return true
 }
 
 /* ---- pick a colour from anywhere on screen ---- */

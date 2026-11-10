@@ -302,8 +302,15 @@ export async function inspectElement(frameId: string, selector: string): Promise
 /** Write inline styles onto the element. The runtime saves the edited
  *  document through the frame's normal edit path and answers with the
  *  element's fresh properties. */
-export async function styleElement(frameId: string, selector: string, styles: StylePatch): Promise<ElementInfo | null> {
-  return infoOf(await requestFrame(frameId, 'doop:style', { selector, styles }))
+/** `uniformText` makes the patch's type the whole layer's: the inline runs
+ *  under it drop their own values, and <b> / <i> / <u> runs their formatting. */
+export async function styleElement(
+  frameId: string,
+  selector: string,
+  styles: StylePatch,
+  { uniformText = false }: { uniformText?: boolean } = {},
+): Promise<ElementInfo | null> {
+  return infoOf(await requestFrame(frameId, 'doop:style', { selector, styles, uniformText }))
 }
 
 /** Replace image content through the same live edit/undo path as styles. */
@@ -355,13 +362,16 @@ export async function formatElementText(
 }
 
 /** The element's computed values for `properties`, or null when the selector
- *  no longer resolves or the frame is not mounted. */
+ *  no longer resolves or the frame is not mounted. `fromTextRun` reads them
+ *  off the element's first text run instead, where a bold or italic run's
+ *  formatting shows. */
 export async function computedStyles(
   frameId: string,
   selector: string,
   properties: readonly string[],
+  { fromTextRun = false }: { fromTextRun?: boolean } = {},
 ): Promise<Record<string, string> | null> {
-  const reply = await requestFrame(frameId, 'doop:computed', { selector, properties: [...properties] })
+  const reply = await requestFrame(frameId, 'doop:computed', { selector, properties: [...properties], fromTextRun })
   return reply && reply.values && typeof reply.values === 'object' ? (reply.values as Record<string, string>) : null
 }
 
