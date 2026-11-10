@@ -636,6 +636,10 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
     if (!el || !el.matches('[data-doop-drawing]') || isLocked(el)) return null
     var picked = pickedAround(selected, el)
     if (!standalone && picked && elementGeometry(picked).enabled) return null
+    // A drawing picked with other layers moves with them, through the layer
+    // gesture, not on its own.
+    if (!standalone && Array.isArray(selected) && selected.length > 1 && elementGeometry(el).enabled
+      && selected.some(function (sel) { return styleTarget(sel) === el })) return null
     var rect = designRect(el)
     var css = getComputedStyle(el)
     var width = parseFloat(css.width)
@@ -1167,15 +1171,19 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
      movable on its own, none inside the pressed element or another follower,
      none holding the pressed element */
   function gestureFollowers(el, selectors) {
-    var followers = []
+    var movable = []
     ;(Array.isArray(selectors) ? selectors : []).forEach(function (selector) {
       var other = styleTarget(selector)
       if (!other || other === el || other.contains(el) || el.contains(other) || isLocked(other)) return
       if (!elementGeometry(other).enabled) return
-      if (followers.some(function (f) { return f.el === other || f.el.contains(other) || other.contains(f.el) })) return
-      followers.push({ selector: selector, el: other, original: other.getAttribute('style') })
+      if (movable.some(function (m) { return m.el === other })) return
+      movable.push({ selector: selector, el: other, original: other.getAttribute('style') })
     })
-    return followers
+    // A picked parent carries its picked descendants, whatever order the pick
+    // names them in (as doop:nudge does).
+    return movable.filter(function (m) {
+      return !movable.some(function (other) { return other.el !== m.el && other.el.contains(m.el) })
+    })
   }
   function beginStyleEdit(selector, followers) {
     var el = styleTarget(selector)

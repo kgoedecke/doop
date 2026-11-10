@@ -997,6 +997,52 @@ describe.skipIf(!findBrowserPath())('drawing on the canvas', { timeout: 30_000 }
     expect((await visibleDrawing('Layers', '#box')).x).toBeCloseTo(box.x, 0)
   })
 
+  it('drags a drawing picked with other layers together with them', async () => {
+    const source = layerFrame(
+      rectangle +
+        '<div id="shape" data-doop-drawing="rectangle" data-name="Rectangle" style="position:absolute;left:300px;top:60px;width:60px;height:40px;background:red"></div>',
+    )
+    await seedFrames([source])
+    await page.evaluate(() => {
+      window.drawingHarness.viewport({ x: 40, y: 20, zoom: 1 })
+      window.drawingHarness.selectFrames(['layers'])
+      window.drawingHarness.pickMany('layers', ['#rect', '#shape'])
+    })
+    const rect = await visibleDrawing('Layers', '#rect')
+    const shape = await visibleDrawing('Layers', '#shape')
+    /* a travel that lines the shape up with none of its sibling's edges, so no snap */
+    await drag([shape.x + 20, shape.y + 20], [shape.x + 60, shape.y + 50])
+    await expect.poll(() => patchRequests).toBe(1)
+    expect((await visibleDrawing('Layers', '#shape')).x).toBeCloseTo(shape.x + 40, 0)
+    expect((await visibleDrawing('Layers', '#rect')).x).toBeCloseTo(rect.x + 40, 0)
+    expect((await visibleDrawing('Layers', '#rect')).y).toBeCloseTo(rect.y + 30, 0)
+    const state = await page.evaluate(() => window.drawingHarness.state())
+    expect(state.selectedElements).toEqual(['#rect', '#shape'])
+  })
+
+  it('moves a picked parent once with its picked child, whatever order the pick names them in', async () => {
+    const source = layerFrame(
+      rectangle +
+        '<div id="box" style="position:absolute;left:300px;top:60px;width:120px;height:90px;background:teal">' +
+        '<div id="child" style="position:absolute;left:10px;top:10px;width:30px;height:30px;background:gold"></div></div>',
+    )
+    await seedFrames([source])
+    await page.evaluate(() => {
+      window.drawingHarness.viewport({ x: 40, y: 20, zoom: 1 })
+      window.drawingHarness.selectFrames(['layers'])
+      window.drawingHarness.pickMany('layers', ['#child', '#box', '#rect'])
+    })
+    const rect = await visibleDrawing('Layers', '#rect')
+    const box = await visibleDrawing('Layers', '#box')
+    const child = await visibleDrawing('Layers', '#child')
+    await drag([rect.x + 40, rect.y + 40], [rect.x + 80, rect.y + 40])
+    await expect.poll(() => patchRequests).toBe(1)
+    expect((await visibleDrawing('Layers', '#box')).x).toBeCloseTo(box.x + 40, 0)
+    /* the child rides its parent and is not moved a second time on its own */
+    expect((await visibleDrawing('Layers', '#child')).x).toBeCloseTo(child.x + 40, 0)
+    expect(saved[0]!.html).not.toMatch(/id="child"[^>]*translate/)
+  })
+
   it('leaves the rest of a pick where it is when Escape cancels the drag', async () => {
     const source = layerFrame(
       rectangle +
