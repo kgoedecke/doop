@@ -4,11 +4,12 @@ import { copyElementLink } from '../lib/elementLink'
 import { copyElementPng, type ElementTarget } from '../lib/frameExport'
 import { useExportSettings } from '../lib/exportSettings'
 import { copyPicked, hasElementClip, pasteLayer } from '../lib/elementClipboard'
-import { writeCanvasClipboard } from '../lib/canvasClipboard'
+import { cutWith, writeCanvasClipboard } from '../lib/canvasClipboard'
 import { hasFrameClip, pasteFrameCentered } from '../lib/frameClipboard'
 import { deleteLayer, duplicateLayer, setLayerHidden, setLayerLocked, shiftLayer } from '../lib/layerEdits'
 import { buildLayerTree, elementHtml, findLayer, isElementHidden, isElementLocked, layerName } from '../lib/layers'
 import { MOD_KEY } from '../lib/keys'
+import { canEditOpenCanvas, useStore } from '../lib/store'
 import { useT } from '../lib/i18n'
 import { ContextMenuContent, ContextMenuItem, ContextMenuSeparator } from './ui/context-menu'
 import { MenuHint } from './ui/menu'
@@ -79,6 +80,7 @@ function ElementMenuItems({ frame, selector, hit, onRename, onExport }: ElementI
   /* a copied standalone shape is a frame on the clipboard: its paste lands
      a second element on the canvas, as ⌘V does, not a layer in this frame */
   const frameClip = hasFrameClip()
+  const canEdit = useStore(canEditOpenCanvas)
   return (
     <>
       <ContextMenuItem
@@ -89,6 +91,21 @@ function ElementMenuItems({ frame, selector, hit, onRename, onExport }: ElementI
       >
         {t('common.copy')}
         <MenuHint>{MOD_KEY}C</MenuHint>
+      </ContextMenuItem>
+      <ContextMenuItem
+        disabled={!canEdit || !exists || locked}
+        onSelect={() => {
+          if (!selector) return
+          /* the clipboard answers later; a frame edited meanwhile is not saved over */
+          const live = () => useStore.getState().canvas?.frames.find((f) => f.id === frame.id)
+          cutWith(
+            () => live()?.html === frame.html && copyPicked(frame, [selector]),
+            () => deleteLayer(frame, selector),
+          )
+        }}
+      >
+        {t('common.cut')}
+        <MenuHint>{MOD_KEY}X</MenuHint>
       </ContextMenuItem>
       <ContextMenuItem
         disabled={frameClip ? false : locked || !hasElementClip() || (!!selector && !exists)}

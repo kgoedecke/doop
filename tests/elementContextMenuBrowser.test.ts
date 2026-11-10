@@ -93,7 +93,7 @@ describe.skipIf(!findBrowserPath())('frame and element context menus', () => {
     await page.setRequestInterception(true)
     page.on('request', async (request) => {
       const pathname = new URL(request.url()).pathname
-      if (pathname === '/api/frames/f') {
+      if (pathname === '/api/frames/f' || pathname === '/api/frames/other') {
         if (request.method() === 'PATCH') saved = { ...saved, ...JSON.parse(request.postData()!) }
         if (request.method() === 'DELETE') deletedFrames++
         await request.respond({ status: 200, contentType: 'application/json', body: JSON.stringify(saved) })
@@ -213,6 +213,7 @@ describe.skipIf(!findBrowserPath())('frame and element context menus', () => {
     await rightClick('#text')
     expect(await items()).toEqual([
       'Copy',
+      'Cut',
       'Paste',
       'Duplicate',
       'Hide',
@@ -269,7 +270,7 @@ describe.skipIf(!findBrowserPath())('frame and element context menus', () => {
   it('does not open the frame or background menu in empty frame space', async () => {
     await page.mouse.click(500, 440, { button: 'right' })
     await page.waitForFunction(() => document.querySelector('[role="menuitem"]')?.textContent?.startsWith('Copy'))
-    expect(await items()).toEqual(['Copy', 'Paste'])
+    expect(await items()).toEqual(['Copy', 'Cut', 'Paste'])
     expect(await page.evaluate(() => window.contextMenuHarness.selection())).toBeNull()
   })
 
@@ -359,6 +360,18 @@ describe.skipIf(!findBrowserPath())('frame and element context menus', () => {
     await choose('Delete element')
     await expect.poll(() => saved.html).not.toContain('id="box"')
     expect(deletedFrames).toBe(0)
+  })
+
+  it('cuts every selected frame from a title', async () => {
+    await page.evaluate((frame) => {
+      window.contextMenuHarness.seed([frame, { ...frame, id: 'other', x: 600 }])
+      window.contextMenuHarness.selectMany(['f', 'other'])
+    }, saved)
+    await page.click('[data-frame-title]', { button: 'right' })
+    await choose('Cut 2 frames')
+    await expect.poll(() => deletedFrames).toBe(2)
+    const clip = await page.evaluate(() => JSON.parse(localStorage.getItem('doop:frame-clipboard') ?? '{}'))
+    expect(clip.frames.map((f: Frame) => f.x)).toEqual([0, 540])
   })
 
   it('waits for the matching iframe document before using a position-based selector', async () => {

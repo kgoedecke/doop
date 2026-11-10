@@ -6,6 +6,7 @@ export const common: Catalog['common'] = {
   delete: 'Excluir',
   close: 'Fechar',
   copy: 'Copiar',
+  cut: 'Recortar',
   copied: 'Copiado',
   back: 'Voltar',
   loading: 'Carregando…',

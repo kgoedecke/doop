@@ -2,7 +2,7 @@ import { useRef, useState, type MutableRefObject } from 'react'
 import type { Frame } from '../../shared/types'
 import { errorMessage } from '../lib/api'
 import { copyFrames, duplicateFrames, hasFrameClip, pasteFrameAtScreen } from '../lib/frameClipboard'
-import { writeCanvasClipboard } from '../lib/canvasClipboard'
+import { cutWith, writeCanvasClipboard } from '../lib/canvasClipboard'
 import { copyFramePng } from '../lib/frameExport'
 import { deleteFramesTracked } from '../lib/history'
 import { isStackLocked, setFramesHidden, setFramesLocked } from '../lib/layerEdits'
@@ -68,9 +68,10 @@ export function FrameContextMenu({
     const group = s.canvas?.frames.filter((f) => ids.includes(f.id)) ?? [frame]
     return group.every((f) => f.locked)
   })
-  function deleteSelection() {
-    /* locked frames stay, as they do on ⌫ */
-    deleteFramesTracked(groupFrames().filter((f) => !f.locked))
+  function deleteFrames(frames: Frame[]) {
+    /* locked frames stay, as they do on ⌫; the lock is read now, not when the menu opened */
+    const ids = new Set(frames.map((f) => f.id))
+    deleteFramesTracked(useStore.getState().canvas?.frames.filter((f) => ids.has(f.id) && !f.locked) ?? [])
   }
   const allReady = useStore((s) => {
     const ids = s.selectedIds.includes(frame.id) ? s.selectedIds : [frame.id]
@@ -110,6 +111,20 @@ export function FrameContextMenu({
         </ContextMenuItem>
         {!readOnly && (
           <>
+            <ContextMenuItem
+              disabled={allLocked}
+              onSelect={() => {
+                const frames = groupFrames()
+                if (frames.length)
+                  cutWith(
+                    () => copyFrames(frames),
+                    () => deleteFrames(frames),
+                  )
+              }}
+            >
+              {groupSize > 1 ? t('stage.cutFrames', { count: groupSize }) : t('common.cut')}
+              <MenuHint>{MOD_KEY}X</MenuHint>
+            </ContextMenuItem>
             {onRename && (
               <ContextMenuItem disabled={isStackLocked(frame)} onSelect={() => (renameRequested.current = true)}>
                 {t('panels.layersRename')}
@@ -162,7 +177,7 @@ export function FrameContextMenu({
               <MenuHint>{MOD_KEY}⇧L</MenuHint>
             </ContextMenuItem>
             <ContextMenuSeparator />
-            <ContextMenuItem tone="danger" disabled={allLocked} onSelect={deleteSelection}>
+            <ContextMenuItem tone="danger" disabled={allLocked} onSelect={() => deleteFrames(groupFrames())}>
               {groupSize > 1 ? t('stage.deleteFrames', { count: groupSize }) : t('stage.deleteFrame')}
               <MenuHint>⌫</MenuHint>
             </ContextMenuItem>

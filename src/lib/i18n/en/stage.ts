@@ -76,6 +76,7 @@ export const stage = {
   deleteElement: 'Delete element',
   deleteFrame: 'Delete frame',
   copyFrames: 'Copy {count} frames',
+  cutFrames: 'Cut {count} frames',
   duplicateFrames: 'Duplicate {count} frames',
   showFrames: 'Show {count} frames',
   hideFrames: 'Hide {count} frames',

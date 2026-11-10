@@ -1,6 +1,6 @@
 import { CAPTURE_PREFIX, pasteWebCapture } from '../lib/webCapture'
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
-import { canEditOpenCanvas, pickedSelectors, roleOf, useStore } from '../lib/store'
+import { canEditOpenCanvas, roleOf, useStore } from '../lib/store'
 import { MOD_KEY, PRESENT_SHORTCUT_HINT, isControlTarget, isTypingTarget } from '../lib/keys'
 import { enterSelection, exitSelection, selectSibling } from '../lib/selectionKeys'
 import { dispatchActionKey, setActionHost, type ActionHost } from '../lib/actions/registry'
@@ -60,7 +60,6 @@ import { LinkDialog } from '../components/LinkDialog'
 import { FrameHistoryModal } from '../components/FrameHistoryModal'
 import { getIdentity, setName } from '../lib/identity'
 import {
-  copyFrames,
   dropFiles,
   hasFrameClip,
   hasIncoming,
@@ -71,8 +70,8 @@ import {
 } from '../lib/frameClipboard'
 import { clearHistory } from '../lib/history'
 import { deleteSelection, nudgeSelection } from '../lib/layerEdits'
-import { copyPicked, hasElementClip, pasteLayer } from '../lib/elementClipboard'
-import { isCanvasClipboard, writeCanvasClipboard } from '../lib/canvasClipboard'
+import { copySelection, cutSelection, hasElementClip, pasteLayer } from '../lib/elementClipboard'
+import { isCanvasClipboard } from '../lib/canvasClipboard'
 import { authClient } from '../lib/auth'
 import { avatarUrl } from '../../shared/avatar'
 import { openSupportChat, posthog } from '../lib/posthog'
@@ -399,6 +398,11 @@ export function CanvasPage({
         e.preventDefault()
         if (canEdit && !e.repeat) deleteSelection()
       }
+      /* the same for a held ⌘X: cancelling its repeats stops their cut events */
+      if (e.repeat && (e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'x') {
+        e.preventDefault()
+        return
+      }
       /* Figma's walk of the selection: ↩ into it, ⇧↩ out to the parent, Tab
          and ⇧Tab along the siblings. Only the bare keys, and only when no
          control (a button, a menu, the Layers tree) has the keyboard — there
@@ -428,25 +432,19 @@ export function CanvasPage({
     return () => window.removeEventListener('keydown', onKey)
   }, [canvasId, presenting]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  /* Native copy/paste events let us write the selection's token and read
+  /* Native copy/cut/paste events let us write the selection's token and read
      clipboard images without asking for clipboard-read permission. */
   useEffect(() => {
+    /* the event's clipboard when the canvas owns it, not a field or a text selection */
+    const canvasClipboard = (e: ClipboardEvent) =>
+      isTypingTarget(e.target) || window.getSelection()?.toString() ? null : e.clipboardData
     function onCopy(e: ClipboardEvent) {
-      if (isTypingTarget(e.target) || window.getSelection()?.toString() || !e.clipboardData) return
-      const state = useStore.getState()
-      const picked = state.selectedElement
-      const frame = state.canvas?.frames.find((f) => f.id === picked?.frameId)
-      let copy: () => boolean | void
-      if (picked) {
-        if (!frame) return
-        const selectors = pickedSelectors(state)
-        copy = () => copyPicked(frame, selectors)
-      } else {
-        const frames = state.canvas?.frames.filter((f) => state.selectedIds.includes(f.id)) ?? []
-        if (!frames.length) return
-        copy = () => copyFrames(frames)
-      }
-      if (writeCanvasClipboard(copy, e.clipboardData)) e.preventDefault()
+      const data = canvasClipboard(e)
+      if (data && copySelection(data)) e.preventDefault()
+    }
+    function onCut(e: ClipboardEvent) {
+      const data = canvasClipboard(e)
+      if (data && cutSelection(data)) e.preventDefault()
     }
     function onPaste(e: ClipboardEvent) {
       if (isTypingTarget(e.target)) return
@@ -481,9 +479,11 @@ export function CanvasPage({
       }
     }
     window.addEventListener('copy', onCopy)
+    window.addEventListener('cut', onCut)
     window.addEventListener('paste', onPaste)
     return () => {
       window.removeEventListener('copy', onCopy)
+      window.removeEventListener('cut', onCut)
       window.removeEventListener('paste', onPaste)
     }
   }, [canvasId])
