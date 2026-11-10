@@ -1421,7 +1421,7 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
     if (following) {
       // A follower's move previews with the gesture and is restored, or saved,
       // with it: never a save of its own mid-drag.
-      patchStyle(el.style, styles)
+      patchStyle(el, styles)
       if (!el.getAttribute('style')) el.removeAttribute('style')
       return true
     }
