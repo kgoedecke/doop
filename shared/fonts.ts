@@ -116,6 +116,11 @@ export function withFontFaces(html: string, library: readonly CustomFont[]): str
   return `${html.slice(0, at)}${tag}${html.slice(at)}`
 }
 
+/** How two spellings of a family compare: CSS matches names case-insensitively. */
+export function familyKey(family: string): string {
+  return family.trim().toLowerCase()
+}
+
 /** Families in a library, each once, in the order they were first uploaded. */
 export function libraryFamilies(library: readonly CustomFont[]): string[] {
   const seen = new Map<string, string>()

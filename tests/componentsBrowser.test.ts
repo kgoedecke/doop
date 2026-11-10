@@ -1,8 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import type { Page } from 'puppeteer-core'
-import { createServer, type ViteDevServer } from 'vite'
 import { findBrowserPath } from '../server/screenshot'
-import { fixtureServerConfig, openBrowser, type TestBrowser } from './browser'
+import { openBrowser, serveBuilt, type BuiltServer, type TestBrowser } from './browser'
 import { freePort, startServer, type Server } from './harness'
 
 /* The whole loop in the real editor, over the real server: make a component
@@ -12,7 +11,7 @@ import { freePort, startServer, type Server } from './harness'
 const SHOTS = process.env.COMPONENT_SHOTS
 
 describe.skipIf(!findBrowserPath())('components in the editor', { timeout: 60_000 }, () => {
-  let vite: ViteDevServer
+  let web: BuiltServer
   let server: Server
   let browser: TestBrowser
   let page: Page
@@ -85,17 +84,12 @@ describe.skipIf(!findBrowserPath())('components in the editor', { timeout: 60_00
 
   beforeAll(async () => {
     const port = await freePort()
-    vite = await createServer(
-      fixtureServerConfig({
-        proxy: {
-          '/api': { target: `http://localhost:${port}` },
-          '/ws': { target: `ws://localhost:${port}`, ws: true },
-          '/i': { target: `http://localhost:${port}` },
-        },
-      }),
-    )
-    await vite.listen()
-    const origin = vite.resolvedUrls!.local[0]!.replace(/\/$/, '')
+    web = await serveBuilt({
+      '/api': { target: `http://localhost:${port}` },
+      '/ws': { target: `ws://localhost:${port}`, ws: true },
+      '/i': { target: `http://localhost:${port}` },
+    })
+    const origin = web.origin
     server = await startServer({ PORT: String(port), BETTER_AUTH_URL: origin })
     browser = await openBrowser()
     page = await browser.newPage()
@@ -109,13 +103,6 @@ describe.skipIf(!findBrowserPath())('components in the editor', { timeout: 60_00
         body: JSON.stringify({ name: 'Designer', email: 'components@test.dev', password: 'password12345' }),
       })
       if (!signup.ok) throw new Error(await signup.text())
-      /* a fresh account is asked the onboarding questions over its first page,
-         and that modal's overlay would take the clicks meant for the canvas */
-      await fetch('/api/me/onboarding', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ role: null, intent: null }),
-      })
       const made = await (
         await fetch('/api/canvases', {
           method: 'POST',
@@ -148,7 +135,7 @@ describe.skipIf(!findBrowserPath())('components in the editor', { timeout: 60_00
   afterAll(async () => {
     await page?.close()
     await browser?.close()
-    await vite?.close()
+    await web?.close()
     server?.stop()
   })
 

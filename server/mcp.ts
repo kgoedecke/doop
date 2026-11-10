@@ -2048,7 +2048,6 @@ export function buildMcpServer(
   }
   for (const extension of extensions) extension.registerMcpTools?.(server, extensionHelpers)
 
-  server.registerTool(
   for (const tool of COMPONENT_TOOLS) {
     server.registerTool(
       tool.name,
