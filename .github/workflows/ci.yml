@@ -69,6 +69,21 @@ jobs:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
       - run: bun install --frozen-lockfile
+      # The browser tests drive the Chrome named in .chrome-version, not the one
+      # the runner image happens to ship: an image update must not be able to
+      # change what the suite runs on without a commit here.
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/doop-chrome
+          key: chrome-${{ runner.os }}-${{ hashFiles('.chrome-version') }}
+      - name: Install the pinned Chrome
+        run: |
+          path=$(./node_modules/.bin/browsers install "chrome@$(cat .chrome-version)" --path ~/.cache/doop-chrome | awk '{ print $2 }')
+          "$path" --version
+          echo "CHROME_PATH=$path" >> "$GITHUB_ENV"
+          # Ubuntu 24.04 lets only the browsers it has an AppArmor profile for
+          # make the user namespaces Chrome's sandbox needs
+          echo 0 | sudo tee /proc/sys/kernel/apparmor_restrict_unprivileged_userns >/dev/null
       # `bun run test`, not `bun test`: the suite is vitest, and `bun test`
       # would run Bun's own runner against the same files
       - run: bun run test -- --shard=${{ matrix.shard }}/${{ strategy.job-total }}

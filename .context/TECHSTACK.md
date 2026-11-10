@@ -712,6 +712,12 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   worker runs; a file calls `openBrowser()` for its own context (focus emulated, 30s navigation
   bound) and `fixtureUrl()` for its page. A test that needs its own Vite server (a proxy) builds it
   from `fixtureServerConfig()`, so every server shares one dependency hash and cache directory.
+- CI runs the browser tests on the Chrome for Testing build named in `.chrome-version`, installed
+  by the `test` job and passed as `CHROME_PATH`, so a runner image update cannot change the
+  browser without a commit. `bun run test:linux [vitest args]` (`scripts/test-linux.sh`,
+  `tests/linux.Dockerfile`, needs Docker) runs the suite in a two-CPU Linux container, for a
+  test that fails on CI and passes on a Mac, and for the clipboard tests a Mac skips; on Apple
+  Silicon the container uses Debian's Chromium, since Chrome for Testing has no Linux arm64 build.
 
 ## 8. CI/CD and Delivery
 

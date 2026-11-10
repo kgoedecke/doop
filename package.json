@@ -11,6 +11,7 @@
     "start": "NODE_ENV=production tsx server/index.ts",
     "typecheck": "tsgo --noEmit",
     "test": "vitest run",
+    "test:linux": "sh scripts/test-linux.sh",
     "lint": "oxlint --type-aware --deny-warnings . && eslint . --max-warnings 0",
     "lint:fix": "oxlint --type-aware --deny-warnings --fix . && eslint . --fix",
     "format": "prettier --write .",
