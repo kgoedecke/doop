@@ -12,6 +12,9 @@ export const components: Catalog['components'] = {
   dragHint: '{name}: arraste para o canvas para inserir',
   moreActions: 'Mais opções de {name}',
   insertInstance: 'Inserir instância',
+  rename: 'Renomear',
+  nameAria: 'Nome do componente',
+  renameFailed: 'Não foi possível renomear o componente. Tente novamente.',
   deleteComponent: 'Excluir componente',
   deleteConfirmTitle: 'Excluir “{name}”?',
   deleteConfirmDescription:

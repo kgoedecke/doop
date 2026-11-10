@@ -280,6 +280,25 @@ export async function removeComponent(def: ComponentDef) {
   }
 }
 
+/** Rename a component. Its instances are linked by id, so they keep working; the server
+ *  refuses a name another component here has, and that reason is what the person sees.
+ *  Not undoable, like its description. Resolves to the name the component now has (the
+ *  server cleans what it is given), or null when it could not be saved. */
+export async function renameComponent(def: ComponentDef, value: string): Promise<string | null> {
+  const name = value.trim()
+  const s = useStore.getState()
+  if (!s.canvas || !name) return null
+  if (name === def.name) return def.name
+  try {
+    const { component } = await api.updateComponent(s.canvas.id, def.id, { name })
+    if (useStore.getState().canvas?.id === s.canvas.id) useStore.getState().setComponentLocal(component.id, component)
+    return component.name
+  } catch (error) {
+    notifyFailure(error, t('components.renameFailed'))
+    return null
+  }
+}
+
 export function goToMain(def: ComponentDef) {
   const s = useStore.getState()
   const frame = def.mainFrameId ? s.canvas?.frames.find((candidate) => candidate.id === def.mainFrameId) : undefined
