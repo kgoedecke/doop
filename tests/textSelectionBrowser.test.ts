@@ -1,18 +1,17 @@
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
 import type { Frame, Page } from 'puppeteer-core'
 import { findBrowserPath } from '../server/screenshot'
-import { fixtureUrl, openBrowser, type TestBrowser } from './browser'
+import { fixtureUrl, pagePerTest } from './browser'
 
 type Message = { type: string; reqId?: string }
 type Fixture = { messages: Message[] }
 
 describe.skipIf(!findBrowserPath())('text selection while editing', () => {
-  let browser: TestBrowser
+  const pages = pagePerTest()
   let page: Page
   let frame: Frame
-  beforeAll(async () => {
-    browser = await openBrowser()
-    page = await browser.newPage()
+  beforeEach(async () => {
+    page = await pages.open()
     await page.goto(fixtureUrl('frameReplay.html'))
     await page.waitForFunction(() =>
       (window as unknown as Fixture).messages?.some((m) => m.type === 'doop:frame-ready'),
@@ -32,10 +31,6 @@ describe.skipIf(!findBrowserPath())('text selection while editing', () => {
       document.querySelector('iframe')!.contentWindow!.postMessage({ type: 'doop:edit', on: true }, '*'),
     )
     frame = page.frames().find((f) => f !== page.mainFrame())!
-  }, 60_000)
-  afterAll(async () => {
-    await page?.close()
-    await browser?.close()
   })
 
   async function drag(fromFraction: number, toFraction: number) {

@@ -1,7 +1,7 @@
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeEach, describe, expect, it } from 'vitest'
 import type { HTTPRequest, Page } from 'puppeteer-core'
 import { findBrowserPath } from '../server/screenshot'
-import { fixtureUrl, openBrowser, type TestBrowser } from './browser'
+import { fixtureUrl, pagePerTest } from './browser'
 import type { Canvas, CanvasGuide, ElementComment, Frame } from '../shared/types'
 
 declare global {
@@ -40,9 +40,9 @@ const FRAME: Frame = {
 }
 
 describe.skipIf(!findBrowserPath())('rulers and guides', { timeout: 30_000 }, () => {
-  let browser: TestBrowser
+  const pages = pagePerTest()
   let page: Page
-  const guideRequests: { method: string; id: string; body: Partial<CanvasGuide> | null }[] = []
+  let guideRequests: { method: string; id: string; body: Partial<CanvasGuide> | null }[] = []
   let frame = FRAME
   const errors: string[] = []
 
@@ -75,14 +75,36 @@ describe.skipIf(!findBrowserPath())('rulers and guides', { timeout: 30_000 }, ()
     await page.keyboard.press('R')
     await page.keyboard.up('Shift')
   }
+  async function showRulers() {
+    await toggleRulers()
+    await page.waitForSelector('[data-ruler="top"]')
+  }
   const state = () => page.evaluate(() => window.rulersHarness.state())
   const lastGuideRequest = () => guideRequests.at(-1)
+  /** rulers on, and a vertical guide dragged out of the left one to x 300 */
+  async function addGuide() {
+    await showRulers()
+    const at = screen(300, 360)
+    await drag([10, at[1]], at)
+    await page.waitForSelector('[data-guide][data-axis="v"]')
+    await expect.poll(lastGuideRequest).toMatchObject({ method: 'PUT', body: { axis: 'v', at: 300 } })
+  }
 
-  beforeAll(async () => {
-    browser = await openBrowser()
-    page = await browser.newPage()
+  beforeEach(async () => {
+    page = await pages.open()
+    guideRequests = []
+    frame = FRAME
     page.setDefaultTimeout(10_000)
     page.on('pageerror', (err) => errors.push(String(err)))
+    /* the file's pages share one storage, where the rulers' switch is kept:
+       every test starts with it unset (a sandboxed frame has no storage) */
+    await page.evaluateOnNewDocument(() => {
+      try {
+        localStorage.removeItem('doop:rulers')
+      } catch {
+        /* a frame's document */
+      }
+    })
     await page.setRequestInterception(true)
     page.on('request', (req) => void respond(req))
     await page.setViewport({ width: 1200, height: 800, deviceScaleFactor: 2 })
@@ -100,12 +122,9 @@ describe.skipIf(!findBrowserPath())('rulers and guides', { timeout: 30_000 }, ()
     }, FRAME)
     await page.waitForSelector('[aria-label="Canvas tools"]')
     await page.evaluate((vp) => window.rulersHarness.viewport(vp), CAMERA)
-  }, 60_000)
+  })
 
-  afterAll(async () => {
-    await page?.screenshot({ path: '/tmp/doop-rulers.png' })
-    await page?.close()
-    await browser?.close()
+  afterAll(() => {
     expect(errors).toEqual([])
   })
 
@@ -128,6 +147,7 @@ describe.skipIf(!findBrowserPath())('rulers and guides', { timeout: 30_000 }, ()
   })
 
   it('paints crisp at the device pixel ratio and highlights the selection', async () => {
+    await showRulers()
     const size = await page.$eval('[data-ruler="top"]', (el) => {
       const canvas = el as HTMLCanvasElement
       return { width: canvas.width, css: canvas.clientWidth, height: canvas.height, cssHeight: canvas.clientHeight }
@@ -165,6 +185,7 @@ describe.skipIf(!findBrowserPath())('rulers and guides', { timeout: 30_000 }, ()
   })
 
   it('drags a guide out of the ruler, showing its position, and saves it', async () => {
+    await showRulers()
     const at = screen(300, 360)
     await page.mouse.move(10, at[1])
     await page.mouse.down()
@@ -178,6 +199,7 @@ describe.skipIf(!findBrowserPath())('rulers and guides', { timeout: 30_000 }, ()
   })
 
   it('snaps a moved frame onto the guide, and Alt moves it freely', async () => {
+    await addGuide()
     /* the title sits just above the frame; 46px right puts the right edge at
        296, inside the snap distance of the guide at 300 */
     const title = screen(70, 40)
@@ -197,6 +219,7 @@ describe.skipIf(!findBrowserPath())('rulers and guides', { timeout: 30_000 }, ()
   })
 
   it('moves a guide, undoes it, and removes it by dropping it on its ruler', async () => {
+    await addGuide()
     const id = (await state()).guides[0]!.id
     await drag(screen(300, 460), screen(350, 460))
     await expect.poll(lastGuideRequest).toMatchObject({ method: 'PUT', id, body: { at: 350 } })
@@ -216,6 +239,7 @@ describe.skipIf(!findBrowserPath())('rulers and guides', { timeout: 30_000 }, ()
   })
 
   it('selects a guide with a click and deletes it with Delete', async () => {
+    await addGuide()
     const id = (await state()).guides[0]!.id
     await page.mouse.click(...screen(300, 460))
     await page.waitForSelector('[data-guide][data-selected]')
@@ -228,9 +252,7 @@ describe.skipIf(!findBrowserPath())('rulers and guides', { timeout: 30_000 }, ()
   })
 
   it('lets go of a guide once it is hidden, so Delete leaves it alone', async () => {
-    const at = screen(300, 360)
-    await drag([10, at[1]], at)
-    await page.waitForSelector('[data-guide]')
+    await addGuide()
     await page.mouse.click(...screen(300, 460))
     await page.waitForSelector('[data-guide][data-selected]')
     await toggleRulers()
@@ -245,6 +267,7 @@ describe.skipIf(!findBrowserPath())('rulers and guides', { timeout: 30_000 }, ()
   })
 
   it('hides the rulers and the guides together on a phone-width layout', async () => {
+    await addGuide()
     await page.setViewport({ width: 600, height: 800 })
     await page.waitForFunction(() => !document.querySelector('[data-ruler]'))
     /* no guide is drawn where none snaps */

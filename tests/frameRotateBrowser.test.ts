@@ -1,7 +1,7 @@
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeEach, describe, expect, it } from 'vitest'
 import type { Page } from 'puppeteer-core'
 import { findBrowserPath } from '../server/screenshot'
-import { fixtureUrl, openBrowser, type TestBrowser } from './browser'
+import { fixtureUrl, pagePerTest } from './browser'
 import type { Frame } from '../shared/types'
 import type { ElementInfo, GeometryEdit } from '../src/lib/frameBridge'
 import { ROTATE_ZONE_PX } from '../src/lib/frameRotate'
@@ -37,11 +37,11 @@ const HTML =
 type Box = { left: number; top: number; right: number; bottom: number; width: number; height: number }
 
 describe.skipIf(!findBrowserPath())('frame rotate zones', () => {
-  let browser: TestBrowser
+  const pages = pagePerTest()
   let page: Page
   let saved: Frame
   let saves = 0
-  const copies: Frame[] = []
+  let copies: Frame[] = []
   const errors: string[] = []
 
   const box = (selector: string) =>
@@ -93,9 +93,10 @@ describe.skipIf(!findBrowserPath())('frame rotate zones', () => {
     await page.waitForSelector('[data-frame-rotate-handle]')
   }
 
-  beforeAll(async () => {
-    browser = await openBrowser()
-    page = await browser.newPage()
+  beforeEach(async () => {
+    saves = 0
+    copies = []
+    page = await pages.open()
     page.setDefaultTimeout(5_000)
     page.on('pageerror', (error) => errors.push(String(error)))
     await page.setViewport({ width: 1000, height: 900 })
@@ -129,10 +130,7 @@ describe.skipIf(!findBrowserPath())('frame rotate zones', () => {
     await reset()
   }, 60_000)
 
-  afterAll(async () => {
-    await page?.screenshot({ path: '/tmp/doop-frame-rotate.png' })
-    await page?.close()
-    await browser?.close()
+  afterAll(() => {
     expect(errors).toEqual([])
   })
 
@@ -198,6 +196,13 @@ describe.skipIf(!findBrowserPath())('frame rotate zones', () => {
   })
 
   it('turns the rotate cursors with the frame', async () => {
+    saved = { ...saved, rotation: 45, updatedAt: saved.updatedAt + 1 }
+    await page.evaluate((frame) => window.elementPanelHarness.seed(frame), saved)
+    await page.evaluate(() => window.elementPanelHarness.selectFrame())
+    await page.waitForFunction(
+      () =>
+        document.querySelector<HTMLElement>('[data-frame-surface]')?.parentElement?.style.transform === 'rotate(45deg)',
+    )
     /* the glyph is drawn for the north-east corner, so at 45° it turns by the frame's 45° */
     const angle = await page.$eval(
       '[data-frame-rotate-handle="ne"]',

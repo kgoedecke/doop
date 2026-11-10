@@ -1,7 +1,7 @@
 import { readdirSync } from 'node:fs'
 import puppeteer, { type Browser, type Page, type Permission } from 'puppeteer-core'
 import { createServer, type InlineConfig, type ServerOptions } from 'vite'
-import { inject } from 'vitest'
+import { afterAll, afterEach, beforeAll, expect, inject } from 'vitest'
 import { findBrowserPath, launchBrowser } from '../server/screenshot.ts'
 
 /**
@@ -162,6 +162,71 @@ export async function openBrowser(): Promise<TestBrowser> {
     async close() {
       await context.close()
       await browser.disconnect()
+    },
+  }
+}
+
+/** What `pagePerTest` hands a file: a way to open this test's page. */
+export interface TestPages {
+  /** a new page for the running test (most tests open one; a test about two
+   *  people opens a second), closed when the test ends */
+  open(): Promise<Page>
+}
+
+/**
+ * A page of its own for every test in the file. Call it once inside the
+ * file's `describe`, then open the page in `beforeEach`:
+ *
+ *     const pages = pagePerTest()
+ *     beforeEach(async () => {
+ *       page = await pages.open()
+ *       await page.goto(fixtureUrl('drawing.html'))
+ *     })
+ *
+ * One page for a whole file made every test depend on the ones before it. A
+ * page load that stalled on a CI runner left the page unusable, so each later
+ * test's setup timed out too: one stall failed forty tests. A request still in
+ * flight when a test ended arrived during the next one and was counted as its
+ * own. A page that ends with its test takes both with it: its requests stop
+ * when it closes, and the next test starts on a page nothing has touched.
+ *
+ * A file whose tests need clipboard or other permissions passes them here;
+ * they are granted once, to the file's browser context.
+ */
+export function pagePerTest(options: { permissions?: Permission[] } = {}): TestPages {
+  let browser: TestBrowser | undefined
+  let opened: Page[] = []
+  /** the pages of this test Chromium gave up on, and why */
+  let lost = new Map<Page, string>()
+
+  beforeAll(async () => {
+    browser = await openBrowser()
+    if (options.permissions) await browser.grantPermissions(options.permissions)
+  }, 60_000)
+
+  afterEach(async () => {
+    const pages = opened
+    const crashed = lost
+    opened = []
+    lost = new Map()
+    /* a page Chromium lost can no longer be closed politely (closing the
+       context at the end of the file takes it); every other page of the test
+       still closes here, so nothing of it runs on into the next test */
+    await Promise.all(pages.map((page) => (page.isClosed() || crashed.has(page) ? undefined : page.close())))
+    expect([...crashed.values()], 'Chromium lost a page during this test').toEqual([])
+  })
+
+  afterAll(async () => {
+    await browser?.close()
+  })
+
+  return {
+    async open() {
+      if (!browser) throw new Error('pagePerTest: open() runs inside a test or its beforeEach')
+      const page = await browser.newPage()
+      page.on('error', (error) => lost.set(page, String(error)))
+      opened.push(page)
+      return page
     },
   }
 }

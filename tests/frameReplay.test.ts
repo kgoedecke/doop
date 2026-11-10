@@ -1,7 +1,7 @@
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Page, HTTPRequest } from 'puppeteer-core'
 import { findBrowserPath } from '../server/screenshot.ts'
-import { fixtureUrl, openBrowser, type TestBrowser } from './browser.ts'
+import { fixtureUrl, pagePerTest } from './browser.ts'
 
 type ReplayEvent = { type: number; data: { isAttachIframe?: boolean } }
 declare global {
@@ -19,20 +19,15 @@ declare global {
 
 // DOM emulators do not enforce opaque origins or exercise rrweb's real bridge.
 describe.skipIf(!findBrowserPath())('sandboxed frame replay', () => {
-  let browser: TestBrowser
+  const pages = pagePerTest()
   let page: Page
-  beforeAll(async () => {
-    browser = await openBrowser()
-    page = await browser.newPage()
+  beforeEach(async () => {
+    page = await pages.open()
     await page.goto(fixtureUrl('frameReplay.html'))
     await page.waitForFunction(() => window.testReady && window.messages.some((m) => m.type === 'doop:frame-ready'), {
       timeout: 60_000,
     })
   }, 60_000)
-  afterAll(async () => {
-    await page?.close()
-    await browser?.close()
-  })
 
   async function render(html: string, index = 0) {
     await page.evaluate(
@@ -45,6 +40,12 @@ describe.skipIf(!findBrowserPath())('sandboxed frame replay', () => {
   }
   async function captured(text: string) {
     await page.waitForFunction((text) => JSON.stringify(window.events).includes(text), {}, text)
+  }
+  /** A frame showing a design with the recorder running in it and the design captured. */
+  async function recordDesign() {
+    await page.evaluate(() => window.startReplay())
+    await render('<h1>Streamed design</h1>')
+    await captured('Streamed design')
   }
 
   it('captures rendered content and mutations while preserving the sandbox and masking', async () => {
@@ -113,25 +114,23 @@ describe.skipIf(!findBrowserPath())('sandboxed frame replay', () => {
   })
 
   it('renders the captured frame content in the actual replay player', async () => {
+    await recordDesign()
+    await page.waitForFunction(() => window.events.some((e) => e.data?.isAttachIframe))
     const events = await page.evaluate(() => window.events)
-    const replay = await browser.newPage()
-    try {
-      await replay.goto(fixtureUrl('frameReplay.html'))
-      await replay.waitForFunction(() => window.testReady)
-      await replay.evaluate((events) => window.renderReplay(events), events)
-      await replay.waitForFunction(() => {
-        const outer = document.querySelector('iframe')?.contentDocument
-        return outer
-          ?.querySelector<HTMLIFrameElement>('iframe[data-doop-frame]')
-          ?.contentDocument?.body.textContent?.includes('Streamed design')
-      })
-    } finally {
-      await replay.close()
-      await page.bringToFront()
-    }
+    const replay = await pages.open()
+    await replay.goto(fixtureUrl('frameReplay.html'))
+    await replay.waitForFunction(() => window.testReady)
+    await replay.evaluate((events) => window.renderReplay(events), events)
+    await replay.waitForFunction(() => {
+      const outer = document.querySelector('iframe')?.contentDocument
+      return outer
+        ?.querySelector<HTMLIFrameElement>('iframe[data-doop-frame]')
+        ?.contentDocument?.body.textContent?.includes('Streamed design')
+    })
   })
 
   it('keeps recording infrastructure out of saved frame HTML', async () => {
+    await recordDesign()
     await page.evaluate(() => {
       const target = document.querySelector('iframe')!.contentWindow!
       target.postMessage({ type: 'doop:edit', on: true }, '*')
@@ -146,6 +145,7 @@ describe.skipIf(!findBrowserPath())('sandboxed frame replay', () => {
   })
 
   it('reattaches existing frames after parent checkouts and records frames mounted later', async () => {
+    await recordDesign()
     await page.evaluate(() => {
       window.events = []
       window.snapshot()
@@ -158,6 +158,7 @@ describe.skipIf(!findBrowserPath())('sandboxed frame replay', () => {
   })
 
   it('stops child recording, resumes with current content, and applies updated privacy settings', async () => {
+    await recordDesign()
     await page.evaluate(() => window.stopReplay())
     await page.evaluate(() => {
       window.messages = []
@@ -175,8 +176,6 @@ describe.skipIf(!findBrowserPath())('sandboxed frame replay', () => {
   })
 
   it('bounds failed downloads and cancels pending retries when recording stops', async () => {
-    await page.reload()
-    await page.waitForFunction(() => window.testReady && window.messages.some((m) => m.type === 'doop:frame-ready'))
     await page.setRequestInterception(true)
     let attempts = 0
     const onRequest = (request: HTTPRequest) => {

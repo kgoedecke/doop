@@ -1,7 +1,7 @@
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
 import type { Page } from 'puppeteer-core'
 import { findBrowserPath } from '../server/screenshot'
-import { fixtureUrl, openBrowser, type TestBrowser } from './browser'
+import { fixtureUrl, pagePerTest } from './browser'
 
 declare global {
   interface Window {
@@ -16,23 +16,16 @@ declare global {
 /* Each test loads the whole app in its own body, which on a busy CI runner
    takes longer than the 5 s default test timeout. */
 describe.skipIf(!findBrowserPath())('sign-up form error handling', { timeout: 30_000 }, () => {
-  let browser: TestBrowser
+  const pages = pagePerTest()
   let page: Page
   let pageErrors: string[] = []
 
-  beforeAll(async () => {
-    browser = await openBrowser()
-    page = await browser.newPage()
+  beforeEach(async () => {
+    pageErrors = []
+    page = await pages.open()
     await page.setViewport({ width: 900, height: 900 })
     page.setDefaultTimeout(5_000)
     page.on('pageerror', (error) => pageErrors.push(String(error)))
-  }, 60_000)
-  afterAll(async () => {
-    await page?.close()
-    await browser?.close()
-  })
-  afterEach(() => {
-    pageErrors = []
   })
 
   /** Load the form, choose what the sign-up POST answers, and submit it. */
@@ -114,18 +107,13 @@ describe.skipIf(!findBrowserPath())('sign-up form error handling', { timeout: 30
 
 /* The instance's sign-in policy (Admin → Sign-in) on the real form. */
 describe.skipIf(!findBrowserPath())('sign-in policy', { timeout: 30_000 }, () => {
-  let browser: TestBrowser
+  const pages = pagePerTest()
   let page: Page
 
-  beforeAll(async () => {
-    browser = await openBrowser()
-    page = await browser.newPage()
+  beforeEach(async () => {
+    page = await pages.open()
     await page.setViewport({ width: 900, height: 900 })
     page.setDefaultTimeout(5_000)
-  }, 60_000)
-  afterAll(async () => {
-    await page?.close()
-    await browser?.close()
   })
 
   const SSO = { enabled: true, displayName: 'Zitadel' }
