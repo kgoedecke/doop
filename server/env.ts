@@ -198,6 +198,13 @@ const schema = {
   /* Kimi Code, a membership's coding quota; China's is
      https://api.kimi.com/coding/v1/chat/completions */
   KIMI_CODE_CHAT_URL: str({ default: 'https://api.kimi.ai/coding/v1/chat/completions' }),
+  /* custom providers (Settings → Doop Agent → Custom provider): any OpenAI-
+     or Anthropic-compatible endpoint a person names. Off switches the feature
+     off and takes existing ones out of use. Their URLs are user input, so they
+     are reached only over public addresses unless PRIVATE_HOSTS is on, for a
+     self-hosted instance whose models run on its own network */
+  DOOP_CUSTOM_PROVIDERS: bool({ default: true }),
+  DOOP_CUSTOM_PROVIDER_PRIVATE_HOSTS: bool({ default: false }),
 
   /* ------------------------------------------------ image generation */
   OPENAI_API_KEY: str({ default: undefined }),

@@ -636,7 +636,7 @@ export const modelAccounts = pgTable(
   'model_accounts',
   {
     userId: text('user_id').notNull(),
-    /** 'chatgpt' (subscription, OAuth) | 'openai-key' | 'anthropic-key' | 'openrouter-key' | 'gemini-key' | 'deepseek-key' | 'kimi-key' | 'kimi-code' */
+    /** 'chatgpt' (subscription, OAuth) | 'openai-key' | 'anthropic-key' | 'openrouter-key' | 'gemini-key' | 'deepseek-key' | 'kimi-key' | 'kimi-code' | 'custom:<id>' */
     kind: text('kind').notNull(),
     /** off keeps the credential but takes the account out of the composer and the default */
     enabled: boolean('enabled').notNull().default(true),
@@ -654,6 +654,12 @@ export const modelAccounts = pgTable(
     model: text('model'),
     /** OpenAI reasoning effort this user picked; null = the server default */
     reasoningEffort: text('reasoning_effort'),
+    /** a custom provider (kind `custom:<id>`): its name, API type, base URL,
+     *  models and options (shared/customProvider.ts); null on every other kind */
+    custom: jsonb('custom'),
+    /** a custom provider's extra request headers, as JSON; they can carry a
+     *  credential, so they are sealed like the key */
+    customHeaders: sealedText('custom_headers'),
     connectedAt: bigint('connected_at', { mode: 'number' }).notNull(),
     updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
   },

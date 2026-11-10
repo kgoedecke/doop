@@ -6,11 +6,14 @@ import { localAgentRuns, type LocalHarnessRequest } from './localAgentRuns.ts'
 import { isClaudeEffort, isClaudeModel, type LocalAgentResult } from '../shared/localAgent.ts'
 import type { RunnerPick } from '../shared/agentRunner.ts'
 import Anthropic from '@anthropic-ai/sdk'
-import { withFreshToken, accountModelFor, accountVisionFor, accountWithPick } from './modelAccounts.ts'
-import type { AccountKind, ModelAccount } from './modelAccounts.ts'
+import { withFreshToken, accountModelFor, accountVisionFor, accountWithPick, customModelFor } from './modelAccounts.ts'
+import type { AccountKind, BuiltinAccountKind, ModelAccount } from './modelAccounts.ts'
+import { customProviderFetch } from './customProviderFetch.ts'
+import { isCustomProviderKind, type CustomModel, type CustomProviderConfig } from '../shared/customProvider.ts'
 import { ModelAuthError, ModelUnavailableError, effortFor, runAzureTurn, runOpenAiTurn } from './openaiAgent.ts'
 import type { StopReason, TurnBlock } from './openaiAgent.ts'
 import {
+  IMAGE_OMITTED_NOTE,
   deepseekConfig,
   geminiConfig,
   kimiCodeConfig,
@@ -206,7 +209,7 @@ function warnOnce(message: string) {
 /* a user's own account                                             */
 /* ---------------------------------------------------------------- */
 
-const BYO_LABELS: Record<AccountKind, string> = {
+const BYO_LABELS: Record<BuiltinAccountKind, string> = {
   chatgpt: 'ChatGPT',
   'openai-key': 'OpenAI',
   'anthropic-key': 'Claude API',
@@ -219,7 +222,7 @@ const BYO_LABELS: Record<AccountKind, string> = {
 
 /* the account kinds that run on the Chat Completions transport */
 const CHAT_COMPLETIONS_CONFIGS: Partial<
-  Record<AccountKind, (apiKey: string, model: string, vision: boolean) => ChatCompletionsConfig>
+  Record<BuiltinAccountKind, (apiKey: string, model: string, vision: boolean) => ChatCompletionsConfig>
 > = {
   'openrouter-key': openrouterConfig,
   'gemini-key': geminiConfig,
@@ -234,8 +237,115 @@ function joinSystem(req: AgentTurnRequest): string {
   return req.system.map((block) => block.text).join('\n\n')
 }
 
+/* ---------------------------------------------------------------- */
+/* a custom provider: an endpoint its person named                  */
+/* ---------------------------------------------------------------- */
+
+/** Where a custom provider's turns go and with what credentials. */
+export interface CustomTarget {
+  config: CustomProviderConfig
+  apiKey?: string
+  headers?: Record<string, string>
+}
+
+/**
+ * One turn on a custom provider's model, over the API type its person
+ * picked. Every request goes through customProviderFetch (public addresses
+ * only, DNS pinned, no redirects), and the output budget is held to what the
+ * model was said to allow.
+ */
+export function customTurn(target: CustomTarget, model: CustomModel): AgentModel['run'] {
+  const { config, apiKey, headers = {} } = target
+  const budget = (req: AgentTurnRequest) => Math.min(req.maxTokens, model.maxOutputTokens ?? req.maxTokens)
+  if (config.apiType === 'anthropic') {
+    const client = new Anthropic({
+      apiKey: apiKey || null,
+      baseURL: config.baseUrl,
+      fetch: customProviderFetch,
+      /* no key: say so explicitly, or the SDK refuses to send anything */
+      defaultHeaders: { ...headers, ...(apiKey ? {} : { 'X-Api-Key': null }) },
+    })
+    return async (req) => {
+      try {
+        return await runAnthropicTurn(client, model.id, {
+          ...req,
+          messages: model.vision ? req.messages : withoutImages(req.messages),
+          maxTokens: budget(req),
+        })
+      } catch (error) {
+        if (error instanceof Anthropic.APIError && (error.status === 401 || error.status === 403)) {
+          throw new ModelAuthError(`${config.name} rejected the API key. Update it in Settings.`)
+        }
+        throw error
+      }
+    }
+  }
+  const chat: ChatCompletionsConfig = {
+    url: `${config.baseUrl}/chat/completions`,
+    headers: { ...headers, ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}) },
+    model: model.id,
+    label: config.name,
+    vision: model.vision,
+    ...(config.echoReasoning ? { echoReasoning: true } : {}),
+    ...(config.tokenParam ? { tokenParam: config.tokenParam } : {}),
+    fetch: customProviderFetch,
+  }
+  return (req) =>
+    runChatCompletionsTurn(chat, {
+      system: joinSystem(req),
+      tools: req.tools,
+      messages: req.messages,
+      maxTokens: budget(req),
+      signal: req.signal,
+    })
+}
+
+/**
+ * The conversation with every image, top-level or inside a tool result,
+ * swapped for the text note the Chat Completions transport uses: a model said
+ * not to see images must not be sent any, whichever tool produced them.
+ */
+export function withoutImages(messages: Anthropic.MessageParam[]): Anthropic.MessageParam[] {
+  const note = { type: 'text' as const, text: IMAGE_OMITTED_NOTE }
+  return messages.map((message) => {
+    if (typeof message.content === 'string') return message
+    return {
+      ...message,
+      content: message.content.map((block) => {
+        if (block.type === 'image') return note
+        if (block.type === 'tool_result' && Array.isArray(block.content)) {
+          return { ...block, content: block.content.map((part) => (part.type === 'image' ? note : part)) }
+        }
+        return block
+      }),
+    }
+  })
+}
+
+function customModel(account: ModelAccount): AgentModel {
+  const config = account.custom
+  const model = customModelFor(account)
+  if (!config || !model) throw new ModelConfigurationError('Add a model to this custom provider in Settings.')
+  return {
+    provider: account.kind,
+    label: `${config.name} (${model.id})`,
+    userId: account.userId,
+    vision: model.vision,
+    run: customTurn(
+      {
+        config,
+        ...(account.apiKey ? { apiKey: account.apiKey } : {}),
+        ...(account.headers ? { headers: account.headers } : {}),
+      },
+      model,
+    ),
+  }
+}
+
 function byoModel(account: ModelAccount): AgentModel {
-  if (account.kind === 'anthropic-key') {
+  const kind = account.kind
+  if (isCustomProviderKind(kind)) return customModel(account)
+  if (kind === 'anthropic-key') {
     if (!account.apiKey) throw new ModelAuthError('Reconnect your Claude API key in Settings.')
     const client = new Anthropic({ apiKey: account.apiKey })
     const model = accountModelFor(account)
@@ -264,15 +374,15 @@ function byoModel(account: ModelAccount): AgentModel {
       },
     }
   }
-  const chatCompletionsConfig = CHAT_COMPLETIONS_CONFIGS[account.kind]
+  const chatCompletionsConfig = CHAT_COMPLETIONS_CONFIGS[kind]
   if (chatCompletionsConfig) {
-    if (!account.apiKey) throw new ModelAuthError(`Reconnect your ${BYO_LABELS[account.kind]} key in Settings.`)
+    if (!account.apiKey) throw new ModelAuthError(`Reconnect your ${BYO_LABELS[kind]} key in Settings.`)
     const model = accountModelFor(account)
     const vision = accountVisionFor(account)
     const config = chatCompletionsConfig(account.apiKey, model, vision)
     return {
       provider: account.kind,
-      label: `${BYO_LABELS[account.kind]} (${model})`,
+      label: `${BYO_LABELS[kind]} (${model})`,
       userId: account.userId,
       vision,
       run: (req) =>
@@ -287,7 +397,7 @@ function byoModel(account: ModelAccount): AgentModel {
   }
   return {
     provider: account.kind,
-    label: `${BYO_LABELS[account.kind]} (${accountModelFor(account)}, ${effortFor(account)} effort)`,
+    label: `${BYO_LABELS[kind]} (${accountModelFor(account)}, ${effortFor(account)} effort)`,
     userId: account.userId,
     async run(req) {
       /* refreshed per turn, not per run: a long design run outlives an

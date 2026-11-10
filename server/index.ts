@@ -82,7 +82,17 @@ import { getLocalAgentPreference } from './localAgentPreferences.ts'
 import { serverTierInfo } from './agentModel.ts'
 import { imageModelAvailability, serverImageGenEnabled } from './imageGen.ts'
 import { setImagePref } from './imagePrefs.ts'
-import { accountsView, listRunners, MODEL_MENUS } from './agentRunners.ts'
+import { accountsView, listRunners, menuFor } from './agentRunners.ts'
+import { CustomProviderError, discoverCustomModels, takeProbeSlot, testCustomProvider } from './customProviders.ts'
+import { CustomProviderUrlError, customProvidersEnabled, reachableUrl } from './customProviderFetch.ts'
+import {
+  isCustomProviderKind,
+  normalizeBaseUrl,
+  parseCustomHeaders,
+  parseCustomKey,
+  parseCustomProviderConfig,
+  CUSTOM_API_TYPES,
+} from '../shared/customProvider.ts'
 import { setStoredDefault } from './agentDefaults.ts'
 import { isRunnerProvider } from '../shared/agentRunner.ts'
 import { modelCatalogFor } from './modelCatalog.ts'
@@ -1053,7 +1063,7 @@ app.get('/api/model-account/models', async (req, res) => {
          must not hold the picker past the catalog's own budget */
       new Promise<typeof account>((resolve) => setTimeout(resolve, 8_000, account).unref()),
     ])
-    res.json(await modelCatalogFor(live, MODEL_MENUS[account.kind]))
+    res.json(await modelCatalogFor(live, menuFor(account)))
   } catch {
     res.status(500).json({ error: 'models unavailable' })
   }
@@ -1157,6 +1167,122 @@ for (const [kind, connect] of Object.entries(KEY_CONNECTS)) {
     }
   })
 }
+
+/* ---- custom providers: any OpenAI- or Anthropic-compatible endpoint, by
+   its base URL. One is a model account of kind `custom:<id>`, so switching it
+   on or off, picking its model, making it the default and disconnecting it
+   are the routes above; these create and edit it, and help set it up. */
+
+app.use('/api/custom-providers', (_req, res, next) => {
+  if (!customProvidersEnabled()) return res.status(404).json({ error: 'custom providers are off on this server' })
+  next()
+})
+
+/** The key and headers a request carries: a field left out is undefined, so
+ *  an edit keeps the stored one; an empty key clears it. */
+function customSecrets(body: Record<string, unknown>): { apiKey?: string; headers?: Record<string, string> } {
+  const secrets: { apiKey?: string; headers?: Record<string, string> } = {}
+  if (body.apiKey !== undefined) {
+    const key = parseCustomKey(body.apiKey)
+    if (!key.ok) throw new CustomProviderError(key.error)
+    secrets.apiKey = key.value
+  }
+  if (body.headers !== undefined) {
+    const headers = parseCustomHeaders(body.headers)
+    if (!headers.ok) throw new CustomProviderError(headers.error)
+    secrets.headers = headers.value
+  }
+  return secrets
+}
+
+/** A validated provider description whose URL this server may reach. */
+function customConfig(body: unknown) {
+  const config = parseCustomProviderConfig(body)
+  if (!config.ok) throw new CustomProviderError(config.error)
+  reachableUrl(config.value.baseUrl)
+  return config.value
+}
+
+/** The secrets a set-up request should use: what it carries, else (for a
+ *  provider being edited) what is stored for it. */
+async function probeSecrets(userId: string, body: Record<string, unknown>) {
+  const given = customSecrets(body)
+  const stored = isCustomProviderKind(body.kind) ? await modelAccounts.getAccount(userId, body.kind) : null
+  const apiKey = given.apiKey ?? stored?.apiKey
+  const headers = given.headers ?? stored?.headers
+  return { ...(apiKey ? { apiKey } : {}), ...(headers ? { headers } : {}) }
+}
+
+function customFailure(res: express.Response, error: unknown, fallback: string) {
+  if (error instanceof CustomProviderError || error instanceof CustomProviderUrlError) {
+    return res.status(400).json({ error: error.message })
+  }
+  /* the provider's own error text (a 400 body, a refused model) is what the
+     person needs to fix their endpoint; never a stack */
+  const message = error instanceof Error ? error.message.slice(0, 500) : fallback
+  return res.status(400).json({ error: message || fallback })
+}
+
+app.post('/api/custom-providers', async (req, res) => {
+  try {
+    const body = (req.body ?? {}) as Record<string, unknown>
+    const config = customConfig(body)
+    await modelAccounts.connectCustomProvider(req.user!.id, config, customSecrets(body))
+    res.json(await accountsView(req.user!.id))
+    wakeUserWork(req.user!.id)
+  } catch (error) {
+    customFailure(res, error, 'could not add that provider')
+  }
+})
+
+app.put('/api/custom-providers/:kind', async (req, res) => {
+  const kind = req.params.kind
+  if (!isCustomProviderKind(kind)) return res.status(400).json({ error: 'unknown provider' })
+  try {
+    const body = (req.body ?? {}) as Record<string, unknown>
+    await modelAccounts.updateCustomProvider(req.user!.id, kind, customConfig(body), customSecrets(body))
+    res.json(await accountsView(req.user!.id))
+    wakeUserWork(req.user!.id)
+  } catch (error) {
+    customFailure(res, error, 'could not save that provider')
+  }
+})
+
+/* the endpoint's own model list, to fill the form's rows */
+app.post('/api/custom-providers/models', async (req, res) => {
+  const userId = req.user!.id
+  if (!takeProbeSlot(userId)) return res.status(429).json({ error: 'Too many requests. Wait a few minutes.' })
+  try {
+    const body = (req.body ?? {}) as Record<string, unknown>
+    const apiType = CUSTOM_API_TYPES.find((type) => type === body.apiType)
+    if (!apiType) throw new CustomProviderError('Pick the API type')
+    const baseUrl = normalizeBaseUrl(typeof body.baseUrl === 'string' ? body.baseUrl : '')
+    if (!baseUrl.ok) throw new CustomProviderError(baseUrl.error)
+    const models = await discoverCustomModels({
+      config: { apiType, baseUrl: baseUrl.value },
+      ...(await probeSecrets(userId, body)),
+    })
+    res.json({ models })
+  } catch (error) {
+    customFailure(res, error, 'could not list that endpoint’s models')
+  }
+})
+
+/* one short turn that has to call a tool: the agent cannot work without it */
+app.post('/api/custom-providers/test', async (req, res) => {
+  const userId = req.user!.id
+  if (!takeProbeSlot(userId)) return res.status(429).json({ error: 'Too many requests. Wait a few minutes.' })
+  try {
+    const body = (req.body ?? {}) as Record<string, unknown>
+    const config = customConfig(body)
+    const model = config.models.find((option) => option.id === body.model) ?? config.models[0]
+    if (!model) throw new CustomProviderError('Add a model to test')
+    await testCustomProvider({ config, ...(await probeSecrets(userId, body)) }, model)
+    res.json({ ok: true, model: model.id })
+  } catch (error) {
+    customFailure(res, error, 'the test turn failed')
+  }
+})
 
 app.delete('/api/model-account/:kind', async (req, res) => {
   const kind = req.params.kind

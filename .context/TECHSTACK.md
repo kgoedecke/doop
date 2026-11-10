@@ -90,6 +90,23 @@
   `reasoning_content`, so the transport keeps it as a `thinking` block in the run's history and
   sends it back where the config sets `echoReasoning`. Tests: the `reasoning_content` cases in
   `chatCompletionsAgent.test.ts`, `rosterRouting.test.ts`, `providerKeyAccounts.test.ts`.
+- Custom providers (`shared/customProvider.ts`, `server/customProviders.ts`,
+  `server/customProviderFetch.ts`, `src/components/CustomProviderForm.tsx`): any OpenAI Chat
+  Completions or Anthropic Messages endpoint, added in Settings → Doop Agent by name, API type, base
+  URL, an optional key and the models it offers (each with "Sees images" and an optional max output
+  tokens, which caps the turn's budget). One is a `model_accounts` row of kind `custom:<id>` (id
+  minted by the server, at most 10 per person) with its description in `custom` (jsonb) and extra
+  headers in `custom_headers` (sealed; migration 0051), so on/off, the default, the composer pick and
+  disconnect are the ordinary account routes. `POST /api/custom-providers` adds, `PUT
+/api/custom-providers/:kind` edits (a key or headers left out are kept, empty clears them);
+  `/models` lists the endpoint's ids and `/test` runs one turn that must call a tool, both rationed per
+  person and able to use an edited provider's stored secrets. Every request goes through
+  `customProviderFetch`: https to public addresses only, DNS pinned per request, no redirects, 32 MB
+  response cap; `DOOP_CUSTOM_PROVIDER_PRIVATE_HOSTS` admits private hosts and http for a self-hosted
+  instance, `DOOP_CUSTOM_PROVIDERS=false` turns the feature off (existing ones read as disconnected).
+  Advanced: extra headers (routing and framing headers refused), `max_tokens` vs
+  `max_completion_tokens`, and echoing `reasoning_content`. Tests: `customProvider.test.ts`,
+  `customProvidersHttp.test.ts`, `customProviderForm.test.tsx`.
 - Reasoning effort on a user's OpenAI account (ChatGPT subscription or OpenAI key): the pick lives
   in `model_accounts.reasoning_effort` (`REASONING_EFFORTS` in `shared/modelMenu.ts`: low / medium /
   high / xhigh), set through `PATCH /api/model-account/:kind { effort }`, read by `effortFor` in
