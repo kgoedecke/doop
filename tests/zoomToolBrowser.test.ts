@@ -1,61 +1,20 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
 import type { Page } from 'puppeteer-core'
 import { findBrowserPath } from '../server/screenshot'
-import { pagePerTest, serveBuilt, type BuiltServer } from './browser'
-import { freePort, startServer, type Server } from './harness'
+import { pagePerTest } from './browser'
+import { canvasFrame, openCanvasPage } from './canvasPageFixture'
 
 /* Z held is the Zoom tool: a click zooms in, a drag zooms onto its box, Esc
    drops the box, and letting go of Z returns to the tool before it, in
    whichever order Z and the mouse are released */
 describe.skipIf(!findBrowserPath())('the Zoom tool', () => {
-  let web: BuiltServer
-  let server: Server
   const pages = pagePerTest()
   let page: Page
-  let origin: string
-  let users = 0
-  beforeAll(async () => {
-    const port = await freePort()
-    web = await serveBuilt({
-      '/api': { target: `http://localhost:${port}` },
-      '/ws': { target: `ws://localhost:${port}`, ws: true },
-    })
-    origin = web.origin
-    server = await startServer({ PORT: String(port), BETTER_AUTH_URL: origin })
-  }, 60_000)
-  afterAll(async () => {
-    await web?.close()
-    server?.stop()
-  })
-  /* each test signs up its own person and draws on their own canvas */
   beforeEach(async () => {
     page = await pages.open()
     page.setDefaultTimeout(10_000)
     await page.setViewport({ width: 1400, height: 900 })
-    await page.goto(origin)
-    const canvasId = await page.evaluate(async (email) => {
-      const signup = await fetch('/api/auth/sign-up/email', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: 'Zoom Tester', email, password: 'password12345' }),
-      })
-      if (!signup.ok) throw new Error(await signup.text())
-      const canvas = await (
-        await fetch('/api/canvases', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name: 'Zoom tool' }),
-        })
-      ).json()
-      await fetch(`/api/canvases/${canvas.id}/frames`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: 'Board', x: 0, y: 0, width: 800, height: 600, html: '<body></body>' }),
-      })
-      return canvas.id as string
-    }, `zoom-tool-${++users}@test.dev`)
-    await page.goto(`${origin}/c/${canvasId}`)
-    await page.waitForSelector('[data-frame-title]')
+    await openCanvasPage(page, [canvasFrame({ id: 'board', name: 'Board', x: 0, y: 0, width: 800, height: 600 })])
   })
 
   const zoom = () => page.$eval('[aria-label="Zoom level"] span', (el) => parseInt(el.textContent ?? '', 10))
