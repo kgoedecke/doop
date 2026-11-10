@@ -1,7 +1,7 @@
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
 import type { Page } from 'puppeteer-core'
 import { findBrowserPath } from '../server/screenshot'
-import { fixtureUrl, openBrowser, type TestBrowser } from './browser'
+import { fixtureUrl, pagePerTest } from './browser'
 
 type Message = { type: string; reqId?: string; ok?: boolean }
 type Fixture = { messages: Message[] }
@@ -9,21 +9,16 @@ type Fixture = { messages: Message[] }
 /* The live document follows a rename's stamp: the id the saved document
    gives the element, and a rolled-back stamp coming off again. */
 describe.skipIf(!findBrowserPath())('layer renames in the live frame', () => {
-  let browser: TestBrowser
+  const pages = pagePerTest()
   let page: Page
   let seq = 0
-  beforeAll(async () => {
-    browser = await openBrowser()
-    page = await browser.newPage()
+  beforeEach(async () => {
+    page = await pages.open()
     await page.goto(fixtureUrl('frameReplay.html'))
     await page.waitForFunction(() =>
       (window as unknown as Fixture).messages?.some((m) => m.type === 'doop:frame-ready'),
     )
   }, 60_000)
-  afterAll(async () => {
-    await page?.close()
-    await browser?.close()
-  })
 
   async function ask(message: Record<string, unknown>) {
     const reqId = `rename-${++seq}`

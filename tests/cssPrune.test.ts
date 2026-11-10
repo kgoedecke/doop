@@ -1,27 +1,21 @@
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
 import type { Page } from 'puppeteer-core'
 import { PRUNE_DEADLINE_MS, pruneCssInDocument } from '../server/cssPrune.ts'
 import { findBrowserPath } from '../server/screenshot.ts'
-import { openBrowser, type TestBrowser } from './browser.ts'
+import { pagePerTest } from './browser.ts'
 
 /* The pruner runs inside Chromium and leans on its CSS parser, so it is
    tested in the real thing rather than against a DOM emulation. Skipped where
    no browser is installed. */
 describe.skipIf(!findBrowserPath())('unused CSS pruning', () => {
-  let browser: TestBrowser
+  const pages = pagePerTest()
   let page: Page
 
-  beforeAll(async () => {
-    browser = await openBrowser()
-    page = await browser.newPage()
+  beforeEach(async () => {
+    page = await pages.open()
     await page.setContent(
       '<!doctype html><html><head></head><body><div class="used"><ul><li>one</li></ul><a href="#">link</a></div><p style="font-family: Inline">inline</p></body></html>',
     )
-  }, 60_000)
-
-  afterAll(async () => {
-    await page?.close()
-    await browser?.close()
   })
 
   const prune = async (css: string, deadlineMs = PRUNE_DEADLINE_MS) =>

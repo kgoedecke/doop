@@ -1,10 +1,10 @@
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import type { Page } from 'puppeteer-core'
 import { findBrowserPath } from '../server/screenshot'
-import { fixtureUrl, openBrowser, type TestBrowser } from './browser'
+import { fixtureUrl, pagePerTest } from './browser'
 import type { Frame } from '../shared/types'
 import type { ElementInfo, GeometryEdit } from '../src/lib/frameBridge'
 
@@ -30,10 +30,10 @@ declare global {
 }
 
 describe.skipIf(!findBrowserPath())('element design controls', () => {
-  let browser: TestBrowser
+  const pages = pagePerTest()
   let page: Page
   let saved: Frame
-  const framePatches: Partial<Frame>[] = []
+  let framePatches: Partial<Frame>[] = []
   let seedId = 0
   let uploadStatus = 200
   let uploadGate: Promise<void> | null = null
@@ -43,11 +43,17 @@ describe.skipIf(!findBrowserPath())('element design controls', () => {
   const replacementUrl = `data:image/svg+xml;base64,${Buffer.from(replacementSvg).toString('base64')}`
   const originalUrl = `data:image/svg+xml;base64,${Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="120" height="80"><rect width="120" height="80" fill="teal"/></svg>').toString('base64')}`
   const errors: string[] = []
-  beforeAll(async () => {
+  beforeAll(() => {
     imageDir = mkdtempSync(path.join(tmpdir(), 'doop-image-fill-'))
     writeFileSync(path.join(imageDir, 'replacement.svg'), replacementSvg)
-    browser = await openBrowser()
-    page = await browser.newPage()
+  })
+
+  beforeEach(async () => {
+    framePatches = []
+    seedId = 0
+    uploadStatus = 200
+    uploadGate = null
+    page = await pages.open()
     page.setDefaultTimeout(5_000)
     page.on('pageerror', (error) => errors.push(String(error)))
     await page.setViewport({ width: 1000, height: 900 })
@@ -118,10 +124,7 @@ describe.skipIf(!findBrowserPath())('element design controls', () => {
     await page.waitForSelector('select[aria-label="Font family"]')
   }, 60_000)
 
-  afterAll(async () => {
-    await page?.screenshot({ path: '/tmp/narwhal-element-panel.png' })
-    await page?.close()
-    await browser?.close()
+  afterAll(() => {
     if (imageDir) rmSync(imageDir, { recursive: true, force: true })
     expect(errors).toEqual([])
   })
@@ -1506,7 +1509,6 @@ describe.skipIf(!findBrowserPath())('element design controls', () => {
 
   it('leaves a standalone canvas element in place', async () => {
     saved = { ...saved, html: '<body data-doop-canvas-element="rect"><div id="shape"></div></body>' }
-    framePatches.length = 0
     const handled = await page.evaluate((frame) => {
       window.elementPanelHarness.seed(frame)
       window.elementPanelHarness.select('#shape')

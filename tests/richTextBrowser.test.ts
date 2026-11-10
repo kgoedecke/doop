@@ -1,7 +1,7 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
 import type { Frame, Page } from 'puppeteer-core'
 import { findBrowserPath } from '../server/screenshot'
-import { fixtureUrl, openBrowser, type TestBrowser } from './browser'
+import { fixtureUrl, pagePerTest } from './browser'
 import type { TextFormatCommand } from '../src/lib/richText'
 import type { ElementInfo, StylePatch } from '../src/lib/frameBridge'
 
@@ -10,19 +10,12 @@ type Fixture = {
 }
 
 describe.skipIf(!findBrowserPath())('rich text editing', { timeout: 30_000 }, () => {
-  let browser: TestBrowser
+  const pages = pagePerTest()
   let page: Page
   let frame: Frame
 
-  beforeAll(async () => {
-    browser = await openBrowser()
-    page = await browser.newPage()
-  })
-  afterAll(async () => {
-    await page?.close()
-    await browser?.close()
-  })
   beforeEach(async () => {
+    page = await pages.open()
     await page.goto(fixtureUrl('frameReplay.html'))
     await page.waitForFunction(() =>
       (window as unknown as Fixture).messages?.some((m) => m.type === 'doop:frame-ready'),

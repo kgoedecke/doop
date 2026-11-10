@@ -1,27 +1,23 @@
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
 import type { Page } from 'puppeteer-core'
 import { findBrowserPath } from '../server/screenshot'
-import { fixtureUrl, openBrowser, type TestBrowser } from './browser'
+import { fixtureUrl, pagePerTest } from './browser'
 
 type Message = { type: string; reqId?: string; html?: string; ok?: boolean }
 type Fixture = { messages: Message[]; testReady: boolean }
 
 describe.skipIf(!findBrowserPath())('layer visibility during text editing', () => {
-  let browser: TestBrowser
+  const pages = pagePerTest()
   let page: Page
   let seq = 0
-  beforeAll(async () => {
-    browser = await openBrowser()
-    page = await browser.newPage()
+  beforeEach(async () => {
+    seq = 0
+    page = await pages.open()
     await page.goto(fixtureUrl('frameReplay.html'))
     await page.waitForFunction(() =>
       (window as unknown as Fixture).messages?.some((m) => m.type === 'doop:frame-ready'),
     )
   }, 60_000)
-  afterAll(async () => {
-    await page?.close()
-    await browser?.close()
-  })
 
   async function send(message: Record<string, unknown>) {
     await page.evaluate(

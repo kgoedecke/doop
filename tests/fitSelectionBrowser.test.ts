@@ -1,8 +1,8 @@
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { createServer, type ViteDevServer } from 'vite'
 import type { Page } from 'puppeteer-core'
 import { findBrowserPath } from '../server/screenshot'
-import { fixtureServerConfig, openBrowser, type TestBrowser } from './browser'
+import { fixtureServerConfig, pagePerTest } from './browser'
 import { freePort, startServer, type Server } from './harness'
 
 /* ⇧2 fits the selection into the part of the stage the panels leave open,
@@ -10,9 +10,12 @@ import { freePort, startServer, type Server } from './harness'
 describe.skipIf(!findBrowserPath())('zoom to selection with the panels open', () => {
   let vite: ViteDevServer
   let server: Server
-  let browser: TestBrowser
+  const pages = pagePerTest()
   let page: Page
   let origin: string
+  /* made by the first test's page and kept for the file: the account's session
+     lives in the browser context every page shares */
+  let seeded: { canvasId: string; frameId: string } | undefined
   let canvasId: string
   let frameId: string
   beforeAll(async () => {
@@ -28,12 +31,15 @@ describe.skipIf(!findBrowserPath())('zoom to selection with the panels open', ()
     await vite.listen()
     origin = vite.resolvedUrls!.local[0]!.replace(/\/$/, '')
     server = await startServer({ PORT: String(port), BETTER_AUTH_URL: origin })
-    browser = await openBrowser()
-    page = await browser.newPage()
+  }, 60_000)
+  beforeEach(async () => {
+    page = await pages.open()
     page.setDefaultTimeout(10_000)
     await page.setViewport({ width: 1600, height: 1000 })
     await page.goto(origin)
-    ;({ canvasId, frameId } = await page.evaluate(async () => {
+    /* localStorage belongs to the context too, and the docked tests leave their layout in it */
+    await page.evaluate(() => localStorage.removeItem('doop:panel-layout'))
+    seeded ??= await page.evaluate(async () => {
       const signup = await fetch('/api/auth/sign-up/email', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -55,13 +61,12 @@ describe.skipIf(!findBrowserPath())('zoom to selection with the panels open', ()
         })
       ).json()
       return { canvasId: canvas.id as string, frameId: frame.id as string }
-    }))
+    })
+    ;({ canvasId, frameId } = seeded)
     await page.goto(`${origin}/c/${canvasId}`)
     await page.waitForSelector('[data-frame-title]')
-  }, 60_000)
+  })
   afterAll(async () => {
-    await page?.close()
-    await browser?.close()
     await vite?.close()
     server?.stop()
   })

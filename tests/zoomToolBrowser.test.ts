@@ -1,8 +1,8 @@
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { createServer, type ViteDevServer } from 'vite'
 import type { Page } from 'puppeteer-core'
 import { findBrowserPath } from '../server/screenshot'
-import { fixtureServerConfig, openBrowser, type TestBrowser } from './browser'
+import { fixtureServerConfig, pagePerTest } from './browser'
 import { freePort, startServer, type Server } from './harness'
 
 /* Z held is the Zoom tool: a click zooms in, a drag zooms onto its box, Esc
@@ -11,8 +11,10 @@ import { freePort, startServer, type Server } from './harness'
 describe.skipIf(!findBrowserPath())('the Zoom tool', () => {
   let vite: ViteDevServer
   let server: Server
-  let browser: TestBrowser
+  const pages = pagePerTest()
   let page: Page
+  let origin: string
+  let users = 0
   beforeAll(async () => {
     const port = await freePort()
     vite = await createServer(
@@ -24,18 +26,24 @@ describe.skipIf(!findBrowserPath())('the Zoom tool', () => {
       }),
     )
     await vite.listen()
-    const origin = vite.resolvedUrls!.local[0]!.replace(/\/$/, '')
+    origin = vite.resolvedUrls!.local[0]!.replace(/\/$/, '')
     server = await startServer({ PORT: String(port), BETTER_AUTH_URL: origin })
-    browser = await openBrowser()
-    page = await browser.newPage()
+  }, 60_000)
+  afterAll(async () => {
+    await vite?.close()
+    server?.stop()
+  })
+  /* each test signs up its own person and draws on their own canvas */
+  beforeEach(async () => {
+    page = await pages.open()
     page.setDefaultTimeout(10_000)
     await page.setViewport({ width: 1400, height: 900 })
     await page.goto(origin)
-    const canvasId = await page.evaluate(async () => {
+    const canvasId = await page.evaluate(async (email) => {
       const signup = await fetch('/api/auth/sign-up/email', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: 'Zoom Tester', email: 'zoom-tool@test.dev', password: 'password12345' }),
+        body: JSON.stringify({ name: 'Zoom Tester', email, password: 'password12345' }),
       })
       if (!signup.ok) throw new Error(await signup.text())
       const canvas = await (
@@ -51,15 +59,9 @@ describe.skipIf(!findBrowserPath())('the Zoom tool', () => {
         body: JSON.stringify({ name: 'Board', x: 0, y: 0, width: 800, height: 600, html: '<body></body>' }),
       })
       return canvas.id as string
-    })
+    }, `zoom-tool-${++users}@test.dev`)
     await page.goto(`${origin}/c/${canvasId}`)
     await page.waitForSelector('[data-frame-title]')
-  }, 60_000)
-  afterAll(async () => {
-    await page?.close()
-    await browser?.close()
-    await vite?.close()
-    server?.stop()
   })
 
   const zoom = () => page.$eval('[aria-label="Zoom level"] span', (el) => parseInt(el.textContent ?? '', 10))
@@ -71,7 +73,7 @@ describe.skipIf(!findBrowserPath())('the Zoom tool', () => {
     })
     return r
   }
-  /* back to 100% between cases */
+  /* every case starts from 100% */
   async function reset() {
     await page.keyboard.down('Meta')
     await page.keyboard.press('Digit0')

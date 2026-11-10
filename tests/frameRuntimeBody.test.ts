@@ -1,7 +1,7 @@
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
 import type { Page } from 'puppeteer-core'
 import { findBrowserPath } from '../server/screenshot.ts'
-import { fixtureUrl, openBrowser, type TestBrowser } from './browser.ts'
+import { fixtureUrl, pagePerTest } from './browser.ts'
 
 type Inspect = { classes: string[]; backgroundColor: string; padding: number[] } | null
 type Message = { type: string; reqId?: string; info?: Inspect }
@@ -14,12 +14,12 @@ type Fixture = { messages: Message[]; testReady: boolean }
 // document, so the body's own attributes have to travel too or the whole
 // stylesheet matches nothing and the frame renders as browser defaults.
 describe.skipIf(!findBrowserPath())('frame runtime body attributes', () => {
-  let browser: TestBrowser
+  const pages = pagePerTest()
   let page: Page
   let seq = 0
-  beforeAll(async () => {
-    browser = await openBrowser()
-    page = await browser.newPage()
+  beforeEach(async () => {
+    seq = 0
+    page = await pages.open()
     await page.goto(fixtureUrl('frameReplay.html'))
     await page.waitForFunction(
       () =>
@@ -30,10 +30,6 @@ describe.skipIf(!findBrowserPath())('frame runtime body attributes', () => {
       },
     )
   }, 60_000)
-  afterAll(async () => {
-    await page?.close()
-    await browser?.close()
-  })
 
   async function ask<T extends Message>(message: Record<string, unknown>, reply: string): Promise<T> {
     const reqId = `req-${++seq}`

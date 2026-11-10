@@ -1,7 +1,7 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { afterAll, beforeEach, describe, expect, it } from 'vitest'
 import type { Page } from 'puppeteer-core'
 import { findBrowserPath } from '../server/screenshot'
-import { fixtureUrl, openBrowser, type TestBrowser } from './browser'
+import { fixtureUrl, pagePerTest } from './browser'
 import type { Frame } from '../shared/types'
 
 declare global {
@@ -27,7 +27,7 @@ const HTML = `<html><head><style>body { margin: 0; padding: 20px }</style></head
 </body></html>`
 
 describe.skipIf(!findBrowserPath())('frame and element context menus', () => {
-  let browser: TestBrowser
+  const pages = pagePerTest({ permissions: ['clipboard-read', 'clipboard-write', 'clipboard-sanitized-write'] })
   let page: Page
   let saved: Frame
   let deletedFrames = 0
@@ -70,9 +70,10 @@ describe.skipIf(!findBrowserPath())('frame and element context menus', () => {
     await page.waitForFunction(() => !document.querySelector('[role="menu"]'))
   }
 
-  beforeAll(async () => {
-    browser = await openBrowser()
-    page = await browser.newPage()
+  beforeEach(async () => {
+    deletedFrames = 0
+    stamped = []
+    page = await pages.open()
     // Install before the iframe bootstrap registers its listener. A handler
     // added later cannot stop a message the runtime has already processed.
     await page.evaluateOnNewDocument(() => {
@@ -106,10 +107,6 @@ describe.skipIf(!findBrowserPath())('frame and element context menus', () => {
         })
       } else await request.continue()
     })
-    await browser.grantPermissions(['clipboard-read', 'clipboard-write', 'clipboard-sanitized-write'])
-  }, 60_000)
-
-  beforeEach(async () => {
     await page.goto(fixtureUrl('elementContextMenu.html'))
     await page.waitForFunction(() => !!window.contextMenuHarness)
     saved = {
@@ -125,8 +122,6 @@ describe.skipIf(!findBrowserPath())('frame and element context menus', () => {
       updatedAt: 0,
       updatedBy: 'Tester',
     }
-    deletedFrames = 0
-    stamped = []
     await page.evaluate((frame) => {
       localStorage.clear()
       window.contextMenuHarness.seed([frame])
@@ -135,9 +130,7 @@ describe.skipIf(!findBrowserPath())('frame and element context menus', () => {
     await doc.waitForSelector('#box')
   })
 
-  afterAll(async () => {
-    await page?.close()
-    await browser?.close()
+  afterAll(() => {
     expect(errors).toEqual([])
   })
 

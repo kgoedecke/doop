@@ -1,7 +1,7 @@
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeEach, describe, expect, it } from 'vitest'
 import type { Page } from 'puppeteer-core'
 import { findBrowserPath } from '../server/screenshot'
-import { fixtureUrl, openBrowser, type TestBrowser } from './browser'
+import { fixtureUrl, pagePerTest } from './browser'
 import type { Frame } from '../shared/types'
 
 /* the rulers fixture mounts the real Stage; its harness is declared in
@@ -24,13 +24,12 @@ const frame = (id: string, y: number, height: number): Frame => ({
 })
 
 describe.skipIf(!findBrowserPath())('frame size badge', { timeout: 30_000 }, () => {
-  let browser: TestBrowser
+  const pages = pagePerTest()
   let page: Page
   const errors: string[] = []
 
-  beforeAll(async () => {
-    browser = await openBrowser()
-    page = await browser.newPage()
+  beforeEach(async () => {
+    page = await pages.open()
     page.setDefaultTimeout(10_000)
     page.on('pageerror', (err) => errors.push(String(err)))
     await page.setViewport({ width: 1200, height: 800 })
@@ -54,9 +53,7 @@ describe.skipIf(!findBrowserPath())('frame size badge', { timeout: 30_000 }, () 
     await page.evaluate(() => window.rulersHarness.viewport({ x: 100, y: 100, zoom: 0.25 }))
   }, 60_000)
 
-  afterAll(async () => {
-    await page?.close()
-    await browser?.close()
+  afterAll(() => {
     expect(errors).toEqual([])
   })
 

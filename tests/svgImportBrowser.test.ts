@@ -1,7 +1,7 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { afterAll, beforeEach, describe, expect, it } from 'vitest'
 import type { Page } from 'puppeteer-core'
 import { findBrowserPath } from '../server/screenshot'
-import { fixtureUrl, openBrowser, type TestBrowser } from './browser'
+import { fixtureUrl, pagePerTest } from './browser'
 import type { Frame } from '../shared/types'
 
 /* `window.drawingHarness` is declared by drawingBrowser.test.ts, whose fixture this shares */
@@ -15,14 +15,14 @@ const screen = (wx: number, wy: number): [number, number] => [
 ]
 
 describe.skipIf(!findBrowserPath())('importing SVG files', { timeout: 30_000 }, () => {
-  let browser: TestBrowser
+  const pages = pagePerTest()
   let page: Page
   let saved: Frame[] = []
   const errors: string[] = []
 
-  beforeAll(async () => {
-    browser = await openBrowser()
-    page = await browser.newPage()
+  beforeEach(async () => {
+    saved = []
+    page = await pages.open()
     page.setDefaultTimeout(10_000)
     page.on('pageerror', (err) => errors.push(String(err)))
     await page.setRequestInterception(true)
@@ -35,18 +35,12 @@ describe.skipIf(!findBrowserPath())('importing SVG files', { timeout: 30_000 }, 
         await req.respond({ status: 200, contentType: 'application/json', body: JSON.stringify(frame) })
       } else await req.continue()
     })
-  }, 60_000)
-
-  beforeEach(async () => {
-    saved = []
     await page.setViewport({ width: 1200, height: 800 })
     await page.goto(fixtureUrl('drawing.html'))
     await page.waitForFunction(() => !!window.drawingHarness)
   })
 
-  afterAll(async () => {
-    await page?.close()
-    await browser?.close()
+  afterAll(() => {
     expect(errors).toEqual([])
   })
 
