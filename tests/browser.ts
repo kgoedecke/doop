@@ -141,6 +141,11 @@ export async function openBrowser(): Promise<TestBrowser> {
       const page = await context.newPage()
       page.setDefaultTimeout(STEP_TIMEOUT_MS)
       page.setDefaultNavigationTimeout(NAVIGATION_TIMEOUT_MS)
+      /* a renderer Chromium lost takes its page with it, and every later wait
+         on that page only times out: say so once, where the log can be read */
+      page.on('error', (error) => {
+        process.stderr.write(`[browser] Chromium lost the tab at ${page.url()}: ${String(error)}\n`)
+      })
       /* files running side by side each have a window in the one browser, and
          only one window holds the focus at a time: a page that lost it stops
          moving focus between its iframes. Emulated focus keeps every page
