@@ -196,8 +196,8 @@ export interface TestPages {
 export function pagePerTest(options: { permissions?: Permission[] } = {}): TestPages {
   let browser: TestBrowser | undefined
   let opened: Page[] = []
-  /** why Chromium gave up on one of this test's pages, when it did */
-  let lost: string | null = null
+  /** the pages of this test Chromium gave up on, and why */
+  let lost = new Map<Page, string>()
 
   beforeAll(async () => {
     browser = await openBrowser()
@@ -206,13 +206,14 @@ export function pagePerTest(options: { permissions?: Permission[] } = {}): TestP
 
   afterEach(async () => {
     const pages = opened
-    const reason = lost
+    const crashed = lost
     opened = []
-    lost = null
-    /* a page Chromium lost can no longer be closed politely; closing the
-       context at the end of the file takes it */
-    if (!reason) await Promise.all(pages.map((page) => (page.isClosed() ? undefined : page.close())))
-    expect(reason, 'Chromium lost the page during this test').toBeNull()
+    lost = new Map()
+    /* a page Chromium lost can no longer be closed politely (closing the
+       context at the end of the file takes it); every other page of the test
+       still closes here, so nothing of it runs on into the next test */
+    await Promise.all(pages.map((page) => (page.isClosed() || crashed.has(page) ? undefined : page.close())))
+    expect([...crashed.values()], 'Chromium lost a page during this test').toEqual([])
   })
 
   afterAll(async () => {
@@ -223,7 +224,7 @@ export function pagePerTest(options: { permissions?: Permission[] } = {}): TestP
     async open() {
       if (!browser) throw new Error('pagePerTest: open() runs inside a test or its beforeEach')
       const page = await browser.newPage()
-      page.on('error', (error) => (lost = String(error)))
+      page.on('error', (error) => lost.set(page, String(error)))
       opened.push(page)
       return page
     },
