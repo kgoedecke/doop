@@ -1751,6 +1751,10 @@ describe.skipIf(!findBrowserPath())('drawing on the canvas', { timeout: 30_000 }
     await page.evaluate(() => window.drawingHarness.undo())
     await expect.poll(() => saved[0]?.html).toBe(source.html)
     expect(await page.evaluate(() => window.drawingHarness.state().selectedElement?.selector)).toBe(paragraph)
+    /* the save comes back before the frame's own document shows the undo;
+       formatting acts on that document, so wait until the bold is gone from it */
+    const doc = (await (await page.$('iframe[title="Layers"]'))!.contentFrame())!
+    await doc.waitForFunction(() => document.querySelector('p')?.innerHTML === 'Hello <b>world</b>')
     // The paragraph becomes a div so the list survives reload; the selection follows it.
     expect(await page.evaluate(() => window.drawingHarness.formatText('insertUnorderedList'))).toBe(true)
     await expect.poll(() => saved[0]?.html).toContain('<li>Hello <b>world</b></li>')
