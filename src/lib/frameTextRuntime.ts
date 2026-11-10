@@ -412,6 +412,75 @@ export const FRAME_TEXT_RUNTIME = `
     return layers.map(function (layer) { return retagged && layer.el ? cssPath(layer.el) : layer.selector })
   }
 
+  /* Markdown shortcuts, as Notion and Google Docs have them: "- ", "* " or
+     "1. " typed at the start of a line outside a list makes that line one.
+     The marker is deleted and the list made through native commands, so ⌘Z
+     brings the typed marker back. */
+  var LIST_MARKERS = { '-': 'insertUnorderedList', '*': 'insertUnorderedList', '1.': 'insertOrderedList' }
+  document.addEventListener('input', function (ev) {
+    if (ev.inputType !== 'insertText' || ev.data !== ' ' || !editing || !activeEl || isLocked(activeEl)) return
+    var selection = getSelection()
+    if (!selection.rangeCount || !selection.isCollapsed) return
+    var node = selection.anchorNode
+    if (!node || node.nodeType !== 3 || !activeEl.contains(node)) return
+    // A text root inside a list item (<li><p>…</p></li>) is in a list too.
+    if (node.parentElement.closest('li')) return
+    var marker = lineBefore(node, selection.anchorOffset)
+    var match = marker && /^\\s*(-|\\*|1\\.)[ \\u00a0]$/.exec(marker.toString())
+    if (!match || !validTextRange(marker)) return
+    // formatText saves the list at once: the typing save would only repeat it.
+    ev.stopImmediatePropagation()
+    selection.removeAllRanges()
+    selection.addRange(marker)
+    document.execCommand('delete', false, null)
+    textRange = selection.getRangeAt(0).cloneRange()
+    formatText(LIST_MARKERS[match[1]])
+  })
+
+  /* The range from the start of the caret's line to the caret, across runs
+     (a marker typed half bold is still a marker), or null when more than a
+     marker's few characters, or anything not text, is drawn before it on the
+     line. The line starts at the text root, a <br> or a block's edge; an
+     inline-block or a replaced element shares the line. */
+  function lineBefore(node, offset) {
+    var range = document.createRange()
+    range.setStart(node, 0)
+    range.setEnd(node, offset)
+    var text = node.nodeValue.slice(0, offset)
+    var REPLACED = /^(img|svg|video|canvas|input|textarea|select|button|iframe|object|embed|math)$/
+    function isBlock(el) {
+      var display = getComputedStyle(el).display
+      return display.indexOf('inline') !== 0 && display !== 'contents' && display !== 'none'
+    }
+    // Scans a node before the caret from its end: 'line' at a line start, 'more' to go on, 'drawn' otherwise.
+    function scan(n) {
+      if (n.nodeType === 3) {
+        text = n.nodeValue + text
+        range.setStart(n, 0)
+        return text.trim().length > 3 ? 'drawn' : 'more'
+      }
+      if (n.nodeType !== 1) return 'more'
+      if (n.localName === 'br' || isBlock(n)) return 'line'
+      var display = getComputedStyle(n).display
+      if (display === 'none') return 'more'
+      if ((display !== 'inline' && display !== 'contents') || REPLACED.test(n.localName)) return 'drawn'
+      for (var child = n.lastChild; child; child = child.previousSibling) {
+        var found = scan(child)
+        if (found !== 'more') return found
+      }
+      return 'more'
+    }
+    for (var cur = node; cur !== activeEl; cur = cur.parentNode) {
+      for (var prev = cur.previousSibling; prev; prev = prev.previousSibling) {
+        var found = scan(prev)
+        if (found === 'line') return range
+        if (found === 'drawn') return null
+      }
+      if (cur.parentNode !== activeEl && isBlock(cur.parentNode)) return range
+    }
+    return range
+  }
+
   document.addEventListener('selectionchange', postTextState)
   document.addEventListener('keydown', function (ev) {
     if (!editing || !activeEl || !(ev.metaKey || ev.ctrlKey) || ev.altKey) return

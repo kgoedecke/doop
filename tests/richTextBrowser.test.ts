@@ -155,6 +155,113 @@ describe.skipIf(!findBrowserPath())('rich text editing', { timeout: 30_000 }, ()
     expect(await frame.$eval('#text', (el) => el.textContent)).toContain('Outside')
   })
 
+  it.each([
+    ['- ', 'ul'],
+    ['* ', 'ul'],
+    ['1. ', 'ol'],
+  ] as const)('turns "%s" typed at the start of a line into a list', async (marker, tag) => {
+    await render('<p id="text" style="margin:0;font:24px Arial">One</p>')
+    await page.keyboard.press('End')
+    await page.keyboard.press('Enter')
+    await new Promise((resolve) => setTimeout(resolve, 500))
+    await page.evaluate(() => {
+      ;(window as unknown as Fixture).messages = []
+    })
+    await page.keyboard.type(marker)
+    expect(await frame.$$eval(`#text ${tag} li`, (items) => items.map((li) => li.textContent))).toEqual([''])
+    // The list is saved as one discrete edit, not left to the typing debounce.
+    await page.waitForFunction(
+      (tag) =>
+        (window as unknown as Fixture).messages.some((m) => m.type === 'doop:edited' && m.html?.includes(`<${tag}`)),
+      {},
+      tag,
+    )
+    // Past the typing debounce: the conversion was saved once, not again by the space that made it.
+    await new Promise((resolve) => setTimeout(resolve, 500))
+    expect(
+      await page.evaluate(() => (window as unknown as Fixture).messages.filter((m) => m.type === 'doop:edited').length),
+    ).toBe(1)
+    await page.keyboard.type('Two')
+    expect(await frame.$$eval(`#text ${tag} li`, (items) => items.map((li) => li.textContent))).toEqual(['Two'])
+    expect(await frame.$eval('#text', (el) => el.textContent)).toBe('OneTwo')
+    // Undo takes the typing, then the list, then gives the typed marker back.
+    for (let i = 0; i < 3; i++) await frame.evaluate(() => document.execCommand('undo'))
+    expect(await frame.$(`#text ${tag}`)).toBeNull()
+    expect(await frame.$eval('#text', (el) => el.textContent?.replace(/\u00a0/g, ' '))).toBe(`One${marker}`)
+  })
+
+  it('leaves a marker typed mid-line or inside a list as text', async () => {
+    await render('<p id="text" style="margin:0;font:24px Arial">One</p>')
+    await page.keyboard.press('End')
+    await page.keyboard.type(' - 1. * x')
+    expect(await frame.$('#text ul, #text ol')).toBeNull()
+    await format('insertUnorderedList')
+    await caretAtEnd('#text li')
+    await page.keyboard.press('Enter')
+    await page.keyboard.type('1. Two')
+    expect(await frame.$('#text ol')).toBeNull()
+    expect(
+      await frame.$$eval('#text li', (items) => items.map((li) => li.textContent?.replace(/\u00a0/g, ' '))),
+    ).toEqual(['One - 1. * x', '1. Two'])
+  })
+
+  async function caretAtEnd(selector: string) {
+    await frame.evaluate((selector) => {
+      const range = document.createRange()
+      range.selectNodeContents(document.querySelector(selector)!)
+      range.collapse(false)
+      getSelection()!.removeAllRanges()
+      getSelection()!.addRange(range)
+    }, selector)
+  }
+
+  it('reads a marker typed across runs', async () => {
+    await render('<p id="text" style="margin:0;font:24px Arial">One</p>')
+    await page.keyboard.press('End')
+    await page.keyboard.press('Enter')
+    await page.keyboard.type('1')
+    await page.keyboard.down('Control')
+    await page.keyboard.press('b')
+    await page.keyboard.up('Control')
+    await page.keyboard.type('. Two')
+    expect(await frame.$$eval('#text ol li', (items) => items.map((li) => li.textContent))).toEqual(['Two'])
+  })
+
+  it('starts a line after a <br> that ends an inline run', async () => {
+    await render('<p id="text" style="margin:0;font:24px Arial"><b>One<br></b><i>-</i></p>')
+    await caretAtEnd('#text i')
+    await page.keyboard.type(' Two')
+    expect(await frame.$$eval('#text ul li', (items) => items.map((li) => li.textContent))).toEqual(['Two'])
+  })
+
+  it('leaves a marker after an inline-block on its line as text', async () => {
+    await render(
+      '<p id="text" style="margin:0;font:24px Arial">One<br><span style="display:inline-block">B</span><i>-</i></p>',
+    )
+    await caretAtEnd('#text i')
+    await page.keyboard.type(' x')
+    expect(await frame.$('#text ul')).toBeNull()
+  })
+
+  it('leaves a marker that takes in locked text alone', async () => {
+    await render('<p id="text" style="margin:0;font:24px Arial">One<br><span data-doop-locked>1</span><i>.</i></p>')
+    await caretAtEnd('#text i')
+    await page.keyboard.type(' x')
+    expect(await frame.$('#text ol')).toBeNull()
+    expect(await frame.$eval('#text [data-doop-locked]', (el) => el.textContent)).toBe('1')
+  })
+
+  it('leaves a marker in a text root inside a list item as text', async () => {
+    await render(
+      '<ul style="margin:0;padding:0;list-style:none"><li><p id="text" style="margin:0;font:24px Arial">One</p></li></ul>',
+    )
+    expect(await frame.$eval('[contenteditable]', (el) => el.id)).toBe('text')
+    await caretAtEnd('#text')
+    await page.keyboard.press('Enter')
+    await page.keyboard.type('- x')
+    expect(await frame.$('#text ul')).toBeNull()
+  })
+
   it('keeps the text root when clicking formatted words, and supports native undo and redo', async () => {
     await render('<p id="text" style="margin:0;font:24px Arial">Hello world</p>')
     await select(0, 5)
