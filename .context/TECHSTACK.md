@@ -700,7 +700,9 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   `<doop-use>` naming a library family gets its face. Agents read and write the short form
   (`get_frame`, `edit_frame_html`); tools live once in `server/componentTools.ts` for MCP and the
   resident agent. `src/lib/components.ts` and `ComponentsPanel.tsx` (the Layers panel's Components
-  tab, beside Tokens) / `ComponentSection.tsx` are the editor's side. Stored in `components`
+  tab, beside Tokens) / `ComponentSection.tsx` are the editor's side. A component is renamed from its card's menu
+  or a double-click on its name in that tab, or from its main's Layers row (`renameComponent`; instances are
+  linked by id, so they follow); an instance's row is not renamed on its own. Stored in `components`
   (migration `0052_components`). Tests: `components.test.ts`, `componentsEdgeCases.test.ts`,
   `componentTools.test.ts`, `componentsRoutes.test.ts`, `componentsBrowser.test.ts`.
 - Prototypes (`.context/specs/prototyping.md`): interactions are `data-doop-on` /

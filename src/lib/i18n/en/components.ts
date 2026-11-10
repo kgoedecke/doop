@@ -10,6 +10,9 @@ export const components = {
   dragHint: '{name}: drag onto the canvas to place it',
   moreActions: 'More for {name}',
   insertInstance: 'Insert instance',
+  rename: 'Rename',
+  nameAria: 'Component name',
+  renameFailed: 'Couldn’t rename the component. Please try again.',
   deleteComponent: 'Delete component',
   deleteConfirmTitle: 'Delete “{name}”?',
   deleteConfirmDescription:

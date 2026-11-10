@@ -1,7 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ComponentDef } from '../../shared/components'
 import { api, type ComponentCandidate, type ComponentLibrary } from '../lib/api'
-import { COMPONENT_DRAG_TYPE, goToMain, makeComponent, placeComponent, removeComponent } from '../lib/components'
+import {
+  COMPONENT_DRAG_TYPE,
+  goToMain,
+  makeComponent,
+  placeComponent,
+  removeComponent,
+  renameComponent,
+} from '../lib/components'
 import { useT } from '../lib/i18n'
 import { cn } from '@/lib/utils'
 import { canEditOpenCanvas, useStore } from '../lib/store'
@@ -16,6 +23,7 @@ import {
 } from './ui/dropdown-menu'
 import { ComponentIcon, MoreHorizontalIcon } from './ui/icons'
 import { IconButton } from './ui/icon-button'
+import { Input } from './ui/input'
 import { SearchField } from './ui/search-field'
 
 /** A component's sheet in an inert iframe: no scripts, no clicks, scaled to the card. */
@@ -68,6 +76,36 @@ function ComponentThumb({ def, canvasId }: { def: ComponentDef; canvasId: string
   )
 }
 
+/** The card's name as a field: Enter or a blur saves, Escape puts it back. */
+function ComponentNameInput({ def, onDone }: { def: ComponentDef; onDone: () => void }) {
+  const t = useT()
+  const finished = useRef(false)
+  function finish(input: HTMLInputElement, save: boolean) {
+    if (finished.current) return
+    finished.current = true
+    if (save) void renameComponent(def, input.value)
+    onDone()
+  }
+  return (
+    <Input
+      autoFocus
+      aria-label={t('components.nameAria')}
+      variant="bare"
+      inputSize="auto"
+      className="h-5 min-w-0 flex-1 bg-surface px-1 text-ink shadow-elevation-1-focus md:text-body"
+      defaultValue={def.name}
+      onFocus={(event) => event.target.select()}
+      onBlur={(event) => finish(event.currentTarget, true)}
+      onKeyDown={(event) => {
+        event.stopPropagation()
+        if (event.nativeEvent.isComposing || (event.key !== 'Enter' && event.key !== 'Escape')) return
+        event.preventDefault()
+        finish(event.currentTarget, event.key === 'Enter')
+      }}
+    />
+  )
+}
+
 /** The library rail: what this canvas has, what it could turn into components,
  *  and what other canvases offer. */
 export function ComponentsPanel() {
@@ -79,6 +117,11 @@ export function ComponentsPanel() {
   const [candidates, setCandidates] = useState<ComponentCandidate[] | null>(null)
   const [libraries, setLibraries] = useState<ComponentLibrary[] | null>(null)
   const [confirmDelete, setConfirmDelete] = useState<ComponentDef | null>(null)
+  const [renaming, setRenaming] = useState<string | null>(null)
+  /* Rename picked from the menu opens the field once the menu has closed, in
+     place of the focus it would hand back to its trigger, which would blur the
+     new field at once */
+  const renameFromMenu = useRef(false)
 
   const shown = useMemo(() => {
     const wanted = query.trim().toLowerCase()
@@ -113,7 +156,7 @@ export function ComponentsPanel() {
         <article key={def.id} className="flex flex-col gap-1.5" data-component-card={def.name}>
           {/* the card is picked up and dropped onto the canvas; the menu holds the rest */}
           <div
-            draggable={canEdit}
+            draggable={canEdit && renaming !== def.id}
             aria-label={canEdit ? t('components.dragHint', { name: def.name }) : def.name}
             className={cn('flex w-full flex-col gap-1.5 text-left', canEdit && 'cursor-grab active:cursor-grabbing')}
             onDragStart={(event) => {
@@ -124,7 +167,13 @@ export function ComponentsPanel() {
             <ComponentThumb def={def} canvasId={canvasId} />
             <span className="flex min-w-0 items-center gap-1.5 text-body text-ink">
               <ComponentIcon size="rail" className="flex-none text-brand" />
-              <span className="truncate">{def.name}</span>
+              {renaming === def.id ? (
+                <ComponentNameInput def={def} onDone={() => setRenaming(null)} />
+              ) : (
+                <span className="truncate" onDoubleClick={canEdit ? () => setRenaming(def.id) : undefined}>
+                  {def.name}
+                </span>
+              )}
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <IconButton
@@ -136,10 +185,28 @@ export function ComponentsPanel() {
                     <MoreHorizontalIcon size="rail" aria-hidden />
                   </IconButton>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" width="md">
+                <DropdownMenuContent
+                  align="end"
+                  width="md"
+                  onCloseAutoFocus={(event) => {
+                    if (!renameFromMenu.current) return
+                    renameFromMenu.current = false
+                    event.preventDefault()
+                    setRenaming(def.id)
+                  }}
+                >
                   {canEdit && (
                     <DropdownMenuItem onSelect={() => void placeComponent(def)}>
                       {t('components.insertInstance')}
+                    </DropdownMenuItem>
+                  )}
+                  {canEdit && (
+                    <DropdownMenuItem
+                      onSelect={() => {
+                        renameFromMenu.current = true
+                      }}
+                    >
+                      {t('components.rename')}
                     </DropdownMenuItem>
                   )}
                   <DropdownMenuItem onSelect={() => goToMain(def)}>{t('components.goToMain')}</DropdownMenuItem>

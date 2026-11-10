@@ -286,4 +286,133 @@ describe.skipIf(!findBrowserPath())('components in the editor', { timeout: 60_00
       return false
     }, 'the detached instance to keep its look')
   })
+
+  it('renames a component from the panel menu, and Escape keeps the old name', async () => {
+    const name = async () => (await canvas()).components![0]!.name
+    const field = '[data-component-card] input[aria-label="Component name"]'
+    await switchTab('Components')
+    await page.waitForSelector('[data-component-card="Pill"]')
+
+    /* Escape leaves the name alone */
+    await page.click('[data-component-card="Pill"] [data-component-menu]')
+    await clickByText('Rename')
+    await page.waitForSelector(field)
+    await page.keyboard.type('Nope')
+    await page.keyboard.press('Escape')
+    await page.waitForSelector(field, { hidden: true })
+    expect(await name()).toBe('Pill')
+
+    /* the field opens with the name selected, so typing replaces it */
+    await page.click('[data-component-card="Pill"] [data-component-menu]')
+    await clickByText('Rename')
+    await page.waitForSelector(field)
+    expect(await page.$eval(field, (el) => document.activeElement === el)).toBe(true)
+    await page.keyboard.type('Badge')
+    await page.keyboard.press('Enter')
+    await until(async () => (await name()) === 'Badge', 'the rename to save')
+    await page.waitForSelector('[data-component-card="Badge"]')
+
+    /* the main's Layers row renames it too */
+    await switchTab('Layers')
+    const mainRow = await page.evaluate((id) => {
+      const rows = [...document.querySelectorAll<HTMLElement>(`[data-row-key^="${id}|"]`)]
+      return rows.find((row) => row.querySelector('.text-brand:not(.opacity-70)'))?.dataset.rowKey ?? ''
+    }, frameId)
+    await page.click(`[data-row-key="${mainRow}"] > span:nth-of-type(3)`, { count: 2 })
+    const rowField = 'input[aria-label="Item name"]'
+    await page.waitForSelector(rowField)
+    await page.keyboard.type('Tag')
+    await page.keyboard.press('Enter')
+    await until(async () => (await name()) === 'Tag', 'the rename from the layers row')
+  })
+
+  it('renames a standalone main’s component and its frame from the Layers row', async () => {
+    const made = await page.evaluate(async (id) => {
+      const post = async (url: string, body: unknown) => {
+        const res = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        })
+        if (!res.ok) throw new Error(await res.text())
+        return res.json()
+      }
+      const frame = await post(`/api/canvases/${id}/frames`, {
+        name: 'Shape',
+        x: 700,
+        y: 100,
+        width: 80,
+        height: 80,
+        html: '<!doctype html><html><head></head><body data-doop-canvas-element="true"><div data-doop-id="dotdot" data-doop-drawing="rect" style="width:80px;height:80px;background:#0177d3"></div></body></html>',
+      })
+      const { component } = await post(`/api/canvases/${id}/components`, {
+        name: 'Dot',
+        frameId: frame.id,
+        element: 'dotdot',
+      })
+      return { frameId: frame.id as string, componentId: component.id as string }
+    }, canvasId)
+    const state = async () => {
+      const data = await canvas()
+      return {
+        component: data.components!.find((def) => def.id === made.componentId)!.name,
+        frame: (data.frames as { id: string; name?: string }[]).find((frame) => frame.id === made.frameId)!.name,
+      }
+    }
+    const row = await page.waitForFunction(
+      (id) =>
+        [...document.querySelectorAll<HTMLElement>(`[data-row-key^="${id}"]`)].find((el) =>
+          el.querySelector('.text-brand:not(.opacity-70)'),
+        )?.dataset.rowKey,
+      {},
+      made.frameId,
+    )
+    const rowKey = (await row.jsonValue()) as string
+    await page.click(`[data-row-key="${rowKey}"] > span:nth-of-type(3)`, { count: 2 })
+    await page.waitForSelector('input[aria-label="Item name"]')
+    await page.keyboard.type('Marker')
+    await page.keyboard.press('Enter')
+    await until(async () => {
+      const now = await state()
+      return now.component === 'Marker' && now.frame === 'Marker'
+    }, 'the component and its frame to take the new name')
+
+    const renameRow = async (value: string) => {
+      await page.click(`[data-row-key="${rowKey}"] > span:nth-of-type(3)`, { count: 2 })
+      await page.waitForSelector('input[aria-label="Item name"]')
+      await page.keyboard.down('Meta')
+      await page.keyboard.press('a')
+      await page.keyboard.up('Meta')
+      await page.keyboard.type(value)
+      await page.keyboard.press('Enter')
+    }
+    const renameFrameOnServer = (name: string) =>
+      page.evaluate(
+        async (id, next) => {
+          const res = await fetch(`/api/frames/${id}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name: next }),
+          })
+          if (!res.ok) throw new Error(await res.text())
+        },
+        made.frameId,
+        name,
+      )
+
+    /* the frame takes the name the server saved, not what was typed */
+    await renameFrameOnServer('Shape')
+    await until(async () => (await state()).frame === 'Shape', 'the frame to be renamed apart')
+    await renameRow('Pin <b>')
+    await until(async () => {
+      const now = await state()
+      return now.component === 'Pin b' && now.frame === 'Pin b'
+    }, 'both to take the cleaned name')
+
+    /* typing the component's own name still brings a frame that drifted back to it */
+    await renameFrameOnServer('Shape')
+    await until(async () => (await state()).frame === 'Shape', 'the frame to be renamed apart again')
+    await renameRow('Pin b')
+    await until(async () => (await state()).frame === 'Pin b', 'the frame to follow the unchanged name')
+  })
 })
