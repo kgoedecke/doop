@@ -1036,7 +1036,7 @@ private final class FrameLayer {
         }
         let htmlHash = html.hashValue
         BlitzDocument.queue.async {
-            let info = document.element(at: point).flatMap { document.info(for: $0) }
+            let info = document.pickableElement(at: point).flatMap { document.info(for: $0) }
             DispatchQueue.main.async { completion(info, htmlHash) }
         }
     }

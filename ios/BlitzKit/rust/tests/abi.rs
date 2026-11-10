@@ -542,3 +542,35 @@ fn rect_composes_nested_transforms_before_bounding() {
         doopblitz_doc_free(doc);
     }
 }
+
+/// A tap selects the drawing it lands in, the way the web runtime's `probe`
+/// does: the whole text layer, not a bold run inside it, which as an inline
+/// box has no layout of its own and came back as a zero-size outline.
+#[test]
+fn pick_selects_the_text_layer_not_its_inline_runs() {
+    let html = CString::new(concat!(
+        "<body style=\"margin:0\">",
+        "<p data-doop-drawing=\"text\" id=\"t\" style=\"position:fixed;left:100px;top:100px;width:200px;height:120px;margin:0;font:24px/1.4 sans-serif\"><b>bold</b> run</p>",
+        "<div id=\"plain\" style=\"position:fixed;left:100px;top:300px;width:200px;height:60px;font:24px/1.4 sans-serif\"><b>bold</b></div>",
+        "</body>",
+    ))
+    .unwrap();
+    let base = CString::new("https://doop.design/").unwrap();
+    unsafe {
+        let doc = doopblitz_doc_new(html.as_ptr(), base.as_ptr(), 400, 400, 1.0);
+        let (mut w, mut h, mut len) = (0u32, 0u32, 0usize);
+        doopblitz_buffer_free(doopblitz_doc_render(doc, &mut w, &mut h, &mut len), len);
+        let layer = doopblitz_doc_query_selector(doc, CString::new("#t").unwrap().as_ptr());
+        let plain = doopblitz_doc_query_selector(doc, CString::new("#plain").unwrap().as_ptr());
+        // On the bold glyphs, and in the layer's empty lower half.
+        assert_eq!(doopblitz_doc_pick_from_point(doc, 120.0, 115.0), layer);
+        assert_eq!(doopblitz_doc_pick_from_point(doc, 250.0, 200.0), layer);
+        // Outside a drawing, bold text resolves to the nearest box.
+        assert_ne!(doopblitz_doc_element_from_point(doc, 120.0, 315.0), plain);
+        assert_eq!(doopblitz_doc_pick_from_point(doc, 120.0, 315.0), plain);
+        let mut rect = [0f32; 4];
+        assert!(doopblitz_node_rect(doc, layer, rect.as_mut_ptr()));
+        assert!(rect[2] > 199.0 && rect[3] > 119.0, "{rect:?}");
+        doopblitz_doc_free(doc);
+    }
+}
