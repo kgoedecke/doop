@@ -107,18 +107,13 @@ describe.skipIf(!findBrowserPath())('sign-up form error handling', { timeout: 30
 
 /* The instance's sign-in policy (Admin → Sign-in) on the real form. */
 describe.skipIf(!findBrowserPath())('sign-in policy', { timeout: 30_000 }, () => {
-  let browser: TestBrowser
+  const pages = pagePerTest()
   let page: Page
 
-  beforeAll(async () => {
-    browser = await openBrowser()
-    page = await browser.newPage()
+  beforeEach(async () => {
+    page = await pages.open()
     await page.setViewport({ width: 900, height: 900 })
     page.setDefaultTimeout(5_000)
-  }, 60_000)
-  afterAll(async () => {
-    await page?.close()
-    await browser?.close()
   })
 
   const SSO = { enabled: true, displayName: 'Zitadel' }

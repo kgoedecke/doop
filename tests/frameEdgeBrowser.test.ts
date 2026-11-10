@@ -1,8 +1,8 @@
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
 import type { Page } from 'puppeteer-core'
 import sharp from 'sharp'
 import { findBrowserPath } from '../server/screenshot'
-import { fixtureUrl, openBrowser, type TestBrowser } from './browser'
+import { fixtureUrl, pagePerTest } from './browser'
 import type { Canvas, Frame } from '../shared/types'
 
 /* the part of the rulers fixture's harness used here (rulersBrowser.test.ts
@@ -50,7 +50,7 @@ const ZOOMS = [0.1, 0.11, 0.13, 0.18, 0.2, 0.24, 0.29]
 const OFFSETS = [0.13, 0.37, 0.62, 0.88]
 
 describe.skipIf(!findBrowserPath())('frame edge', { timeout: 60_000 }, () => {
-  let browser: TestBrowser
+  const pages = pagePerTest()
   let page: Page
 
   const iframeBox = (name: string) =>
@@ -79,9 +79,8 @@ describe.skipIf(!findBrowserPath())('frame edge', { timeout: 60_000 }, () => {
     await new Promise((r) => setTimeout(r, 450))
   }
 
-  beforeAll(async () => {
-    browser = await openBrowser()
-    page = await browser.newPage()
+  beforeEach(async () => {
+    page = await pages.open()
     await page.setViewport({ width: 1200, height: 800, deviceScaleFactor: 1 })
     await page.goto(fixtureUrl('rulers.html'))
     await page.waitForFunction(() => !!(window as unknown as { rulersHarness?: unknown }).rulersHarness)
@@ -113,11 +112,6 @@ describe.skipIf(!findBrowserPath())('frame edge', { timeout: 60_000 }, () => {
       await new Promise((r) => setTimeout(r, 100))
     }
   }, 120_000)
-
-  afterAll(async () => {
-    await page?.close()
-    await browser?.close()
-  })
 
   it('shows no line lighter than both the canvas and the design along the edge', async () => {
     const worst: Record<string, number> = {}
