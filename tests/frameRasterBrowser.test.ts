@@ -144,8 +144,7 @@ describe.skipIf(!findBrowserPath())('rasterizing a frame in the browser', () => 
   })
 
   it('rejects a frame with an image the browser cannot fetch, for the server to render', async () => {
-    /* a host nothing answers on; the fixture server itself answers any
-       path with the app page */
+    /* a host nothing answers on */
     const failed = await page.evaluate(() =>
       (window as unknown as { render: (o: unknown) => Promise<Rendered> })
         .render({ html: '<html><body><img src="http://127.0.0.1:9/no-cors.png"></body></html>' })

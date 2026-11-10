@@ -1,14 +1,13 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
-import { createServer, type ViteDevServer } from 'vite'
 import type { Page } from 'puppeteer-core'
 import { findBrowserPath } from '../server/screenshot'
-import { fixtureServerConfig, pagePerTest } from './browser'
+import { pagePerTest, serveBuilt, type BuiltServer } from './browser'
 import { freePort, startServer, type Server } from './harness'
 
 /* ⇧2 fits the selection into the part of the stage the panels leave open,
    not the whole window under them */
 describe.skipIf(!findBrowserPath())('zoom to selection with the panels open', () => {
-  let vite: ViteDevServer
+  let web: BuiltServer
   let server: Server
   const pages = pagePerTest()
   let page: Page
@@ -20,16 +19,11 @@ describe.skipIf(!findBrowserPath())('zoom to selection with the panels open', ()
   let frameId: string
   beforeAll(async () => {
     const port = await freePort()
-    vite = await createServer(
-      fixtureServerConfig({
-        proxy: {
-          '/api': { target: `http://localhost:${port}` },
-          '/ws': { target: `ws://localhost:${port}`, ws: true },
-        },
-      }),
-    )
-    await vite.listen()
-    origin = vite.resolvedUrls!.local[0]!.replace(/\/$/, '')
+    web = await serveBuilt({
+      '/api': { target: `http://localhost:${port}` },
+      '/ws': { target: `ws://localhost:${port}`, ws: true },
+    })
+    origin = web.origin
     server = await startServer({ PORT: String(port), BETTER_AUTH_URL: origin })
   }, 60_000)
   beforeEach(async () => {
@@ -67,7 +61,7 @@ describe.skipIf(!findBrowserPath())('zoom to selection with the panels open', ()
     await page.waitForSelector('[data-frame-title]')
   })
   afterAll(async () => {
-    await vite?.close()
+    await web?.close()
     server?.stop()
   })
 

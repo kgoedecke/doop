@@ -745,11 +745,16 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
 
 - Vitest 5 - unit/integration tests across `server/` and `src/`; run via `bun run test`
   (`vitest run`). Tests live in `tests/`.
-- Browser tests drive one shared Chromium and one Vite fixture server (`tests/browser.ts`), which
-  `tests/globalSetup.ts` starts and warms (every `tests/fixtures/*.html` loaded once) before any
-  worker runs; a file calls `openBrowser()` for its own context (focus emulated, 30s navigation
-  bound) and `fixtureUrl()` for its page. A test that needs its own Vite server (a proxy) builds it
-  from `fixtureServerConfig()`, so every server shares one dependency hash and cache directory.
+- Browser tests drive one shared Chromium and one fixture server (`tests/browser.ts`), which
+  `tests/globalSetup.ts` starts before any worker runs. The server hands out a production build:
+  `tests/fixtures.vite.config.ts` is the app's own build with every `tests/fixtures/*.html` as an
+  entry beside `index.html`, built once per run (about a second, as its own `vite build` process
+  with `NODE_ENV=production`) into a temp directory and served by `vite preview`; there is no dev
+  server and no live-reload client. A file calls `pagePerTest()` for a page per test in its own
+  context (focus emulated, 30s navigation bound) and `fixtureUrl()` for its page. A fixture
+  exposes what a test needs on `window`; a test cannot import `/src/...` from the page. A test that
+  puts the app in front of a real backend starts its own server over the same build with
+  `serveBuilt(proxy)`.
 - CI runs the browser tests on the Chrome for Testing build named in `.chrome-version`, installed
   by the `test` job and passed as `CHROME_PATH`, so a runner image update cannot change the
   browser without a commit. `bun run test:linux [vitest args]` (`scripts/test-linux.sh`,

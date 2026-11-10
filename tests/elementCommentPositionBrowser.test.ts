@@ -48,10 +48,6 @@ describe.skipIf(!findBrowserPath())('element comment pin placement', () => {
     page = await pages.open()
     page.on('pageerror', (error) => errors.push(String(error)))
     await page.goto(fixtureUrl('elementPanel.html'))
-    await page.addScriptTag({
-      type: 'module',
-      content: "import { useStore } from '/src/lib/store.ts'; window.commentPositionStore = useStore",
-    })
     await page.waitForFunction(() => !!window.commentPositionStore)
     await page.evaluate(
       ({ frame, comment }) => {
