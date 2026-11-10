@@ -9,7 +9,15 @@
    The snap needs the white behind a frame kept one screen pixel inside its
    edge (FrameView's surface): measured in Chrome, a snapped frame with white
    painted to the edge still showed the line, and so did an unsnapped one
-   whose own body was white. Together neither does. */
+   whose own body was white.
+
+   One source is left inside the frame's own layer. Chromium rasterizes the
+   document at the scale it is shown at and rounds the layer up to whole
+   pixels, so the last column and row can be a pixel the design does not
+   reach, filled with the document's background and squeezed into the frame's
+   edge. The iframe is therefore stretched past the surface's clip by under a
+   device pixel (frameOverscan), which cuts that pixel off. Unsnapped, it took
+   2.5 device pixels to hide; snapped, 0.6. */
 
 export type SnapBox = { x: number; y: number; width: number; height: number }
 
@@ -29,7 +37,7 @@ export function snapCameraOffset(offset: number, origin: number, dpr: number): n
 const SHIFT_NOISE = 1e-6
 const STRETCH_NOISE = 1e-9
 
-type AxisSnap = { shift: number; stretch: number }
+type AxisSnap = { shift: number; stretch: number; size: number }
 
 /** One axis of a box, in design px, onto device pixels: both edges are
  *  rounded on their own, so two boxes sharing an edge keep sharing it. */
@@ -39,7 +47,12 @@ function snapAxis(start: number, size: number, devicePerDesign: number): AxisSna
   const snappedFrom = Math.round(from)
   /* never rounded away: a sliver stays one device pixel */
   const snappedTo = Math.max(snappedFrom + 1, Math.round(to))
-  return { shift: (snappedFrom - from) / devicePerDesign, stretch: (snappedTo - snappedFrom) / (to - from) }
+  const snappedSize = snappedTo - snappedFrom
+  return { shift: (snappedFrom - from) / devicePerDesign, stretch: snappedSize / (to - from), size: snappedSize }
+}
+
+function usable(box: SnapBox, devicePerDesign: number): boolean {
+  return devicePerDesign > 0 && box.width > 0 && box.height > 0
 }
 
 /** The transform (origin top left, in the frame's own design px) that puts a
@@ -47,12 +60,30 @@ function snapAxis(start: number, size: number, devicePerDesign: number): AxisSna
  *  is, or cannot be. */
 export function frameSnapTransform(box: SnapBox, scale: SnapScale): string | null {
   const devicePerDesign = scale.zoom * scale.dpr
-  if (!(devicePerDesign > 0) || !(box.width > 0) || !(box.height > 0)) return null
+  if (!usable(box, devicePerDesign)) return null
   const x = snapAxis(box.x, box.width, devicePerDesign)
   const y = snapAxis(box.y, box.height, devicePerDesign)
   const still = (axis: AxisSnap) => Math.abs(axis.shift) < SHIFT_NOISE && Math.abs(axis.stretch - 1) < STRETCH_NOISE
   if (still(x) && still(y)) return null
   return `translate(${x.shift}px, ${y.shift}px) scale(${x.stretch}, ${y.stretch})`
+}
+
+/* how far the iframe reaches past its surface, in device px: enough to cut
+   off the layer's rounded-up edge pixel, little enough that under one device
+   pixel of the design goes with it */
+const OVERSCAN = 0.75
+
+/** The scale (origin top left) that stretches a snapped frame's iframe just
+ *  past its surface's right and bottom edge, or null at a scale where the
+ *  document is drawn pixel for pixel: nothing is rounded there, and a stretch
+ *  would only soften it. */
+export function frameOverscan(box: SnapBox, scale: SnapScale): string | null {
+  const devicePerDesign = scale.zoom * scale.dpr
+  if (!usable(box, devicePerDesign)) return null
+  if (Math.abs(devicePerDesign - Math.round(devicePerDesign)) < STRETCH_NOISE) return null
+  const x = snapAxis(box.x, box.width, devicePerDesign)
+  const y = snapAxis(box.y, box.height, devicePerDesign)
+  return `scale(${(x.size + OVERSCAN) / x.size}, ${(y.size + OVERSCAN) / y.size})`
 }
 
 /* The scale frames are snapped for: published by the Stage once the camera's

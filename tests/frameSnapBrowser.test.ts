@@ -103,6 +103,12 @@ describe.skipIf(!findBrowserPath())('frame snap', { timeout: 120_000 }, () => {
       for (const zoom of ZOOMS) {
         await camera({ x: 140.37, y: 96.62, zoom })
         await settled()
+        /* as the settle left it: a new layout zoom rewrites the world's
+           transform, and must round the camera as every other write does */
+        for (const name of ['plain', 'odd']) {
+          const off = await offGrid(name)
+          if (off > ON_GRID) worst[`${name} ${zoom} settled`] = off
+        }
         for (const offset of OFFSETS) {
           /* a pan keeps the zoom, so it needs no settle: the camera itself
              moves in whole device pixels */
@@ -125,18 +131,43 @@ describe.skipIf(!findBrowserPath())('frame snap', { timeout: 120_000 }, () => {
         const surface = iframe.closest<HTMLElement>('[data-frame-surface]')!
         return {
           transform: getComputedStyle(surface).transform,
+          overscan: getComputedStyle(iframe).transform,
           zooming: 'zooming' in surface.closest<HTMLElement>('.world')!.dataset,
         }
       })
     expect(await snap()).toMatchObject({ zooming: false })
     expect((await snap()).transform).not.toBe('none')
+    expect((await snap()).overscan).not.toBe('none')
 
     await camera({ x: 140.37, y: 96.62, zoom: 0.52 })
-    expect(await snap()).toEqual({ transform: 'none', zooming: true })
+    expect(await snap()).toEqual({ transform: 'none', overscan: 'none', zooming: true })
 
     await settled()
     expect(await snap()).toMatchObject({ zooming: false })
     expect(await offGrid('plain')).toBeLessThan(ON_GRID)
+  })
+
+  it('reaches the iframe under a device pixel past its surface, right and bottom only', async () => {
+    await open(2)
+    await camera({ x: 140.37, y: 96.62, zoom: 0.4653 })
+    await settled()
+    const past = await page.$eval('iframe[title="plain"]', (iframe) => {
+      const inner = iframe.getBoundingClientRect()
+      const outer = iframe.closest('[data-frame-surface]')!.getBoundingClientRect()
+      const dpr = window.devicePixelRatio
+      return {
+        left: (outer.left - inner.left) * dpr,
+        top: (outer.top - inner.top) * dpr,
+        right: (inner.right - outer.right) * dpr,
+        bottom: (inner.bottom - outer.bottom) * dpr,
+      }
+    })
+    expect(Math.abs(past.left)).toBeLessThan(ON_GRID)
+    expect(Math.abs(past.top)).toBeLessThan(ON_GRID)
+    for (const reach of [past.right, past.bottom]) {
+      expect(reach).toBeGreaterThan(0.5)
+      expect(reach).toBeLessThan(1)
+    }
   })
 
   it('leaves a turned frame as it is', async () => {

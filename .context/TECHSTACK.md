@@ -330,6 +330,10 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   pixels is blended with whatever white is near it, the backdrop behind the iframe or a white
   body under a dark design, and showed as a light line on a dark canvas; the snap and the
   surface's backdrop kept one screen pixel inside the edge remove it together, neither alone.
+  Chromium also rounds a frame's own layer up to whole pixels, leaving a last column and row
+  the design does not reach, filled with the document's background; in Chromium the iframe
+  is stretched 0.75 device px past the surface's clip (`--frame-overscan`, `frameOverscan`)
+  to cut it off, except where the document is drawn pixel for pixel.
   Headless Chromium does not draw the line, so `frameSnapBrowser.test.ts` checks the geometry
   (`frameSnap.test.ts` the math). Frame
   names sit inside their frame, counter-scaled by `--zoom`, so they keep size and gap at every

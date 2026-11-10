@@ -18,7 +18,7 @@ import { throttle } from '../lib/throttle'
 import { getIdentity } from '../lib/identity'
 import { FRAME_BOOTSTRAP } from '../lib/frameRuntime'
 import { FRAME_DOCUMENTS_TAKE_ZOOM_AS_DENSITY, counterZoom } from '../lib/layoutZoom'
-import { frameSnapTransform, snapScale, subscribeSnapScale } from '../lib/frameSnap'
+import { frameOverscan, frameSnapTransform, snapScale, subscribeSnapScale } from '../lib/frameSnap'
 import { dropEntry, recordCreate, recordUpdate, recordUpdates, trackSave, type HistoryEntry } from '../lib/history'
 import { snapFrame } from '../lib/snap'
 import { visibleGuides } from '../lib/guides'
@@ -233,13 +233,19 @@ function useFrameSnap(surfaceRef: React.RefObject<HTMLDivElement | null>, frame:
     if (!surface) return
     function apply() {
       const scale = snapScale()
-      const snap = snappable && scale ? frameSnapTransform({ x, y, width, height }, scale) : null
-      if (snap) surface?.style.setProperty('--frame-snap', snap)
-      else surface?.style.removeProperty('--frame-snap')
+      const box = { x, y, width, height }
+      setOrRemove(surface, '--frame-snap', snappable && scale ? frameSnapTransform(box, scale) : null)
+      /* the iframe inherits this one and reaches past the surface's clip */
+      setOrRemove(surface, '--frame-overscan', snappable && scale ? frameOverscan(box, scale) : null)
     }
     apply()
     return subscribeSnapScale(apply)
   }, [surfaceRef, x, y, width, height, snappable])
+}
+
+function setOrRemove(el: HTMLElement | null, property: string, value: string | null) {
+  if (value) el?.style.setProperty(property, value)
+  else el?.style.removeProperty(property)
 }
 
 type DragRect = { id: string; x: number; y: number; width: number; height: number; rotation?: number }
@@ -1788,7 +1794,8 @@ export const FrameView = memo(function FrameView({
                 width: frame.width,
                 height: frame.height,
                 ...(FRAME_DOCUMENTS_TAKE_ZOOM_AS_DENSITY
-                  ? null
+                  ? /* a hair past the surface's clip (frameSnap's overscan) */
+                    { transform: 'var(--frame-overscan, none)' }
                   : { zoom: counterZoom(layoutZoom), transform: `scale(${layoutZoom})` }),
                 transformOrigin: '0 0',
                 /* Chromium paints an opaque backdrop behind an iframe whose

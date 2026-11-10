@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
+  frameOverscan,
   frameSnapTransform,
   settleSnapScale,
   snapCameraOffset,
@@ -76,6 +77,36 @@ describe('frameSnapTransform', () => {
   it('has nothing to say about a box or a scale it cannot use', () => {
     expect(frameSnapTransform({ x: 0, y: 0, width: 0, height: 10 }, { zoom: 0.3, dpr: 2 })).toBeNull()
     expect(frameSnapTransform({ x: 0.3, y: 0, width: 10, height: 10 }, { zoom: 0, dpr: 2 })).toBeNull()
+  })
+})
+
+describe('frameOverscan', () => {
+  const box = { x: 1578, y: -38, width: 988, height: 910 }
+
+  it('stretches the iframe under one device pixel past the snapped box', () => {
+    for (const zoom of [0.1, 0.29, 0.4653, 0.5748987854251012, 0.75, 1.3])
+      for (const dpr of [1, 2]) {
+        const [, sx, sy] = frameOverscan(box, { zoom, dpr })?.match(/scale\((.+), (.+)\)/) ?? []
+        const edges = snappedEdges(box, { zoom, dpr })
+        const past = {
+          x: (Number(sx) - 1) * (edges.right - edges.left),
+          y: (Number(sy) - 1) * (edges.bottom - edges.top),
+        }
+        for (const reach of [past.x, past.y]) {
+          expect(reach).toBeGreaterThan(0.5)
+          expect(reach).toBeLessThan(1)
+        }
+      }
+  })
+
+  it('leaves a document drawn pixel for pixel alone', () => {
+    expect(frameOverscan(box, { zoom: 1, dpr: 1 })).toBeNull()
+    expect(frameOverscan(box, { zoom: 0.5, dpr: 2 })).toBeNull()
+    expect(frameOverscan(box, { zoom: 2, dpr: 2 })).toBeNull()
+  })
+
+  it('has nothing to say about a box it cannot use', () => {
+    expect(frameOverscan({ ...box, width: 0 }, { zoom: 0.3, dpr: 2 })).toBeNull()
   })
 })
 

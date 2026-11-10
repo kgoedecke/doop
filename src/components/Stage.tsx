@@ -89,6 +89,17 @@ function worldTransform(vp: Viewport, k: number): string {
   return `translate(${vp.x / k}px, ${vp.y / k}px) scale(${vp.zoom / k})`
 }
 
+/** The camera as the world is drawn with it: its offset on whole device
+ *  pixels, so a pan never moves a frame's edge between two (frameSnap). */
+function cameraOnDevicePixels(camera: Viewport, origin: { x: number; y: number }): Viewport {
+  const dpr = window.devicePixelRatio || 1
+  return {
+    ...camera,
+    x: snapCameraOffset(camera.x, origin.x, dpr),
+    y: snapCameraOffset(camera.y, origin.y, dpr),
+  }
+}
+
 /* The pixel grid, as Figma draws it zoomed in: a hairline on every design-px
    boundary. Below PIXEL_GRID_FROM the cells are too small to read as anything
    but a tint, so it fades in from there and is fully on at PIXEL_GRID_FULL. */
@@ -276,6 +287,9 @@ export function Stage({
      per-frame viewport writes */
   const [layoutZoom, setLayoutZoom] = useState(1)
   const layoutZoomRef = useRef(1)
+  /* where the stage starts in the window: with it, a camera offset can be
+     rounded to device pixels (frameSnap). Read at rest, never per frame. */
+  const stageOrigin = useRef({ x: 0, y: 0 })
   const fitted = useRef(false)
   const deepLinkHandled = useRef(false)
   const focusedPage = useRef<string | null>(null)
@@ -297,9 +311,7 @@ export function Stage({
      transform, the grid layer, the --zoom variable (which counter-scales
      labels/pins/cursors from CSS), and the zoom pill's % directly. */
   useLayoutEffect(() => {
-    /* where the stage starts in the window: with it, a camera offset can be
-       rounded to device pixels (frameSnap). Read at rest, never per frame. */
-    const origin = { x: 0, y: 0 }
+    const origin = stageOrigin.current
     function readOrigin() {
       const box = ref.current?.getBoundingClientRect()
       if (!box) return
@@ -322,12 +334,7 @@ export function Stage({
       const grid = gridRef.current
       const stage = ref.current
       if (!world || !grid || !stage) return
-      const dpr = window.devicePixelRatio || 1
-      const vp = {
-        x: snapCameraOffset(camera.x, origin.x, dpr),
-        y: snapCameraOffset(camera.y, origin.y, dpr),
-        zoom: camera.zoom,
-      }
+      const vp = cameraOnDevicePixels(camera, origin)
       world.style.transform = worldTransform(vp, layoutZoomRef.current)
       stage.style.setProperty('--zoom', String(vp.zoom))
       /* the camera's offset, for chrome drawn in screen px (FrameLabelLayer) */
@@ -392,7 +399,10 @@ export function Stage({
        off its spot and slid back. Transitions are off for this one change. */
     world.dataset.rezoom = ''
     world.style.zoom = String(layoutZoom)
-    world.style.transform = worldTransform(useStore.getState().viewport, layoutZoom)
+    world.style.transform = worldTransform(
+      cameraOnDevicePixels(useStore.getState().viewport, stageOrigin.current),
+      layoutZoom,
+    )
     void world.offsetWidth
     delete world.dataset.rezoom
   }, [layoutZoom])

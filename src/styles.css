@@ -1240,5 +1240,6 @@ body:has([data-panel-resizing]) * {
    zoom and would grow with it, so the world drops every snap until the next
    settle. */
 .world[data-zooming] [data-frame-surface] {
-  transform: none !important;
+  --frame-snap: none !important;
+  --frame-overscan: none !important;
 }
