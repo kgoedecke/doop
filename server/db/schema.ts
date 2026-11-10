@@ -14,6 +14,13 @@ import {
 import { open, seal } from '../secretBox.ts'
 import type { CanvasGuide, CanvasPageInfo, FrameApproval } from '../../shared/types.ts'
 import type { AutomationRunState, AutomationTrigger, Schedule, Step } from '../../shared/automations.ts'
+import type {
+  ComponentCode,
+  ComponentDef,
+  ComponentProp,
+  ComponentSlot,
+  ComponentSnapshot,
+} from '../../shared/components.ts'
 
 /** A credential kept on a user's behalf: sealed on write and opened on read
  *  (server/secretBox.ts), so call sites see plaintext and the row does not.
@@ -504,6 +511,35 @@ export const guidelines = pgTable(
     y: doublePrecision('y'),
   },
   (t) => [primaryKey({ columns: [t.canvasId, t.name] })],
+)
+
+/** Reusable designs. Keyed per canvas: a copied canvas keeps its ids, so the
+ *  instance markers in its copied frames still point at the right rows. Mirrored
+ *  in memory like guidelines. `history` holds recent revisions inline because
+ *  merging a stale save needs them synchronously. */
+export const components = pgTable(
+  'components',
+  {
+    canvasId: text('canvas_id').notNull(),
+    id: text('id').notNull(),
+    name: text('name').notNull(),
+    description: text('description').notNull(),
+    template: text('template').notNull(),
+    css: text('css').notNull(),
+    rawCss: text('raw_css').notNull(),
+    head: jsonb('head').$type<string[]>().notNull(),
+    props: jsonb('props').$type<ComponentProp[]>().notNull(),
+    slots: jsonb('slots').$type<ComponentSlot[]>().notNull(),
+    rev: integer('rev').notNull(),
+    mainFrameId: text('main_frame_id'),
+    code: jsonb('code').$type<ComponentCode>(),
+    source: jsonb('source').$type<NonNullable<ComponentDef['source']>>(),
+    history: jsonb('history').$type<ComponentSnapshot[]>().notNull(),
+    createdAt: bigint('created_at', { mode: 'number' }).notNull(),
+    updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
+    updatedBy: text('updated_by').notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.canvasId, t.id] })],
 )
 
 /** Append-only history of guideline docs: one snapshot per save, an empty

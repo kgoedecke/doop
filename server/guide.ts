@@ -97,6 +97,44 @@ only run in the player):
   and flags targets that do not exist — call it after wiring and fix what it flags. The player
   lives at /c/<canvasId>/proto (append ?frame=<id> to open on a specific screen).`
 
+/** How to use components — shared by the MCP guide and the resident agents' system prompt. */
+export const COMPONENTS = `A component is one design used in many places: change its main and every instance follows.
+get_canvas and list_components show a canvas's components with their props.
+
+- Anything on that list goes in through <doop-use>, never redrawn. It is shorter, and it stays linked:
+      <doop-use component="Button" label="Start free" tone="ghost"></doop-use>
+  Write it anywhere frame HTML goes (create_frame, set_frame_html, append_frame_html,
+  edit_frame_html), including inside a <table>. Attributes are props; a bad one comes back as a
+  COMPONENT note in the result telling you what is allowed. Slot content goes in children:
+      <doop-use component="Card" title="Pro"><template slot="actions">
+        <doop-use component="Button" label="Upgrade"></doop-use>
+      </template></doop-use>
+  A plain child goes to the first slot; <doop-use slot="actions" …> names one directly.
+- get_frame returns instances in this short form, so a screen of forty buttons reads as forty
+  lines. Keep the id="…" when you write one back: comments and links point at it. Pass
+  expand_components=true only if you must read the full markup. edit_frame_html matches either
+  form.
+- Before you write the same block a third time, make it a component and use that. On a canvas
+  that already repeated itself: find_component_candidates, then create_component with
+  replace_matching=true.
+- Write a description saying when to use it. Set code (file and export name) when the component
+  exists in the human's repo: that is what makes the design implementable with their real code.
+- Vary with props, not copies. An enum prop sets data-<name> on the root, so a variant is plain
+  CSS: .btn[data-tone="ghost"] { … }. Hover and focus are ordinary CSS too. You do not need a
+  component per state, or per size.
+- For one instance that must differ: use update_instances, or just edit it; edits inside an instance
+  are captured as overrides on that element alone and survive every later change to the main. Do
+  not detach to make a small change.
+- To change them all, call update_component with find + replace, and read the impact it reports.
+  Approved frames that change lose sign-off, and it says which. Use dry_run first on anything
+  widely used. Never edit each instance by hand.
+- get_component_preview shows you every variant at once. Look at it after changing a component.
+- Keep data-doop-part, data-doop-prop, data-doop-if and data-doop-slot when editing a main: part
+  keys are how overrides stay attached.
+- A deleted component leaves its instances looking the same, as plain markup. To reuse components
+  from another canvas: list_components with libraries=true, import_component, and sync_component
+  when list_components says library_update_available.`
+
 export const DOOP_GUIDE = `# Doop Agent Guide
 
 ## The room you're in
@@ -438,6 +476,10 @@ ${DESIGN_QUALITY}
 
 ${PROTOTYPES}
 - Frame ids come from get_canvas.
+
+## Components — design once, use everywhere
+
+${COMPONENTS}
 
 ## Exporting frames (images, PDF)
 

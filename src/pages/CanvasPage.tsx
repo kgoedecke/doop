@@ -33,6 +33,7 @@ import {
 import { LivePresence } from '../components/LivePresence'
 import { ensureTab, openExternal } from '../lib/desktop'
 import { Stage } from '../components/Stage'
+import { COMPONENT_DRAG_TYPE, dropComponent } from '../lib/components'
 import { Inspector } from '../components/Inspector'
 import { PagePanel } from '../components/PagePanel'
 import { ElementPanel } from '../components/ElementPanel'
@@ -496,7 +497,10 @@ export function CanvasPage({
      frame being edited would swallow the drop in its iframe. Enter and leave
      fire for every element crossed, so a count tells when the drag is gone. */
   useEffect(() => {
-    const carriesFiles = (e: DragEvent) => e.dataTransfer?.types.includes('Files') ?? false
+    /* files from outside, or a component card from the Components panel; both
+       need the frames' shields up so the drop reaches the window */
+    const carriesComponent = (e: DragEvent) => e.dataTransfer?.types.includes(COMPONENT_DRAG_TYPE) ?? false
+    const carriesFiles = (e: DragEvent) => (e.dataTransfer?.types.includes('Files') ?? false) || carriesComponent(e)
     let depth = 0
     const setDragging = useStore.getState().setFileDragging
     function onDragEnter(e: DragEvent) {
@@ -523,6 +527,11 @@ export function CanvasPage({
       if (!carriesFiles(e) || e.defaultPrevented) return
       e.preventDefault()
       if (!canEditOpenCanvas(useStore.getState())) return
+      const componentId = e.dataTransfer?.getData(COMPONENT_DRAG_TYPE)
+      if (componentId) {
+        void dropComponent(componentId, { x: e.clientX, y: e.clientY })
+        return
+      }
       const incoming = splitIncoming([...(e.dataTransfer?.files ?? [])])
       if (!hasIncoming(incoming)) return
       dropFiles(canvasId, incoming, { x: e.clientX, y: e.clientY }).catch((err: Error) => {

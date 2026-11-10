@@ -4,6 +4,7 @@ import * as persist from './db/persist.ts'
 import type { LinkAccess } from '../shared/canvasRole.ts'
 import { MAX_GUIDES } from '../shared/guides.ts'
 import { remapFrameTargets } from '../shared/prototype.ts'
+import type { ComponentDef } from '../shared/components.ts'
 import { byStack, frontOf, stackOf } from '../shared/frameStack.ts'
 import { htmlLoaded, setHtml, setHtmlMissHandler, unloadHtml, withHtml } from './frameHtml.ts'
 import type { DesignToken } from '../shared/designTokens.ts'
@@ -368,6 +369,17 @@ class Store {
       ...(source.guides?.length ? { guides: source.guides.map((guide) => ({ ...guide })) } : {}),
       ...(options.workspaceId ? { workspaceId: options.workspaceId } : {}),
       ...(guidelines?.length ? { guidelines } : {}),
+      /* same ids: the markers in the copied frames keep pointing at them */
+      ...(source.components?.length
+        ? {
+            components: source.components.map((def) => ({
+              ...def,
+              mainFrameId: def.mainFrameId ? (frameIds.get(def.mainFrameId) ?? null) : null,
+              updatedAt: now,
+              updatedBy: by,
+            })),
+          }
+        : {}),
       ...(tokens?.length ? { tokens } : {}),
       ...(source.tokenThemes?.length ? { tokenThemes: [...source.tokenThemes] } : {}),
       ...(references?.length ? { references } : {}),
@@ -690,6 +702,30 @@ class Store {
     c.updatedAt = Date.now()
     persist.saveCanvas(c)
     return c
+  }
+
+  getComponents(canvasId: string): ComponentDef[] {
+    return this.canvases.get(canvasId)?.components ?? []
+  }
+
+  /** Add or replace by id, and mirror it to the database. */
+  saveComponent(canvasId: string, def: ComponentDef) {
+    const c = this.canvases.get(canvasId)
+    if (!c) return
+    const list = (c.components ??= [])
+    const at = list.findIndex((existing) => existing.id === def.id)
+    if (at === -1) list.push(def)
+    else list[at] = def
+    persist.saveComponent(canvasId, def)
+  }
+
+  deleteComponent(canvasId: string, id: string): boolean {
+    const c = this.canvases.get(canvasId)
+    const at = c?.components?.findIndex((def) => def.id === id) ?? -1
+    if (!c?.components || at === -1) return false
+    c.components.splice(at, 1)
+    persist.deleteComponent(canvasId, id)
+    return true
   }
 
   getGuidelines(canvasId: string): GuidelineDoc[] {

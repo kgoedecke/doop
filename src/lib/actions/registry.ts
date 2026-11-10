@@ -55,6 +55,7 @@ import {
   tidy,
   ungroupSelection,
 } from './edits'
+import { promptMakeComponent } from '../components'
 
 /** What the canvas page lends the registry: its own modals and panels. */
 export interface ActionHost {
@@ -582,6 +583,22 @@ export const ACTIONS: readonly CanvasAction[] = [
     edit: true,
     enabled: hasInnerPick,
     run: () => groupSelection('frame'),
+  },
+  {
+    /* ⌘⌥K, Figma's key: the picked layer becomes a component's main */
+    id: 'create-component',
+    label: 'actions.createComponent',
+    menu: 'object',
+    section: 0,
+    keys: [code('KeyK', { mod: true, alt: true })],
+    edit: true,
+    enabled: hasInnerPick,
+    run: () => {
+      const p = pickedLayers()
+      const selector = p?.selectors[p.selectors.length - 1]
+      if (!p || p.standalone || !selector) return false
+      promptMakeComponent(p.frame, selector)
+    },
   },
   {
     id: 'group',

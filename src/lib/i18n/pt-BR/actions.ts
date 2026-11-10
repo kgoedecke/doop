@@ -73,6 +73,7 @@ export const actions: Catalog['actions'] = {
 
   /* Object */
   frameSelection: 'Criar frame com a seleção',
+  createComponent: 'Criar componente',
   group: 'Agrupar seleção',
   ungroup: 'Desagrupar seleção',
   groupName: 'Grupo',

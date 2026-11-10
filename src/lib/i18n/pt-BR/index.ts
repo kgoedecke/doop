@@ -20,6 +20,7 @@ import { workspace } from './workspace'
 import { community } from './community'
 import { admin } from './admin'
 import { ui } from './ui'
+import { components } from './components'
 import { actions } from './actions'
 
 export const ptBR: Catalog = {
@@ -44,5 +45,6 @@ export const ptBR: Catalog = {
   community,
   admin,
   ui,
+  components,
   actions,
 }

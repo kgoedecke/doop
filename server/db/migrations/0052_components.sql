@@ -1,0 +1,21 @@
+CREATE TABLE "components" (
+	"canvas_id" text NOT NULL,
+	"id" text NOT NULL,
+	"name" text NOT NULL,
+	"description" text NOT NULL,
+	"template" text NOT NULL,
+	"css" text NOT NULL,
+	"raw_css" text NOT NULL,
+	"head" jsonb NOT NULL,
+	"props" jsonb NOT NULL,
+	"slots" jsonb NOT NULL,
+	"rev" integer NOT NULL,
+	"main_frame_id" text,
+	"code" jsonb,
+	"source" jsonb,
+	"history" jsonb NOT NULL,
+	"created_at" bigint NOT NULL,
+	"updated_at" bigint NOT NULL,
+	"updated_by" text NOT NULL,
+	CONSTRAINT "components_canvas_id_id_pk" PRIMARY KEY("canvas_id","id")
+);

@@ -189,6 +189,9 @@ function handle(msg: ServerMessage) {
     case 'canvas:renamed':
       s.renameCanvasLocal(msg.name)
       break
+    case 'component':
+      s.setComponentLocal(msg.id, msg.component)
+      break
     case 'guidelines':
       s.setGuidelineLocal(msg.name, msg.doc)
       break

@@ -119,6 +119,9 @@ function resolve(doc: Tree.Document, selector: string): Element | undefined {
   return walkPath(body, steps)
 }
 
+/** The element a selector names in a parsed document, for callers that hold the tree. */
+export const resolveElement = resolve
+
 function parseDocument(html: string): Tree.Document {
   return parse(html, { sourceCodeLocationInfo: true })
 }

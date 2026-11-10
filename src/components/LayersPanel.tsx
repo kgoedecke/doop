@@ -47,6 +47,7 @@ import {
 import { cn } from '@/lib/utils'
 import { AgentIcon } from './AgentIcon'
 import { LayerKindIcon } from './LayerKindIcon'
+import { ComponentsPanel } from './ComponentsPanel'
 import { FrameContextMenu } from './FrameContextMenu'
 import { FrameApprovalBadge } from './FrameApproval'
 import {
@@ -75,6 +76,7 @@ import {
   EyeIcon,
   FrameIcon,
   LayersIcon,
+  ComponentIcon,
   BracesIcon,
   LockIcon,
   LockOpenIcon,
@@ -542,6 +544,9 @@ export function LayersPanel({
             <PanelIconTab value="layers" icon={<LayersIcon />} title={t('panels.layersTitle')}>
               {t('panels.layersTitle')}
             </PanelIconTab>
+            <PanelIconTab value="components" icon={<ComponentIcon />} title={t('components.title')}>
+              {t('components.title')}
+            </PanelIconTab>
             <PanelIconTab value="tokens" icon={<BracesIcon />} title={t('panels.layersTabTokens')}>
               {t('panels.layersTabTokens')}
             </PanelIconTab>
@@ -563,6 +568,7 @@ export function LayersPanel({
           )}
         </PanelHeader>
       </PanelTabsRoot>
+      {tab === 'components' && <ComponentsPanel />}
       {tab === 'tokens' && (
         <PanelBody className="flex flex-col pb-2">
           <TokensSection />
@@ -701,6 +707,16 @@ export function LayersRailToggle({ docked = false }: { docked?: boolean }) {
         }}
       >
         <LayersIcon />
+      </ToolbarControl>
+      <ToolbarControl
+        label={t('components.title')}
+        side="right"
+        onClick={() => {
+          useStore.getState().setLayersTab('components')
+          setLayersOpen(true)
+        }}
+      >
+        <ComponentIcon />
       </ToolbarControl>
       <ToolbarControl
         label={t('panels.layersTabTokens')}
@@ -899,12 +915,16 @@ function NodeRow({
   const { frame, node } = row
   const readOnly = useStore((s) => !canEditOpenCanvas(s))
   const hasChildren = node.children.length > 0
+  const componentName = useStore((s) =>
+    node.componentId ? s.canvas?.components?.find((def) => def.id === node.componentId)?.name : undefined,
+  )
   /* a standalone element is its frame: its name, eye, lock and menu all
      belong to the frame */
   const standalone = !!row.standalone
+  /* an instance row is named after its component, and renamed through it */
   const { label, startRename } = useItemRename(
-    standalone ? frame.name : node.label,
-    !readOnly && !frame.locked && !node.locked,
+    standalone ? frame.name : (componentName ?? node.label),
+    !readOnly && !frame.locked && !node.locked && !componentName,
     (value) => (standalone ? renameFrame(frame.id, value) : renameLayer(frame.id, node.selector, value)),
   )
   const pasteAt = useRef({ x: 0, y: 0 })
@@ -917,9 +937,19 @@ function NodeRow({
           drop={drop}
           caret={<Caret open={row.open} present={hasChildren} />}
           onCaret={hasChildren ? onToggle : undefined}
-          icon={<LayerKindIcon kind={node.kind} />}
+          icon={
+            node.component ? (
+              <ComponentIcon
+                width={14}
+                height={14}
+                className={node.component === 'main' ? 'text-brand' : 'text-brand opacity-70'}
+              />
+            ) : (
+              <LayerKindIcon kind={node.kind} />
+            )
+          }
           label={label}
-          detail={standalone ? undefined : node.detail}
+          detail={standalone || componentName ? undefined : node.detail}
           selected={selected}
           /* a standalone element is hidden by its frame or by its own
              attribute (⌘⇧H sets the latter): the row shows either, and its

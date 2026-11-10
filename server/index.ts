@@ -1,4 +1,23 @@
 import { env } from './env.ts'
+import {
+  catalogEntry,
+  changeInstances,
+  componentDetail,
+  ComponentError,
+  createComponentFromElement,
+  createComponentFromHtml,
+  deleteComponent,
+  findComponent,
+  findComponentCandidates,
+  importComponent,
+  insertInstance,
+  restoreComponentVersion,
+  syncComponent,
+  updateComponent,
+} from './componentActions.ts'
+import { z } from 'zod'
+import { previewDocument } from './componentPreview.ts'
+import { codeSchema, propSchema } from './componentTools.ts'
 import { canvasPages, framePageId, samePages } from '../shared/pages.ts'
 import { normalizePageBackground } from '../shared/pageBackground.ts'
 import { MAX_STACK_WRITES, type StackWrite } from '../shared/frameStack.ts'
@@ -2232,6 +2251,202 @@ app.patch('/api/frames/:id', (req, res) => {
   const frame = actions.updateFrame(req.params.id, clean, actor)
   if (!frame) return res.status(404).json({ error: 'frame not found' })
   res.json(frame)
+})
+
+/* Components. Reads are for anyone who can see the canvas; everything else edits it. */
+function componentContext(req: express.Request, canvas: Canvas) {
+  return { canvas, actor: userActor(req) }
+}
+
+/* The REST bodies, typed like the MCP tools' input (the same zod pieces), so a
+   malformed field is a 400 and never reaches the engine; `head` is a library
+   pull's alone and is not accepted here. */
+const componentCreateBody = z.object({
+  name: z.string().max(200).optional(),
+  description: z.string().max(2000).optional(),
+  props: z.array(propSchema).optional(),
+  code: codeSchema.optional(),
+  frameId: z.string().optional(),
+  element: z.string().optional(),
+  autoProps: z.boolean().optional(),
+  replaceMatching: z.boolean().optional(),
+  html: z.string().optional(),
+  css: z.string().optional(),
+  width: z.number().optional(),
+  height: z.number().optional(),
+})
+const componentPatchBody = z.object({
+  name: z.string().max(200).optional(),
+  description: z.string().max(2000).optional(),
+  props: z.array(propSchema).optional(),
+  code: codeSchema.nullable().optional(),
+  html: z.string().optional(),
+  css: z.string().optional(),
+  find: z.string().optional(),
+  replace: z.string().optional(),
+  expectedRev: z.number().optional(),
+  dryRun: z.boolean().optional(),
+})
+
+function componentBody<T>(res: express.Response, schema: z.ZodType<T>, body: unknown): T | undefined {
+  const parsed = schema.safeParse(body ?? {})
+  if (parsed.success) return parsed.data
+  const issue = parsed.error.issues[0]
+  res.status(400).json({ error: `${issue?.path.join('.') || 'body'}: ${issue?.message ?? 'invalid'}` })
+  return undefined
+}
+
+function componentRoute(res: express.Response, run: () => unknown) {
+  try {
+    res.json(run())
+  } catch (error) {
+    if (error instanceof ComponentError) return res.status(400).json({ error: error.message })
+    throw error
+  }
+}
+
+app.get('/api/canvases/:id/components', (req, res) => {
+  const canvas = requireCanvas(req, res, req.params.id, 'view')
+  if (!canvas) return
+  res.json((canvas.components ?? []).map((def) => componentDetail(canvas, def)))
+})
+
+/* other canvases this person can read that hold components: the import picker.
+   Importing takes edit, and this walks every canvas the person can read, so a
+   viewer gets no such scan */
+app.get('/api/canvases/:id/component-libraries', (req, res) => {
+  const canvas = requireCanvas(req, res, req.params.id, 'edit')
+  if (!canvas) return
+  res.json(
+    workspaces.canvasesFor(req.user!.id).flatMap((meta) => {
+      const other = store.getCanvas(meta.id)
+      if (!other || other.id === canvas.id || !other.components?.length) return []
+      return [{ id: other.id, name: other.name, components: other.components.map((def) => catalogEntry(other, def)) }]
+    }),
+  )
+})
+
+/* parses every frame on the canvas: for the editors who can act on it */
+app.get('/api/canvases/:id/component-candidates', (req, res) => {
+  const canvas = requireCanvas(req, res, req.params.id, 'edit')
+  if (!canvas) return
+  res.json(findComponentCandidates(canvas))
+})
+
+app.post('/api/canvases/:id/components', (req, res) => {
+  const canvas = requireCanvas(req, res, req.params.id, 'edit')
+  if (!canvas) return
+  const { actor } = componentContext(req, canvas)
+  const body = componentBody(res, componentCreateBody, req.body)
+  if (!body) return
+  componentRoute(res, () => {
+    if (typeof body.html === 'string') {
+      return {
+        component: createComponentFromHtml(
+          canvas.id,
+          { ...body, html: body.html, props: body.props as never, name: String(body.name ?? '') },
+          actor,
+        ),
+        converted: [],
+      }
+    }
+    const created = createComponentFromElement(
+      canvas.id,
+      {
+        name: String(body.name ?? ''),
+        description: body.description,
+        props: body.props as never,
+        code: body.code,
+        frameId: String(body.frameId ?? ''),
+        element: String(body.element ?? ''),
+        autoProps: body.autoProps,
+        replaceMatching: body.replaceMatching === true,
+      },
+      actor,
+    )
+    /* what the editor needs to undo this as one step */
+    const changed = new Set([String(body.frameId), ...created.converted.map((entry) => entry.frameId)])
+    return { ...created, frames: [...changed].flatMap((id) => store.getFrame(id) ?? []) }
+  })
+})
+
+app.post('/api/canvases/:id/components/import', (req, res) => {
+  const canvas = requireCanvas(req, res, req.params.id, 'edit')
+  if (!canvas) return
+  const source = String(req.body?.sourceCanvasId ?? '')
+  const origin = store.getCanvas(source)
+  if (!origin || !roleAllows(canvasRole(req.user!.id, origin), 'view'))
+    return res.status(403).json({ error: 'this account cannot read that canvas' })
+  componentRoute(res, () => importComponent(canvas.id, source, String(req.body?.component ?? ''), userActor(req)))
+})
+
+app.patch('/api/canvases/:id/components/:componentId', (req, res) => {
+  const canvas = requireCanvas(req, res, req.params.id, 'edit')
+  if (!canvas) return
+  const body = componentBody(res, componentPatchBody, req.body)
+  if (!body) return
+  componentRoute(res, () =>
+    updateComponent(canvas.id, req.params.componentId, { ...body, props: body.props as never }, userActor(req)),
+  )
+})
+
+app.delete('/api/canvases/:id/components/:componentId', (req, res) => {
+  const canvas = requireCanvas(req, res, req.params.id, 'edit')
+  if (!canvas) return
+  componentRoute(res, () => deleteComponent(canvas.id, req.params.componentId, userActor(req)))
+})
+
+app.post('/api/canvases/:id/components/:componentId/restore', (req, res) => {
+  const canvas = requireCanvas(req, res, req.params.id, 'edit')
+  if (!canvas) return
+  componentRoute(res, () =>
+    restoreComponentVersion(canvas.id, req.params.componentId, Number(req.body?.rev), userActor(req)),
+  )
+})
+
+app.post('/api/canvases/:id/components/:componentId/sync', (req, res) => {
+  const canvas = requireCanvas(req, res, req.params.id, 'edit')
+  if (!canvas) return
+  componentRoute(res, () =>
+    syncComponent(canvas.id, req.params.componentId, userActor(req), (id) => {
+      const other = store.getCanvas(id)
+      return !!other && roleAllows(canvasRole(req.user!.id, other), 'view')
+    }),
+  )
+})
+
+app.get('/api/canvases/:id/components/:componentId/preview', (req, res) => {
+  const canvas = requireCanvas(req, res, req.params.id, 'view')
+  if (!canvas) return
+  const def = findComponent(canvas.id, req.params.componentId)
+  if (!def) return res.status(404).json({ error: 'component not found' })
+  res.json(previewDocument(canvas.id, def))
+})
+
+app.post('/api/frames/:id/instances', (req, res) => {
+  const current = requireFrame(req, res, req.params.id, 'edit')
+  if (!current) return
+  const body = req.body ?? {}
+  componentRoute(res, () =>
+    insertInstance(
+      current.canvasId,
+      {
+        frameId: current.id,
+        component: String(body.component ?? ''),
+        props: body.props,
+        target: body.target,
+        position: body.position,
+      },
+      userActor(req),
+    ),
+  )
+})
+
+app.patch('/api/frames/:id/instances', (req, res) => {
+  const current = requireFrame(req, res, req.params.id, 'edit')
+  if (!current) return
+  const changes = Array.isArray(req.body?.changes) ? req.body.changes : []
+  componentRoute(res, () => changeInstances(current.canvasId, current.id, changes, userActor(req)))
 })
 
 app.put('/api/frames/:id/approval', (req, res) => {

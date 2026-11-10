@@ -40,6 +40,7 @@ import {
   ArrowUp,
   Bell,
   Blocks,
+  Component as LucideComponent,
   Calendar,
   BookOpen,
   Brain,
@@ -329,6 +330,8 @@ export const WorkflowIcon = icon(Workflow)
 export const ServerIcon = icon(Server)
 /** integrations: building blocks */
 export const BlocksIcon = icon(Blocks)
+/* a component's main and its instances, the one glyph that marks them */
+export const ComponentIcon = icon(LucideComponent)
 /** connect an agent: a plus in a ring */
 export const CirclePlusIcon = icon(CirclePlus)
 /** import: the arrow entering from above */
