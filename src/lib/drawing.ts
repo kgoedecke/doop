@@ -7,6 +7,7 @@ import { currentPaper } from './paper'
 import type { ResolvedTheme } from './theme'
 import type { DrawingTool } from './tools'
 import { paddedBounds, subpathsData } from './svgPath'
+import { FRAME_PAPER_ATTR, FRAME_PAPER_CSS } from '../../shared/framePaper'
 
 export interface Point {
   x: number
@@ -170,8 +171,13 @@ export function drawingDocument(drawing: Drawing, ink = DRAWING_INK): string {
   const doc = new DOMParser().parseFromString('<!doctype html><html><head></head><body></body></html>', 'text/html')
   doc.documentElement.style.cssText = 'width:100%;height:100%;margin:0;'
   doc.body.style.cssText = 'width:100%;height:100%;margin:0;'
-  if (drawing.tool === 'frame') doc.body.style.background = '#ffffff'
-  else {
+  if (drawing.tool === 'frame') {
+    /* white until a design brings a background of its own (framePaper) */
+    const paper = doc.createElement('style')
+    paper.setAttribute(FRAME_PAPER_ATTR, '')
+    paper.textContent = FRAME_PAPER_CSS
+    doc.head.append(paper)
+  } else {
     doc.body.setAttribute('data-doop-canvas-element', 'true')
     doc.body.append(drawingElement(doc, drawing, true, ink))
   }
