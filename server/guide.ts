@@ -98,6 +98,29 @@ only run in the player):
   lives at /c/<canvasId>/proto (append ?frame=<id> to open on a specific screen).`
 
 /** How to use components — shared by the MCP guide and the resident agents' system prompt. */
+/** Where a frame's CSS goes. People edit a frame element by element, and the
+ *  editor reads and writes the style attribute, so that is where an agent's
+ *  styles are most editable. Guidance only: nothing rejects a stylesheet. */
+export const FRAME_STYLES = `- Style an element on the element itself: style="…". People edit a frame element by element in the
+  editor, which reads and writes that attribute, so a style written there is one they can change,
+  move and copy without surprises. A stylesheet rule can outrank their edit, or stop matching the
+  moment they group or reorder layers.
+- A <style> block is for what an attribute cannot say: @keyframes, @font-face, custom properties on
+  :root, states (:hover, :focus, :active, :disabled, :checked), pseudo-elements (::before,
+  ::placeholder), @media and @container queries, a component's variant and state rules, and the
+  reset. Keep using it for those: never drop a hover state or an animation to avoid the block.
+- A property that changes with a state, a variant or a query goes in the stylesheet in both forms,
+  the resting value included. An inline value outranks every rule, so style="background:#111" would
+  keep .btn:hover { background:#333 } from ever showing. Only what never changes on the element
+  stays inline.
+- Set inherited text styles (font-family, color, line-height) once, on the body or a section, not on
+  every text element.
+- A block you would repeat is a component, not a class (Components, below).
+- Do not write !important, least of all to make a rule beat an inline value: move the property into
+  the stylesheet as above.
+- This is how to write new markup. A frame that already styles itself with classes keeps them: edit
+  it in its own idiom, and do not convert it.`
+
 export const COMPONENTS = `A component is one design used in many places: change its main and every instance follows.
 get_canvas and list_components show a canvas's components with their props.
 
@@ -264,8 +287,9 @@ Viewers watch designs assemble live. Stream with append_frame_html:
   to find approved screens, then re-read get_frame before implementing. HTML and size edits
   invalidate sign-off; needs_review requires another human approval. Approval alone does not
   assign an implementation job — follow the human's request.
-- A frame renders a complete HTML document in a sandboxed iframe. Inline <style> and
-  <script> work; Google Fonts via <link> work.
+- A frame renders a complete HTML document in a sandboxed iframe. <style> and <script>
+  work; Google Fonts via <link> work.
+${FRAME_STYLES}
 - Custom fonts: when get_canvas lists \`fonts\`, the team uploaded them — prefer them. Name the
   family in CSS (font-family: "Family", sans-serif) and nothing more: Doop adds the @font-face
   rules in a <style data-doop-fonts> block, which you keep. Never fetch them from Google Fonts.

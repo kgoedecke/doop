@@ -46,6 +46,15 @@
   something matches; six-hour in-memory cache for the free plan's 1,000 requests a day. Every
   result credits One Page Love and the authors with the entry's link (their terms). Tests:
   `inspiration.test.ts`.
+- Where frame CSS goes (`FRAME_STYLES` in `server/guide.ts`): agents are asked to style an element
+  in its own `style` attribute, which is what the editor reads and writes, and to keep a `<style>`
+  block for what an attribute cannot say (keyframes, font faces, `:root` custom properties, states,
+  pseudo-elements, media and container queries, a component's variant rules, the reset). A property
+  a state, variant or query changes sits in the stylesheet with its resting value too, since an
+  inline value outranks every rule. Guidance
+  only: nothing rejects or rewrites a stylesheet, and a frame already styled by classes keeps them.
+  The MCP guide, `create_frame`'s description and the resident agent's system prompt carry the same
+  text. Tests: `frameStyleGuidance.test.ts`.
 - Agent feedback (`server/agentFeedback.ts`, `shared/agentFeedback.ts`): agents talk to the Doop
   team through two MCP tools, which the resident agent has under the same names. `report_issue`
   (kind `issue`: `bug`, `tool_error`, `confusing`, `missing_capability`, `other`) is for where Doop

@@ -29,7 +29,7 @@ import * as backgrounds from './backgrounds.ts'
 import * as ingest from './ingest.ts'
 import { viewWebsite, referencedUrls } from './website.ts'
 import { createImportedWebpageFrame, findImportedWebpageFrame } from './webpageImport.ts'
-import { COMPONENTS, DESIGN_BRIEF, DESIGN_QUALITY, PROTOTYPES } from './guide.ts'
+import { COMPONENTS, DESIGN_BRIEF, DESIGN_QUALITY, FRAME_STYLES, PROTOTYPES } from './guide.ts'
 import { zodToJsonSchema } from 'zod-to-json-schema'
 import { z } from 'zod'
 import { catalogEntry, compactFrameHtml, findComponent } from './componentActions.ts'
@@ -160,7 +160,8 @@ Rules:
 - For requests to copy, match, or borrow another frame's design: screenshot and inspect BOTH the target and reference before editing. Use the reference screenshot and computed design tokens as the source of visual truth. Read target HTML only when you need to preserve its content; do not load a large reference document just to learn its style. For a full redesign, use begin_frame_rewrite, append_frame_rewrite in chunks under 12,000 characters, and commit_frame_rewrite; then screenshot the changed frame.
 - Element comments are pinned to ONE element (you get its data-doop-id and an HTML excerpt at comment time). Change that element or its immediate context — never rework unrelated parts of the frame because of an element comment.
 - Canvas comments are pinned to a point on the page, not to an element (you get the point and the frames nearest to it). The request is about what sits around that point: edit those frames in place, or add a new frame near the point when the comment asks for something new — never rework the whole page because of a canvas comment.
-- Frames are complete HTML documents with inline CSS. Keep each frame's existing style and structure; change what the feedback requires.
+- Frames are complete, self-contained HTML documents. Keep each frame's existing style and structure; change what the feedback requires.
+${FRAME_STYLES}
 - Prefer edit_frame_html (exact find/replace) for small changes; use set_frame_html only when the change is structural.
 - After any visual change, call screenshot_frame and LOOK at the result. If it doesn't clearly satisfy the feedback, fix it before finishing.
 - Call set_status when you start ("Fixing: …") and when your focus shifts. One line, under 80 chars, present tense. People watch this live.
@@ -185,7 +186,7 @@ Components:
 ${COMPONENTS}`
 
 /** The system prompt for one agent: the shared harness rules plus its specialty. */
-function systemFor(role: AgentRole): string {
+export function systemFor(role: AgentRole): string {
   const reviewer = role.reviewer
     ? '\n\nYou are a review pass. Judge what is already on the canvas against your specialty and fix only what fails it. Changing nothing is a valid outcome — if the frame already meets your bar, say so plainly in your final message instead of inventing work.'
     : ''
@@ -1076,7 +1077,7 @@ const TOOLS: Anthropic.Tool[] = [
         name: { type: 'string' },
         width: { type: 'number', description: 'px, e.g. 1200' },
         height: { type: 'number', description: 'px, e.g. 630' },
-        html: { type: 'string', description: 'Complete HTML document with inline CSS' },
+        html: { type: 'string', description: 'Complete, self-contained HTML document' },
         x: {
           type: 'number',
           description:
@@ -1137,7 +1138,7 @@ const TOOLS: Anthropic.Tool[] = [
       type: 'object',
       properties: {
         frame_id: { type: 'string' },
-        html: { type: 'string', description: 'Complete HTML document with inline CSS' },
+        html: { type: 'string', description: 'Complete, self-contained HTML document' },
       },
       required: ['frame_id', 'html'],
     },
