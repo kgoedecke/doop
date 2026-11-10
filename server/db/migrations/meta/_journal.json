@@ -351,6 +351,13 @@
       "when": 1794299332162,
       "tag": "0050_instance_settings",
       "breakpoints": true
+    },
+    {
+      "idx": 51,
+      "version": "7",
+      "when": 1794347436684,
+      "tag": "0051_custom_providers",
+      "breakpoints": true
     }
   ]
 }

@@ -5,6 +5,7 @@ import type { StackWrite } from '../../shared/frameStack'
 import type { LocalAgentPreference, LocalAgentJob, LocalAgentResult } from '../../shared/localAgent'
 import type { ImageDescriptionMode, ImageDescriptionPreference } from '../../shared/imageDescriptions'
 import type { AgentRunners, RunnerPick, RunnerProvider } from '../../shared/agentRunner'
+import type { CustomProviderConfig, CustomProviderKind } from '../../shared/customProvider'
 import type { NotificationPrefs, NotificationSettings } from '../../shared/notifications'
 import type { WebhookDeliveryResult, WebhookEventType, WebhookInfo } from '../../shared/webhooks'
 import type { AgentFeedbackKind, AgentFeedbackReport } from '../../shared/agentFeedback'
@@ -147,11 +148,16 @@ export interface Allowance {
   byoModel: boolean
   byoKind?: ModelAccountKind | 'claude-local' | 'gemini-cloud'
   byoEmail?: string
+  /** a custom provider's name, when that is the default */
+  byoName?: string
   /** free tasks are spent and their own account is carrying the agent */
   onOwnAccount: boolean
 }
 
-export type ModelAccountKind =
+/** A built-in provider, or a custom one a person added (`custom:<id>`). */
+export type ModelAccountKind = BuiltinModelAccountKind | CustomProviderKind
+
+export type BuiltinModelAccountKind =
   | 'chatgpt'
   | 'openai-key'
   | 'anthropic-key'
@@ -200,6 +206,20 @@ export interface ModelAccountStatus {
   /** the reasoning effort in effect; only the OpenAI kinds have one */
   effort?: string
   connectedAt: number
+  /** a custom provider's description: never its key or header values */
+  custom?: CustomProviderStatus
+}
+
+export interface CustomProviderStatus extends CustomProviderConfig {
+  headerNames: string[]
+  hasKey: boolean
+}
+
+/** What the custom provider form sends. A key or headers left out keep the
+ *  stored ones on an edit; an empty key clears it. */
+export interface CustomProviderInput extends CustomProviderConfig {
+  apiKey?: string
+  headers?: Record<string, string>
 }
 
 /** The Settings pane's view: every connected account, on or off, and which
@@ -209,8 +229,11 @@ export interface ModelAccounts {
   default?: RunnerProvider
   /** false when the server has switched the ChatGPT flow off */
   chatgptEnabled: boolean
-  /** the curated menu each provider's picker offers */
-  menus: Record<ModelAccountKind, AgentModelOption[]>
+  /** the menu each provider's picker offers: curated for the built-in
+   *  kinds, as listed for each connected custom provider */
+  menus: Partial<Record<ModelAccountKind, AgentModelOption[]>>
+  /** false when the server has switched custom providers off */
+  customProviders?: boolean
 }
 
 /** One image-model registry entry's availability for this user. */
@@ -595,13 +618,40 @@ export const api = {
   connectKimiCodeKey: (apiKey: string) =>
     req<ModelAccounts>('/api/model-account/kimi-code', { method: 'POST', body: JSON.stringify({ apiKey }) }),
   disconnectModelAccount: (kind: ModelAccountKind) =>
-    req<ModelAccounts>(`/api/model-account/${kind}`, { method: 'DELETE' }),
+    req<ModelAccounts>(`/api/model-account/${encodeURIComponent(kind)}`, { method: 'DELETE' }),
   setAgentModel: (kind: ModelAccountKind, model: string) =>
-    req<ModelAccounts>(`/api/model-account/${kind}`, { method: 'PATCH', body: JSON.stringify({ model }) }),
+    req<ModelAccounts>(`/api/model-account/${encodeURIComponent(kind)}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ model }),
+    }),
   setAgentEffort: (kind: ModelAccountKind, effort: string) =>
-    req<ModelAccounts>(`/api/model-account/${kind}`, { method: 'PATCH', body: JSON.stringify({ effort }) }),
+    req<ModelAccounts>(`/api/model-account/${encodeURIComponent(kind)}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ effort }),
+    }),
   setModelAccountEnabled: (kind: ModelAccountKind, enabled: boolean) =>
-    req<ModelAccounts>(`/api/model-account/${kind}`, { method: 'PATCH', body: JSON.stringify({ enabled }) }),
+    req<ModelAccounts>(`/api/model-account/${encodeURIComponent(kind)}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ enabled }),
+    }),
+  addCustomProvider: (input: CustomProviderInput) =>
+    req<ModelAccounts>('/api/custom-providers', { method: 'POST', body: JSON.stringify(input) }),
+  updateCustomProvider: (kind: CustomProviderKind, input: CustomProviderInput) =>
+    req<ModelAccounts>(`/api/custom-providers/${encodeURIComponent(kind)}`, {
+      method: 'PUT',
+      body: JSON.stringify(input),
+    }),
+  /** the endpoint's own model ids; `kind` lets an edit use the stored key */
+  discoverCustomModels: (input: {
+    apiType: CustomProviderConfig['apiType']
+    baseUrl: string
+    apiKey?: string
+    headers?: Record<string, string>
+    kind?: CustomProviderKind
+  }) => req<{ models: string[] }>('/api/custom-providers/models', { method: 'POST', body: JSON.stringify(input) }),
+  /** one turn that must call a tool, on `model` */
+  testCustomProvider: (input: CustomProviderInput & { model: string; kind?: CustomProviderKind }) =>
+    req<{ ok: true; model: string }>('/api/custom-providers/test', { method: 'POST', body: JSON.stringify(input) }),
   imageModels: () => req<{ models: ImageModelStatus[] }>('/api/image-model'),
   setImageModel: (model: string) =>
     req<{ models: ImageModelStatus[] }>('/api/image-model', { method: 'PUT', body: JSON.stringify({ model }) }),

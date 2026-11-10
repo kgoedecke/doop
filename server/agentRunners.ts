@@ -14,9 +14,12 @@ import {
   chatgptConnectEnabled,
   statusOf,
   takesReasoningEffort,
-  type AccountKind,
   type AccountStatus,
+  type BuiltinAccountKind,
+  type ModelAccount,
 } from './modelAccounts.ts'
+import { customMenu } from './customProviders.ts'
+import { customProvidersEnabled } from './customProviderFetch.ts'
 import { CLAUDE_EFFORT_OPTIONS, CLAUDE_MODELS } from '../shared/localAgent.ts'
 import {
   ANTHROPIC_MODELS,
@@ -30,8 +33,8 @@ import {
 import type { ModelOption } from '../shared/modelMenu.ts'
 import { RUNNER_NAMES, type AgentRunner, type AgentRunners, type RunnerProvider } from '../shared/agentRunner.ts'
 
-/** the curated menu each account kind's picker opens with */
-export const MODEL_MENUS: Record<AccountKind, ModelOption[]> = {
+/** the curated menu each built-in account kind's picker opens with */
+export const MODEL_MENUS: Record<BuiltinAccountKind, ModelOption[]> = {
   chatgpt: AGENT_MODELS.map((m) => ({ ...m, vision: true })),
   'openai-key': AGENT_MODELS.map((m) => ({ ...m, vision: true })),
   'anthropic-key': ANTHROPIC_MODELS,
@@ -40,6 +43,18 @@ export const MODEL_MENUS: Record<AccountKind, ModelOption[]> = {
   'deepseek-key': DEEPSEEK_MODELS,
   'kimi-key': KIMI_MODELS,
   'kimi-code': KIMI_CODE_MODELS,
+}
+
+/** The menu one connected account's picker opens with: the curated one, or
+ *  the models a custom provider's person listed. */
+export function menuFor(account: ModelAccount): ModelOption[] {
+  if (account.custom) return customMenu(account.custom)
+  return MODEL_MENUS[account.kind as BuiltinAccountKind]
+}
+
+/** What the composer and the meter call a connection. */
+function nameOf(account: ModelAccount): string {
+  return account.custom?.name ?? RUNNER_NAMES[account.kind as BuiltinAccountKind]
 }
 
 export async function listRunners(userId: string): Promise<AgentRunners> {
@@ -62,11 +77,11 @@ export async function listRunners(userId: string): Promise<AgentRunners> {
     const effort = takesReasoningEffort(account.kind) ? effortFor(account) : undefined
     runners.push({
       provider: account.kind,
-      name: RUNNER_NAMES[account.kind],
+      name: nameOf(account),
       ...(account.email ? { email: account.email } : {}),
       model: accountModelFor(account),
       ...(effort ? { effort } : {}),
-      models: MODEL_MENUS[account.kind].map(({ id, name, blurb }) => ({ id, name, blurb })),
+      models: menuFor(account).map(({ id, name, blurb }) => ({ id, name, blurb })),
       ...(effort ? { efforts: reasoningEffortOptions(effort) } : {}),
     })
   }
@@ -81,7 +96,11 @@ export interface AccountsView {
   accounts: AccountStatus[]
   default?: RunnerProvider
   chatgptEnabled: boolean
-  menus: Record<AccountKind, ModelOption[]>
+  /** the menu per kind: the built-in curated ones, and each connected
+   *  custom provider's own list */
+  menus: Record<string, ModelOption[]>
+  /** whether this server lets people add custom providers at all */
+  customProviders: boolean
 }
 
 export async function accountsView(userId: string): Promise<AccountsView> {
@@ -90,6 +109,10 @@ export async function accountsView(userId: string): Promise<AccountsView> {
     accounts: connections.accounts.map(statusOf),
     ...(connections.default ? { default: connections.default } : {}),
     chatgptEnabled: chatgptConnectEnabled(),
-    menus: MODEL_MENUS,
+    menus: {
+      ...MODEL_MENUS,
+      ...Object.fromEntries(connections.accounts.flatMap((a) => (a.custom ? [[a.kind, customMenu(a.custom)]] : []))),
+    },
+    customProviders: customProvidersEnabled(),
   }
 }
