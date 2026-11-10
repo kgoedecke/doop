@@ -5,6 +5,7 @@ import type { LinkAccess } from '../shared/canvasRole.ts'
 import { MAX_GUIDES } from '../shared/guides.ts'
 import { remapFrameTargets } from '../shared/prototype.ts'
 import { byStack, frontOf, stackOf } from '../shared/frameStack.ts'
+import { htmlLoaded, setHtml, setHtmlMissHandler, unloadHtml, withHtml } from './frameHtml.ts'
 import type { DesignToken } from '../shared/designTokens.ts'
 import type {
   Canvas,
@@ -44,12 +45,35 @@ const names = (pages: CanvasPageInfo[]) => pages.map((page) => page.name)
  * In-memory canvas/frame state — the hot path for reads, reveals and
  * broadcasts. Every committed mutation is mirrored to the database via
  * the write-through helpers in db/persist.ts; boot hydrates from there.
+ *
+ * Every canvas and frame is in memory except frame HTML, which is most of
+ * the data: boot leaves it out and `load` reads one canvas's when something
+ * needs it (frameHtml.ts). Entry points (a REST route, the room join, an MCP
+ * tool, an agent run, a job) await `load`; everything past them reads the
+ * store synchronously as before. `evictIdle` drops the HTML of a canvas
+ * nobody has used for a while, never one that is held or in use.
  */
 class Store {
   canvases = new Map<string, Canvas>()
   private frameIndex = new Map<string, string>() // frameId -> canvasId
   /** the page copy in flight per canvas, so the next one waits for it */
   private pageCopies = new Map<string, Promise<unknown>>()
+  /** canvases whose frame HTML is in memory -> when they were last used */
+  private loaded = new Map<string, number>()
+  private loading = new Map<string, Promise<void>>()
+  /** canvases an agent run or job is working on, counted */
+  private holds = new Map<string, number>()
+  /** rooms, agents and streams the store cannot see (wired by index.ts) */
+  private inUse: (canvasId: string) => boolean = () => false
+
+  constructor() {
+    /* a missed load still fails, but the canvas is on its way for a retry */
+    setHtmlMissHandler((canvasId) => {
+      this.load(canvasId).catch((error: unknown) =>
+        console.error('[store] loading after a miss failed', canvasId, error),
+      )
+    })
+  }
 
   init(canvases: Canvas[]) {
     for (const c of canvases) {
@@ -61,10 +85,151 @@ class Store {
            once) rejoins the first page instead of vanishing from every page. */
         if (!f.pageId || !c.pages.some((page) => page.id === f.pageId)) {
           f.pageId = c.pages[0]!.id
-          persist.saveFrame(f, true)
+          if (htmlLoaded(f)) persist.saveFrame(f, true)
+          else persist.saveFramePage(f.id, f.pageId)
         }
         this.frameIndex.set(f.id, c.id)
       }
+      if (c.frames.every(htmlLoaded)) this.loaded.set(c.id, Date.now())
+      else this.loaded.delete(c.id)
+    }
+  }
+
+  /** The canvas with every frame's HTML in memory, read from the database
+   *  the first time and kept until `evictIdle`. Concurrent calls share one
+   *  read. Undefined for a canvas that does not exist. */
+  async load(canvasId: string): Promise<Canvas | undefined> {
+    if (!this.canvases.has(canvasId)) return undefined
+    if (this.loaded.has(canvasId)) {
+      this.loaded.set(canvasId, Date.now())
+      return this.canvases.get(canvasId)
+    }
+    let pending = this.loading.get(canvasId)
+    if (!pending) {
+      pending = this.fill(canvasId).finally(() => this.loading.delete(canvasId))
+      this.loading.set(canvasId, pending)
+    }
+    await pending
+    return this.canvases.get(canvasId)
+  }
+
+  /** The canvas of a frame, loaded; undefined when the frame is gone. */
+  async loadFrame(frameId: string): Promise<Frame | undefined> {
+    const canvasId = this.frameIndex.get(frameId)
+    if (canvasId) await this.load(canvasId)
+    return this.getFrame(frameId)
+  }
+
+  private async fill(canvasId: string) {
+    /* a canvas whose every frame was written since boot needs no read */
+    if (this.canvases.get(canvasId)?.frames.every(htmlLoaded)) {
+      this.loaded.set(canvasId, Date.now())
+      return
+    }
+    const rows = await persist.loadFrameHtml(canvasId)
+    const canvas = this.canvases.get(canvasId)
+    if (!canvas) return
+    const stored = new Map(rows.map((row) => [row.id, row.html]))
+    /* a frame written while the read was in flight already holds newer html */
+    for (const frame of canvas.frames) {
+      if (htmlLoaded(frame)) continue
+      const html = stored.get(frame.id)
+      if (html === undefined) console.error('[store] frame has no stored html', frame.id)
+      setHtml(frame, html ?? '')
+    }
+    this.loaded.set(canvasId, Date.now())
+  }
+
+  /** Keep a canvas loaded while an agent run or job works on it; call the
+   *  returned function when done. Load it first. */
+  hold(canvasId: string): () => void {
+    this.holds.set(canvasId, (this.holds.get(canvasId) ?? 0) + 1)
+    let released = false
+    return () => {
+      if (released) return
+      released = true
+      const count = (this.holds.get(canvasId) ?? 1) - 1
+      if (count > 0) this.holds.set(canvasId, count)
+      else this.holds.delete(canvasId)
+      if (this.loaded.has(canvasId)) this.loaded.set(canvasId, Date.now())
+    }
+  }
+
+  /** Load, hold for the length of `work`, release. */
+  async withCanvas<T>(canvasId: string, work: (canvas: Canvas | undefined) => Promise<T>): Promise<T> {
+    const canvas = await this.load(canvasId)
+    const release = this.hold(canvasId)
+    try {
+      return await work(canvas)
+    } finally {
+      release()
+    }
+  }
+
+  setInUse(check: (canvasId: string) => boolean) {
+    this.inUse = check
+  }
+
+  isLoaded(canvasId: string): boolean {
+    return this.loaded.has(canvasId)
+  }
+
+  /** Drop the frame HTML of canvases unused for `idleMs`: never one that is
+   *  held, in use (a room, an agent, a stream) or waiting on a frame write.
+   *  Returns how many were dropped. */
+  evictIdle(idleMs: number, now = Date.now()): number {
+    let evicted = 0
+    for (const [canvasId, usedAt] of this.loaded) {
+      if (now - usedAt < idleMs) continue
+      /* in use counts as used: the idle wait starts when the last one leaves */
+      if (this.holds.has(canvasId) || this.inUse(canvasId)) {
+        this.loaded.set(canvasId, now)
+        continue
+      }
+      const canvas = this.canvases.get(canvasId)
+      const unsaved = canvas?.frames.filter((frame) => persist.frameWritePending(frame.id)) ?? []
+      if (unsaved.length) {
+        /* idle with unsaved frames means a write failed: try it again */
+        for (const frame of unsaved) persist.retryFrameWrite(frame)
+        continue
+      }
+      for (const frame of canvas?.frames ?? []) unloadHtml(frame)
+      this.loaded.delete(canvasId)
+      evicted++
+    }
+    return evicted
+  }
+
+  /** A standalone copy of a frame with its HTML, for a render: from memory
+   *  when its canvas is loaded, else read from the database, so one
+   *  thumbnail never pulls a whole canvas into memory. A copy, so a canvas
+   *  dropped while the render waits for a slot cannot take the html away. */
+  async renderableFrame(frameId: string): Promise<Frame | undefined> {
+    const frame = this.getFrame(frameId)
+    if (!frame) return undefined
+    if (htmlLoaded(frame)) return withHtml(frame, frame.html)
+    const html = await persist.loadOneFrameHtml(frameId)
+    const current = this.getFrame(frameId)
+    if (!current) return undefined
+    return withHtml(current, htmlLoaded(current) ? current.html : (html ?? ''))
+  }
+
+  /** The renderable copy of `frame`, for a render that was handed the
+   *  frame's metadata. A frame the store no longer holds renders as given
+   *  when it carries its html; otherwise this rejects. */
+  async renderSource(frame: Frame): Promise<Frame> {
+    const source = await this.renderableFrame(frame.id)
+    if (source) return source
+    if (htmlLoaded(frame)) return frame
+    throw new Error(`frame ${frame.id} no longer exists`)
+  }
+
+  stats() {
+    return {
+      canvases: this.canvases.size,
+      loaded: this.loaded.size,
+      loading: this.loading.size,
+      held: this.holds.size,
     }
   }
 
@@ -144,6 +309,7 @@ class Store {
     const canvas: Canvas = { id: nanoid(10), name, ownerId, createdAt: now, updatedAt: now, frames: [] }
     if (workspaceId) canvas.workspaceId = workspaceId
     this.canvases.set(canvas.id, canvas)
+    this.loaded.set(canvas.id, now)
     canvas.pages = canvasPages(canvas)
     persist.saveCanvas(canvas)
     return canvas
@@ -161,7 +327,7 @@ class Store {
     by: string,
     options: { name?: string; dropDemo?: boolean; workspaceId?: string } = {},
   ): Promise<Canvas | undefined> {
-    const source = this.canvases.get(id)
+    const source = await this.load(id)
     if (!source) return undefined
     const now = Date.now()
     const canvasId = nanoid(10)
@@ -208,6 +374,7 @@ class Store {
     }
     await persist.saveCanvasCopy(canvas)
     this.canvases.set(canvas.id, canvas)
+    this.loaded.set(canvas.id, Date.now())
     for (const frame of frames) this.frameIndex.set(frame.id, canvas.id)
     return canvas
   }
@@ -233,7 +400,7 @@ class Store {
   }
 
   private async copyPage(canvasId: string, pageId: string, by: string): Promise<PageCopy | undefined> {
-    const canvas = this.canvases.get(canvasId)
+    const canvas = await this.load(canvasId)
     if (!canvas) return undefined
     const pages = canvasPages(canvas)
     const source = pages.find((page) => page.id === pageId)
@@ -397,6 +564,7 @@ class Store {
     if (!c) return undefined
     for (const f of c.frames) this.frameIndex.delete(f.id)
     this.canvases.delete(id)
+    this.loaded.delete(id)
     persist.deleteCanvas(id)
     return c
   }

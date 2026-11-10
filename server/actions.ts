@@ -725,7 +725,8 @@ export async function backfillElementIds(
   for (const [frameId, rows] of byFrame) {
     const found: Array<{ comment: ElementComment; id: string }> = []
     const lost: ElementComment[] = []
-    let html = store.getFrame(frameId)?.html
+    /* one frame's canvas at a time; the idle sweep gives it back afterwards */
+    let html = (await store.loadFrame(frameId))?.html
     if (html === undefined) continue
     for (const { comment, selector } of rows) {
       try {
@@ -1980,6 +1981,15 @@ export function setFrameApproval(
 
 export function isFrameStreaming(frameId: string): boolean {
   return streams.has(frameId) || reveals.has(frameId)
+}
+
+/** Whether any frame on the canvas has a stream or playback open, which
+ *  keeps the canvas's frame HTML in memory (store.evictIdle). */
+export function isCanvasStreaming(canvasId: string): boolean {
+  for (const frameId of [...streams.keys(), ...reveals.keys()]) {
+    if (store.getFrame(frameId)?.canvasId === canvasId) return true
+  }
+  return false
 }
 
 export function deleteFrame(frameId: string, actor: Actor): Frame | undefined {

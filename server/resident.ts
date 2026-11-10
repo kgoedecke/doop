@@ -109,7 +109,12 @@ async function sweep(canvasId: string) {
   /* Agents whose whole queue is stalled. Skipped rather than breaking the
      sweep, so one unpayable queue cannot hide another agent's runnable work. */
   const idle = new Set<string>()
+  /* the canvas stays loaded for every run of the sweep, however long a
+     model turn takes (store.evictIdle) */
+  let release = () => {}
   try {
+    await store.load(canvasId)
+    release = store.hold(canvasId)
     for (let i = 0; i < MAX_SWEEP_RUNS; i++) {
       const next = actions.pendingWorkAgents(canvasId).find((name) => !idle.has(name))
       if (!next) break
@@ -123,6 +128,7 @@ async function sweep(canvasId: string) {
       idle.clear()
     }
   } finally {
+    release()
     running.delete(canvasId)
     if (queued.delete(canvasId)) onFeedback(canvasId)
   }

@@ -271,6 +271,26 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
 - `@electric-sql/pglite` 0.5.4 - embedded Postgres so `bun run dev` works with zero external
   services.
 - `pg` 8.22.0 - Postgres driver for the real-database path.
+- Frame HTML in memory (`server/store.ts`, `server/frameHtml.ts`): the store keeps every canvas
+  and frame, but frame HTML (most of the data) loads per canvas. Boot reads `frames` without `html`;
+  `store.load(canvasId)` reads one canvas's (concurrent calls share the read) and `evictIdle` drops
+  it after `CANVAS_IDLE_MS` (10 min) unused, never while a room, an MCP agent's presence, a stream,
+  a `store.hold` or an unsaved frame is on it (`persist.frameWritePending`: dirty from a save until
+  a write at that state succeeds, so a debounce, a write in flight and a failed write all count; the
+  sweep retries a failed one). Entry points load and hold for their length, and the rest stays
+  synchronous: the REST middleware for `/api/canvases/:id`, `/api/frames/:id` and
+  `/api/comments/:id` (behind the session gate, held until the response closes), the room `join`,
+  every MCP tool naming `canvas_id`, `frame_id` or `frame_ids` (`server/toolLoads.ts` wraps
+  `registerTool`), resident sweeps and automation pulls, ingest, the local and Gemini agent
+  endpoints. `/i/` renders
+  read the one frame's HTML (`store.renderableFrame`) instead of loading its canvas. Reading an
+  unloaded frame's `html` throws `FrameHtmlNotLoadedError` and starts loading that canvas, so a
+  missed entry point fails loudly rather than seeing an empty design; assigning it always works. The
+  boot asset-ref reconcile pages through Postgres. Context: by 2026-11-09 frame HTML was 6.4 GB on
+  disk and ~11.7 GB of V8 heap (60% of frames hold a non-Latin-1 character, which makes V8 store
+  the whole string at two bytes a character), against a 12 GB heap cap. Tests:
+  `lazyFrameHtml.test.ts`, `lazyFrameHtmlHttp.test.ts` (a restart, then REST, the room, MCP and an
+  idle drop).
 - Automations (`shared/automations.ts`, `server/automations.ts`) support schedules and
   approval triggers scoped to one canvas. The five-second worker groups up to ten signed-off
   frames per run. `automation_approvals` retains dispatch receipts independently of the
