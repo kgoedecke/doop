@@ -907,7 +907,7 @@ read-only / destructive / idempotent annotations; the server registers no MCP pr
 | `save_decision`          | Record a design decision so later agents don't re-litigate it; feeds the distiller                                  |
 | **Assets & inspiration** |                                                                                                                     |
 | `search_images`          | Stock photo search (Pexels) — returns thumbnails the agent picks from                                               |
-| `search_icons`           | 200,000+ open-source icons (Iconify) as hotlinkable SVGs                                                            |
+| `search_icons`           | 200,000+ open-source icons (Iconify); stored originals, locally generated SVG variants                              |
 | `search_logos`           | Real company logos by brand name or domain (Brandfetch, vector marks)                                               |
 | `list_backgrounds`       | Curated hero/section/bento backgrounds (glows, grainy meshes, aurora, painterly) as thumbnails                      |
 | `search_inspiration`     | Curated live landing pages with style, colour, fonts and sections (One Page Love)                                   |

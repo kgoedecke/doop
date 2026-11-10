@@ -4,6 +4,7 @@ import path from 'node:path'
 import puppeteer, { type Browser, type Page } from 'puppeteer-core'
 import type { Frame } from '../shared/types.ts'
 import { guardPublicPageRequests } from './publicUrl.ts'
+import { frameIconResponse, prepareFrameIcons } from './frameIcons.ts'
 
 /**
  * Render a frame's HTML in headless Chrome so agents can *see* their work.
@@ -111,11 +112,13 @@ export async function openIsolatedPage(): Promise<IsolatedPage> {
 }
 
 export async function loadFramePage(frame: Frame): Promise<IsolatedPage> {
+  const assetOrigin = new URL(env.BETTER_AUTH_URL).origin
+  await prepareFrameIcons(frame.html || '', assetOrigin)
   const loaded = await openIsolatedPage()
   const { page } = loaded
   try {
-    const assetOrigin = new URL(env.BETTER_AUTH_URL).origin
     await guardPublicPageRequests(page, {
+      resolveAsset: (url) => frameIconResponse(url, assetOrigin),
       allowUrl: (url) =>
         (url.origin === assetOrigin && url.pathname.startsWith('/a/')) ||
         /* webfonts referenced by imported frames (imports request the

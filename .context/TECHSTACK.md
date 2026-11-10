@@ -46,6 +46,17 @@
   something matches; six-hour in-memory cache for the free plan's 1,000 requests a day. Every
   result credits One Page Love and the authors with the entry's link (their terms). Tests:
   `inspiration.test.ts`.
+- Icons (`server/iconData.ts`, `server/iconAssets.ts`): `search_icons` batches Iconify JSON
+  downloads by collection and stores one immutable base icon per id in the existing disk/S3
+  storage (`icons/v1-<sha256-of-id>.json`), shared across users. `/a/iconify/<prefix>/<name>.svg`
+  renders color, size, flip and rotation locally using `@iconify/utils`; variants never mutate
+  or duplicate the stored original. Path edits belong in a separate inline SVG or user asset.
+  Each server process has a bounded download queue, two active upstream requests, deduplication
+  and `Retry-After` backoff; cached icons remain usable during backoff. The 4 MB memory cache is
+  only an accelerator. `frameIcons.ts` prepares image/srcset/CSS/srcdoc dependencies before
+  rendering, and `guardPublicPageRequests.resolveAsset` fulfills both local icon URLs and
+  legacy Iconify URLs before any direct-browser bypass. Cold failures for preloaded dependencies propagate rather
+  than silently caching broken screenshots. Tests: `iconAssets.test.ts`, `publicUrl.test.ts`.
 - Agent feedback (`server/agentFeedback.ts`, `shared/agentFeedback.ts`): agents talk to the Doop
   team through two MCP tools, which the resident agent has under the same names. `report_issue`
   (kind `issue`: `bug`, `tool_error`, `confusing`, `missing_capability`, `other`) is for where Doop

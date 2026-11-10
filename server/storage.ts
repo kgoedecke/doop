@@ -9,7 +9,8 @@ import type { S3Client } from '@aws-sdk/client-s3'
  * Railway Bucket injects via variable references (BUCKET, ACCESS_KEY_ID,
  * SECRET_ACCESS_KEY, ENDPOINT, REGION); R2 or S3 work with the same names.
  * Without them (local development) bytes land under ./data/assets, next to
- * PGlite. Either way the assets table is the source of truth for what exists.
+ * PGlite. The assets table tracks user uploads; derived and shared libraries
+ * use their own namespaces below.
  */
 
 const BUCKET = env.BUCKET
@@ -20,11 +21,12 @@ export const storageMode: 'bucket' | 'disk' = BUCKET ? 'bucket' : 'disk'
 /* keys are `<nanoid>.<ext>`, optionally under the `thumb/` prefix (derived
    frame previews — a folder of their own so they can be purged or lifecycle-
    ruled without touching user uploads) or the `bg/` prefix (the curated
-   background library, server/backgrounds.ts). Anything else is a bug, and in
+   background library, server/backgrounds.ts) or icons/ (immutable base icon data).
+   Anything else is a bug, and in
    disk mode the check doubles as the path-traversal guard: known literal
    prefixes, no dots or slashes in the name. */
 function assertKey(key: string) {
-  if (!/^(thumb\/|bg\/)?[A-Za-z0-9_-]+\.[a-z0-9]+$/.test(key)) throw new Error(`malformed storage key: ${key}`)
+  if (!/^(thumb\/|bg\/|icons\/)?[A-Za-z0-9_-]+\.[a-z0-9]+$/.test(key)) throw new Error(`malformed storage key: ${key}`)
 }
 
 let s3: S3Client | undefined
