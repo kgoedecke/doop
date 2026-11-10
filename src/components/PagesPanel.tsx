@@ -27,6 +27,10 @@ export function PagesPanel({ fill = false }: { fill?: boolean }) {
   const [busy, setBusy] = useState(false)
   const [renaming, setRenaming] = useState<string | null>(null)
   const [name, setName] = useState('')
+  /* set once Enter, Esc or a blur has settled the rename, so the blur that
+     follows (the field unmounting, or being disabled while it saves) does
+     not settle it a second time */
+  const renameSettled = useRef(false)
   const [drag, setDrag] = useState<{ id: string; targetId: string | null; after: boolean } | null>(null)
   const didDrag = useRef(false)
   const stopDrag = useRef<(() => void) | null>(null)
@@ -67,6 +71,23 @@ export function PagesPanel({ fill = false }: { fill?: boolean }) {
     } finally {
       setBusy(false)
     }
+  }
+
+  function startRename(page: CanvasPageInfo) {
+    renameSettled.current = false
+    setRenaming(page.id)
+    setName(page.name)
+  }
+
+  /** Enter or a click elsewhere keeps the typed name, as in Figma; an empty or
+   *  unchanged one just closes the field. A failed save leaves it open. */
+  async function commitRename(page: CanvasPageInfo) {
+    if (renameSettled.current) return
+    renameSettled.current = true
+    const next = name.trim()
+    if (!next || next === page.name) return setRenaming(null)
+    await save(pages.map((p) => (p.id === page.id ? { ...p, name: next } : p)))
+    renameSettled.current = false
   }
 
   function startDrag(e: ReactPointerEvent<HTMLButtonElement>, id: string) {
@@ -185,7 +206,7 @@ export function PagesPanel({ fill = false }: { fill?: boolean }) {
                   className="min-w-0 flex-1"
                   onSubmit={(e) => {
                     e.preventDefault()
-                    if (name.trim()) void save(pages.map((p) => (p.id === page.id ? { ...p, name: name.trim() } : p)))
+                    void commitRename(page)
                   }}
                 >
                   <input
@@ -197,8 +218,11 @@ export function PagesPanel({ fill = false }: { fill?: boolean }) {
                     className="w-full rounded-[6px] bg-surface px-2 py-1 text-[12px] text-ink shadow-elevation-1-focus outline-none"
                     value={name}
                     onChange={(e) => setName(e.target.value)}
+                    onBlur={() => void commitRename(page)}
                     onKeyDown={(e) => {
-                      if (e.key === 'Escape') setRenaming(null)
+                      if (e.key !== 'Escape') return
+                      renameSettled.current = true
+                      setRenaming(null)
                     }}
                   />
                 </form>
@@ -219,8 +243,7 @@ export function PagesPanel({ fill = false }: { fill?: boolean }) {
                   }}
                   onDoubleClick={() => {
                     if (busy || readOnly || didDrag.current) return
-                    setRenaming(page.id)
-                    setName(page.name)
+                    startRename(page)
                   }}
                 >
                   {page.name}
@@ -233,13 +256,7 @@ export function PagesPanel({ fill = false }: { fill?: boolean }) {
               if (renaming === page.id) e.preventDefault()
             }}
           >
-            <ContextMenuItem
-              disabled={busy}
-              onSelect={() => {
-                setRenaming(page.id)
-                setName(page.name)
-              }}
-            >
+            <ContextMenuItem disabled={busy} onSelect={() => startRename(page)}>
               {t('panels.pagesRename')}
             </ContextMenuItem>
             <ContextMenuItem disabled={busy || pages.length >= 100} onSelect={() => void duplicate(page.id)}>
