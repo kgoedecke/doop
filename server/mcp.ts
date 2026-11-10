@@ -1398,7 +1398,7 @@ export function buildMcpServer(
          has no card either). The review screenshot after the stream is the
          first card the person sees. */
       description:
-        'Create a new frame on a canvas with an HTML design. A frame is a rectangular artboard that renders a full HTML document (inline <style> and <script> allowed, no external network access needed). If x/y are omitted the frame is auto-placed to the right of existing frames. Everyone viewing the canvas sees it appear live. Use <doop-use> for anything get_canvas lists under components.',
+        'Create a new frame on a canvas with an HTML design. A frame is a rectangular artboard that renders a full HTML document (no external network access needed). Put the styles of an element in its style attribute; a <style> block is for what an attribute cannot say (keyframes, states, pseudo-elements, media queries, the reset), and <script> is allowed. If x/y are omitted the frame is auto-placed to the right of existing frames. Everyone viewing the canvas sees it appear live. Use <doop-use> for anything get_canvas lists under components.',
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
       inputSchema: {
         canvas_id: z.string(),
