@@ -321,7 +321,17 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   viewport, not k. From 300% a 1px pixel grid fades in over the frames (full at 500%): the
   Stage draws it over the bare paper, under the world, and each frame draws its own over its
   document and under its chrome (`PixelGrid.tsx`, faded by `--pixel-grid`), so pins, threads,
-  grips, cursors and guides stay above it. Tests: `pixelGridBrowser.test.ts`. Frame
+  grips, cursors and guides stay above it. Tests: `pixelGridBrowser.test.ts`. At rest every
+  upright frame sits on whole device pixels (`src/lib/frameSnap.ts`): the Stage rounds the
+  camera's offset to device pixels on every write and publishes the settled zoom, and each
+  `FrameView` nudges and stretches its surface by at most half a device pixel through a
+  `--frame-snap` transform (a style write, no render; dropped by `.world[data-zooming]` while the
+  camera zooms, skipped for turned frames and standalone elements). A frame edge between device
+  pixels is blended with whatever white is near it, the backdrop behind the iframe or a white
+  body under a dark design, and showed as a light line on a dark canvas; the snap and the
+  surface's backdrop kept one screen pixel inside the edge remove it together, neither alone.
+  Headless Chromium does not draw the line, so `frameSnapBrowser.test.ts` checks the geometry
+  (`frameSnap.test.ts` the math). Frame
   names sit inside their frame, counter-scaled by `--zoom`, so they keep size and gap at every
   zoom and stack with their own frame (a later frame covers an earlier frame's name, never the
   reverse). The selected frame's size badge lives in a screen-space layer (`FrameLabelLayer`),

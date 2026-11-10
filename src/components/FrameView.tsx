@@ -18,6 +18,7 @@ import { throttle } from '../lib/throttle'
 import { getIdentity } from '../lib/identity'
 import { FRAME_BOOTSTRAP } from '../lib/frameRuntime'
 import { FRAME_DOCUMENTS_TAKE_ZOOM_AS_DENSITY, counterZoom } from '../lib/layoutZoom'
+import { frameSnapTransform, snapScale, subscribeSnapScale } from '../lib/frameSnap'
 import { dropEntry, recordCreate, recordUpdate, recordUpdates, trackSave, type HistoryEntry } from '../lib/history'
 import { snapFrame } from '../lib/snap'
 import { visibleGuides } from '../lib/guides'
@@ -220,6 +221,27 @@ const FRAME_NAME_COMMENT_AT = 12
 /* `doop:locate` request ids for the outlines of a multi-element pick */
 const PICK_REQ = '__pick__:'
 
+/** Keeps a frame's surface on whole device pixels at the settled zoom
+ *  (frameSnap), as a style write: a settle renders no frame. A turned frame
+ *  has no axis-aligned edge to snap, and a standalone element is see-through,
+ *  so there is no edge for a light line to show on. */
+function useFrameSnap(surfaceRef: React.RefObject<HTMLDivElement | null>, frame: Frame) {
+  const { x, y, width, height } = frame
+  const snappable = !frame.rotation && !isCanvasElement(frame.html)
+  useLayoutEffect(() => {
+    const surface = surfaceRef.current
+    if (!surface) return
+    function apply() {
+      const scale = snapScale()
+      const snap = snappable && scale ? frameSnapTransform({ x, y, width, height }, scale) : null
+      if (snap) surface?.style.setProperty('--frame-snap', snap)
+      else surface?.style.removeProperty('--frame-snap')
+    }
+    apply()
+    return subscribeSnapScale(apply)
+  }, [surfaceRef, x, y, width, height, snappable])
+}
+
 type DragRect = { id: string; x: number; y: number; width: number; height: number; rotation?: number }
 
 interface HoverHit {
@@ -250,6 +272,7 @@ export const FrameView = memo(function FrameView({
   const menuKind = useRef<'frame' | 'element'>('frame')
   const menuRequest = useRef(0)
   const surfaceRef = useRef<HTMLDivElement>(null)
+  useFrameSnap(surfaceRef, frame)
   const elementMove = useElementMove(frame, layoutZoom)
   const labelLayer = useContext(FrameLabelLayer)
   const [pathEdit, setPathEdit] = useState<PathEditSource | null>(null)
@@ -1706,6 +1729,12 @@ export const FrameView = memo(function FrameView({
                  an unselected frame's own stacking context a z-index here would
                  cover the frame's pins and hover outlines */
               zIndex: selected ? stack : undefined,
+              /* the snap onto device pixels (useFrameSnap), on the surface and
+                 not the wrapper: a transform there would make the wrapper a
+                 stacking context and keep a selected frame's chrome from
+                 rising above the page */
+              transform: 'var(--frame-snap, none)',
+              transformOrigin: '0 0',
             }}
             onPointerDown={(e) => startDrag(e, 'move', true)}
             onDoubleClick={(e) => {

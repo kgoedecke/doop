@@ -49,6 +49,7 @@ import { useCanvasDrawing } from './CanvasDrawing'
 import { FrameLabelLayer } from './FrameLabelLayer'
 import { pixelGridLines } from './PixelGrid'
 import { layoutZoomFor } from '../lib/layoutZoom'
+import { settleSnapScale, snapCameraOffset, watchDevicePixelRatio } from '../lib/frameSnap'
 import { useT, type PlainMessageKey } from '../lib/i18n'
 import { NO_INSETS, fitBox, type StageInsets } from '../lib/viewFit'
 import { spaceWouldScroll } from '../lib/spaceScroll'
@@ -296,11 +297,37 @@ export function Stage({
      transform, the grid layer, the --zoom variable (which counter-scales
      labels/pins/cursors from CSS), and the zoom pill's % directly. */
   useLayoutEffect(() => {
-    function apply(vp: { x: number; y: number; zoom: number }) {
+    /* where the stage starts in the window: with it, a camera offset can be
+       rounded to device pixels (frameSnap). Read at rest, never per frame. */
+    const origin = { x: 0, y: 0 }
+    function readOrigin() {
+      const box = ref.current?.getBoundingClientRect()
+      if (!box) return
+      origin.x = box.left
+      origin.y = box.top
+    }
+    /* frames are snapped to device pixels for one zoom: the moment the camera
+       zooms, the world drops the snaps (styles.css), and they come back for
+       the zoom it settles on */
+    function settleSnap() {
+      const world = worldRef.current
+      if (!world) return
+      readOrigin()
+      apply(useStore.getState().viewport)
+      settleSnapScale({ zoom: useStore.getState().viewport.zoom, dpr: window.devicePixelRatio || 1 })
+      delete world.dataset.zooming
+    }
+    function apply(camera: { x: number; y: number; zoom: number }) {
       const world = worldRef.current
       const grid = gridRef.current
       const stage = ref.current
       if (!world || !grid || !stage) return
+      const dpr = window.devicePixelRatio || 1
+      const vp = {
+        x: snapCameraOffset(camera.x, origin.x, dpr),
+        y: snapCameraOffset(camera.y, origin.y, dpr),
+        zoom: camera.zoom,
+      }
       world.style.transform = worldTransform(vp, layoutZoomRef.current)
       stage.style.setProperty('--zoom', String(vp.zoom))
       /* the camera's offset, for chrome drawn in screen px (FrameLabelLayer) */
@@ -327,7 +354,8 @@ export function Stage({
       }
       if (zoomLabelRef.current) zoomLabelRef.current.textContent = `${Math.round(vp.zoom * 100)}%`
     }
-    apply(useStore.getState().viewport)
+    settleSnap()
+    const unwatchDensity = watchDevicePixelRatio(settleSnap)
     let settle = 0
     const unsub = useStore.subscribe((s, prev) => {
       /* a (re)connect needs the camera announced afresh — the server only
@@ -335,16 +363,20 @@ export function Stage({
       if (s.connected && !prev.connected && ref.current) sendViewport(s.viewport, ref.current)
       if (s.viewOptions.pixelGrid !== prev.viewOptions.pixelGrid) apply(s.viewport)
       if (s.viewport === prev.viewport) return
+      if (s.viewport.zoom !== prev.viewport.zoom && worldRef.current) worldRef.current.dataset.zooming = ''
       apply(s.viewport)
       if (ref.current) sendViewport(s.viewport, ref.current)
       window.clearTimeout(settle)
       settle = window.setTimeout(() => {
         setLayoutZoom(layoutZoomFor(useStore.getState().viewport.zoom, MAX_ZOOM))
+        settleSnap()
       }, 250)
     })
     return () => {
       unsub()
+      unwatchDensity()
       window.clearTimeout(settle)
+      settleSnapScale(null)
     }
   }, [])
 

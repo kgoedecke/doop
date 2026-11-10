@@ -1234,3 +1234,11 @@ body:has([data-panel-resizing]) * {
     animation: none !important;
   }
 }
+
+/* Frames sit on whole device pixels for the zoom the camera settled on
+   (src/lib/frameSnap.ts). While it zooms, that correction belongs to another
+   zoom and would grow with it, so the world drops every snap until the next
+   settle. */
+.world[data-zooming] [data-frame-surface] {
+  transform: none !important;
+}
