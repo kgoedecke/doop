@@ -684,16 +684,17 @@ describe.skipIf(!findBrowserPath())('drawing on the canvas', { timeout: 30_000 }
     expect(await iframe.evaluate(() => document.hasFocus())).toBe(true)
     await page.keyboard.press('r')
     await page.waitForFunction(() => window.drawingHarness.state().tool === 'rectangle')
-    /* a canvas chord reaches the canvas (Ctrl+= zooms in) and is kept from
-       the frame document's own browser default, the page zoom */
+    /* a canvas chord reaches the canvas (⌘= / Ctrl+= zooms in) and is kept
+       from the frame document's own browser default, the page zoom */
     await iframe.evaluate(() => {
       document.addEventListener('keydown', (e) => {
         if (e.key === '=') document.body.dataset.prevented = String(e.defaultPrevented)
       })
     })
-    await page.keyboard.down('Control')
+    const mod = process.platform === 'darwin' ? 'Meta' : 'Control'
+    await page.keyboard.down(mod)
     await page.keyboard.press('Equal')
-    await page.keyboard.up('Control')
+    await page.keyboard.up(mod)
     await expect.poll(() => page.evaluate(() => window.drawingHarness.camera().zoom)).toBe(1.25)
     expect(await iframe.evaluate(() => document.body.dataset.prevented)).toBe('true')
     /* a design's own script cannot forge a key: not by posting the relay's
