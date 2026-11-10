@@ -268,6 +268,20 @@ export const FRAME_TEXT_RUNTIME = `
     return node && node.parentElement ? node.parentElement : el
   }
 
+  /* The lines a run's text is drawn with: text-decoration is not inherited
+     but painted across descendants, so an underline on the layer shows on its
+     <b> run though the run's own computed value is none. Every line set from
+     the run up to the layer counts. */
+  function runDecoration(run, layer) {
+    var lines = []
+    for (var el = run; el; el = el === layer ? null : el.parentElement) {
+      getComputedStyle(el).textDecorationLine.split(/\\s+/).forEach(function (line) {
+        if (line && line !== 'none' && lines.indexOf(line) === -1) lines.push(line)
+      })
+    }
+    return lines.length ? lines.join(' ') : 'none'
+  }
+
   /* The type properties of a patch, for clearing a layer's runs under it. */
   function layerTextPatch(styles) {
     var text = {}

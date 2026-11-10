@@ -1320,9 +1320,12 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
       var computedEl = styleTarget(d.selector)
       var values = null
       if (computedEl) {
-        var cs = getComputedStyle(d.fromTextRun === true ? firstTextRun(computedEl) : computedEl)
+        var run = d.fromTextRun === true ? firstTextRun(computedEl) : computedEl
+        var cs = getComputedStyle(run)
         values = {}
-        d.properties.forEach(function (name) { values[name] = cs.getPropertyValue(name) })
+        d.properties.forEach(function (name) {
+          values[name] = name === 'text-decoration-line' && run !== computedEl ? runDecoration(run, computedEl) : cs.getPropertyValue(name)
+        })
       }
       parent.postMessage({ type: 'doop:computed-result', reqId: d.reqId, values: values }, '*')
     }

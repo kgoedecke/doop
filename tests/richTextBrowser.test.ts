@@ -307,7 +307,7 @@ describe.skipIf(!findBrowserPath())('rich text editing', { timeout: 30_000 }, ()
     await send({
       type: 'doop:html',
       html:
-        '<p id="source" style="margin:0;font:24px Arial"><b><i>Bold</i></b></p>' +
+        '<p id="source" style="margin:0;font:24px Arial;text-decoration:underline"><b><i><s>Bold</s></i></b></p>' +
         '<p id="text" style="margin:0;font:16px Arial;background:red">Plain <b>and</b> <u>marked</u></p>',
       reqId: 'render',
     })
@@ -316,7 +316,7 @@ describe.skipIf(!findBrowserPath())('rich text editing', { timeout: 30_000 }, ()
     await send({
       type: 'doop:computed',
       selector: '#source',
-      properties: ['font-weight', 'font-style', 'font-size'],
+      properties: ['font-weight', 'font-style', 'font-size', 'text-decoration-line'],
       fromTextRun: true,
       reqId,
     })
@@ -334,7 +334,13 @@ describe.skipIf(!findBrowserPath())('rich text editing', { timeout: 30_000 }, ()
         ).values,
       reqId,
     )
-    expect(copied).toEqual({ 'font-weight': '700', 'font-style': 'italic', 'font-size': '24px' })
+    // The paragraph's underline is painted on the run too, though not inherited.
+    expect(copied).toEqual({
+      'font-weight': '700',
+      'font-style': 'italic',
+      'font-size': '24px',
+      'text-decoration-line': 'line-through underline',
+    })
 
     await ask('doop:style', {
       selector: '#text',
