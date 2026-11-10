@@ -207,6 +207,9 @@ describe.skipIf(!findBrowserPath() || !CLIPBOARD_IS_RELIABLE)('canvas clipboard 
     await page.evaluate(() => window.canvasClipboardHarness.pick('#card'))
     await chord('c')
     await page.evaluate(() => navigator.clipboard.writeText('new external text'))
+    /* the write's promise settles before headless Chromium has committed it to the
+       clipboard the paste reads, so a paste right away could still see the token */
+    await page.waitForFunction(() => navigator.clipboard.readText().then((text) => text === 'new external text'))
     await chord('v')
     await page.evaluate(
       () => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))),
