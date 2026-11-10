@@ -35,6 +35,8 @@ import * as workspaces from './workspaces.ts'
 import { auth, getUserName, isBanned } from './auth.ts'
 import { capture, captureThrottled } from './analytics.ts'
 import { renderFrame } from './screenshot.ts'
+import { imagesForFrames } from './assets.ts'
+import type { FrameImage } from '../shared/imageDescriptions.ts'
 import {
   MAX_PDF_FRAMES,
   PDF_UNAVAILABLE_MESSAGE,
@@ -257,23 +259,30 @@ const agentName = z
     'Your display name, shown live to everyone on the canvas (e.g. "Claude", "Codex"). Reuse the SAME name on every call so your work is attributed consistently.',
   )
 
-function frameSummary(f: {
-  pageId?: string
-  id: string
-  name: string
-  x: number
-  y: number
-  width: number
-  height: number
-  updatedAt: number
-  updatedBy: string
-  html: string
-  demo?: boolean
-  hidden?: boolean
-  locked?: boolean
-  rotation?: number
-  approval?: FrameApproval | null
-}) {
+/** Said once in get_canvas when any listed frame carries an image. */
+const IMAGES_NOTE =
+  'Frames with `images` reference pictures people uploaded or pasted; each carries a `description` of what it shows (null while it is being written). Read them, and call get_frame_screenshot on the relevant ones before designing. A frame that is nothing but one image is a reference pasted for you: leave it as it is and deliver in a separate frame. A design that uses images is an ordinary frame.'
+
+function frameSummary(
+  f: {
+    pageId?: string
+    id: string
+    name: string
+    x: number
+    y: number
+    width: number
+    height: number
+    updatedAt: number
+    updatedBy: string
+    html: string
+    demo?: boolean
+    hidden?: boolean
+    locked?: boolean
+    rotation?: number
+    approval?: FrameApproval | null
+  },
+  images?: FrameImage[],
+) {
   return {
     id: f.id,
     pageId: f.pageId,
@@ -290,6 +299,7 @@ function frameSummary(f: {
     ...(f.rotation ? { rotation: f.rotation } : {}),
     updatedAt: new Date(f.updatedAt).toISOString(),
     updatedBy: f.updatedBy,
+    ...(images?.length ? { images } : {}),
     htmlBytes: f.html.length,
     /* public render of the CURRENT design — downloadable/hotlinkable
        (append &download, or .jpg?quality=90 for JPEG) */
@@ -565,7 +575,9 @@ export function buildMcpServer(
       /* design-synced canvases carry a flow map: real user navigation between
          the synced screens — context a redesign must respect */
       const flow = describeSyncFlow(await getSyncFlow(c), c.frames)
+      const images = await imagesForFrames(shown.map((f) => f.id))
       const notes = [
+        ...(images.size ? [IMAGES_NOTE] : []),
         ...(flow.length
           ? [
               'This canvas is synced from a live app and `flow` shows how its screens connect — including how often real users take each path. Do not bury or weaken elements that carry heavy navigation.',
@@ -591,7 +603,7 @@ export function buildMcpServer(
             id: c.id,
             name: c.name,
             pages: canvasPages(c),
-            frames: shown.map(frameSummary),
+            frames: shown.map((f) => frameSummary(f, images.get(f.id))),
             guidelines: docs.map((d) => ({
               name: d.name,
               title: actions.guidelineTitle(d),
@@ -1404,8 +1416,9 @@ export function buildMcpServer(
       const f = frameFor(frame_id, 'view')
       if (!f) return noFrame(frame_id)
       arrive(f.canvasId, agent_name)
+      const images = (await imagesForFrames([f.id])).get(f.id)
       return withFeedbackNotice(
-        text({ ...frameSummary(f), html: f.html }),
+        text({ ...frameSummary(f, images), html: f.html }),
         f.canvasId,
         agent_name ? actorFrom(agent_name) : undefined,
       )

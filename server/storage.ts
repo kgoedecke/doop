@@ -65,12 +65,14 @@ export async function deleteObject(key: string): Promise<void> {
   await fs.rm(path.join(DISK_DIR, key), { force: true })
 }
 
-export async function getObject(key: string): Promise<Buffer | null> {
+export async function getObject(key: string, signal?: AbortSignal): Promise<Buffer | null> {
   assertKey(key)
   if (BUCKET) {
     try {
       const { GetObjectCommand } = await import('@aws-sdk/client-s3')
-      const out = await (await client()).send(new GetObjectCommand({ Bucket: BUCKET, Key: key }))
+      const out = await (
+        await client()
+      ).send(new GetObjectCommand({ Bucket: BUCKET, Key: key }), { abortSignal: signal })
       return Buffer.from(await out.Body!.transformToByteArray())
     } catch (e) {
       if ((e as { name?: string }).name === 'NoSuchKey') return null
@@ -78,7 +80,7 @@ export async function getObject(key: string): Promise<Buffer | null> {
     }
   }
   try {
-    return await fs.readFile(path.join(DISK_DIR, key))
+    return await fs.readFile(path.join(DISK_DIR, key), { signal })
   } catch (e) {
     if ((e as NodeJS.ErrnoException).code === 'ENOENT') return null
     throw e
