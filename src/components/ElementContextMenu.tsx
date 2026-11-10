@@ -10,6 +10,7 @@ import { deleteLayer, duplicateLayer, setLayerHidden, setLayerLocked, shiftLayer
 import { buildLayerTree, elementHtml, findLayer, isElementHidden, isElementLocked, layerName } from '../lib/layers'
 import { MOD_KEY } from '../lib/keys'
 import { useT } from '../lib/i18n'
+import { useStore } from '../lib/store'
 import { changeInstance, componentContextOf, goToMain, promptMakeComponent } from '../lib/components'
 import { ContextMenuContent, ContextMenuItem, ContextMenuSeparator } from './ui/context-menu'
 import { MenuHint } from './ui/menu'

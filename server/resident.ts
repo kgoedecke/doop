@@ -2355,7 +2355,7 @@ export async function execTool(
         if (!COMPONENT_TOOL_NAMES.includes(block.name)) return fail(`unknown tool ${block.name}`)
         const canvas = store.getCanvas(canvasId)
         if (!canvas) return fail('canvas not found')
-        const reader = runState.requesterId ?? runState.payerId
+        const reader = runState.payerId
         const outcome = runComponentTool(block.name, block.input as Record<string, unknown>, {
           canvas,
           actor,

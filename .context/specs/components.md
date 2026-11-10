@@ -22,7 +22,7 @@ through tools, and read them back in a short form.
 ## Model
 
 Instances are **materialized**: the frame's HTML holds the full markup. Everything that reads frame HTML
-(iframes, thumbnails, PDF, PSD, Figma and Canva export, comments, Layers) works unchanged, and a deleted
+(iframes, thumbnails, PDF and image export, comments, Layers) works unchanged, and a deleted
 component loses nothing visually.
 
 - **Main**: an element with `data-doop-component="<id>"`. Editing it with any tool edits the component.
