@@ -1,4 +1,4 @@
-/** The "Your account" pane of /settings: profile, notifications, password. */
+/** The "Your account" pane of /settings: profile, notifications, password, deletion. */
 export const account = {
   nameSaveFailed: 'That name could not be saved',
   nameSaved: 'Saved — agents pick it up within a minute',
@@ -48,4 +48,20 @@ export const account = {
   updatingPassword: 'Updating…',
   updatePassword: 'Update password',
   passwordMinLength: 'At least 8 characters',
+
+  deleteTitle: 'Delete account',
+  deleteDescription: 'Permanently deletes your account on this server. This action cannot be undone.',
+  deleteRow: 'Delete account',
+  deleteHint:
+    'Canvases only you can reach are deleted with it; canvases shared with others or living in a workspace stay with them.',
+  deleteButton: 'Delete account…',
+  deleteCheckFailed: 'Your account could not be checked — try again',
+  deleteDialogTitle: 'Delete your account?',
+  deleteDialogLede:
+    'Your account, your sign-ins and every canvas only you can reach are deleted for good. You leave your workspaces and shared canvases. This action cannot be undone.',
+  deletePasswordLabel: 'Enter your password to confirm',
+  deleteConfirm: 'Delete account',
+  deleting: 'Deleting…',
+  deleteFailed: 'Your account could not be deleted',
+  deleteNeedsFreshSession: 'Log out, sign in again, and then delete your account.',
 } as const

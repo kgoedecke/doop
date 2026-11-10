@@ -711,6 +711,13 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   plain try-again rather than being shown. Tests: `authError.test.ts`,
   `authFormBrowser.test.ts` (the real form in Chromium, against that exact edge body).
 
+- Account deletion: Settings → Your account ends with a Delete account card
+  (`src/components/DeleteAccount.tsx`) and the iOS app has the same action; both call better-auth's
+  `POST /api/auth/delete-user`, with the password when the account has one (`list-accounts` shows a
+  `credential` provider), else on a fresh session. The `beforeDelete` hook
+  (`server/accountDeletion.ts`) deletes canvases only that user could reach and leaves the rest.
+  Tests: `accountDeletion.test.ts`, `deleteAccount.test.tsx`.
+
 - Sign-in policy (`shared/instanceSettings.ts`, `server/instanceSettings.ts`): instance admins set,
   in Admin → Sign-in, whether visitors may sign up with email and password (off hides the form and
   the `/api/auth/*` mount refuses `sign-up/email` with `SIGNUP_DISABLED`; existing accounts still
