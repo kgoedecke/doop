@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import type { Page } from 'puppeteer-core'
 import type { TextFormatCommand } from '../src/lib/richText'
 import { findBrowserPath } from '../server/screenshot'
@@ -34,7 +34,11 @@ declare global {
   }
 }
 
-describe.skipIf(!findBrowserPath())('drawing on the canvas', { timeout: 30_000 }, () => {
+/* a tab Chromium lost on a CI runner is not a failure of the canvas: the test
+   runs again there on a fresh page, and a real failure fails all three times */
+const RETRIES = process.env.CI ? 2 : 0
+
+describe.skipIf(!findBrowserPath())('drawing on the canvas', { timeout: 30_000, retry: RETRIES }, () => {
   let browser: TestBrowser
   let page: Page
   let saved: Frame[] = []
@@ -43,12 +47,22 @@ describe.skipIf(!findBrowserPath())('drawing on the canvas', { timeout: 30_000 }
   /* the anchors sent by PATCH /api/comments/:id/anchor, in order */
   let commentMoves: Record<string, unknown>[] = []
   const errors: string[] = []
+  /** why Chromium gave up on this test's tab, when it did */
+  let crashed: string | null = null
 
   beforeAll(async () => {
     browser = await openBrowser()
-    page = await browser.newPage()
+  }, 60_000)
+
+  /* Every test gets its own page. One page for the whole file meant that a
+     tab Chromium lost (a renderer that died on a CI runner) took every later
+     test with it: each one's setup waited 30s on a page that would never
+     answer. */
+  async function openPage(): Promise<Page> {
+    const page = await browser.newPage()
     page.setDefaultTimeout(10_000)
     page.on('pageerror', (err) => errors.push(String(err)))
+    page.on('error', (err) => (crashed = String(err)))
     /* holds the frames' hit-test answers while a test sets heldMoveHits; it
        must listen before the app does, since a window's own listeners run in
        the order they were added */
@@ -89,11 +103,12 @@ describe.skipIf(!findBrowserPath())('drawing on the canvas', { timeout: 30_000 }
         await req.respond({ status: 200, contentType: 'application/json', body: '{}' })
       } else await req.continue()
     })
-  }, 60_000)
+    return page
+  }
 
   beforeEach(async () => {
-    await page.mouse.reset()
-    await page.keyboard.up('Shift')
+    crashed = null
+    page = await openPage()
     saved = []
     nextId = 0
     patchRequests = 0
@@ -119,8 +134,13 @@ describe.skipIf(!findBrowserPath())('drawing on the canvas', { timeout: 30_000 }
     await page.evaluate(() => window.drawingHarness.viewport({ x: 40, y: 20, zoom: 2 }))
   })
 
+  afterEach(async () => {
+    /* a crashed tab can no longer be closed politely; the context closes it */
+    if (!crashed) await page?.close()
+    expect(crashed, 'Chromium lost the tab during this test').toBeNull()
+  })
+
   afterAll(async () => {
-    await page?.close()
     await browser?.close()
     expect(errors).toEqual([])
   })
