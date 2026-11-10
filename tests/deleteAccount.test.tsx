@@ -81,6 +81,17 @@ it('asks a provider-only account with a stale session to sign in again', async (
   expect(assign).not.toHaveBeenCalled()
 })
 
+it('lets a request that never answered be retried or cancelled', async () => {
+  auth.deleteUser.mockRejectedValue(new TypeError('Failed to fetch'))
+  await openDialog(['credential'])
+  await typePassword('hunter22')
+  await act(async () => button('Delete account').click())
+  expect(document.querySelector('[role="dialog"]')?.textContent).toContain('could not be deleted')
+  expect(button('Delete account').disabled).toBe(false)
+  expect(button('Cancel').disabled).toBe(false)
+  expect(assign).not.toHaveBeenCalled()
+})
+
 it('shows a wrong password and stays signed in', async () => {
   auth.deleteUser.mockResolvedValue({ data: null, error: { status: 400, message: 'Invalid password' } })
   await openDialog(['credential'])

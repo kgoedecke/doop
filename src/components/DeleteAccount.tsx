@@ -80,7 +80,12 @@ function DeleteAccountDialog({ askPassword, onClose }: { askPassword: boolean; o
   async function confirm() {
     setDeleting(true)
     setError(null)
-    const { error: failed } = await authClient.deleteUser(askPassword ? { password } : {})
+    /* a request that never got an answer (offline, a dropped connection)
+       rejects rather than returning an error; it must not leave the dialog
+       stuck on Deleting… with every way out disabled */
+    const { error: failed } = await authClient
+      .deleteUser(askPassword ? { password } : {})
+      .catch(() => ({ error: { status: 0, message: '' } }))
     if (failed) {
       setDeleting(false)
       /* without a password better-auth wants a session younger than its
