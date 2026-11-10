@@ -73,6 +73,7 @@ export const actions = {
 
   /* Object */
   frameSelection: 'Frame selection',
+  createComponent: 'Create component',
   group: 'Group selection',
   ungroup: 'Ungroup selection',
   groupName: 'Group',

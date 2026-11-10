@@ -358,6 +358,13 @@
       "when": 1794347436684,
       "tag": "0051_custom_providers",
       "breakpoints": true
+    },
+    {
+      "idx": 52,
+      "version": "7",
+      "when": 1794352711304,
+      "tag": "0052_components",
+      "breakpoints": true
     }
   ]
 }

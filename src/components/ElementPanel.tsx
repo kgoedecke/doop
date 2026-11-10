@@ -43,6 +43,7 @@ import { Button } from './ui/button'
 import { Textarea } from './ui/textarea'
 import { ImageFill } from './ImageFill'
 import { InteractionsPanel } from './InteractionsPanel'
+import { ComponentSection } from './ComponentSection'
 import { Tooltip } from './ui/tooltip'
 import { familyWeights, fontStack, libraryFamilies } from '../../shared/fonts'
 import { WEB_FONTS, webFontStack } from '../../shared/webFonts'
@@ -292,6 +293,7 @@ export function ElementPanel({
         </div>
         <PanelTabPanel value="design">
           <PanelBody>
+            <ComponentSection frame={frame} selector={selector} />
             {info ? (
               <PropertyScrubContext.Provider
                 value={{ onStart: () => scrub('begin'), onEnd: (cancel) => scrub(cancel ? 'cancel' : 'commit') }}

@@ -216,6 +216,7 @@ describe.skipIf(!findBrowserPath())('frame and element context menus', () => {
       'Paste',
       'Duplicate',
       'Hide',
+      'Create component',
       'Copy HTML',
       'Copy selector',
       'Copy link to element',

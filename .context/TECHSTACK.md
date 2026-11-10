@@ -691,6 +691,18 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   re-anchors the root and its replies together and broadcasts each; a drop on the same anchor
   sends nothing, Esc mid-drag puts the pin back. Tests: `commentMove.test.ts`,
   `canvasCommentsRoute.test.ts`, `elementIds.test.ts`, the drag case in `drawingGeometryBrowser.test.ts`.
+- Components (`.context/specs/components.md`): a main is an element marked `data-doop-component`; an
+  instance is full markup marked `data-doop-instance`, so frame consumers need no changes. Every
+  frame write passes `prepareFrameHtml` (`server/components.ts`): `<doop-use>` expands, a changed main
+  becomes a revision, instances reconcile against the revision they were rendered from
+  (`server/componentEngine.ts`) and upgrade. `actions.propagateComponents` carries a change across the
+  canvas. The components pass runs first on every write, then `withLibraryFaces`, so an expanded
+  `<doop-use>` naming a library family gets its face. Agents read and write the short form
+  (`get_frame`, `edit_frame_html`); tools live once in `server/componentTools.ts` for MCP and the
+  resident agent. `src/lib/components.ts` and `ComponentsPanel.tsx` (the Layers panel's Components
+  tab, beside Tokens) / `ComponentSection.tsx` are the editor's side. Stored in `components`
+  (migration `0052_components`). Tests: `components.test.ts`, `componentsEdgeCases.test.ts`,
+  `componentTools.test.ts`, `componentsRoutes.test.ts`, `componentsBrowser.test.ts`.
 - Prototypes (`.context/specs/prototyping.md`): interactions are `data-doop-on` /
   `data-doop-action` (or the JSON `data-doop-interactions`) attributes in frame HTML, parsed by
   `shared/prototype.ts`, whose parser the frame runtime inlines by source. `PrototypePlayer.tsx`

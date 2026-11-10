@@ -30,6 +30,56 @@ import type { Automation, AutomationRun, AutomationTrigger, Schedule, Step } fro
 import type { BillingInterval, Plan } from '../../shared/billing'
 import type { LinkAccess } from '../../shared/canvasRole'
 import type { CommentAnchorInput } from '../../shared/comments'
+import type { ComponentCode, ComponentDef, ComponentProp, PartOverride } from '../../shared/components'
+
+/** What the server says about a component beyond the definition itself. */
+export interface ComponentInfo {
+  id: string
+  name: string
+  signature: string
+  description?: string
+  usage: string
+  instances: number
+  main_missing?: boolean
+  code?: ComponentCode
+  library_update_available?: { from_rev: number; to_rev: number; canvas_id: string }
+  rev: number
+  usage_by_frame: { id: string; name: string; instances: number; approved: boolean }[]
+}
+
+export interface ComponentCandidate {
+  suggested_name: string
+  occurrences: number
+  frames: number
+  elements_each: number
+  sample_text: string
+  example: { frame_id: string; frame_name: string; element: string }
+}
+
+export interface ComponentLibrary {
+  id: string
+  name: string
+  components: { id: string; name: string; signature: string; description?: string; instances: number }[]
+}
+
+export interface ComponentImpact {
+  component: ComponentDef
+  dry_run: boolean
+  impact: {
+    instances: number
+    frames: { id: string; name: string; instances: number; approved: boolean }[]
+    approvals_affected: number
+    overrides_orphaned: { frame_id: string; instance_id: string; parts: string[] }[]
+  }
+}
+
+export interface InstanceChangeInput {
+  instanceId: string
+  props?: Record<string, string>
+  overrides?: Record<string, PartOverride>
+  reset?: boolean | string[]
+  detach?: boolean
+}
 import type { CustomFont } from '../../shared/fonts'
 import type { DesignToken, DesignTokenInput, ThemeRename, TokenEdit, TokenResult } from '../../shared/designTokens'
 
@@ -550,6 +600,68 @@ export const api = {
       finish()
     }
   },
+  components: (canvasId: string) => req<ComponentInfo[]>(`/api/canvases/${canvasId}/components`),
+  componentPreview: (canvasId: string, componentId: string) =>
+    req<{ html: string; width: number; height: number; variants: number }>(
+      `/api/canvases/${canvasId}/components/${componentId}/preview`,
+    ),
+  componentCandidates: (canvasId: string) =>
+    req<ComponentCandidate[]>(`/api/canvases/${canvasId}/component-candidates`),
+  componentLibraries: (canvasId: string) => req<ComponentLibrary[]>(`/api/canvases/${canvasId}/component-libraries`),
+  createComponent: (
+    canvasId: string,
+    body: { name: string; frameId: string; element: string; replaceMatching?: boolean; description?: string },
+  ) =>
+    req<{ component: ComponentDef; converted: { frameId: string; instances: number }[]; frames: Frame[] }>(
+      `/api/canvases/${canvasId}/components`,
+      { method: 'POST', body: JSON.stringify(body) },
+    ),
+  updateComponent: (
+    canvasId: string,
+    componentId: string,
+    body: {
+      name?: string
+      description?: string
+      props?: ComponentProp[]
+      code?: ComponentCode | null
+      dryRun?: boolean
+    },
+  ) =>
+    req<ComponentImpact>(`/api/canvases/${canvasId}/components/${componentId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+    }),
+  deleteComponent: (canvasId: string, componentId: string) =>
+    req<{ deleted: string; instances_detached: number }>(`/api/canvases/${canvasId}/components/${componentId}`, {
+      method: 'DELETE',
+    }),
+  restoreComponent: (canvasId: string, componentId: string, rev: number) =>
+    req<ComponentImpact>(`/api/canvases/${canvasId}/components/${componentId}/restore`, {
+      method: 'POST',
+      body: JSON.stringify({ rev }),
+    }),
+  importComponent: (canvasId: string, sourceCanvasId: string, component: string) =>
+    req<ComponentDef>(`/api/canvases/${canvasId}/components/import`, {
+      method: 'POST',
+      body: JSON.stringify({ sourceCanvasId, component }),
+    }),
+  syncComponent: (canvasId: string, componentId: string) =>
+    req<{ component: ComponentDef; updated: boolean }>(`/api/canvases/${canvasId}/components/${componentId}/sync`, {
+      method: 'POST',
+    }),
+  insertInstance: (
+    frameId: string,
+    body: { component: string; props?: Record<string, string>; target?: string; position?: string },
+  ) =>
+    req<{ frame: Frame; instanceId: string }>(`/api/frames/${frameId}/instances`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  changeInstances: (frameId: string, changes: InstanceChangeInput[]) =>
+    req<{ frame: Frame; missing: string[] }>(`/api/frames/${frameId}/instances`, {
+      method: 'PATCH',
+      body: JSON.stringify({ changes }),
+    }),
   /* several frames' stacking order at once, all or nothing */
   restackFrames: (canvasId: string, frames: StackWrite[]) =>
     req<Frame[]>(`/api/canvases/${canvasId}/stack`, { method: 'PUT', body: JSON.stringify({ frames }) }),

@@ -1,5 +1,7 @@
 import { nanoid } from 'nanoid'
 import { MAX_DECISION_CHARS } from '../shared/designDecisions.ts'
+import { prepareChunk, prepareFrameHtml, referencesComponent } from './components.ts'
+import { COMPONENT_ATTR, type ComponentDef, type ComponentIssue } from '../shared/components.ts'
 import { MAX_PAGES, PageLimitError, store } from './store.ts'
 import * as persist from './db/persist.ts'
 import * as thumbs from './thumbs.ts'
@@ -1547,11 +1549,13 @@ export async function restoreFrameVersion(
   finishStream(frameId, false)
   finishReveal(frameId)
   const prior = priorState(before)
-  const patch = { html: version.html, width: version.width, height: version.height }
+  const prepared = prepareWrite(before.canvasId, frameId, version.html, before.html, actor.name)
+  const patch = { html: prepared.html, width: version.width, height: version.height }
   const frame = store.updateFrame(frameId, patch, actor.name)
   if (!frame) return undefined
   noteHtmlChange(prior, actor, false)
   broadcast(frame.canvasId, { type: 'frame:updated', frame, actor })
+  if (prepared.changed.length) propagateComponents(frame.canvasId, prepared.changed, actor, frameId)
   logActivity(frame.canvasId, actor, `restored “${frame.name}” to an earlier version by ${version.savedBy}`, frame.id)
   touch(frame.canvasId, actor, frame.id)
   return { frame, replaced }
@@ -1702,10 +1706,149 @@ setInterval(() => {
     const partial = r.shown >= total ? frame.html : healPartialHtml(frame.html.slice(0, r.shown))
     broadcast(frame.canvasId, { type: 'frame:updated', frame: { ...frame, html: partial }, actor: r.actor })
   }
-  for (const [frameId, s] of streams) {
-    if (now - s.lastActivity > STREAM_IDLE_MS) finishStream(frameId, false) // agent died mid-stream
-  }
+  expireIdleStreams(now)
 }, TICK_MS)
+
+/** An agent that died mid-stream never sends the last chunk, so its work is settled here: a
+ *  component change skipped while it streamed, the stylesheets, a main written in the stream. */
+export function expireIdleStreams(now = Date.now()) {
+  for (const [frameId, s] of streams) {
+    if (now - s.lastActivity <= STREAM_IDLE_MS) continue
+    const before = store.getFrame(frameId)
+    const prepared = before ? prepareWrite(before.canvasId, frameId, before.html, before.html, s.actor.name) : undefined
+    if (before && prepared && prepared.html !== before.html) {
+      const prior = priorState(before)
+      const frame = store.updateFrame(frameId, { html: prepared.html }, s.actor.name)!
+      noteHtmlChange(prior, s.actor, true)
+      /* viewers get it healed, like every chunk, so a script cut off mid-way never runs */
+      broadcast(frame.canvasId, {
+        type: 'frame:updated',
+        frame: { ...frame, html: healPartialHtml(frame.html) },
+        actor: s.actor,
+      })
+    }
+    finishStream(frameId, false)
+    if (before && prepared?.changed.length) propagateComponents(before.canvasId, prepared.changed, s.actor, frameId)
+  }
+}
+
+/** A deleted frame held a component's main: the component points at another
+ *  frame carrying the marker if there is one, else at no main, so the catalog
+ *  never hands out a frame that is gone. */
+function releaseMains(canvasId: string, frameId: string, actor: Actor) {
+  for (const def of store.getComponents(canvasId)) {
+    if (def.mainFrameId !== frameId) continue
+    const marker = `${COMPONENT_ATTR}="${def.id}"`
+    const elsewhere = store.getCanvas(canvasId)?.frames.find((frame) => frame.html.includes(marker))
+    const released = { ...def, mainFrameId: elsewhere?.id ?? null, updatedAt: Date.now(), updatedBy: actor.name }
+    store.saveComponent(canvasId, released)
+    broadcastComponent(canvasId, released, actor)
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Components: every frame write passes through prepareFrameHtml, and  */
+/* a main that changed reaches every frame that uses it.               */
+/* ------------------------------------------------------------------ */
+
+const componentIssues = new Map<string, ComponentIssue[]>()
+
+/** What the last write to this frame had to say about its components; reading clears it. */
+export function takeComponentIssues(frameId: string): ComponentIssue[] {
+  const issues = componentIssues.get(frameId) ?? []
+  componentIssues.delete(frameId)
+  return issues
+}
+
+function prepareWrite(canvasId: string, frameId: string, html: string, priorHtml: string, by: string) {
+  const canvas = store.getCanvas(canvasId)
+  if (!canvas) return { html, changed: [] as ComponentDef[] }
+  const prepared = prepareFrameHtml(canvas, frameId, html, by, priorHtml)
+  if (prepared.issues.length) componentIssues.set(frameId, prepared.issues)
+  else componentIssues.delete(frameId)
+  /* faces after the components: an expanded <doop-use> may name a library family */
+  return { ...prepared, html: withLibraryFaces(canvasId, prepared.html) }
+}
+
+/** A component's own line in the activity feed. */
+export function logComponent(canvasId: string, actor: Actor, line: string) {
+  logActivity(canvasId, actor, line)
+  touch(canvasId, actor)
+}
+
+export function broadcastComponent(canvasId: string, component: ComponentDef, actor: Actor) {
+  broadcast(canvasId, { type: 'component', id: component.id, component, actor })
+}
+
+export function broadcastComponentDeleted(canvasId: string, id: string, actor: Actor) {
+  broadcast(canvasId, { type: 'component', id, component: null, actor })
+}
+
+export interface PropagationReport {
+  components: string[]
+  frames: { id: string; name: string; approvalLost: boolean }[]
+}
+
+/** A main changed: bring every frame using it up to date, and tell the room. Frames
+ *  mid-stream catch up when their stream ends, since prepareFrameHtml upgrades instances. */
+export function propagateComponents(
+  canvasId: string,
+  changed: ComponentDef[],
+  actor: Actor,
+  originFrameId?: string,
+): PropagationReport {
+  const report: PropagationReport = { components: [], frames: [] }
+  const queue = [...changed]
+  const seen = new Set<string>()
+  const touched = new Map<string, PropagationReport['frames'][number]>()
+  for (let def = queue.shift(); def; def = queue.shift()) {
+    if (seen.has(def.id)) continue
+    seen.add(def.id)
+    report.components.push(def.name)
+    broadcast(canvasId, { type: 'component', id: def.id, component: def, actor })
+    const canvas = store.getCanvas(canvasId)
+    if (!canvas) break
+    for (const frame of [...canvas.frames]) {
+      if (frame.id === originFrameId && !seen.has(`origin:${frame.id}`)) {
+        seen.add(`origin:${frame.id}`)
+        continue
+      }
+      /* a one-shot reveal is only playback of what is already stored, so it updates like any frame */
+      if (streams.has(frame.id) || !referencesComponent(frame.html, def.id)) continue
+      const prepared = prepareFrameHtml(canvas, frame.id, frame.html, actor.name, frame.html)
+      queue.push(...prepared.changed)
+      /* the ordinary write's font pass too: a main that took up a library family
+         brings its face along to every frame it reaches */
+      const html = withLibraryFaces(canvasId, prepared.html)
+      if (html === frame.html) continue
+      const prior = priorState(frame)
+      const wasApproved = frame.approval?.status === 'ready_for_dev'
+      const updated = store.updateFrame(frame.id, { html }, actor.name)
+      if (!updated) continue
+      noteHtmlChange(prior, actor, true)
+      broadcast(canvasId, { type: 'frame:updated', frame: updated, actor })
+      touched.set(frame.id, {
+        id: frame.id,
+        name: frame.name,
+        approvalLost: wasApproved || !!touched.get(frame.id)?.approvalLost,
+      })
+    }
+  }
+  report.frames = [...touched.values()]
+  if (report.frames.length) {
+    const lost = report.frames.filter((frame) => frame.approvalLost).length
+    const count = report.frames.length
+    logActivity(
+      canvasId,
+      actor,
+      `updated ${report.components.map((name) => `“${name}”`).join(', ')} in ${count} frame${count === 1 ? '' : 's'}${
+        lost ? `; ${lost} approved frame${lost === 1 ? '' : 's'} now need${lost === 1 ? 's' : ''} review` : ''
+      }`,
+    )
+    touch(canvasId, actor)
+  }
+  return report
+}
 
 /** A finished document with the @font-face rules for the canvas's library
  *  fonts it uses (shared/fonts.ts) and the stylesheet link for the hosted
@@ -1735,9 +1878,16 @@ export function appendFrameHtml(
      sample) and must never be sniffed on its own */
   const escaped = starting ? looksEscapedHtml(chunk) : (streams.get(frameId)?.escaped ?? false)
   const piece = escaped ? decodeEscapedHtml(chunk) : chunk
-  const joined = opts.start ? piece : before.html + piece
-  /* faces join once the document is whole; mid-stream it is still arriving */
-  const html = opts.done ? withLibraryFaces(before.canvasId, joined) : joined
+  const canvas = store.getCanvas(before.canvasId)
+  const expanded = canvas ? prepareChunk(canvas, piece, opts.start ? '' : before.html) : piece
+  /* the last chunk settles the whole document: a <doop-use> split across
+     chunks, the component stylesheets, a main written in the stream, the
+     faces of the library fonts it names */
+  const joined = opts.start ? expanded : before.html + expanded
+  const prepared = opts.done
+    ? prepareWrite(before.canvasId, frameId, joined, before.html, actor.name)
+    : { html: joined, changed: [] as ComponentDef[] }
+  const html = prepared.html
   const prior = priorState(before)
   const frame = store.updateFrame(frameId, { html }, actor.name)!
   /* the opening chunk replaces the design; every later one extends this burst */
@@ -1760,7 +1910,10 @@ export function appendFrameHtml(
     frame: opts.done ? frame : { ...frame, html: healPartialHtml(frame.html) },
     actor,
   })
-  if (opts.done) finishStream(frameId, true)
+  if (opts.done) {
+    finishStream(frameId, true)
+    if (prepared.changed.length) propagateComponents(frame.canvasId, prepared.changed, actor, frameId)
+  }
 
   touch(frame.canvasId, actor, frameId)
   return frame
@@ -1847,9 +2000,15 @@ export function createFrame(
   },
   actor: Actor,
 ): Frame | undefined {
-  if (input.html !== undefined) input = { ...input, html: withLibraryFaces(canvasId, repairEscapedHtml(input.html)) }
+  if (input.html !== undefined) {
+    /* no id yet: a main marker arriving in a new frame is a copy of that main */
+    const prepared = prepareWrite(canvasId, '', repairEscapedHtml(input.html), '', actor.name)
+    input = { ...input, html: prepared.html }
+  }
   const frame = store.createFrame(canvasId, input, actor.name)
   if (!frame) return undefined
+  const createIssues = takeComponentIssues('')
+  if (createIssues.length) componentIssues.set(frame.id, createIssues)
   bursts.set(frame.id, { actor, lastAt: frame.createdAt })
   if (actor.kind === 'agent' && frame.html.length > 0) {
     /* agent one-shot creation still plays back as a reveal */
@@ -1879,8 +2038,12 @@ export function updateFrame(
 ): Frame | undefined {
   const before = store.getFrame(frameId)
   if (!before) return undefined
-  if (patch.html !== undefined)
-    patch = { ...patch, html: withLibraryFaces(before.canvasId, repairEscapedHtml(patch.html)) }
+  let changedComponents: ComponentDef[] = []
+  if (patch.html !== undefined) {
+    const prepared = prepareWrite(before.canvasId, frameId, repairEscapedHtml(patch.html), before.html, actor.name)
+    patch = { ...patch, html: prepared.html }
+    changedComponents = prepared.changed
+  }
   const prevName = before.name
   const prevHtml = before.html
   const prevHidden = !!before.hidden
@@ -1934,6 +2097,7 @@ export function updateFrame(
     logActivity(frame.canvasId, actor, `${frame.locked ? 'locked' : 'unlocked'} “${frame.name}”`, frame.id)
   }
 
+  if (changedComponents.length) propagateComponents(frame.canvasId, changedComponents, actor, frameId)
   touch(frame.canvasId, actor, frame.id)
   return frame
 }
@@ -2004,6 +2168,7 @@ export function deleteFrame(frameId: string, actor: Actor): Frame | undefined {
   bursts.delete(frameId)
   thumbs.purge(frameId)
   broadcast(frame.canvasId, { type: 'frame:deleted', frameId, actor })
+  releaseMains(frame.canvasId, frameId, actor)
   logActivity(frame.canvasId, actor, `deleted frame “${frame.name}”`, frame.id)
   touch(frame.canvasId, actor, null)
   return frame

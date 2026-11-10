@@ -1,3 +1,4 @@
+import { COMPONENT_ATTR, INSTANCE_ATTR } from '../../shared/components'
 import { ELEMENT_ID_ATTR, newElementId } from '../../shared/elementId'
 
 /**
@@ -22,6 +23,10 @@ export interface LayerNode {
   hidden: boolean
   /** carries `data-doop-locked`: the stage neither picks nor edits it */
   locked: boolean
+  /** a component's main, or an instance of one */
+  component?: 'main' | 'instance'
+  /** which component, for the row to show its name */
+  componentId?: string
   children: LayerNode[]
 }
 
@@ -157,6 +162,11 @@ function defaultNode(el: Element): LayerNode {
     detail: drawingName ? '' : detailOf(el),
     hidden: el.hasAttribute(HIDDEN_ATTR),
     locked: el.hasAttribute(LOCK_ATTR),
+    ...(el.hasAttribute(COMPONENT_ATTR)
+      ? { component: 'main' as const, componentId: el.getAttribute(COMPONENT_ATTR) ?? '' }
+      : el.hasAttribute(INSTANCE_ATTR)
+        ? { component: 'instance' as const, componentId: el.getAttribute(INSTANCE_ATTR) ?? '' }
+        : {}),
   }
   if (el.namespaceURI === 'http://www.w3.org/2000/svg')
     return { ...base, label: drawingName ?? 'svg', kind: 'svg', children: [] }

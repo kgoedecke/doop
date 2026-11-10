@@ -10,7 +10,7 @@ export const panels = {
   layersNoMatch: 'Nothing matches “{query}”.',
   layersSearch: 'Search layers',
   layersRailAria: 'Layers panel',
-  layersTabsAria: 'Layers and tokens',
+  layersTabsAria: 'Layers, components and tokens',
   layersTabTokens: 'Tokens',
   layersRailCount: { one: 'Layers · {count} frame', other: 'Layers · {count} frames' },
   layersDesigning: 'designing…',
