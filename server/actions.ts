@@ -34,6 +34,7 @@ import {
   type TokenResult,
   type TokenType,
 } from '../shared/designTokens.ts'
+import { withPaperRule } from '../shared/framePaper.ts'
 import { emitCanvasEvent } from './events.ts'
 import type {
   Actor,
@@ -1716,7 +1717,7 @@ function withLibraryFaces(canvasId: string, html: string): string {
   const library = fontsForCanvas(canvas)
   /* tokens first: a family named only through a font token is then in the
      document for the font scan to find */
-  const withTokens = withTokenBlock(html, canvas.tokens ?? [], canvas.tokenThemes ?? [])
+  const withTokens = withTokenBlock(withPaperRule(html), canvas.tokens ?? [], canvas.tokenThemes ?? [])
   return withWebFontLinks(withFontFaces(withTokens, library), library)
 }
 

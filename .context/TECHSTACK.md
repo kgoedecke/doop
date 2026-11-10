@@ -451,6 +451,18 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   custom properties, as one `<style data-doop-carried>`, every rule scoped through a
   `data-doop-carried-scope` mark on the moved root so the destination's own layers keep their
   look); copy/paste across frames carries it the same way. Tests: `layerTransfer.test.ts`, `layersDragAcross.test.tsx`, `styleCarry.test.ts`.
+- Frame paper (`shared/framePaper.ts`): the Frame tool's empty document is white through a
+  `<style data-doop-paper>` rule in its head, `:where(body)` inside the cascade layer
+  `doop-paper`: no specificity and the earliest layer, so a design that styles its own body
+  wins, layered (Tailwind) or not. It used to be an inline `background` on the body, which beat
+  the design's stylesheet: a dark design put into a drawn frame sat on white, and the white
+  showed as a light line along the frame's edge on a dark canvas. `withPaperRule` turns that
+  inline white into the rule in documents saved before, recognised by the Frame tool's exact
+  `html` and `body` style pair (an inline white a design chose is never touched, and no CSS is
+  judged), wherever `withFontFaces` runs (`actions` on every write, `FrameView`'s save path),
+  so a frame is healed on its next save. Tests: `framePaper.test.ts`,
+  `framePaperBrowser.test.ts` (the cascade in Chromium, layered designs included), the paper
+  case in `drawing.test.ts`.
 - The pen snaps to the nearest anchor on its unfinished path within eight screen pixels,
   highlights the target, and previews a closed curve when approaching the first anchor.
   Alt bypasses snapping. Double-clicking a native path opens `PathEditor.tsx`: anchors and
