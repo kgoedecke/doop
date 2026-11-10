@@ -141,6 +141,8 @@ export const FRAME_TEXT_RUNTIME = `
         partial.push(node.getAttribute('data-doop-id'))
       }
     })
+    var host = range.commonAncestorContainer
+    if (host.nodeType !== 1) host = host.parentElement
     var fragment = range.cloneContents()
     var walker = document.createTreeWalker(fragment, NodeFilter.SHOW_TEXT)
     var nodes = []
@@ -157,7 +159,18 @@ export const FRAME_TEXT_RUNTIME = `
         node.parentNode.insertBefore(run, node)
         run.appendChild(node)
       }
-      patchStyle(run.style, styles)
+      // The copy is detached, so no ancestor selector matches it: a bare copy
+      // of the run's chain, put where the selection sits for the length of
+      // the check, stands in for it when rules are matched.
+      var standIn = run.cloneNode(false)
+      var chain = standIn
+      for (var up = run.parentNode; up && up !== fragment; up = up.parentNode) {
+        var shell = up.cloneNode(false)
+        shell.appendChild(chain)
+        chain = shell
+      }
+      host.appendChild(chain)
+      try { patchStyle(run, styles, null, standIn) } finally { host.removeChild(chain) }
       if (!run.getAttribute('style')) run.removeAttribute('style')
       run.setAttribute('data-doop-run', '')
     })
@@ -241,7 +254,7 @@ export const FRAME_TEXT_RUNTIME = `
         run.appendChild(node)
         created.push(run)
       } else before.push({ el: run, cssText: run.style.cssText })
-      patchStyle(run.style, styles)
+      patchStyle(run, styles)
       if (!run.getAttribute('style')) run.removeAttribute('style')
     })
     if (nodes.length) {
