@@ -243,6 +243,14 @@ describe.skipIf(!findBrowserPath())('rich text editing', { timeout: 30_000 }, ()
     expect(await frame.$('#text ul')).toBeNull()
   })
 
+  it('leaves a marker that takes in locked text alone', async () => {
+    await render('<p id="text" style="margin:0;font:24px Arial">One<br><span data-doop-locked>1</span><i>.</i></p>')
+    await caretAtEnd('#text i')
+    await page.keyboard.type(' x')
+    expect(await frame.$('#text ol')).toBeNull()
+    expect(await frame.$eval('#text [data-doop-locked]', (el) => el.textContent)).toBe('1')
+  })
+
   it('leaves a marker in a text root inside a list item as text', async () => {
     await render(
       '<ul style="margin:0;padding:0;list-style:none"><li><p id="text" style="margin:0;font:24px Arial">One</p></li></ul>',

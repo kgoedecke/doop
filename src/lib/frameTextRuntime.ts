@@ -390,7 +390,7 @@ export const FRAME_TEXT_RUNTIME = `
     if (node.parentElement.closest('li')) return
     var marker = lineBefore(node, selection.anchorOffset)
     var match = marker && /^\\s*(-|\\*|1\\.)[ \\u00a0]$/.exec(marker.toString())
-    if (!match) return
+    if (!match || !validTextRange(marker)) return
     // formatText saves the list at once: the typing save would only repeat it.
     ev.stopImmediatePropagation()
     selection.removeAllRanges()
