@@ -1066,8 +1066,12 @@ export function detachedMarkup(el: Element, def: Pick<ComponentDef, 'id' | 'rev'
 const detachedKey = (def: Pick<ComponentDef, 'id' | 'rev'>) => `${def.id}.${def.rev}`
 
 /** The component's rules at the revision that was detached, for elements that no longer follow it.
- *  One copy per revision per frame, however many instances were cut loose. */
-export function withDetachedCss(html: string, def: Pick<ComponentDef, 'id' | 'rev' | 'css'>): string {
+ *  One copy per revision per frame, however many instances were cut loose. The fonts and
+ *  frameworks it brought stay too, as the frame's own tags: `syncComponentHead` drops the
+ *  component's marked copies once nothing linked uses them. */
+export function withDetachedCss(html: string, def: Pick<ComponentDef, 'id' | 'rev' | 'css' | 'head'>): string {
+  const own = def.head.filter((tag) => !html.includes(tag))
+  if (own.length) html = insertIntoHead(html, own.join('\n'))
   const key = detachedKey(def)
   if (!def.css.trim() || html.includes(`${DETACHED_CSS_ATTR}="${key}"`)) return html
   const css = def.css

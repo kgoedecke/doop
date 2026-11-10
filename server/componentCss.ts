@@ -401,8 +401,10 @@ export function extractComponentCss(
   /* inherited and custom properties land on the instance root, so its text
      looks the same wherever it is placed */
   const rootStyle = [...new Set(inherited)]
+  /* the main's own style attributes travel with its markup, so what they name has to come along too */
+  const inlineStyle = serializedAttrs(root)
   const wanted = new Set<string>()
-  const queue = cssVarsIn(`${ruleText} ${rootStyle.join(';')} ${serializedAttrs(root)}`)
+  const queue = cssVarsIn(`${ruleText} ${rootStyle.join(';')} ${inlineStyle}`)
   for (let name = queue.pop(); name; name = queue.pop()) {
     if (wanted.has(name)) continue
     wanted.add(name)
@@ -415,7 +417,7 @@ export function extractComponentCss(
   const rootDeclarations = [...vars, ...rootStyle]
 
   /* @keyframes and @font-face the kept rules name, wherever they were declared */
-  const fonts = usedFonts(`${ruleText} ${rootStyle.join(';')}`)
+  const fonts = usedFonts(`${ruleText} ${rootStyle.join(';')} ${inlineStyle}`)
   const atomics: string[] = []
   const scopedAtomics: string[] = []
   const keyframes: string[] = []
@@ -433,7 +435,8 @@ export function extractComponentCss(
       }
       if (node.name === 'keyframes') {
         const name = node.prelude.replace(/^@\S+\s*/, '').trim()
-        if (new RegExp(`(^|[\\s,:])${name.replace(/[^\w-]/g, '\\$&')}([\\s,;}]|$)`, 'm').test(ruleText)) {
+        const named = new RegExp(`(^|[\\s,:])${name.replace(/[^\w-]/g, '\\$&')}([\\s,;}]|$)`, 'm')
+        if (named.test(ruleText)) {
           /* frames share one namespace for these: another component's `pulse` must not replace this one's */
           const own = /^[\w-]+$/.test(name)
           if (own) keyframes.push(name)
@@ -441,6 +444,11 @@ export function extractComponentCss(
             node.text,
             own ? `${node.prelude.replace(name, ownKeyframes(name, componentId))}{${node.body}}` : node.text,
           )
+        }
+        /* an inline animation keeps the name it was written with: the markup is not rewritten */
+        if (named.test(inlineStyle)) {
+          if (!atomics.includes(node.text)) atomics.push(node.text)
+          if (!scopedAtomics.includes(node.text)) scopedAtomics.push(node.text)
         }
       }
       if (node.name === 'font-face') {

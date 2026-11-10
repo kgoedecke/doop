@@ -567,4 +567,83 @@ describe('components edge cases', () => {
     actions.expireIdleStreams(Date.now() + 60_000)
     expect(store.getFrame(page.id)!.html).toContain('Fresh')
   })
+  it('carries the fonts and keyframes a main names in its own style attributes', () => {
+    const css = '@font-face { font-family: Brand; src: url(/brand.woff2) } @keyframes pulse { to { opacity: 0 } }'
+    const { def } = makeComponent(
+      canvasId,
+      'Badge',
+      (id) => `<span ${COMPONENT_ATTR}="${id}" style="font-family: Brand; animation: pulse 1s infinite">New</span>`,
+      css,
+    )
+    const saved = store.getComponents(canvasId).find((candidate) => candidate.id === def.id)!
+    expect(saved.css).toContain('@font-face')
+    /* the instance's markup still says `pulse`, so that is the name its keyframes keep */
+    expect(saved.css).toMatch(/@keyframes pulse\s*\{/)
+    const page = actions.createFrame(canvasId, { name: 'Page', html: '' }, actor)!
+    actions.updateFrame(page.id, { html: doc(`<doop-use component="${def.id}"></doop-use>`) }, actor)
+    expect(html(page.id)).toContain('font-family: Brand; src: url(/brand.woff2)')
+    expect(html(page.id)).toMatch(/@keyframes pulse\s*\{/)
+  })
+
+  it('a detached instance keeps the stylesheet links its component brought', () => {
+    const link = '<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter">'
+    const { def } = makeComponent(
+      canvasId,
+      'Pill',
+      (id) => `<div class="pill" ${COMPONENT_ATTR}="${id}">Hi</div>`,
+      '.pill { font-family: Inter }',
+      [],
+      link,
+    )
+    const page = actions.createFrame(canvasId, { name: 'Page', html: '' }, actor)!
+    actions.updateFrame(page.id, { html: doc(`<doop-use component="${def.id}"></doop-use>`) }, actor)
+    expect(html(page.id)).toContain(`<link ${HEAD_ATTR} rel="stylesheet"`)
+    changeInstances(canvasId, page.id, [{ instanceId: instanceIdOf(html(page.id), def.id), detach: true }], actor)
+    expect(html(page.id)).toContain(link)
+    expect(html(page.id)).not.toContain(HEAD_ATTR)
+    /* a later write must not sweep it away */
+    actions.updateFrame(page.id, { html: `${html(page.id)} ` }, actor)
+    expect(html(page.id).match(/<link/g)).toHaveLength(1)
+  })
+
+  it('refuses to import over a component a canvas copy shares, and writes nothing', () => {
+    const { def } = makeComponent(
+      canvasId,
+      'Card',
+      (id) => `<div class="card" ${COMPONENT_ATTR}="${id}">Original</div>`,
+      '.card { color: red }',
+    )
+    /* a copy of this canvas: same component id, its own main, edited there */
+    const copy = store.createCanvas('copy').id
+    store.saveComponent(copy, { ...def, mainFrameId: null })
+    const edited = actions.createFrame(copy, { name: 'Card main', html: '' }, actor)!
+    actions.updateFrame(
+      edited.id,
+      { html: doc(`<div class="card" ${COMPONENT_ATTR}="${def.id}">Edited</div>`, '.card { color: blue }') },
+      actor,
+    )
+    const before = store.getComponents(canvasId).find((candidate) => candidate.id === def.id)!
+    expect(() => importComponent(canvasId, copy, def.id, actor)).toThrow(/already has its own component/)
+    expect(store.getComponents(canvasId).find((candidate) => candidate.id === def.id)).toEqual(before)
+  })
+
+  it('tells the room when a main only moves', () => {
+    const sent: { type: string; component?: { mainFrameId: string | null } | null }[] = []
+    actions.wire(
+      (_canvasId, msg) => sent.push(msg as (typeof sent)[number]),
+      () => {},
+    )
+    try {
+      const { def, frame } = makeComponent(canvasId, 'Tag', (id) => `<i class="tag" ${COMPONENT_ATTR}="${id}">t</i>`)
+      sent.length = 0
+      actions.updateFrame(frame.id, { html: doc('<p>no main here now</p>') }, actor)
+      expect(sent.find((msg) => msg.type === 'component')?.component?.mainFrameId).toBeNull()
+      expect(store.getComponents(canvasId).find((candidate) => candidate.id === def.id)!.mainFrameId).toBeNull()
+    } finally {
+      actions.wire(
+        () => {},
+        () => {},
+      )
+    }
+  })
 })

@@ -1075,9 +1075,32 @@ export function importComponent(
 ): ComponentDef {
   const origin = findComponent(sourceCanvasId, ref)
   if (!origin) fail(`no component “${ref}” on canvas ${sourceCanvasId}`)
+  refuseSiblings(targetCanvasId, sourceCanvasId, origin)
   const ctxIds = new Set<string>()
   importDependencies(targetCanvasId, sourceCanvasId, origin, actor, ctxIds)
   return requireComponent(targetCanvasId, origin.id)
+}
+
+/** A canvas and its copies share component ids. The same id here, not pulled from this library,
+ *  is this canvas's own component: importing over it would replace its main and every instance.
+ *  Checked for the whole set before anything is written, so a refusal leaves nothing half imported. */
+function refuseSiblings(targetCanvasId: string, sourceCanvasId: string, origin: ComponentDef) {
+  const local = store.getComponents(targetCanvasId)
+  const seen = new Set<string>()
+  const stack = [origin]
+  for (let def = stack.pop(); def; def = stack.pop()) {
+    if (seen.has(def.id)) continue
+    seen.add(def.id)
+    const existing = local.find((candidate) => candidate.id === def!.id)
+    if (existing && existing.source?.canvasId !== sourceCanvasId)
+      fail(
+        `this canvas already has its own component “${existing.name}” (${existing.id}), shared with canvas ${sourceCanvasId} because one was copied from the other; importing would replace it, so edit it here instead`,
+      )
+    for (const match of def.template.matchAll(/component="([^"]+)"/g)) {
+      const dependency = findComponent(sourceCanvasId, match[1]!)
+      if (dependency) stack.push(dependency)
+    }
+  }
 }
 
 function importDependencies(
