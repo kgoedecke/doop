@@ -50,9 +50,9 @@ export type NativeItemState = [id: string, enabled: boolean, checked: boolean | 
 /* the shell's predefined Undo and Redo stand for these: they are what makes
    ⌘Z reach a text field, and the canvas takes the key before the menu does */
 const SHELL_OWNED = new Set(['undo', 'redo'])
-/* the general rows (the ⌘K palette, the agent) open the Help menu, as the
-   canvas menu's search sits above its submenus */
-const HELP_LEAD = ['palette', 'ask-agent']
+/* the ⌘K palette opens the Help menu, as the canvas menu's search sits above
+   its submenus */
+const HELP_LEAD = ['palette']
 
 const PUNCTUATION: Record<string, string> = {
   '[': 'BracketLeft',

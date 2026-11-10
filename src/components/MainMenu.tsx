@@ -14,7 +14,7 @@ import {
   DropdownMenuTrigger,
 } from './ui/dropdown-menu'
 import { MenuHint } from './ui/menu'
-import { SearchIcon, SparkIcon } from './ui/icons'
+import { FolderIcon, SearchIcon } from './ui/icons'
 
 /* The rows of one menu, a separator between each section. Rows are read as
    the menu opens (Radix mounts the content then), so what is enabled or
@@ -57,8 +57,8 @@ function ActionRow({ action, label, icon }: { action: CanvasAction; label: strin
 }
 
 /**
- * The canvas's main menu, off a button at the bar's left: the action search
- * first, then File, Edit, View, Object, Text, Arrange and Help, each a
+ * The canvas's main menu, off a button at the bar's left: the way back to
+ * the canvases and the action search first, then File, Edit, View, Object, Text, Arrange and Help, each a
  * submenu of the registry's commands with their chords.
  */
 export function MainMenu({ trigger }: { trigger: ReactNode }) {
@@ -68,18 +68,18 @@ export function MainMenu({ trigger }: { trigger: ReactNode }) {
     <DropdownMenu modal={false}>
       <DropdownMenuTrigger asChild>{trigger}</DropdownMenuTrigger>
       <DropdownMenuContent align="start" width="md">
+        {isEnabled(general('go-to-files')) && (
+          <ActionRow
+            action={general('go-to-files')}
+            label={t('actions.goToFiles')}
+            icon={<FolderIcon width={14} height={14} aria-hidden className="flex-none text-ink-faint" />}
+          />
+        )}
         <ActionRow
           action={general('palette')}
           label={t('actions.palette')}
           icon={<SearchIcon width={14} height={14} aria-hidden className="flex-none text-ink-faint" />}
         />
-        {isEnabled(general('ask-agent')) && (
-          <ActionRow
-            action={general('ask-agent')}
-            label={t('actions.askAgent')}
-            icon={<SparkIcon width={14} height={14} aria-hidden className="flex-none text-ink-faint" />}
-          />
-        )}
         <DropdownMenuSeparator />
         {MENUS.map((menu) => (
           <Fragment key={menu.id}>
