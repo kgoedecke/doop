@@ -385,15 +385,14 @@ export const FRAME_TEXT_RUNTIME = `
     var selection = getSelection()
     if (!selection.rangeCount || !selection.isCollapsed) return
     var node = selection.anchorNode
-    var offset = selection.anchorOffset
     if (!node || node.nodeType !== 3 || !activeEl.contains(node)) return
-    var item = node.parentElement && node.parentElement.closest('li')
-    if (item && activeEl.contains(item)) return
-    var match = /^(-|\\*|1\\.)[ \\u00a0]$/.exec(node.nodeValue.slice(0, offset))
-    if (!match || !startsLine(node)) return
-    var marker = document.createRange()
-    marker.setStart(node, 0)
-    marker.setEnd(node, offset)
+    // A text root inside a list item (<li><p>…</p></li>) is in a list too.
+    if (node.parentElement.closest('li')) return
+    var marker = lineBefore(node, selection.anchorOffset)
+    var match = marker && /^\\s*(-|\\*|1\\.)[ \\u00a0]$/.exec(marker.toString())
+    if (!match) return
+    // formatText saves the list at once: the typing save would only repeat it.
+    ev.stopImmediatePropagation()
     selection.removeAllRanges()
     selection.addRange(marker)
     document.execCommand('delete', false, null)
@@ -401,19 +400,48 @@ export const FRAME_TEXT_RUNTIME = `
     formatText(LIST_MARKERS[match[1]])
   })
 
-  /* Whether nothing is drawn before a text node on its line: walking back to
-     the text root, only empty text may come before it, and a line break or
-     block ends the walk. */
-  function startsLine(node) {
-    for (var n = node; n && n !== activeEl; n = n.parentNode) {
-      for (var prev = n.previousSibling; prev; prev = prev.previousSibling) {
-        if (prev.nodeType === 3 && !prev.nodeValue.trim()) continue
-        if (prev.nodeType === 1 && (prev.tagName === 'BR' || getComputedStyle(prev).display !== 'inline')) return true
-        return false
-      }
-      if (n.parentNode !== activeEl && getComputedStyle(n.parentNode).display !== 'inline') return true
+  /* The range from the start of the caret's line to the caret, across runs
+     (a marker typed half bold is still a marker), or null when more than a
+     marker's few characters, or anything not text, is drawn before it on the
+     line. The line starts at the text root, a <br> or a block's edge; an
+     inline-block or a replaced element shares the line. */
+  function lineBefore(node, offset) {
+    var range = document.createRange()
+    range.setStart(node, 0)
+    range.setEnd(node, offset)
+    var text = node.nodeValue.slice(0, offset)
+    var REPLACED = /^(img|svg|video|canvas|input|textarea|select|button|iframe|object|embed|math)$/
+    function isBlock(el) {
+      var display = getComputedStyle(el).display
+      return display.indexOf('inline') !== 0 && display !== 'contents' && display !== 'none'
     }
-    return true
+    // Scans a node before the caret from its end: 'line' at a line start, 'more' to go on, 'drawn' otherwise.
+    function scan(n) {
+      if (n.nodeType === 3) {
+        text = n.nodeValue + text
+        range.setStart(n, 0)
+        return text.trim().length > 3 ? 'drawn' : 'more'
+      }
+      if (n.nodeType !== 1) return 'more'
+      if (n.localName === 'br' || isBlock(n)) return 'line'
+      var display = getComputedStyle(n).display
+      if (display === 'none') return 'more'
+      if ((display !== 'inline' && display !== 'contents') || REPLACED.test(n.localName)) return 'drawn'
+      for (var child = n.lastChild; child; child = child.previousSibling) {
+        var found = scan(child)
+        if (found !== 'more') return found
+      }
+      return 'more'
+    }
+    for (var cur = node; cur !== activeEl; cur = cur.parentNode) {
+      for (var prev = cur.previousSibling; prev; prev = prev.previousSibling) {
+        var found = scan(prev)
+        if (found === 'line') return range
+        if (found === 'drawn') return null
+      }
+      if (cur.parentNode !== activeEl && isBlock(cur.parentNode)) return range
+    }
+    return range
   }
 
   document.addEventListener('selectionchange', postTextState)
