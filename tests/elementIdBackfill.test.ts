@@ -24,6 +24,7 @@ vi.mock('../server/db/persist.ts', () => ({
   saveDecision: () => {},
   saveProposal: () => {},
   saveFrame: () => {},
+  insertCanvas: async () => {},
   saveCanvas: () => {},
   deleteFrame: (id: string) => {
     writes.push(`delete:${id}`)

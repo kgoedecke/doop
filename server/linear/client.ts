@@ -1,5 +1,5 @@
 import { env } from '../env.ts'
-import { z } from 'zod'
+import { z } from 'zod/v4'
 
 export class LinearError extends Error {
   constructor(
@@ -11,11 +11,15 @@ export class LinearError extends Error {
 }
 
 /** Never forward upstream error text: it can contain request or credential details. */
+interface ResponseSchema<T> {
+  safeParse(value: unknown): { success: true; data: T } | { success: false }
+}
+
 export async function linearQuery<T>(
   token: string,
   query: string,
   variables: Record<string, unknown>,
-  schema: z.ZodType<T>,
+  schema: ResponseSchema<T>,
 ): Promise<T> {
   let response: Response
   try {

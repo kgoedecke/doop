@@ -10,6 +10,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
  */
 
 vi.mock('../server/db/persist.ts', () => ({
+  insertCanvas: async () => {},
   saveCanvas: () => {},
   saveFrame: () => {},
   saveTask: () => {},
@@ -32,7 +33,7 @@ async function connect() {
   const { store } = await import('../server/store.ts')
   /* upload_asset resolves its canvas through canAccessCanvas, so the owner
      must actually own a canvas for the call to reach the limiter */
-  const canvas = store.createCanvas('rate limits', OWNER_ID)
+  const canvas = await store.createCanvas('rate limits', OWNER_ID)
   const server = buildMcpServer('Test Owner', OWNER_ID)
   const client = new Client({ name: 'doop-rate-limit-test', version: '1.0.0' })
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair()

@@ -1,5 +1,7 @@
 import express from 'express'
-import { store } from './store.ts'
+import { CanvasCreationUncertainError, store } from './store.ts'
+import { PrivateResourceError } from './privateResources.ts'
+import { PrivateReferenceError } from '../shared/privateReferences.ts'
 import { getUserName } from './auth.ts'
 import { isCommunityCategory, type Canvas, type CommunityItem } from '../shared/types.ts'
 
@@ -9,9 +11,10 @@ import { isCommunityCategory, type Canvas, type CommunityItem } from '../shared/
  * signed in can browse the listings and copy one into their own account.
  *
  * Deliberately NOT a change to canAccessCanvas: a published canvas is still
- * private to its collaborators. The gallery hands out frame ids (which the
- * public /i/ image pipeline already renders for anyone holding one) and
- * fresh copies — never the source canvas, its HTML, or a seat in its room.
+ * private to its collaborators. Listing a frame ID grants no media access:
+ * /i/ still requires a current session with source-canvas access, and copying
+ * private files rechecks that access. Managed company canvases cannot publish.
+ * Public private-media previews or publication capabilities are unsupported.
  */
 export const communityRouter = express.Router()
 
@@ -78,6 +81,10 @@ communityRouter.post('/:id/copy', async (req, res) => {
     store.recordCommunityCopy(source.id)
     res.json(copy)
   } catch (error) {
+    if (error instanceof CanvasCreationUncertainError)
+      return res.status(503).json({ error: error.message, candidateId: error.canvasId, outcome: 'unknown' })
+    if (error instanceof PrivateResourceError) return res.status(403).json({ error: error.message })
+    if (error instanceof PrivateReferenceError) return res.status(400).json({ error: error.message })
     console.error('[community] copy failed', error)
     res.status(500).json({ error: 'could not copy this design' })
   }

@@ -3,6 +3,7 @@
   <body>
     <script type="module">
       import { rasterizeFrame } from '/src/lib/frameRaster.ts'
+      import { fixturePrivateMaterializer } from '/tests/privateMediaAdapter.ts'
       import { FRAME_BOOTSTRAP } from '/src/lib/frameRuntime.ts'
       import { registerFrameWindow, requestFrame } from '/src/lib/frameBridge.ts'
 
@@ -82,7 +83,7 @@
           height: 300,
           html,
         }
-        const blob = await rasterizeFrame(frame, { scale, type, clip })
+        const blob = await rasterizeFrame(frame, { scale, type, clip, materialize: fixturePrivateMaterializer })
         const bitmap = await createImageBitmap(blob)
         const canvas = document.createElement('canvas')
         canvas.width = bitmap.width

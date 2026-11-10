@@ -22,6 +22,7 @@ const CANVAS = 'canvas-1'
 beforeAll(async () => {
   const { migrate } = await import('drizzle-orm/pglite/migrator')
   await migrate(db as unknown as ReturnType<typeof pgliteDrizzle>, { migrationsFolder: 'server/db/migrations' })
+  await persist.insertCanvas({ id: CANVAS, name: 'Hand-back persistence', frames: [], createdAt: 0, updatedAt: 0 })
   actions.wire(
     () => {},
     () => {},

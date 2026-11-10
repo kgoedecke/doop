@@ -3,6 +3,7 @@ import type { Frame } from '../../shared/types'
 import type { Interaction, ProtoTransition } from '../../shared/prototype'
 import { useStore } from '../lib/store'
 import { FRAME_BOOTSTRAP } from '../lib/frameRuntime'
+import { usePrivateDocument } from '../lib/privateMaterialization'
 import {
   fitScale,
   historyStep,
@@ -657,6 +658,15 @@ function ProtoScreen({
   const [shown, setShown] = useState(false)
   const latest = useRef({ onReady, onMessage, register, takeFocus })
   const t = useT()
+  const { prepared, error, epoch } = usePrivateDocument(
+    frame?.html ?? '',
+    frame ? { kind: 'frame', id: frame.id, canvasId: frame.canvasId } : null,
+  )
+  useLayoutEffect(() => {
+    // oxlint-disable-next-line react/set-state-in-effect -- a replaced external iframe must boot and acknowledge its current document again
+    setBooted(false)
+    setShown(false)
+  }, [epoch, frame?.id, frame?.canvasId, error])
   useLayoutEffect(() => {
     latest.current = { onReady, onMessage, register, takeFocus }
   })
@@ -692,12 +702,21 @@ function ProtoScreen({
       window.removeEventListener('message', onMsg)
       latest.current.register(key, null)
     }
-  }, [entry.key])
+  }, [entry.key, epoch, frame?.id, frame?.canvasId, error])
 
-  const html = frame?.html ?? ''
   useEffect(() => {
-    if (booted) iframeRef.current?.contentWindow?.postMessage({ type: 'doop:html', html, reqId: 'proto' }, '*')
-  }, [booted, html])
+    if (booted && prepared)
+      iframeRef.current?.contentWindow?.postMessage(
+        {
+          type: 'doop:html',
+          html: prepared.html,
+          replacements: prepared.replacements,
+          privateMedia: prepared.privateMedia,
+          reqId: 'proto',
+        },
+        '*',
+      )
+  }, [booted, prepared])
 
   useEffect(() => {
     const iframe = iframeRef.current
@@ -716,16 +735,24 @@ function ProtoScreen({
   }, [shown, interactive])
 
   if (!frame || !layout) return <div className="text-body text-code-ink/70">{t('panels.protoDeleted')}</div>
+  if (error)
+    return (
+      <div role="status" className="text-body text-accent-ink">
+        {error.message}
+      </div>
+    )
 
   const { width, height, scale } = layout
   const box: CSSProperties = { width: Math.round(width * scale), height: Math.round(height * scale) }
   return (
     <div className="relative overflow-hidden bg-white" style={box}>
       <iframe
+        key={`${epoch}:${frame.canvasId}:${frame.id}`}
         ref={iframeRef}
         className="block border-none bg-white"
         title={frame.name}
         data-doop-proto-frame={frame.id}
+        data-doop-private-preview={prepared?.privateMedia ? '' : undefined}
         sandbox="allow-scripts"
         srcDoc={FRAME_BOOTSTRAP}
         style={{ width, height, transform: `scale(${scale})`, transformOrigin: '0 0' }}

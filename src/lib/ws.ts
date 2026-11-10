@@ -3,6 +3,7 @@ import { isPeerViewport } from '../../shared/viewport'
 import { roleAllows } from '../../shared/canvasRole'
 import { getIdentity } from './identity'
 import { useStore } from './store'
+import { invalidatePrivateMedia, observePrivateCanvasAccess } from './privateMaterialization'
 
 let socket: WebSocket | null = null
 let currentCanvasId: string | null = null
@@ -62,6 +63,7 @@ function open() {
   s.onclose = (ev) => {
     /* a superseded socket must not trigger reconnects */
     if (socket !== s) return
+    if ([4401, 4403, 4404].includes(ev.code)) invalidatePrivateMedia(canvasId)
     useStore.getState().setConnected(false)
     if (joinedAsGuest && (ev.code === 4401 || ev.code === 4403)) {
       /* a guest may not look (any more): App swaps in the sign-in form at
@@ -111,6 +113,7 @@ function handle(msg: ServerMessage) {
       {
         const firstJoin = s.canvas?.id !== msg.canvas.id
         s.setCanvas(msg.canvas)
+        observePrivateCanvasAccess(msg.canvas.id)
         /* drops a tool the role does not allow, e.g. on a rejoin after the
          owner turned the link to view-only */
         s.setRole(msg.canvas.role ?? 'edit')
@@ -199,6 +202,7 @@ function handle(msg: ServerMessage) {
       s.upsertProposal(msg.proposal)
       break
     case 'canvas:deleted':
+      if (currentCanvasId) invalidatePrivateMedia(currentCanvasId)
       /* the room only receives this for the canvas it's viewing */
       location.href = '/'
       break

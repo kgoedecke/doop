@@ -9,8 +9,10 @@ let root: string
 
 beforeEach(() => {
   vi.resetModules()
-  vi.doMock('../server/env.ts', () => ({
+  vi.doMock('../server/env.ts', async (original) => ({
+    ...(await original<typeof import('../server/env.ts')>()),
     env: {
+      ...(await original<typeof import('../server/env.ts')>()).env,
       get CHROME_PATH() {
         return config.chromePath
       },

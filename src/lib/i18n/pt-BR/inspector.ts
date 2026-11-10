@@ -13,8 +13,7 @@ export const inspector: Catalog['inspector'] = {
   downloadJpg: 'Baixar como JPG (2×)',
   copyPngTitle: 'Copiar a imagem (2×) para colar em qualquer lugar',
   copyPng: 'Copiar como PNG',
-  copyImageUrlTitle:
-    'URL pública da imagem — sempre mostra o design atual; cole como og:image ou imagem de destaque de um blog',
+  copyImageUrlTitle: 'URL da imagem para pessoas conectadas com acesso ao canvas; mostra o design salvo atual',
   copyImageUrl: 'Copiar URL da imagem',
   pinReferenceTitle: 'Adicionar à memória de design — será usado como referência',
   pinReference: 'Fixar como referência',

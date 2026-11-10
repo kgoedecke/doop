@@ -1,5 +1,5 @@
 import type express from 'express'
-import type { z } from 'zod'
+import type { z } from 'zod/v4'
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import type { Actor, Canvas, Frame } from '../shared/types.ts'
 import type { CanvasRole } from '../shared/canvasRole.ts'

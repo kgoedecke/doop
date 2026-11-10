@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 vi.mock('../server/db/persist.ts', () => ({
   saveFrame: () => {},
   saveFrameNow: async () => {},
+  insertCanvas: async () => {},
   saveCanvas: () => {},
   saveTask: () => {},
   saveFeedback: () => {},
@@ -38,12 +39,12 @@ const call = (name: string, input: unknown) => ({ type: 'tool_use' as const, id:
 
 let canvasId: string
 
-beforeEach(() => {
+beforeEach(async () => {
   actions.wire(
     () => {},
     () => {},
   )
-  canvasId = store.createCanvas('tokens', 'kevin').id
+  canvasId = (await store.createCanvas('tokens', 'kevin')).id
 })
 
 describe('a run that only writes tokens has delivered its card', () => {

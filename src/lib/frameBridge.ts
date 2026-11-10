@@ -189,13 +189,16 @@ export function noteFrameDocument(frameId: string, html: string | null) {
   if (html === null) shownDocuments.delete(frameId)
   else shownDocuments.set(frameId, html)
   documentListeners.get(frameId)?.forEach((cb) => cb())
+  // Runtime render notifications can precede private preparation's parent-side
+  // acknowledgement. Metadata consumers reread only after that document lands.
+  if (html !== null) changeListeners.get(frameId)?.forEach((cb) => cb())
 }
 
 /** Resolve true once the frame's runtime shows `html`, false if it does not
  *  within the reply timeout. The store can run ahead of the frame's
  *  throttled render, and a hit test on the older document would name its
  *  elements, not the ones `html` has in those places. */
-export function frameShows(frameId: string, html: string): Promise<boolean> {
+export function frameShows(frameId: string, html: string, timeoutMs = REPLY_TIMEOUT_MS): Promise<boolean> {
   if (shownDocuments.get(frameId) === html) return Promise.resolve(true)
   return new Promise((resolve) => {
     const set = documentListeners.get(frameId) ?? new Set()
@@ -209,7 +212,7 @@ export function frameShows(frameId: string, html: string): Promise<boolean> {
     const check = () => {
       if (shownDocuments.get(frameId) === html) done(true)
     }
-    const timer = window.setTimeout(() => done(false), REPLY_TIMEOUT_MS)
+    const timer = window.setTimeout(() => done(false), timeoutMs)
     set.add(check)
   })
 }

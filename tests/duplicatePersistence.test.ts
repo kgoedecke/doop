@@ -70,9 +70,10 @@ it('persists a complete canvas duplicate across a server restart', async () => {
     expect(restored.references[0].frameId).toBe(restored.frames[0].id)
 
     const assetPath = new URL(restored.frames[0].html.match(/src="([^"]+)"/)![1]).pathname
-    const copiedAsset = await fetch(`${server.base}${assetPath}`)
+    const copiedAsset = await signedIn.get(assetPath)
     expect(copiedAsset.status).toBe(200)
     expect(copiedAsset.headers.get('content-type')).toBe('image/png')
+    expect((await fetch(`${server.base}${assetPath}`)).status).toBe(404)
   } finally {
     server.stop()
   }

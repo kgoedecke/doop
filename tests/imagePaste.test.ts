@@ -9,7 +9,7 @@ const api = {
   uploadAsset: vi.fn(async () => ({ url: '/a/pasted.png' })),
   createFrame: vi.fn(async (canvasId: string, rest: Partial<Frame>) => ({ ...rest, canvasId, id: 'f1' }) as Frame),
 }
-vi.mock('../src/lib/api', () => ({ api }))
+vi.mock('../src/lib/api', async (original) => ({ ...(await original<typeof import('../src/lib/api')>()), api }))
 const posthog = { capture: vi.fn() }
 vi.mock('../src/lib/posthog', () => ({ posthog }))
 
@@ -40,7 +40,15 @@ function image(name: string, width: number, height: number): File {
   return new File(['png'], name, { type: 'image/png' })
 }
 
-beforeEach(() => vi.clearAllMocks())
+beforeEach(() => {
+  vi.clearAllMocks()
+  useStore.setState({
+    canvas: { id: 'c1', name: 'Paste target', frames: [], createdAt: 0, updatedAt: 0 },
+    selectedId: null,
+    selectedIds: [],
+    activePageId: null,
+  })
+})
 
 describe('pasted images', () => {
   it('land as a top-level canvas element, not a frame', async () => {

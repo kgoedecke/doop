@@ -22,8 +22,11 @@
       import { Stage } from '/src/components/Stage.tsx'
       import { TooltipProvider } from '/src/components/ui/tooltip.tsx'
       import { useStore } from '/src/lib/store.ts'
+      import { PrivateMaterializationContext } from '/src/lib/privateMaterialization.ts'
+      import { fixturePrivateMaterializer } from '/tests/privateMediaAdapter.ts'
       import { FRAME_BOOTSTRAP } from '/src/lib/frameRuntime.ts'
       import '/src/styles.css'
+      // Layout/interaction-only fixture; actual scoped consumers have a separate native fixture.
       const root = createRoot(document.getElementById('root'))
       window.messages = []
       window.addEventListener('message', (ev) => window.messages.push(ev.data))
@@ -37,7 +40,13 @@
          for the new one's screens */
       const mountPlayer = (props) =>
         flushSync(() =>
-          root.render(React.createElement(PrototypePlayer, { key: `${props.startFrameId}:${Date.now()}`, ...props })),
+          root.render(
+            React.createElement(
+              PrivateMaterializationContext.Provider,
+              { value: fixturePrivateMaterializer },
+              React.createElement(PrototypePlayer, { key: `${props.startFrameId}:${Date.now()}`, ...props }),
+            ),
+          ),
         )
       window.play = (startFrameId) =>
         mountPlayer({
@@ -62,7 +71,13 @@
       /* the editor's stage, for Prototype mode's connectors */
       window.mountStage = (prototypeMode) => {
         useStore.getState().setPrototypeMode(prototypeMode)
-        root.render(React.createElement(TooltipProvider, null, React.createElement(Stage, { onAddFrame: () => {} })))
+        root.render(
+          React.createElement(
+            PrivateMaterializationContext.Provider,
+            { value: fixturePrivateMaterializer },
+            React.createElement(TooltipProvider, null, React.createElement(Stage, { onAddFrame: () => {} })),
+          ),
+        )
       }
       window.fixtureReady = true
     </script>

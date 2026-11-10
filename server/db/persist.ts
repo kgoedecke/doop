@@ -1,10 +1,11 @@
-import fs from 'node:fs'
-import path from 'node:path'
 import { nanoid } from 'nanoid'
 import { and, desc, eq, inArray, sql } from 'drizzle-orm'
 import { db } from './index.ts'
 import * as t from './schema.ts'
 import { extractAssetIds } from '../assets.ts'
+import { requireCanvasCreation, requireResourceActor } from '../privateResources.ts'
+import { store } from '../store.ts'
+import { requireCopySource, type CanvasResourceCopy } from '../resourceCopies.ts'
 import { roleByAgentName } from '../../shared/agents.ts'
 import { isCommunityCategory } from '../../shared/types.ts'
 import { storedLinkAccess } from '../../shared/canvasRole.ts'
@@ -40,7 +41,7 @@ function swallow(p: Promise<unknown>) {
   p.catch((err) => console.error('[db] write failed', err))
 }
 
-/** every mutable canvas column, so insert and upsert can't drift apart */
+/** Shared columns for initial creation and later updates. */
 function canvasColumns(c: Canvas) {
   return {
     name: c.name,
@@ -59,19 +60,34 @@ function canvasColumns(c: Canvas) {
 }
 
 export function saveCanvas(c: Canvas) {
+  // Pooled updates can finish out of order; an earlier header snapshot must
+  // never lower the document revision that a later frame mutation published.
   swallow(
     db
-      .insert(t.canvases)
-      .values({ id: c.id, ...canvasColumns(c), createdAt: c.createdAt })
-      .onConflictDoUpdate({ target: t.canvases.id, set: canvasColumns(c) }),
+      .update(t.canvases)
+      .set({ ...canvasColumns(c), updatedAt: sql`greatest(${t.canvases.updatedAt}, ${c.updatedAt})` })
+      .where(eq(t.canvases.id, c.id)),
   )
+}
+
+/** Initial creation is never swallowed or exposed before its durable outcome. */
+export async function insertCanvas(c: Canvas): Promise<void> {
+  await db.transaction(async (tx) => {
+    requireCanvasCreation(c.ownerId, c.workspaceId)
+    await tx.insert(t.canvases).values({ id: c.id, ...canvasColumns(c), createdAt: c.createdAt })
+  })
 }
 
 /** Persist a newly duplicated canvas as one unit. Unlike ordinary live edits,
  * duplication must not report success until every copied row is durable. */
-export async function saveCanvasCopy(c: Canvas): Promise<void> {
+export async function saveCanvasCopy(c: Canvas, resources: CanvasResourceCopy): Promise<void> {
   await db.transaction(async (tx) => {
+    await requireResourceActor(resources.actorId, tx)
+    requireCanvasCreation(resources.actorId, c.workspaceId)
+    requireCopySource(resources.sourceCanvasId, resources.actorId, resources.assets.length > 0)
     await tx.insert(t.canvases).values({ id: c.id, ...canvasColumns(c), createdAt: c.createdAt })
+    if (resources.assets.length) await tx.insert(t.assets).values(resources.assets)
+    if (resources.fonts.length) await tx.insert(t.fonts).values(resources.fonts)
 
     if (c.frames.length) {
       await tx.insert(t.frames).values(
@@ -132,7 +148,7 @@ export async function saveCanvasCopy(c: Canvas): Promise<void> {
     }
 
     const refs = c.frames.flatMap((frame) =>
-      [...extractAssetIds(frame.html)].map((assetId) => ({ assetId, frameId: frame.id })),
+      [...extractAssetIds(frame.html)].map((assetId) => ({ assetId, frameId: frame.id, canvasId: frame.canvasId })),
     )
     if (refs.length) await tx.insert(t.assetRefs).values(refs)
   })
@@ -348,7 +364,8 @@ export function saveProposal(canvasId: string, p: MemoryProposal) {
 
 /* Streaming appends update a frame's html on every chunk — debounce per frame
    so the DB sees one row write per burst, not one per keystroke of the reveal. */
-const frameTimers = new Map<string, NodeJS.Timeout>()
+const frameTimers = new Map<string, { canvasId: string; timer: NodeJS.Timeout }>()
+const frameWrites = new Map<string, { canvasId: string; queued: Promise<void> }>()
 const FRAME_DEBOUNCE_MS = 400
 
 /** Persist a duplicated page as one unit: the canvas's new page list and
@@ -379,7 +396,7 @@ export async function savePageCopy(c: Canvas, frames: Frame[]): Promise<void> {
       })),
     )
     const refs = frames.flatMap((frame) =>
-      [...extractAssetIds(frame.html)].map((assetId) => ({ assetId, frameId: frame.id })),
+      [...extractAssetIds(frame.html)].map((assetId) => ({ assetId, frameId: frame.id, canvasId: frame.canvasId })),
     )
     if (refs.length) await tx.insert(t.assetRefs).values(refs)
   })
@@ -389,26 +406,26 @@ export async function savePageCopy(c: Canvas, frames: Frame[]): Promise<void> {
  *  must write something naming the frame's content afterwards. */
 export async function saveFrameNow(f: Frame): Promise<void> {
   const existing = frameTimers.get(f.id)
-  if (existing) clearTimeout(existing)
+  if (existing) clearTimeout(existing.timer)
   frameTimers.delete(f.id)
   await writeFrame(f)
 }
 
 export function saveFrame(f: Frame, immediate = false) {
   const existing = frameTimers.get(f.id)
-  if (existing) clearTimeout(existing)
+  if (existing) clearTimeout(existing.timer)
   if (immediate) {
     frameTimers.delete(f.id)
     swallow(writeFrame(f))
     return
   }
-  frameTimers.set(
-    f.id,
-    setTimeout(() => {
+  frameTimers.set(f.id, {
+    canvasId: f.canvasId,
+    timer: setTimeout(() => {
       frameTimers.delete(f.id)
       swallow(writeFrame(f)) // f is mutated in place by the store, so the ref holds the latest state
     }, FRAME_DEBOUNCE_MS),
-  )
+  })
 }
 
 async function writeFrame(f: Frame) {
@@ -432,8 +449,23 @@ async function writeFrame(f: Frame) {
     approval: f.approval ?? null,
   }
   const { id, createdAt, ...set } = row
-  await db.insert(t.frames).values(row).onConflictDoUpdate({ target: t.frames.id, set })
-  await syncAssetRefs(f.id, f.html)
+  const previous = frameWrites.get(f.id)?.queued ?? Promise.resolve()
+  const queued = previous
+    .catch(() => {})
+    .then(async () => {
+      const current = store.getFrame(row.id)
+      if (!current || current.canvasId !== row.canvasId) return
+      await db.transaction(async (tx) => {
+        await tx.insert(t.frames).values(row).onConflictDoUpdate({ target: t.frames.id, set })
+        await syncAssetRefs(tx, row.id, row.canvasId, row.html)
+      })
+    })
+  frameWrites.set(f.id, { canvasId: f.canvasId, queued })
+  const settled = () => {
+    if (frameWrites.get(f.id)?.queued === queued) frameWrites.delete(f.id)
+  }
+  void queued.then(settled, settled)
+  await queued
 }
 
 /* Frame design history: one row per burst boundary (see actions.ts), newest
@@ -465,6 +497,9 @@ function pendingVersionWrites(pick: (frameId: string, canvasId: string) => boole
 }
 
 async function appendFrameVersion(version: FrameVersion) {
+  await (frameWrites.get(version.frameId)?.queued ?? Promise.resolve())
+  const current = store.getFrame(version.frameId)
+  if (!current || current.canvasId !== version.canvasId) return
   /* a burst that ended where it began (an edit typed and reverted) would
      snapshot the same state twice — the newest row already holds it. Size
      counts: the same document at another frame size is a state of its own */
@@ -567,62 +602,80 @@ export async function getFrameVersion(frameId: string, versionId: string): Promi
 /* asset_refs is a projection of frame HTML: recompute this frame's full ref
    set on every durable write (never increment/decrement — nothing to drift).
    Boot reconciles the whole table, so a lost write here self-heals. */
-async function syncAssetRefs(frameId: string, html: string) {
+async function syncAssetRefs(
+  tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
+  frameId: string,
+  canvasId: string,
+  html: string,
+) {
   const ids = [...extractAssetIds(html)]
-  await db.delete(t.assetRefs).where(eq(t.assetRefs.frameId, frameId))
+  await tx.delete(t.assetRefs).where(eq(t.assetRefs.frameId, frameId))
   if (ids.length) {
-    await db
+    await tx
       .insert(t.assetRefs)
-      .values(ids.map((assetId) => ({ assetId, frameId })))
+      .values(ids.map((assetId) => ({ assetId, frameId, canvasId })))
       .onConflictDoNothing()
   }
 }
 
-export function deleteCanvas(canvasId: string) {
-  /* refs must go before the frames rows the subquery reads */
-  swallow(
-    db
+export async function deleteCanvas(canvasId: string): Promise<void> {
+  for (const [id, pending] of frameTimers) {
+    if (pending.canvasId !== canvasId) continue
+    clearTimeout(pending.timer)
+    frameTimers.delete(id)
+  }
+  await Promise.allSettled([...frameWrites.values()].filter((e) => e.canvasId === canvasId).map((e) => e.queued))
+  await pendingTokenWrites(canvasId)
+  await pendingVersionWrites((_, c) => c === canvasId)
+  await db.transaction(async (tx) => {
+    /* refs must go before the frames rows the subquery reads */
+    await tx
       .delete(t.assetRefs)
       .where(
         inArray(
           t.assetRefs.frameId,
-          db.select({ id: t.frames.id }).from(t.frames).where(eq(t.frames.canvasId, canvasId)),
+          tx.select({ id: t.frames.id }).from(t.frames).where(eq(t.frames.canvasId, canvasId)),
         ),
       )
-      .then(() => db.delete(t.frames).where(eq(t.frames.canvasId, canvasId))),
-  )
-  swallow(db.delete(t.tasks).where(eq(t.tasks.canvasId, canvasId)))
-  swallow(db.delete(t.feedback).where(eq(t.feedback.canvasId, canvasId)))
-  swallow(db.delete(t.comments).where(eq(t.comments.canvasId, canvasId)))
-  swallow(db.delete(t.activity).where(eq(t.activity.canvasId, canvasId)))
-  swallow(db.delete(t.guidelines).where(eq(t.guidelines.canvasId, canvasId)))
-  swallow(db.delete(t.guidelineVersions).where(eq(t.guidelineVersions.canvasId, canvasId)))
-  swallow(
-    pendingTokenWrites(canvasId).then(() => db.delete(t.designTokens).where(eq(t.designTokens.canvasId, canvasId))),
-  )
-  swallow(
-    pendingVersionWrites((_, c) => c === canvasId).then(() =>
-      db.delete(t.frameVersions).where(eq(t.frameVersions.canvasId, canvasId)),
-    ),
-  )
-  swallow(db.delete(t.memoryReferences).where(eq(t.memoryReferences.canvasId, canvasId)))
-  swallow(db.delete(t.decisions).where(eq(t.decisions.canvasId, canvasId)))
-  swallow(db.delete(t.memoryProposals).where(eq(t.memoryProposals.canvasId, canvasId)))
-  swallow(db.delete(t.canvasMembers).where(eq(t.canvasMembers.canvasId, canvasId)))
-  swallow(db.delete(t.canvases).where(eq(t.canvases.id, canvasId)))
+    await tx.delete(t.frames).where(eq(t.frames.canvasId, canvasId))
+    await tx.delete(t.tasks).where(eq(t.tasks.canvasId, canvasId))
+    await tx.delete(t.feedback).where(eq(t.feedback.canvasId, canvasId))
+    await tx.delete(t.comments).where(eq(t.comments.canvasId, canvasId))
+    await tx.delete(t.activity).where(eq(t.activity.canvasId, canvasId))
+    await tx.delete(t.guidelines).where(eq(t.guidelines.canvasId, canvasId))
+    await tx.delete(t.guidelineVersions).where(eq(t.guidelineVersions.canvasId, canvasId))
+    await tx.delete(t.designTokens).where(eq(t.designTokens.canvasId, canvasId))
+    await tx.delete(t.frameVersions).where(eq(t.frameVersions.canvasId, canvasId))
+    await tx.delete(t.memoryReferences).where(eq(t.memoryReferences.canvasId, canvasId))
+    await tx.delete(t.decisions).where(eq(t.decisions.canvasId, canvasId))
+    await tx.delete(t.memoryProposals).where(eq(t.memoryProposals.canvasId, canvasId))
+    await tx.delete(t.canvasMembers).where(eq(t.canvasMembers.canvasId, canvasId))
+    await tx.delete(t.canvases).where(eq(t.canvases.id, canvasId))
+  })
 }
 
-export function deleteFrame(frameId: string) {
+export function deleteFrame(frameId: string, canvasId: string) {
   const timer = frameTimers.get(frameId)
   if (timer) {
-    clearTimeout(timer)
+    clearTimeout(timer.timer)
     frameTimers.delete(frameId)
   }
-  swallow(db.delete(t.frames).where(eq(t.frames.id, frameId)))
-  swallow(db.delete(t.assetRefs).where(eq(t.assetRefs.frameId, frameId)))
-  queueVersionWrite(frameId, versionWrites.get(frameId)?.canvasId ?? '', () =>
-    db.delete(t.frameVersions).where(eq(t.frameVersions.frameId, frameId)),
-  )
+  const pending = frameWrites.get(frameId)?.queued ?? Promise.resolve()
+  const queued = pending
+    .catch(() => {})
+    .then(() =>
+      db.transaction(async (tx) => {
+        await tx.delete(t.assetRefs).where(eq(t.assetRefs.frameId, frameId))
+        await tx.delete(t.frames).where(eq(t.frames.id, frameId))
+      }),
+    )
+  frameWrites.set(frameId, { canvasId, queued })
+  const settled = () => {
+    if (frameWrites.get(frameId)?.queued === queued) frameWrites.delete(frameId)
+  }
+  void queued.then(settled, settled)
+  swallow(queued)
+  queueVersionWrite(frameId, canvasId, () => db.delete(t.frameVersions).where(eq(t.frameVersions.frameId, frameId)))
 }
 
 /** The frame/element a prompt card was scoped to, or nothing when the row
@@ -831,7 +884,7 @@ export function saveActivity(canvasId: string, item: ActivityItem) {
  *  on shutdown): a design must not survive a restart without its history. */
 export async function flush(getFrame: (id: string) => Frame | undefined): Promise<void> {
   const ids = [...frameTimers.keys()]
-  for (const [, timer] of frameTimers) clearTimeout(timer)
+  for (const [, pending] of frameTimers) clearTimeout(pending.timer)
   frameTimers.clear()
   await Promise.allSettled(
     ids.map((id) => {
@@ -839,6 +892,8 @@ export async function flush(getFrame: (id: string) => Frame | undefined): Promis
       return f ? writeFrame(f) : Promise.resolve()
     }),
   )
+  await Promise.allSettled([...frameWrites.values()].map((e) => e.queued))
+  await Promise.allSettled([...tokenWrites.values()])
   await pendingVersionWrites(() => true)
 }
 
@@ -1138,26 +1193,4 @@ export async function hydrate(): Promise<Hydrated> {
   }
 
   return { canvases, tasks, feedback, comments, legacyCommentSelectors, activity, decisions, proposals }
-}
-
-/** One-time import of the pre-DB data/store.json so existing canvases survive. */
-export async function importLegacyJson(): Promise<Canvas[] | null> {
-  const file = path.join(process.cwd(), 'data', 'store.json')
-  let parsed: Canvas[]
-  try {
-    parsed = JSON.parse(fs.readFileSync(file, 'utf8'))
-  } catch {
-    return null
-  }
-  if (!Array.isArray(parsed) || parsed.length === 0) return null
-  for (const c of parsed) {
-    await db
-      .insert(t.canvases)
-      .values({ id: c.id, name: c.name, createdAt: c.createdAt, updatedAt: c.updatedAt })
-      .onConflictDoNothing()
-    for (const f of c.frames) await writeFrame(f)
-  }
-  fs.renameSync(file, `${file}.imported`)
-  console.log(`[db] imported ${parsed.length} canvas(es) from legacy store.json`)
-  return parsed
 }

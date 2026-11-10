@@ -1,7 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
+// Store ordering uses a valid actor seam; native private-resource tests cover
+// actual credential/account revocation and transactional copy authorization.
+vi.mock('../server/auth.ts', () => ({ isBanned: async () => false }))
+
 /* persistence is not under test: the in-memory order is */
 vi.mock('../server/db/persist.ts', () => ({
+  insertCanvas: async () => {},
   saveCanvas: () => {},
   saveFrame: () => {},
   savePageCopy: () => Promise.resolve(),
@@ -17,8 +22,8 @@ const order = (pageId?: string) => {
   return pageFrames(canvas, pageId ?? canvasPages(canvas)[0]!.id).map((f) => f.name)
 }
 
-beforeEach(() => {
-  canvasId = store.createCanvas('stack', 'kevin').id
+beforeEach(async () => {
+  canvasId = (await store.createCanvas('stack', 'kevin')).id
 })
 
 describe('server frame stacking', () => {

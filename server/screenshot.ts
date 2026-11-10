@@ -3,7 +3,18 @@ import fs from 'node:fs'
 import path from 'node:path'
 import puppeteer, { type Browser, type Page } from 'puppeteer-core'
 import type { Frame } from '../shared/types.ts'
-import { guardPublicPageRequests } from './publicUrl.ts'
+import { guardPublicPageRequests, type PublicRequestSession } from './publicUrl.ts'
+import { privatePublicMedia } from './privatePublicMedia.ts'
+import {
+  assertRenderRead,
+  assertPrivateRenderBytes,
+  resourceReadError,
+  PrivateResourceError,
+  type PrivateRenderScope,
+} from './privateResources.ts'
+import { renderAdmission } from './renderAdmission.ts'
+import { materializePrivateResources } from './privateMaterialization.ts'
+import { assertRenderPixels, PrivateMaterializationError, PrivateMediaBudget } from '../shared/privateMedia.ts'
 
 /**
  * Render a frame's HTML in headless Chrome so agents can *see* their work.
@@ -85,44 +96,118 @@ export function launchBrowser(timeout?: number): Promise<Browser> {
 
 export interface IsolatedPage {
   page: Page
+  ownRequests(session: PublicRequestSession): void
+  assertReady(): void
+  /** Begin owned cleanup without making a failed caller await uncancellable IO. */
+  cancel(): void
   close: () => Promise<void>
+}
+
+// Each entry still occupies its original context permit. This is a cleanup
+// registry, not replacement capacity; failed closure retains its slot.
+const closingContexts = new Set<Promise<void>>()
+
+function contextCloser(
+  context: Awaited<ReturnType<Browser['createBrowserContext']>>,
+  drain: () => Promise<void> | undefined,
+  release: () => void,
+) {
+  let closing: Promise<void> | undefined
+  return () => {
+    if (closing) return closing
+    closing = (async () => {
+      const results = await Promise.allSettled([
+        Promise.resolve().then(() => context.close()),
+        Promise.resolve().then(drain),
+      ])
+      if (results.some((result) => result.status === 'rejected')) throw new PrivateMaterializationError('aborted')
+      release()
+    })()
+    closingContexts.add(closing)
+    const owned = closing
+    void owned.then(
+      () => closingContexts.delete(owned),
+      () => {
+        console.warn('[render] context cleanup is unconfirmed; capacity retained')
+      },
+    )
+    return owned
+  }
 }
 
 /** External pages never share cookies, cache or service workers across users
  *  or imports. Closing the wrapper tears down the entire browser context. */
-export async function openIsolatedPage(): Promise<IsolatedPage> {
-  const browser = await getBrowser()
-  const context = await browser.createBrowserContext()
+const acquireContext = renderAdmission(4)
+
+export async function openIsolatedPage(scope?: PrivateRenderScope): Promise<IsolatedPage> {
+  if (scope) await assertRenderRead(scope)
+  const release = await acquireContext()
+  let context: Awaited<ReturnType<Browser['createBrowserContext']>> | undefined
   try {
-    const page = await context.newPage()
+    if (scope) await assertRenderRead(scope)
+    const browser = await getBrowser()
+    if (scope) await assertRenderRead(scope)
+    context = await browser.createBrowserContext()
+    const ownedContext = context
+    const page = await ownedContext.newPage()
+    let requests: PublicRequestSession | undefined
     let closed = false
+    const closeContext = contextCloser(ownedContext, () => requests?.cancelAndDrain(), release)
+    const close = () => {
+      closed = true
+      return closeContext()
+    }
     return {
       page,
-      close: async () => {
-        if (closed) return
-        closed = true
-        await context.close().catch(() => {})
+      ownRequests: (session) => {
+        if (closed || requests) throw new PrivateMaterializationError('aborted')
+        requests = session
       },
+      assertReady: () => requests?.assertSettled(),
+      cancel: () => {
+        void close()
+      },
+      close,
     }
   } catch (error) {
-    await context.close().catch(() => {})
-    throw error
+    if (context) void contextCloser(context, () => undefined, release)()
+    else release()
+    throw scope ? resourceReadError(error) : error
   }
 }
 
-export async function loadFramePage(frame: Frame): Promise<IsolatedPage> {
-  const loaded = await openIsolatedPage()
+export async function loadFramePage(frame: Frame, scope: PrivateRenderScope): Promise<IsolatedPage> {
+  frame = { ...frame }
+  assertRenderPixels(frame.width, frame.height)
+  await assertRenderRead(scope, frame)
+  const loaded = await openIsolatedPage(scope)
   const { page } = loaded
   try {
     const assetOrigin = new URL(env.BETTER_AUTH_URL).origin
-    await guardPublicPageRequests(page, {
-      allowUrl: (url) =>
-        (url.origin === assetOrigin && url.pathname.startsWith('/a/')) ||
-        /* webfonts referenced by imported frames (imports request the
-           source design's families from Google Fonts) */
-        url.origin === 'https://fonts.googleapis.com' ||
-        url.origin === 'https://fonts.gstatic.com',
+    const budget = new PrivateMediaBudget()
+    const preparedRequests = new Set<string>()
+    const prepared = await materializePrivateResources(
+      frame.html || '<!doctype html><html><body></body></html>',
+      scope,
+      { budget, publicReference: (url) => preparedRequests.add(url) },
+    )
+    let deniedPrivateRequest = false
+    const requests = await guardPublicPageRequests(page, {
+      privateResources: privatePublicMedia(scope, budget, preparedRequests),
+      rejectUrl: (url) => {
+        if (url.origin !== assetOrigin) return false
+        let pathname = url.pathname
+        try {
+          pathname = decodeURIComponent(pathname)
+        } catch {
+          /* malformed paths remain blocked by the HTTP owner */
+        }
+        if (!/^\/(?:a|i)(?:\/|$)/.test(pathname)) return false
+        deniedPrivateRequest = true
+        return true
+      },
     })
+    loaded.ownRequests(requests)
     await page.setViewport({
       width: Math.max(1, Math.round(frame.width)),
       /* A viewport does not need to span an entire imported landing page for
@@ -134,11 +219,12 @@ export async function loadFramePage(frame: Frame): Promise<IsolatedPage> {
        asset URLs of imported frames resolve nowhere. In the app an iframe
        inherits the page origin; here a <base> stands in for it — unless the
        frame brought its own (website imports do). */
-    let html = frame.html || '<!doctype html><html><body></body></html>'
+    let html = prepared.html
     if (!/<base\s/i.test(html)) {
       const baseTag = `<base href="${assetOrigin.replace(/"/g, '&quot;')}/">`
       html = /<head[^>]*>/i.test(html) ? html.replace(/<head([^>]*)>/i, `<head$1>${baseTag}`) : baseTag + html
     }
+    const contentStarted = Date.now()
     try {
       await page.setContent(html, {
         waitUntil: 'load',
@@ -147,11 +233,53 @@ export async function loadFramePage(frame: Frame): Promise<IsolatedPage> {
     } catch {
       /* Slow external resources: inspect whatever has rendered. */
     }
+    const remaining = Math.max(0, 8_000 - (Date.now() - contentStarted))
+    let readinessTimer: ReturnType<typeof setTimeout> | undefined
+    try {
+      await Promise.race([
+        Promise.all([
+          requests.settle(),
+          page.evaluate(
+            async (resources) => {
+              await document.fonts.ready
+              for (const font of document.fonts) if (font.status === 'error') throw new Error('font unavailable')
+              await Promise.all(
+                Array.from(document.images)
+                  .filter((image) => image.currentSrc || image.src)
+                  .map((image) => image.decode()),
+              )
+              await Promise.all(
+                resources.map(async (source) => {
+                  if (source.startsWith('data:font/')) {
+                    await new FontFace('doop-private-resource-check', `url("${source}")`).load()
+                  } else {
+                    const image = new Image()
+                    image.src = source
+                    await image.decode()
+                  }
+                }),
+              )
+            },
+            prepared.replacements.map((value) => value.inline),
+          ),
+        ]),
+        new Promise<never>((_resolve, reject) => {
+          readinessTimer = setTimeout(() => reject(new PrivateMaterializationError('aborted')), remaining)
+        }),
+      ])
+    } catch (error) {
+      throw error instanceof PrivateMaterializationError ? error : new PrivateMaterializationError('invalid')
+    } finally {
+      clearTimeout(readinessTimer)
+    }
     await new Promise((resolve) => setTimeout(resolve, 120))
+    requests.assertSettled()
+    if (deniedPrivateRequest) throw new PrivateResourceError()
+    await assertRenderRead(scope, frame)
     return loaded
   } catch (error) {
-    await loaded.close()
-    throw error
+    loaded.cancel()
+    throw resourceReadError(error)
   }
 }
 
@@ -178,10 +306,12 @@ export interface FrameInspection {
 
 /** A compact, rendered representation for agents. It intentionally relies on
  * visible text, semantics, geometry and computed styles rather than classes. */
-export async function inspectFrame(frame: Frame): Promise<FrameInspection> {
-  const loaded = await loadFramePage(frame)
-  const { page } = loaded
+export async function inspectFrame(frame: Frame, scope: PrivateRenderScope): Promise<FrameInspection> {
+  frame = { ...frame }
+  let loaded: IsolatedPage | undefined
   try {
+    loaded = await loadFramePage(frame, scope)
+    const { page } = loaded
     /* tsx/esbuild annotates nested functions with __name; page.evaluate
        serializes the callback without that runtime helper. A tiny in-page
        identity shim keeps the evaluated code independent of the loader. */
@@ -364,6 +494,9 @@ export async function inspectFrame(frame: Frame): Promise<FrameInspection> {
       }
     })
 
+    loaded.assertReady()
+    await loaded.close()
+    await assertRenderRead(scope, frame)
     return {
       document: {
         title: inspection.title,
@@ -374,20 +507,25 @@ export async function inspectFrame(frame: Frame): Promise<FrameInspection> {
       design: inspection.design,
       elements: inspection.elements,
     }
-  } finally {
-    await loaded.close()
+  } catch (error) {
+    loaded?.cancel()
+    throw resourceReadError(error)
   }
 }
 
 export async function renderFrame(
   frame: Frame,
+  scope: PrivateRenderScope,
   /* output pixel density — fractional values downscale huge frames */
   scale: number = 1,
   opts: { type?: 'png' | 'jpeg'; quality?: number; maxHeight?: number } = {},
 ): Promise<Buffer> {
-  const loaded = await loadFramePage(frame)
-  const { page } = loaded
+  frame = { ...frame }
+  let loaded: IsolatedPage | undefined
   try {
+    assertRenderPixels(frame.width, Math.min(frame.height, opts.maxHeight ?? frame.height), scale)
+    loaded = await loadFramePage(frame, scope)
+    const { page } = loaded
     await page.setViewport({
       width: Math.max(1, Math.round(frame.width)),
       height: Math.max(1, Math.round(frame.height)),
@@ -403,8 +541,13 @@ export async function renderFrame(
       ...(type === 'jpeg' ? { quality: opts.quality ?? 90 } : {}),
       ...(clip ? { clip } : {}),
     })
-    return Buffer.from(buf)
-  } finally {
+    loaded.assertReady()
+    assertPrivateRenderBytes(buf)
     await loaded.close()
+    await assertRenderRead(scope, frame)
+    return Buffer.from(buf)
+  } catch (error) {
+    loaded?.cancel()
+    throw resourceReadError(error)
   }
 }

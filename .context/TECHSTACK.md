@@ -130,11 +130,10 @@
   and HTML" section says when a page beats a frame. Tests: the page cases in `mcp-tools.test.ts`.
 - `ws` 8.18.0 - WebSocket server for realtime multiplayer (cursors, presence, frame edits,
   activity feed) over one room per canvas.
-- Custom fonts (`shared/fonts.ts`, `server/fonts.ts`, `server/fontFile.ts`): font libraries, one
-  per workspace (used on its canvases) and one per person (used on their personal canvases),
-  managed in Settings → Fonts and Workspace → Fonts (`FontLibrary.tsx`, strings in the `fonts`
-  catalog) over `/api/fonts`
-  (`?workspace=` for a workspace's, members only); `GET /api/canvases/:id/fonts` is a canvas's.
+- Custom fonts (`shared/fonts.ts`, `server/fonts.ts`, `server/fontFile.ts`): one private library
+  per canvas. Choose its canvas in `FontLibrary.tsx`; `/api/fonts?canvas=<id>` and
+  `GET /api/canvases/:id/fonts` require current durable access to that parent. There is no
+  person-wide or workspace-wide private library.
   Uploads are TTF/OTF/WOFF/WOFF2 up to 10 MB, one face per file; `fontFile.ts` reads format,
   family (name id 16, else 1), weight (a variable font's `wght` range) and style from the bytes,
   with no font library dependency (zlib for WOFF, brotli for WOFF2), every decompression bounded
@@ -145,8 +144,10 @@
   families its CSS names to one `<style data-doop-fonts>` block in its own HTML (only adds, never
   removes). `actions.createFrame` / `updateFrame` / the final append chunk run it on every write,
   and `FrameView`'s save path runs it too, so a family picked from the Design panel's "Custom
-  fonts" group renders at once. Every renderer that reads frame HTML (screenshots, PDF
-  export, iOS) gets the font that way. Agents see the library as `fonts` plus a note in
+  fonts" group names that face. Frame HTML retains canonical private URLs; opaque web/headless
+  embedding is still being upgraded and native iOS private-file consumers are unsupported.
+  Current HTTP/MCP font metadata is guarded separately from ordinary public HTML access.
+  Authorized agents see the library as `fonts` plus a note in
   `get_canvas` and as a system block in the resident agent (`libraryBrief`): name the family,
   never load it from Google Fonts. Tests: `fonts.test.ts` (a real WOFF2 in `tests/fixtures/fonts`), `fontLibrary.test.ts`,
   `fontLibraryRace.test.ts`, `fontFrameWrites.test.ts` (faces on create, stream end and idle; an idle close sends viewers the
@@ -189,8 +190,8 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   OS fonts are often licensed for one person; Doop checks no licences (Figma's posture for shared
   fonts). Tests: the Rust unit tests in `fonts.rs`, `localFonts.test.ts`.
 - Profile photos (`shared/avatar.ts`, `server/avatars.ts`): Settings → Your account → Photo uploads a
-  PNG/JPG/WebP/GIF under 2 MB as raw bytes to `POST /api/me/avatar`, which stores it as an ordinary
-  immutable `/a/` asset and points better-auth's `user.image` at it; `DELETE /api/me/avatar` puts the
+  PNG/JPG/WebP/GIF under 2 MB as raw bytes to `POST /api/me/avatar` after choosing its canvas.
+  The file is an immutable canvas-owned `/a/` asset and points better-auth's `user.image` at it; `DELETE /api/me/avatar` puts the
   initials back. `avatarUrl` is the one rule for what a face may load: only such `/a/` uploads, never
   a social provider's picture or a URL set through the raw update-user call, so no account can make
   every viewer fetch an address it chose. The `Avatar` primitive takes `image` (a photo that fails to
@@ -666,7 +667,60 @@ Figma, Canva and PSD are deferred. Migration 0019 is reserved for the deferred F
 the OSS journal skips it while retaining the shared migration tags and timestamps for 0020–0022.
 Gemini cloud workers remain an operator-managed, opt-in pilot; see `docs/gemini-cloud-pilot.md`.
 
-The shared font library serves public font assets with CORS so sandboxed frames can load them.
+Private read owners discard arbitrary driver/browser diagnostics; background jobs receive bounded
+errors without raw query/URL causes.
+
+Private files are canvas owned. `server/privateResources.ts` carries ephemeral frozen actor,
+current-credential resolver and expected parent through existing read owners. Stored frame or
+pinned-reference identity is checked as well as the current account/parent; a detached snapshot
+cannot revive a deleted frame, and a PDF loses its entire result if any selected frame disappears.
+Raw `/a/` and `/i/` accept current normal browser cookies, with no MCP/admin bearer alternative.
+Normal MCP reads retain their existing credential owner and must supply its current reader.
+Private binary delivery uses `private, no-store`, no public CORS/redirect/validators and no range
+processing; each cache waiter revalidates independently. Content hashes include parent/frame,
+HTML and size; persisted thumbnails also verify actual-byte provenance and unknown restart state
+is a miss. The preview cache retains at most 200 entries for five minutes, with a 64 MiB ceiling on completed bytes.
+Private render/PDF output is capped at 15,000,000 bytes. Page admission allows four active contexts
+and 16 waiters with a 30 second deadline. The upstream thumbnail pipeline allows three active
+operations through persistence and 16 waiters with the same deadline. The two queues allow up to
+32 waiting operations and 60 seconds of combined queue time.
+
+`tests/privateMediaCache.test.ts` exercises actual Chrome/disk/PG and credential/membership/frame
+revocation with held completed renders; `privateMediaStorage.test.ts` uses the reusable pinned,
+non-root Garage fixture in `scripts/private-storage-fixture.py`. Its protected ownership intent
+precedes external creation; exact name/label reconciliation preserves uncertain recovery state.
+`privateStorageLifecycle.test.ts` executes eight controlled CLI failure cases, and
+`privateStorageWrapper.test.ts` checks runtime retention at the TypeScript boundary. It is test infrastructure, not
+a production provider choice. See `docs/private-files.md` for required local dependencies and
+native-interface limits. Private resource embedding, deployed ingress/CDN privacy and complete
+release verification remain in progress; startup validates no bucket/CDN privacy.
 Migrations 0040 (agent feedback) and 0041 (custom fonts) retain their shared timestamps; their OSS
 snapshots omit the deferred Figma `integrations.refresh_token` column, as does the credential
 encryption backfill. Desktop downloads use the platform-neutral `https://doop.design/download` page.
+
+## Scoped private media rendering
+
+`server/privateMaterialization.ts` binds bounded source preparation to the current
+normal reader and authoritative parent/frame or pinned reference. The shared
+parser in `shared/privateReferences.ts` handles HTML/CSS URL carriers; the
+materializer returns transient data resources, canonical reversal mappings and
+producer-derived costs. Media inspection/full validation uses one decoder worker
+per admitted job; the same four-job owner retains cancelled jobs until begun IO
+and actual worker exit settle. Encoded, intrinsic decoded, parser/reference,
+expanded-document and output-pixel limits have separate units.
+
+The updated web client prepares resources through its normal scoped API before
+opaque editor/prototype/history/Memory/drag rendering. `frameBridge` canonical
+document acknowledgement follows preparation and DOM delivery; bootstrap readiness
+alone cannot authorize selection/metadata work. Runtime serialization restores
+private IDs, including nested srcdoc and CSS carriers, while preserving authored
+data URLs. Image replacement proposes a canonical clone and waits for full source
+preparation instead of assigning a new resource to the live decoder directly.
+Private-resource documents are excluded from real rrweb capture and mutations.
+
+Browser exports keep one operation budget and live context through asynchronous
+resource admission and final save/clipboard. MCP inline images/PDF fields fit the
+existing 16,384-character consumer limit; larger full files use authenticated
+current-design download locations and truthful preview metadata. No public media
+capability is created. Details, supported consumers, focused native checks and
+remaining deployment requirements are in `docs/private-files.md`.

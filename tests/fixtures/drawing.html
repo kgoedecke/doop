@@ -7,6 +7,11 @@
   <body style="margin: 0">
     <div id="root" style="position: absolute; inset: 40px 0 0; height: auto; overflow: hidden"></div>
     <script type="module">
+      // Synthetic layout/interaction fixture; no authorization/admission proof.
+      import { createElement as privateFixtureElement } from 'react'
+      import { PrivateMaterializationContext } from '/src/lib/privateMaterialization.ts'
+      import { fixturePrivateMaterializer } from '/tests/privateMediaAdapter.ts'
+
       import React from 'react'
       import { createRoot } from 'react-dom/client'
       import { Stage } from '/src/components/Stage.tsx'
@@ -44,10 +49,14 @@
         importSvg: (markup, name) => importSvgInBrowser(markup, name, { key: 'k' }),
       }
       createRoot(document.getElementById('root')).render(
-        React.createElement(
-          TooltipProvider,
-          null,
-          React.createElement(Stage, { onAddFrame: () => {}, sidePanelOpen: false }),
+        privateFixtureElement(
+          PrivateMaterializationContext.Provider,
+          { value: fixturePrivateMaterializer },
+          React.createElement(
+            TooltipProvider,
+            null,
+            React.createElement(Stage, { onAddFrame: () => {}, sidePanelOpen: false }),
+          ),
         ),
       )
     </script>

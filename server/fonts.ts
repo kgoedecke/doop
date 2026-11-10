@@ -5,7 +5,8 @@ import * as t from './db/schema.ts'
 import { env } from './env.ts'
 import { storeAsset } from './assets.ts'
 import { readFontFile } from './fontFile.ts'
-import { isWorkspaceMember } from './workspaces.ts'
+import { privateCanvas, requireResourceActor } from './privateResources.ts'
+import { store } from './store.ts'
 import { MAX_FONT_BYTES, type CustomFont, type FontFormat, type FontScope, type FontStyle } from '../shared/fonts.ts'
 
 /**
@@ -40,26 +41,39 @@ function toFont(row: FontRow): CustomFont {
   }
 }
 
-function inScope(row: FontRow, scope: FontScope, userId: string): boolean {
-  return 'workspaceId' in scope ? row.workspaceId === scope.workspaceId : !row.workspaceId && row.ownerId === userId
+function inScope(row: FontRow, scope: FontScope): boolean {
+  return row.canvasId === scope.canvasId
 }
 
-/** Whether a person may read and change a library. */
+/** Libraries have the same current durable parent policy as their bytes. */
 export function canUseScope(scope: FontScope, userId: string): boolean {
-  return 'personal' in scope || isWorkspaceMember(scope.workspaceId, userId)
+  return !!privateCanvas(scope.canvasId, userId, 'edit')
 }
 
-export function listFonts(scope: FontScope, userId: string): CustomFont[] {
+function fontsInCanvas(canvasId: string): CustomFont[] {
   return [...rows.values()]
-    .filter((row) => inScope(row, scope, userId))
+    .filter((row) => row.canvasId === canvasId)
     .sort((a, b) => a.family.localeCompare(b.family) || a.weight.localeCompare(b.weight) || a.createdAt - b.createdAt)
     .map(toFont)
 }
 
-/** The library a canvas designs with: its workspace's, or its owner's own. */
-export function fontsForCanvas(canvas: { workspaceId?: string | null; ownerId?: string | null }): CustomFont[] {
-  if (canvas.workspaceId) return listFonts({ workspaceId: canvas.workspaceId }, '')
-  return canvas.ownerId ? listFonts({ personal: true }, canvas.ownerId) : []
+export function listFonts(scope: FontScope, userId: string): CustomFont[] {
+  return privateCanvas(scope.canvasId, userId) ? fontsInCanvas(scope.canvasId) : []
+}
+
+/** Used by authorized frame writers; another canvas's faces never propagate. */
+export function fontsForCanvas(canvas: { id: string }): CustomFont[] {
+  return store.getCanvas(canvas.id) ? fontsInCanvas(canvas.id) : []
+}
+
+/** Internal copy input; the copy owner separately checks current source rights. */
+export function canvasFontRows(canvasId: string): Readonly<FontRow>[] {
+  return [...rows.values()].filter((row) => row.canvasId === canvasId)
+}
+
+/** Publish only a confirmed committed copy, alongside its new canvas/assets. */
+export function publishCopiedFonts(committed: readonly FontRow[]): void {
+  for (const row of committed) rows.set(row.id, row)
 }
 
 /** Add a font file to a library. A file for a face the library already has
@@ -71,6 +85,7 @@ export async function addFont(
   buf: Buffer,
   fileName: string,
 ): Promise<CustomFont> {
+  if (!canUseScope(scope, user.id)) throw new FontInputError('canvas is not available for font uploads')
   if (buf.length === 0) throw new FontInputError('empty file')
   if (buf.length > MAX_FONT_BYTES)
     throw new FontInputError(`file is ${(buf.length / 1024 / 1024).toFixed(1)} MB — the limit is 10 MB`)
@@ -80,11 +95,14 @@ export async function addFont(
   } catch (e) {
     throw new FontInputError(e instanceof Error ? e.message : 'the font file could not be read')
   }
-  const asset = await storeAsset(buf, info, { ownerId: user.id, uploadedBy: user.name })
+  const asset = await storeAsset(
+    buf,
+    { ...info, kind: 'font' },
+    { canvasId: scope.canvasId, actorId: user.id, uploadedBy: user.name },
+  )
   const row: FontRow = {
     id: nanoid(10),
-    workspaceId: 'workspaceId' in scope ? scope.workspaceId : null,
-    ownerId: user.id,
+    canvasId: scope.canvasId,
     family: info.family,
     weight: info.weight,
     style: info.style,
@@ -98,18 +116,20 @@ export async function addFont(
   }
   /* find-and-replace runs one at a time per library: two uploads of the same
      face racing would otherwise each miss the other's row and both stay */
-  return inLibraryOrder(scope, user.id, async () => {
+  return inLibraryOrder(scope, async () => {
     /* checked again in the queue: the workspace may have been deleted, or the
-       uploader removed from it, while the file was being stored */
-    if (!canUseScope(scope, user.id)) throw new FontInputError('this workspace no longer exists or you left it')
+       uploader lost access, while the file was being stored */
+    if (!canUseScope(scope, user.id)) throw new FontInputError('canvas is no longer available for font uploads')
     const replaced = [...rows.values()].filter(
       (r) =>
-        inScope(r, scope, user.id) &&
+        inScope(r, scope) &&
         r.family.toLowerCase() === row.family.toLowerCase() &&
         r.weight === row.weight &&
         r.style === row.style,
     )
     await db.transaction(async (tx) => {
+      await requireResourceActor(user.id, tx)
+      if (!canUseScope(scope, user.id)) throw new FontInputError('canvas is no longer available for font uploads')
       await tx.insert(t.fonts).values(row)
       if (replaced.length)
         await tx.delete(t.fonts).where(
@@ -128,8 +148,8 @@ export async function addFont(
 const libraryChains = new Map<string, Promise<unknown>>()
 
 /** Run library writes one after another, per library, in arrival order. */
-function inLibraryOrder<T>(scope: FontScope, userId: string, work: () => Promise<T>): Promise<T> {
-  const key = 'workspaceId' in scope ? `ws:${scope.workspaceId}` : `user:${userId}`
+function inLibraryOrder<T>(scope: FontScope, work: () => Promise<T>): Promise<T> {
+  const key = scope.canvasId
   const next = (libraryChains.get(key) ?? Promise.resolve()).then(work, work)
   const settled = next.catch(() => {})
   libraryChains.set(key, settled)
@@ -149,18 +169,11 @@ async function removeRow(id: string): Promise<void> {
 export async function deleteFont(id: string, userId: string): Promise<boolean> {
   const row = rows.get(id)
   if (!row) return false
-  const scope: FontScope = row.workspaceId ? { workspaceId: row.workspaceId } : { personal: true }
-  if (!inScope(row, scope, userId) || !canUseScope(scope, userId)) return false
-  await inLibraryOrder(scope, userId, () => removeRow(id))
-  return true
-}
-
-/** Drop a deleted workspace's library rows (its assets stay, like any asset). */
-export async function dropWorkspaceFonts(workspaceId: string): Promise<void> {
-  /* in the library's queue, after any upload already past its check; the
-     workspace's members are gone by now, so later uploads are refused */
-  await inLibraryOrder({ workspaceId }, '', async () => {
-    await db.delete(t.fonts).where(eq(t.fonts.workspaceId, workspaceId))
-    for (const [id, row] of rows) if (row.workspaceId === workspaceId) rows.delete(id)
+  const scope: FontScope = { canvasId: row.canvasId }
+  if (!canUseScope(scope, userId)) return false
+  await inLibraryOrder(scope, async () => {
+    if (!canUseScope(scope, userId)) throw new FontInputError('canvas is no longer available')
+    await removeRow(id)
   })
+  return true
 }

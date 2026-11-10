@@ -7,6 +7,11 @@
   <body>
     <div id="root"></div>
     <script type="module">
+      // Synthetic layout/interaction fixture; no authorization/admission proof.
+      import { createElement as privateFixtureElement } from 'react'
+      import { PrivateMaterializationContext } from '/src/lib/privateMaterialization.ts'
+      import { fixturePrivateMaterializer } from '/tests/privateMediaAdapter.ts'
+
       import React from 'react'
       import { createRoot } from 'react-dom/client'
       import { FrameView } from '/src/components/FrameView.tsx'
@@ -88,7 +93,13 @@
             React.createElement(ElementPanel, { frame, selector: selected.selector, style: { right: 12 } }),
         )
       }
-      createRoot(document.getElementById('root')).render(React.createElement(Fixture))
+      createRoot(document.getElementById('root')).render(
+        privateFixtureElement(
+          PrivateMaterializationContext.Provider,
+          { value: fixturePrivateMaterializer },
+          React.createElement(Fixture),
+        ),
+      )
     </script>
   </body>
 </html>

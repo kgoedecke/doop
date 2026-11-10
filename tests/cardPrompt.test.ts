@@ -9,6 +9,7 @@ vi.mock('../server/db/persist.ts', () => ({
   saveActivity: () => {},
   saveDecision: () => {},
   saveProposal: () => {},
+  insertCanvas: async () => {},
   saveCanvas: () => {},
   saveFrame: () => {},
 }))
@@ -27,7 +28,7 @@ const longPrompt = `${filler.repeat(3)}the real task: create one 600x400 frame n
 
 let canvasId: string
 
-beforeEach(() => {
+beforeEach(async () => {
   actions.wire(
     () => {},
     () => {},
@@ -40,7 +41,7 @@ beforeEach(() => {
     decisions: new Map(),
     proposals: new Map(),
   })
-  canvasId = store.createCanvas('card prompt', 'kevin').id
+  canvasId = (await store.createCanvas('card prompt', 'kevin')).id
 })
 
 describe('addQueuedCard', () => {
@@ -85,8 +86,8 @@ describe('addQueuedCard', () => {
     expect(whole?.id).not.toBe(card?.id)
   })
 
-  it('drops a scope whose frame is not on this canvas', () => {
-    const other = store.createCanvas('elsewhere', 'kevin').id
+  it('drops a scope whose frame is not on this canvas', async () => {
+    const other = (await store.createCanvas('elsewhere', 'kevin')).id
     const foreign = store.createFrame(other, { name: 'Away' }, 'kevin')!
     const card = actions.addQueuedCard(canvasId, 'tidy up', 'kevin', undefined, undefined, undefined, {
       frameId: foreign.id,

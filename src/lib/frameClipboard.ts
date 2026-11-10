@@ -1,5 +1,5 @@
 import type { Frame } from '../../shared/types'
-import { api } from './api'
+import { api, errorMessage } from './api'
 import { useStore } from './store'
 import { posthog } from './posthog'
 import { recordCreates } from './history'
@@ -11,6 +11,9 @@ import { importPdf, isPdfFile } from './pdfImport'
 /** One copied frame, positioned relative to the top-left of the copied group
  *  so a multi-frame paste keeps the frames' layout. */
 interface ClipFrame {
+  sourceFrameId: string
+  sourceCanvasId: string
+  sourceVersion: number
   name: string
   html: string
   x: number
@@ -20,6 +23,7 @@ interface ClipFrame {
 }
 
 interface FrameClip {
+  version: 1
   frames: ClipFrame[]
 }
 
@@ -28,7 +32,11 @@ export function copyFrames(frames: Frame[]) {
   const left = Math.min(...frames.map((f) => f.x))
   const top = Math.min(...frames.map((f) => f.y))
   const clip: FrameClip = {
+    version: 1,
     frames: frames.map((f) => ({
+      sourceFrameId: f.id,
+      sourceCanvasId: f.canvasId,
+      sourceVersion: f.updatedAt,
       name: f.name,
       html: f.html,
       x: f.x - left,
@@ -42,16 +50,33 @@ export function copyFrames(frames: Frame[]) {
 }
 
 function readClip(): ClipFrame[] {
-  const raw = localStorage.getItem(CLIP_KEY)
-  if (!raw) return []
-  const parsed = JSON.parse(raw)
-  if (Array.isArray(parsed?.frames)) return parsed.frames
-  /* a clip written before multi-frame copy: one frame, no offset */
-  return parsed?.html === undefined ? [] : [{ ...parsed, x: 0, y: 0 }]
+  try {
+    const raw = localStorage.getItem(CLIP_KEY)
+    const parsed = raw ? JSON.parse(raw) : null
+    if (
+      parsed?.version !== 1 ||
+      !Array.isArray(parsed.frames) ||
+      !parsed.frames.every(
+        (f: Partial<ClipFrame>) =>
+          f &&
+          typeof f.sourceFrameId === 'string' &&
+          typeof f.sourceCanvasId === 'string' &&
+          Number.isSafeInteger(f.sourceVersion) &&
+          (f.sourceVersion ?? -1) >= 0 &&
+          typeof f.html === 'string' &&
+          typeof f.name === 'string' &&
+          [f.x, f.y, f.width, f.height].every((n) => typeof n === 'number' && Number.isFinite(n)),
+      )
+    )
+      return []
+    return parsed.frames
+  } catch {
+    return []
+  }
 }
 
 export function hasFrameClip(): boolean {
-  return !!localStorage.getItem(CLIP_KEY)
+  return readClip().length > 0
 }
 
 /** Overall size of the copied group, for centring it in the view. */
@@ -72,11 +97,17 @@ async function createFrames(requests: { canvasId: string; frame: Parameters<type
 /** Like `createFrames`, but says which request each frame came from: a
  *  `null` where that request failed. */
 async function settleFrames(requests: { canvasId: string; frame: Parameters<typeof api.createFrame>[1] }[]) {
+  const context = useStore.getState()
+  const canvasId = requests[0]?.canvasId
+  const pageId = context.activePageId
   const results = await Promise.allSettled(requests.map((r) => api.createFrame(r.canvasId, r.frame)))
   const created = results.flatMap((r) => (r.status === 'fulfilled' ? [r.value] : []))
   const failed = results.find((r): r is PromiseRejectedResult => r.status === 'rejected')
   if (failed) console.error(`${requests.length - created.length} of ${requests.length} frame(s) failed`, failed.reason)
-  if (created.length) {
+  const current = useStore.getState()
+  const sameContext = current.canvas?.id === canvasId && current.activePageId === pageId
+  if (failed && sameContext) current.pushNotice(errorMessage(failed.reason, 'Some content could not be pasted.'))
+  if (created.length && sameContext) {
     recordCreates(created)
     useStore.getState().selectMany(created.map((f) => f.id))
   }
@@ -87,21 +118,45 @@ async function settleFrames(requests: { canvasId: string; frame: Parameters<type
 function createFromClip(canvasId: string, x: number, y: number) {
   const frames = readClip()
   if (!frames.length) return
-  void createFrames(
-    frames.map((f) => ({
-      canvasId,
-      frame: {
-        name: f.name,
-        html: f.html,
-        width: f.width,
-        height: f.height,
-        x: Math.round(x + f.x),
-        y: Math.round(y + f.y),
-      },
-    })),
-  ).then((created) => {
+  const context = useStore.getState()
+  if (context.canvas?.id !== canvasId) return
+  const pageId = context.activePageId
+  void (async () => {
+    const foreign = frames.flatMap((frame, index) => (frame.sourceCanvasId === canvasId ? [] : [{ frame, index }]))
+    if (foreign.length) {
+      const copied = await api.copyResources(
+        canvasId,
+        foreign.map(({ frame }) => ({
+          sourceFrameId: frame.sourceFrameId,
+          sourceVersion: frame.sourceVersion,
+          html: frame.html,
+        })),
+      )
+      if (copied.canvasId !== canvasId || copied.entries.length !== foreign.length)
+        throw new Error('The copied files did not match this destination.')
+      for (const [index, entry] of copied.entries.entries()) frames[foreign[index]!.index]!.html = entry.html
+    }
+    const current = useStore.getState()
+    if (current.canvas?.id !== canvasId || current.activePageId !== pageId)
+      throw new Error('The destination changed. Paste again where you want the content.')
+    const created = await createFrames(
+      frames.map((f) => ({
+        canvasId,
+        frame: {
+          pageId: pageId ?? undefined,
+          name: f.name,
+          html: f.html,
+          width: f.width,
+          height: f.height,
+          x: Math.round(x + f.x),
+          y: Math.round(y + f.y),
+        },
+      })),
+    )
     if (created.length) posthog.capture('frame_pasted', { count: created.length })
-  })
+  })().catch((error: unknown) =>
+    useStore.getState().pushNotice(errorMessage(error, 'The content could not be pasted.')),
+  )
 }
 
 /** Paste with the group's top-left at a screen point (e.g. a right-click). */

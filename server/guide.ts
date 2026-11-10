@@ -318,13 +318,19 @@ any public image URL. Source images in this order:
   canvas_id it belongs to and ONE input, chosen by where the file lives:
   - Remote (it has a public URL): pass source_url — the server fetches it directly.
   - Local (a file on your machine): pass local_file=true. You get a one-time upload URL
-    and a ready curl command; run it in your shell, and the curl response JSON contains
-    the permanent public URL. Preferred for local files — the bytes never enter your
-    context, so it is fast and cannot corrupt.
+    and a curl command. Set DOOP_MCP_TOKEN in your shell to your current MCP credential
+    for the same account, then run the command; the ticket alone does not authenticate.
+    The curl response contains the canvas-owned URL. The bytes stay out of your context.
   - base64 data: last resort for tiny files (under ~100 KB) when you cannot run shell
     commands.
-  Either way you get a permanent URL on this origin (/a/<id>.<ext>) to use in <img> or
-  CSS.
+  Either way the URL on this origin (/a/<id>.<ext>) belongs to that canvas. Use it in
+  that canvas's <img> or CSS; the ID is not permission to use it in another canvas.
+  Raw downloads require a current normal browser session. Doop prepares authorized
+  files for its isolated renderers; external hotlink consumers are unsupported.
+  Whole-canvas duplication and the browser's explicit cross-canvas clipboard copy
+  create independently owned files after checking source read and destination edit.
+  Raw HTML writes that name foreign private files are refused. Keep credentials out
+  of HTML, URLs, tool output and copied content.
 - **When to use them.** Enumerated content — feature cards, step lists, capability
   grids, value rows — needs a visual anchor per item: an icon (search_icons), a big
   number, or a mono label. Naked text lists read as drafts. Pick ONE anchor style per
@@ -424,15 +430,26 @@ ${PROTOTYPES}
 
 ## Exporting frames (images, PDF)
 
-Every frame response includes an image_url — a public, hotlinkable render of the frame's
-CURRENT html (/i/<frameId>.png?scale=2; use .jpg?quality=90 for JPEG, append &download
-for an attachment). The export_frame tool returns the same URLs on demand. Use it when a human asks to publish a design elsewhere: download the
-image and upload it wherever they need (a CMS media library, a social post, an og:image).
-The URL re-renders on change, so an embedded link stays current as the frame iterates.
-For print, a client handoff or a deck, export_frame with format "pdf" returns the PDF file itself
-(an embedded application/pdf resource, not a URL): vector, text selectable, one page per frame
-at the frame's own size. Pass frame_ids to bind several frames of one canvas into one multi-page
-PDF; pages follow the order given (frame_id first, then frame_ids as listed).
+Every frame response includes an authenticated image_url for its CURRENT stored design
+(/i/<frameId>.png?scale=2; .jpg?quality=90 for JPEG, append &download for an attachment).
+These URLs require a current normal browser session with canvas access. An MCP bearer
+alone cannot download them; signed-out or unrelated clients cannot use them as hotlinks.
+No public publication or automatic bot download capability is provided.
+
+export_frame PNG/JPG and get_frame_screenshot return a bounded real image plus the full
+authenticated download location. A full image that fits the inline limit retains its
+original bytes; larger images return a JPEG thumbnail with its actual dimensions and
+full_resolution=false. The requested full format and dimensions are separate metadata.
+Use the preview to review visible layout; do not claim that full text or every detail
+was inspected from a smaller image or a URL alone.
+
+export_frame with format "pdf" produces one selectable-text page per frame at its own
+size. Only PDFs that fit the inline limit are embedded as application/pdf. Larger PDFs
+return inline_embedded=false and an authenticated full-download location. Pass frame_ids
+for same-canvas pages after frame_id, in order. Download URLs render the selected current
+stored designs when fetched, not immutable snapshots. Authorized downloaded copies cannot
+be recalled. Private replay and external hotlinks remain unsupported; any future public
+publication needs a separate authorized mechanism.
 
 ## Multiplayer etiquette
 

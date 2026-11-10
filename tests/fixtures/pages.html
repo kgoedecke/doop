@@ -15,6 +15,11 @@
   <body>
     <div id="root"></div>
     <script type="module">
+      // Synthetic layout/interaction fixture; no authorization/admission proof.
+      import { createElement as privateFixtureElement } from 'react'
+      import { PrivateMaterializationContext } from '/src/lib/privateMaterialization.ts'
+      import { fixturePrivateMaterializer } from '/tests/privateMediaAdapter.ts'
+
       import React from 'react'
       import { createRoot } from 'react-dom/client'
       import { Stage } from '/src/components/Stage.tsx'
@@ -79,7 +84,11 @@
       })
       /* mounted as main.tsx mounts it: the toolbar's tooltips need the provider */
       createRoot(document.getElementById('root')).render(
-        React.createElement(TooltipProvider, null, React.createElement(Stage, { onAddFrame: () => {} })),
+        privateFixtureElement(
+          PrivateMaterializationContext.Provider,
+          { value: fixturePrivateMaterializer },
+          React.createElement(TooltipProvider, null, React.createElement(Stage, { onAddFrame: () => {} })),
+        ),
       )
     </script>
   </body>

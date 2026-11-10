@@ -10,6 +10,7 @@ vi.mock('../server/db/persist.ts', () => ({
   saveActivity: () => {},
   saveDecision: () => {},
   saveProposal: () => {},
+  insertCanvas: async () => {},
   saveCanvas: () => {},
 }))
 
@@ -44,7 +45,7 @@ const pricing: RepoScreenRef = {
 
 let canvasId: string
 
-beforeEach(() => {
+beforeEach(async () => {
   actions.hydrateLogs({
     tasks: new Map(),
     feedback: new Map(),
@@ -53,7 +54,7 @@ beforeEach(() => {
     decisions: new Map(),
     proposals: new Map(),
   })
-  canvasId = store.createCanvas('repo cards', 'kevin').id
+  canvasId = (await store.createCanvas('repo cards', 'kevin')).id
 })
 
 describe('addRepoCards', () => {

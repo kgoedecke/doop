@@ -17,7 +17,7 @@ import { eq, inArray } from 'drizzle-orm'
 import { toNodeHandler, fromNodeHeaders } from 'better-auth/node'
 import { oAuthDiscoveryMetadata } from 'better-auth/plugins'
 import { WebSocketServer, WebSocket } from 'ws'
-import { GuideLimitError, PageLimitError, store } from './store.ts'
+import { CanvasCreationUncertainError, GuideLimitError, PageLimitError, store } from './store.ts'
 import { parseGuide } from '../shared/guides.ts'
 import { getImage } from './previews.ts'
 import * as actions from './actions.ts'
@@ -50,6 +50,8 @@ import { startMcpTokenPrune } from './mcpTokens.ts'
 import { integrationsRouter, relayDesktopCallback } from './integrations.ts'
 import { extensions } from './extensions.ts'
 import * as workspaces from './workspaces.ts'
+import { companyPolicy, CompanyPolicyError } from './companyPolicy.ts'
+import { validateCompanySetup } from './companySetup.ts'
 import * as billing from './billing.ts'
 import * as demo from './demo.ts'
 import { db, initDb } from './db/index.ts'
@@ -57,13 +59,14 @@ import { resealSecrets } from './secretBackfill.ts'
 import { encryptionConfigured } from './secretBox.ts'
 import * as authSchema from './db/auth-schema.ts'
 import * as persist from './db/persist.ts'
-import { handleMcpRequest } from './mcp.ts'
+import { currentMcpActor, handleMcpRequest, McpAuthenticationUnavailable } from './mcp.ts'
 import {
-  getAsset,
+  getAssetById,
   reconcileAssetRefs,
   beginTicketUpload,
   endTicketUpload,
   createAsset,
+  hydrateAssetMetadata,
   MAX_ASSET_BYTES,
 } from './assets.ts'
 import * as ingest from './ingest.ts'
@@ -73,6 +76,27 @@ import * as storage from './storage.ts'
 import * as github from './github.ts'
 import * as githubApp from './githubApp.ts'
 import { seed } from './seed.ts'
+import {
+  PrivateResourceError,
+  privateCanvas,
+  requireReadActor,
+  assertCanvasRead,
+  assertRenderRead,
+  frameReadScope,
+  referenceReadScope,
+  type ResourceReader,
+} from './privateResources.ts'
+import { RenderBusyError } from './renderAdmission.ts'
+import { materializePrivateResources } from './privateMaterialization.ts'
+import { PRIVATE_REFERENCE_LIMITS } from '../shared/privateReferences.ts'
+import { privateMediaAllowance, PrivateMaterializationError } from '../shared/privateMedia.ts'
+import { PrivateReferenceError } from '../shared/privateReferences.ts'
+import {
+  copyClipboardResources,
+  parseResourceCopyRequest,
+  ResourceCopyConflict,
+  ResourceCopyUncertainError,
+} from './resourceCopies.ts'
 import * as allowance from './allowance.ts'
 import * as modelAccounts from './modelAccounts.ts'
 import { getLocalAgentPreference } from './localAgentPreferences.ts'
@@ -108,22 +132,21 @@ const BUILD_ID = (() => {
   }
 })()
 
-/* boot: connect the DB, hydrate memory, import pre-DB store.json once */
+/* Boot from the current database schema; incompatible old state requires reset. */
 await initDb()
+await hydrateAssetMetadata()
 await backgrounds.initBackgrounds()
 initAuth()
 await syncAdmins() // ADMIN_EMAILS -> user.role, for accounts that already exist
-let data = await persist.hydrate()
-if (data.canvases.length === 0 && (await persist.importLegacyJson())) {
-  data = await persist.hydrate()
-}
+const data = await persist.hydrate()
 store.init(data.canvases)
 await workspaces.hydrateWorkspaces() // before the first request: canvasRole reads membership
+await validateCompanySetup() // operator bindings must be valid before readiness/listening
 await webhooks.hydrateWebhooks()
 await hydrateFonts() // before the first request: frame writes add the faces they use
 billing.reportBillingConfig()
 actions.hydrateLogs(data)
-seed()
+await seed()
 
 /* Never-attempted queued cards get their first pickup after boot. Hydration
    marks interrupted claimed cards as failed, so they are excluded until a
@@ -247,21 +270,30 @@ function connRole(conn: Conn): CanvasRole | null {
    editor goes read-only, or back), and anyone left with no access at all is
    disconnected rather than kept on the live feed. */
 function refreshRoomRoles(canvasId: string) {
-  for (const conn of room(canvasId)) {
-    const role = connRole(conn)
-    if (!role) {
-      conn.ws.close(4403, 'no access')
-      continue
-    }
-    send(conn.ws, { type: 'role', role })
-    /* the room now drops this visitor's editing messages, including the one
-       that would clear their badge, so clear it for them */
-    if (!roleAllows(role, 'edit') && conn.presence.activeFrameId) {
-      conn.presence.activeFrameId = null
-      broadcast(canvasId, { type: 'editing', clientId: conn.presence.clientId, frameId: null }, conn.presence.clientId)
-    }
+  for (const conn of room(canvasId)) refreshConnRole(conn)
+}
+
+function refreshConnRole(conn: Conn) {
+  const role = connRole(conn)
+  if (!role) {
+    conn.ws.close(4403, 'no access')
+    return
+  }
+  send(conn.ws, { type: 'role', role })
+  /* The room drops editing messages once edit access is lost; clear the old badge here. */
+  if (!roleAllows(role, 'edit') && conn.presence.activeFrameId) {
+    conn.presence.activeFrameId = null
+    broadcast(
+      conn.canvasId,
+      { type: 'editing', clientId: conn.presence.clientId, frameId: null },
+      conn.presence.clientId,
+    )
   }
 }
+
+userEvents.onCanvasesChanged((userIds) => {
+  for (const conn of conns.values()) if (conn.userId && userIds.has(conn.userId)) refreshConnRole(conn)
+})
 
 function send(ws: WebSocket, msg: ServerMessage) {
   if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg))
@@ -270,6 +302,10 @@ function send(ws: WebSocket, msg: ServerMessage) {
 function broadcast(canvasId: string, msg: ServerMessage, excludeClientId?: string) {
   for (const c of room(canvasId)) {
     if (excludeClientId && c.presence.clientId === excludeClientId) continue
+    if (!connRole(c)) {
+      c.ws.close(4403, 'no access')
+      continue
+    }
     const shown = c.userId ? msg : forGuest(msg)
     if (shown) send(c.ws, shown)
   }
@@ -414,82 +450,198 @@ app.use('/relay', async (req, res) => {
   }
 })
 
-/* ------------------------------------------------------------------ */
-/* Public frame images: /i/<frameId>.png|jpg — shareable/hotlinkable   */
-/* (og:image etc). Unauthenticated by the same unguessable-id logic as */
-/* canvas share links; renders the CURRENT frame, so embedded images   */
-/* stay up to date as the design iterates. Caching, rate limiting and  */
-/* render dispatch live in previews.ts — this route is HTTP only.      */
-/* ------------------------------------------------------------------ */
+function privateResponseHeaders(res: express.Response): void {
+  res.set('Cache-Control', 'private, no-store')
+  res.vary('Cookie')
+  res.vary('Authorization')
+  res.set('Accept-Ranges', 'none')
+  res.set('X-Content-Type-Options', 'nosniff')
+}
+
+/** Normal browser COOKIE sessions only; headers never enter a render. */
+async function browserResourceReader(req: express.Request): Promise<ResourceReader> {
+  const cookie = req.headers.cookie ?? ''
+  const currentActor = async () => {
+    const session = await auth.api.getSession({ headers: new Headers({ cookie }) })
+    return session?.user.id
+  }
+  const actorId = await currentActor()
+  if (!actorId) throw new PrivateResourceError()
+  const reader = Object.freeze({ actorId, currentActor })
+  await requireReadActor(reader)
+  return reader
+}
+
+function privateReadFailure(res: express.Response, error: unknown) {
+  if (error instanceof PrivateResourceError) return res.status(404).end()
+  if (error instanceof PrivateMaterializationError)
+    return res
+      .status(error.kind === 'aborted' ? 503 : error.kind === 'limit' ? 413 : 422)
+      .set('Content-Type', 'application/json')
+      .end(JSON.stringify({ error: error.message }))
+  console.error('[private-read] operation unavailable')
+  return res
+    .status(503)
+    .set('Content-Type', 'application/json')
+    .end(
+      JSON.stringify({
+        error: error instanceof RenderBusyError ? error.message : 'private read is temporarily unavailable',
+      }),
+    )
+}
+
+/* Headers precede auth/errors; reject noncanonical private paths before the SPA fallback. */
+app.use((req, res, next) => {
+  const raw = req.path
+  let decoded = raw
+  try {
+    if (raw.length <= 512) decoded = decodeURIComponent(raw)
+  } catch {
+    /* syntax is rejected below */
+  }
+  const family = /^\/(?:a|i)(?:\/|$)/i
+  if (family.test(raw) || family.test(decoded)) {
+    privateResponseHeaders(res)
+    if (raw.length > 128 || raw !== decoded || !/^\/(?:a|i)\/[A-Za-z0-9_-]{1,64}\.[a-z0-9]{1,8}$/.test(raw))
+      return res.status(404).end()
+  } else if (
+    /^\/api\/(?:frames\/[^/]+\/screenshot\.png|canvases\/[^/]+\/(?:export\.pdf|fonts)|fonts)(?:\/|$)/i.test(raw)
+  ) {
+    privateResponseHeaders(res)
+  }
+  next()
+})
 
 app.get('/i/:id.:ext', async (req, res) => {
   const { id, ext } = req.params as { id: string; ext: string }
   if (ext !== 'png' && ext !== 'jpg') return res.status(404).end()
-  const frame = store.getFrame(id)
-  if (!frame) return res.status(404).end()
-
-  let result: Awaited<ReturnType<typeof getImage>>
   try {
-    result = await getImage(frame, {
+    const reader = await browserResourceReader(req)
+    const live = store.getFrame(id)
+    if (!live) throw new PrivateResourceError()
+    const frame = { ...live }
+    const scope = frameReadScope(reader, frame)
+    const { buf } = await getImage(frame, {
       ext,
+      scope,
       scale: req.query.scale === '2' ? 2 : 1,
       quality: Math.min(100, Math.max(1, Number(req.query.quality) || 90)),
-      /* ?preview — the dashboard-card variant; see previews.ts */
       preview: req.query.preview !== undefined,
-      ip: req.ip ?? 'unknown',
-      /* the render limit targets anonymous hotlink abuse — a logged-in user
-         loading a dashboard of many canvases shouldn't hit it (and behind
-         the Railway proxy many users can share one req.ip). Only called
-         when the budget is exhausted, so cached serves stay auth-free. */
-      isAuthenticated: async () =>
-        !!(await auth.api.getSession({ headers: fromNodeHeaders(req.headers) }).catch(() => null)),
     })
-  } catch (e) {
-    return res.status(500).json({ error: e instanceof Error ? e.message : 'render failed' })
+    await assertRenderRead(scope, frame)
+    res.set('Content-Type', ext === 'jpg' ? 'image/jpeg' : 'image/png')
+    if (req.query.download !== undefined) {
+      const safe = frame.name.replace(/[^\w\- ]+/g, '').trim() || 'frame'
+      res.set('Content-Disposition', `attachment; filename="${safe}.${ext}"`)
+    }
+    res.set('Content-Length', String(buf.length))
+    return res.end(buf)
+  } catch (error) {
+    return privateReadFailure(res, error)
   }
-  if (result.status === 'rate-limited') {
-    res.set('Retry-After', '60')
-    return res.status(429).json({ error: 'render rate limit — cached URLs are unaffected' })
-  }
-  const { buf } = result
-
-  res.set('Content-Type', ext === 'jpg' ? 'image/jpeg' : 'image/png')
-  res.set('Cache-Control', 'public, max-age=60')
-  if (req.query.download !== undefined) {
-    const safe = frame.name.replace(/[^\w\- ]+/g, '').trim() || 'frame'
-    res.set('Content-Disposition', `attachment; filename="${safe}.${ext}"`)
-  }
-  res.send(buf)
 })
-
-/* ------------------------------------------------------------------ */
-/* Uploaded assets: /a/<assetId>.<ext> — written once by the upload_asset */
-/* MCP tool, immutable thereafter, so far-future caching is safe. Public  */
-/* by the same unguessable-id logic as /i/ (frame HTML embedding these    */
-/* URLs renders for anyone who can see the canvas).                       */
-/* ------------------------------------------------------------------ */
 
 app.get('/a/:id.:ext', async (req, res) => {
   const { id, ext } = req.params as { id: string; ext: string }
   try {
-    const found = await getAsset(id)
-    if (!found || found.meta.ext !== ext) return res.status(404).end()
+    const reader = await browserResourceReader(req)
+    const found = await getAssetById(id, ext, reader)
+    if (!found) return res.status(404).end()
     res.set('Content-Type', found.meta.mime)
-    res.set('Cache-Control', 'public, max-age=31536000, immutable')
-    res.set('X-Content-Type-Options', 'nosniff')
-    /* Fonts load with CORS from sandboxed frames with opaque origins.
-       Assets are public by unguessable id. */
-    res.set('Access-Control-Allow-Origin', '*')
-    /* svg can script when opened as a document — neuter it; <img> embeds
-       are unaffected */
     if (found.meta.mime === 'image/svg+xml')
       res.set('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'")
     if (req.query.download !== undefined) res.set('Content-Disposition', `attachment; filename="${id}.${ext}"`)
-    res.send(found.buf)
-  } catch (e) {
-    res.status(500).json({ error: e instanceof Error ? e.message : 'asset fetch failed' })
+    res.set('Content-Length', String(found.buf.length))
+    return res.end(found.buf)
+  } catch (error) {
+    return privateReadFailure(res, error)
   }
 })
+
+app.post(
+  '/api/canvases/:canvasId/private-materialization',
+  (_req: express.Request, res: express.Response, next: express.NextFunction) => {
+    privateResponseHeaders(res)
+    next()
+  },
+  express.json({ limit: '8mb' }),
+  async (req: express.Request, res: express.Response) => {
+    const controller = new AbortController()
+    const disconnect = () => {
+      if (!res.writableEnded) controller.abort()
+    }
+    res.once('close', disconnect)
+    try {
+      const reader = await browserResourceReader(req)
+      const body: unknown = req.body
+      const canvasId = req.params.canvasId as string
+      const id = (value: unknown): value is string => typeof value === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(value)
+      if (
+        !body ||
+        typeof body !== 'object' ||
+        Array.isArray(body) ||
+        Object.keys(body).some((key) => !['source', 'syntax', 'context', 'remaining'].includes(key)) ||
+        !('source' in body) ||
+        typeof body.source !== 'string' ||
+        !('syntax' in body) ||
+        typeof body.syntax !== 'string' ||
+        !['html', 'stylesheet', 'value'].includes(body.syntax) ||
+        !('context' in body) ||
+        !body.context ||
+        typeof body.context !== 'object' ||
+        Array.isArray(body.context) ||
+        Object.keys(body.context).some((key) => !['kind', 'id'].includes(key)) ||
+        !('kind' in body.context) ||
+        !('id' in body.context) ||
+        !id(body.context.id) ||
+        !id(canvasId) ||
+        typeof body.context.kind !== 'string' ||
+        !['frame', 'reference'].includes(body.context.kind)
+      ) {
+        return res
+          .status(400)
+          .set('Content-Type', 'application/json')
+          .end(JSON.stringify({ error: 'Invalid private media request.' }))
+      }
+      let limits
+      try {
+        limits = privateMediaAllowance('remaining' in body ? body.remaining : undefined)
+      } catch {
+        return res
+          .status(400)
+          .set('Content-Type', 'application/json')
+          .end(JSON.stringify({ error: 'Invalid private media budget.' }))
+      }
+      if (Buffer.byteLength(body.source) > PRIVATE_REFERENCE_LIMITS.bytes)
+        throw new PrivateMaterializationError('limit')
+      const scope =
+        body.context.kind === 'frame'
+          ? frameReadScope(reader, { id: body.context.id, canvasId })
+          : referenceReadScope(reader, canvasId, body.context.id)
+      const result = await materializePrivateResources(body.source, scope, {
+        syntax: body.syntax as 'html' | 'stylesheet' | 'value',
+        signal: controller.signal,
+        limits,
+      })
+      if (controller.signal.aborted || res.destroyed) return
+      const payload = JSON.stringify(result)
+      res.set('Content-Type', 'application/json')
+      res.set('Content-Length', String(Buffer.byteLength(payload)))
+      return res.end(payload)
+    } catch (error) {
+      if (!res.destroyed) return privateReadFailure(res, error)
+    } finally {
+      res.off('close', disconnect)
+    }
+  },
+  (error: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+    const tooLarge = error && typeof error === 'object' && 'status' in error && error.status === 413
+    return res
+      .status(tooLarge ? 413 : 400)
+      .set('Content-Type', 'application/json')
+      .end(JSON.stringify({ error: 'Invalid private media request.' }))
+  },
+)
 
 /* Curated background library (server/backgrounds.ts): /bg/<id>.webp and  */
 /* /bg/<id>-t.webp straight from object storage. Public and immutable —  */
@@ -519,6 +671,14 @@ app.get('/bg/:file', async (req, res) => {
 /* ------------------------------------------------------------------ */
 
 app.put('/u/:token', async (req, res) => {
+  let actorId: string | undefined
+  try {
+    actorId = await currentMcpActor(req)
+  } catch (error) {
+    console.error('[upload] authentication unavailable', error)
+    return res.status(503).json({ error: 'MCP authentication is temporarily unavailable' })
+  }
+  if (!actorId) return res.status(401).json({ error: 'current MCP authentication is required' })
   const { token } = req.params
   const ticket = beginTicketUpload(token)
   if (!ticket)
@@ -527,6 +687,8 @@ app.put('/u/:token', async (req, res) => {
       .json({ error: 'invalid, expired or already-used upload ticket — request a new one via the upload_asset tool' })
   let success = false
   try {
+    if (ticket.actorId !== actorId || !privateCanvas(ticket.canvasId, actorId, 'edit'))
+      return res.status(404).json({ error: 'upload is not available' })
     /* on any early rejection, destroy the request stream — otherwise curl
        keeps sending a body nobody reads and the connection deadlocks */
     if (Number(req.headers['content-length'] || 0) > MAX_ASSET_BYTES) {
@@ -545,9 +707,11 @@ app.put('/u/:token', async (req, res) => {
       }
       chunks.push(chunk as Buffer)
     }
+    if ((await currentMcpActor(req)) !== actorId || !privateCanvas(ticket.canvasId, actorId, 'edit'))
+      return res.status(404).json({ error: 'upload is not available' })
     const asset = await createAsset(Buffer.concat(chunks), {
       canvasId: ticket.canvasId,
-      ownerId: ticket.ownerId,
+      actorId,
       uploadedBy: ticket.uploadedBy,
     })
     success = true
@@ -558,9 +722,11 @@ app.put('/u/:token', async (req, res) => {
       mime: asset.mime,
       size_bytes: asset.size,
       usage: `<img src="${url}" alt="">`,
-      note: 'Permanent public URL — reference it in frame HTML.',
+      note: 'Private canvas-owned URL. Use it only in this canvas; other canvases require an authorized resource copy.',
     })
   } catch (e) {
+    if (e instanceof McpAuthenticationUnavailable) return res.status(503).json({ error: e.message })
+    if (e instanceof PrivateResourceError) return res.status(404).json({ error: e.message })
     res.status(400).json({ error: e instanceof Error ? e.message : 'upload failed' })
   } finally {
     endTicketUpload(token, success)
@@ -759,12 +925,15 @@ app.get('/api/me', async (req, res) => {
    person is in see the new face at once; the session the browser holds is
    re-read by the page, since better-auth serves it from the row. */
 app.post('/api/me/avatar', express.raw({ type: () => true, limit: MAX_AVATAR_BYTES + 1024 }), async (req, res) => {
+  const canvasId = typeof req.query.canvas === 'string' ? req.query.canvas : ''
+  if (!canvasId) return res.status(400).json({ error: 'choose a canvas to store the profile photo' })
   try {
-    const image = await setAvatar(req.user!.id, Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0))
+    const image = await setAvatar(req.user!.id, canvasId, Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0))
     refreshPresenceImage(req.user!.id, image)
     res.json({ image })
   } catch (e) {
     if (e instanceof AvatarInputError) res.status(400).json({ error: e.message })
+    else if (e instanceof PrivateResourceError) res.status(404).json({ error: e.message })
     else {
       console.error('[avatar] upload failed', e)
       res.status(500).json({ error: 'the photo could not be saved — try again' })
@@ -924,10 +1093,32 @@ app.use('/api/notifications', notificationsRouter)
 app.use('/api/webhooks', webhooksRouter)
 app.use('/api/fonts', fontsRouter)
 
-/* the font library a canvas designs with: its workspace's, or its owner's */
-app.get('/api/canvases/:id/fonts', (req, res) => {
-  const canvas = requireCanvas(req, res, req.params.id, 'view')
-  if (canvas) res.json(fontsForCanvas(canvas))
+app.post('/api/canvases/:id/resource-copies', async (req, res) => {
+  try {
+    const request = parseResourceCopyRequest(req.body)
+    res.json(await copyClipboardResources(req.params.id, req.user!.id, request))
+  } catch (error) {
+    if (error instanceof PrivateResourceError) return res.status(404).json({ error: error.message })
+    if (error instanceof ResourceCopyConflict) return res.status(409).json({ error: error.message })
+    if (error instanceof PrivateReferenceError) return res.status(400).json({ error: error.message })
+    if (error instanceof ResourceCopyUncertainError)
+      return res
+        .status(503)
+        .json({ error: error.message, outcome: 'unknown', canvasId: error.canvasId, candidateIds: error.candidateIds })
+    console.error('[resources] clipboard copy failed', error)
+    res.status(500).json({ error: 'the files could not be copied' })
+  }
+})
+
+/* A private library requires durable parent access, including its metadata. */
+app.get('/api/canvases/:id/fonts', async (req, res) => {
+  try {
+    const reader = await browserResourceReader(req)
+    await assertCanvasRead({ reader, canvasId: req.params.id })
+    return res.json(fontsForCanvas({ id: req.params.id }))
+  } catch (error) {
+    return privateReadFailure(res, error)
+  }
 })
 app.use('/api/admin', adminRouter)
 app.use('/api/community', communityRouter)
@@ -1211,11 +1402,17 @@ function requireGrowableWorkspace(req: express.Request, res: express.Response, w
   return ws
 }
 
-app.post('/api/canvases', (req, res) => {
-  const name = String(req.body?.name || 'Untitled canvas')
-  const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : undefined
-  if (workspaceId && !requireGrowableWorkspace(req, res, workspaceId)) return
-  res.json(store.createCanvas(name, req.user!.id, workspaceId))
+app.post('/api/canvases', async (req, res, next) => {
+  try {
+    const name = String(req.body?.name || 'Untitled canvas')
+    const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : undefined
+    if (workspaceId && !requireGrowableWorkspace(req, res, workspaceId)) return
+    res.json(await store.createCanvas(name, req.user!.id, workspaceId))
+  } catch (error) {
+    if (error instanceof CanvasCreationUncertainError) {
+      res.status(503).json({ error: error.message, candidateId: error.canvasId, outcome: 'unknown' })
+    } else next(error)
+  }
 })
 
 app.post('/api/canvases/:id/duplicate', async (req, res) => {
@@ -1229,10 +1426,16 @@ app.post('/api/canvases/:id/duplicate', async (req, res) => {
     sourceWs && workspaces.isWorkspaceMember(sourceWs.id, req.user!.id) && workspaces.isActive(sourceWs)
       ? sourceWs.id
       : undefined
+  if (!companyPolicy.allowsDestination(req.user!.id, workspaceId))
+    return res.status(403).json({ error: 'managed company workspace policy denies this destination' })
   try {
     const copy = await store.duplicateCanvas(source.id, req.user!.id, req.user!.name, { workspaceId })
     res.json(copy)
   } catch (error) {
+    if (error instanceof CanvasCreationUncertainError)
+      return res.status(503).json({ error: error.message, candidateId: error.canvasId, outcome: 'unknown' })
+    if (error instanceof PrivateResourceError) return res.status(403).json({ error: error.message })
+    if (error instanceof PrivateReferenceError) return res.status(400).json({ error: error.message })
     console.error('[canvas] duplicate failed', error)
     res.status(500).json({ error: 'could not duplicate canvas' })
   }
@@ -1309,7 +1512,7 @@ app.get('/api/home/activity', (req, res) => {
   res.json(items.slice(0, 14))
 })
 
-app.delete('/api/canvases/:id', (req, res) => {
+app.delete('/api/canvases/:id', async (req, res, next) => {
   const c = store.getCanvas(req.params.id)
   if (!c) return res.status(404).json({ error: 'not found' })
   /* only the owner (or an admin of its workspace) may delete; unclaimed
@@ -1317,8 +1520,12 @@ app.delete('/api/canvases/:id', (req, res) => {
      before they can be destroyed */
   if (!c.ownerId) return res.status(403).json({ error: 'claim it first' })
   if (!canManageCanvas(req.user!.id, c)) return res.status(403).json({ error: 'not yours' })
-  actions.deleteCanvas(c.id)
-  res.json({ ok: true })
+  try {
+    await actions.deleteCanvas(c.id)
+    res.json({ ok: true })
+  } catch (error) {
+    next(error)
+  }
 })
 
 app.patch('/api/canvases/:id', (req, res) => {
@@ -1390,6 +1597,13 @@ app.post('/api/canvases/:id/members', async (req, res) => {
     .from(authSchema.user)
     .where(eq(authSchema.user.email, email))
   if (!row) return res.status(404).json({ error: 'no doop account with that email — ask them to sign up first' })
+  if (!requireCanvas(req, res, c.id, 'edit')) return
+  if (
+    !companyPolicy.allowsDestination(row.id, c.workspaceId) ||
+    (companyPolicy.isPrivate(c.workspaceId) && !workspaces.isWorkspaceMember(c.workspaceId!, row.id))
+  ) {
+    return res.status(403).json({ error: 'company workspace membership is required' })
+  }
   if (row.id === c.ownerId) return res.status(400).json({ error: 'the owner already has access' })
   const isNew = !c.memberIds?.includes(row.id)
   store.addMember(c.id, row.id, req.user!.id)
@@ -1429,6 +1643,8 @@ function requireDurableCanvas(req: express.Request, res: express.Response, canva
 app.get('/api/canvases/:id/sync-keys', async (req, res) => {
   const c = requireDurableCanvas(req, res, req.params.id)
   if (!c) return
+  if (companyPolicy.isPrivate(c.workspaceId))
+    return res.status(403).json({ error: 'design sync is unavailable for company canvases' })
   const keys = await ingest.listSyncKeys(c.id)
   res.json(keys.map((k) => ({ ...k, frames: ingest.syncedFrameCount(c, k.id) })))
 })
@@ -1436,6 +1652,8 @@ app.get('/api/canvases/:id/sync-keys', async (req, res) => {
 app.post('/api/canvases/:id/sync-keys', async (req, res) => {
   const c = requireDurableCanvas(req, res, req.params.id)
   if (!c) return
+  if (companyPolicy.isPrivate(c.workspaceId))
+    return res.status(403).json({ error: 'design sync is unavailable for company canvases' })
   const key = await ingest.createSyncKey(c.id, String(req.body?.name ?? ''), req.user!.id)
   res.json({ ...key, frames: 0 })
 })
@@ -1843,7 +2061,7 @@ app.post(
     try {
       const asset = await createAsset(Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0), {
         canvasId: c.id,
-        ownerId: req.user!.id,
+        actorId: req.user!.id,
         uploadedBy: req.user!.name,
       })
       /* absolute like the MCP flow: frame HTML renders inside sandboxed
@@ -2444,24 +2662,32 @@ app.post('/api/feedback/:id/retry', async (req, res) => {
 })
 
 app.get('/api/frames/:id/screenshot.png', async (req, res) => {
-  const frame = requireFrame(req, res, req.params.id, 'view')
-  if (!frame) return
   try {
+    const reader = await browserResourceReader(req)
+    const live = store.getFrame(req.params.id)
+    if (!live) throw new PrivateResourceError()
+    const frame = { ...live }
+    const scope = frameReadScope(reader, frame)
     const { renderFrame } = await import('./screenshot.ts')
-    const png = await renderFrame(frame, req.query.scale === '2' ? 2 : 1)
-    res.type('png').send(png)
-  } catch (e) {
-    res.status(500).json({ error: e instanceof Error ? e.message : 'render failed' })
+    const png = await renderFrame(frame, scope, req.query.scale === '2' ? 2 : 1)
+    await assertRenderRead(scope, frame)
+    res.type('png').set('Content-Length', String(png.length))
+    return res.end(png)
+  } catch (error) {
+    return privateReadFailure(res, error)
   }
 })
 
-/* Vector PDF of frames on a canvas, a page per frame: ?frames=<id>,<id>
-   picks frames, pages in the order listed, else ?page=<pageId> (default the
-   first page) takes every visible frame there, in reading order. A GET so a read-only
-   impersonation session can export too. */
 app.get('/api/canvases/:id/export.pdf', async (req, res) => {
-  const canvas = requireCanvas(req, res, req.params.id, 'view')
-  if (!canvas) return
+  let reader: ResourceReader
+  try {
+    reader = await browserResourceReader(req)
+    await assertCanvasRead({ reader, canvasId: req.params.id })
+  } catch (error) {
+    return privateReadFailure(res, error)
+  }
+  const canvas = privateCanvas(req.params.id, reader.actorId)
+  if (!canvas) return res.status(404).end()
   const pdf = await import('./pdfExport.ts')
   const frameIds = typeof req.query.frames === 'string' ? req.query.frames.split(',').filter(Boolean) : undefined
   const pageId = typeof req.query.page === 'string' && req.query.page ? req.query.page : undefined
@@ -2475,14 +2701,14 @@ app.get('/api/canvases/:id/export.pdf', async (req, res) => {
     return res.status(429).json({ error: 'PDF export rate limit — wait a minute' })
   }
   try {
-    const buf = await pdf.renderFramesPdf(selection.frames)
+    const buf = await pdf.renderFramesPdf(selection.frames, reader)
     res.set('Content-Type', 'application/pdf')
     res.set('Content-Disposition', `attachment; filename="${pdf.pdfFileName(canvas, selection.frames)}"`)
-    res.set('Cache-Control', 'no-store')
-    return res.send(buf)
+    res.set('Content-Length', String(buf.length))
+    return res.end(buf)
   } catch (e) {
     if (e instanceof pdf.PdfRendererUnavailableError) return res.status(503).json({ error: e.message })
-    return res.status(500).json({ error: e instanceof Error ? e.message : 'PDF export failed' })
+    return privateReadFailure(res, e)
   }
 })
 
@@ -2553,6 +2779,26 @@ if (env.isProduction) {
 }
 
 /* ------------------------------------------------- websocket */
+
+app.use((error: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  if (error instanceof PrivateReferenceError) {
+    res.status(400).json({ error: error.message })
+    return
+  }
+  if (error instanceof CompanyPolicyError) {
+    res.status(403).json({ error: error.message })
+    return
+  }
+  if (error instanceof PrivateResourceError) {
+    res.status(404).end()
+    return
+  }
+  const status = typeof error === 'object' && error !== null && 'status' in error ? Number(error.status) : 500
+  console.error('[http] request failed')
+  res
+    .status(Number.isInteger(status) && status >= 400 && status < 500 ? status : 500)
+    .json({ error: status >= 400 && status < 500 ? 'request refused' : 'request is temporarily unavailable' })
+})
 
 const server = http.createServer(app)
 const wss = new WebSocketServer({ server, path: '/ws' })

@@ -1,6 +1,10 @@
 import { beforeEach, expect, it, vi } from 'vitest'
 import type { Canvas, Frame } from '../shared/types.ts'
 
+// Persistence is stood in for in this store-only rig; actual account state and
+// copy revocation are covered by privateClipboardCopies/privateCanvasCopies.
+vi.mock('../server/auth.ts', () => ({ isBanned: async () => false }))
+
 const rig = vi.hoisted(() => ({
   savedFrames: [] as { id: string; pageId?: string; immediate?: boolean }[],
   /* runs while a page copy is being written, before it lands in memory */
@@ -15,6 +19,7 @@ vi.mock('../server/db/persist.ts', () => {
     deleteToken: noop,
     deleteMember: noop,
     deleteReference: noop,
+    insertCanvas: async () => {},
     saveCanvas: noop,
     saveCanvasCopy: noop,
     saveFrame: (frame: Frame, immediate?: boolean) =>
@@ -45,8 +50,8 @@ const frame = (id: string, pageId?: string): Frame => ({
   updatedBy: 'test',
 })
 
-beforeEach(() => {
-  for (const canvas of store.allCanvases()) store.deleteCanvas(canvas.id)
+beforeEach(async () => {
+  for (const canvas of store.allCanvases()) await store.deleteCanvas(canvas.id)
   rig.savedFrames = []
   rig.duringCopy = null
 })
@@ -77,10 +82,10 @@ it('rehomes a frame whose page no longer exists to the first page on boot', () =
   ])
 })
 
-it('advances a frame version when multiple writes share the same timestamp', () => {
+it('advances a frame version when multiple writes share the same timestamp', async () => {
   const now = vi.spyOn(Date, 'now').mockReturnValue(100)
   try {
-    const canvas = store.createCanvas('Versions', 'alice')
+    const canvas = await store.createCanvas('Versions', 'alice')
     const frame = store.createFrame(canvas.id, { name: 'Path' }, 'alice')!
     const first = frame.updatedAt
     const second = store.updateFrame(frame.id, { html: '<p>Second</p>' }, 'alice')!.updatedAt
@@ -93,7 +98,7 @@ it('advances a frame version when multiple writes share the same timestamp', () 
 })
 
 it('keeps a page copy within the guide limit when guides are added while it is written', async () => {
-  const canvas = store.createCanvas('Guide race', 'alice')
+  const canvas = await store.createCanvas('Guide race', 'alice')
   const [page] = canvasPages(canvas)
   const guide = (id: string, pageId = 'elsewhere') => ({ id, pageId, axis: 'v' as const, at: 0 })
   for (let i = 0; i < 10; i++) store.setGuide(canvas.id, guide(`copied${i}`, page!.id))
@@ -108,7 +113,7 @@ it('keeps a page copy within the guide limit when guides are added while it is w
 })
 
 it('points a copied page’s prototype links and flow start at the copied frames', async () => {
-  const canvas = store.createCanvas('Prototype copy', 'alice')
+  const canvas = await store.createCanvas('Prototype copy', 'alice')
   const [page] = canvasPages(canvas)
   store.setPages(canvas.id, [page!, { id: 'other-page', name: 'Other' }])
   const other = store.createFrame(canvas.id, { name: 'Elsewhere', pageId: 'other-page' }, 'alice')!
@@ -140,7 +145,7 @@ it('points a copied page’s prototype links and flow start at the copied frames
 })
 
 it('points a copied canvas’s prototype links and flow starts at the copied frames', async () => {
-  const canvas = store.createCanvas('Prototype canvas', 'alice')
+  const canvas = await store.createCanvas('Prototype canvas', 'alice')
   const [page] = canvasPages(canvas)
   const target = store.createFrame(canvas.id, { name: 'Target', pageId: page!.id }, 'alice')!
   store.createFrame(
@@ -150,6 +155,7 @@ it('points a copied canvas’s prototype links and flow starts at the copied fra
   )
   store.setFlowStart(canvas.id, page!.id, target.id)
 
+  canvas.memberIds = ['bob'] // this fixture grants the copying actor source read access
   const copy = (await store.duplicateCanvas(canvas.id, 'bob', 'bob'))!
   const copiedTarget = copy.frames.find((f) => f.name === 'Target')!
   expect(copy.frames.find((f) => f.name === 'Start')!.html).toContain(`overlay:${copiedTarget.id}`)
@@ -157,7 +163,7 @@ it('points a copied canvas’s prototype links and flow starts at the copied fra
 })
 
 it('keeps a page’s background across page-list saves and gives it to copies of the page and the canvas', async () => {
-  const canvas = store.createCanvas('Painted', 'alice')
+  const canvas = await store.createCanvas('Painted', 'alice')
   const [page] = canvasPages(canvas)
   expect(store.setPageBackground(canvas.id, 'missing', '#1e1e1e')).toBeUndefined()
   expect(store.setPageBackground(canvas.id, page!.id, '#1e1e1e')).toEqual([{ ...page, background: '#1e1e1e' }])

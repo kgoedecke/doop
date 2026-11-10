@@ -12,9 +12,45 @@ import { FRAME_TEXT_RUNTIME } from './frameTextRuntime'
 export const FRAME_BOOTSTRAP = `<!doctype html>
 <html><head></head><body><script data-v-boot>
 (function () {
+  var privateReplayBlocked = false
+  var privateReplacements = []
+  var needsPrivateMaterialization = false
   ${FRAME_REPLAY_RUNTIME}
   ${FRAME_DROP_RUNTIME}
   ${FRAME_PROTO_RUNTIME}
+  function canonicalPrivateHtml(value) {
+    for (var i = 0; i < privateReplacements.length; i++) {
+      var entry = privateReplacements[i]
+      var forms = [[entry.inline, entry.canonical]]
+      if (entry.cssInline && entry.cssCanonical) forms.unshift([entry.cssInline, entry.cssCanonical])
+      for (var f = 0; f < forms.length; f++) {
+        var from = forms[f][0], to = forms[f][1]
+        for (var depth = 0; depth <= 32; depth++) {
+          value = value.split(from).join(to)
+          var escaped = from.replace(/&/g, '&amp;')
+          if (escaped === from) break
+          from = escaped
+          to = to.replace(/&/g, '&amp;')
+        }
+      }
+    }
+    return value
+  }
+  function blockPrivateReplay(on) {
+    if (on) {
+      privateReplayBlocked = true
+      if (replayStop) replayStop()
+      replayStop = null
+      if (replayRetryTimer) clearTimeout(replayRetryTimer)
+      replayRetryTimer = null
+      if (replayScript) replayScript.remove()
+      replayScript = null
+    } else if (privateReplayBlocked) {
+      privateReplayBlocked = false
+      replaySnapshot = true
+      syncReplay()
+    }
+  }
   /* horizontal overscroll inside a frame must not chain to the parent page,
      where the browser turns it into a history back/forward swipe. Adopted
      sheet, not a <style> tag — the morph would wipe a tag from <head>. */
@@ -280,8 +316,8 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
     return root
   }
 
-  function serialize() {
-    return '<!doctype html>\\n' + cleanClone(document.documentElement.cloneNode(true)).outerHTML
+  function serialize(root) {
+    return canonicalPrivateHtml('<!doctype html>\\n' + cleanClone(root || document.documentElement.cloneNode(true)).outerHTML)
   }
 
   function rulesText(sheet) {
@@ -362,7 +398,7 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
        set src on image clones the cleaning leaves alone */
     cleanClone(root)
     return Promise.all(reads).then(
-      function () { return '<!doctype html>\\n' + root.outerHTML },
+      function () { return canonicalPrivateHtml('<!doctype html>\\n' + root.outerHTML) },
       function () { return null },
     )
   }
@@ -380,8 +416,9 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
       })
   }
 
-  function postEdited(discrete) {
-    parent.postMessage({ type: 'doop:edited', html: serialize(), discrete: discrete === true }, '*')
+  function postEdited(discrete, html) {
+    parent.postMessage({ type: 'doop:edited', html: typeof html === 'string' ? html : serialize(), discrete: discrete === true, materialize: needsPrivateMaterialization }, '*')
+    needsPrivateMaterialization = false
     /* typing can move/grow the element — keep the parent's toolbar anchored */
     if (editing && activeEl) postActive()
   }
@@ -514,7 +551,7 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
   }
 
   function hitInfo(el) {
-    var snippet = el.outerHTML || ''
+    var snippet = canonicalPrivateHtml(el.outerHTML || '')
     if (snippet.length > 400) snippet = snippet.slice(0, 397) + '...'
     return {
       selector: cssPath(el),
@@ -705,7 +742,7 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
       nodes[i].removeAttribute('data-v-active')
       nodes[i].removeAttribute('contenteditable')
     }
-    var html = c.outerHTML
+    var html = canonicalPrivateHtml(c.outerHTML)
     if (html.length > 20000) html = html.slice(0, 20000) + '\\n<!-- truncated -->'
     return html
   }
@@ -850,29 +887,29 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
   }
 
   function imageFill(el, cs) {
-    if (el.tagName === 'IMG') return { kind: 'img', src: el.currentSrc || el.src || '', size: cs.objectFit, repeat: 'no-repeat' }
+    if (el.tagName === 'IMG') return { kind: 'img', src: canonicalPrivateHtml(el.currentSrc || el.src || ''), size: cs.objectFit, repeat: 'no-repeat' }
     // A single CSS image fill; leave gradients and layered backgrounds intact.
     var match = cs.backgroundImage.match(/^url\\("([^"]*)"\\)$/)
-    return match ? { kind: 'background', src: match[1], size: cs.backgroundSize, repeat: cs.backgroundRepeat } : null
+    return match ? { kind: 'background', src: canonicalPrivateHtml(match[1]), size: cs.backgroundSize, repeat: cs.backgroundRepeat } : null
   }
 
-  function preserveImageSize(el, cs) {
+  function preserveImageSize(el, cs, naturalWidth, naturalHeight) {
     // Keep the old intrinsic inputs, not the flex/grid layout's used size.
     // This also works without Typed OM and leaves authored widths, heights,
     // flex factors and responsive constraints in charge of the actual box.
     // Already size-contained images (including earlier replacements) do not
     // derive their layout from the file, so keep their existing overrides.
     var contain = cs.contain
-    if (!el.naturalWidth || !el.naturalHeight || contain === 'strict' || contain.split(' ').indexOf('size') !== -1) return
+    if (!naturalWidth || !naturalHeight || contain === 'strict' || contain.split(' ').indexOf('size') !== -1) return
     var ratio = cs.aspectRatio
     if (ratio.indexOf('auto') !== -1) {
-      ratio = el.naturalWidth + ' / ' + el.naturalHeight
+      ratio = naturalWidth + ' / ' + naturalHeight
       // A natural ratio applies to the content box; a CSS ratio follows
       // box-sizing. Preserve the current outer ratio for padded border boxes.
       if (cs.boxSizing === 'border-box' && px(cs.width) > 0 && px(cs.height) > 0) ratio = px(cs.width) + ' / ' + px(cs.height)
     }
     el.style.setProperty('aspect-ratio', ratio, 'important')
-    el.style.setProperty('contain-intrinsic-size', el.naturalWidth + 'px ' + el.naturalHeight + 'px', 'important')
+    el.style.setProperty('contain-intrinsic-size', naturalWidth + 'px ' + naturalHeight + 'px', 'important')
     el.style.setProperty('contain', contain === 'none' ? 'size' : contain === 'content' ? 'size layout style paint' : contain + ' size', 'important')
   }
 
@@ -884,18 +921,29 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
     if (!image || image.kind !== expected.kind || image.src !== expected.src) return false
     if (styleEdit) endStyleEdit(styleEdit.selector, false)
     if (styleTimer) { clearTimeout(styleTimer); styleTimer = null; postEdited() }
+    // Mutate a detached clone using an inert token. No new user URL reaches
+    // an Image/CSS decoder before the parent prepares the full proposed source.
+    var clone = document.documentElement.cloneNode(true)
+    var target = clone.querySelector(selector)
+    if (!target) return false
+    var token = 'about:blank#doop-image-proposal-' + Math.random().toString(36).slice(2)
     if (image.kind === 'img') {
-      preserveImageSize(el, cs)
-      el.removeAttribute('srcset')
-      el.removeAttribute('sizes')
-      if (el.parentElement && el.parentElement.tagName === 'PICTURE') {
-        el.parentElement.querySelectorAll('source').forEach(function (source) { source.remove() })
+      preserveImageSize(target, cs, el.naturalWidth, el.naturalHeight)
+      target.removeAttribute('srcset')
+      target.removeAttribute('sizes')
+      if (target.parentElement && target.parentElement.tagName === 'PICTURE') {
+        target.parentElement.querySelectorAll('source').forEach(function (source) { source.remove() })
       }
-      el.src = url
+      target.setAttribute('src', token)
     } else {
-      el.style.setProperty('background-image', 'url(' + JSON.stringify(url) + ')', 'important')
+      target.style.setProperty('background-image', 'url(' + JSON.stringify(token) + ')', 'important')
     }
-    postEdited(true)
+    var html = serialize(clone)
+    var replacement = image.kind === 'img' ? url : JSON.stringify(url).slice(1, -1)
+    replacement = replacement.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    html = html.split(token).join(replacement)
+    needsPrivateMaterialization = true
+    postEdited(true, html)
     return true
   }
 
@@ -918,14 +966,14 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
     var inline = {}
     for (var j = 0; j < el.style.length; j++) {
       var name = el.style[j]
-      inline[name] = el.style.getPropertyValue(name)
+      inline[name] = canonicalPrivateHtml(el.style.getPropertyValue(name))
     }
     // The list enumerates longhands, so a shorthand holding a var() (a design
     // token on border-radius) is only visible through the shorthand itself.
     var shorthands = ['border-radius', 'border-color', 'border-width', 'padding', 'gap']
     for (var sh = 0; sh < shorthands.length; sh++) {
       var shorthandValue = el.style.getPropertyValue(shorthands[sh])
-      if (shorthandValue) inline[shorthands[sh]] = shorthandValue
+      if (shorthandValue) inline[shorthands[sh]] = canonicalPrivateHtml(shorthandValue)
     }
     var classes = (el.getAttribute('class') || '').trim().split(/[ ]+/).filter(Boolean)
     var text = ''
@@ -1100,6 +1148,9 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
   function applyStyle(selector, styles) {
     var el = styleTarget(selector)
     if (!el || isLocked(el)) return false
+    for (var resourceKey in styles) {
+      if (Object.prototype.hasOwnProperty.call(styles, resourceKey) && /url/i.test(String(styles[resourceKey]))) needsPrivateMaterialization = true
+    }
     var textPatch = isTextPatch(styles)
     var gesture = styleEdit && styleEdit.selector === selector
     function noteRuns(change) {
@@ -1186,10 +1237,21 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
       parent.postMessage({ type: 'doop:style-gesture-result', reqId: d.reqId, info: changed ? inspect(d.selector) : null }, '*')
     }
     if (d.type === 'doop:html' && typeof d.html === 'string' && !editing) {
+      var resources = d.replacements || []
+      if (!Array.isArray(resources) || resources.length > 64 || resources.some(function (entry) {
+        return !entry || typeof entry.inline !== 'string' || entry.inline.indexOf('data:') !== 0 || typeof entry.canonical !== 'string'
+      })) {
+        if (d.reqId) parent.postMessage({ type: 'doop:html-result', reqId: d.reqId, ok: false }, '*')
+        return
+      }
+      var privateDocument = resources.length > 0 || d.privateMedia === true
+      if (privateDocument) blockPrivateReplay(true)
+      privateReplacements = resources
       render(d.html)
+      if (!privateDocument) blockPrivateReplay(false)
       notifyFrameUpdated()
       protoHtmlChanged()
-      if (d.reqId) parent.postMessage({ type: 'doop:html-result', reqId: d.reqId }, '*')
+      if (d.reqId) parent.postMessage({ type: 'doop:html-result', reqId: d.reqId, ok: true }, '*')
     }
     if (d.type === 'doop:text-format' && Array.isArray(d.selectors)) {
       parent.postMessage({ type: 'doop:text-format-result', reqId: d.reqId, selectors: formatLayers(d.selectors, d.command) }, '*')

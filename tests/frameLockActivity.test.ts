@@ -9,6 +9,7 @@ vi.mock('../server/db/persist.ts', () => ({
   saveActivity: () => {},
   saveDecision: () => {},
   saveProposal: () => {},
+  insertCanvas: async () => {},
   saveCanvas: () => {},
   saveFrame: () => {},
 }))
@@ -24,7 +25,7 @@ function messages(): string[] {
   return actions.getActivity(canvasId).map((item) => item.message)
 }
 
-beforeEach(() => {
+beforeEach(async () => {
   actions.wire(
     () => {},
     () => {},
@@ -37,7 +38,7 @@ beforeEach(() => {
     decisions: new Map(),
     proposals: new Map(),
   })
-  canvasId = store.createCanvas('locks', 'kevin').id
+  canvasId = (await store.createCanvas('locks', 'kevin')).id
 })
 
 describe('frame lock activity', () => {

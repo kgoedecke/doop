@@ -28,6 +28,7 @@ import type { BillingInterval, Plan } from '../../shared/billing'
 import type { LinkAccess } from '../../shared/canvasRole'
 import type { CommentAnchorInput } from '../../shared/comments'
 import type { CustomFont } from '../../shared/fonts'
+import type { ResourceCopyEntry, ResourceCopyResult } from '../../shared/resourceCopies'
 import type { DesignToken, DesignTokenInput, ThemeRename, TokenEdit, TokenResult } from '../../shared/designTokens'
 
 export type HomeActivity = ActivityItem & { canvasId: string; canvasName: string }
@@ -296,31 +297,53 @@ export async function req<T>(url: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
+  privateMaterialization: (
+    context: import('../../shared/privateMedia').PrivateDocumentContext,
+    source: string,
+    signal: AbortSignal,
+    syntax: 'html' | 'stylesheet' | 'value' = 'html',
+    remaining?: import('../../shared/privateMedia').PrivateMediaAllowance,
+  ) =>
+    req<import('../../shared/privateMedia').PrivateMaterialization>(
+      `/api/canvases/${encodeURIComponent(context.canvasId)}/private-materialization`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ source, syntax, context: { kind: context.kind, id: context.id }, remaining }),
+        signal,
+        credentials: 'same-origin',
+        cache: 'no-store',
+        redirect: 'error',
+      },
+    ),
   listWebhooks: () => req<WebhookInfo[]>('/api/webhooks'),
   createWebhook: (input: { url: string; events: WebhookEventType[] }) =>
     req<WebhookInfo & { secret: string }>('/api/webhooks', { method: 'POST', body: JSON.stringify(input) }),
   updateWebhook: (id: string, patch: { url?: string; events?: WebhookEventType[]; enabled?: boolean }) =>
     req<WebhookInfo>(`/api/webhooks/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
   deleteWebhook: (id: string) => req<{ ok: boolean }>(`/api/webhooks/${id}`, { method: 'DELETE' }),
-  /* font libraries: a workspace's with an id, the signed-in person's without */
-  listFonts: (workspaceId?: string) =>
-    req<CustomFont[]>(`/api/fonts${workspaceId ? `?workspace=${encodeURIComponent(workspaceId)}` : ''}`),
-  uploadFont: (file: File, workspaceId?: string) =>
-    req<CustomFont>(`/api/fonts${workspaceId ? `?workspace=${encodeURIComponent(workspaceId)}` : ''}`, {
+  /* Private custom fonts belong to one explicitly selected canvas. */
+  listFonts: (canvasId: string) => req<CustomFont[]>(`/api/fonts?canvas=${encodeURIComponent(canvasId)}`),
+  uploadFont: (file: File, canvasId: string) =>
+    req<CustomFont>(`/api/fonts?canvas=${encodeURIComponent(canvasId)}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/octet-stream', 'X-File-Name': encodeURIComponent(file.name) },
       body: file,
     }),
   deleteFont: (id: string) => req<{ ok: boolean }>(`/api/fonts/${id}`, { method: 'DELETE' }),
   /* the profile photo: raw bytes in, the face's URL out */
-  uploadAvatar: (file: File) =>
-    req<{ image: string }>('/api/me/avatar', {
+  uploadAvatar: (file: File, canvasId: string) =>
+    req<{ image: string }>(`/api/me/avatar?canvas=${encodeURIComponent(canvasId)}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/octet-stream' },
       body: file,
     }),
   removeAvatar: () => req<{ ok: boolean }>('/api/me/avatar', { method: 'DELETE' }),
   canvasFonts: (canvasId: string) => req<CustomFont[]>(`/api/canvases/${canvasId}/fonts`),
+  copyResources: (canvasId: string, entries: ResourceCopyEntry[]) =>
+    req<ResourceCopyResult>(`/api/canvases/${canvasId}/resource-copies`, {
+      method: 'POST',
+      body: JSON.stringify({ entries }),
+    }),
   rotateWebhookSecret: (id: string) => req<{ secret: string }>(`/api/webhooks/${id}/rotate`, { method: 'POST' }),
   testWebhook: (id: string) => req<WebhookDeliveryResult>(`/api/webhooks/${id}/test`, { method: 'POST' }),
   notificationSettings: () => req<NotificationSettings>('/api/notifications'),

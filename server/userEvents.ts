@@ -15,6 +15,15 @@ import type { UserEvent } from '../shared/userEvents.ts'
 const HEARTBEAT_MS = 25_000
 
 const streams = new Map<string, Set<Response>>()
+const canvasObservers = new Set<(userIds: ReadonlySet<string>) => void>()
+
+/** In-process current-access observers; registration belongs to the server, not a client. */
+export function onCanvasesChanged(observer: (userIds: ReadonlySet<string>) => void): () => void {
+  canvasObservers.add(observer)
+  return () => {
+    canvasObservers.delete(observer)
+  }
+}
 
 export function subscribe(req: Request, res: Response): void {
   const userId = req.user!.id
@@ -40,8 +49,11 @@ export function subscribe(req: Request, res: Response): void {
 }
 
 export function notifyUsers(userIds: Iterable<string>, event: UserEvent): void {
+  const changed = new Set(userIds)
+  // Update idle canvas rooms before writing to optional (possibly disconnected) Home streams.
+  if (event.type === 'canvases') for (const observer of canvasObservers) observer(changed)
   const line = `data: ${JSON.stringify(event)}\n\n`
-  for (const id of new Set(userIds)) for (const res of streams.get(id) ?? []) res.write(line)
+  for (const id of changed) for (const res of streams.get(id) ?? []) res.write(line)
 }
 
 /** Test seam: open streams for a user. */

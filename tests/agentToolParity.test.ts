@@ -4,7 +4,12 @@ import { expect, it, vi } from 'vitest'
 import { buildMcpServer } from '../server/mcp.ts'
 import { RESIDENT_TOOL_NAMES } from '../server/resident.ts'
 
-vi.mock('../server/db/persist.ts', () => ({ saveCanvas: () => {}, saveFrame: () => {}, saveActivity: () => {} }))
+vi.mock('../server/db/persist.ts', () => ({
+  insertCanvas: async () => {},
+  saveCanvas: () => {},
+  saveFrame: () => {},
+  saveActivity: () => {},
+}))
 
 /* The resident agents should be able to do whatever an agent connected over
    MCP can do on a canvas. Every MCP tool is either in the resident set under

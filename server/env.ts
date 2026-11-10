@@ -118,6 +118,8 @@ const schema = {
   TRUSTED_ORIGINS: list({ default: [] }),
   SIGNUP_EMAIL_DOMAINS: list({ default: [] }),
   ADMIN_EMAILS: list({ default: [] }),
+  /* Operator-owned, startup-validated workspace/bot pairs; never supplied by a browser/model. */
+  MANAGED_COMPANY_WORKSPACES: str({ default: '[]' }),
   REQUIRE_EMAIL_VERIFICATION: bool({ default: true }),
   OIDC_ISSUER: str({ default: undefined }),
   OIDC_CLIENT_ID: str({ default: undefined }),

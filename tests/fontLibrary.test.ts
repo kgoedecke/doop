@@ -15,6 +15,8 @@ let owner: Client
 let mate: Client
 let stranger: Client
 let workspaceId: string
+let personalCanvasId: string
+let workspaceCanvasId: string
 
 beforeAll(async () => {
   server = await startServer()
@@ -25,12 +27,14 @@ beforeAll(async () => {
   expect((await owner.post(`/api/workspaces/${workspaceId}/members`, { email: 'fonts-mate@test.dev' })).status).toBe(
     200,
   )
+  personalCanvasId = (await (await owner.post('/api/canvases', { name: 'Personal fonts' })).json()).id
+  workspaceCanvasId = (await (await mate.post('/api/canvases', { name: 'Brand fonts', workspaceId })).json()).id
 }, 70_000)
 
 afterAll(() => server?.stop())
 
-function upload(client: Client, bytes: Buffer, fileName: string, workspace?: string) {
-  return client.req(`/api/fonts${workspace ? `?workspace=${workspace}` : ''}`, {
+function upload(client: Client, bytes: Buffer, fileName: string, canvasId = personalCanvasId) {
+  return client.req(`/api/fonts?canvas=${canvasId}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/octet-stream', 'X-File-Name': encodeURIComponent(fileName) },
     body: new Uint8Array(bytes),
@@ -42,29 +46,32 @@ async function savedHtml(client: Client, canvasId: string, frameId: string): Pro
   return canvas.frames.find((f: { id: string }) => f.id === frameId).html
 }
 
-describe('personal font library', () => {
+describe('personal canvas font library', () => {
   let regular: CustomFont
 
-  it('reads the uploaded file and serves it as an immutable asset', async () => {
-    const res = await upload(owner, woff2({ family: 'Owner Sans' }), 'OwnerSans-Regular.woff2')
+  it('reads the uploaded file and serves its bytes to the parent owner', async () => {
+    const bytes = woff2({ family: 'Owner Sans' })
+    const res = await upload(owner, bytes, 'OwnerSans-Regular.woff2')
     expect(res.status).toBe(200)
     regular = await res.json()
     expect(regular).toMatchObject({ family: 'Owner Sans', weight: '400', style: 'normal', format: 'woff2' })
-    const asset = await fetch(regular.url.replace(/^https?:\/\/[^/]+/, server.base))
+    const asset = await owner.get(new URL(regular.url).pathname)
     expect(asset.status).toBe(200)
     expect(asset.headers.get('content-type')).toBe('font/woff2')
-    expect(asset.headers.get('access-control-allow-origin')).toBe('*')
+    expect(Buffer.from(await asset.arrayBuffer())).toEqual(bytes)
   })
 
   it('is private to its owner', async () => {
-    expect((await (await owner.get('/api/fonts')).json()).map((f: CustomFont) => f.id)).toEqual([regular.id])
-    expect(await (await stranger.get('/api/fonts')).json()).toEqual([])
+    expect(
+      (await (await owner.get(`/api/fonts?canvas=${personalCanvasId}`)).json()).map((f: CustomFont) => f.id),
+    ).toEqual([regular.id])
+    expect((await stranger.get(`/api/fonts?canvas=${personalCanvasId}`)).status).toBe(404)
     expect((await stranger.delete(`/api/fonts/${regular.id}`)).status).toBe(404)
   })
 
   it('replaces a face uploaded again instead of listing it twice', async () => {
     const again: CustomFont = await (await upload(owner, ttf({ family: 'Owner Sans' }), 'OwnerSans.ttf')).json()
-    const list: CustomFont[] = await (await owner.get('/api/fonts')).json()
+    const list: CustomFont[] = await (await owner.get(`/api/fonts?canvas=${personalCanvasId}`)).json()
     expect(list.map((f) => f.id)).toEqual([again.id])
     regular = again
   })
@@ -75,8 +82,10 @@ describe('personal font library', () => {
     expect((await res.json()).error).toMatch(/not a font file/)
   })
 
-  it('is the library of the owner’s personal canvases, and frames using it carry the face', async () => {
-    const canvasId = (await (await owner.post('/api/canvases', { name: 'Personal' })).json()).id
+  it('is limited to its selected personal canvas, and frames using it carry the face', async () => {
+    const canvasId = personalCanvasId
+    const other = (await (await owner.post('/api/canvases', { name: 'Other personal' })).json()).id
+    expect(await (await owner.get(`/api/canvases/${other}/fonts`)).json()).toEqual([])
     const fonts: CustomFont[] = await (await owner.get(`/api/canvases/${canvasId}/fonts`)).json()
     expect(fonts.map((f) => f.family)).toEqual(['Owner Sans'])
 
@@ -92,7 +101,7 @@ describe('personal font library', () => {
   })
 })
 
-describe('workspace font library', () => {
+describe('workspace canvas font library', () => {
   let brand: CustomFont
 
   it('takes uploads from any member and none from outsiders', async () => {
@@ -100,18 +109,20 @@ describe('workspace font library', () => {
       mate,
       woff2({ family: 'Brand Grotesk', weight: 700 }),
       'BrandGrotesk-Bold.woff2',
-      workspaceId,
+      workspaceCanvasId,
     )
     expect(res.status).toBe(200)
     brand = await res.json()
-    expect((await upload(stranger, woff2({ family: 'Sneaky' }), 's.woff2', workspaceId)).status).toBe(403)
-    expect((await stranger.get(`/api/fonts?workspace=${workspaceId}`)).status).toBe(403)
-    const list: CustomFont[] = await (await owner.get(`/api/fonts?workspace=${workspaceId}`)).json()
+    expect((await upload(stranger, woff2({ family: 'Sneaky' }), 's.woff2', workspaceCanvasId)).status).toBe(404)
+    expect((await stranger.get(`/api/fonts?canvas=${workspaceCanvasId}`)).status).toBe(404)
+    const list: CustomFont[] = await (await owner.get(`/api/fonts?canvas=${workspaceCanvasId}`)).json()
     expect(list.map((f) => f.family)).toEqual(['Brand Grotesk'])
   })
 
-  it('is what a workspace canvas designs with, and a PATCH that starts using it adds the face', async () => {
-    const canvasId = (await (await mate.post('/api/canvases', { name: 'Site', workspaceId })).json()).id
+  it('stays in its selected workspace canvas, and a PATCH that starts using it adds the face', async () => {
+    const canvasId = workspaceCanvasId
+    const other = (await (await mate.post('/api/canvases', { name: 'Other site', workspaceId })).json()).id
+    expect(await (await owner.get(`/api/canvases/${other}/fonts`)).json()).toEqual([])
     const fonts: CustomFont[] = await (await owner.get(`/api/canvases/${canvasId}/fonts`)).json()
     expect(fonts.map((f) => f.family)).toEqual(['Brand Grotesk'])
 
@@ -132,9 +143,20 @@ describe('workspace font library', () => {
 
   it('lets a member remove a font; frames that load it keep their face', async () => {
     expect((await owner.delete(`/api/fonts/${brand.id}`)).status).toBe(200)
-    const left: CustomFont[] = await (await owner.get(`/api/fonts?workspace=${workspaceId}`)).json()
+    const left: CustomFont[] = await (await owner.get(`/api/fonts?canvas=${workspaceCanvasId}`)).json()
     expect(left.map((f) => f.family)).not.toContain('Brand Grotesk')
-    const asset = await fetch(brand.url.replace(/^https?:\/\/[^/]+/, server.base))
+    const asset = await owner.get(new URL(brand.url).pathname)
     expect(asset.status).toBe(200)
+  })
+
+  it('keeps the canvas library when a workspace is deleted and applies the parent’s new rights', async () => {
+    const added = await upload(mate, woff2({ family: 'Retained Face' }), 'retained.woff2', workspaceCanvasId)
+    expect(added.status).toBe(200)
+    expect((await owner.delete(`/api/workspaces/${workspaceId}`)).status).toBe(200)
+    const own = await mate.get(`/api/fonts?canvas=${workspaceCanvasId}`)
+    expect(own.status).toBe(200)
+    expect((await own.json()).map((font: CustomFont) => font.family)).toEqual(['Retained Face'])
+    expect((await owner.get(`/api/fonts?canvas=${workspaceCanvasId}`)).status).toBe(404)
+    expect((await owner.get(`/api/canvases/${workspaceCanvasId}/fonts`)).status).toBe(404)
   })
 })

@@ -243,7 +243,7 @@ export function Workspace({ workspaceId }: { workspaceId: string }) {
           ) : pane === 'members' ? (
             <MembersPane ws={ws} meId={meId} admin={admin} onChange={reload} onError={handle} onToast={showToast} />
           ) : pane === 'fonts' ? (
-            <FontLibrary workspaceId={ws.id} />
+            <FontLibrary key={ws.id} workspaceId={ws.id} />
           ) : pane === 'billing' ? (
             <BillingPane
               ws={ws}

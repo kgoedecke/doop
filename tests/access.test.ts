@@ -226,9 +226,12 @@ describe('canvas access model', () => {
     expect(copy.references[0].frameId).toBe(copy.frames.find((frame: { name: string }) => frame.name === 'F1').id)
     const copiedImage = copy.frames.find((frame: { name: string }) => frame.name === 'F1')
     expect(copiedImage.html).toMatch(/<img src="http:\/\/localhost:\d+\/a\/[A-Za-z0-9_-]+\.png"/)
-    const copiedAsset = await fetch(copiedImage.html.match(/src="([^"]+)"/)![1])
+    const copiedAssetPath = new URL(copiedImage.html.match(/src="([^"]+)"/)![1]).pathname
+    const copiedAsset = await invited.get(copiedAssetPath)
     expect(copiedAsset.status).toBe(200)
     expect(copiedAsset.headers.get('content-type')).toBe('image/png')
+    expect((await fetch(server.base + copiedAssetPath)).status).toBe(404)
+    expect((await owner.get(copiedAssetPath)).status).toBe(404)
     expect((await stranger.get(`/api/canvases/${copy.id}`)).status).toBe(403)
     expect((await invited.delete(`/api/canvases/${copy.id}`)).status).toBe(200)
   })

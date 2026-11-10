@@ -1,8 +1,11 @@
-import { useId, useRef, useState } from 'react'
+import { PRIVATE_MEDIA_LIMITS, PrivateMaterializationError } from '../../shared/privateMedia'
+import * as css from 'css-tree'
+import { useContext, useId, useRef, useState } from 'react'
 import type { Frame } from '../../shared/types'
 import { api, errorMessage } from '../lib/api'
-import { replaceElementImage, type ElementInfo, type StylePatch } from '../lib/frameBridge'
+import { frameShows, replaceElementImage, type ElementInfo, type StylePatch } from '../lib/frameBridge'
 import { isLayerLocked } from '../lib/layerEdits'
+import { PrivateMaterializationContext } from '../lib/privateMaterialization'
 import { useStore } from '../lib/store'
 import { Button } from './ui/button'
 import { ArrowRightIcon, UploadIcon, XIcon } from './ui/icons'
@@ -30,7 +33,7 @@ function sizeMode(image: ImageInfo) {
 }
 
 /** Verify pasted URLs before replacing the current, working image. */
-async function checkImageUrl(value: string, t: Translate): Promise<string> {
+function checkImageUrl(value: string, t: Translate): string {
   let url: URL
   try {
     url = new URL(value, location.origin)
@@ -40,20 +43,8 @@ async function checkImageUrl(value: string, t: Translate): Promise<string> {
   if (!['https:', 'http:'].includes(url.protocol) && !/^data:image\//i.test(url.href)) {
     throw new Error(t('inspector.imageUrlProtocol'))
   }
-  await new Promise<void>((resolve, reject) => {
-    const preview = new Image()
-    const finish = (error?: Error) => {
-      window.clearTimeout(timer)
-      preview.onload = null
-      preview.onerror = null
-      if (error) reject(error)
-      else resolve()
-    }
-    const timer = window.setTimeout(() => finish(new Error(t('inspector.imageUrlTimeout'))), 10000)
-    preview.onload = () => finish()
-    preview.onerror = () => finish(new Error(t('inspector.imageUrlLoadFailed')))
-    preview.src = url.href
-  })
+  // Decoder admission belongs to the full scoped document preparation. The
+  // URL editor must not allocate an arbitrary Image before that preparation.
   return url.href
 }
 
@@ -69,6 +60,7 @@ export function ImageFill({
   apply: (styles: StylePatch) => void
 }) {
   const t = useT()
+  const materialize = useContext(PrivateMaterializationContext)
   const input = useRef<HTMLInputElement>(null)
   const urlId = useId()
   const [open, setOpen] = useState(false)
@@ -102,9 +94,21 @@ export function ImageFill({
     setBusy(typeof source === 'string' ? 'url' : 'upload')
     try {
       const url =
-        typeof source === 'string'
-          ? await checkImageUrl(source, t)
-          : (await api.uploadAsset(frame.canvasId, source)).url
+        typeof source === 'string' ? checkImageUrl(source, t) : (await api.uploadAsset(frame.canvasId, source)).url
+      // Reject invalid, foreign or oversized private/inline candidates before
+      // proposing a persisted edit; full-document admission still precedes DOM.
+      try {
+        await materialize(
+          `url(${css.string.encode(url)})`,
+          { kind: 'frame', id: frame.id, canvasId: frame.canvasId },
+          undefined,
+          'value',
+        )
+      } catch (failure) {
+        if (failure instanceof PrivateMaterializationError && ['invalid', 'unsupported'].includes(failure.kind))
+          throw new Error(t('inspector.imageUrlLoadFailed'), { cause: failure })
+        throw failure
+      }
       const current = useStore.getState().canvas?.frames.find((f) => f.id === frame.id)
       // A path selector can point to a different layer after a remote edit.
       if (!current || current.html !== original.html || isLayerLocked(current, selector)) {
@@ -113,6 +117,12 @@ export function ImageFill({
       if (!(await replaceElementImage(frame.id, selector, image, url))) {
         throw new Error(t('inspector.imageNotEditable'))
       }
+      const proposed = useStore.getState().canvas?.frames.find((f) => f.id === frame.id)
+      if (!proposed || !(await frameShows(frame.id, proposed.html, PRIVATE_MEDIA_LIMITS.responseMs)))
+        throw new Error(t('inspector.imageNotEditable'))
+      const settled = useStore.getState().canvas?.frames.find((f) => f.id === frame.id)
+      if (settled?.canvasId !== frame.canvasId || settled.html !== proposed.html)
+        throw new Error(t('inspector.imageDesignChanged'))
       setDraft(url)
     } catch (err) {
       const message = errorMessage(err, err instanceof Error ? err.message : t('inspector.imageReplaceFailed'))

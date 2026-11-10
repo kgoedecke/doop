@@ -1,5 +1,5 @@
 import express from 'express'
-import { z } from 'zod'
+import { z } from 'zod/v4'
 import type { ServerExtension } from '../extensions.ts'
 import { connect, connectionStatus, disconnect, getConnection } from './connection.ts'
 import { agentEnabled, agentToken, finishInstall, getInstallation, startInstall } from './oauth.ts'

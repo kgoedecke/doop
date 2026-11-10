@@ -4,14 +4,20 @@ import type { serializedNodeWithId } from 'posthog-js/dist/rrweb-types'
 
 type Recorder = typeof record
 type Options = NonNullable<Parameters<Recorder>[0]>
+const PRIVATE_REPLAY_PLACEHOLDER = '<!doctype html><html><body>Private media is unavailable in replay.</body></html>'
 
 /** Replay must rebuild the recorded DOM, not navigate back to our empty
  * bootstrap. These attributes are changed only in snapshots; the live iframe
  * retains its opaque-origin sandbox. The replay sandbox still blocks scripts. */
 function prepareFrameNode(node: serializedNodeWithId) {
-  if ('attributes' in node && node.tagName === 'iframe' && 'data-doop-frame' in node.attributes) {
-    delete node.attributes.srcdoc
-    node.attributes.sandbox = 'allow-same-origin'
+  if ('attributes' in node && node.tagName === 'iframe') {
+    if ('data-doop-private-preview' in node.attributes) {
+      node.attributes.srcdoc = PRIVATE_REPLAY_PLACEHOLDER
+      node.attributes.sandbox = ''
+    } else if ('data-doop-frame' in node.attributes) {
+      delete node.attributes.srcdoc
+      node.attributes.sandbox = 'allow-same-origin'
+    }
   }
   if ('childNodes' in node) node.childNodes.forEach(prepareFrameNode)
 }
@@ -81,9 +87,14 @@ export function installFrameReplay(
             event.data.adds.forEach(({ node }) => prepareFrameNode(node))
             for (const mutation of event.data.attributes) {
               const element = original.mirror.getNode(mutation.id)
-              if (element instanceof HTMLIFrameElement && element.hasAttribute('data-doop-frame')) {
-                delete mutation.attributes.srcdoc
-                if ('sandbox' in mutation.attributes) mutation.attributes.sandbox = 'allow-same-origin'
+              if (element instanceof HTMLIFrameElement) {
+                if (element.hasAttribute('data-doop-private-preview')) {
+                  mutation.attributes.srcdoc = PRIVATE_REPLAY_PLACEHOLDER
+                  mutation.attributes.sandbox = ''
+                } else if (element.hasAttribute('data-doop-frame')) {
+                  delete mutation.attributes.srcdoc
+                  if ('sandbox' in mutation.attributes) mutation.attributes.sandbox = 'allow-same-origin'
+                }
               }
             }
           }

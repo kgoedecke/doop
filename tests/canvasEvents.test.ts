@@ -7,6 +7,7 @@ import type { AgentTask, Frame } from '../shared/types.ts'
 vi.mock('../server/db/persist.ts', () => ({
   saveFrame: () => {},
   saveFrameNow: async () => {},
+  insertCanvas: async () => {},
   saveCanvas: () => {},
   saveTask: () => {},
   saveFeedback: () => {},

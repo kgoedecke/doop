@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Frame } from '../shared/types'
+import type { ResourceCopyEntry, ResourceCopyResult } from '../shared/resourceCopies'
 import { copyLayer, copyLayers, copyPicked, hasElementClip, pasteLayer } from '../src/lib/elementClipboard'
 import { copyFrames, hasFrameClip } from '../src/lib/frameClipboard'
 import { insertElement } from '../src/lib/layers'
@@ -9,9 +10,13 @@ import { deleteLayer, duplicateLayers, standaloneSelector } from '../src/lib/lay
 import { clearHistory, redo, undo } from '../src/lib/history'
 
 const createFrame = vi.fn((_canvasId: string, frame: Partial<Frame>) => Promise.resolve({ ...frame, id: 'new' }))
+const updateFrame = vi.fn().mockResolvedValue({})
+const copyResources = vi.fn<(canvasId: string, entries: ResourceCopyEntry[]) => Promise<ResourceCopyResult>>()
 vi.mock('../src/lib/api', () => ({
+  errorMessage: (error: unknown, fallback: string) => (error instanceof Error ? error.message : fallback),
   api: {
-    updateFrame: vi.fn().mockResolvedValue({}),
+    updateFrame: (...args: unknown[]) => updateFrame(...args),
+    copyResources: (canvasId: string, entries: ResourceCopyEntry[]) => copyResources(canvasId, entries),
     createFrame: (canvasId: string, frame: Partial<Frame>) => createFrame(canvasId, frame),
   },
 }))
@@ -34,10 +39,75 @@ const frame: Frame = {
 beforeEach(() => {
   clearHistory()
   localStorage.clear()
+  updateFrame.mockClear()
+  copyResources.mockReset().mockImplementation(async (canvasId, entries) => ({
+    canvasId,
+    entries: entries.map((entry) => ({
+      html: entry.html.replaceAll('/a/source.png', '/a/owned.png'),
+      css: entry.css?.replaceAll('/a/source.png', '/a/owned.png'),
+    })),
+    assets: [{ from: 'source', to: 'owned', url: '/a/owned.png' }],
+  }))
   useStore.getState().setCanvas({ id: 'c', name: 'Canvas', frames: [frame], createdAt: 0, updatedAt: 0 })
 })
 
 afterEach(() => vi.restoreAllMocks())
+
+describe('explicit cross-canvas layer clipboard', () => {
+  function prepare() {
+    const source = { ...frame, id: 'source', updatedAt: 7, html: '<div id="piece"><img src="/a/source.png"></div>' }
+    useStore.getState().setCanvas({ id: 'c', name: 'Source', frames: [source], createdAt: 1, updatedAt: 1 })
+    expect(copyLayer(source, '#piece')).toBe(true)
+    const target = {
+      ...frame,
+      id: 'destination-frame',
+      canvasId: 'destination',
+      updatedAt: 11,
+      html: '<div id="target">Target</div>',
+    }
+    useStore
+      .getState()
+      .setCanvas({ id: 'destination', name: 'Destination', frames: [target], createdAt: 1, updatedAt: 1 })
+    return target
+  }
+
+  it('waits for the explicit owned mapping before the normal layer save', async () => {
+    const target = prepare()
+    expect(pasteLayer(target, '#target')).toBe(true)
+    await vi.waitFor(() => expect(copyResources).toHaveBeenCalledTimes(1))
+    expect(copyResources.mock.calls[0]![1][0]).toMatchObject({ sourceFrameId: 'source', sourceVersion: 7 })
+    await vi.waitFor(() => expect(updateFrame).toHaveBeenCalledTimes(1))
+    expect(updateFrame.mock.calls[0]![1].html).toContain('/a/owned.png')
+    expect(useStore.getState().canvas!.frames[0]!.html).not.toContain('/a/source.png')
+  })
+
+  it('reports source denial and leaves the destination unchanged without retry', async () => {
+    const target = prepare()
+    copyResources.mockRejectedValueOnce(new Error('Source file is not available'))
+    expect(pasteLayer(target, '#target')).toBe(true)
+    await vi.waitFor(() => expect(useStore.getState().notice?.text).toBe('Source file is not available'))
+    expect(copyResources).toHaveBeenCalledTimes(1)
+    expect(updateFrame).not.toHaveBeenCalled()
+    expect(useStore.getState().canvas!.frames[0]!.html).toBe(target.html)
+  })
+
+  it('refuses a late paste when the target revision changed while files were copied', async () => {
+    const target = prepare()
+    let release!: (value: ResourceCopyResult) => void
+    copyResources.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          release = resolve
+        }),
+    )
+    expect(pasteLayer(target, '#target')).toBe(true)
+    useStore.getState().patchFrameLocal(target.id, { html: '<p>new target revision</p>', updatedAt: 12 })
+    release({ canvasId: target.canvasId, entries: [{ html: '<img src="/a/owned.png">', css: '' }], assets: [] })
+    await vi.waitFor(() => expect(useStore.getState().notice?.text).toContain('destination changed'))
+    expect(updateFrame).not.toHaveBeenCalled()
+    expect(useStore.getState().canvas!.frames[0]!.html).toBe('<p>new target revision</p>')
+  })
+})
 
 /* a shape drawn on the canvas: a transparent shell holding its one layer */
 const shape: Frame = {

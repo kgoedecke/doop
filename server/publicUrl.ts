@@ -1,7 +1,9 @@
 import dns from 'node:dns/promises'
 import net from 'node:net'
 import type { LookupFunction } from 'node:net'
-import type { Page } from 'puppeteer-core'
+import type { HTTPRequest, Page } from 'puppeteer-core'
+import { PRIVATE_MEDIA_LIMITS, PrivateMaterializationError } from '../shared/privateMedia.ts'
+import { renderAdmission } from './renderAdmission.ts'
 import { Agent, fetch as undiciFetch, type RequestInit as UndiciRequestInit } from 'undici'
 
 export interface PublicAddress {
@@ -177,7 +179,10 @@ async function readBodyBounded(
 ): Promise<Buffer> {
   if (!response.body) return Buffer.alloc(0)
   const declared = Number(response.headers.get('content-length') || 0)
-  if (declared > maxBytes) throw new Error('remote resource is too large')
+  if (declared > maxBytes) {
+    await response.body.cancel().catch(() => {})
+    throw new Error('remote resource is too large')
+  }
   const reader = response.body.getReader()
   const chunks: Uint8Array[] = []
   let total = 0
@@ -200,12 +205,23 @@ async function readBodyBounded(
   return Buffer.concat(chunks)
 }
 
-function forwardedRequestHeaders(headers: Record<string, string>): Record<string, string> {
+function forwardedRequestHeaders(
+  headers: Record<string, string>,
+  credentials: 'browser' | 'omit',
+): Record<string, string> {
   const blocked = new Set(['accept-encoding', 'connection', 'content-length', 'host', 'proxy-authorization', 'upgrade'])
+  if (credentials === 'omit') {
+    blocked.add('cookie')
+    blocked.add('authorization')
+  }
   return Object.fromEntries(Object.entries(headers).filter(([name]) => !blocked.has(name.toLowerCase())))
 }
 
-function browserResponseHeaders(response: Response, document: boolean): Record<string, string | string[]> {
+function browserResponseHeaders(
+  response: Response,
+  document: boolean,
+  credentials: 'browser' | 'omit',
+): Record<string, string | string[]> {
   const headers: Record<string, string | string[]> = {}
   response.headers.forEach((value, name) => {
     if (
@@ -217,7 +233,7 @@ function browserResponseHeaders(response: Response, document: boolean): Record<s
     }
   })
   const cookies = (response.headers as Headers & { getSetCookie?: () => string[] }).getSetCookie?.() ?? []
-  if (cookies.length) headers['set-cookie'] = cookies
+  if (credentials === 'browser' && cookies.length) headers['set-cookie'] = cookies
   if (document && /html|xhtml/i.test(response.headers.get('content-type') ?? '')) {
     /* HTTP fetch/XHR stays usable and is pinned by interception. Transports
        that cannot be fulfilled through request.respond remain disabled. */
@@ -228,71 +244,192 @@ function browserResponseHeaders(response: Response, document: boolean): Record<s
   return headers
 }
 
-/** Chromium requests are fulfilled through pinned Node connections. Merely
- * validating and then calling request.continue() would let Chromium resolve an
- * attacker-controlled hostname again after a DNS rebind. */
+export interface PublicRequestSession {
+  settle(): Promise<void>
+  assertSettled(): void
+  cancelAndDrain(): Promise<void>
+}
+
+interface PublicGuardOptions {
+  allowUrl?: (url: URL) => boolean
+  rejectUrl?: (url: URL) => boolean
+  fetchUrl?: typeof fetchPinnedPublicUrl
+  privateResources?: {
+    beginRequest(url: string): void
+    accountChunk(bytes: number): void
+    validateResponse(body: Buffer, mime: string, resourceType: string, url: string, signal: AbortSignal): Promise<void>
+  }
+}
+
+/** Per-page lifetime only; existing admission owns its bounded private IO queue. */
+class PageRequests {
+  readonly controller = new AbortController()
+  private readonly pending = new Set<Promise<void>>()
+  private readonly acquire: () => Promise<() => void>
+  private failure?: Error
+  private count = 0
+  private validation = Promise.resolve()
+
+  constructor(private readonly options: PublicGuardOptions) {
+    this.acquire = options.privateResources
+      ? renderAdmission(PRIVATE_MEDIA_LIMITS.storageConcurrency, PRIVATE_MEDIA_LIMITS.references)
+      : async () => () => {}
+  }
+
+  check(): void {
+    if (this.failure) throw this.failure
+    if (this.controller.signal.aborted) throw new PrivateMaterializationError('aborted')
+  }
+
+  run(start: (signal: AbortSignal) => Promise<void>): Promise<void> {
+    this.check()
+    if (this.options.privateResources && ++this.count > PRIVATE_MEDIA_LIMITS.references) {
+      this.failure = new PrivateMaterializationError('limit')
+      this.controller.abort()
+      throw this.failure
+    }
+    const work = (async () => {
+      const release = await this.acquire()
+      try {
+        this.check()
+        await start(this.controller.signal)
+      } finally {
+        release()
+      }
+    })()
+    this.pending.add(work)
+    void work.then(
+      () => this.pending.delete(work),
+      (error: unknown) => {
+        if (this.options.privateResources) {
+          this.failure ??=
+            error instanceof PrivateMaterializationError ? error : new PrivateMaterializationError('invalid')
+          this.controller.abort()
+        }
+        this.pending.delete(work)
+      },
+    )
+    return work
+  }
+
+  async validate(body: Buffer, mime: string, type: string, url: string): Promise<void> {
+    const resource = this.options.privateResources
+    if (!resource) return
+    const work = this.validation.then(async () => {
+      this.check()
+      await resource.validateResponse(body, mime, type, url, this.controller.signal)
+      this.check()
+    })
+    this.validation = work.catch(() => {})
+    await work
+  }
+
+  async drain(): Promise<void> {
+    while (this.pending.size) await Promise.allSettled([...this.pending])
+  }
+
+  async settle(): Promise<void> {
+    await this.drain()
+    this.assertSettled()
+  }
+
+  assertSettled(): void {
+    this.check()
+    if (this.pending.size) throw new PrivateMaterializationError('aborted')
+  }
+}
+
+async function fulfillPublicRequest(
+  request: HTTPRequest,
+  options: PublicGuardOptions,
+  owner: PageRequests,
+  account: (bytes: number) => void,
+  signal: AbortSignal,
+): Promise<void> {
+  const raw = request.url()
+  const requested = new URL(raw)
+  if (options.rejectUrl?.(requested)) throw new PrivateMaterializationError('invalid')
+  if (!options.privateResources && options.allowUrl?.(requested)) {
+    await request.continue()
+    return
+  }
+  parsePublicHttpUrl(raw)
+  options.privateResources?.beginRequest(raw)
+  const method = request.method().toUpperCase()
+  if (!['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'].includes(method))
+    throw new Error('unsupported browser request method')
+  const postData = request.hasPostData() ? await request.fetchPostData() : undefined
+  owner.check()
+  if (postData && Buffer.byteLength(postData) > 1_000_000) throw new Error('browser request body is too large')
+  const credentials = options.privateResources ? 'omit' : 'browser'
+  const response = await (options.fetchUrl ?? fetchPinnedPublicUrl)(raw, {
+    method,
+    headers: forwardedRequestHeaders(request.headers(), credentials),
+    ...(postData !== undefined ? { body: postData } : {}),
+    redirect: 'manual',
+    signal: AbortSignal.any([signal, AbortSignal.timeout(20_000)]),
+  })
+  // Keep reading/cancellation under the request owner even after caller failure.
+  let body: Buffer
+  if (method === 'HEAD' || response.status === 204 || response.status === 304) {
+    await response.body?.cancel().catch(() => {})
+    body = Buffer.alloc(0)
+  } else body = await readBodyBounded(response, MAX_BROWSER_RESOURCE_BYTES, account)
+  owner.check()
+  if (options.privateResources && response.status >= 400) throw new PrivateMaterializationError('invalid')
+  if (response.status < 300 || response.status >= 400)
+    await owner.validate(body, response.headers.get('content-type') ?? '', request.resourceType(), raw)
+  owner.check()
+  await request.respond({
+    status: response.status,
+    headers: browserResponseHeaders(response, request.resourceType() === 'document', credentials),
+    contentType: response.headers.get('content-type') ?? undefined,
+    body,
+  })
+}
+
+/** Node connections stay DNS-pinned; each begun body/validation has a drain owner. */
 export async function guardPublicPageRequests(
   page: Page,
-  options: {
-    allowUrl?: (url: URL) => boolean
-    fetchUrl?: typeof fetchPinnedPublicUrl
-  } = {},
-): Promise<void> {
-  const fetchUrl = options.fetchUrl ?? fetchPinnedPublicUrl
+  options: PublicGuardOptions = {},
+): Promise<PublicRequestSession> {
+  const owner = new PageRequests(options)
   let pageBytes = 0
+  const account = (bytes: number) => {
+    owner.check()
+    if (pageBytes + bytes > MAX_BROWSER_PAGE_BYTES) throw new Error('website resource budget exceeded')
+    options.privateResources?.accountChunk(bytes)
+    pageBytes += bytes
+  }
   await page.setBypassServiceWorker(true)
   const client = await page.createCDPSession()
   await client.send('Network.enable')
   await client.send('Network.setBlockedURLs', { urls: ['ws://*', 'wss://*'] })
   await page.setRequestInterception(true)
-  page.on('request', (request) => {
-    void (async () => {
-      const raw = request.url()
-      if (!/^https?:/i.test(raw)) {
-        if (/^(?:about|blob|data):/i.test(raw)) await request.continue().catch(() => {})
-        else await request.abort('blockedbyclient').catch(() => {})
-        return
-      }
-      try {
-        const requested = new URL(raw)
-        if (options.allowUrl?.(requested)) {
-          await request.continue()
-          return
-        }
-        parsePublicHttpUrl(raw)
-        const method = request.method().toUpperCase()
-        if (!['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'].includes(method)) {
-          throw new Error('unsupported browser request method')
-        }
-        const postData = request.hasPostData() ? await request.fetchPostData() : undefined
-        if (postData && Buffer.byteLength(postData) > 1_000_000) throw new Error('browser request body is too large')
-        const response = await fetchUrl(raw, {
-          method,
-          headers: forwardedRequestHeaders(request.headers()),
-          ...(postData !== undefined ? { body: postData } : {}),
-          redirect: 'manual',
-          signal: AbortSignal.timeout(20_000),
-        })
-        const body =
-          method === 'HEAD' || response.status === 204 || response.status === 304
-            ? Buffer.alloc(0)
-            : await readBodyBounded(response, MAX_BROWSER_RESOURCE_BYTES, (bytes) => {
-                /* Async handlers resume one at a time, so charging each chunk
-                   before buffering it keeps the aggregate limit race-free. */
-                if (pageBytes + bytes > MAX_BROWSER_PAGE_BYTES) {
-                  throw new Error('website resource budget exceeded')
-                }
-                pageBytes += bytes
-              })
-        await request.respond({
-          status: response.status,
-          headers: browserResponseHeaders(response, request.resourceType() === 'document'),
-          contentType: response.headers.get('content-type') ?? undefined,
-          body,
-        })
-      } catch {
-        await request.abort('blockedbyclient').catch(() => {})
-      }
-    })()
-  })
+  const onRequest = (request: HTTPRequest) => {
+    if (!/^https?:/i.test(request.url())) {
+      if (/^(?:about|blob|data):/i.test(request.url()) && !owner.controller.signal.aborted)
+        void request.continue().catch(() => {})
+      else void request.abort('blockedbyclient').catch(() => {})
+      return
+    }
+    try {
+      void owner
+        .run((signal) => fulfillPublicRequest(request, options, owner, account, signal))
+        .catch(() => request.abort('blockedbyclient').catch(() => {}))
+    } catch {
+      void request.abort('blockedbyclient').catch(() => {})
+    }
+  }
+  page.on('request', onRequest)
+  let drain: Promise<void> | undefined
+  return {
+    settle: () => owner.settle(),
+    assertSettled: () => owner.assertSettled(),
+    cancelAndDrain: () => {
+      owner.controller.abort()
+      page.off('request', onRequest)
+      return (drain ??= owner.drain())
+    },
+  }
 }

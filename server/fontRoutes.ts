@@ -1,24 +1,40 @@
 import express, { Router, type Request, type Response } from 'express'
 import { MAX_FONT_BYTES, type FontScope } from '../shared/fonts.ts'
 import { FontInputError, addFont, canUseScope, deleteFont, listFonts } from './fonts.ts'
+import { auth } from './auth.ts'
+import { assertCanvasRead, PrivateResourceError } from './privateResources.ts'
 
-/** /api/fonts: the font libraries Settings and Workspace manage. `?workspace=`
- *  names a workspace's library (members only); without it the library is the
- *  signed-in person's own. The /api session gate upstream means impersonating
- *  admins can look but not change anything. */
+/** /api/fonts?canvas=<id>: the selected canvas's private font library.
+ *  Normal browser session authentication is applied upstream. */
 export const fontsRouter = Router()
 
 function scopeOf(req: Request, res: Response): FontScope | null {
-  const workspace = req.query.workspace
-  const scope: FontScope = typeof workspace === 'string' && workspace ? { workspaceId: workspace } : { personal: true }
+  const canvasId = req.query.canvas
+  if (typeof canvasId !== 'string' || !canvasId) {
+    res.status(400).json({ error: 'choose a canvas for the font library' })
+    return null
+  }
+  const scope: FontScope = { canvasId }
   if (canUseScope(scope, req.user!.id)) return scope
-  res.status(403).json({ error: 'you are not a member of this workspace' })
+  res.status(404).json({ error: 'canvas is not available' })
   return null
 }
 
-fontsRouter.get('/', (req, res) => {
+fontsRouter.get('/', async (req, res) => {
+  res.set('Cache-Control', 'private, no-store').vary('Cookie')
   const scope = scopeOf(req, res)
-  if (scope) res.json(listFonts(scope, req.user!.id))
+  if (!scope) return
+  try {
+    const cookie = req.headers.cookie ?? ''
+    const reader = {
+      actorId: req.user!.id,
+      currentActor: async () => (await auth.api.getSession({ headers: new Headers({ cookie }) }))?.user.id,
+    }
+    await assertCanvasRead({ reader, canvasId: scope.canvasId })
+    return res.json(listFonts(scope, reader.actorId))
+  } catch (error) {
+    return res.status(error instanceof PrivateResourceError ? 404 : 503).json({ error: 'font library is unavailable' })
+  }
 })
 
 /* raw font bytes in; the file name rides a header since the body is the file */

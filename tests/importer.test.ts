@@ -83,7 +83,7 @@ function stubPage(options: PageStubOptions = {}) {
     screenshot: vi.fn().mockResolvedValue(options.screenshot ?? Buffer.from('jpeg')),
     close: vi.fn().mockResolvedValue(undefined),
   }
-  browserMocks.openIsolatedPage.mockResolvedValue({ page, close: page.close })
+  browserMocks.openIsolatedPage.mockResolvedValue({ page, close: page.close, cancel: page.close, ownRequests: vi.fn() })
   return page
 }
 

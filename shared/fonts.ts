@@ -31,8 +31,8 @@ export interface CustomFont {
   createdAt: number
 }
 
-/** Where a library lives: a workspace's, or the signed-in person's own. */
-export type FontScope = { workspaceId: string } | { personal: true }
+/** Custom files have one explicit durable canvas parent. */
+export type FontScope = { canvasId: string }
 
 export const MAX_FONT_BYTES = 10 * 1024 * 1024
 

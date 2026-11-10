@@ -1,4 +1,5 @@
 import { env } from './env.ts'
+import { companyPolicy } from './companyPolicy.ts'
 import type express from 'express'
 import { nanoid } from 'nanoid'
 import { and, desc, eq, inArray, sql } from 'drizzle-orm'
@@ -34,6 +35,7 @@ export interface SyncKey {
 }
 
 export async function createSyncKey(canvasId: string, name: string, createdBy: string): Promise<SyncKey> {
+  companyPolicy.assertPublicFeature(store.getCanvas(canvasId)?.workspaceId)
   const row: SyncKey = {
     id: nanoid(8),
     secret: 'dk_' + nanoid(24),
@@ -48,6 +50,7 @@ export async function createSyncKey(canvasId: string, name: string, createdBy: s
 }
 
 export function listSyncKeys(canvasId: string): Promise<SyncKey[]> {
+  companyPolicy.assertPublicFeature(store.getCanvas(canvasId)?.workspaceId)
   return db.select().from(syncKeys).where(eq(syncKeys.canvasId, canvasId)).orderBy(desc(syncKeys.createdAt))
 }
 
@@ -287,6 +290,10 @@ export async function handleIngest(req: express.Request, res: express.Response) 
   if (!key) return res.status(404).json({ error: 'unknown sync key' })
   const canvas = store.getCanvas(key.canvasId)
   if (!canvas) return res.status(410).json({ error: 'the canvas this key points at no longer exists' })
+  // Any old/listed bearer is inactive for this purpose, regardless of its creator.
+  if (companyPolicy.isPrivate(canvas.workspaceId)) {
+    return res.status(403).json({ error: 'design sync is unavailable for company canvases' })
+  }
 
   const page = cleanPage(req.body?.page)
   const html = typeof req.body?.html === 'string' ? req.body.html : ''

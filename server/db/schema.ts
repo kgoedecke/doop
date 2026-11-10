@@ -10,6 +10,7 @@ import {
   primaryKey,
   jsonb,
   customType,
+  foreignKey,
 } from 'drizzle-orm/pg-core'
 import { open, seal } from '../secretBox.ts'
 import type { CanvasGuide, CanvasPageInfo, FrameApproval } from '../../shared/types.ts'
@@ -29,7 +30,9 @@ const sealedText = customType<{ data: string; driverData: string }>({
 export const liveActivities = pgTable('live_activities', {
   id: text('id').primaryKey(),
   userId: text('user_id').notNull(),
-  canvasId: text('canvas_id').notNull(),
+  canvasId: text('canvas_id')
+    .notNull()
+    .references(() => canvases.id, { onDelete: 'cascade' }),
   token: text('token').notNull().unique(),
   environment: text('environment').notNull(),
   expiresAt: bigint('expires_at', { mode: 'number' }).notNull(),
@@ -53,8 +56,8 @@ export const liveActivityStarters = pgTable('live_activity_starters', {
  * One Postgres-dialect schema for every environment: PGlite (embedded, file
  * in ./data) during development, a managed Postgres via DATABASE_URL in
  * production. Timestamps are epoch-ms bigints to match the in-memory types.
- * No FK constraints — memory is the source of truth and writes are async
- * fire-and-forget, so we don't want ordering between them to matter.
+ * Canvas parents commit before publication. Canvas children cascade on
+ * deletion; late asynchronous writes cannot recreate a removed parent.
  */
 
 export const canvases = pgTable('canvases', {
@@ -155,7 +158,9 @@ export const workspaceInvites = pgTable(
 export const canvasMembers = pgTable(
   'canvas_members',
   {
-    canvasId: text('canvas_id').notNull(),
+    canvasId: text('canvas_id')
+      .notNull()
+      .references(() => canvases.id, { onDelete: 'cascade' }),
     userId: text('user_id').notNull(),
     addedBy: text('added_by').notNull(),
     addedAt: bigint('added_at', { mode: 'number' }).notNull(),
@@ -168,7 +173,9 @@ export const frames = pgTable(
   {
     pageId: text('page_id'),
     id: text('id').primaryKey(),
-    canvasId: text('canvas_id').notNull(),
+    canvasId: text('canvas_id')
+      .notNull()
+      .references(() => canvases.id, { onDelete: 'cascade' }),
     name: text('name').notNull(),
     x: doublePrecision('x').notNull(),
     y: doublePrecision('y').notNull(),
@@ -188,7 +195,7 @@ export const frames = pgTable(
     z: doublePrecision('z'),
     approval: jsonb('approval').$type<FrameApproval>(),
   },
-  (t) => [index('frames_canvas_idx').on(t.canvasId)],
+  (t) => [index('frames_canvas_idx').on(t.canvasId), uniqueIndex('frames_parent_idx').on(t.id, t.canvasId)],
 )
 
 /** Frame design history: the HTML (and size) a frame had before a burst of
@@ -201,7 +208,9 @@ export const frameVersions = pgTable(
   {
     id: text('id').primaryKey(),
     frameId: text('frame_id').notNull(),
-    canvasId: text('canvas_id').notNull(),
+    canvasId: text('canvas_id')
+      .notNull()
+      .references(() => canvases.id, { onDelete: 'cascade' }),
     html: text('html').notNull(),
     width: doublePrecision('width').notNull(),
     height: doublePrecision('height').notNull(),
@@ -226,7 +235,9 @@ export const syncKeys = pgTable(
   {
     id: text('id').primaryKey(),
     secret: text('secret').notNull(),
-    canvasId: text('canvas_id').notNull(),
+    canvasId: text('canvas_id')
+      .notNull()
+      .references(() => canvases.id, { onDelete: 'cascade' }),
     /** label shown in the share modal and used as the frames' actor name */
     name: text('name').notNull(),
     createdBy: text('created_by').notNull(),
@@ -305,7 +316,9 @@ export const githubConnections = pgTable(
   'github_connections',
   {
     id: text('id').primaryKey(),
-    canvasId: text('canvas_id').notNull(),
+    canvasId: text('canvas_id')
+      .notNull()
+      .references(() => canvases.id, { onDelete: 'cascade' }),
     /** "owner/name" */
     repo: text('repo').notNull(),
     branch: text('branch').notNull(),
@@ -324,7 +337,9 @@ export const tasks = pgTable(
   'tasks',
   {
     id: text('id').primaryKey(),
-    canvasId: text('canvas_id').notNull(),
+    canvasId: text('canvas_id')
+      .notNull()
+      .references(() => canvases.id, { onDelete: 'cascade' }),
     agentName: text('agent_name').notNull(),
     owner: text('owner'),
     color: text('color').notNull(),
@@ -362,7 +377,9 @@ export const feedback = pgTable(
   {
     id: text('id').primaryKey(),
     taskId: text('task_id').notNull(),
-    canvasId: text('canvas_id').notNull(),
+    canvasId: text('canvas_id')
+      .notNull()
+      .references(() => canvases.id, { onDelete: 'cascade' }),
     agentName: text('agent_name').notNull(),
     targetAgent: text('target_agent'),
     fromName: text('from_name').notNull(),
@@ -384,7 +401,9 @@ export const comments = pgTable(
   'comments',
   {
     id: text('id').primaryKey(),
-    canvasId: text('canvas_id').notNull(),
+    canvasId: text('canvas_id')
+      .notNull()
+      .references(() => canvases.id, { onDelete: 'cascade' }),
     /* element comment: the frame + the element's data-doop-id + snippet;
        frame comment: the frame and a design point; canvas comment: no frame,
        a page and a world point instead. `selector` is the positional CSS path
@@ -416,14 +435,15 @@ export const comments = pgTable(
 )
 
 /** Uploaded image assets: metadata only — bytes live in object storage (or
- *  ./data/assets in dev). canvas_id is a housekeeping hint, not ownership:
- *  liveness comes from asset_refs, so a URL copied to another canvas keeps
- *  its asset alive. */
+ *  ./data/assets in dev). Each asset belongs to exactly one durable canvas;
+ *  attribution fields do not grant access. */
 export const assets = pgTable(
   'assets',
   {
     id: text('id').primaryKey(),
-    canvasId: text('canvas_id'),
+    canvasId: text('canvas_id')
+      .notNull()
+      .references(() => canvases.id, { onDelete: 'cascade' }),
     ownerId: text('owner_id'),
     mime: text('mime').notNull(),
     ext: text('ext').notNull(),
@@ -431,7 +451,7 @@ export const assets = pgTable(
     uploadedBy: text('uploaded_by').notNull(),
     createdAt: bigint('created_at', { mode: 'number' }).notNull(),
   },
-  (t) => [index('assets_canvas_idx').on(t.canvasId)],
+  (t) => [index('assets_canvas_idx').on(t.canvasId), uniqueIndex('assets_parent_idx').on(t.id, t.canvasId)],
 )
 
 /** Which frames reference which assets — a projection of frame HTML, synced
@@ -441,22 +461,27 @@ export const assets = pgTable(
 export const assetRefs = pgTable(
   'asset_refs',
   {
+    canvasId: text('canvas_id').notNull(),
     assetId: text('asset_id').notNull(),
     frameId: text('frame_id').notNull(),
   },
-  (t) => [primaryKey({ columns: [t.assetId, t.frameId] }), index('asset_refs_frame_idx').on(t.frameId)],
+  (t) => [
+    primaryKey({ columns: [t.assetId, t.frameId] }),
+    index('asset_refs_frame_idx').on(t.frameId),
+    foreignKey({ columns: [t.assetId, t.canvasId], foreignColumns: [assets.id, assets.canvasId] }).onDelete('cascade'),
+    foreignKey({ columns: [t.frameId, t.canvasId], foreignColumns: [frames.id, frames.canvasId] }).onDelete('cascade'),
+  ],
 )
 
-/** Font libraries (shared/fonts.ts): one row per uploaded font file. A row
- *  with a workspace_id is that workspace's; one without is owner_id's own,
- *  used on their personal canvases. The bytes are an ordinary /a/ asset, so
- *  deleting a row leaves every frame that already loads it rendering. */
+/** Canvas-scoped custom fonts; the font row and asset share one parent.
+ *  Deleting a library entry retains the asset used by existing frames. */
 export const fonts = pgTable(
   'fonts',
   {
     id: text('id').primaryKey(),
-    workspaceId: text('workspace_id'),
-    ownerId: text('owner_id'),
+    canvasId: text('canvas_id')
+      .notNull()
+      .references(() => canvases.id, { onDelete: 'cascade' }),
     family: text('family').notNull(),
     /** a CSS font-weight: '400', or '100 900' for a variable font */
     weight: text('weight').notNull(),
@@ -471,7 +496,10 @@ export const fonts = pgTable(
     uploadedBy: text('uploaded_by').notNull(),
     createdAt: bigint('created_at', { mode: 'number' }).notNull(),
   },
-  (t) => [index('fonts_workspace_idx').on(t.workspaceId), index('fonts_owner_idx').on(t.ownerId)],
+  (t) => [
+    index('fonts_canvas_idx').on(t.canvasId),
+    foreignKey({ columns: [t.assetId, t.canvasId], foreignColumns: [assets.id, assets.canvasId] }).onDelete('cascade'),
+  ],
 )
 
 /** Named design docs per canvas (brand rules, style recipes) — markdown
@@ -479,7 +507,9 @@ export const fonts = pgTable(
 export const guidelines = pgTable(
   'guidelines',
   {
-    canvasId: text('canvas_id').notNull(),
+    canvasId: text('canvas_id')
+      .notNull()
+      .references(() => canvases.id, { onDelete: 'cascade' }),
     name: text('name').notNull(),
     markdown: text('markdown').notNull(),
     /* pretty display name; null = show the slug */
@@ -500,7 +530,9 @@ export const guidelineVersions = pgTable(
   'guideline_versions',
   {
     id: text('id').primaryKey(),
-    canvasId: text('canvas_id').notNull(),
+    canvasId: text('canvas_id')
+      .notNull()
+      .references(() => canvases.id, { onDelete: 'cascade' }),
     name: text('name').notNull(),
     markdown: text('markdown').notNull(),
     savedAt: bigint('saved_at', { mode: 'number' }).notNull(),
@@ -515,7 +547,9 @@ export const guidelineVersions = pgTable(
 export const designTokens = pgTable(
   'design_tokens',
   {
-    canvasId: text('canvas_id').notNull(),
+    canvasId: text('canvas_id')
+      .notNull()
+      .references(() => canvases.id, { onDelete: 'cascade' }),
     /** the CSS custom property name, `--color-primary` */
     name: text('name').notNull(),
     /** one of TOKEN_TYPES */
@@ -538,7 +572,9 @@ export const memoryReferences = pgTable(
   'memory_references',
   {
     id: text('id').primaryKey(),
-    canvasId: text('canvas_id').notNull(),
+    canvasId: text('canvas_id')
+      .notNull()
+      .references(() => canvases.id, { onDelete: 'cascade' }),
     frameId: text('frame_id').notNull(),
     title: text('title').notNull(),
     html: text('html').notNull(),
@@ -556,7 +592,9 @@ export const decisions = pgTable(
   'decisions',
   {
     id: text('id').primaryKey(),
-    canvasId: text('canvas_id').notNull(),
+    canvasId: text('canvas_id')
+      .notNull()
+      .references(() => canvases.id, { onDelete: 'cascade' }),
     text: text('text').notNull(),
     summary: text('summary'),
     source: text('source').notNull(),
@@ -574,7 +612,9 @@ export const memoryProposals = pgTable(
   'memory_proposals',
   {
     id: text('id').primaryKey(),
-    canvasId: text('canvas_id').notNull(),
+    canvasId: text('canvas_id')
+      .notNull()
+      .references(() => canvases.id, { onDelete: 'cascade' }),
     guideName: text('guide_name').notNull(),
     guideTitle: text('guide_title'),
     rule: text('rule').notNull(),
@@ -593,7 +633,9 @@ export const activity = pgTable(
   'activity',
   {
     id: text('id').primaryKey(),
-    canvasId: text('canvas_id').notNull(),
+    canvasId: text('canvas_id')
+      .notNull()
+      .references(() => canvases.id, { onDelete: 'cascade' }),
     actorName: text('actor_name').notNull(),
     actorKind: text('actor_kind').notNull(),
     actorColor: text('actor_color').notNull(),

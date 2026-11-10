@@ -8,6 +8,7 @@ import type { Canvas } from '../shared/types.ts'
  * test can read which states were filed, in order. */
 vi.mock('../server/db/persist.ts', () => ({
   saveFrame: () => {},
+  insertCanvas: async () => {},
   saveCanvas: () => {},
   saveActivity: () => {},
   saveTask: () => {},

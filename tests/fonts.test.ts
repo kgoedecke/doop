@@ -66,6 +66,34 @@ describe('readFontFile', () => {
     expect(readFontFile(woff2({ family: 'Long Name', padName: 300 })).family).toBe('Long Name')
   })
 
+  it('charges the complete reconstructed font rather than its compressed metadata', () => {
+    const spec = { family: 'Decoded size' }
+    const fullSize = ttf(spec).length
+    for (const wrap of [ttf, woff, woff2]) expect(readFontFile(wrap(spec)).decodedBytes).toBe(fullSize)
+    const real = readFileSync(new URL('./fixtures/fonts/nunito-sans-bold-italic.woff2', import.meta.url))
+    expect(readFontFile(real).decodedBytes).toBeGreaterThan(real.length)
+  })
+
+  it('rejects expansion in a non-metadata table before attempting to inflate it', () => {
+    const file = woff({ family: 'Large glyph table' })
+    const count = file.readUInt16BE(12)
+    for (let i = 0; i < count; i++) {
+      const at = 44 + i * 20
+      if (file.toString('latin1', at, at + 4) === 'OS/2') {
+        file.write('glyf', at, 'latin1')
+        file.writeUInt32BE(48 * 1024 * 1024, at + 12)
+      }
+    }
+    expect(file.length).toBeLessThan(1024)
+    expect(() => readFontFile(file)).toThrow(/too large/)
+  })
+
+  it('refuses unknown WOFF2 transformations instead of charging an invented decoded size', () => {
+    const file = woff2({ family: 'Unsupported transformation' })
+    file[48] = file[48]! | 0x40
+    expect(() => readFontFile(file)).toThrow(/unsupported font table transformation/)
+  })
+
   it('refuses files that would unpack far past their size, before unpacking them', () => {
     expect(() => readFontFile(woff2({ family: 'Bomb', declare: 100 * 1024 * 1024 }))).toThrow(/too large/)
     /* a stream that inflates past what its directory declares stops at the declaration */

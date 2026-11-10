@@ -12,6 +12,8 @@ import { parseRunnerPick, runnerKey, type RunnerPick } from '../shared/agentRunn
 import { hasElementId, stampElementId } from './elementIds.ts'
 import { decodeEscapedHtml, looksEscapedHtml, repairEscapedHtml } from './escapedHtml.ts'
 import { fontsForCanvas } from './fonts.ts'
+import { validateAssetReferences } from './assets.ts'
+import { PrivateReferenceError } from '../shared/privateReferences.ts'
 import { withFontFaces } from '../shared/fonts.ts'
 import { withWebFontLinks } from '../shared/webFonts.ts'
 import {
@@ -577,7 +579,7 @@ async function stampSaved(frameId: string, id: string): Promise<boolean> {
       .then(
         () => {
           /* deleted while the write was out: the write must not bring it back */
-          if (!store.getFrame(frameId)) persist.deleteFrame(frameId)
+          if (!store.getFrame(frameId)) persist.deleteFrame(frameId, frame.canvasId)
           for (const stamp of carried) pending.ids.delete(stamp)
           if (!pending.ids.size && unsavedStamps.get(frameId) === pending) unsavedStamps.delete(frameId)
         },
@@ -1996,8 +1998,8 @@ export function deleteFrame(frameId: string, actor: Actor): Frame | undefined {
 }
 
 /** Remove a canvas with everything attached to it; viewers are told to leave. */
-export function deleteCanvas(canvasId: string): boolean {
-  const c = store.deleteCanvas(canvasId)
+export async function deleteCanvas(canvasId: string): Promise<boolean> {
+  const c = await store.deleteCanvas(canvasId)
   if (!c) return false
   for (const f of c.frames) {
     thumbs.purge(f.id)
@@ -2140,11 +2142,18 @@ function tokenError(name: string, message: string): TokenResult {
  *  clean declaration, an alias names a token that exists (in the canvas or
  *  earlier in the same batch) and does not loop back. */
 function valueProblem(
+  canvasId: string,
   tokens: readonly DesignToken[],
   name: string,
   value: string,
   themes: Record<string, string> = {},
 ): string | null {
+  try {
+    for (const candidate of [value, ...Object.values(themes)]) validateAssetReferences(candidate, canvasId, 'value')
+  } catch (error) {
+    if (error instanceof PrivateReferenceError) return error.message
+    throw error
+  }
   for (const candidate of [value, ...Object.values(themes)]) {
     const target = aliasOf(candidate)
     if (!target) continue
@@ -2323,7 +2332,7 @@ export function createTokens(canvasId: string, inputs: unknown[], actor: Actor):
       continue
     }
     const themes = cleaned?.themes ?? {}
-    const problem = valueProblem(pending, name, value, themes)
+    const problem = valueProblem(canvasId, pending, name, value, themes)
     if (problem) {
       results.push(tokenError(name, problem))
       continue
@@ -2416,7 +2425,7 @@ export function setTokens(canvasId: string, edits: TokenEdit[], actor: Actor): T
     }
     const themes = { ...(token.themes ?? {}), ...(cleaned?.themes ?? {}) }
     for (const theme of cleaned?.removed ?? []) delete themes[theme]
-    const problem = valueProblem(tokens, name, value, themes)
+    const problem = valueProblem(canvasId, tokens, name, value, themes)
     if (problem) {
       results.push(tokenError(name, problem))
       continue

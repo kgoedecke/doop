@@ -1,10 +1,13 @@
-import { pdfRenderBudgetMs } from '../../shared/pdfLimits'
+import { MAX_PDF_FRAMES, pdfRenderBudgetMs } from '../../shared/pdfLimits'
 import type { Frame } from '../../shared/types'
 import { isDesktopShell } from './shell'
 import { inspectElement } from './frameBridge'
 import { clipToFrame, cropRaster, rasterizeFrame, type ClipRect } from './frameRaster'
 import { useStore } from './store'
 import { t } from './i18n'
+import { PrivateExportOperation } from './privateExport'
+import { privateMediaOperation } from './privateMaterialization'
+import { PRIVATE_MEDIA_LIMITS, PrivateMaterializationError } from '../../shared/privateMedia'
 
 export type FrameExportFormat = 'png' | 'jpg'
 
@@ -50,14 +53,37 @@ async function failureOf(res: Response, label: string): Promise<string> {
    display (PNG and JPG) and would show the file
    in the window instead; with the attribute it opens the native save panel. */
 function saveBlob(blob: Blob, fileName: string) {
-  const url = URL.createObjectURL(blob)
+  const lifetime = privateMediaOperation()
+  let url: string
+  try {
+    url = URL.createObjectURL(blob)
+  } catch (error) {
+    lifetime.close()
+    throw error
+  }
+  let timer: ReturnType<typeof setTimeout> | undefined
+  let finished = false
+  const revoke = () => {
+    if (finished) return
+    finished = true
+    clearTimeout(timer)
+    URL.revokeObjectURL(url)
+    lifetime.close()
+  }
+  lifetime.signal.addEventListener('abort', revoke, { once: true })
   const link = document.createElement('a')
-  link.href = url
-  link.download = fileName
-  document.body.append(link)
-  link.click()
-  link.remove()
-  setTimeout(() => URL.revokeObjectURL(url), BLOB_URL_LIFETIME_MS)
+  try {
+    link.href = url
+    link.download = fileName
+    document.body.append(link)
+    link.click()
+    timer = setTimeout(revoke, BLOB_URL_LIFETIME_MS)
+  } catch (error) {
+    revoke()
+    throw error
+  } finally {
+    link.remove()
+  }
 }
 
 /** Starting a download can throw (a blocked blob URL, a sandboxed page);
@@ -108,16 +134,24 @@ const rasterType = (format: FrameExportFormat) => (format === 'jpg' ? 'jpeg' : '
 /** The frame drawn by this browser (what the person sees, no server
  *  round trip), or null when it cannot be: an image its host refuses to
  *  share, a document the serializer cannot round-trip. */
-async function rasterExport(frame: Frame, format: FrameExportFormat, clip?: ClipRect): Promise<Blob | null> {
+async function rasterExport(
+  frame: Frame,
+  format: FrameExportFormat,
+  signal: AbortSignal,
+  clip?: ClipRect,
+): Promise<Blob | null> {
   try {
     return await rasterizeFrame(frame, {
       scale: EXPORT_SCALE,
       type: rasterType(format),
       quality: JPG_QUALITY,
-      signal: AbortSignal.timeout(RASTER_TIMEOUT_MS),
+      signal: AbortSignal.any([signal, AbortSignal.timeout(RASTER_TIMEOUT_MS)]),
       clip,
     })
-  } catch {
+  } catch (error) {
+    // A source/authority/budget failure cannot export a different, older stored
+    // design through the fallback route and report the rejected draft as saved.
+    if (error instanceof PrivateMaterializationError) throw error
     return null
   }
 }
@@ -133,9 +167,15 @@ async function measureElement(frame: Frame, selector: string): Promise<ClipRect 
 }
 
 /** The server's render of the whole frame, cut down to `clip` here. */
-async function fetchClipped(frame: Frame, format: FrameExportFormat, clip: ClipRect, fileName: string) {
+async function fetchClipped(
+  frame: Frame,
+  format: FrameExportFormat,
+  clip: ClipRect,
+  fileName: string,
+  signal: AbortSignal,
+) {
   const label = FORMAT_LABEL[format]
-  const whole = await fetchFile(frameExportUrl(frame, format), label, fileName)
+  const whole = await fetchFile(frameExportUrl(frame, format), label, fileName, EXPORT_TIMEOUT_MS, signal)
   if (!whole.ok) return whole
   try {
     const blob = await cropRaster(whole.blob, clip, {
@@ -143,6 +183,8 @@ async function fetchClipped(frame: Frame, format: FrameExportFormat, clip: ClipR
       type: rasterType(format),
       quality: JPG_QUALITY,
     })
+    signal.throwIfAborted()
+    if (blob.size > PRIVATE_MEDIA_LIMITS.encodedBytes) throw new PrivateMaterializationError('limit')
     return { ok: true as const, blob, fileName }
   } catch {
     return { ok: false as const, message: t('panels.exportFailed', { label }) }
@@ -150,14 +192,20 @@ async function fetchClipped(frame: Frame, format: FrameExportFormat, clip: ClipR
 }
 
 /** Render here first; the server's Chromium is the fallback. */
-async function fetchExport(frame: Frame, format: FrameExportFormat, element?: ElementTarget): Promise<Fetched> {
+async function fetchExport(
+  frame: Frame,
+  format: FrameExportFormat,
+  signal: AbortSignal,
+  element?: ElementTarget,
+): Promise<Fetched> {
   const fileName = `${exportName(frame, element)}.${format}`
   const clip = element ? await measureElement(frame, element.selector) : undefined
   if (clip === null) return { ok: false, message: t('panels.exportElementMissing') }
-  const local = await rasterExport(frame, format, clip)
+  const local = await rasterExport(frame, format, signal, clip)
+  signal.throwIfAborted()
   if (local) return { ok: true, blob: local, fileName }
-  if (clip) return fetchClipped(frame, format, clip, fileName)
-  return fetchFile(frameExportUrl(frame, format), FORMAT_LABEL[format], fileName)
+  if (clip) return fetchClipped(frame, format, clip, fileName, signal)
+  return fetchFile(frameExportUrl(frame, format), FORMAT_LABEL[format], fileName, EXPORT_TIMEOUT_MS, signal)
 }
 
 /* the server's file naming (server/index.ts, /i/:id.:ext?download) */
@@ -176,11 +224,22 @@ async function fetchFile(
   label: string,
   fallbackName: string,
   timeoutMs = EXPORT_TIMEOUT_MS,
+  signal?: AbortSignal,
 ): Promise<Fetched> {
   try {
-    const res = await fetch(url, { signal: AbortSignal.timeout(timeoutMs) })
+    const timed = AbortSignal.timeout(timeoutMs)
+    const combined = signal ? AbortSignal.any([signal, timed]) : timed
+    const res = await fetch(url, { signal: combined, credentials: 'same-origin', redirect: 'error' })
     if (!res.ok) return { ok: false, message: await failureOf(res, label) }
-    return { ok: true, blob: await res.blob(), fileName: fileNameOf(res, fallbackName) }
+    return {
+      ok: true,
+      blob: await exportBlob(
+        res,
+        combined,
+        label === 'PDF' ? PRIVATE_MEDIA_LIMITS.responseBytes : PRIVATE_MEDIA_LIMITS.encodedBytes,
+      ),
+      fileName: fileNameOf(res, fallbackName),
+    }
   } catch (err) {
     const message =
       err instanceof DOMException && err.name === 'TimeoutError'
@@ -190,18 +249,65 @@ async function fetchFile(
   }
 }
 
-async function exportOutcome(fetched: Promise<Fetched>): Promise<string | null> {
-  const result = await fetched
-  if (!result.ok) return result.message
-  if (!trySave(result.blob, result.fileName)) return t('panels.exportSaveFailed', { name: result.fileName })
-  return isDesktopShell() ? null : t('panels.exportReady', { name: result.fileName })
+/** Bound streamed export bytes before buffering, including absent/false lengths. */
+async function exportBlob(res: Response, signal: AbortSignal, maximum: number): Promise<Blob> {
+  if (Number(res.headers.get('content-length') ?? 0) > maximum) {
+    await res.body?.cancel().catch(() => {})
+    throw new PrivateMaterializationError('limit')
+  }
+  const reader = res.body?.getReader()
+  const parts: Uint8Array<ArrayBuffer>[] = []
+  let total = 0
+  try {
+    for (;;) {
+      signal.throwIfAborted()
+      const part = await reader?.read()
+      if (!part || part.done) break
+      total += part.value.byteLength
+      if (total > maximum) throw new PrivateMaterializationError('limit')
+      parts.push(new Uint8Array(part.value))
+    }
+    signal.throwIfAborted()
+    return new Blob(parts, { type: res.headers.get('content-type') ?? '' })
+  } catch (error) {
+    await reader?.cancel().catch(() => {})
+    throw error
+  } finally {
+    reader?.releaseLock()
+  }
 }
 
-/** Save the frame's document as an .html file — the same text the raw editor
- *  shows, so a draft in progress exports as typed. Nothing to fetch, so it
- *  cannot fail the way the rendered exports can. */
-export function downloadFrameHtml(frame: Frame, html = frame.html): void {
-  saveBlob(new Blob([html], { type: 'text/html;charset=utf-8' }), `${frame.name || 'frame'}.html`)
+async function exportOutcome(fetched: Promise<Fetched>, verify: () => Promise<void>): Promise<string | null> {
+  try {
+    const result = await fetched
+    if (!result.ok) return result.message
+    await verify()
+    if (!trySave(result.blob, result.fileName)) return t('panels.exportSaveFailed', { name: result.fileName })
+    return isDesktopShell() ? null : t('panels.exportReady', { name: result.fileName })
+  } catch (error) {
+    return error instanceof PrivateMaterializationError ? error.message : t('panels.exportFailed', { label: '' })
+  }
+}
+
+/** Export the current draft with its authorized private files embedded. */
+export async function downloadFrameHtml(frame: Frame, html = frame.html): Promise<void> {
+  const operation = new PrivateExportOperation(frame, AbortSignal.timeout(EXPORT_TIMEOUT_MS))
+  inFlight += 1
+  useStore.getState().pushNotice(t('panels.exportingFormat', { label: 'HTML' }), { busy: true })
+  let outcome: string | null = null
+  try {
+    const prepared = await operation.document(html)
+    const blob = new Blob([prepared.html], { type: 'text/html;charset=utf-8' })
+    outcome = await exportOutcome(Promise.resolve({ ok: true, blob, fileName: `${frame.name || 'frame'}.html` }), () =>
+      operation.revalidate(),
+    )
+  } catch (error) {
+    outcome = error instanceof Error ? error.message : t('panels.exportFailed', { label: 'HTML' })
+  } finally {
+    operation.close()
+    inFlight -= 1
+    report(outcome)
+  }
 }
 
 /** Render and download a frame export, reporting through the canvas toast:
@@ -225,11 +331,17 @@ export async function downloadElementExport(
 }
 
 async function downloadExport(frame: Frame, format: FrameExportFormat, element?: ElementTarget): Promise<void> {
+  const operation = new PrivateExportOperation(frame)
   inFlight += 1
   useStore.getState().pushNotice(t('panels.exportingFormat', { label: FORMAT_LABEL[format] }), { busy: true })
-  const outcome = await exportOutcome(fetchExport(frame, format, element))
-  inFlight -= 1
-  report(outcome)
+  let outcome: string | null = null
+  try {
+    outcome = await exportOutcome(fetchExport(frame, format, operation.signal, element), () => operation.revalidate())
+  } finally {
+    operation.close()
+    inFlight -= 1
+    report(outcome)
+  }
 }
 
 /** Render frames of one canvas into a single PDF (a page per frame, in the
@@ -239,6 +351,12 @@ async function downloadExport(frame: Frame, format: FrameExportFormat, element?:
 export async function downloadFramesPdf(canvasId: string, frames: readonly Frame[]): Promise<void> {
   const [first] = frames
   if (!first) return
+  if (frames.length > MAX_PDF_FRAMES || frames.some((frame) => frame.canvasId !== canvasId)) {
+    useStore.getState().pushNotice(t('panels.exportFailed', { label: 'PDF' }))
+    return
+  }
+  const operations = frames.map((frame) => new PrivateExportOperation(frame))
+  const signal = AbortSignal.any(operations.map((operation) => operation.signal))
   inFlight += 1
   useStore
     .getState()
@@ -248,9 +366,20 @@ export async function downloadFramesPdf(canvasId: string, frames: readonly Frame
     )
   const fallback = `${(frames.length === 1 && first.name) || 'frames'}.pdf`
   const timeoutMs = Math.max(EXPORT_TIMEOUT_MS, pdfRenderBudgetMs(frames.length))
-  const outcome = await exportOutcome(fetchFile(framesPdfUrl(canvasId, frames), 'PDF', fallback, timeoutMs))
-  inFlight -= 1
-  report(outcome)
+  let outcome: string | null = null
+  try {
+    outcome = await exportOutcome(
+      fetchFile(framesPdfUrl(canvasId, frames), 'PDF', fallback, timeoutMs, signal),
+      async () => {
+        for (const operation of operations) await operation.revalidate()
+        signal.throwIfAborted()
+      },
+    )
+  } finally {
+    for (const operation of operations) operation.close()
+    inFlight -= 1
+    report(outcome)
+  }
 }
 
 /** Render the frame and put the PNG itself on the clipboard, reporting
@@ -274,6 +403,7 @@ async function copyPng(frame: Frame, element?: ElementTarget): Promise<void> {
     useStore.getState().pushNotice(t('panels.copyPngUnsupported'))
     return
   }
+  const operation = new PrivateExportOperation(frame)
   inFlight += 1
   useStore.getState().pushNotice(t('panels.copyingPng'), { busy: true })
   /* engines differ in what the write rejects with when the blob fails, so
@@ -287,13 +417,21 @@ async function copyPng(frame: Frame, element?: ElementTarget): Promise<void> {
       failure = t('panels.exportElementMissing')
       throw new Error(failure)
     }
-    const local = await rasterExport(frame, 'png', clip)
-    if (local) return local
+    const local = await rasterExport(frame, 'png', operation.signal, clip)
+    operation.signal.throwIfAborted()
+    if (local) {
+      await operation.revalidate()
+      return local
+    }
     try {
-      const res = await fetch(frameExportUrl(frame, 'png'), { signal: AbortSignal.timeout(EXPORT_TIMEOUT_MS) })
+      const signal = AbortSignal.any([operation.signal, AbortSignal.timeout(EXPORT_TIMEOUT_MS)])
+      const res = await fetch(frameExportUrl(frame, 'png'), { signal, credentials: 'same-origin', redirect: 'error' })
       if (res.ok) {
-        const whole = await res.blob()
-        return clip ? await cropRaster(whole, clip, { scale: EXPORT_SCALE, type: 'png' }) : whole
+        const whole = await exportBlob(res, signal, PRIVATE_MEDIA_LIMITS.encodedBytes)
+        const result = clip ? await cropRaster(whole, clip, { scale: EXPORT_SCALE, type: 'png' }) : whole
+        if (result.size > PRIVATE_MEDIA_LIMITS.encodedBytes) throw new PrivateMaterializationError('limit')
+        await operation.revalidate()
+        return result
       }
       failure = await failureOf(res, 'png')
     } catch (err) {
@@ -309,6 +447,8 @@ async function copyPng(frame: Frame, element?: ElementTarget): Promise<void> {
     outcome = t('panels.copyPngDone')
   } catch {
     outcome = failure
+  } finally {
+    operation.close()
   }
   inFlight -= 1
   report(outcome)

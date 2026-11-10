@@ -1,6 +1,7 @@
 import type { Canvas, ClientMessage } from '../shared/types.ts'
 import { roleAllows, type CanvasRole } from '../shared/canvasRole.ts'
 import { hasRole, isWorkspaceMember } from './workspaces.ts'
+import { companyPolicy } from './companyPolicy.ts'
 
 /**
  * Canvas access, Figma-style: private by default. The owner always has
@@ -31,6 +32,10 @@ export function isAdmin(user: { role?: string | null } | undefined): boolean {
  *  owner, invited members and workspace members edit; anyone else gets the
  *  share link's level. */
 export function canvasRole(userId: string | undefined, canvas: Canvas): CanvasRole | null {
+  if (!companyPolicy.allowsDestination(userId, canvas.workspaceId)) return null
+  if (companyPolicy.isPrivate(canvas.workspaceId)) {
+    return userId && isWorkspaceMember(canvas.workspaceId!, userId) ? 'edit' : null
+  }
   if (!canvas.ownerId) return 'edit'
   if (!userId) return null
   if (hasDurableCanvasAccess(userId, canvas)) return 'edit'
@@ -44,6 +49,7 @@ export function canvasRole(userId: string | undefined, canvas: Canvas): CanvasRo
  *  signed in can claim it. Only the room grants this: REST and MCP still
  *  need a session. */
 export function guestCanvasRole(canvas: Canvas): 'view' | null {
+  if (companyPolicy.isPrivate(canvas.workspaceId)) return null
   if (!canvas.ownerId) return null
   const link = canvas.linkAccess
   return link === 'view' || link === 'comment' || link === 'edit' ? 'view' : null
@@ -70,6 +76,8 @@ export function canEditCanvas(userId: string | undefined, canvas: Canvas): boole
  *  design-sync keys: a bearer secret minted or read through a share link
  *  would keep writing frames long after the owner turns the link off. */
 export function hasDurableCanvasAccess(userId: string | undefined, canvas: Canvas): boolean {
+  if (!companyPolicy.allowsDestination(userId, canvas.workspaceId)) return false
+  if (companyPolicy.isPrivate(canvas.workspaceId)) return !!userId && isWorkspaceMember(canvas.workspaceId!, userId)
   if (!userId || !canvas.ownerId) return false
   if (canvas.ownerId === userId || !!canvas.memberIds?.includes(userId)) return true
   return !!canvas.workspaceId && isWorkspaceMember(canvas.workspaceId, userId)
@@ -80,6 +88,8 @@ export function hasDurableCanvasAccess(userId: string | undefined, canvas: Canva
  *  control of the work done in its space. */
 export function canManageCanvas(userId: string | undefined, canvas: Canvas): boolean {
   if (!userId) return false
+  if (!companyPolicy.allowsDestination(userId, canvas.workspaceId)) return false
+  if (companyPolicy.isPrivate(canvas.workspaceId) && !isWorkspaceMember(canvas.workspaceId!, userId)) return false
   if (canvas.ownerId === userId) return true
   return !!canvas.workspaceId && hasRole(canvas.workspaceId, userId, 'admin')
 }

@@ -1,10 +1,10 @@
 import { store } from './store.ts'
 
 /** Create a demo canvas on first run so the app isn't empty. */
-export function seed() {
+export async function seed() {
   if (store.canvases.size > 0) return
 
-  const canvas = store.createCanvas('Welcome Canvas')
+  const canvas = await store.createCanvas('Welcome Canvas')
 
   store.createFrame(
     canvas.id,

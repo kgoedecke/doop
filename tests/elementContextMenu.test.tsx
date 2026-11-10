@@ -69,6 +69,9 @@ it('pastes a copied standalone shape as a new element on the canvas', async () =
     y: 20,
     width: 100,
     height: 50,
+    createdAt: 1,
+    updatedAt: 1,
+    updatedBy: 'Tester',
     html: '<body data-doop-canvas-element><div id="layer" data-doop-drawing="rect"></div></body>',
   } as Frame
   useStore.getState().setCanvas({ id: 'c', name: 'Canvas', frames: [shape], createdAt: 0, updatedAt: 0 })

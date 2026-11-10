@@ -14,6 +14,7 @@ vi.mock('../server/db/persist.ts', () => ({
   saveActivity: () => {},
   saveDecision: () => {},
   saveProposal: () => {},
+  insertCanvas: async () => {},
   saveCanvas: () => {},
   saveFrame: () => {},
 }))
@@ -29,7 +30,11 @@ const BRAND: CustomFont = {
   size: 1,
   createdAt: 1,
 }
-vi.mock('../server/fonts.ts', () => ({ fontsForCanvas: () => [BRAND] }))
+vi.mock('../server/fonts.ts', () => ({
+  fontsForCanvas: () => [BRAND],
+  canvasFontRows: () => [],
+  publishCopiedFonts: () => {},
+}))
 
 vi.useFakeTimers({ now: 1_000_000 })
 const actions = await import('../server/actions.ts')
@@ -54,14 +59,14 @@ actions.wire(
 )
 
 describe('library faces on frame writes', () => {
-  it('adds them on create', () => {
-    const canvasId = store.createCanvas('fonts', 'kevin').id
+  it('adds them on create', async () => {
+    const canvasId = (await store.createCanvas('fonts', 'kevin')).id
     const frame = actions.createFrame(canvasId, { name: 'Hero', html: `${DESIGN}</body></html>` }, agent)!
     expect(store.getFrame(frame.id)!.html).toContain(BRAND.url)
   })
 
-  it('links a hosted family the design names, next to the library faces', () => {
-    const canvasId = store.createCanvas('fonts', 'kevin').id
+  it('links a hosted family the design names, next to the library faces', async () => {
+    const canvasId = (await store.createCanvas('fonts', 'kevin')).id
     const html = `${DESIGN}<p style="font-family: 'Space Grotesk', sans-serif">x</p></body></html>`
     const frame = actions.createFrame(canvasId, { name: 'Hero', html }, agent)!
     const saved = store.getFrame(frame.id)!.html
@@ -72,8 +77,8 @@ describe('library faces on frame writes', () => {
     expect(saved).not.toContain('family=Brand+Sans')
   })
 
-  it('finds a family named only through a font token', () => {
-    const canvasId = store.createCanvas('fonts', 'kevin').id
+  it('finds a family named only through a font token', async () => {
+    const canvasId = (await store.createCanvas('fonts', 'kevin')).id
     const human: Actor = { name: 'Kevin', kind: 'user', color: '#2743ee' }
     actions.createTokens(
       canvasId,
@@ -91,8 +96,8 @@ describe('library faces on frame writes', () => {
     expect(store.getFrame(frame.id)!.html).toContain('family=Space+Grotesk:')
   })
 
-  it('adds them with the done chunk of a stream, not before', () => {
-    const canvasId = store.createCanvas('fonts', 'kevin').id
+  it('adds them with the done chunk of a stream, not before', async () => {
+    const canvasId = (await store.createCanvas('fonts', 'kevin')).id
     const frame = actions.createFrame(canvasId, { name: 'Hero' }, agent)!
     actions.appendFrameHtml(frame.id, DESIGN, agent, { start: true })
     expect(store.getFrame(frame.id)!.html).not.toContain(BRAND.url)
@@ -100,8 +105,8 @@ describe('library faces on frame writes', () => {
     expect(store.getFrame(frame.id)!.html).toContain(BRAND.url)
   })
 
-  it('adds them when an unfinished stream goes idle', () => {
-    const canvasId = store.createCanvas('fonts', 'kevin').id
+  it('adds them when an unfinished stream goes idle', async () => {
+    const canvasId = (await store.createCanvas('fonts', 'kevin')).id
     const frame = actions.createFrame(canvasId, { name: 'Hero' }, agent)!
     actions.appendFrameHtml(frame.id, DESIGN, agent, { start: true })
     sent.length = 0
@@ -111,8 +116,8 @@ describe('library faces on frame writes', () => {
     expect(sent.some((m) => m.frameId === frame.id && m.html.includes(BRAND.url))).toBe(true)
   })
 
-  it('never sends viewers a script the stream left unfinished', () => {
-    const canvasId = store.createCanvas('fonts', 'kevin').id
+  it('never sends viewers a script the stream left unfinished', async () => {
+    const canvasId = (await store.createCanvas('fonts', 'kevin')).id
     const frame = actions.createFrame(canvasId, { name: 'Hero' }, agent)!
     actions.appendFrameHtml(frame.id, `${DESIGN}<script>document.body.innerHTML = ''; // and then`, agent, {
       start: true,

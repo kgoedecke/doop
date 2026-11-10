@@ -78,7 +78,7 @@ beforeEach(async () => {
   await db.delete(slackInstallations)
   sent.length = 0
   stubEnv('BETTER_AUTH_URL', 'https://doop.example')
-  canvas = store.createCanvas('Campaign', owner.id)
+  canvas = await store.createCanvas('Campaign', owner.id)
   source = store.createFrame(canvas.id, { name: 'Approved creative', html: '<h1>Spring sale</h1>' }, owner.name)!
   await db.insert(integrations).values({
     id: 'linear-owner',

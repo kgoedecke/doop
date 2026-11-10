@@ -347,7 +347,7 @@ export function Inspector({
                 variant="bare"
                 className={cn(fillBtn, 'gap-1.5')}
                 title={t('inspector.exportHtmlTitle')}
-                onClick={() => downloadFrameHtml(frame, draft)}
+                onClick={() => void downloadFrameHtml(frame, draft)}
               >
                 <DownloadIcon className="size-3.5" />
                 {t('inspector.export')}

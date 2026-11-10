@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } f
 import { createPortal } from 'react-dom'
 import type { Frame } from '../../shared/types'
 import { isCanvasElement } from '../lib/drawing'
+import { usePrivateDocument } from '../lib/privateMaterialization'
 import {
   drawingDropFrame,
   movableDrawing,
@@ -52,6 +53,14 @@ export interface ElementMoveHit {
 export function useElementMove(frame: Frame, layoutZoom: number) {
   const t = useT()
   const [preview, setPreview] = useState<Preview | null>(null)
+  const {
+    prepared: privatePreview,
+    error: privatePreviewError,
+    epoch: privateEpoch,
+  } = usePrivateDocument(
+    preview?.html ?? '',
+    preview ? { kind: 'frame', id: frame.id, canvasId: frame.canvasId } : null,
+  )
   const [moving, setMoving] = useState(false)
   const [layoutDrop, setLayoutDrop] = useState<{
     drop: LayoutDrop
@@ -431,9 +440,11 @@ export function useElementMove(frame: Frame, layoutZoom: number) {
                     density in Chromium, undone elsewhere), so the drawing lays out
                     at the width it has in its frame and stays as sharp */}
                 <iframe
+                  key={`${privateEpoch}:${frame.canvasId}:${frame.id}`}
                   title={t('stage.movingDrawing')}
                   sandbox=""
-                  srcDoc={preview.html}
+                  srcDoc={privatePreview?.html ?? ''}
+                  data-doop-private-preview={privatePreview?.privateMedia ? '' : undefined}
                   className="block border-0 bg-transparent"
                   style={{
                     width: preview.rect.width,
@@ -444,6 +455,11 @@ export function useElementMove(frame: Frame, layoutZoom: number) {
                     transformOrigin: '0 0',
                   }}
                 />
+                {privatePreviewError && (
+                  <span role="status" className="text-body text-accent-ink">
+                    {privatePreviewError.message}
+                  </span>
+                )}
               </div>
             </div>,
             preview.world,

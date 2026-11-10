@@ -1,6 +1,10 @@
 import { nanoid } from 'nanoid'
+import { CompanyPolicyError, companyPolicy } from './companyPolicy.ts'
 import { canvasPages, copyPageName, pageFrames, samePages } from '../shared/pages.ts'
 import * as persist from './db/persist.ts'
+import { validateAssetReferences } from './assets.ts'
+import { prepareCanvasResourceCopy, publishCanvasResourceCopy } from './resourceCopies.ts'
+import { PrivateResourceError } from './privateResources.ts'
 import type { LinkAccess } from '../shared/canvasRole.ts'
 import { MAX_GUIDES } from '../shared/guides.ts'
 import { remapFrameTargets } from '../shared/prototype.ts'
@@ -17,6 +21,12 @@ import type {
 } from '../shared/types.ts'
 
 export const MAX_PAGES = 100
+
+export class CanvasCreationUncertainError extends Error {
+  constructor(readonly canvasId: string) {
+    super(`Canvas creation could not be confirmed. Do not repeat it; reconcile candidate ${canvasId}.`)
+  }
+}
 
 export class PageLimitError extends Error {
   constructor() {
@@ -95,6 +105,7 @@ class Store {
    *  unguessable id and claimable there. */
   listCanvases(userId: string, workspaceIds: readonly string[] = []) {
     return [...this.canvases.values()]
+      .filter((canvas) => companyPolicy.allowsListing(userId, canvas, workspaceIds))
       .filter(
         (c) =>
           c.ownerId === userId ||
@@ -139,13 +150,19 @@ class Store {
     }
   }
 
-  createCanvas(name: string, ownerId?: string, workspaceId?: string): Canvas {
+  async createCanvas(name: string, ownerId?: string, workspaceId?: string): Promise<Canvas> {
+    companyPolicy.assertCreation(ownerId, workspaceId)
     const now = Date.now()
     const canvas: Canvas = { id: nanoid(10), name, ownerId, createdAt: now, updatedAt: now, frames: [] }
     if (workspaceId) canvas.workspaceId = workspaceId
-    this.canvases.set(canvas.id, canvas)
     canvas.pages = canvasPages(canvas)
-    persist.saveCanvas(canvas)
+    try {
+      await persist.insertCanvas(canvas)
+    } catch {
+      // A connection can fail after a commit. Never claim no effect or repeat it.
+      throw new CanvasCreationUncertainError(canvas.id)
+    }
+    this.canvases.set(canvas.id, canvas)
     return canvas
   }
 
@@ -161,6 +178,7 @@ class Store {
     by: string,
     options: { name?: string; dropDemo?: boolean; workspaceId?: string } = {},
   ): Promise<Canvas | undefined> {
+    companyPolicy.assertCreation(ownerId, options.workspaceId)
     const source = this.canvases.get(id)
     if (!source) return undefined
     const now = Date.now()
@@ -206,9 +224,18 @@ class Store {
       ...(source.tokenThemes?.length ? { tokenThemes: [...source.tokenThemes] } : {}),
       ...(references?.length ? { references } : {}),
     }
-    await persist.saveCanvasCopy(canvas)
+    const resources = await prepareCanvasResourceCopy(id, canvas, ownerId)
+    try {
+      await persist.saveCanvasCopy(canvas, resources)
+    } catch (error) {
+      if (error instanceof PrivateResourceError || error instanceof CompanyPolicyError) throw error
+      // The commit may have succeeded even if its acknowledgement was lost.
+      // Keep prepared bytes for reconciliation; never delete or auto-repeat.
+      throw new CanvasCreationUncertainError(canvas.id)
+    }
     this.canvases.set(canvas.id, canvas)
     for (const frame of frames) this.frameIndex.set(frame.id, canvas.id)
+    publishCanvasResourceCopy(resources)
     return canvas
   }
 
@@ -392,12 +419,12 @@ class Store {
   }
 
   /** Remove a canvas and its frames from memory + database. */
-  deleteCanvas(id: string): Canvas | undefined {
+  async deleteCanvas(id: string): Promise<Canvas | undefined> {
     const c = this.canvases.get(id)
     if (!c) return undefined
     for (const f of c.frames) this.frameIndex.delete(f.id)
     this.canvases.delete(id)
-    persist.deleteCanvas(id)
+    await persist.deleteCanvas(id)
     return c
   }
 
@@ -405,6 +432,7 @@ class Store {
   claimCanvas(id: string, userId: string): Canvas | undefined {
     const c = this.canvases.get(id)
     if (!c || c.ownerId) return undefined
+    companyPolicy.assertCreation(userId, c.workspaceId)
     c.ownerId = userId
     persist.saveCanvas(c)
     return c
@@ -416,6 +444,7 @@ class Store {
   setLinkAccess(id: string, mode: LinkAccess): Canvas | undefined {
     const c = this.canvases.get(id)
     if (!c) return undefined
+    if (mode !== 'none') companyPolicy.assertPublicFeature(c.workspaceId)
     if (mode === 'none') delete c.linkAccess
     else c.linkAccess = mode
     persist.saveCanvas(c)
@@ -430,6 +459,7 @@ class Store {
   setWorkspace(id: string, workspaceId: string | undefined): Canvas | undefined {
     const c = this.canvases.get(id)
     if (!c) return undefined
+    companyPolicy.assertMove(c, workspaceId)
     if (workspaceId) c.workspaceId = workspaceId
     else delete c.workspaceId
     persist.saveCanvas(c)
@@ -444,6 +474,7 @@ class Store {
 
   /** A workspace is going away: every canvas in it becomes personal again. */
   detachWorkspace(workspaceId: string): void {
+    companyPolicy.assertPublicFeature(workspaceId)
     for (const c of this.canvases.values()) {
       if (c.workspaceId === workspaceId) {
         delete c.workspaceId
@@ -460,6 +491,7 @@ class Store {
   publishCanvas(id: string, listing: { description: string; category: CommunityCategory }): Canvas | undefined {
     const c = this.canvases.get(id)
     if (!c) return undefined
+    companyPolicy.assertPublicFeature(c.workspaceId)
     c.publishedAt ??= Date.now()
     c.category = listing.category
     if (listing.description) c.description = listing.description
@@ -483,6 +515,7 @@ class Store {
    *  exposes previews and copies, never the canvas itself. */
   listPublished(): Canvas[] {
     return [...this.canvases.values()]
+      .filter((canvas) => !companyPolicy.isPrivate(canvas.workspaceId))
       .filter((c) => c.publishedAt !== undefined)
       .sort((a, b) => b.publishedAt! - a.publishedAt!)
   }
@@ -499,6 +532,7 @@ class Store {
   addMember(canvasId: string, userId: string, addedBy: string): Canvas | undefined {
     const c = this.canvases.get(canvasId)
     if (!c || c.ownerId === userId) return c
+    companyPolicy.assertInvite(c, userId)
     if (!(c.memberIds ??= []).includes(userId)) {
       c.memberIds.push(userId)
       persist.saveMember(canvasId, userId, addedBy, Date.now())
@@ -613,6 +647,12 @@ class Store {
   ): DesignToken[] | undefined {
     const c = this.canvases.get(canvasId)
     if (!c) return undefined
+    /* Direct domain callers must also preflight every base/theme carrier before
+       mutating tokens or enqueueing any persistence. Actions retain their normal
+       per-item batch errors before reaching this common owner. */
+    for (const input of inputs)
+      for (const value of [input.value, ...Object.values(input.themes ?? {})])
+        validateAssetReferences(value, canvasId, 'value')
     const tokens = (c.tokens ??= [])
     const now = Date.now()
     const written: DesignToken[] = []
@@ -726,6 +766,8 @@ class Store {
   addReference(canvasId: string, frame: Frame, by: string): MemoryReference | undefined {
     const c = this.canvases.get(canvasId)
     if (!c) return undefined
+    if (frame.canvasId !== canvasId || this.getFrame(frame.id) !== frame) return undefined
+    validateAssetReferences(frame.html, canvasId)
     const ref: MemoryReference = {
       id: nanoid(10),
       frameId: frame.id,
@@ -777,6 +819,7 @@ class Store {
   ): Frame | undefined {
     const c = this.canvases.get(canvasId)
     if (!c) return undefined
+    validateAssetReferences(input.html ?? '', canvasId)
     const pageId = input.pageId ?? canvasPages(c)[0]!.id
     if (!canvasPages(c).some((page) => page.id === pageId)) return undefined
     const frames = pageFrames(c, pageId)
@@ -830,6 +873,7 @@ class Store {
   ): Frame | undefined {
     const frame = this.getFrame(frameId)
     if (!frame) return undefined
+    if (patch.html !== undefined) validateAssetReferences(patch.html, frame.canvasId)
     if (
       patch.pageId !== undefined &&
       !canvasPages(this.canvases.get(frame.canvasId)!).some((p) => p.id === patch.pageId)
@@ -867,7 +911,7 @@ class Store {
     const [frame] = c.frames.splice(idx, 1)
     c.updatedAt = Date.now()
     this.frameIndex.delete(frameId)
-    persist.deleteFrame(frameId)
+    persist.deleteFrame(frameId, canvasId)
     persist.saveCanvas(c)
     return frame
   }

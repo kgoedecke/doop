@@ -117,7 +117,10 @@ export function woff(spec: FaceSpec): Buffer {
     bodies.push(padded)
     offset += padded.length
   })
-  return Buffer.concat([header, ...bodies])
+  const file = Buffer.concat([header, ...bodies])
+  file.writeUInt32BE(file.length, 8)
+  file.writeUInt32BE(12 + tables.length * 16 + tables.reduce((total, [, data]) => total + pad4(data).length, 0), 16)
+  return file
 }
 
 const WOFF2_INDEX: Record<string, number> = { name: 5, 'OS/2': 6, fvar: 47 }
@@ -145,7 +148,15 @@ export function woff2(spec: FaceSpec & { padName?: number; declare?: number }): 
   header.writeUInt32BE(0x00010000, 4)
   header.writeUInt16BE(tables.length, 12)
   header.writeUInt32BE(stream.length, 20)
-  return Buffer.concat([header, directory, stream])
+  const file = Buffer.concat([header, directory, stream])
+  file.writeUInt32BE(file.length, 8)
+  file.writeUInt32BE(
+    12 +
+      tables.length * 16 +
+      tables.reduce((total, [, data]) => total + Math.ceil((spec.declare ?? data.length) / 4) * 4, 0),
+    16,
+  )
+  return file
 }
 
 /** A WOFF whose name table claims `origLength` bytes once inflated. */
@@ -175,5 +186,11 @@ export function woffRepeating(spec: FaceSpec, times: number): Buffer {
   for (const entry of entries) entry.writeUInt32BE(entry.readUInt32BE(4) + grown, 4)
   const header = Buffer.from(file.subarray(0, 44))
   header.writeUInt16BE(entries.length, 12)
-  return Buffer.concat([header, ...entries, file.subarray(44 + count * 20)])
+  const repeated = Buffer.concat([header, ...entries, file.subarray(44 + count * 20)])
+  repeated.writeUInt32BE(repeated.length, 8)
+  repeated.writeUInt32BE(
+    12 + entries.length * 16 + entries.reduce((sum, entry) => sum + Math.ceil(entry.readUInt32BE(12) / 4) * 4, 0),
+    16,
+  )
+  return repeated
 }

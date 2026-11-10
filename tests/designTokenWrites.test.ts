@@ -2,6 +2,10 @@ import { describe, expect, it, vi } from 'vitest'
 import type { Actor } from '../shared/types'
 import { TOKEN_BLOCK_ATTR } from '../shared/designTokens'
 
+// This token/HTML rig supplies an active actor, with real account/copy policy
+// exercised separately by the native private-resource server tests.
+vi.mock('../server/auth.ts', () => ({ isBanned: async () => false }))
+
 /* Frame writes mirror into Postgres and broadcast; only the saved HTML and
    what the room is sent matter here. */
 vi.mock('../server/db/persist.ts', () => ({
@@ -11,6 +15,7 @@ vi.mock('../server/db/persist.ts', () => ({
   saveActivity: () => {},
   saveDecision: () => {},
   saveProposal: () => {},
+  insertCanvas: async () => {},
   saveCanvas: () => {},
   saveFrame: () => {},
   saveToken: () => {},
@@ -18,7 +23,11 @@ vi.mock('../server/db/persist.ts', () => ({
   saveCanvasCopy: async () => {},
   saveFrameVersion: () => {},
 }))
-vi.mock('../server/fonts.ts', () => ({ fontsForCanvas: () => [] }))
+vi.mock('../server/fonts.ts', () => ({
+  fontsForCanvas: () => [],
+  canvasFontRows: () => [],
+  publishCopiedFonts: () => {},
+}))
 
 const actions = await import('../server/actions.ts')
 const { store } = await import('../server/store.ts')
@@ -42,8 +51,8 @@ actions.wire(
   () => {},
 )
 
-function setup() {
-  const canvasId = store.createCanvas('tokens', 'kevin').id
+async function setup() {
+  const canvasId = (await store.createCanvas('tokens', 'kevin')).id
   const results = actions.createTokens(
     canvasId,
     [
@@ -58,8 +67,8 @@ function setup() {
 }
 
 describe('design tokens on frame writes', () => {
-  it('writes the block on create and keeps it current on update', () => {
-    const canvasId = setup()
+  it('writes the block on create and keeps it current on update', async () => {
+    const canvasId = await setup()
     const frame = actions.createFrame(
       canvasId,
       { name: 'Hero', html: '<html><head></head><body style="color:var(--color-primary)"></body></html>' },
@@ -75,8 +84,8 @@ describe('design tokens on frame writes', () => {
     expect(store.getFrame(frame.id)!.html).not.toContain('--color-ink')
   })
 
-  it('restyles the frames naming a changed token, keeping sign-off', () => {
-    const canvasId = setup()
+  it('restyles the frames naming a changed token, keeping sign-off', async () => {
+    const canvasId = await setup()
     /* human writes: an agent's create plays back as a reveal, which defers the broadcast */
     const uses = actions.createFrame(
       canvasId,
@@ -109,8 +118,8 @@ describe('design tokens on frame writes', () => {
     expect(sent.some((m) => m.type === 'tokens')).toBe(true)
   })
 
-  it('renames a theme with its values, and keeps “default” reserved', () => {
-    const canvasId = setup()
+  it('renames a theme with its values, and keeps “default” reserved', async () => {
+    const canvasId = await setup()
     actions.setTokens(canvasId, [{ name: '--color-ink', themes: { dark: '#eee' } }], human)
     const frame = actions.createFrame(
       canvasId,
@@ -124,8 +133,8 @@ describe('design tokens on frame writes', () => {
     expect(() => actions.setTokenThemes(canvasId, ['night'], human, [{ from: 'nope', to: 'x' }])).toThrow(/no theme/)
   })
 
-  it('moves a theme rename into frame attributes, and writes nothing on a bad request', () => {
-    const canvasId = setup()
+  it('moves a theme rename into frame attributes, and writes nothing on a bad request', async () => {
+    const canvasId = await setup()
     actions.setTokens(canvasId, [{ name: '--color-ink', themes: { dark: '#eee' } }], human)
     const frame = actions.createFrame(
       canvasId,
@@ -144,8 +153,8 @@ describe('design tokens on frame writes', () => {
     expect(html).toContain('[data-doop-theme="night"]{--color-ink:#eee}')
   })
 
-  it('declares no theme for an edit it refuses', () => {
-    const canvasId = setup()
+  it('declares no theme for an edit it refuses', async () => {
+    const canvasId = await setup()
     const [refused] = actions.setTokens(
       canvasId,
       [{ name: '--color-ink', newName: '--spacing-4', themes: { dim: '#000' } }],
@@ -155,8 +164,8 @@ describe('design tokens on frame writes', () => {
     expect(store.getTokenThemes(canvasId)).toEqual([])
   })
 
-  it('refuses alias loops that only close under a theme, and deletes an aliased-by-theme token', () => {
-    const canvasId = setup()
+  it('refuses alias loops that only close under a theme, and deletes an aliased-by-theme token', async () => {
+    const canvasId = await setup()
     actions.createTokens(canvasId, [{ name: '--a', type: 'color', value: '#000' }], human)
     actions.createTokens(canvasId, [{ name: '--b', type: 'color', value: '#fff', themes: { dark: 'var(--a)' } }], human)
     const [loop] = actions.setTokens(canvasId, [{ name: '--a', themes: { dark: 'var(--b)' } }], human)!
@@ -165,8 +174,8 @@ describe('design tokens on frame writes', () => {
     expect(deletion).toMatchObject({ result: 'error', message: expect.stringContaining('--b aliases') })
   })
 
-  it('restyles frames that already name a token when it is created', () => {
-    const canvasId = setup()
+  it('restyles frames that already name a token when it is created', async () => {
+    const canvasId = await setup()
     const frame = actions.createFrame(
       canvasId,
       { name: 'Early', html: '<html><head></head><body style="gap:var(--spacing-8)"></body></html>' },
@@ -177,8 +186,8 @@ describe('design tokens on frame writes', () => {
     expect(store.getFrame(frame.id)!.html).toContain(':root{--spacing-8:32px}')
   })
 
-  it('applies a rename to a streaming frame when its stream closes', () => {
-    const canvasId = setup()
+  it('applies a rename to a streaming frame when its stream closes', async () => {
+    const canvasId = await setup()
     const frame = actions.createFrame(canvasId, { name: 'Stream' }, agent)!
     actions.appendFrameHtml(frame.id, '<html><head></head><body style="gap:var(--spacing-4)">', agent, { start: true })
     actions.setTokens(canvasId, [{ name: '--spacing-4', newName: '--space-4' }], human)
@@ -190,8 +199,8 @@ describe('design tokens on frame writes', () => {
     expect(html).toContain(':root{--space-4:16px}')
   })
 
-  it('follows a rename into references inside other tokens’ expressions', () => {
-    const canvasId = setup()
+  it('follows a rename into references inside other tokens’ expressions', async () => {
+    const canvasId = await setup()
     actions.createTokens(
       canvasId,
       [
@@ -210,8 +219,8 @@ describe('design tokens on frame writes', () => {
     expect(tint.themes).toEqual({ dark: 'var(--color-text)' })
   })
 
-  it('follows a rename into frames and aliases', () => {
-    const canvasId = setup()
+  it('follows a rename into frames and aliases', async () => {
+    const canvasId = await setup()
     const frame = actions.createFrame(
       canvasId,
       { name: 'Hero', html: '<html><head></head><body style="color:var(--color-ink, #000)"></body></html>' },
@@ -226,8 +235,8 @@ describe('design tokens on frame writes', () => {
     expect(store.getTokens(canvasId).some((t) => t.name === '--color-ink')).toBe(false)
   })
 
-  it('refuses bad input in-band and lands the rest of a batch', () => {
-    const canvasId = setup()
+  it('refuses bad input in-band and lands the rest of a batch', async () => {
+    const canvasId = await setup()
     const results = actions.createTokens(
       canvasId,
       [
@@ -251,8 +260,8 @@ describe('design tokens on frame writes', () => {
     })
   })
 
-  it('drops a deleted token from the frames that named it', () => {
-    const canvasId = setup()
+  it('drops a deleted token from the frames that named it', async () => {
+    const canvasId = await setup()
     const frame = actions.createFrame(
       canvasId,
       { name: 'Hero', html: '<html><head></head><body style="gap:var(--spacing-4)"></body></html>' },
@@ -264,8 +273,24 @@ describe('design tokens on frame writes', () => {
     expect(store.getFrame(frame.id)!.html).toContain('gap:var(--spacing-4)')
   })
 
+  it('preflights direct store token batches before any item changes canvas state', async () => {
+    const canvas = await store.createCanvas('Direct token admission', 'kevin')
+    const before = structuredClone(canvas)
+    expect(() =>
+      store.setTokens(
+        canvas.id,
+        [
+          { name: '--allowed', type: 'color', value: '#123' },
+          { name: '--missing', type: 'color', value: '#fff', themes: { dark: 'url(/a/missing_direct_file.png)' } },
+        ],
+        'kevin',
+      ),
+    ).toThrow(/private file/)
+    expect(store.getCanvas(canvas.id)).toEqual(before)
+  })
+
   it('copies tokens with a duplicated canvas', async () => {
-    const canvasId = setup()
+    const canvasId = await setup()
     const copy = (await store.duplicateCanvas(canvasId, 'kevin', 'kevin'))!
     expect(copy.tokens?.map((t) => t.name)).toEqual(['--color-ink', '--color-primary', '--spacing-4'])
   })

@@ -13,6 +13,7 @@ import { Badge } from './ui/badge'
 import { Note } from './ui/note'
 import { Checkbox } from './ui/checkbox'
 import { CardDescription, CardHeader, CardRow, CardTitle, SettingsCard } from './ui/card'
+import { PrivateCanvasChoice } from './PrivateCanvasChoice'
 
 /* settings fields are a fixed column on desktop and full width on a phone */
 
@@ -42,6 +43,7 @@ export function AccountSettings() {
      every face on the page (the account menu included) turns at once */
   const photoInput = useRef<HTMLInputElement>(null)
   const [savingPhoto, setSavingPhoto] = useState(false)
+  const [photoCanvasId, setPhotoCanvasId] = useState('')
   const [photoNote, setPhotoNote] = useState<Notice | null>(null)
   const [photoError, setPhotoError] = useState<Notice | null>(null)
 
@@ -75,10 +77,11 @@ export function AccountSettings() {
   async function uploadPhoto(file: File) {
     setPhotoNote(null)
     setPhotoError(null)
+    if (!photoCanvasId) return setPhotoError({ text: 'Choose a canvas to store this private profile photo.' })
     if (file.size > MAX_AVATAR_BYTES) return setPhotoError({ key: 'account.photoTooLarge' })
     setSavingPhoto(true)
     try {
-      await api.uploadAvatar(file)
+      await api.uploadAvatar(file, photoCanvasId)
       await refetchSession()
       posthog.capture('account_photo_changed')
       setPhotoNote({ key: 'account.photoSaved' })
@@ -173,7 +176,7 @@ export function AccountSettings() {
           label={t('account.photoRow')}
           action={
             <>
-              <Button size="sm" disabled={savingPhoto} onClick={() => photoInput.current?.click()}>
+              <Button size="sm" disabled={savingPhoto || !photoCanvasId} onClick={() => photoInput.current?.click()}>
                 {savingPhoto
                   ? t('account.uploadingPhoto')
                   : photo
@@ -189,6 +192,8 @@ export function AccountSettings() {
           }
         >
           <Avatar name={user?.name ?? ''} image={photo} color={colorFor(user?.id ?? '')} size={48} />
+          <PrivateCanvasChoice value={photoCanvasId} onChange={setPhotoCanvasId} disabled={savingPhoto} />
+          <Note>People without access to the selected canvas see your initials instead of this photo.</Note>
           <Input
             ref={photoInput}
             type="file"

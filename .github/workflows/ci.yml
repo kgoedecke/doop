@@ -20,6 +20,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.10
       - run: bun install --frozen-lockfile
       # Via env, never inlined into the script: a PR title is attacker-controlled text.
       - name: Lint PR title
@@ -35,6 +37,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.10
       - run: bun install --frozen-lockfile
       - run: bun run typecheck
 
@@ -43,6 +47,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.10
       - run: bun install --frozen-lockfile
       - run: bun run lint
       - run: bun run format:check
@@ -53,6 +59,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.10
       - run: bun install --frozen-lockfile
       # The Docker build stage uses Bun even for commands named `node`.
       - run: bun run --bun build
@@ -61,6 +69,23 @@ jobs:
   # the 2-vCPU runner; sharding across runners is what brings the step down.
   test:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18.6-alpine@sha256:123b17998ccaf47e53b502e8c6a1e79afd8f579c6f3eec83c563da026f957395
+        env:
+          POSTGRES_USER: doop_test
+          POSTGRES_PASSWORD: doop_test_only
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U doop_test -d postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      # Disposable CI authority; each native test owns and drops a fresh UUID database.
+      DOOP_TEST_DATABASE_URL: postgresql://doop_test:doop_test_only@127.0.0.1:5432/postgres
     strategy:
       fail-fast: false
       matrix:
@@ -68,7 +93,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.10
       - run: bun install --frozen-lockfile
+      # Required native storage tests use this same pinned non-root fixture locally and in CI.
+      - name: Prepare private S3 test image
+        run: docker pull dxflrs/garage:v2.5.0@sha256:677e5b758e4425a325b811c425c026bf35a4bf42f7ddbaa773de3f4fd779a5a5
       # `bun run test`, not `bun test`: the suite is vitest, and `bun test`
       # would run Bun's own runner against the same files
       - run: bun run test -- --shard=${{ matrix.shard }}/${{ strategy.job-total }}

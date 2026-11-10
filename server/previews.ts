@@ -1,120 +1,99 @@
-import { env } from './env.ts'
 import type { Frame } from '../shared/types.ts'
 import * as thumbs from './thumbs.ts'
+import {
+  assertRenderRead,
+  assertPrivateRenderBytes,
+  frameContentKey,
+  type PrivateRenderScope,
+} from './privateResources.ts'
 
-/**
- * Everything behind GET /i/<frameId>.<ext> except HTTP: the in-process
- * image cache, the render rate limit, and the dispatch between the three
- * ways an image can be produced (persisted thumbnail, preview render,
- * full-size render). The route stays thin — params, auth callback,
- * headers — and this module stays testable without a server.
- *
- * Freshness model, one layer per lifetime:
- *  - imgCache: per-process, ~minutes. Holds the render *promise*, not the
- *    buffer, so concurrent requests for the same key share one render.
- *    May serve a just-revalidated thumb's previous bytes for up to
- *    IMG_CACHE_MS — accepted, previews only claim minutes-freshness.
- *  - thumbs (previews only): persisted across deploys, stale-while-
- *    revalidate. See thumbs.ts.
- *  - a full-size render is never persisted; it exists for og:image embeds
- *    and downloads, and is only ever cached here.
- */
-
-const imgCache = new Map<string, { buf: Promise<Buffer>; updatedAt: number; at: number }>()
+/** Private derived bytes. Every waiter reauthorizes independently, including cache hits. */
+const imgCache = new Map<string, { buf: Promise<Buffer>; at: number; bytes: number }>()
 const IMG_CACHE_MS = 5 * 60_000
 const IMG_CACHE_MAX = 200
-
-/* Renders boot Chromium pages; cached serves and persisted-thumb serves are
-   cheap and never metered. The budget is per IP because its purpose is
-   anonymous hotlink abuse — authenticated users bypass it (verified by the
-   caller, and only checked when the budget is actually exhausted). */
-const renderHits = new Map<string, number[]>()
-const RENDERS_PER_MIN = env.PREVIEW_RENDERS_PER_MIN
+const IMG_CACHE_BYTES = 64 * 1024 * 1024
 
 export interface ImageRequest {
   ext: 'png' | 'jpg'
   scale: 1 | 2
   quality: number
-  /** dashboard-card variant: small, clipped, jpeg, persisted. Only
-   *  meaningful for jpg — a png?preview would serve jpeg bytes under an
-   *  image/png content-type, so the flag is ignored there. */
   preview: boolean
-  ip: string
-  /** consulted only when the render budget is exhausted */
-  isAuthenticated: () => Promise<boolean>
+  scope: PrivateRenderScope
 }
 
-export type ImageResult = { status: 'ok'; buf: Buffer } | { status: 'rate-limited' }
+export type ImageResult = { status: 'ok'; buf: Buffer }
 
-/** May reject when the render itself fails — the caller owns the 500. */
-export async function getImage(frame: Frame, req: ImageRequest): Promise<ImageResult> {
+export async function getImage(input: Frame, req: ImageRequest): Promise<ImageResult> {
+  const frame = { ...input }
+  await assertRenderRead(req.scope, frame)
+  if (req.scope.kind !== 'frame') throw new Error('a preview requires a stored frame')
   const preview = req.preview && req.ext === 'jpg'
-  const key = imageKey(frame.id, req.ext, req.scale, req.ext === 'jpg' ? req.quality : '', preview)
+  const key = imageKey(frame, req.ext, req.scale, req.ext === 'jpg' ? req.quality : '', preview)
   const cached = imgCache.get(key)
-  let pending =
-    cached && cached.updatedAt === frame.updatedAt && Date.now() - cached.at < IMG_CACHE_MS ? cached.buf : null
-
-  /* previews first try the persisted thumbnail: survives redeploys, serves
-     instantly even when stale (thumbs revalidates in the background), and
-     costs no Chromium boot — so it isn't metered either */
-  if (!pending && preview) {
-    const stored = await thumbs.getStored(frame)
-    if (stored) {
-      pending = Promise.resolve(stored)
-      remember(key, pending, frame.updatedAt)
-    }
-  }
-
+  if (cached && Date.now() - cached.at >= IMG_CACHE_MS) imgCache.delete(key)
+  let pending = imgCache.get(key)?.buf
   if (!pending) {
-    if (!(await consumeRenderBudget(req.ip, req.isAuthenticated))) return { status: 'rate-limited' }
-    pending = preview
-      ? /* renders AND persists — the next cold start serves from storage */
-        thumbs.create(frame)
-      : loadScreenshot().then(({ renderFrame }) =>
-          renderFrame(frame, req.scale, { type: req.ext === 'jpg' ? 'jpeg' : 'png', quality: req.quality }),
-        )
-    remember(key, pending, frame.updatedAt)
+    pending = (async () => {
+      const stored = preview ? await thumbs.getStored(frame, req.scope) : null
+      let buf: Buffer
+      if (stored) buf = stored
+      else if (preview) buf = await thumbs.create(frame, req.scope)
+      else {
+        const { renderFrame } = await loadScreenshot()
+        buf = await renderFrame(frame, req.scope, req.scale, {
+          type: req.ext === 'jpg' ? 'jpeg' : 'png',
+          quality: req.quality,
+        })
+      }
+      assertPrivateRenderBytes(buf)
+      await assertRenderRead(req.scope, frame)
+      return buf
+    })()
+    remember(key, pending)
   }
-
-  return { status: 'ok', buf: await pending }
+  const buf = await pending
+  await assertRenderRead(req.scope, frame)
+  return { status: 'ok', buf }
 }
 
-function imageKey(id: string, ext: 'png' | 'jpg', scale: 1 | 2, quality: number | '', preview: boolean): string {
-  return `${id}:${ext}:${scale}:${quality}:${preview ? 'p' : ''}`
+function imageKey(frame: Frame, ext: 'png' | 'jpg', scale: 1 | 2, quality: number | '', preview: boolean): string {
+  return `${frameContentKey(frame)}:${ext}:${scale}:${quality}:${preview ? 'p' : ''}`
 }
 
-/** Seeds the cache with a render another path already paid for. The MCP
- *  screenshot tool renders through `renderFrame` directly, and the ChatGPT
- *  preview card loads `/i/<id>.png` right after it from a cookie-less sandbox
- *  iframe — anonymous, so metered. Priming turns that load into a free
- *  cached serve instead of a second render against the per-IP budget. */
-export function primeImage(frame: Frame, scale: 1 | 2, png: Buffer): void {
-  remember(imageKey(frame.id, 'png', scale, '', false), Promise.resolve(png), frame.updatedAt)
+/** A private MCP render may prime the same cache; URL readers still need their own session. */
+export async function primeImage(input: Frame, scope: PrivateRenderScope, scale: 1 | 2, png: Buffer): Promise<void> {
+  const frame = { ...input }
+  assertPrivateRenderBytes(png)
+  await assertRenderRead(scope, frame)
+  if (scope.kind !== 'frame') throw new Error('a preview requires a stored frame')
+  remember(imageKey(frame, 'png', scale, '', false), Promise.resolve(png))
 }
 
-function remember(key: string, pending: Promise<Buffer>, updatedAt: number) {
-  imgCache.set(key, { buf: pending, updatedAt, at: Date.now() })
-  /* a failed render must not be served for IMG_CACHE_MS — drop it so the
-     next request retries */
-  pending.catch(() => {
-    if (imgCache.get(key)?.buf === pending) imgCache.delete(key)
-  })
-  if (imgCache.size > IMG_CACHE_MAX) {
-    const oldest = [...imgCache.entries()].sort((a, b) => a[1].at - b[1].at)[0]
-    if (oldest) imgCache.delete(oldest[0])
+function trimCache() {
+  let bytes = [...imgCache.values()].reduce((sum, entry) => sum + entry.bytes, 0)
+  for (const [key, entry] of imgCache) {
+    if (imgCache.size <= IMG_CACHE_MAX && bytes <= IMG_CACHE_BYTES) break
+    imgCache.delete(key)
+    bytes -= entry.bytes
   }
 }
 
-async function consumeRenderBudget(ip: string, isAuthenticated: () => Promise<boolean>): Promise<boolean> {
-  const now = Date.now()
-  const hits = (renderHits.get(ip) ?? []).filter((t) => now - t < 60_000)
-  if (hits.length >= RENDERS_PER_MIN) return isAuthenticated()
-  hits.push(now)
-  renderHits.set(ip, hits)
-  return true
+function remember(key: string, pending: Promise<Buffer>) {
+  const entry = { buf: pending, at: Date.now(), bytes: 0 }
+  imgCache.set(key, entry)
+  trimCache()
+  pending.then(
+    (buf) => {
+      if (imgCache.get(key) === entry) {
+        entry.bytes = buf.length
+        trimCache()
+      }
+    },
+    () => {
+      if (imgCache.get(key) === entry) imgCache.delete(key)
+    },
+  )
 }
 
-/* lazy so dev never pays for puppeteer-core until the first render;
-   single-flight because concurrent import() of one module can serialize */
 let screenshot: Promise<typeof import('./screenshot.ts')> | undefined
 const loadScreenshot = () => (screenshot ??= import('./screenshot.ts'))

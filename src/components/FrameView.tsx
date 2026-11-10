@@ -17,6 +17,8 @@ import { sendWs } from '../lib/ws'
 import { throttle } from '../lib/throttle'
 import { getIdentity } from '../lib/identity'
 import { FRAME_BOOTSTRAP } from '../lib/frameRuntime'
+import { PrivateMaterializationContext, usePrivateMediaEpoch } from '../lib/privateMaterialization'
+import { PrivateMaterializationError } from '../../shared/privateMedia'
 import { FRAME_DOCUMENTS_TAKE_ZOOM_AS_DENSITY, counterZoom } from '../lib/layoutZoom'
 import { dropEntry, recordCreate, recordUpdate, recordUpdates, trackSave, type HistoryEntry } from '../lib/history'
 import { snapFrame } from '../lib/snap'
@@ -610,6 +612,11 @@ export const FrameView = memo(function FrameView({
   }
 
   const html = useThrottledValue(frame.html, 150)
+  const materialize = useContext(PrivateMaterializationContext)
+  const mediaEpoch = usePrivateMediaEpoch()
+  const [resourceReset, setResourceReset] = useState(0)
+  const [resourceRequest, setResourceRequest] = useState(0)
+  const resourceFailure = useRef<{ html: string; epoch: number } | null>(null)
   const remoteEditor = editors[0]
 
   /* The iframe loads a bootstrap once; HTML is posted in and DOM-morphed in
@@ -625,6 +632,14 @@ export const FrameView = memo(function FrameView({
      flipped or shifted it away from a viewport edge */
   const menuAt = useRef({ x: 0, y: 0 })
   const [runtimeReady, setRuntimeReady] = useState(false)
+  useLayoutEffect(() => {
+    localHtml.current = null
+    htmlRequest.current++
+    noteFrameDocument(frame.id, null)
+    // oxlint-disable-next-line react/set-state-in-effect -- reset the external iframe channel before a new actor/context can paint
+    setRuntimeDocument(null)
+    setRuntimeReady(false)
+  }, [mediaEpoch, resourceReset, frame.canvasId, frame.id])
   useEffect(() => {
     function onMsg(ev: MessageEvent) {
       if (ev.data?.type === 'doop:frame-ready' && ev.source === iframeRef.current?.contentWindow) {
@@ -640,23 +655,63 @@ export const FrameView = memo(function FrameView({
     if (!runtimeReady || !win) return
     registerFrameWindow(frame.id, win)
     return () => unregisterFrameWindow(frame.id, win)
-  }, [runtimeReady, frame.id])
+  }, [runtimeReady, frame.id, mediaEpoch, resourceReset])
   useEffect(() => {
     if (!runtimeReady || editing || suspendPost || html !== frame.html || html === localHtml.current) return
+    if (resourceFailure.current?.html === html && resourceFailure.current.epoch === mediaEpoch) return
     localHtml.current = null
     const request = ++htmlRequest.current
     noteFrameDocument(frame.id, null)
     let cancelled = false
-    void requestFrame(frame.id, 'doop:html', { html }).then((reply) => {
-      if (!reply || request !== htmlRequest.current) return
-      /* the runtime shows it whether or not this effect is still current */
+    const controller = new AbortController()
+    void (async () => {
+      const prepared = await materialize(
+        html,
+        { kind: 'frame', id: frame.id, canvasId: frame.canvasId },
+        controller.signal,
+      )
+      if (cancelled || request !== htmlRequest.current) return
+      iframeRef.current?.toggleAttribute('data-doop-private-preview', prepared.privateMedia)
+      const reply = await requestFrame(frame.id, 'doop:html', {
+        html: prepared.html,
+        replacements: prepared.replacements,
+        privateMedia: prepared.privateMedia,
+      })
+      if (cancelled || request !== htmlRequest.current) return
+      if (!reply || reply.ok === false) throw new PrivateMaterializationError('invalid')
+      resourceFailure.current = null
       noteFrameDocument(frame.id, html)
-      if (!cancelled) setRuntimeDocument({ html, request })
+      setRuntimeDocument({ html, request })
+    })().catch((error: unknown) => {
+      if (cancelled || controller.signal.aborted || request !== htmlRequest.current) return
+      resourceFailure.current = { html, epoch: mediaEpoch }
+      noteFrameDocument(frame.id, null)
+      setRuntimeDocument(null)
+      // A fresh document also destroys scripts/timers holding the previous bytes.
+      setResourceReset((value) => value + 1)
+      useStore
+        .getState()
+        .pushNotice(
+          error instanceof PrivateMaterializationError ? error.message : 'Private media could not be prepared.',
+        )
     })
     return () => {
       cancelled = true
+      controller.abort()
     }
-  }, [runtimeReady, html, frame.html, frame.id, editing, suspendPost])
+  }, [
+    runtimeReady,
+    html,
+    frame.html,
+    frame.id,
+    frame.canvasId,
+    editing,
+    suspendPost,
+    mediaEpoch,
+    resourceReset,
+    resourceRequest,
+    materialize,
+  ])
 
   /* ---- element comments ---- */
   const frameComments = useStore((s) => s.comments).filter((c) => c.frameId === frame.id)
@@ -954,21 +1009,24 @@ export const FrameView = memo(function FrameView({
     selected &&
     (picked.includes(hover.selector) || probe?.selector === hover.selector || hover.selector === shellSel)
   const [pickRects, setPickRects] = useState<Record<string, ProbeHit['rect'] | null>>({})
+  const documentReady = runtimeReady && runtimeDocument?.html === frame.html && html === frame.html
   useEffect(() => {
-    if (!runtimeReady) return
+    if (!documentReady || runtimeDocument?.request !== htmlRequest.current) return
     for (const selector of JSON.parse(pickedKey) as string[]) {
       iframeRef.current?.contentWindow?.postMessage(
         { type: 'doop:locate', reqId: `${PICK_REQ}${selector}`, selector },
         '*',
       )
     }
-  }, [runtimeReady, html, pickedKey])
+  }, [documentReady, runtimeDocument, pickedKey])
   const selectReq = useRef(0)
   const selectSel = useRef<string | null>(null)
+  const selectedDocument = useRef<typeof runtimeDocument>(null)
   useEffect(() => {
     // A new drawing can be selected before throttled HTML reaches the iframe.
     // Wait for that document before asking it to locate the new layer.
-    if (!runtimeReady || !wantedSel || wantedSel === probeSel || html !== frame.html) return
+    if (!documentReady || runtimeDocument?.request !== htmlRequest.current || !wantedSel) return
+    if (wantedSel === probeSel && selectedDocument.current === runtimeDocument) return
     /* a surface click clears the probe, and the effect above has just cleared
        the store to match — but this render still carries the old selector.
        Re-selecting it here would resurrect the previous element and (via the
@@ -980,11 +1038,12 @@ export const FrameView = memo(function FrameView({
     selectReq.current += 1
     if (live?.frameId !== frame.id || live.selector !== wantedSel) return
     selectSel.current = wantedSel
+    selectedDocument.current = runtimeDocument
     iframeRef.current?.contentWindow?.postMessage(
       { type: 'doop:select', reqId: selectReq.current, selector: wantedSel },
       '*',
     )
-  }, [runtimeReady, wantedSel, probeSel, frame.id, html, frame.html])
+  }, [documentReady, runtimeDocument, wantedSel, probeSel, frame.id])
 
   useEffect(() => {
     function onMsg(ev: MessageEvent) {
@@ -1213,9 +1272,12 @@ export const FrameView = memo(function FrameView({
       if (ev.data?.type === 'doop:edited' && typeof ev.data.html === 'string') {
         // The runtime already has this document. Echoing it through the HTML
         // throttle can overwrite a newer style edit still waiting to save.
-        localHtml.current = ev.data.html
-        setRuntimeDocument({ html: ev.data.html, request: ++htmlRequest.current })
-        noteFrameDocument(frame.id, ev.data.html)
+        const resourceChange = ev.data.materialize === true
+        if (resourceChange) setResourceRequest((value) => value + 1)
+        localHtml.current = resourceChange ? null : ev.data.html
+        const request = ++htmlRequest.current
+        setRuntimeDocument(resourceChange ? null : { html: ev.data.html, request })
+        noteFrameDocument(frame.id, resourceChange ? null : ev.data.html)
         /* a newly used library font brings its @font-face along, a hosted one
            its stylesheet link; the saved
            document then differs from the runtime's, so the post effect sends
@@ -1541,6 +1603,7 @@ export const FrameView = memo(function FrameView({
             onPointerLeave={leaveHover}
           >
             <iframe
+              key={`${mediaEpoch}:${resourceReset}:${frame.canvasId}:${frame.id}`}
               ref={iframeRef}
               className={cn('block border-none', isCanvasElement(frame.html) ? 'bg-transparent' : 'bg-white')}
               title={frame.name}

@@ -300,7 +300,7 @@ export async function discoverSitePages(rawUrl: string): Promise<DiscoveredSite>
     const isolated = await openIsolatedPage()
     const { page } = isolated
     try {
-      await guardPublicPageRequests(page)
+      isolated.ownRequests(await guardPublicPageRequests(page))
       await page.setViewport({ width: VIEWPORT_WIDTH, height: 900 })
       await page.setUserAgent(UA)
       await navigateWebsitePage(
@@ -315,8 +315,10 @@ export async function discoverSitePages(rawUrl: string): Promise<DiscoveredSite>
         links: Array.from(document.querySelectorAll<HTMLAnchorElement>('a[href]'), (a) => a.href),
       }))
       seed = { url: finalUrl, title: cleanTitle(snapshot.title), links: snapshot.links }
-    } finally {
       await isolated.close()
+    } catch (error) {
+      isolated.cancel()
+      throw error
     }
   }
 
@@ -511,7 +513,7 @@ export async function importPage(rawUrl: string, options: { includePreview?: boo
   const isolated = await openIsolatedPage()
   const { page } = isolated
   try {
-    await guardPublicPageRequests(page)
+    isolated.ownRequests(await guardPublicPageRequests(page))
     await page.setViewport({ width: VIEWPORT_WIDTH, height: 900 })
     await page.setUserAgent(UA)
     if (contextCapture) {
@@ -664,7 +666,7 @@ export async function importPage(rawUrl: string, options: { includePreview?: boo
         /* Preview the exact passive artifact that will land on the canvas. This
            avoids a second Context.dev screenshot request and keeps view_website
            visually aligned with import_webpage. */
-        await guardPublicPageRequests(previewPage)
+        previewIsolated.ownRequests(await guardPublicPageRequests(previewPage))
         await previewPage.setViewport({ width: VIEWPORT_WIDTH, height: 900 })
         await previewPage.setUserAgent(UA)
         await previewPage.setJavaScriptEnabled(false)
@@ -717,14 +719,15 @@ export async function importPage(rawUrl: string, options: { includePreview?: boo
           shotCropped: info.pageHeight > MAX_PREVIEW_HEIGHT,
           pageHeight: info.pageHeight,
         }
+        await previewIsolated.close()
       } catch (error) {
+        previewIsolated.cancel()
         if (error instanceof WebsiteCaptureUnavailableError) throw error
         throw new WebsiteCaptureUnavailableError('Doop could not render a local preview of the webpage')
-      } finally {
-        await previewIsolated.close()
       }
     }
 
+    await isolated.close()
     return {
       title: snap.title || contextCapture?.title || new URL(finalUrl).hostname,
       width: VIEWPORT_WIDTH,
@@ -733,9 +736,8 @@ export async function importPage(rawUrl: string, options: { includePreview?: boo
       ...(preview ? { preview } : {}),
     }
   } catch (error) {
+    isolated.cancel()
     if (error instanceof WebsiteCaptureUnavailableError) throw error
     throw new WebsiteCaptureUnavailableError('Doop could not finish rendering the webpage HTML')
-  } finally {
-    await isolated.close()
   }
 }

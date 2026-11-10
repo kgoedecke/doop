@@ -22,6 +22,14 @@ import { runnerKey } from '../shared/agentRunner.ts'
 import * as imageSearch from './imageSearch.ts'
 import * as imageGen from './imageGen.ts'
 import * as assets from './assets.ts'
+import {
+  requirePrivateCanvas,
+  requireResourceActor,
+  jobResourceReader,
+  frameReadScope,
+  referenceReadScope,
+  type PrivateRenderScope,
+} from './privateResources.ts'
 import * as backgrounds from './backgrounds.ts'
 import * as ingest from './ingest.ts'
 import { viewWebsite, referencedUrls } from './website.ts'
@@ -190,6 +198,8 @@ interface RunState {
   vision: boolean
   /** whose account pays for generated images: the run's payer, else the server key */
   payerId?: string
+  /** Authenticated requester frozen by the existing work queue; display Actor is not authority. */
+  actorId?: string
   /** images actually produced in this run — capped, since each one spends the payer's quota or money */
   imagesGenerated: number
   /** where a new frame goes unless the model says otherwise: the page (and,
@@ -602,6 +612,7 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
       rewriteDrafts: new Map(),
       vision: model.vision !== false,
       ...(model.userId ? { payerId: model.userId } : {}),
+      ...(payer ? { actorId: payer } : {}),
       imagesGenerated: 0,
       /* a run about a comment delivers on that comment's page */
       ...(comments[0] ? { placement: placementFor(comments[0], canvas) } : {}),
@@ -1507,11 +1518,12 @@ const MAX_SHOT_HEIGHT = 4000
 
 async function frameImageBlocks(
   f: Frame,
+  scope: PrivateRenderScope,
 ): Promise<NonNullable<Exclude<Anthropic.ToolResultBlockParam['content'], string>>> {
   const cropped = f.height > MAX_SHOT_HEIGHT
   const scale = Math.min(1, 7000 / f.width)
   const big = Math.max(f.width, Math.min(f.height, MAX_SHOT_HEIGHT)) * scale > 2000
-  const buf = await renderFrame(f, scale, {
+  const buf = await renderFrame(f, scope, scale, {
     maxHeight: MAX_SHOT_HEIGHT,
     ...(big ? { type: 'jpeg' as const, quality: 80 } : {}),
   })
@@ -1589,7 +1601,7 @@ export async function execTool(
       case 'inspect_frame': {
         const f = store.getFrame(input.frame_id)
         if (!f || f.canvasId !== canvasId) return fail('frame not found on this canvas')
-        const inspection = await inspectFrame(f)
+        const inspection = await inspectFrame(f, frameReadScope(jobResourceReader(runState.actorId), f))
         return ok(
           JSON.stringify({
             ...inspection,
@@ -1754,10 +1766,14 @@ export async function execTool(
         const quality = (imageGen.IMAGE_QUALITIES as readonly string[]).includes(String(raw.quality))
           ? (raw.quality as imageGen.ImageQuality)
           : undefined
+        if (!runState.actorId)
+          return fail('This image request has no authenticated canvas actor; submit it again from your account.')
+        await requireResourceActor(runState.actorId)
+        requirePrivateCanvas(canvasId, runState.actorId)
         const image = await imageGen.generateImage(runState.payerId, { prompt, aspect, quality })
         const asset = await assets.createAsset(image.buf, {
           canvasId,
-          ...(runState.payerId ? { ownerId: runState.payerId } : {}),
+          actorId: runState.actorId,
           uploadedBy: actor.name,
         })
         /* counted once an image actually exists: a refusal or a transient
@@ -1939,7 +1955,10 @@ export async function execTool(
           updatedAt: ref.pinnedAt,
           updatedBy: ref.pinnedBy,
         }
-        const blocks = await frameImageBlocks(snapshot)
+        const blocks = await frameImageBlocks(
+          snapshot,
+          referenceReadScope(jobResourceReader(runState.actorId), canvasId, ref.id),
+        )
         const truncated = ref.html.length > MAX_HTML_READ_CHARS
         blocks.push({
           type: 'text',
@@ -2119,7 +2138,7 @@ export async function execTool(
            screenshot entirely and point it at the textual surfaces, while
            keeping the verified-frames bookkeeping coherent */
         const blocks = runState.vision
-          ? await frameImageBlocks(f)
+          ? await frameImageBlocks(f, frameReadScope(jobResourceReader(runState.actorId), f))
           : `Screenshot skipped: the selected model cannot view images. Frame "${f.name}" is ${f.width}×${f.height}px. Verify your work with get_frame_html and inspect_frame instead.`
         if (runState.mutatedFrames.has(input.frame_id) || runState.verificationFrames.has(input.frame_id)) {
           runState.verifiedFrames.add(input.frame_id)

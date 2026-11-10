@@ -1,8 +1,18 @@
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
+vi.mock('../server/db/persist.ts', async (original) => ({
+  ...(await original<typeof import('../server/db/persist.ts')>()),
+  saveFrame: vi.fn(),
+}))
+vi.mock('../server/auth.ts', async (original) => ({
+  ...(await original<typeof import('../server/auth.ts')>()),
+  isBanned: async () => false,
+}))
 import { decodePDFRawStream, PDFArray, PDFDocument, PDFName, PDFRawStream } from 'pdf-lib'
 import { readingOrder } from '../shared/frameOrder.ts'
 import { mapLimited, pageSizeFor, renderFramePdfPage, selectPdfFrames, takePdfExportSlot } from '../server/pdfExport.ts'
 import { findBrowserPath } from '../server/screenshot.ts'
+import { store } from '../server/store.ts'
+import { frameReadScope } from '../server/privateResources.ts'
 import type { Canvas, Frame } from '../shared/types.ts'
 import { Client, startServer, type Server } from './harness.ts'
 
@@ -159,7 +169,9 @@ describe('renderFramePdfPage', () => {
         updatedAt: 0,
         updatedBy: 'me',
       }
-      const pdf = await PDFDocument.load(await renderFramePdfPage(frame))
+      store.init([{ id: 'c', name: 'PDF', ownerId: 'pdf-unit-reader', frames: [frame], createdAt: 0, updatedAt: 0 }])
+      const reader = { actorId: 'pdf-unit-reader', currentActor: async () => 'pdf-unit-reader' }
+      const pdf = await PDFDocument.load(await renderFramePdfPage(frame, frameReadScope(reader, frame)))
       expect(pdf.getPageCount()).toBe(1)
       expect(pdf.getPage(0).getHeight()).toBeCloseTo(300 * PX_TO_PT, 0)
       /* the block starts at 60vh of the frame and is cut at its bottom edge */
@@ -264,8 +276,8 @@ describe('GET /api/canvases/:id/export.pdf', () => {
 
   it('keeps a canvas private to strangers and signed-out visitors', async () => {
     const stranger = await new Client(server).signUp('pdf-stranger@test.dev', 'Sam')
-    expect((await stranger.get(`/api/canvases/${canvasId}/export.pdf?frames=${wide.id}`)).status).toBe(403)
-    expect((await stranger.get(`/api/canvases/${canvasId}/export.pdf`)).status).toBe(403)
+    expect((await stranger.get(`/api/canvases/${canvasId}/export.pdf?frames=${wide.id}`)).status).toBe(404)
+    expect((await stranger.get(`/api/canvases/${canvasId}/export.pdf`)).status).toBe(404)
     expect((await new Client(server).get(`/api/canvases/${canvasId}/export.pdf`)).status).toBe(401)
   })
 

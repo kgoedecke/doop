@@ -13,6 +13,7 @@ import { MarkdownBlock, Modal, ModalActions, ModalLede, ModalSpacer, ModalTitle 
 import { ConfirmDialog } from './ui/alert-dialog'
 import { DoopMark } from './Logo'
 import { getLocale, t as translate, useT } from '@/lib/i18n'
+import { usePrivateDocument } from '../lib/privateMaterialization'
 
 const MAX_GUIDELINE_CHARS = 24_000
 const MAX_TITLE_CHARS = 80
@@ -122,7 +123,7 @@ export function MemoryPanel() {
       ) : (
         references.map((r) => (
           <ListRow key={r.id} className="gap-1 py-2.5" onClick={() => setOpenRef(r.id)}>
-            <RefThumb reference={r} />
+            <RefThumb canvasId={canvasId} reference={r} />
             <ListTitle>{r.title}</ListTitle>
             <ListMeta>
               {r.pinnedBy} · {timeAgo(r.pinnedAt)}
@@ -188,7 +189,12 @@ export function MemoryPanel() {
 }
 
 /** Live thumbnail of a pinned reference: its snapshotted HTML, scaled down. */
-function RefThumb({ reference }: { reference: MemoryReference }) {
+function RefThumb({ canvasId, reference }: { canvasId: string; reference: MemoryReference }) {
+  const { prepared, error, epoch } = usePrivateDocument(reference.html, {
+    kind: 'reference',
+    id: reference.id,
+    canvasId,
+  })
   const w = 264 // panel content width
   const scale = w / reference.width
   return (
@@ -196,10 +202,17 @@ function RefThumb({ reference }: { reference: MemoryReference }) {
       className="block w-full overflow-hidden rounded-[8px] border border-line bg-surface"
       style={{ height: Math.min(reference.height * scale, 150) }}
     >
+      {error && (
+        <span role="status" className={errorText}>
+          {error.message}
+        </span>
+      )}
       <iframe
+        key={`${epoch}:${canvasId}:${reference.id}`}
         className="pointer-events-none origin-top-left border-0"
         title={reference.title}
-        srcDoc={reference.html}
+        srcDoc={prepared?.html ?? ''}
+        data-doop-private-preview={prepared?.privateMedia ? '' : undefined}
         sandbox=""
         tabIndex={-1}
         style={{ width: reference.width, height: reference.height, transform: `scale(${scale})` }}
@@ -220,6 +233,10 @@ function RefModal({
 }) {
   const readOnly = useStore((s) => !canEditOpenCanvas(s))
   const t = useT()
+  const { prepared, error, epoch } = usePrivateDocument(
+    reference?.html ?? '',
+    reference ? { kind: 'reference', id: reference.id, canvasId } : null,
+  )
   if (!reference) {
     return (
       <Modal size="xl" onClose={onClose}>
@@ -254,10 +271,17 @@ function RefModal({
           className="mt-3.5 overflow-auto rounded-[12px] border border-line bg-surface"
           style={{ height: Math.min(reference.height * scale, window.innerHeight * 0.55) }}
         >
+          {error && (
+            <p role="status" className={errorText}>
+              {error.message}
+            </p>
+          )}
           <iframe
+            key={`${epoch}:${canvasId}:${reference.id}`}
             className="pointer-events-none origin-top-left border-0"
             title={reference.title}
-            srcDoc={reference.html}
+            srcDoc={prepared?.html ?? ''}
+            data-doop-private-preview={prepared?.privateMedia ? '' : undefined}
             sandbox=""
             tabIndex={-1}
             style={{ width: reference.width, height: reference.height, transform: `scale(${scale})` }}

@@ -15,7 +15,7 @@ export const inspector = {
   copyPngTitle: 'Copy the image (2×) to paste anywhere',
   copyPng: 'Copy as PNG',
   copyImageUrlTitle:
-    'Public image URL — always renders the current design; paste it as og:image or a blog featured image',
+    'Image URL for people with a signed-in session and canvas access; renders the current saved design',
   copyImageUrl: 'Copy image URL',
   pinReferenceTitle: 'Add to design memory — will be used as reference',
   pinReference: 'Pin as reference',

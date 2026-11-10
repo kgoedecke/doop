@@ -5,6 +5,16 @@ import { readingOrder } from '../shared/frameOrder.ts'
 import { canvasPages, pageFrames } from '../shared/pages.ts'
 import { MAX_PDF_FRAMES, PDF_RENDER_CONCURRENCY } from '../shared/pdfLimits.ts'
 import { findBrowserPath, loadFramePage } from './screenshot.ts'
+import {
+  assertRenderRead,
+  assertFramesRead,
+  frameReadScope,
+  assertPrivateRenderBytes,
+  MAX_PRIVATE_RENDER_BYTES,
+  PrivateRenderLimitError,
+  type PrivateRenderScope,
+  type ResourceReader,
+} from './privateResources.ts'
 
 /**
  * Vector PDF export: each frame prints through headless Chrome onto one page
@@ -85,9 +95,11 @@ function printShell(frame: Pick<Frame, 'width' | 'height' | 'html'>): string {
 }
 
 /** One frame as a single-page PDF. */
-export async function renderFramePdfPage(frame: Frame): Promise<Uint8Array> {
+export async function renderFramePdfPage(frame: Frame, scope: PrivateRenderScope): Promise<Uint8Array> {
+  frame = { ...frame }
+  await assertRenderRead(scope, frame)
   if (!pdfRendererAvailable()) throw new PdfRendererUnavailableError()
-  const loaded = await loadFramePage({ ...frame, html: printShell(frame) })
+  const loaded = await loadFramePage({ ...frame, html: printShell(frame) }, scope)
   const { page } = loaded
   try {
     const size = pageSizeFor(frame)
@@ -98,7 +110,7 @@ export async function renderFramePdfPage(frame: Frame): Promise<Uint8Array> {
     })
     await page.emulateMediaType('screen')
     await waitForFonts(page.mainFrame().childFrames()[0] ?? page.mainFrame())
-    return await page.pdf({
+    const bytes = await page.pdf({
       width: `${size.width}px`,
       height: `${size.height}px`,
       scale: size.scale,
@@ -109,8 +121,14 @@ export async function renderFramePdfPage(frame: Frame): Promise<Uint8Array> {
       pageRanges: '1',
       timeout: 30_000,
     })
-  } finally {
+    loaded.assertReady()
+    assertPrivateRenderBytes(bytes)
     await loaded.close()
+    await assertRenderRead(scope, frame)
+    return bytes
+  } catch (error) {
+    loaded.cancel()
+    throw error
   }
 }
 
@@ -143,13 +161,22 @@ export async function mapLimited<T, R>(items: readonly T[], limit: number, run: 
 
 /** Frames as one PDF, a page per frame (each sized to its frame), in the
  *  order given; `selectPdfFrames` decides that order. */
-export async function renderFramesPdf(frames: readonly Frame[]): Promise<Buffer> {
+export async function renderFramesPdf(frames: readonly Frame[], reader: ResourceReader): Promise<Buffer> {
   if (!frames.length) throw new Error('No frames to export')
   if (frames.length > MAX_PDF_FRAMES) throw new Error(`A PDF holds at most ${MAX_PDF_FRAMES} frames`)
   if (!pdfRendererAvailable()) throw new PdfRendererUnavailableError()
   /* snapshots: an edit landing mid-render must not mix two versions */
   const snapshots = frames.map((frame) => ({ ...frame }))
-  const pages = await mapLimited(snapshots, PDF_RENDER_CONCURRENCY, renderFramePdfPage)
+  await assertFramesRead(reader, snapshots)
+  let preparedBytes = 0
+  const pages = await mapLimited(snapshots, PDF_RENDER_CONCURRENCY, async (frame) => {
+    await assertFramesRead(reader, snapshots)
+    const page = await renderFramePdfPage(frame, frameReadScope(reader, frame, snapshots))
+    preparedBytes += page.byteLength
+    if (preparedBytes > MAX_PRIVATE_RENDER_BYTES) throw new PrivateRenderLimitError()
+    await assertFramesRead(reader, snapshots)
+    return page
+  })
   const merged = await PDFDocument.create()
   for (const bytes of pages) {
     const source = await PDFDocument.load(bytes)
@@ -158,7 +185,10 @@ export async function renderFramesPdf(frames: readonly Frame[]): Promise<Buffer>
   }
   merged.setProducer('Doop')
   merged.setCreator('Doop')
-  return Buffer.from(await merged.save())
+  const bytes = await merged.save()
+  assertPrivateRenderBytes(bytes)
+  await assertFramesRead(reader, snapshots)
+  return Buffer.from(bytes)
 }
 
 export type PdfFrameSelection = { ok: true; frames: Frame[] } | { ok: false; status: 400 | 404; error: string }

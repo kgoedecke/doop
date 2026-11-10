@@ -1,11 +1,17 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Canvas, Frame } from '../shared/types'
+import type { ResourceCopyEntry } from '../shared/resourceCopies'
 
 /* the clipboard module creates frames through the API and records them in
    history — stub the network and analytics so the copy/paste bookkeeping can
    be exercised on its own */
 let nextId = 0
 const api = {
+  copyResources: vi.fn(async (canvasId: string, entries: ResourceCopyEntry[]) => ({
+    canvasId,
+    entries: entries.map((entry) => ({ html: entry.html.replaceAll('/a/source.png', '/a/owned.png') })),
+    assets: [{ from: 'source', to: 'owned', url: '/a/owned.png' }],
+  })),
   createFrame: vi.fn(async (canvasId: string, rest: Partial<Frame>) => ({
     ...frame('x'),
     ...rest,
@@ -15,7 +21,10 @@ const api = {
   updateFrame: vi.fn(async () => ({})),
   deleteFrame: vi.fn(async () => ({})),
 }
-vi.mock('../src/lib/api', () => ({ api }))
+vi.mock('../src/lib/api', () => ({
+  api,
+  errorMessage: (error: unknown, fallback: string) => (error instanceof Error ? error.message : fallback),
+}))
 vi.mock('../src/lib/posthog', () => ({ posthog: { capture: vi.fn() } }))
 
 /* the module keeps the clip in localStorage, which the node test runtime
@@ -34,7 +43,19 @@ const history = await import('../src/lib/history')
 const clipboard = await import('../src/lib/frameClipboard')
 
 function frame(id: string, x = 0, y = 0, width = 100, height = 100): Frame {
-  return { id, canvasId: 'c1', name: id, html: `<p>${id}</p>`, x, y, width, height } as Frame
+  return {
+    id,
+    canvasId: 'c1',
+    name: id,
+    html: `<p>${id}</p>`,
+    x,
+    y,
+    width,
+    height,
+    createdAt: 1,
+    updatedAt: 1,
+    updatedBy: 'Tester',
+  }
 }
 
 function seed(...frames: Frame[]) {
@@ -51,6 +72,91 @@ beforeEach(() => {
   useStore.getState().select(null)
   history.clearHistory()
   vi.clearAllMocks()
+  api.copyResources.mockImplementation(async (canvasId, entries) => ({
+    canvasId,
+    entries: entries.map((entry) => ({ html: entry.html.replaceAll('/a/source.png', '/a/owned.png') })),
+    assets: [{ from: 'source', to: 'owned', url: '/a/owned.png' }],
+  }))
+})
+
+describe('explicit cross-canvas frame clipboard', () => {
+  function prepare() {
+    clipboard.copyFrames([{ ...frame('source'), html: '<img src="/a/source.png">', updatedAt: 7 }])
+    useStore.getState().setCanvas({ id: 'destination', name: 'Destination', frames: [], createdAt: 1, updatedAt: 1 })
+  }
+
+  it('uses frozen source provenance and server-rewritten carriers before creating the pasted frame', async () => {
+    prepare()
+    clipboard.pasteFrameCentered('destination')
+    await flush()
+    expect(api.copyResources).toHaveBeenCalledWith('destination', [
+      { sourceFrameId: 'source', sourceVersion: 7, html: '<img src="/a/source.png">' },
+    ])
+    expect(api.createFrame).toHaveBeenCalledTimes(1)
+    expect(api.createFrame.mock.calls[0]![1].html).toBe('<img src="/a/owned.png">')
+    expect(useStore.getState().selectedIds).toEqual(['new1'])
+  })
+
+  it('surfaces source refusal without creating a frame or retrying the copy', async () => {
+    prepare()
+    api.copyResources.mockRejectedValueOnce(new Error('Source access was removed'))
+    clipboard.pasteFrameCentered('destination')
+    await flush()
+    expect(api.copyResources).toHaveBeenCalledTimes(1)
+    expect(api.createFrame).not.toHaveBeenCalled()
+    expect(useStore.getState().notice?.text).toBe('Source access was removed')
+  })
+
+  it('preserves the new canvas selection when the copy response arrives after navigation', async () => {
+    prepare()
+    let release!: (value: Awaited<ReturnType<typeof api.copyResources>>) => void
+    api.copyResources.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          release = resolve
+        }),
+    )
+    clipboard.pasteFrameCentered('destination')
+    useStore.getState().setCanvas({
+      id: 'next',
+      name: 'Next',
+      frames: [{ ...frame('keep'), canvasId: 'next' }],
+      createdAt: 1,
+      updatedAt: 1,
+    })
+    useStore.getState().select('keep')
+    release({ canvasId: 'destination', entries: [{ html: '<img src="/a/owned.png">' }], assets: [] })
+    await flush()
+    expect(api.createFrame).not.toHaveBeenCalled()
+    expect(useStore.getState().canvas?.id).toBe('next')
+    expect(useStore.getState().selectedIds).toEqual(['keep'])
+    expect(useStore.getState().notice?.text).toContain('destination changed')
+  })
+
+  it('does not record a late successful create into another canvas’s selection or undo history', async () => {
+    clipboard.copyFrames([frame('source')])
+    let release!: (value: Frame) => void
+    api.createFrame.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          release = resolve
+        }),
+    )
+    clipboard.pasteFrameCentered('c1')
+    useStore.getState().setCanvas({
+      id: 'next',
+      name: 'Next',
+      frames: [{ ...frame('keep'), canvasId: 'next' }],
+      createdAt: 1,
+      updatedAt: 1,
+    })
+    useStore.getState().select('keep')
+    release({ ...frame('landed'), canvasId: 'c1' })
+    await flush()
+    expect(useStore.getState().selectedIds).toEqual(['keep'])
+    await history.undo()
+    expect(api.deleteFrame).not.toHaveBeenCalled()
+  })
 })
 
 describe('multi-frame copy and paste', () => {
@@ -88,14 +194,13 @@ describe('multi-frame copy and paste', () => {
     expect(api.createFrame.mock.calls[1]![1]).toMatchObject({ x: 210, y: 70 })
   })
 
-  it('still reads a single-frame clip written before multi-frame copy', async () => {
+  it('rejects a clipboard shape without frozen source provenance', async () => {
     store.set('doop:frame-clipboard', JSON.stringify({ name: 'old', html: '<p>old</p>', width: 200, height: 100 }))
-    expect(clipboard.hasFrameClip()).toBe(true)
+    expect(clipboard.hasFrameClip()).toBe(false)
     clipboard.pasteFrameCentered('c1')
     await flush()
 
-    expect(api.createFrame).toHaveBeenCalledTimes(1)
-    expect(api.createFrame.mock.calls[0]![1]).toMatchObject({ name: 'old', x: 400, y: 350 })
+    expect(api.createFrame).not.toHaveBeenCalled()
   })
 
   it('keeps the frames that landed when one create fails', async () => {

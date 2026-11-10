@@ -5,7 +5,7 @@ import { nanoid } from 'nanoid'
 import { db } from './db/index.ts'
 import { integrations } from './db/schema.ts'
 import { createAsset, fetchRemote } from './assets.ts'
-import { store } from './store.ts'
+import { requirePrivateCanvas } from './privateResources.ts'
 import * as actions from './actions.ts'
 import type { Actor, Frame } from '../shared/types.ts'
 import type { PullFilter } from '../shared/automations.ts'
@@ -485,7 +485,7 @@ async function keepImage(url: string | null, canvasId: string, ownerId: string):
   try {
     /* the asset layer's guarded fetch: SSRF-checked hops, 5 MB cap while streaming */
     const buf = await fetchRemote(url)
-    const asset = await createAsset(buf, { canvasId, ownerId, uploadedBy: 'Automation' })
+    const asset = await createAsset(buf, { canvasId, actorId: ownerId, uploadedBy: 'Automation' })
     return `/a/${asset.id}.${asset.ext}`
   } catch {
     return url
@@ -510,11 +510,11 @@ export async function pullCreatives(input: {
   ownerId: string
   actor: Actor
 }): Promise<PullResult> {
-  const canvas = store.getCanvas(input.canvasId)
-  if (!canvas) throw new Error('canvas not found')
+  const canvas = requirePrivateCanvas(input.canvasId, input.ownerId)
   if (!input.connection.accounts.some((a) => a.id === input.accountId))
     throw new Error('that ad account is not part of the Meta connection')
   const ads = await fetchAds(input.connection.accessToken, input.accountId, input.filter)
+  requirePrivateCanvas(input.canvasId, input.ownerId)
   const present = new Set<string>()
   for (const f of canvas.frames) {
     const id = metaFrameMarker(f.html)
@@ -533,6 +533,7 @@ export async function pullCreatives(input: {
       rowHeight = 0
     }
     const src = await keepImage(ad.imageUrl, input.canvasId, input.ownerId)
+    requirePrivateCanvas(input.canvasId, input.ownerId)
     const height = frameHeight(ad)
     rowHeight = Math.max(rowHeight, height)
     const frame = actions.createFrame(

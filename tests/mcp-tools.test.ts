@@ -4,7 +4,12 @@ import { describe, expect, it, vi } from 'vitest'
 import { buildMcpServer } from '../server/mcp.ts'
 import { FRAME_PREVIEW_URI } from '../server/chatgptApp.ts'
 
-vi.mock('../server/db/persist.ts', () => ({ saveCanvas: () => {}, saveFrame: () => {}, saveActivity: () => {} }))
+vi.mock('../server/db/persist.ts', () => ({
+  insertCanvas: async () => {},
+  saveCanvas: () => {},
+  saveFrame: () => {},
+  saveActivity: () => {},
+}))
 
 interface ToolInputSchema {
   properties?: Record<string, unknown>

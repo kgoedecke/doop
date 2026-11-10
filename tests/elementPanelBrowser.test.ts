@@ -405,17 +405,20 @@ describe.skipIf(!findBrowserPath())('element design controls', () => {
     await page.waitForSelector('[aria-label="Image fill"]')
     await chooseReplacement()
     await expect.poll(() => saved.html).toContain(replacementUrl)
-    expect(
-      await frame.$eval('#photo', (el) => {
-        const cs = getComputedStyle(el)
-        return {
-          image: cs.backgroundImage,
-          size: cs.backgroundSize,
-          position: cs.backgroundPosition,
-          color: cs.backgroundColor,
-        }
-      }),
-    ).toEqual({ image: `url("${replacementUrl}")`, size: 'cover', position: '50% 50%', color: 'rgb(18, 52, 86)' })
+    // Persisting the proposal precedes the scoped preparation and DOM ack.
+    await expect
+      .poll(() =>
+        frame.$eval('#photo', (el) => {
+          const cs = getComputedStyle(el)
+          return {
+            image: cs.backgroundImage,
+            size: cs.backgroundSize,
+            position: cs.backgroundPosition,
+            color: cs.backgroundColor,
+          }
+        }),
+      )
+      .toEqual({ image: `url("${replacementUrl}")`, size: 'cover', position: '50% 50%', color: 'rgb(18, 52, 86)' })
     for (const [mode, size, repeat] of [
       ['contain', 'contain', 'no-repeat'],
       ['tile', 'auto', 'repeat'],

@@ -10,6 +10,7 @@ vi.mock('../server/db/persist.ts', () => ({
   saveActivity: () => {},
   saveDecision: () => {},
   saveProposal: () => {},
+  insertCanvas: async () => {},
   saveCanvas: () => {},
   saveFrame: () => {},
 }))
@@ -27,7 +28,7 @@ const { DEFAULT_ROLE_ID, roleName } = await import('../shared/agents.ts')
 const agent: Actor = { name: 'Claude', kind: 'agent', color: '#e5533c' }
 let canvasId: string
 
-beforeEach(() => {
+beforeEach(async () => {
   actions.wire(
     () => {},
     () => {},
@@ -40,7 +41,7 @@ beforeEach(() => {
     decisions: new Map(),
     proposals: new Map(),
   })
-  canvasId = store.createCanvas('task frames', 'kevin').id
+  canvasId = (await store.createCanvas('task frames', 'kevin')).id
 })
 
 describe('task frames', () => {

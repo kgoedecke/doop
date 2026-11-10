@@ -1,4 +1,5 @@
 import { env } from './env.ts'
+import { companyPolicy } from './companyPolicy.ts'
 import { createHash } from 'node:crypto'
 import { eq } from 'drizzle-orm'
 import { db } from './db/index.ts'
@@ -6,12 +7,13 @@ import * as authSchema from './db/auth-schema.ts'
 import { canvasPages, framePageId, MAX_PAGE_NAME, samePages } from '../shared/pages.ts'
 import { normalizePageBackground } from '../shared/pageBackground.ts'
 import { prototypeReport, prototypeUrl, setPrototypeStart } from './prototypeTools.ts'
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
+import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
+import { WorkflowMcpServer } from './mcpSchemas.ts'
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js'
 import type { Request, Response } from 'express'
 import { fromNodeHeaders } from 'better-auth/node'
-import { z } from 'zod'
-import { PageLimitError, store } from './store.ts'
+import { z } from 'zod/v4'
+import { CanvasCreationUncertainError, PageLimitError, store } from './store.ts'
 import { fontsForCanvas } from './fonts.ts'
 import { describeLibrary, libraryBrief } from '../shared/fonts.ts'
 import {
@@ -41,7 +43,18 @@ import {
   selectPdfFrames,
   takePdfExportSlot,
 } from './pdfExport.ts'
-import { primeImage } from './previews.ts'
+import { getImage, primeImage } from './previews.ts'
+import { privateMcpImage } from './mcpMedia.ts'
+import { MAX_INLINE_MCP_MEDIA_BYTES } from '../shared/privateMedia.ts'
+import {
+  assertCanvasRead,
+  assertRenderRead,
+  assertFramesRead,
+  requireReadActor,
+  frameReadScope,
+  PrivateResourceError,
+  type ResourceReader,
+} from './privateResources.ts'
 import { DOOP_GUIDE, GUIDE_TOPICS } from './guide.ts'
 import {
   describeInspiration,
@@ -150,9 +163,6 @@ function withEscapeNote<T extends { content: { type: 'text' | 'image'; [k: strin
   return result
 }
 
-/** A PDF returned inline as base64; beyond this, export fewer frames. */
-const MAX_MCP_PDF_BYTES = 15_000_000
-
 function err(message: string) {
   return { content: [{ type: 'text' as const, text: `Error: ${message}` }], isError: true }
 }
@@ -219,6 +229,22 @@ function withPreview<T extends { content: unknown[] }>(
   return { ...result, structuredContent: previewOf({ id: canvasId, name: canvas?.name ?? '' }, frames) }
 }
 
+const canvasReadOutputSchema = {
+  canvas: z.object({ id: z.string(), name: z.string(), url: z.string() }),
+  workspace_id: z.string().nullable(),
+  frames: z.array(
+    z.object({
+      id: z.string(),
+      name: z.string(),
+      width: z.number(),
+      height: z.number(),
+      image_url: z.string(),
+      url: z.string(),
+      empty: z.boolean(),
+    }),
+  ),
+}
+
 /* Per-connecting-user rate limits, each overridable by environment variable
    for self-hosted instances that want a looser cap (see .env.example). The
    defaults are the conservative values that suit the hosted service. */
@@ -277,8 +303,7 @@ function frameSummary(f: {
     updatedAt: new Date(f.updatedAt).toISOString(),
     updatedBy: f.updatedBy,
     htmlBytes: f.html.length,
-    /* public render of the CURRENT design — downloadable/hotlinkable
-       (append &download, or .jpg?quality=90 for JPEG) */
+    /* Current design, accessible only with a current normal browser session. */
     image_url: `${env.BETTER_AUTH_URL}/i/${f.id}.png?scale=2`,
   }
 }
@@ -292,6 +317,8 @@ export function buildMcpServer(
   owner?: string,
   ownerId?: string,
   clientName?: () => Promise<string | undefined>,
+  onUncertainCreation?: (candidateId: string) => void,
+  privateReader?: ResourceReader,
 ): McpServer {
   const actorFrom = (agent_name?: string) => actions.resolveActor({ name: agent_name, kind: 'agent', owner })
   /* Canvas access for agents mirrors the web UI: the OAuth user's id runs
@@ -340,32 +367,43 @@ export function buildMcpServer(
     if (!takePdfExportSlot(ownerId ?? `mcp:${owner ?? 'anonymous'}`))
       return err('PDF export rate limit — wait a minute before exporting again')
     try {
-      const pdf = await renderFramesPdf(selection.frames)
-      if (pdf.length > MAX_MCP_PDF_BYTES) return err('The PDF is too large to return — export fewer frames at once')
+      if (!privateReader) throw new PrivateResourceError()
+      await assertFramesRead(privateReader, selection.frames)
+      const pdf = await renderFramesPdf(selection.frames, privateReader)
+      await assertFramesRead(privateReader, selection.frames)
       const fileName = pdfFileName(canvas, selection.frames)
+      const downloadUrl = `${env.BETTER_AUTH_URL}/api/canvases/${canvas.id}/export.pdf?frames=${selection.frames.map((frame) => frame.id).join(',')}`
+      if (downloadUrl.length > 2048) return err('The PDF download location is too long — select fewer frames')
+      const embedded = pdf.length <= MAX_INLINE_MCP_MEDIA_BYTES
       return {
         content: [
-          {
-            type: 'resource' as const,
-            resource: {
-              uri: `doop://canvas/${canvas.id}/${encodeURIComponent(fileName)}`,
-              mimeType: 'application/pdf',
-              blob: pdf.toString('base64'),
-            },
-          },
+          ...(embedded
+            ? [
+                {
+                  type: 'resource' as const,
+                  resource: {
+                    uri: `doop://canvas/${canvas.id}/${encodeURIComponent(fileName)}`,
+                    mimeType: 'application/pdf',
+                    blob: pdf.toString('base64'),
+                  },
+                },
+              ]
+            : []),
           {
             type: 'text' as const,
             text: JSON.stringify({
               file_name: fileName,
               bytes: pdf.length,
               pages: selection.frames.length,
-              note: 'The PDF is the embedded application/pdf resource (base64). Save it to disk as the file name above; each page is one frame at its own size, text stays selectable.',
+              inline_embedded: embedded,
+              download_url: downloadUrl,
+              note: `${embedded ? 'The full PDF is also embedded as application/pdf. ' : 'The full PDF exceeds the inline result limit. '}The download requires a current normal browser session with access to this canvas; an MCP bearer alone cannot fetch it. The URL renders the selected current stored designs when fetched, not an immutable snapshot. Each page is one frame; text stays selectable.`,
             }),
           },
         ],
       }
-    } catch (e) {
-      return err(`PDF export failed: ${e instanceof Error ? e.message : String(e)}`)
+    } catch {
+      return err('Private PDF is unavailable')
     }
   }
   /* Reads count as arrival: presence (and with it every "your agent is
@@ -374,7 +412,7 @@ export function buildMcpServer(
   const arrive = (canvasId: string, agent_name?: string) => {
     if (agent_name) actions.heartbeatAgent(canvasId, actorFrom(agent_name))
   }
-  const server = new McpServer({ name: 'doop-canvas', version: '0.1.0' }, { instructions: INSTRUCTIONS })
+  const server = new WorkflowMcpServer({ name: 'doop-canvas', version: '0.1.0' }, { instructions: INSTRUCTIONS })
   registerFramePreview(server)
 
   server.registerTool(
@@ -448,7 +486,7 @@ export function buildMcpServer(
       description:
         "List the connected user's design canvases with their ids, names and frame counts — personal ones, ones shared with them, and every canvas in their workspaces (workspace_id / workspace_name set).",
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
-      inputSchema: {},
+      inputSchema: z.object({}),
     },
     /* '' matches no ownerId: a session without a user sees nothing */
     async () =>
@@ -475,12 +513,13 @@ export function buildMcpServer(
         'Return the Doop account this connection is signed in as (stable id and display name). Read-only; use it to confirm whose canvases you are working on.',
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
       _meta: { 'openai/profile': true },
-      inputSchema: {},
-      outputSchema: { id: z.string(), name: z.string() },
+      inputSchema: z.object({}),
+      outputSchema: { id: z.string(), name: z.string(), managed_workspace_id: z.string().optional() },
     },
     async () => {
       if (!ownerId) return err('this connection is not signed in to a Doop account')
-      const profile = { id: ownerId, name: owner ?? '' }
+      const bound = companyPolicy.workspaceFor(ownerId)
+      const profile = { id: ownerId, name: owner ?? '', ...(bound ? { managed_workspace_id: bound } : {}) }
       return { content: [{ type: 'text' as const, text: JSON.stringify(profile) }], structuredContent: profile }
     },
   )
@@ -497,8 +536,15 @@ export function buildMcpServer(
         workspace_id: z.string().optional().describe('Create inside this shared workspace'),
         agent_name: agentName.optional(),
       },
+      outputSchema: {
+        id: z.string(),
+        name: z.string(),
+        url: z.string(),
+        workspace_id: z.string().nullable(),
+      },
     },
     async ({ name, workspace_id }) => {
+      if (!ownerId) return err('this connection is not signed in to a Doop account')
       if (workspace_id) {
         const ws = workspaces.getWorkspace(workspace_id)
         if (!ws || !workspaces.isWorkspaceMember(ws.id, ownerId)) return err(`no workspace with id ${workspace_id}`)
@@ -507,8 +553,21 @@ export function buildMcpServer(
       }
       /* owned by the connecting user — an ownerless canvas would be invisible
          on every dashboard (and was once visible on all of them) */
-      const canvas = store.createCanvas(name, ownerId, workspace_id)
-      return text({ id: canvas.id, name: canvas.name, url: `/c/${canvas.id}` })
+      let canvas: Awaited<ReturnType<typeof store.createCanvas>>
+      try {
+        canvas = await store.createCanvas(name, ownerId, workspace_id)
+      } catch (error) {
+        if (!(error instanceof CanvasCreationUncertainError)) throw error
+        onUncertainCreation?.(error.canvasId)
+        return err(error.message)
+      }
+      const created = {
+        id: canvas.id,
+        name: canvas.name,
+        url: `/c/${canvas.id}`,
+        workspace_id: canvas.workspaceId ?? null,
+      }
+      return { ...text(created), structuredContent: created }
     },
   )
 
@@ -520,6 +579,7 @@ export function buildMcpServer(
       description:
         "Get a canvas: its name, its pages (id, name, prototype start frame) and its frames with pageId, position, size, approvalStatus and human approval attribution (not the HTML — use get_frame for that). Pass page_id to see one page's frames only; filter approval_status to ready_for_dev to find screens approved for implementation. Use this to see the current layout before adding or editing frames. Pass your agent_name so the result can tell you when human feedback is waiting (claim it with get_feedback).",
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      outputSchema: canvasReadOutputSchema,
       inputSchema: {
         canvas_id: z.string(),
         agent_name: agentName.optional(),
@@ -544,13 +604,32 @@ export function buildMcpServer(
       )
       const docs = store.getGuidelines(canvas_id)
       const refs = store.getReferences(canvas_id)
-      const library = fontsForCanvas(c)
+      let library: ReturnType<typeof fontsForCanvas> = []
+      let privateLibrary = false
+      if (privateReader) {
+        try {
+          await assertCanvasRead({ reader: privateReader, canvasId: canvas_id })
+          library = fontsForCanvas(c)
+          privateLibrary = true
+        } catch (error) {
+          if (!(error instanceof PrivateResourceError)) return err('Canvas read is temporarily unavailable')
+        }
+      }
       const tokens = store.getTokens(canvas_id)
       const tokenThemes = store.getTokenThemes(canvas_id)
       /* design-synced canvases carry a flow map: real user navigation between
          the synced screens — context a redesign must respect */
-      const flow = describeSyncFlow(await getSyncFlow(c), c.frames)
+      let flow: string[]
+      try {
+        flow = describeSyncFlow(await getSyncFlow(c), c.frames)
+        if (privateReader) await requireReadActor(privateReader)
+        if (!canvasFor(canvas_id, 'view')) return noCanvas(canvas_id)
+        if (privateLibrary) await assertCanvasRead({ reader: privateReader!, canvasId: canvas_id })
+      } catch {
+        return err('Canvas read is unavailable')
+      }
       const notes = [
+        ...(!privateLibrary ? ['The private font library is unavailable to this reader.'] : []),
         ...(flow.length
           ? [
               'This canvas is synced from a live app and `flow` shows how its screens connect — including how often real users take each path. Do not bury or weaken elements that carry heavy navigation.',
@@ -570,7 +649,7 @@ export function buildMcpServer(
             ]
           : []),
       ]
-      return withPreview(
+      const result = withPreview(
         withFeedbackNotice(
           text({
             id: c.id,
@@ -603,6 +682,7 @@ export function buildMcpServer(
         canvas_id,
         shown,
       )
+      return { ...result, structuredContent: { ...result.structuredContent, workspace_id: c.workspaceId ?? null } }
     },
   )
 
@@ -1441,7 +1521,7 @@ export function buildMcpServer(
     {
       title: 'Export frame as image or PDF',
       description:
-        "Export the frame's CURRENT design. PNG/JPG return public URLs for publishing it elsewhere (CMS media library, social post, og:image; the URL re-renders when the frame changes). PDF returns the file itself (an embedded application/pdf resource): vector, text selectable, one page per frame sized to the frame; pass frame_ids to put several frames of the same canvas into one multi-page PDF (pages in the order given: frame_id first, then frame_ids as listed).",
+        "Export the frame's CURRENT design. PNG/JPG return a bounded real image (a JPEG thumbnail when the full file is too large) and authenticated full-download metadata. PDF embeds the full file only when it fits the inline limit; otherwise it returns an authenticated download location. Downloads require a current normal browser session; an MCP bearer alone cannot fetch them. URLs render current stored designs when fetched. PDF has one selectable-text page per frame; frame_ids adds same-canvas pages in order after frame_id. A preview or URL does not establish full visual verification.",
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
       inputSchema: {
         frame_id: z.string(),
@@ -1457,18 +1537,44 @@ export function buildMcpServer(
       },
     },
     async ({ frame_id, format, quality, frame_ids }) => {
-      const f = frameFor(frame_id, 'view')
-      if (!f) return noFrame(frame_id)
+      const live = frameFor(frame_id, 'view')
+      if (!live) return noFrame(frame_id)
+      const f = { ...live }
       if (format === 'pdf') return exportPdf(f, frame_ids ?? [])
       const ext = format === 'jpg' ? 'jpg' : 'png'
       const q = ext === 'jpg' ? `&quality=${quality ?? 90}` : ''
-      return text({
-        image_url: `${env.BETTER_AUTH_URL}/i/${frame_id}.${ext}?scale=2${q}`,
-        download_url: `${env.BETTER_AUTH_URL}/i/${frame_id}.${ext}?scale=2${q}&download`,
-        width: f.width * 2,
-        height: f.height * 2,
-        note: 'Public URL, no auth needed. To publish: fetch the URL and upload the bytes to the target platform (e.g. WordPress POST /wp/v2/media), or hotlink it directly — it always shows the current design.',
-      })
+      try {
+        if (!privateReader) throw new PrivateResourceError()
+        const scope = frameReadScope(privateReader, f)
+        const full = await getImage(f, { ext, scale: 2, quality: quality ?? 90, preview: false, scope })
+        const image = await privateMcpImage(full.buf, scope)
+        await assertRenderRead(scope, f)
+        const imageUrl = `${env.BETTER_AUTH_URL}/i/${frame_id}.${ext}?scale=2${q}`
+        return {
+          content: [
+            { type: 'image' as const, data: Buffer.from(image.bytes).toString('base64'), mimeType: image.mime },
+            {
+              type: 'text' as const,
+              text: JSON.stringify({
+                image_url: imageUrl,
+                download_url: `${imageUrl}&download`,
+                width: image.fullWidth,
+                height: image.fullHeight,
+                format: ext,
+                inline: {
+                  width: image.width,
+                  height: image.height,
+                  mime_type: image.mime,
+                  full_resolution: image.fullResolution,
+                },
+                note: 'The full download requires a current normal browser session with canvas access; an MCP bearer alone cannot fetch it. The URL renders the current stored design when fetched. The inline image may be a smaller JPEG thumbnail and does not establish full visual verification.',
+              }),
+            },
+          ],
+        }
+      } catch {
+        return err('Private image export is unavailable')
+      }
     },
   )
 
@@ -1477,7 +1583,7 @@ export function buildMcpServer(
     {
       title: 'Upload an image asset',
       description:
-        'Upload an image (png/jpg/webp/gif/svg, max 5 MB) and get back a permanent public URL to reference in frame HTML (<img src>, CSS background) — use this instead of inlining data: URIs. Pick ONE input by where the file lives: (1) remote — pass source_url and the server fetches it; (2) LOCAL FILE — pass local_file=true to receive a one-time upload URL and a ready-to-run curl command, run it in your shell, and the curl response JSON contains the permanent url. (3) data — base64, LAST RESORT for tiny files (under ~100 KB) when you cannot run shell commands; larger base64 payloads are slow and corrupt easily.',
+        'Upload an image (png/jpg/webp/gif/svg, max 5 MB) and get back a private canvas URL to reference in frame HTML (<img src>, CSS background). Doop renders it through current canvas authorization; external hotlinking is unsupported and raw downloads require a normal browser session. Pick ONE input: (1) remote — source_url; (2) LOCAL FILE — local_file=true returns a one-time upload URL and curl command, whose response contains the private url; (3) data — base64, LAST RESORT for tiny files (under ~100 KB) when shell upload is unavailable.',
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
       inputSchema: {
         source_url: z.string().optional().describe('Public http(s) URL to fetch the file from (remote files)'),
@@ -1500,6 +1606,7 @@ export function buildMcpServer(
           'provide exactly one of: source_url (remote file), local_file=true (local file — returns a curl command), or data (small base64)',
         )
       if (!canvasFor(canvas_id, 'edit')) return noCanvas(canvas_id)
+      if (!ownerId) return err('Sign in to upload private files.')
       const now = Date.now()
       const limitKey = ownerId ?? agent_name
       const hits = (uploadHits.get(limitKey) ?? []).filter((t) => now - t < 60_000)
@@ -1509,7 +1616,7 @@ export function buildMcpServer(
       if (local_file) {
         const { token, expiresAt } = assets.createUploadTicket({
           canvasId: canvas_id,
-          ownerId,
+          actorId: ownerId,
           uploadedBy: agent_name,
         })
         const upload_url = `${env.BETTER_AUTH_URL}/u/${token}`
@@ -1517,9 +1624,9 @@ export function buildMcpServer(
           text({
             ok: true,
             upload_url,
-            command: `curl -sS -T "<path-to-your-file>" ${upload_url}`,
+            command: `curl -sS -H "Authorization: Bearer $DOOP_MCP_TOKEN" -T "<path-to-your-file>" ${upload_url}`,
             expires_at: new Date(expiresAt).toISOString(),
-            note: 'One-time upload URL (single use, 15 min). Run the curl command in your shell with your real file path — its JSON response contains the permanent public url to use in frame HTML. Request a fresh ticket for each file.',
+            note: 'Single-use ticket, 15 minutes. Set DOOP_MCP_TOKEN to your current MCP credential; the ticket also requires the same authenticated account and current canvas edit access. The returned private URL is valid only in this canvas. Request a fresh ticket for each file.',
           }),
           canvas_id,
           actorFrom(agent_name),
@@ -1529,7 +1636,7 @@ export function buildMcpServer(
         const buf = data
           ? Buffer.from(data.replace(/^data:[^,]*;base64,/, ''), 'base64')
           : await assets.fetchRemote(source_url!)
-        const asset = await assets.createAsset(buf, { canvasId: canvas_id, ownerId, uploadedBy: agent_name })
+        const asset = await assets.createAsset(buf, { canvasId: canvas_id, actorId: ownerId, uploadedBy: agent_name })
         const url = `${env.BETTER_AUTH_URL}/a/${asset.id}.${asset.ext}`
         const result = text({
           ok: true,
@@ -1537,7 +1644,7 @@ export function buildMcpServer(
           mime: asset.mime,
           size_bytes: asset.size,
           usage: `<img src="${url}" alt="">`,
-          note: 'Permanent public URL — safe to reference in any frame on any canvas.',
+          note: 'Private canvas-owned URL. Use it only in frames on this canvas; copying requires an authorized resource copy.',
         })
         return withFeedback(result, canvas_id, actorFrom(agent_name))
       } catch (e) {
@@ -1566,6 +1673,7 @@ export function buildMcpServer(
     },
     async ({ prompt, aspect, quality, canvas_id, agent_name }) => {
       if (!canvasFor(canvas_id, 'edit')) return noCanvas(canvas_id)
+      if (!ownerId) return err('Sign in to generate private images.')
       const now = Date.now()
       const limitKey = ownerId ?? agent_name
       const hits = (generateHits.get(limitKey) ?? []).filter((t) => now - t < 60_000)
@@ -1574,7 +1682,11 @@ export function buildMcpServer(
       generateHits.set(limitKey, hits)
       try {
         const image = await imageGen.generateImage(ownerId, { prompt, aspect, quality })
-        const asset = await assets.createAsset(image.buf, { canvasId: canvas_id, ownerId, uploadedBy: agent_name })
+        const asset = await assets.createAsset(image.buf, {
+          canvasId: canvas_id,
+          actorId: ownerId,
+          uploadedBy: agent_name,
+        })
         const url = `${env.BETTER_AUTH_URL}/a/${asset.id}.${asset.ext}`
         capture(ownerId ?? agent_name, 'image_generated', {
           canvas_id,
@@ -1971,7 +2083,7 @@ export function buildMcpServer(
       title: 'Screenshot a frame',
       _meta: previewToolMeta('Rendering the frame…', 'Frame rendered'),
       description:
-        'Render a frame and return a PNG screenshot of it — this is how you SEE your design. Always review your work with this after creating or updating a frame, then fix what looks wrong (spacing, overflow, contrast, alignment) and check again. Iterate until it actually looks good, not just until the HTML seems right.',
+        'Render a frame and return a bounded real image, plus an authenticated full-PNG location. Large renders return a JPEG thumbnail with truthful dimensions; normal-browser-session access is required for the full file and an MCP bearer alone cannot fetch it. Review layout after significant edits and fix visible problems. A thumbnail does not establish that full text or every detail was visually inspected.',
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
       inputSchema: {
         frame_id: z.string(),
@@ -1991,17 +2103,35 @@ export function buildMcpServer(
          it as current for the next five minutes */
       const f = { ...live }
       try {
-        const png = await renderFrame(f, scale ?? 1)
+        if (!privateReader) throw new PrivateResourceError()
+        const scope = frameReadScope(privateReader, f)
+        const png = await renderFrame(f, scope, scale ?? 1)
         /* the ChatGPT card loads this exact image next — serve it from cache */
-        primeImage(f, scale ?? 1, png)
+        await primeImage(f, scope, scale ?? 1, png)
+        const image = await privateMcpImage(png, scope)
+        await assertRenderRead(scope, f)
         return withPreview(
           withFeedbackNotice(
             {
               content: [
-                { type: 'image' as const, data: png.toString('base64'), mimeType: 'image/png' },
+                { type: 'image' as const, data: Buffer.from(image.bytes).toString('base64'), mimeType: image.mime },
                 {
                   type: 'text' as const,
-                  text: `Screenshot of “${f.name}” (${f.width}×${f.height}@${scale ?? 1}x, html ${f.html.length} bytes)`,
+                  text: JSON.stringify({
+                    width: image.fullWidth,
+                    height: image.fullHeight,
+                    format: 'png',
+                    scale: scale ?? 1,
+                    image_url: `${env.BETTER_AUTH_URL}/i/${f.id}.png?scale=${scale ?? 1}`,
+                    download_url: `${env.BETTER_AUTH_URL}/i/${f.id}.png?scale=${scale ?? 1}&download`,
+                    inline: {
+                      width: image.width,
+                      height: image.height,
+                      mime_type: image.mime,
+                      full_resolution: image.fullResolution,
+                    },
+                    note: 'The inline image may be a JPEG thumbnail. Full-file access requires a current normal browser session with canvas access; an MCP bearer alone cannot fetch it. The URL renders current stored designs when fetched. A preview does not establish full visual verification.',
+                  }),
                 },
               ],
             },
@@ -2011,8 +2141,8 @@ export function buildMcpServer(
           f.canvasId,
           [f],
         )
-      } catch (e) {
-        return err(`screenshot failed: ${e instanceof Error ? e.message : String(e)}`)
+      } catch {
+        return err('Private screenshot is unavailable')
       }
     },
   )
@@ -2245,6 +2375,32 @@ async function oauthClientName(clientId: string): Promise<string | undefined> {
   return app?.name
 }
 
+/** Same normal MCP credential owner for tool calls and private ticket redemption. */
+async function resolveMcpCredential(
+  req: Request,
+): Promise<{ userId?: string | null; clientId?: string | null } | null> {
+  const bearer = /^Bearer\s+(.+)$/i.exec(req.headers.authorization ?? '')?.[1]
+  return bearer && isAgentKeySecret(bearer)
+    ? verifyAgentKey(bearer)
+    : auth.api.getMcpSession({ headers: fromNodeHeaders(req.headers) })
+}
+
+export class McpAuthenticationUnavailable extends Error {
+  constructor() {
+    super('MCP authentication is temporarily unavailable')
+  }
+}
+
+export async function currentMcpActor(req: Request): Promise<string | undefined> {
+  try {
+    const session = await resolveMcpCredential(req)
+    return session?.userId && !(await isBanned(session.userId)) ? session.userId : undefined
+  } catch {
+    console.error('[mcp] authentication unavailable')
+    throw new McpAuthenticationUnavailable()
+  }
+}
+
 export async function handleMcpRequest(req: Request, res: Response) {
   if (req.method !== 'POST') {
     res.status(405).json({
@@ -2262,21 +2418,27 @@ export async function handleMcpRequest(req: Request, res: Response) {
      sending a headless client into OAuth discovery helps nobody. Everything
      else falls through to the OAuth gate below. */
   const bearer = /^Bearer\s+(.+)$/i.exec(req.headers.authorization ?? '')?.[1]
-  let session: { userId?: string | null; clientId?: string | null } | null
-  if (bearer && isAgentKeySecret(bearer)) {
-    session = await verifyAgentKey(bearer)
-    if (!session) {
-      res.status(401).json({
-        jsonrpc: '2.0',
-        error: { code: -32001, message: 'Unauthorized: unknown or revoked agent key' },
-        id: null,
-      })
-      return
-    }
-  } else {
-    /* OAuth gate: the 401 + WWW-Authenticate header is what triggers the
-       browser approval flow in MCP clients (RFC 9728 discovery). */
-    session = await auth.api.getMcpSession({ headers: fromNodeHeaders(req.headers) }).catch(() => null)
+  let session: Awaited<ReturnType<typeof resolveMcpCredential>>
+  let banned: boolean
+  try {
+    session = await resolveMcpCredential(req)
+    banned = !!session?.userId && (await isBanned(session.userId))
+  } catch {
+    console.error('[mcp] authentication unavailable')
+    res.status(503).json({
+      jsonrpc: '2.0',
+      error: { code: -32603, message: 'MCP authentication is temporarily unavailable' },
+      id: null,
+    })
+    return
+  }
+  if (bearer && isAgentKeySecret(bearer) && !session) {
+    res.status(401).json({
+      jsonrpc: '2.0',
+      error: { code: -32001, message: 'Unauthorized: unknown or revoked agent key' },
+      id: null,
+    })
+    return
   }
   /* ChatGPT re-fetches a rendered card's component template (resources/read)
      without a usable token — after a token rotation, or when an old chat is
@@ -2309,7 +2471,7 @@ export async function handleMcpRequest(req: Request, res: Response) {
   }
   /* banning revokes browser sessions, but an already-issued MCP token keeps
      validating until it expires — refuse it here so a ban is total */
-  if (session?.userId && (await isBanned(session.userId))) {
+  if (banned) {
     res.status(403).json({
       jsonrpc: '2.0',
       error: { code: -32003, message: 'This account has been disabled on this server.' },
@@ -2340,7 +2502,18 @@ export async function handleMcpRequest(req: Request, res: Response) {
   const clientName = async () =>
     (bearer ? clientNamesByCredential.get(credentialKey(bearer)) : undefined) ??
     (oauthClientId ? await oauthClientName(oauthClientId) : undefined)
-  const server = buildMcpServer(owner, session?.userId ?? undefined, clientName)
+  const server = buildMcpServer(
+    owner,
+    session?.userId ?? undefined,
+    clientName,
+    (candidateId) => {
+      // Preserve the existing transport-level unknown outcome rather than
+      // converting an unconfirmed commit into a tool-error receipt.
+      console.error('[mcp] canvas creation unconfirmed', { candidateId })
+      if (!res.headersSent && !res.destroyed) res.status(503).end()
+    },
+    session?.userId ? Object.freeze({ actorId: session.userId, currentActor: () => currentMcpActor(req) }) : undefined,
+  )
   /* Stateless, and plain JSON rather than an SSE stream per response: no
      tool here sends notifications mid-call, so a stream carries nothing a
      JSON body does not, and JSON is what every client — including ChatGPT's
@@ -2358,7 +2531,7 @@ export async function handleMcpRequest(req: Request, res: Response) {
     await transport.handleRequest(req, res, req.body)
   } catch (e) {
     console.error('mcp error', e)
-    if (!res.headersSent) {
+    if (!res.headersSent && !res.destroyed) {
       res.status(500).json({ jsonrpc: '2.0', error: { code: -32603, message: 'Internal server error' }, id: null })
     }
   }

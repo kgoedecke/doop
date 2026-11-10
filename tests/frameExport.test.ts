@@ -6,11 +6,15 @@ import {
   copyFramePng,
   downloadElementExport,
   downloadFrameExport,
+  downloadFrameHtml,
   downloadFramesPdf,
 } from '../src/lib/frameExport'
 import { cropRaster, rasterizeFrame } from '../src/lib/frameRaster'
 import { inspectElement } from '../src/lib/frameBridge'
 import { useStore } from '../src/lib/store'
+import { preparePrivateDocument, invalidatePrivateMedia } from '../src/lib/privateMaterialization'
+import { PrivateMaterializationError } from '../shared/privateMedia'
+import { fixturePrivateMaterializer } from './privateMediaAdapter'
 
 /* the browser's own render comes first; these tests are about the server
    fallback unless they make it succeed */
@@ -21,6 +25,14 @@ vi.mock('../src/lib/frameRaster', async (importOriginal) => ({
 }))
 /* an element is measured by the live document; an unmounted frame answers null */
 vi.mock('../src/lib/frameBridge', () => ({ inspectElement: vi.fn(async () => null) }))
+
+/* Explicit normal-API stand-in; these tests cover delivery/lifetime, not ACLs. */
+vi.mock('../src/lib/privateMaterialization', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../src/lib/privateMaterialization')>()),
+  preparePrivateDocument: vi.fn((...args: Parameters<typeof fixturePrivateMaterializer>) =>
+    fixturePrivateMaterializer(...args),
+  ),
+}))
 
 const frame: Frame = {
   id: 'export-frame',
@@ -38,6 +50,7 @@ const frame: Frame = {
 let clicked: HTMLAnchorElement[]
 
 beforeEach(() => {
+  vi.mocked(preparePrivateDocument).mockImplementation(fixturePrivateMaterializer)
   clicked = []
   vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) {
     clicked.push(this)
@@ -47,6 +60,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  invalidatePrivateMedia()
   vi.mocked(rasterizeFrame).mockImplementation(async () => Promise.reject(new Error('no')))
   vi.mocked(inspectElement).mockImplementation(async () => null)
   vi.restoreAllMocks()
@@ -377,4 +391,93 @@ it('copies one element as a PNG, measured after the clipboard write has started'
     expect.objectContaining({ type: 'png', clip: { x: 5, y: 5, width: 10, height: 10 } }),
   )
   expect(useStore.getState().notice).toMatchObject({ text: 'PNG copied', busy: false })
+})
+
+it('prepares and revalidates a draft before saving self-contained private HTML', async () => {
+  const html = '<img src="/a/fixture.png">'
+  vi.mocked(preparePrivateDocument).mockImplementation(async (source, ...rest) => {
+    const result = await fixturePrivateMaterializer(source, ...rest)
+    return { ...result, html: source ? '<img src="data:image/png;base64,PRIVATE">' : '' }
+  })
+  await downloadFrameHtml(frame, html)
+  expect(vi.mocked(preparePrivateDocument).mock.calls.map(([source]) => source)).toEqual([html, ''])
+  expect(clicked.map((link) => link.download)).toEqual(['Poster.html'])
+  const blob = vi.mocked(URL.createObjectURL).mock.calls[0]![0] as Blob
+  expect(await blob.text()).toContain('data:image/png;base64,PRIVATE')
+})
+
+it('rejects a late server export after the existing media epoch is invalidated', async () => {
+  let respond!: (res: Response) => void
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(
+      () =>
+        new Promise<Response>((resolve) => {
+          respond = resolve
+        }),
+    ),
+  )
+  const done = downloadFrameExport(frame, 'png')
+  await vi.waitFor(() => expect(fetch).toHaveBeenCalled())
+  invalidatePrivateMedia()
+  respond(new Response('private-png'))
+  await done
+  expect(clicked).toHaveLength(0)
+  expect(URL.createObjectURL).not.toHaveBeenCalled()
+})
+
+it('does not deliver a clipboard blob when access changes during server crop', async () => {
+  measured({ x: 0, y: 0, width: 10, height: 10 })
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () => new Response('private-png')),
+  )
+  let finish!: (blob: Blob) => void
+  vi.mocked(cropRaster).mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve
+      }),
+  )
+  const { written } = stubClipboard()
+  const done = copyElementPng(frame, hero)
+  await vi.waitFor(() => expect(finish).toBeTypeOf('function'))
+  invalidatePrivateMedia()
+  finish(new Blob(['private-crop'], { type: 'image/png' }))
+  await done
+  expect(written).toHaveLength(0)
+  expect(useStore.getState().notice?.text).not.toBe('PNG copied')
+})
+
+it('rejects the entire PDF before saving when one selected frame fails the final current check', async () => {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () => new Response('%PDF-private')),
+  )
+  vi.mocked(preparePrivateDocument).mockImplementation(async (source, context, ...rest) => {
+    if (context.id === 'second') throw new Error('deleted selected frame')
+    return fixturePrivateMaterializer(source, context, ...rest)
+  })
+  await downloadFramesPdf('canvas', [frame, { ...frame, id: 'second' }])
+  expect(preparePrivateDocument).toHaveBeenCalledTimes(2)
+  expect(clicked).toHaveLength(0)
+})
+
+it('revokes a completed download object URL through the existing epoch owner', async () => {
+  vi.mocked(rasterizeFrame).mockResolvedValue(new Blob(['private-png'], { type: 'image/png' }))
+  await downloadFrameExport(frame, 'png')
+  expect(clicked).toHaveLength(1)
+  expect(URL.revokeObjectURL).not.toHaveBeenCalled()
+  invalidatePrivateMedia()
+  expect(URL.revokeObjectURL).toHaveBeenCalledExactlyOnceWith('blob:export')
+})
+
+it('never falls back to an older server design after private source, access, or budget rejection', async () => {
+  vi.stubGlobal('fetch', vi.fn())
+  for (const kind of ['invalid', 'limit', 'aborted', 'unsupported'] as const) {
+    vi.mocked(rasterizeFrame).mockRejectedValueOnce(new PrivateMaterializationError(kind))
+    await downloadFrameExport(frame, 'png')
+  }
+  expect(fetch).not.toHaveBeenCalled()
+  expect(clicked).toHaveLength(0)
 })

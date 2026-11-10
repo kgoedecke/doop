@@ -11,6 +11,7 @@ import type { Canvas, Frame, TaskFeedback } from '../shared/types.ts'
  * the tools that change the canvas keep claiming. */
 vi.mock('../server/db/persist.ts', () => ({
   saveFrame: () => {},
+  insertCanvas: async () => {},
   saveCanvas: () => {},
   saveTask: () => {},
   saveFeedback: () => {},

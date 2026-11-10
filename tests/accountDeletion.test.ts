@@ -14,6 +14,7 @@ vi.mock('../server/db/persist.ts', () => {
     deleteToken: noop,
     deleteMember: noop,
     deleteReference: noop,
+    insertCanvas: async () => {},
     saveCanvas: noop,
     saveCanvasCopy: noop,
     saveFrame: noop,
@@ -43,19 +44,19 @@ import { purgeUserData } from '../server/accountDeletion.ts'
 import { disconnectAgent as disconnectSlack } from '../server/slack/jobs.ts'
 import { disconnectAgent as disconnectLinear } from '../server/linear/jobs.ts'
 
-beforeEach(() => {
-  for (const canvas of store.allCanvases()) store.deleteCanvas(canvas.id)
+beforeEach(async () => {
+  for (const canvas of store.allCanvases()) await store.deleteCanvas(canvas.id)
   rig.workspaces.clear()
   rig.dbDeletes = 0
   vi.clearAllMocks()
 })
 
 it('deletes only the canvases nobody else can reach, and leaves the rest', async () => {
-  const mine = store.createCanvas('Private board', 'alice')
-  const shared = store.createCanvas('Shared board', 'alice')
+  const mine = await store.createCanvas('Private board', 'alice')
+  const shared = await store.createCanvas('Shared board', 'alice')
   store.addMember(shared.id, 'bob', 'alice')
-  const inWorkspace = store.createCanvas('Team board', 'alice', 'ws1')
-  const theirs = store.createCanvas("Bob's board", 'bob')
+  const inWorkspace = await store.createCanvas('Team board', 'alice', 'ws1')
+  const theirs = await store.createCanvas("Bob's board", 'bob')
   store.addMember(theirs.id, 'alice', 'bob')
   rig.workspaces.set('ws1', new Set(['alice', 'bob']))
 

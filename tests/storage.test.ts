@@ -38,6 +38,17 @@ describe('storage keys', () => {
     expect(await storage.getObject('never-written.png')).toBeNull()
   })
 
+  it('bounds actual bytes even when an object is larger than its declared use', async () => {
+    await storage.putObject('bounded.png', Buffer.alloc(9), 'image/png')
+    await expect(storage.getObject('bounded.png', 8)).rejects.toThrow(/read budget/)
+    expect((await storage.getObject('bounded.png', 9))?.length).toBe(9)
+    await expect(storage.getObject('bounded.png', 10 * 1024 * 1024 + 1)).rejects.toThrow(/invalid/)
+    const large = path.join(tmp, 'data', 'assets', 'large.png')
+    await fs.writeFile(large, '')
+    await fs.truncate(large, 10 * 1024 * 1024 + 1)
+    await expect(storage.getObject('large.png')).rejects.toThrow(/read budget/)
+  })
+
   it.each([
     '../escape.png',
     'thumb/../escape.png',

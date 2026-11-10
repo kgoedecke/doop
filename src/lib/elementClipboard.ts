@@ -5,6 +5,7 @@ import { copyFrames } from './frameClipboard'
 import { useStore } from './store'
 import { ELEMENT_CLIP_KEY, ELEMENT_CLIP_STYLE_KEY, FRAME_CLIP_KEY } from './clipboardKeys'
 import { carriedCss, newScope, renameInCss, SCOPE_ATTR, withCarriedCss } from './styleCarry'
+import { api, errorMessage } from './api'
 
 export function copyLayer(frame: Frame, selector: string): boolean {
   return copyLayers(frame, [selector])
@@ -44,7 +45,13 @@ export function copyLayers(frame: Frame, selectors: string[]): boolean {
     if (css) sheets.push(css)
   })
   localStorage.setItem(ELEMENT_CLIP_KEY, tpl.innerHTML)
-  const styles: ClipStyles = { frameId: frame.id, css: sheets.join('\n'), scopes }
+  const styles: ClipStyles = {
+    frameId: frame.id,
+    canvasId: frame.canvasId,
+    sourceVersion: frame.updatedAt,
+    css: sheets.join('\n'),
+    scopes,
+  }
   localStorage.setItem(ELEMENT_CLIP_STYLE_KEY, JSON.stringify(styles))
   localStorage.removeItem(FRAME_CLIP_KEY)
   return true
@@ -69,22 +76,35 @@ function outermostInOrder(html: string, selectors: string[]): string[] {
     .map(({ selector }) => selector)
 }
 
-type ClipStyles = { frameId: string; css: string; scopes?: string[] }
+type ClipStyles = { frameId: string; canvasId: string; sourceVersion: number; css: string; scopes: string[] }
 
 function clipStyles(): ClipStyles | null {
   try {
     const raw = localStorage.getItem(ELEMENT_CLIP_STYLE_KEY)
     const parsed: unknown = raw ? JSON.parse(raw) : null
-    if (parsed && typeof parsed === 'object' && 'css' in parsed && typeof parsed.css === 'string')
-      return parsed as ClipStyles
+    if (parsed && typeof parsed === 'object') {
+      const value = parsed as Partial<ClipStyles>
+      if (
+        typeof value.frameId === 'string' &&
+        value.frameId.length > 0 &&
+        typeof value.canvasId === 'string' &&
+        value.canvasId.length > 0 &&
+        Number.isSafeInteger(value.sourceVersion) &&
+        (value.sourceVersion ?? -1) >= 0 &&
+        typeof value.css === 'string' &&
+        Array.isArray(value.scopes) &&
+        value.scopes.every((scope) => typeof scope === 'string')
+      )
+        return value as ClipStyles
+    }
   } catch {
-    /* an older clip, or a value this code did not write */
+    /* invalid current clipboard data; no legacy shape is adopted */
   }
   return null
 }
 
 export function hasElementClip(): boolean {
-  return !!localStorage.getItem(ELEMENT_CLIP_KEY)
+  return !!localStorage.getItem(ELEMENT_CLIP_KEY) && !!clipStyles()
 }
 
 /** Paste after the picked layer, or at the end of a frame's empty surface;
@@ -96,17 +116,50 @@ export function pasteLayer(frame: Frame, selector: string | null): boolean {
   /* each paste wears scopes of its own, so two pastes of one copy never
      share rules or animations */
   const styles = clipStyles()
-  const fresh = new Map((styles?.scopes ?? []).map((old) => [old, newScope()]))
+  if (!styles) return false
+  if (styles.canvasId !== live.canvasId) {
+    const canvasId = live.canvasId
+    const pageId = useStore.getState().activePageId
+    const version = live.updatedAt
+    void api
+      .copyResources(canvasId, [
+        { sourceFrameId: styles.frameId, sourceVersion: styles.sourceVersion, html, css: styles.css },
+      ])
+      .then((result) => {
+        const state = useStore.getState()
+        const current = state.canvas?.frames.find((f) => f.id === live.id)
+        if (
+          state.canvas?.id !== canvasId ||
+          state.activePageId !== pageId ||
+          !current ||
+          current.updatedAt !== version ||
+          current.locked ||
+          (selector && isElementLocked(current.html, selector))
+        )
+          throw new Error('The destination changed. Paste again where you want the content.')
+        if (result.canvasId !== canvasId || result.entries.length !== 1)
+          throw new Error('The copied files did not match this destination.')
+        if (!pasteContent(current, selector, result.entries[0]!.html, { ...styles, css: result.entries[0]!.css ?? '' }))
+          throw new Error('The destination layer is no longer available. Choose where to paste again.')
+      })
+      .catch((error: unknown) =>
+        useStore.getState().pushNotice(errorMessage(error, 'The content could not be pasted.')),
+      )
+    return true
+  }
+  return pasteContent(live, selector, html, styles)
+}
+
+function pasteContent(live: Frame, selector: string | null, html: string, styles: ClipStyles): boolean {
+  const fresh = new Map(styles.scopes.map((old) => [old, newScope()]))
   const rescope = (text: string) => [...fresh].reduce((t, [old, next]) => t.split(old).join(next), text)
   const inserted = insertElements(live.html, selector, rescope(html))
   if (!inserted) return false
   /* one sheet for every pasted root */
-  const pasted = styles
-    ? withCarriedCss(inserted.html, renameInCss(rescope(styles.css), inserted.renamed), [...fresh.values()])
-    : inserted.html
+  const pasted = withCarriedCss(inserted.html, renameInCss(rescope(styles.css), inserted.renamed), [...fresh.values()])
   saveFrameHtml(live, pasted)
   const store = useStore.getState()
   store.pickElement(null)
-  for (const pasted of inserted.selectors) store.toggleElement({ frameId: frame.id, selector: pasted })
+  for (const pasted of inserted.selectors) store.toggleElement({ frameId: live.id, selector: pasted })
   return true
 }

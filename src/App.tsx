@@ -1,6 +1,7 @@
 import { startLocalAgent } from './lib/localAgent'
 import { navigate } from './lib/navigate'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { observePrivateMediaActor } from './lib/privateMaterialization'
 import { Home } from './pages/Home'
 import { Community } from './pages/Community'
 import { Settings } from './pages/Settings'
@@ -53,6 +54,9 @@ export function App() {
   const [route, setRoute] = useState(location.pathname + location.search)
   const path = route.split('?')[0]!
   const { data: session, isPending } = authClient.useSession()
+  useLayoutEffect(() => {
+    if (!isPending) observePrivateMediaActor(session?.user.id ?? null)
+  }, [session?.user.id, isPending])
   /* a signed-out guest on a share link asked for the sign-in form */
   const [guestAuth, setGuestAuth] = useState<'signin' | 'signup' | null>(null)
   const signInRequired = useStore((s) => s.signInRequired)

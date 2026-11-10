@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock('../server/db/persist.ts', () => ({
   saveFrame: () => {},
   saveFrameNow: async () => {},
+  insertCanvas: async () => {},
   saveCanvas: () => {},
   saveTask: () => {},
   saveFeedback: () => {},

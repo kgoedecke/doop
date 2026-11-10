@@ -13,17 +13,19 @@ const JPG = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(6
 let server: Server
 let alice: Client
 let bob: Client
+let photoCanvasId: string
 
 beforeAll(async () => {
   server = await startServer()
   alice = await new Client(server).signUp('alice-avatar@test.dev', 'Alice Avatar')
   bob = await new Client(server).signUp('bob-avatar@test.dev', 'Bob Avatar')
+  photoCanvasId = (await (await alice.post('/api/canvases', { name: 'Profile files' })).json()).id
 }, 60_000)
 
 afterAll(() => server?.stop())
 
-function upload(client: Client, bytes: Buffer) {
-  return client.req('/api/me/avatar', {
+function upload(client: Client, bytes: Buffer, canvasId = photoCanvasId) {
+  return client.req(`/api/me/avatar?canvas=${canvasId}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/octet-stream' },
     body: new Uint8Array(bytes),
@@ -79,7 +81,7 @@ it('stores a photo and shows it on every face', async () => {
   expect(image).toMatch(/^\/a\/[A-Za-z0-9_-]+\.png$/)
 
   /* the bytes are served as the image they were sniffed to be */
-  const served = await fetch(server.base + image)
+  const served = await alice.get(image)
   expect(served.status).toBe(200)
   expect(served.headers.get('content-type')).toBe('image/png')
   expect(Buffer.from(await served.arrayBuffer()).equals(PNG)).toBe(true)
@@ -94,7 +96,8 @@ it('stores a photo and shows it on every face', async () => {
   expect((await alice.post(`/api/canvases/${canvas.id}/members`, { email: 'bob-avatar@test.dev' })).status).toBe(200)
   /* the share list appends the invite's answer as a row, so it carries the face too */
   const carol = await new Client(server).signUp('carol-avatar@test.dev', 'Carol Avatar')
-  const { image: carolImage } = await (await upload(carol, JPG)).json()
+  const carolCanvas = await (await carol.post('/api/canvases', { name: 'Carol profile files' })).json()
+  const { image: carolImage } = await (await upload(carol, JPG, carolCanvas.id)).json()
   const invited = await (
     await alice.post(`/api/canvases/${canvas.id}/members`, { email: 'carol-avatar@test.dev' })
   ).json()
@@ -125,7 +128,7 @@ it('stores a photo and shows it on every face', async () => {
   const { image: second } = await again.json()
   expect(second).toMatch(/\.jpg$/)
   expect((await (await alice.get('/api/me')).json()).image).toBe(second)
-  expect((await fetch(server.base + image)).status).toBe(200)
+  expect((await alice.get(image)).status).toBe(200)
 
   /* the room hears about the new face without a reconnect */
   const updated = await new Promise<{ image?: string }>((resolve) => {

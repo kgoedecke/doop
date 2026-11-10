@@ -5,6 +5,7 @@ import type { Actor } from '../shared/types'
 vi.mock('../server/db/persist.ts', () => ({
   saveTask: () => {},
   saveActivity: () => {},
+  insertCanvas: async () => {},
   saveCanvas: () => {},
   saveFrame: () => {},
 }))
@@ -16,12 +17,12 @@ const user: Actor = { name: 'kevin', kind: 'user', color: '#000' }
 let canvasId: string
 const order = () => store.getCanvas(canvasId)!.frames.map((f) => f.name)
 
-beforeEach(() => {
+beforeEach(async () => {
   actions.wire(
     () => {},
     () => {},
   )
-  canvasId = store.createCanvas('stack', 'kevin').id
+  canvasId = (await store.createCanvas('stack', 'kevin')).id
 })
 
 describe('restackFrames', () => {
@@ -40,10 +41,10 @@ describe('restackFrames', () => {
     expect(order()).toEqual(['b', 'a'])
   })
 
-  it('writes nothing when one frame is missing or on another canvas', () => {
+  it('writes nothing when one frame is missing or on another canvas', async () => {
     const a = actions.createFrame(canvasId, { name: 'a' }, user)!
     actions.createFrame(canvasId, { name: 'b' }, user)
-    const elsewhere = actions.createFrame(store.createCanvas('other', 'kevin').id, { name: 'x' }, user)!
+    const elsewhere = actions.createFrame((await store.createCanvas('other', 'kevin')).id, { name: 'x' }, user)!
     const z = a.z
     expect(
       actions.restackFrames(

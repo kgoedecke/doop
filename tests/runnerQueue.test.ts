@@ -9,6 +9,7 @@ vi.mock('../server/db/persist.ts', () => ({
   saveActivity: () => {},
   saveDecision: () => {},
   saveProposal: () => {},
+  insertCanvas: async () => {},
   saveCanvas: () => {},
   saveFrame: () => {},
 }))
@@ -24,7 +25,7 @@ const chatgpt = { provider: 'chatgpt' as const, model: 'gpt-5.6-sol', effort: 'h
 
 let canvasId: string
 
-beforeEach(() => {
+beforeEach(async () => {
   actions.wire(
     () => {},
     () => {},
@@ -37,7 +38,7 @@ beforeEach(() => {
     decisions: new Map(),
     proposals: new Map(),
   })
-  canvasId = store.createCanvas('runner queue', 'alice').id
+  canvasId = (await store.createCanvas('runner queue', 'alice')).id
 })
 
 describe('a card with a runner pick', () => {

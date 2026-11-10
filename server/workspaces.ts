@@ -1,4 +1,5 @@
 import { env } from './env.ts'
+import { companyPolicy } from './companyPolicy.ts'
 import express from 'express'
 import { and, eq, inArray } from 'drizzle-orm'
 import { nanoid } from 'nanoid'
@@ -8,7 +9,6 @@ import * as authSchema from './db/auth-schema.ts'
 import { store } from './store.ts'
 import * as billing from './billing.ts'
 import { mailerConfigured, sendMail } from './mailer.ts'
-import { dropWorkspaceFonts } from './fonts.ts'
 import { notifyUsers } from './userEvents.ts'
 import { avatarUrl } from '../shared/avatar.ts'
 import { isBillingInterval, isWorkspaceActive } from '../shared/billing.ts'
@@ -186,6 +186,7 @@ export function listFor(userId: string): WorkspaceSummary[] {
 /* ---- writes ---- */
 
 export function createWorkspace(name: string, ownerId: string): WorkspaceRecord {
+  companyPolicy.assertWorkspaceOwner(ownerId)
   const now = Date.now()
   const ws: WorkspaceRecord = {
     id: nanoid(10),
@@ -230,6 +231,7 @@ export function renameWorkspace(id: string, name: string): WorkspaceRecord | und
 export async function deleteWorkspace(id: string): Promise<void> {
   const ws = records.get(id)
   if (!ws) return
+  companyPolicy.assertPublicFeature(id)
   if (billing.billingEnabled()) await billing.cancelSubscription(ws)
   store.detachWorkspace(id)
   records.delete(id)
@@ -241,7 +243,6 @@ export async function deleteWorkspace(id: string): Promise<void> {
     await tx.delete(t.workspaceInvites).where(eq(t.workspaceInvites.workspaceId, id))
     await tx.delete(t.workspaces).where(eq(t.workspaces.id, id))
   })
-  await dropWorkspaceFonts(id)
 }
 
 /** Mirror a Stripe subscription onto the row. The one place billing state
@@ -332,6 +333,7 @@ function reconcileSeats(ws: WorkspaceRecord): void {
 }
 
 export function addMember(workspaceId: string, userId: string, role: WorkspaceRole, addedBy: string): boolean {
+  if (!companyPolicy.allowsMembership(workspaceId, userId, role)) return false
   const ws = records.get(workspaceId)
   if (!ws) return false
   const map = membersOf(workspaceId)
@@ -345,6 +347,7 @@ export function addMember(workspaceId: string, userId: string, role: WorkspaceRo
 }
 
 export function setRole(workspaceId: string, userId: string, role: WorkspaceRole): boolean {
+  if (!companyPolicy.allowsMembership(workspaceId, userId, role)) return false
   const entry = members.get(workspaceId)?.get(userId)
   if (!entry) return false
   entry.role = role
@@ -420,6 +423,7 @@ async function acceptInvite(
   invite: { id: string; role: string; invitedBy: string },
 ): Promise<void> {
   const role: WorkspaceRole = isWorkspaceRole(invite.role) ? invite.role : 'member'
+  if (!companyPolicy.allowsMembership(ws.id, userId, role)) return
   const addedAt = Date.now()
   await db.transaction(async (tx) => {
     await tx
@@ -576,6 +580,8 @@ workspacesRouter.patch('/:id', (req, res) => {
 workspacesRouter.delete('/:id', async (req, res) => {
   const ws = requireWorkspace(req, res, req.params.id, 'owner')
   if (!ws) return
+  if (companyPolicy.isPrivate(ws.id))
+    return res.status(403).json({ error: 'operator deprovisioning is required for company workspaces' })
   try {
     await deleteWorkspace(ws.id)
     res.json({ ok: true })
@@ -604,6 +610,10 @@ workspacesRouter.post('/:id/members', async (req, res) => {
     .from(authSchema.user)
     .where(eq(authSchema.user.email, email))
   if (row) {
+    if (!requireWorkspace(req, res, ws.id, 'admin')) return
+    if (!companyPolicy.allowsMembership(ws.id, row.id, role)) {
+      return res.status(403).json({ error: 'managed bots belong to their configured company workspace' })
+    }
     if (!addMember(ws.id, row.id, role, req.user!.id)) return res.status(400).json({ error: 'already a member' })
     const member: WorkspaceMember = {
       userId: row.id,
@@ -641,6 +651,8 @@ workspacesRouter.patch('/:id/members/:userId', (req, res) => {
   const role = req.body?.role
   if (role !== 'admin' && role !== 'member') return res.status(400).json({ error: 'role must be admin or member' })
   if (req.params.userId === ws.ownerId) return res.status(400).json({ error: 'the owner keeps the owner role' })
+  if (!companyPolicy.allowsMembership(ws.id, req.params.userId, role))
+    return res.status(403).json({ error: 'managed company workspace policy denies this role' })
   if (!setRole(ws.id, req.params.userId, role)) return res.status(404).json({ error: 'not a member' })
   res.json({ ok: true })
 })

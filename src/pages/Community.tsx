@@ -337,6 +337,6 @@ function DesignModal({
   )
 }
 
-/** A published frame through the public image pipeline. The frame id is
+/** A listed frame through the authenticated image pipeline. The frame id is
  *  all the gallery holds; a render that fails says so instead of leaving a
  *  blank tile that looks like an empty design. */

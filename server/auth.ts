@@ -482,8 +482,14 @@ function buildAuth() {
           },
           after: async (user) => {
             const first = (user.name || 'Your').split(/\s+/)[0]
-            const canvas = store.createCanvas(`${first}'s first canvas`, user.id)
-            demo.markPending(canvas.id)
+            try {
+              const canvas = await store.createCanvas(`${first}'s first canvas`, user.id)
+              demo.markPending(canvas.id)
+            } catch {
+              // The account is usable without an optional welcome document.
+              // Do not expose SQL parameters, claim a document, or queue a demo.
+              console.error('[auth] welcome canvas creation could not be confirmed; demo not queued')
+            }
             /* the other half of the ADMIN_EMAILS reconcile: syncAdmins covers
                people who already existed at boot, this covers signups after.
                With SMTP on, a fresh signup is never verified yet, so the
@@ -576,21 +582,14 @@ export async function getUserName(userId: string): Promise<string | undefined> {
   return row?.name
 }
 
-/* userId -> banned, same short cache: banning revokes browser sessions via
-   better-auth, but MCP OAuth tokens stay valid until expiry — this check is
-   what actually locks a banned user's agent out, so it runs per MCP call */
-const banStates = new Map<string, { banned: boolean; at: number }>()
-
-export async function isBanned(userId: string): Promise<boolean> {
-  const cached = banStates.get(userId)
-  if (cached && Date.now() - cached.at < NAME_TTL_MS) return cached.banned
-  const [row] = await db
+/* OAuth and agent credentials may outlive an account's suspension or deletion.
+   Read current account state for each authorization decision. */
+export async function isBanned(userId: string, reader: Pick<typeof db, 'select'> = db): Promise<boolean> {
+  const [row] = await reader
     .select({ banned: authSchema.user.banned })
     .from(authSchema.user)
     .where(eq(authSchema.user.id, userId))
   /* an unknown user is treated as banned: a token whose account is gone
      should not keep working */
-  const banned = row ? !!row.banned : true
-  banStates.set(userId, { banned, at: Date.now() })
-  return banned
+  return row ? !!row.banned : true
 }

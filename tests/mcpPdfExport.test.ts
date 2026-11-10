@@ -2,8 +2,11 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
 import { PDFDocument } from 'pdf-lib'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+vi.mock('../server/auth.ts', async (original) => ({
+  ...(await original<typeof import('../server/auth.ts')>()),
+  isBanned: async () => false,
+}))
 import { buildMcpServer } from '../server/mcp.ts'
-import { findBrowserPath } from '../server/screenshot.ts'
 import { store } from '../server/store.ts'
 import type { Canvas, Frame } from '../shared/types.ts'
 
@@ -16,7 +19,9 @@ function frame(id: string, x: number, width: number, height: number): Frame {
     id,
     canvasId: 'pdf-canvas',
     name: id,
-    html: `<!doctype html><html><body style="margin:0"><h1>${id}</h1></body></html>`,
+    /* This control has no font/image payload so the real multipage PDF fits
+       the inline field budget. Dense media/download cases use privateExport. */
+    html: '<!doctype html><html><body style="margin:0;background:#18a74a"></body></html>',
     x,
     y: 0,
     width,
@@ -44,7 +49,10 @@ interface CallResult {
 }
 
 async function exportFrame(ownerId: string, args: Record<string, unknown>): Promise<CallResult> {
-  const server = buildMcpServer('Test Owner', ownerId)
+  const server = buildMcpServer('Test Owner', ownerId, undefined, undefined, {
+    actorId: ownerId,
+    currentActor: async () => ownerId,
+  })
   const client = new Client({ name: 'doop-pdf-test', version: '1.0.0' })
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair()
   await server.connect(serverTransport)
@@ -74,19 +82,16 @@ describe('export_frame format pdf', () => {
     expect(result.isError).toBe(true)
   })
 
-  it.skipIf(!findBrowserPath())(
-    'returns one multi-page PDF as an embedded resource, pages in the order given',
-    async () => {
-      /* the poster sits right of the slide on the canvas, but it was named first */
-      const result = await exportFrame(OWNER_ID, { frame_id: POSTER.id, format: 'pdf', frame_ids: [SLIDE.id] })
-      expect(result.isError).toBeFalsy()
-      const resource = result.content.find((block) => block.type === 'resource')?.resource
-      expect(resource?.mimeType).toBe('application/pdf')
-      const pdf = await PDFDocument.load(Buffer.from(resource!.blob!, 'base64'))
-      expect(pdf.getPages().map((page) => Math.round(page.getWidth()))).toEqual([225, 480])
-      const meta = JSON.parse(result.content.find((block) => block.type === 'text')!.text!)
-      expect(meta).toMatchObject({ file_name: 'Pitch.pdf', pages: 2 })
-    },
-    60_000,
-  )
+  it('returns one multi-page PDF as an embedded resource, pages in the order given', async () => {
+    /* the poster sits right of the slide on the canvas, but it was named first */
+    const result = await exportFrame(OWNER_ID, { frame_id: POSTER.id, format: 'pdf', frame_ids: [SLIDE.id] })
+    expect(result.isError).toBeFalsy()
+    const resource = result.content.find((block) => block.type === 'resource')?.resource
+    expect(resource?.mimeType).toBe('application/pdf')
+    const pdf = await PDFDocument.load(Buffer.from(resource!.blob!, 'base64'))
+    expect(pdf.getPages().map((page) => Math.round(page.getWidth()))).toEqual([225, 480])
+    const meta = JSON.parse(result.content.find((block) => block.type === 'text')!.text!)
+    expect(meta).toMatchObject({ file_name: 'Pitch.pdf', pages: 2, inline_embedded: true })
+    expect(resource!.blob!.length).toBeLessThanOrEqual(16_384)
+  }, 60_000)
 })

@@ -1,0 +1,8 @@
+{
+  "source": "https://github.com/moby/profiles",
+  "revision": "4b8214fc4971e06172938a1f1554ccff6647ee80",
+  "path": "seccomp/default.json",
+  "sha256": "6416b47770785a41ac59073cdc77d9fe98517df2799dc83ef207e622de3053f6",
+  "delta": "one SCMP_ACT_ALLOW rule for clone,setns,unshare,chroot; all baseline rules retained; parent requires cap-drop ALL and no-new-privileges",
+  "reference": "https://playwright.dev/docs/docker"
+}

@@ -10,6 +10,7 @@ import { Button } from './ui/button'
 import { ListMeta, ListRow, ListSummary, ListTitle } from './ui/list'
 import { Modal, ModalActions, ModalLede, ModalSpacer, ModalTitle } from './ui/modal'
 import { getLocale, t as translate, useT } from '@/lib/i18n'
+import { usePrivateDocument } from '../lib/privateMaterialization'
 
 /* a version is shown at its own size, scaled to fit the modal */
 const PREVIEW_W = 696
@@ -106,7 +107,7 @@ export function FrameHistoryModal({ frame, onClose }: { frame: Frame; onClose: (
             {new Date(picked.at).toLocaleString(getLocale())}
           </div>
           {shown ? (
-            <VersionPreview title={live.name} version={shown} />
+            <VersionPreview frame={live} version={shown} />
           ) : (
             <ModalLede>{t('panels.historyLoadingVersion')}</ModalLede>
           )}
@@ -174,7 +175,12 @@ function Author({ name, kind }: { name: string; kind?: FrameVersion['savedByKind
 }
 
 /** The version's HTML at its own size, scaled to fit; no scripts run. */
-function VersionPreview({ title, version }: { title: string; version: Shown }) {
+function VersionPreview({ frame, version }: { frame: Frame; version: Shown }) {
+  const { prepared, error, epoch } = usePrivateDocument(version.html, {
+    kind: 'frame',
+    id: frame.id,
+    canvasId: frame.canvasId,
+  })
   const w = Math.min(PREVIEW_W, window.innerWidth - 110)
   const scale = Math.min(1, w / version.width)
   return (
@@ -182,10 +188,17 @@ function VersionPreview({ title, version }: { title: string; version: Shown }) {
       className="mt-3.5 overflow-auto rounded-[12px] border border-line bg-surface"
       style={{ height: Math.min(version.height * scale, window.innerHeight * 0.55) }}
     >
+      {error && (
+        <p role="status" className="p-3 text-[13px] text-accent-ink">
+          {error.message}
+        </p>
+      )}
       <iframe
+        key={`${epoch}:${frame.canvasId}:${frame.id}`}
         className="pointer-events-none origin-top-left border-0"
-        title={title}
-        srcDoc={version.html}
+        title={frame.name}
+        srcDoc={prepared?.html ?? ''}
+        data-doop-private-preview={prepared?.privateMedia ? '' : undefined}
         sandbox=""
         tabIndex={-1}
         style={{ width: version.width, height: version.height, transform: `scale(${scale})` }}

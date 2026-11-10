@@ -2,6 +2,7 @@ import { env } from './env.ts'
 import { ModelAuthError, ModelUnavailableError, type AgentModel } from './agentModel.ts'
 import type { TurnBlock } from './openaiAgent.ts'
 import { createAsset } from './assets.ts'
+import { requirePrivateCanvas, jobResourceReader, frameReadScope } from './privateResources.ts'
 import * as actions from './actions.ts'
 import { store } from './store.ts'
 import {
@@ -350,6 +351,7 @@ const ORIGIN = env.BETTER_AUTH_URL
  *  every viewer. Unresolvable refs collapse to a transparent pixel rather
  *  than a broken image. */
 export async function resolveRepoAssets(conn: GithubConnection, html: string, pathSet: Set<string>): Promise<string> {
+  requirePrivateCanvas(conn.canvasId, conn.createdBy)
   const wanted = [...new Set([...html.matchAll(REPO_REF_RE)].map((m) => m[2]!))]
     .filter((p) => pathSet.has(p))
     .slice(0, MAX_TRANSPLANTED_ASSETS)
@@ -358,6 +360,7 @@ export async function resolveRepoAssets(conn: GithubConnection, html: string, pa
     try {
       const asset = await createAsset(await fetchRepoBinary(conn, p), {
         canvasId: conn.canvasId,
+        actorId: conn.createdBy,
         uploadedBy: 'Doop',
       })
       urls.set(p, `${ORIGIN}/a/${asset.id}.${asset.ext}`)
@@ -554,8 +557,8 @@ function placeRepoFrame(
   height: number,
   actor: Actor,
 ): Frame {
-  const canvas = store.getCanvas(canvasId)
-  if (!canvas) throw new Error('canvas not found')
+  if (conn.canvasId !== canvasId) throw new Error('connection belongs to a different canvas')
+  const canvas = requirePrivateCanvas(canvasId, conn.createdBy)
   const at = nextRepoFramePosition(canvas.frames, conn.id, width)
   const frame = actions.createFrame(canvasId, { name: screen.title.slice(0, 80), ...at, width, height, html }, actor)
   if (!frame) throw new Error('canvas not found')
@@ -655,11 +658,16 @@ async function sketchScreen(
   for (let round = 0; round < REVIEW_ROUNDS; round++) {
     try {
       const { renderFrame } = await import('./screenshot.ts')
-      const shot = await renderFrame(frame, frame.height > 4000 ? 0.7 : 1, {
-        type: 'jpeg',
-        quality: 72,
-        maxHeight: 8000,
-      })
+      const shot = await renderFrame(
+        frame,
+        frameReadScope(jobResourceReader(conn.createdBy), frame),
+        frame.height > 4000 ? 0.7 : 1,
+        {
+          type: 'jpeg',
+          quality: 72,
+          maxHeight: 8000,
+        },
+      )
       messages.push({ role: 'assistant', content: (result?.content ?? []) as TurnBlock[] })
       messages.push({
         role: 'user',
@@ -683,6 +691,7 @@ async function sketchScreen(
       result = fixed
       const redo = extractHtml(fixed.content as { type: string; text?: string }[])
       const redoAssets = await resolveRepoAssets(conn, redo.html, pathSet)
+      requirePrivateCanvas(canvasId, conn.createdBy)
       frame =
         actions.updateFrame(
           frame.id,

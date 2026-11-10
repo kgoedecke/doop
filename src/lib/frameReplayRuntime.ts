@@ -11,6 +11,7 @@ export const FRAME_REPLAY_RUNTIME = `
   var replayUrl = null
   var replaySnapshot = false
   function syncReplay() {
+    if (privateReplayBlocked) return
     var rr = window.__PosthogExtensions__ && window.__PosthogExtensions__.rrweb
     if (!replayOptions) return
     if (!rr) { loadReplay(); return }
@@ -28,7 +29,7 @@ export const FRAME_REPLAY_RUNTIME = `
   }
   function loadReplay() {
     // Three total attempts per recording generation, with 250/500ms backoff.
-    if (!replayOptions || replayScript || replayRetryTimer || replayAttempts >= 3) return
+    if (privateReplayBlocked || !replayOptions || replayScript || replayRetryTimer || replayAttempts >= 3) return
     replayAttempts++
     var script = document.createElement('script')
     replayScript = script

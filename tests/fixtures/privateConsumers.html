@@ -1,0 +1,79 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <style>
+      html,
+      body,
+      #root {
+        margin: 0;
+        width: 100%;
+        height: 100%;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module">
+      import React from 'react'
+      import { createRoot } from 'react-dom/client'
+      import { flushSync } from 'react-dom'
+      import { PrototypePlayer } from '/src/components/PrototypePlayer.tsx'
+      import { FrameHistoryModal } from '/src/components/FrameHistoryModal.tsx'
+      import { Stage } from '/src/components/Stage.tsx'
+      import { TooltipProvider } from '/src/components/ui/tooltip.tsx'
+      import { MemoryPanel } from '/src/components/MemoryPanel.tsx'
+      import { useStore } from '/src/lib/store.ts'
+      import { downloadFrameExport, downloadFrameHtml } from '/src/lib/frameExport.ts'
+      import { invalidatePrivateMedia } from '/src/lib/privateMaterialization.ts'
+      import '/src/styles.css'
+      // No transport override: every component uses the normal authenticated API.
+      window.clearPrivateFixture = () => invalidatePrivateMedia()
+      window.exportPrivatePng = async (frame) => {
+        const click = HTMLAnchorElement.prototype.click
+        let clicked = false
+        HTMLAnchorElement.prototype.click = () => {
+          clicked = true
+        }
+        try {
+          await downloadFrameExport(frame, 'png')
+          return clicked
+        } finally {
+          HTMLAnchorElement.prototype.click = click
+        }
+      }
+      window.exportPrivateHtml = async (frame) => {
+        const click = HTMLAnchorElement.prototype.click
+        let url = null
+        HTMLAnchorElement.prototype.click = function () {
+          url = this.href
+        }
+        try {
+          await downloadFrameHtml(frame)
+          if (!url) throw new Error('HTML export produced no download')
+          return { url, source: await (await fetch(url)).text() }
+        } finally {
+          HTMLAnchorElement.prototype.click = click
+        }
+      }
+      const root = createRoot(document.getElementById('root'))
+      window.mountPrivateConsumer = (kind, canvas, frame) => {
+        useStore.getState().setCanvas(canvas)
+        if (kind === 'drag') useStore.getState().setViewport({ x: 100, y: 80, zoom: 1 })
+        const content =
+          kind === 'prototype'
+            ? React.createElement(PrototypePlayer, { startFrameId: frame.id })
+            : kind === 'history'
+              ? React.createElement(FrameHistoryModal, { frame, onClose: () => root.render(null) })
+              : kind === 'drag'
+                ? React.createElement(
+                    TooltipProvider,
+                    null,
+                    React.createElement(Stage, { onAddFrame: () => {}, sidePanelOpen: false }),
+                  )
+                : React.createElement(MemoryPanel)
+        flushSync(() => root.render(content))
+      }
+    </script>
+  </body>
+</html>
