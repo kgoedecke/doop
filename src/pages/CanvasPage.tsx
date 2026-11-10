@@ -43,6 +43,7 @@ import { LimitWall, isResidentLimit } from '../components/TeamAllowance'
 import { WorkingNow } from '../components/WorkingNow'
 import { MobilePanelTabs, SideRail } from '../components/SideRail'
 import { LayersPanel, LayersRailToggle } from '../components/LayersPanel'
+import { IosAppPrompt } from '../components/NativeAppPromo'
 import { Onboarding } from '../components/Onboarding'
 import { AccessBanner } from '../components/AccessBanner'
 import { ShareModal } from '../components/ShareModal'
@@ -1044,6 +1045,7 @@ export function CanvasPage({
               line; this per-agent stack is only for windows too narrow for it */}
           <WorkingNow style={{ left: chrome.left }} className="min-[1180px]:hidden" />
           {!readOnly && <Onboarding canvasId={canvasId} />}
+          <IosAppPrompt />
           <AccessBanner guest={guest} onSignUp={onSignUp} onSignIn={onSignIn} />
           {!isMobile &&
             (layersOpen ? (

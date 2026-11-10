@@ -15,6 +15,7 @@ import { AppRail, railLayout } from '../components/AppRail'
 import { ConnectModal } from '../components/ConnectModal'
 import { FramePreview, FrameThumb } from '../components/FramePreview'
 import { HomeHero } from '../components/HomeHero'
+import { IosAppPrompt } from '../components/NativeAppPromo'
 import { SourcePicker } from '../components/ImportSources'
 import { importSources } from '../components/importSourceList'
 import { Modal } from '../components/ui/modal'
@@ -607,6 +608,7 @@ export function Home() {
         }}
       />
       {toast && <Toast>{toast}</Toast>}
+      <IosAppPrompt />
     </DashLayout>
   )
 }

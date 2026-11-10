@@ -13,6 +13,7 @@ import { AgentIcon } from './AgentIcon'
 import { AccountMenu } from './DashShell'
 import { CanvasSearchModal } from './CanvasSearchModal'
 import { ConnectModal } from './ConnectModal'
+import { NativeAppCard } from './NativeAppPromo'
 import { DashNavItem, DashSectionLabel, DashSidebar, DashSidebarBrand } from './ui/dash'
 import { Dot } from './ui/dot'
 import { IconButton } from './ui/icon-button'
@@ -534,9 +535,14 @@ export function AppRail({
         </DashNavItem>
       </div>
 
-      <div className="mt-auto flex items-center gap-2.5 px-1 pt-4">
-        <AccountMenu face side="top" align="start" />
-        <AccountName />
+      {/* the desktop app, on a computer's browser only; the phone drawer
+          leaves it to the App Store sheet */}
+      <div className="mt-auto flex flex-col pt-4">
+        {!inDrawer && <NativeAppCard className="mb-3" />}
+        <div className="flex items-center gap-2.5 px-1">
+          <AccountMenu face side="top" align="start" />
+          <AccountName />
+        </div>
       </div>
     </div>
   )
