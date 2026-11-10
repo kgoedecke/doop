@@ -1,8 +1,8 @@
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { afterAll, beforeEach, describe, expect, it } from 'vitest'
 import type { Page } from 'puppeteer-core'
 import type { TextFormatCommand } from '../src/lib/richText'
 import { findBrowserPath } from '../server/screenshot'
-import { fixtureUrl, openBrowser, type TestBrowser } from './browser'
+import { fixtureUrl, pagePerTest } from './browser'
 import type { Canvas, ElementComment, Frame } from '../shared/types'
 import type { ImportedSvg } from '../src/lib/svgImport'
 
@@ -38,7 +38,7 @@ declare global {
 }
 
 describe.skipIf(!findBrowserPath())('drawing on the canvas', { timeout: 30_000 }, () => {
-  let browser: TestBrowser
+  const pages = pagePerTest()
   let page: Page
   let saved: Frame[] = []
   let nextId = 0
@@ -46,22 +46,11 @@ describe.skipIf(!findBrowserPath())('drawing on the canvas', { timeout: 30_000 }
   /* the anchors sent by PATCH /api/comments/:id/anchor, in order */
   let commentMoves: Record<string, unknown>[] = []
   const errors: string[] = []
-  /** why Chromium gave up on this test's tab, when it did */
-  let crashed: string | null = null
-
-  beforeAll(async () => {
-    browser = await openBrowser()
-  }, 60_000)
-
-  /* Every test gets its own page. One page for the whole file meant that a
-     tab Chromium lost (a renderer that died on a CI runner) took every later
-     test with it: each one's setup waited 30s on a page that would never
-     answer. */
+  /* every test gets its own page (see pagePerTest) */
   async function openPage(): Promise<Page> {
-    const page = await browser.newPage()
+    const page = await pages.open()
     page.setDefaultTimeout(10_000)
     page.on('pageerror', (err) => errors.push(String(err)))
-    page.on('error', (err) => (crashed = String(err)))
     /* holds the frames' hit-test answers while a test sets heldMoveHits; it
        must listen before the app does, since a window's own listeners run in
        the order they were added */
@@ -106,7 +95,6 @@ describe.skipIf(!findBrowserPath())('drawing on the canvas', { timeout: 30_000 }
   }
 
   beforeEach(async () => {
-    crashed = null
     page = await openPage()
     saved = []
     nextId = 0
@@ -133,14 +121,7 @@ describe.skipIf(!findBrowserPath())('drawing on the canvas', { timeout: 30_000 }
     await page.evaluate(() => window.drawingHarness.viewport({ x: 40, y: 20, zoom: 2 }))
   })
 
-  afterEach(async () => {
-    /* a crashed tab can no longer be closed politely; the context closes it */
-    if (!crashed) await page?.close()
-    expect(crashed, 'Chromium lost the tab during this test').toBeNull()
-  })
-
-  afterAll(async () => {
-    await browser?.close()
+  afterAll(() => {
     expect(errors).toEqual([])
   })
 
