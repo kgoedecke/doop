@@ -1,12 +1,11 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
-import { createServer, type ViteDevServer } from 'vite'
 import type { Page } from 'puppeteer-core'
 import { findBrowserPath } from '../server/screenshot'
-import { fixtureServerConfig, pagePerTest } from './browser'
+import { pagePerTest, serveBuilt, type BuiltServer } from './browser'
 import { freePort, startServer, type Server } from './harness'
 
 describe.skipIf(!findBrowserPath())('page list controls and keyboard history', () => {
-  let vite: ViteDevServer
+  let web: BuiltServer
   let server: Server
   const pages = pagePerTest()
   let page: Page
@@ -14,19 +13,14 @@ describe.skipIf(!findBrowserPath())('page list controls and keyboard history', (
   /* every test signs up as someone new, so each works on a canvas of its own */
   let accounts = 0
   beforeAll(async () => {
-    /* vite needs the server's port for its proxy and the server needs vite's
+    /* the web server needs the backend's port for its proxy and the backend needs its
        origin as BETTER_AUTH_URL, so the port is picked before either starts */
     const port = await freePort()
-    vite = await createServer(
-      fixtureServerConfig({
-        proxy: {
-          '/api': { target: `http://localhost:${port}` },
-          '/ws': { target: `ws://localhost:${port}`, ws: true },
-        },
-      }),
-    )
-    await vite.listen()
-    origin = vite.resolvedUrls!.local[0]!.replace(/\/$/, '')
+    web = await serveBuilt({
+      '/api': { target: `http://localhost:${port}` },
+      '/ws': { target: `ws://localhost:${port}`, ws: true },
+    })
+    origin = web.origin
     server = await startServer({ PORT: String(port), BETTER_AUTH_URL: origin })
   }, 60_000)
   beforeEach(async () => {
@@ -57,7 +51,7 @@ describe.skipIf(!findBrowserPath())('page list controls and keyboard history', (
     await page.waitForSelector('[data-page-id]')
   }, 60_000)
   afterAll(async () => {
-    await vite?.close()
+    await web?.close()
     server?.stop()
   })
 

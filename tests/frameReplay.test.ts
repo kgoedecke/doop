@@ -29,6 +29,10 @@ describe.skipIf(!findBrowserPath())('sandboxed frame replay', () => {
     })
   }, 60_000)
 
+  /** The recorder the frame downloads: its own file in the build, named
+   *  recorder-<hash>.js (the page's posthog-recorder chunk is another file). */
+  const isRecorder = (request: HTTPRequest) => /\/recorder-[\w-]+\.js$/.test(new URL(request.url()).pathname)
+
   async function render(html: string, index = 0) {
     await page.evaluate(
       (html, index) => {
@@ -59,7 +63,7 @@ describe.skipIf(!findBrowserPath())('sandboxed frame replay', () => {
     })
     let attempts = 0
     const onRequest = (request: HTTPRequest) => {
-      if (new URL(request.url()).pathname.endsWith('/dist/recorder.js')) {
+      if (isRecorder(request)) {
         attempts++
         if (attempts === 1) void request.abort('failed')
         else release(request)
@@ -92,7 +96,7 @@ describe.skipIf(!findBrowserPath())('sandboxed frame replay', () => {
     const saved = await page.evaluate(() => window.messages.find((m) => m.type === 'doop:edited')!.html)
     expect(saved).toContain('<div data-doop-replay="">Preserve design content</div>')
     expect(saved).toContain('<script data-doop-replay="">window.designScriptRan = true</script>')
-    expect(saved).not.toContain('/dist/recorder.js')
+    expect(saved).not.toContain(new URL(request.url()).pathname)
     await page.evaluate(() => {
       window.messages = window.messages.filter((m) => m.type !== 'doop:edited')
     })
@@ -179,7 +183,7 @@ describe.skipIf(!findBrowserPath())('sandboxed frame replay', () => {
     await page.setRequestInterception(true)
     let attempts = 0
     const onRequest = (request: HTTPRequest) => {
-      if (new URL(request.url()).pathname.endsWith('/dist/recorder.js')) {
+      if (isRecorder(request)) {
         attempts++
         void request.abort('failed')
       } else void request.continue()

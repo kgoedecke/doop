@@ -1,15 +1,14 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
-import { createServer, type ViteDevServer } from 'vite'
 import type { Page } from 'puppeteer-core'
 import { findBrowserPath } from '../server/screenshot'
-import { fixtureServerConfig, pagePerTest } from './browser'
+import { pagePerTest, serveBuilt, type BuiltServer } from './browser'
 import { freePort, startServer, type Server } from './harness'
 
 /* Z held is the Zoom tool: a click zooms in, a drag zooms onto its box, Esc
    drops the box, and letting go of Z returns to the tool before it, in
    whichever order Z and the mouse are released */
 describe.skipIf(!findBrowserPath())('the Zoom tool', () => {
-  let vite: ViteDevServer
+  let web: BuiltServer
   let server: Server
   const pages = pagePerTest()
   let page: Page
@@ -17,20 +16,15 @@ describe.skipIf(!findBrowserPath())('the Zoom tool', () => {
   let users = 0
   beforeAll(async () => {
     const port = await freePort()
-    vite = await createServer(
-      fixtureServerConfig({
-        proxy: {
-          '/api': { target: `http://localhost:${port}` },
-          '/ws': { target: `ws://localhost:${port}`, ws: true },
-        },
-      }),
-    )
-    await vite.listen()
-    origin = vite.resolvedUrls!.local[0]!.replace(/\/$/, '')
+    web = await serveBuilt({
+      '/api': { target: `http://localhost:${port}` },
+      '/ws': { target: `ws://localhost:${port}`, ws: true },
+    })
+    origin = web.origin
     server = await startServer({ PORT: String(port), BETTER_AUTH_URL: origin })
   }, 60_000)
   afterAll(async () => {
-    await vite?.close()
+    await web?.close()
     server?.stop()
   })
   /* each test signs up its own person and draws on their own canvas */
