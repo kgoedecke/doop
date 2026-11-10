@@ -17,4 +17,12 @@ export const shell: Catalog['shell'] = {
   updateRestart: 'Reiniciar e atualizar',
   updateRestarting: 'Reiniciando…',
   updateLater: 'Agora não',
+  appPromoDismiss: 'Ocultar',
+  appPromoDesktopTitle: 'App do Doop para desktop',
+  appPromoDesktopBody: 'Rode o Claude Code no seu próprio plano, ao lado do canvas.',
+  appPromoDownloadFor: 'Baixar para {platform}',
+  appPromoIosTitle: 'Doop para iPhone e iPad',
+  appPromoIosBody: 'Acompanhe seus agentes enquanto desenham, revise frames e responda comentários em um app nativo.',
+  appPromoIosGet: 'Baixar na App Store',
+  appPromoIosLater: 'Continuar no navegador',
 }
