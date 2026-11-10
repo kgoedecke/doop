@@ -124,7 +124,11 @@ export function CustomProviderForm({
     const key = apiKey.trim()
     return {
       ...(key ? { apiKey: key } : clearKey ? { apiKey: '' } : {}),
-      ...(headers.ok && Object.keys(headers.value).length ? { headers: headers.value } : {}),
+      ...(headers.ok && Object.keys(headers.value).length
+        ? { headers: headers.value }
+        : clearHeaders
+          ? { headers: {} }
+          : {}),
       ...(kind ? { kind } : {}),
     }
   }

@@ -13,6 +13,7 @@ import { isCustomProviderKind, type CustomModel, type CustomProviderConfig } fro
 import { ModelAuthError, ModelUnavailableError, effortFor, runAzureTurn, runOpenAiTurn } from './openaiAgent.ts'
 import type { StopReason, TurnBlock } from './openaiAgent.ts'
 import {
+  IMAGE_OMITTED_NOTE,
   deepseekConfig,
   geminiConfig,
   kimiCodeConfig,
@@ -266,7 +267,11 @@ export function customTurn(target: CustomTarget, model: CustomModel): AgentModel
     })
     return async (req) => {
       try {
-        return await runAnthropicTurn(client, model.id, { ...req, maxTokens: budget(req) })
+        return await runAnthropicTurn(client, model.id, {
+          ...req,
+          messages: model.vision ? req.messages : withoutImages(req.messages),
+          maxTokens: budget(req),
+        })
       } catch (error) {
         if (error instanceof Anthropic.APIError && (error.status === 401 || error.status === 403)) {
           throw new ModelAuthError(`${config.name} rejected the API key. Update it in Settings.`)
@@ -293,6 +298,28 @@ export function customTurn(target: CustomTarget, model: CustomModel): AgentModel
       maxTokens: budget(req),
       signal: req.signal,
     })
+}
+
+/**
+ * The conversation with every image, top-level or inside a tool result,
+ * swapped for the text note the Chat Completions transport uses: a model said
+ * not to see images must not be sent any, whichever tool produced them.
+ */
+export function withoutImages(messages: Anthropic.MessageParam[]): Anthropic.MessageParam[] {
+  const note = { type: 'text' as const, text: IMAGE_OMITTED_NOTE }
+  return messages.map((message) => {
+    if (typeof message.content === 'string') return message
+    return {
+      ...message,
+      content: message.content.map((block) => {
+        if (block.type === 'image') return note
+        if (block.type === 'tool_result' && Array.isArray(block.content)) {
+          return { ...block, content: block.content.map((part) => (part.type === 'image' ? note : part)) }
+        }
+        return block
+      }),
+    }
+  })
 }
 
 function customModel(account: ModelAccount): AgentModel {

@@ -185,6 +185,19 @@ it('refuses bad descriptions and unreachable URLs with the reason', async () => 
   expect((await alice.post('/api/custom-providers', { ...provider, baseUrl: 'ftp://x.example' })).status).toBe(400)
 })
 
+it('holds a person to ten providers, even when adds race', async () => {
+  const adds = await Promise.all(
+    Array.from({ length: 12 }, (_, i) =>
+      bob.post('/api/custom-providers', { ...provider, baseUrl: base, name: `Bob ${i}` }),
+    ),
+  )
+  expect(adds.filter((r) => r.status === 200)).toHaveLength(10)
+  const refused = adds.find((r) => r.status === 400)!
+  expect((await refused.json()).error).toContain('at most 10')
+  const view = (await (await bob.get('/api/model-account')).json()) as View
+  expect(view.accounts.filter((a) => a.kind.startsWith('custom:'))).toHaveLength(10)
+})
+
 it('disconnects it like any other account', async () => {
   const view = (await (await alice.get('/api/model-account')).json()) as View
   const kind = customOf(view)!.kind

@@ -120,6 +120,9 @@ it('edits without resending the stored key or headers, and lists the endpoint’
 
   await click('Remove key')
   await click('Remove saved headers')
+  /* a probe after removing them must not fall back to the stored ones */
+  await click('Fetch models')
+  expect(mocks.discover).toHaveBeenLastCalledWith(expect.objectContaining({ apiKey: '', headers: {} }))
   await click('Save')
   expect(mocks.update).toHaveBeenLastCalledWith(provider.kind, expect.objectContaining({ apiKey: '', headers: {} }))
 })

@@ -85,7 +85,16 @@ export async function testCustomProvider(target: CustomTarget, model: CustomMode
     maxTokens: Math.min(2048, model.maxOutputTokens ?? 2048),
     signal: AbortSignal.timeout(TEST_TIMEOUT_MS),
   })
-  if (!result.content.some((block) => block.type === 'tool_use' && block.name === PING_TOOL.name)) {
+  /* the call must arrive whole: a server that garbles the arguments (which
+     the transport turns into an empty object) would garble every design
+     tool's arguments too */
+  const called = result.content.some(
+    (block) =>
+      block.type === 'tool_use' &&
+      block.name === PING_TOOL.name &&
+      (block.input as { ready?: unknown } | null)?.ready === true,
+  )
+  if (!called) {
     throw new CustomProviderError(
       `${model.id} answered without calling a tool. Doop’s agent works through tool calls, so pick a model (or a server setting) with tool calling.`,
     )
@@ -100,6 +109,11 @@ const probeHits = new Map<string, number[]>()
  *  one makes this server call a URL they chose, so they are rationed. */
 export function takeProbeSlot(userId: string): boolean {
   const now = Date.now()
+  /* forget people whose last probe has aged out, so the map follows recent
+     use rather than everyone who ever set up a provider */
+  for (const [user, hits] of probeHits) {
+    if (now - (hits.at(-1) ?? 0) >= PROBE_WINDOW_MS) probeHits.delete(user)
+  }
   const hits = (probeHits.get(userId) ?? []).filter((at) => now - at < PROBE_WINDOW_MS)
   if (hits.length >= PROBES_PER_WINDOW) {
     probeHits.set(userId, hits)

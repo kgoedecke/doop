@@ -2,7 +2,7 @@ import { env } from './env.ts'
 import type { RunnerPick } from '../shared/agentRunner.ts'
 import http from 'node:http'
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto'
-import { and, asc, eq, like } from 'drizzle-orm'
+import { and, asc, eq, like, sql } from 'drizzle-orm'
 import { db } from './db/index.ts'
 import { modelAccounts } from './db/schema.ts'
 import {
@@ -1048,25 +1048,30 @@ export async function connectCustomProvider(
   config: CustomProviderConfig,
   secrets: CustomProviderSecrets,
 ): Promise<CustomProviderKind> {
-  const existing = await db
-    .select({ kind: modelAccounts.kind })
-    .from(modelAccounts)
-    .where(and(eq(modelAccounts.userId, userId), like(modelAccounts.kind, `${CUSTOM_PROVIDER_PREFIX}%`)))
-  if (existing.length >= MAX_CUSTOM_PROVIDERS) {
-    throw new Error(`You can connect at most ${MAX_CUSTOM_PROVIDERS} custom providers`)
-  }
   const kind = newCustomKind()
   const now = Date.now()
-  await db.insert(modelAccounts).values({
-    userId,
-    kind,
-    apiKey: secrets.apiKey || null,
-    custom: config,
-    customHeaders: secrets.headers && Object.keys(secrets.headers).length ? JSON.stringify(secrets.headers) : null,
-    model: config.models[0]?.id ?? null,
-    enabled: true,
-    connectedAt: now,
-    updatedAt: now,
+  /* count and insert under a per-person lock, so two adds racing at nine
+     cannot both see room for a tenth */
+  await db.transaction(async (tx) => {
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`custom-providers:${userId}`}))`)
+    const existing = await tx
+      .select({ kind: modelAccounts.kind })
+      .from(modelAccounts)
+      .where(and(eq(modelAccounts.userId, userId), like(modelAccounts.kind, `${CUSTOM_PROVIDER_PREFIX}%`)))
+    if (existing.length >= MAX_CUSTOM_PROVIDERS) {
+      throw new Error(`You can connect at most ${MAX_CUSTOM_PROVIDERS} custom providers`)
+    }
+    await tx.insert(modelAccounts).values({
+      userId,
+      kind,
+      apiKey: secrets.apiKey || null,
+      custom: config,
+      customHeaders: secrets.headers && Object.keys(secrets.headers).length ? JSON.stringify(secrets.headers) : null,
+      model: config.models[0]?.id ?? null,
+      enabled: true,
+      connectedAt: now,
+      updatedAt: now,
+    })
   })
   return kind
 }

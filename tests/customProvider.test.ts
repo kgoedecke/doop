@@ -1,4 +1,4 @@
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import http from 'node:http'
 import type { AddressInfo } from 'node:net'
 import type Anthropic from '@anthropic-ai/sdk'
@@ -11,8 +11,8 @@ import {
   parseCustomProviderConfig,
 } from '../shared/customProvider.ts'
 import { CustomProviderUrlError, customProviderFetch, reachableUrl } from '../server/customProviderFetch.ts'
-import { customTurn } from '../server/agentModel.ts'
-import { discoverCustomModels, testCustomProvider } from '../server/customProviders.ts'
+import { customTurn, withoutImages } from '../server/agentModel.ts'
+import { discoverCustomModels, takeProbeSlot, testCustomProvider } from '../server/customProviders.ts'
 import { IMAGE_OMITTED_NOTE } from '../server/chatCompletionsAgent.ts'
 import { stubEnv, unstubAllEnvs } from './envStub.ts'
 
@@ -306,6 +306,38 @@ describe('a custom provider’s turns', () => {
     expect(seen[0]!.body).toMatchObject({ model: 'glm-5', max_tokens: 2048 })
   })
 
+  it('sends a text-only Anthropic-compatible model no images, even inside tool results', async () => {
+    reply = (_req, res) => {
+      res.writeHead(500)
+      res.end()
+    }
+    const run = customTurn(
+      { config: { name: 'Gateway', apiType: 'anthropic', baseUrl: base, models: [] }, apiKey: 'k' },
+      { id: 'glm-5', vision: false },
+    )
+    const withScreenshot: Anthropic.MessageParam = {
+      role: 'user',
+      content: [
+        {
+          type: 'tool_result',
+          tool_use_id: 'toolu_1',
+          content: [
+            { type: 'text', text: 'screenshot of Hero' },
+            { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'iVBORw0KGgo=' } },
+          ],
+        },
+      ],
+    }
+    await expect(
+      run({ system: [{ text: 'sys' }], tools: [TOOL], messages: [screenshot, withScreenshot], maxTokens: 1000 }),
+    ).rejects.toThrow()
+    expect(seen.length).toBeGreaterThan(0)
+    for (const request of seen) {
+      expect(JSON.stringify(request.body)).not.toContain('iVBORw0KGgo')
+      expect(JSON.stringify(request.body)).toContain(IMAGE_OMITTED_NOTE)
+    }
+  })
+
   it('lists the endpoint’s models, deduplicated and without junk ids', async () => {
     reply = (_req, res) => json(res, 200, { data: [{ id: 'a' }, { id: 'a' }, { id: 'has space' }, { id: 'b' }] })
     const models = await discoverCustomModels({
@@ -336,6 +368,17 @@ describe('a custom provider’s turns', () => {
     reply = (_req, res) =>
       json(res, 200, { choices: [{ finish_reason: 'stop', message: { content: 'Sure, I am ready!' } }] })
     await expect(testCustomProvider(target, { id: 'm', vision: false })).rejects.toThrow(/without calling a tool/)
+    /* a call whose arguments arrive garbled would garble every design tool too */
+    reply = (_req, res) =>
+      json(res, 200, {
+        choices: [
+          {
+            finish_reason: 'tool_calls',
+            message: { tool_calls: [{ id: 'c', function: { name: 'report_ready', arguments: '{"ready":tr' } }] },
+          },
+        ],
+      })
+    await expect(testCustomProvider(target, { id: 'm', vision: false })).rejects.toThrow(/without calling a tool/)
   })
 
   it('refuses to follow a redirect', async () => {
@@ -345,5 +388,39 @@ describe('a custom provider’s turns', () => {
     }
     await expect(customProviderFetch(`${base}/v1/models`)).rejects.toThrow()
     expect(seen).toHaveLength(1)
+  })
+})
+
+describe('withoutImages', () => {
+  it('replaces images and leaves everything else as it was', () => {
+    const messages: Anthropic.MessageParam[] = [
+      { role: 'user', content: 'plain' },
+      screenshot,
+      { role: 'assistant', content: [{ type: 'text', text: 'ok' }] },
+    ]
+    expect(withoutImages(messages)).toEqual([
+      { role: 'user', content: 'plain' },
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: 'Look at this' },
+          { type: 'text', text: IMAGE_OMITTED_NOTE },
+        ],
+      },
+      { role: 'assistant', content: [{ type: 'text', text: 'ok' }] },
+    ])
+  })
+})
+
+describe('probe rationing', () => {
+  afterEach(() => vi.useRealTimers())
+
+  it('allows thirty set-up requests per person per ten minutes', () => {
+    vi.useFakeTimers()
+    for (let i = 0; i < 30; i++) expect(takeProbeSlot('rationed')).toBe(true)
+    expect(takeProbeSlot('rationed')).toBe(false)
+    expect(takeProbeSlot('someone-else')).toBe(true)
+    vi.advanceTimersByTime(10 * 60_000)
+    expect(takeProbeSlot('rationed')).toBe(true)
   })
 })
