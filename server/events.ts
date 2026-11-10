@@ -20,6 +20,8 @@ export type CanvasEvent =
   /** a board card an agent finished — status tasks ending are not events */
   | { type: 'task.completed'; task: AgentTask }
   | { type: 'task.failed'; task: AgentTask; reason: string }
+  /** an image landed in object storage for a canvas (fonts, avatars and svg are not events) */
+  | { type: 'asset.stored'; asset: { id: string; mime: string; ext: string; size: number; canvasId: string } }
 
 export type CanvasEventListener = (canvasId: string, event: CanvasEvent) => void
 

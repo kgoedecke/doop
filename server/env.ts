@@ -265,6 +265,11 @@ const schema = {
   MCP_IMPORTS_PER_MIN: perMinute({ default: 5 }),
   SYNC_INGESTS_PER_MIN: perMinute({ default: 30 }),
   PREVIEW_RENDERS_PER_MIN: perMinute({ default: 12 }),
+  /* image descriptions (server/imageDescriptions.ts): a day's budget per
+     canvas, and how many describe calls run at once */
+  DESCRIBE_PER_CANVAS_PER_DAY: nonNegativeInt({ default: 200 }),
+  DESCRIBE_CONCURRENCY: perMinute({ default: 2 }),
+  DESCRIBE_RETRY_MS: nonNegativeInt({ default: 30_000 }),
   /* how long a canvas nobody uses keeps its frame HTML in memory (store.ts) */
   CANVAS_IDLE_MS: nonNegativeInt({ default: 10 * 60_000 }),
   SYNC_PAGE_INTERVAL_MS: nonNegativeInt({ default: 30_000 }),

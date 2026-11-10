@@ -24,6 +24,7 @@ import { getImage } from './previews.ts'
 import * as actions from './actions.ts'
 import { liveActivitiesRouter, logLiveActivityRequests, startLiveActivityDelivery } from './liveActivities.ts'
 import { onCanvasEvent } from './events.ts'
+import * as imageDescriptions from './imageDescriptions.ts'
 import * as commentNotifications from './commentNotifications.ts'
 import { notificationsRouter } from './notifications.ts'
 import * as webhooks from './webhooks.ts'
@@ -153,6 +154,8 @@ seed()
 reconcileAssetRefs()
   .then((n) => n && console.log(`[assets] reconciled ${n} asset ref(s)`))
   .catch((e) => console.error('[assets] reconcile failed', e))
+/* image descriptions for agents: recover the backlog and listen for new assets. */
+void imageDescriptions.startImageDescriptions(broadcast)
 
 /* One stray rejection must never take down the multiplayer server: Node's
    default is to exit, which turned a single aborted analytics upload into
@@ -345,6 +348,7 @@ actions.wire(broadcast, agentTouch)
 /* after the room has been told: email for the people who were not in it */
 onCanvasEvent(commentNotifications.onCanvasEvent)
 onCanvasEvent(webhooks.onCanvasEvent)
+onCanvasEvent(imageDescriptions.onCanvasEvent)
 
 /* ------------------------------------------------- http api */
 
@@ -958,6 +962,7 @@ function requireFrame(
 }
 
 app.use('/api/local-agent', localAgentRouter)
+app.use('/api/image-descriptions', imageDescriptions.imageDescriptionsRouter)
 app.use('/api/notifications', notificationsRouter)
 app.use('/api/webhooks', webhooksRouter)
 app.use('/api/fonts', fontsRouter)

@@ -23,6 +23,8 @@ import { runnerKey } from '../shared/agentRunner.ts'
 import * as imageSearch from './imageSearch.ts'
 import * as imageGen from './imageGen.ts'
 import * as assets from './assets.ts'
+import { imagesForFrames, isStandaloneImage } from './assets.ts'
+import type { FrameImage } from '../shared/imageDescriptions.ts'
 import * as backgrounds from './backgrounds.ts'
 import * as ingest from './ingest.ts'
 import { viewWebsite, referencedUrls } from './website.ts'
@@ -481,12 +483,7 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
        the canvas's established style */
     const visibleFrames = (canvas?.frames ?? []).filter((f) => !f.demo)
     const pages = canvas ? pageList(canvas) : []
-    const frameList = visibleFrames
-      .map(
-        (f, index) =>
-          `- Frame ${index + 1}: id=${f.id}, name="${f.name}", page=${canvas ? framePageId(canvas, f) : '?'}, at (${Math.round(f.x)}, ${Math.round(f.y)}), ${Math.round(f.width)}x${Math.round(f.height)} (last edit: ${f.updatedBy}, ${f.html.length} bytes${f.html.length > LARGE_HTML_CHARS ? '; large document — avoid a full read for visual-reference work' : ''}); approval=${JSON.stringify(f.approval ?? { status: 'draft' })}`,
-      )
-      .join('\n')
+    const frameList = describeFrameList(visibleFrames, await imagesForFrames(visibleFrames.map((f) => f.id)), canvas)
 
     const sections: string[] = []
     /* design-synced canvases: real navigation between the synced screens is
@@ -1573,6 +1570,31 @@ export const RESIDENT_TOOL_NAMES = TOOLS.map((tool) => tool.name)
 /* tall frames (imported landing pages) are CROPPED to the top 4000px at full
    detail rather than downscaled to mush; width still scales down if it would
    breach the API's 8000px image limit */
+/** How many characters of an image's description the kickoff quotes. */
+const KICKOFF_IMAGE_CHARS = 300
+
+/** The kickoff's frame list: one line per frame, and under it one line per
+ *  image the frame shows with the description the describer wrote
+ *  (shared/imageDescriptions.ts), so a pasted screenshot reads as what it
+ *  is rather than as a 600-byte frame named after a file. */
+export function describeFrameList(frames: Frame[], images: Map<string, FrameImage[]>, canvas?: Canvas): string {
+  const lines = frames.map((f, index) => {
+    const shown = images.get(f.id) ?? []
+    const pasted = shown.length === 1 && isStandaloneImage(f.html) ? ' (pasted image)' : ''
+    const head = `- Frame ${index + 1}: id=${f.id}, name="${f.name}"${pasted}, page=${canvas ? framePageId(canvas, f) : (f.pageId ?? '?')}, at (${Math.round(f.x)}, ${Math.round(f.y)}), ${Math.round(f.width)}x${Math.round(f.height)} (last edit: ${f.updatedBy}, ${f.html.length} bytes${f.html.length > LARGE_HTML_CHARS ? '; large document — avoid a full read for visual-reference work' : ''}); approval=${JSON.stringify(f.approval ?? { status: 'draft' })}`
+    const pictures = shown.map(
+      (image) =>
+        `    image ${image.src}: ${image.description ? image.description.slice(0, KICKOFF_IMAGE_CHARS) : '(description pending)'}`,
+    )
+    return [head, ...pictures].join('\n')
+  })
+  if (images.size > 0)
+    lines.push(
+      'Read the image descriptions above and call screenshot_frame on the relevant frames before designing. A frame marked (pasted image) is a reference someone put there for you: leave it as it is and deliver in a separate frame. A design that uses images is an ordinary frame.',
+    )
+  return lines.join('\n')
+}
+
 const MAX_SHOT_HEIGHT = 4000
 
 async function frameImageBlocks(

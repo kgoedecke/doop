@@ -2,6 +2,7 @@ import { useStore } from './store'
 import { beginFrameSave } from './frameSaves'
 import type { StackWrite } from '../../shared/frameStack'
 import type { LocalAgentPreference, LocalAgentJob, LocalAgentResult } from '../../shared/localAgent'
+import type { ImageDescriptionMode, ImageDescriptionPreference } from '../../shared/imageDescriptions'
 import type { AgentRunners, RunnerPick, RunnerProvider } from '../../shared/agentRunner'
 import type { NotificationPrefs, NotificationSettings } from '../../shared/notifications'
 import type { WebhookDeliveryResult, WebhookEventType, WebhookInfo } from '../../shared/webhooks'
@@ -334,6 +335,9 @@ export const api = {
   notificationSettings: () => req<NotificationSettings>('/api/notifications'),
   setNotificationPrefs: (prefs: NotificationPrefs) =>
     req<NotificationSettings>('/api/notifications', { method: 'PUT', body: JSON.stringify(prefs) }),
+  imageDescriptions: () => req<ImageDescriptionPreference>('/api/image-descriptions'),
+  setImageDescriptions: (mode: ImageDescriptionMode) =>
+    req<ImageDescriptionPreference>('/api/image-descriptions', { method: 'PUT', body: JSON.stringify({ mode }) }),
   localAgent: () => req<LocalAgentPreference>('/api/local-agent'),
   setLocalAgent: (preference: LocalAgentPreference) =>
     req<LocalAgentPreference>('/api/local-agent', { method: 'PUT', body: JSON.stringify(preference) }),

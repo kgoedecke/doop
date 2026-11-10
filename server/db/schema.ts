@@ -432,6 +432,17 @@ export const assets = pgTable(
     size: integer('size').notNull(),
     uploadedBy: text('uploaded_by').notNull(),
     createdAt: bigint('created_at', { mode: 'number' }).notNull(),
+    /** what the picture shows, written once by a small vision model
+     *  (server/imageDescriptions.ts) so agents reading the canvas know;
+     *  null until described, and for good after three failed attempts */
+    description: text('description'),
+    describedAt: bigint('described_at', { mode: 'number' }),
+    /** the model label that wrote it */
+    describedBy: text('described_by'),
+    describeAttempts: integer('describe_attempts').notNull().default(0),
+    /** Fixed before the first attempt; null payer means server credentials. */
+    describePayerId: text('describe_payer_id'),
+    describeProvider: text('describe_provider'),
   },
   (t) => [index('assets_canvas_idx').on(t.canvasId)],
 )
@@ -775,6 +786,15 @@ export const localAgentPreferences = pgTable('local_agent_preferences', {
 export const notificationPrefs = pgTable('notification_prefs', {
   userId: text('user_id').primaryKey(),
   commentEmails: boolean('comment_emails').notNull().default(true),
+  updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
+})
+
+/** Whether, and on whose model, images uploaded to a user's canvases get a
+ *  description for agents (shared/imageDescriptions.ts). No row = `account`:
+ *  the owner's connected model account, else the server tier. */
+export const imageDescriptionPrefs = pgTable('image_description_prefs', {
+  userId: text('user_id').primaryKey(),
+  mode: text('mode').notNull().default('account'),
   updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
 })
 

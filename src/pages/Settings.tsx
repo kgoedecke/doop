@@ -3,6 +3,7 @@ import { navigate } from '../App'
 import { useT, type PlainMessageKey } from '../lib/i18n'
 import { ModelAccountPanel } from '../components/ModelAccount'
 import { ImageModelCard } from '../components/ImageModelCard'
+import { ImageDescriptionsCard } from '../components/ImageDescriptionsCard'
 import { useAllowance } from '../components/TeamAllowance'
 import { AccountSettings } from '../components/AccountSettings'
 import { AppearanceSettings } from '../components/AppearanceSettings'
@@ -236,6 +237,7 @@ export function Settings() {
               )}
               <ModelAccountPanel onChange={refresh} />
               <ImageModelCard />
+              <ImageDescriptionsCard />
             </>
           ) : pane === 'fonts' ? (
             <FontLibrary />

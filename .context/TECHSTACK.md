@@ -96,6 +96,21 @@
   `server/openaiAgent.ts` for every turn, with `DOOP_AGENT_OPENAI_EFFORT` as the default until a
   user picks. The status reports the resolved `effort` for the OpenAI kinds only, which is what
   shows the `Segmented` switch in Settings and the radio group in the composer's `ModelPicker`.
+- Image descriptions (`.context/specs/image-descriptions.md`, `server/imageDescriptions.ts`,
+  `shared/imageDescriptions.ts`): raster uploads emit `asset.stored` and get an asynchronous
+  description. Billing resolves uploader → eligible canvas owner → server; Off on either
+  person stops analysis, and a server-only uploader bypasses both accounts. The stable uploader
+  ID is `assets.owner_id`; migration 0049 persists `describe_payer_id` and `describe_provider`
+  before work so retries never change payer. Runtime errors do not trigger billing fallback.
+  The in-memory queue defaults to two concurrent jobs, three attempts 30s apart, and 200
+  attempts per canvas per UTC day (counter resets on restart). A 20s deadline bounds storage,
+  resizing and model work. Deleted canvases are skipped. Startup recovers unfinished assets;
+  migration 0049 excludes pre-feature history. Settings uses `image_description_prefs` and
+  `GET`/`PUT /api/image-descriptions`. Agents read `images` on frame summaries and in resident
+  kickoff; only standalone image layers are marked pasted references. Success broadcasts
+  `asset:described` without changing frame HTML. Tests: `imageDescriptions.test.ts`,
+  `describerModels.test.ts`, `imageDescriptionsMcp.test.ts`, `imageDescriptionsHttp.test.ts`,
+  `imageDescriptionsCard.test.tsx`.
 - Connections and the default (`server/agentDefaults.ts`, `server/modelAccounts.ts`): a person can
   connect every provider at once, one `model_accounts` row per user and kind (composite key and an
   `enabled` flag, migration 0046), plus the Claude Plan on their desktop (`local_agent_preferences`,
