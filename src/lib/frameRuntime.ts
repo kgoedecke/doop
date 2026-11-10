@@ -18,8 +18,9 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
   /* horizontal overscroll inside a frame must not chain to the parent page,
      where the browser turns it into a history back/forward swipe. Adopted
      sheet, not a <style> tag — the morph would wipe a tag from <head>. */
+  var vSheet = null
   try {
-    var vSheet = new CSSStyleSheet()
+    vSheet = new CSSStyleSheet()
     vSheet.replaceSync('html,body{overscroll-behavior-x:none}[data-v-path-hidden]{visibility:hidden!important}')
     document.adoptedStyleSheets = document.adoptedStyleSheets.concat(vSheet)
   } catch (e) {}
@@ -1143,14 +1144,93 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
     try { el = selector ? document.querySelector(selector) : null } catch (e) { /* bad selector */ }
     return el
   }
-  function patchStyle(style, styles, original) {
+  /* the longhands a declaration sets: a rule may mark only one side of a
+     shorthand !important, and the CSSOM reports priority per longhand */
+  function longhandsOf(name, value) {
+    var probe = document.createElement('div').style
+    probe.setProperty(name, value)
+    var names = []
+    for (var i = 0; i < probe.length; i++) names.push(probe[i])
+    if (!names.length) names.push(name)
+    // A rule may name the same box side logically. Which logical side maps to
+    // a physical one depends on the writing mode, so every candidate counts:
+    // an !important the edit did not need is harmless, a missed one is not.
+    for (var n = names.length - 1; n >= 0; n--) {
+      var logical = logicalNames(names[n])
+      for (var l = 0; l < logical.length; l++) names.push(logical[l])
+    }
+    return names
+  }
+  function logicalNames(name) {
+    var m
+    if ((m = /^(min-|max-)?(width|height)$/.exec(name))) return [(m[1] || '') + 'inline-size', (m[1] || '') + 'block-size']
+    if ((m = /^(margin|padding)-(top|right|bottom|left)$/.exec(name))) {
+      return [m[1] + '-block-start', m[1] + '-block-end', m[1] + '-inline-start', m[1] + '-inline-end']
+    }
+    if ((m = /^border-(top|right|bottom|left)-(width|style|color)$/.exec(name))) {
+      return ['border-block-start-' + m[2], 'border-block-end-' + m[2], 'border-inline-start-' + m[2], 'border-inline-end-' + m[2]]
+    }
+    if (/^(top|right|bottom|left)$/.test(name)) return ['inset-block-start', 'inset-block-end', 'inset-inline-start', 'inset-inline-end']
+    if (/^border-(top|bottom)-(left|right)-radius$/.test(name)) {
+      return ['border-start-start-radius', 'border-start-end-radius', 'border-end-start-radius', 'border-end-end-radius']
+    }
+    return []
+  }
+  function ruleOutranksInline(rules, el, names) {
+    for (var i = 0; i < rules.length; i++) {
+      var rule = rules[i]
+      if (rule.selectorText && rule.style) {
+        // "all" is its own entry in the CSSOM, never expanded into longhands
+        var marked = rule.style.getPropertyPriority('all') === 'important'
+        for (var n = 0; n < names.length && !marked; n++) marked = rule.style.getPropertyPriority(names[n]) === 'important'
+        if (!marked) continue
+        try { if (el.matches(rule.selectorText)) return true } catch (e) { /* a selector this engine cannot match */ }
+        continue
+      }
+      if (rule.media && rule.media.mediaText && !matchMedia(rule.media.mediaText).matches) continue
+      var inner = null
+      try { inner = rule.styleSheet ? rule.styleSheet.cssRules : rule.cssRules } catch (e) { /* cross-origin import */ }
+      if (inner && ruleOutranksInline(inner, el, names)) return true
+    }
+    return false
+  }
+  /* A design's own rule marked !important beats a plain inline declaration,
+     so an edit written the usual way would change nothing on screen. True
+     when a rule matching el declares any of the edit's longhands that way.
+     Sheets a design script adopted count like its <style> tags; our own (the
+     adopted ones by identity, the editing tag by its mark) never do, and a
+     cross-origin sheet cannot be read and is passed over. */
+  function isRuntimeSheet(sheet) {
+    var owner = sheet.ownerNode
+    return sheet === vSheet || sheet === vOutlineSheet || sheet === protoSheet ||
+      !!(owner && owner.hasAttribute && owner.hasAttribute('data-v-edit'))
+  }
+  function sheetOutranksInline(el, name, value) {
+    var names = longhandsOf(name, value)
+    var sheets = Array.prototype.slice.call(document.styleSheets).concat(document.adoptedStyleSheets || [])
+    for (var s = 0; s < sheets.length; s++) {
+      var sheet = sheets[s]
+      if (sheet.disabled || isRuntimeSheet(sheet)) continue
+      if (sheet.media && sheet.media.mediaText && !matchMedia(sheet.media.mediaText).matches) continue
+      var rules = null
+      try { rules = sheet.cssRules } catch (e) { /* cross-origin */ }
+      if (rules && ruleOutranksInline(rules, el, names)) return true
+    }
+    return false
+  }
+  /* "context" is the element whose place in the document decides which rules
+     apply, when el itself is detached (a run in a copied fragment). */
+  function patchStyle(el, styles, original, context) {
+    var style = el.style
     for (var k in styles) {
       if (!Object.prototype.hasOwnProperty.call(styles, k)) continue
       if (styles[k] === null || styles[k] === '') style.removeProperty(k)
       else {
+        var value = String(styles[k])
         // Returning to a gesture's original value must also restore its priority.
         var priority = original && styles[k] === original.getPropertyValue(k) ? original.getPropertyPriority(k) : ''
-        style.setProperty(k, String(styles[k]), priority)
+        if (!priority && sheetOutranksInline(context || el, k, value)) priority = 'important'
+        style.setProperty(k, value, priority)
       }
     }
   }
@@ -1159,7 +1239,7 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
     before.cssText = el.style.cssText
     var original = document.createElement('div').style
     original.cssText = styleEdit.original
-    patchStyle(el.style, styles, original)
+    patchStyle(el, styles, original)
     // CSS enumerates longhands, so padding/border shorthands and !important
     // declarations can be restored without replacing unrelated inline styles.
     var names = {}
@@ -1298,7 +1378,7 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
       if (!el.getAttribute('style')) el.removeAttribute('style')
       return true
     }
-    patchStyle(el.style, styles)
+    patchStyle(el, styles)
     if (!el.getAttribute('style')) el.removeAttribute('style')
     /* a slider fires many of these a second — one save once it settles */
     if (styleTimer) clearTimeout(styleTimer)

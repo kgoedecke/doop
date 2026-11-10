@@ -467,6 +467,33 @@ describe.skipIf(!findBrowserPath())('rich text editing', { timeout: 30_000 }, ()
     expect(await frame.$eval('#text', (el) => getComputedStyle(el).backgroundColor)).toBe('rgb(0, 0, 255)')
   })
 
+  it('keeps an edit on selected words above a rule marked !important, typed or scrubbed', async () => {
+    const html =
+      '<style>#text span { font-size: 16px !important }</style><p id="text" style="margin:0;font:24px Arial">Hello world</p>'
+    const run = () =>
+      frame.$eval('#text span', (el) => [el.getAttribute('style'), getComputedStyle(el).fontSize, el.textContent])
+    await render(html)
+    await select(0, 5)
+    await style({ 'font-size': '32px' })
+    expect(await run()).toEqual(['font-size: 32px !important;', '32px', 'Hello'])
+    // Nothing of the stand-in used to match the rule stays behind.
+    expect(await frame.$eval('#text', (el) => el.children.length)).toBe(1)
+
+    await send({ type: 'doop:edit', on: false })
+    await frame.waitForFunction(() => !document.querySelector('[contenteditable]'))
+    await render(html)
+    await frame.waitForFunction(() => !document.querySelector('#text span'))
+    await select(0, 5)
+    const gesture = (phase: 'begin' | 'commit') =>
+      ask('doop:style-gesture' as 'doop:style', { selector: '#text', phase })
+    await gesture('begin')
+    await style({ 'font-size': '40px' })
+    expect((await run())[1]).toBe('40px')
+    await gesture('commit')
+    expect(await run()).toEqual(['font-size: 40px !important;', '40px', 'Hello'])
+    await expect.poll(savedHtml).toContain('<span style="font-size: 40px !important;">Hello</span> world')
+  })
+
   it('restores a cancelled size scrub on selected words and saves a committed one once', async () => {
     await render('<p id="text" style="margin:0;font:24px Arial">Hello world</p>')
     await select(0, 5)
