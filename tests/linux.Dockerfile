@@ -14,10 +14,14 @@ WORKDIR /work
 COPY package.json bun.lock ./
 RUN bun install --frozen-lockfile
 COPY .chrome-version ./
-RUN if [ "$(dpkg --print-architecture)" = amd64 ]; then \
-      ./node_modules/.bin/browsers install "chrome@$(cat .chrome-version)" --path /opt/chrome \
-        | awk '{ print $2 }' > /opt/chrome-path; \
-    else echo /usr/bin/chromium > /opt/chrome-path; fi
+# a failed install must fail the build: an empty path would let the tests fall
+# back to Debian's Chromium and pass for a browser CI does not run
+RUN set -e; \
+    if [ "$(dpkg --print-architecture)" = amd64 ]; then \
+      ./node_modules/.bin/browsers install "chrome@$(cat .chrome-version)" --path /opt/chrome > /tmp/chrome-install; \
+      awk '{ print $2 }' /tmp/chrome-install > /opt/chrome-path; \
+    else echo /usr/bin/chromium > /opt/chrome-path; fi; \
+    "$(cat /opt/chrome-path)" --version
 COPY . .
 
 # root in a container has no user namespaces for Chromium's sandbox

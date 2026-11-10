@@ -78,7 +78,8 @@ jobs:
           key: chrome-${{ runner.os }}-${{ hashFiles('.chrome-version') }}
       - name: Install the pinned Chrome
         run: |
-          path=$(./node_modules/.bin/browsers install "chrome@$(cat .chrome-version)" --path ~/.cache/doop-chrome | awk '{ print $2 }')
+          ./node_modules/.bin/browsers install "chrome@$(cat .chrome-version)" --path ~/.cache/doop-chrome > "$RUNNER_TEMP/chrome-install"
+          path=$(awk '{ print $2 }' "$RUNNER_TEMP/chrome-install")
           "$path" --version
           echo "CHROME_PATH=$path" >> "$GITHUB_ENV"
           # Ubuntu 24.04 lets only the browsers it has an AppArmor profile for
