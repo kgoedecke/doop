@@ -933,14 +933,19 @@ export function buildMcpServer(
     {
       title: 'Save a design decision',
       description:
-        'Record a design decision your human made while talking to YOU — style feedback you carried out ("rounder corners", "less purple, more white and blue", "stop using italic serif"). Doop\'s UI feedback is captured automatically, but you are the only one who hears your own conversation, so report it with this tool AFTER you have addressed it. It lands in the canvas\'s Memory; recurring preferences become suggested style rules. Record design taste only — not one-off content edits like typo fixes or copy changes.',
+        'Record a design decision your human made while talking to YOU — style feedback you carried out ("rounder corners", "less purple, more white and blue", "stop using italic serif"). Doop\'s UI feedback is captured automatically, but you are the only one who hears your own conversation, so report it with this tool AFTER you have addressed it. It lands in the canvas\'s Memory; recurring preferences become suggested style rules. Save one decision and its rationale per call, at most 500 characters. Split longer feedback or briefs into separate calls by topic (palette, typography, layout), preserving the reason for each choice. Record design taste only — not one-off content edits like typo fixes or copy changes.',
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
       inputSchema: {
         canvas_id: z.string(),
         decision: z
           .string()
-          .max(actions.MAX_DECISION_CHARS)
-          .describe('The feedback in the human\'s own words, e.g. "make it less claude-esque, more white and blue"'),
+          .max(
+            actions.MAX_DECISION_CHARS,
+            'Save one decision and its rationale per call, at most 500 characters; split longer feedback into separate calls by topic.',
+          )
+          .describe(
+            "One decision and its rationale in the human's own words, at most 500 characters. Split longer feedback into separate calls by topic.",
+          ),
         agent_name: agentName,
       },
     },

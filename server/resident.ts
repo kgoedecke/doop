@@ -1298,7 +1298,7 @@ const TOOLS: Anthropic.Tool[] = [
   {
     name: 'save_decision',
     description:
-      'Persist a design decision to the canvas Memory so humans and later agents see what was committed to — this is how you post your design brief (mood, the one exemplar followed, palette roles, type). Keep it under 500 chars. Design taste only, never one-off content edits.',
+      'Persist a design decision to the canvas Memory so humans and later agents see what was committed to — this is how you post your design brief (mood, the one exemplar followed, palette roles, type). Save one decision and its rationale per call, at most 500 characters. Split longer briefs or feedback into separate calls by topic (exemplar, palette, typography, layout), preserving the reason for each choice. Design taste only, never one-off content edits.',
     input_schema: {
       type: 'object',
       properties: {

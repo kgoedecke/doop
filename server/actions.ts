@@ -2634,7 +2634,7 @@ export function recordChatDecision(canvasId: string, text: string, actor: Actor)
   if (!clean) throw new Error('decision text is empty')
   if (clean.length > MAX_DECISION_CHARS)
     throw new Error(
-      `decision is ${clean.length} chars — keep it under ${MAX_DECISION_CHARS} (the human's words, not an essay)`,
+      `decision is ${clean.length} chars — save one decision and its rationale per call, at most ${MAX_DECISION_CHARS} characters; split longer feedback into separate calls by topic`,
     )
   /* agents re-tell things; the same words land in Memory once */
   if (getDecisions(canvasId).some((d) => d.text === clean)) return null
