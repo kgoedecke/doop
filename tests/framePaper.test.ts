@@ -1,71 +1,57 @@
 import { describe, expect, it } from 'vitest'
-import { FRAME_PAPER_STYLE, stylesBodyBackground, withoutPaperOverride } from '../shared/framePaper'
+import { FRAME_PAPER_STYLE, withPaperRule } from '../shared/framePaper'
 
 const SHELL = 'width: 100%; height: 100%; margin: 0px;'
 const WHITE = 'background: rgb(255, 255, 255);'
-const legacy = (content: string, bodyStyle = `${SHELL} ${WHITE}`) =>
-  `<!doctype html>\n<html style="${SHELL}"><head></head><body style="${bodyStyle}">${content}</body></html>`
+/** a document as the Frame tool used to write it, with a design put inside */
+const drawn = (content: string, { head = '', bodyStyle = `${SHELL} ${WHITE}`, htmlStyle = SHELL } = {}) =>
+  `<!doctype html>\n<html style="${htmlStyle}"><head>${head}</head><body style="${bodyStyle}">${content}</body></html>`
 const DARK_DESIGN = '<meta charset="utf-8"><style>*{margin:0}body{background:#101111;color:#fff}</style><main></main>'
 
-describe('stylesBodyBackground', () => {
-  const styled = (css: string) => `<html><head><style>${css}</style></head><body></body></html>`
+describe('withPaperRule', () => {
+  it('turns the old inline white into the rule a design can beat', () => {
+    expect(withPaperRule(drawn(DARK_DESIGN))).toBe(drawn(DARK_DESIGN, { head: FRAME_PAPER_STYLE, bodyStyle: SHELL }))
+  })
 
-  it('finds a rule whose subject is the body', () => {
-    for (const css of [
-      'body{background:#101111}',
-      'html, body { background-color: black }',
-      '*{margin:0}body.dark{background-image:linear-gradient(#000,#111)}',
-      '@media (min-width:1px){ body { background: red } }',
+  it('keeps an empty drawn frame white, through the rule', () => {
+    expect(withPaperRule(drawn(''))).toBe(drawn('', { head: FRAME_PAPER_STYLE, bodyStyle: SHELL }))
+  })
+
+  it('puts the rule ahead of whatever the head already holds', () => {
+    const fonts = '<link rel="stylesheet" data-doop-webfonts href="https://fonts.example/css2">'
+    expect(withPaperRule(drawn(DARK_DESIGN, { head: fonts }))).toBe(
+      drawn(DARK_DESIGN, { head: FRAME_PAPER_STYLE + fonts, bodyStyle: SHELL }),
+    )
+  })
+
+  it('settles: a healed document comes back as it is', () => {
+    const healed = withPaperRule(drawn(DARK_DESIGN))
+    expect(withPaperRule(healed)).toBe(healed)
+  })
+
+  it('leaves a white a design chose for itself alone', () => {
+    for (const html of [
+      '<html><head><style>body{background:#111}</style></head><body style="background:#fff"><main></main></body></html>',
+      '<html><head></head><body style="background: rgb(255, 255, 255);"></body></html>',
+      /* the white without the Frame tool's shell on html */
+      drawn(DARK_DESIGN, { htmlStyle: 'height: 100%;' }),
+      /* the shell with another colour */
+      drawn(DARK_DESIGN, { bodyStyle: `${SHELL} background: rgb(250, 240, 230);` }),
+      /* the white with more beside it */
+      drawn(DARK_DESIGN, { bodyStyle: `${SHELL} ${WHITE} color: red;` }),
     ])
-      expect(stylesBodyBackground(styled(css)), css).toBe(true)
+      expect(withPaperRule(html), html).toBe(html)
   })
 
-  it('does not count the Frame tool paper itself', () => {
-    expect(stylesBodyBackground(`<html><head>${FRAME_PAPER_STYLE}</head><body></body></html>`)).toBe(false)
+  it('leaves fragments and plain documents alone', () => {
+    for (const html of ['<main>fragment</main>', '<html><body><p>plain</p></body></html>', DARK_DESIGN, ''])
+      expect(withPaperRule(html)).toBe(html)
   })
 
-  it('passes over rules that are not the body getting a background', () => {
-    for (const css of [
-      'body{color:red}',
-      'body > main{background:#000}',
-      'tbody{background:#000}',
-      '.body{background:#000}',
-      '/* body{background:#000} */ main{background:#000}',
-    ])
-      expect(stylesBodyBackground(styled(css)), css).toBe(false)
-  })
-})
-
-describe('withoutPaperOverride', () => {
-  it('drops the inline white where the design styles the body itself', () => {
-    const html = withoutPaperOverride(legacy(DARK_DESIGN))
-    expect(html).toBe(legacy(DARK_DESIGN, SHELL))
-  })
-
-  it('reads the white in the forms a style attribute holds it', () => {
-    for (const white of ['background: #ffffff;', 'background:#fff', 'background-color: rgb(255,255,255);'])
-      expect(withoutPaperOverride(legacy(DARK_DESIGN, `${SHELL} ${white}`))).toBe(legacy(DARK_DESIGN, SHELL))
-  })
-
-  it('keeps the white of a drawn frame nothing has styled yet', () => {
-    const empty = legacy('')
-    expect(withoutPaperOverride(empty)).toBe(empty)
-    const content = legacy('<style>main{background:#101111}</style><main></main>')
-    expect(withoutPaperOverride(content)).toBe(content)
-  })
-
-  it('keeps a body background that is not the Frame tool white', () => {
-    const tinted = legacy(DARK_DESIGN, `${SHELL} background: rgb(250, 240, 230);`)
-    expect(withoutPaperOverride(tinted)).toBe(tinted)
-  })
-
-  it('leaves documents without a styled body, or without a body, alone', () => {
-    for (const html of ['<main>fragment</main>', '<html><body><p>plain</p></body></html>', DARK_DESIGN])
-      expect(withoutPaperOverride(html)).toBe(html)
-  })
-
-  it('touches nothing but the body tag', () => {
-    const html = legacy(`${DARK_DESIGN}<div style="${WHITE}">card</div>`)
-    expect(withoutPaperOverride(html)).toBe(legacy(`${DARK_DESIGN}<div style="${WHITE}">card</div>`, SHELL))
+  it('touches nothing but the head and the body tag', () => {
+    const card = `<div style="${WHITE}">card</div>`
+    expect(withPaperRule(drawn(DARK_DESIGN + card))).toBe(
+      drawn(DARK_DESIGN + card, { head: FRAME_PAPER_STYLE, bodyStyle: SHELL }),
+    )
   })
 })

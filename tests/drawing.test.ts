@@ -114,7 +114,9 @@ describe('drawing geometry and markup', () => {
   it('gives a drawn frame its white as a rule any design background beats, not inline on the body', () => {
     const frame = doc(drawingDocument({ ...box, tool: 'frame' }))
     expect(frame.body.style.background).toBe('')
-    expect(frame.head.querySelector('style[data-doop-paper]')?.textContent).toBe(':where(body){background:#ffffff}')
+    expect(frame.head.querySelector('style[data-doop-paper]')?.textContent).toBe(
+      '@layer doop-paper{:where(body){background:#ffffff}}',
+    )
   })
 
   it('inverts the ink of text and strokes on bare canvas in the dark theme, never inside a frame', async () => {

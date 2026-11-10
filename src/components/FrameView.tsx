@@ -53,7 +53,7 @@ import { sizeLabel, type ResizeHandle } from '../lib/elementResize'
 import { withFontFaces } from '../../shared/fonts'
 import { withWebFontLinks } from '../../shared/webFonts'
 import { withTokenBlock } from '../../shared/designTokens'
-import { withoutPaperOverride } from '../../shared/framePaper'
+import { withPaperRule } from '../../shared/framePaper'
 import { canvasFonts } from '../lib/customFonts'
 import { t as translate, useT } from '../lib/i18n'
 
@@ -1412,11 +1412,7 @@ export const FrameView = memo(function FrameView({
         const library = canvasFonts()
         const canvas = useStore.getState().canvas
         /* tokens first, so a family named through a font token is seen by the font scan */
-        const withTokens = withTokenBlock(
-          withoutPaperOverride(ev.data.html),
-          canvas?.tokens ?? [],
-          canvas?.tokenThemes ?? [],
-        )
+        const withTokens = withTokenBlock(withPaperRule(ev.data.html), canvas?.tokens ?? [], canvas?.tokenThemes ?? [])
         const html = withWebFontLinks(withFontFaces(withTokens, library), library)
         const before = useStore.getState().canvas?.frames.find((f) => f.id === frame.id)?.html
         useStore.getState().patchFrameLocal(frame.id, { html })
