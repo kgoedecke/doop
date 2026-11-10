@@ -4,7 +4,7 @@ import { findBrowserPath } from '../server/screenshot'
 import { fixtureUrl, pagePerTest } from './browser'
 import type { Frame } from '../shared/types'
 
-/* `window.drawingHarness` is declared by drawingBrowser.test.ts, whose fixture this shares */
+/* `window.drawingHarness` is declared by drawingPage.ts, whose fixture this shares */
 
 /* the fixture's stage starts 40px down the page; the viewport below puts
    world (0,0) at stage (40,20) and doubles everything */
