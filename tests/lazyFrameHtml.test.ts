@@ -143,3 +143,11 @@ it('holds the canvases a tool call names until the tool returns', async () => {
   store.evictIdle(HOUR / 2, later + HOUR)
   expect(store.isLoaded(canvasId)).toBe(false)
 })
+
+it('leaves a canvas unloaded when the resident agent is woken with no work on it', async () => {
+  const { onFeedback } = await import('../server/resident.ts')
+  const { canvasId } = await bootedCanvas('Nothing queued')
+  onFeedback(canvasId)
+  await new Promise((resolve) => setTimeout(resolve, 50))
+  expect(store.isLoaded(canvasId)).toBe(false)
+})

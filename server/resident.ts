@@ -113,6 +113,9 @@ async function sweep(canvasId: string) {
      model turn takes (store.evictIdle) */
   let release = () => {}
   try {
+    /* only a canvas with work is loaded: wake() sweeps every canvas a person
+       can edit, and loading them all would undo the per-canvas load */
+    if (!actions.pendingWorkAgents(canvasId).length) return
     await store.load(canvasId)
     release = store.hold(canvasId)
     for (let i = 0; i < MAX_SWEEP_RUNS; i++) {
