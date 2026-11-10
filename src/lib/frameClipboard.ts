@@ -2,10 +2,11 @@ import type { Frame } from '../../shared/types'
 import { api } from './api'
 import { useStore } from './store'
 import { posthog } from './posthog'
-import { recordCreates } from './history'
+import { historyEpoch, recordCreates, replaceFramesTracked } from './history'
 import { ELEMENT_CLIP_KEY, FRAME_CLIP_KEY as CLIP_KEY } from './clipboardKeys'
 import { stageViewportSize } from './framePlacement'
 import { importSvgInBrowser, looksLikeSvg } from './svgImport'
+import { importPdf, isPdfFile } from './pdfImport'
 
 /** One copied frame, positioned relative to the top-left of the copied group
  *  so a multi-frame paste keeps the frames' layout. */
@@ -16,6 +17,8 @@ interface ClipFrame {
   y: number
   width: number
   height: number
+  /** degrees clockwise about the centre, when the copied frame was turned */
+  rotation?: number
 }
 
 interface FrameClip {
@@ -34,6 +37,7 @@ export function copyFrames(frames: Frame[]) {
       y: f.y - top,
       width: f.width,
       height: f.height,
+      ...(f.rotation ? { rotation: f.rotation } : {}),
     })),
   }
   localStorage.setItem(CLIP_KEY, JSON.stringify(clip))
@@ -96,6 +100,7 @@ function createFromClip(canvasId: string, x: number, y: number) {
         height: f.height,
         x: Math.round(x + f.x),
         y: Math.round(y + f.y),
+        ...(f.rotation ? { rotation: f.rotation } : {}),
       },
     })),
   ).then((created) => {
@@ -181,12 +186,15 @@ interface Slot {
   height: number
   /** A vector keeps its proportions; a bitmap sits in a box it fits inside. */
   uniform?: boolean
+  /** A page keeps its size: its markup is laid out in those px. */
+  exact?: boolean
 }
 
 /** Lay sizes out in a row centered as a group on `at` (a screen point, the
  *  middle of the view when left out; one lands dead-center), in world px. */
 function rowSlots(sizes: Slot[], at?: { x: number; y: number }) {
   const scaled = sizes.map((d) => {
+    if (d.exact) return { width: d.width, height: d.height }
     const scale = Math.min(1, MAX_PASTE_DIM / Math.max(d.width, d.height))
     if (d.uniform)
       return { width: Math.max(1, Math.round(d.width * scale)), height: Math.max(1, Math.round(d.height * scale)) }
@@ -254,10 +262,11 @@ export function svgMarkupOf(data: DataTransfer | null): string | null {
   return looksLikeSvg(text) ? text : null
 }
 
-/** What a paste or drop brought: image files, SVG files, or SVG source text. */
+/** What a paste or drop brought: image files, SVG files, PDFs, or SVG source text. */
 export interface IncomingFiles {
   images: File[]
   vectors: File[]
+  pdfs: File[]
   markup?: string | null
 }
 
@@ -265,22 +274,24 @@ export function splitIncoming(files: File[], markup: string | null = null): Inco
   const vectors = files.filter(isSvgFile)
   return {
     vectors,
+    pdfs: files.filter(isPdfFile),
     images: files.filter((f) => f.type.startsWith('image/') && !isSvgFile(f)),
     markup: files.length ? null : markup,
   }
 }
 
-export function hasIncoming({ images, vectors, markup }: IncomingFiles): boolean {
-  return images.length > 0 || vectors.length > 0 || !!markup
+export function hasIncoming({ images, vectors, pdfs, markup }: IncomingFiles): boolean {
+  return images.length > 0 || vectors.length > 0 || pdfs.length > 0 || !!markup
 }
 
 /** One frame to create, sized and named, with its markup ready. */
-type Prepared = { kind: 'image' | 'vector'; name: string; size: Slot; html: () => Promise<string> }
+type Prepared = { kind: 'image' | 'vector' | 'page'; name: string; size: Slot; html: () => Promise<string> }
 
 /** What a paste or drop landed, by kind. */
 interface Landed {
   images: number
   vectors: number
+  pages: number
 }
 
 /** Place everything a paste or drop brought as one row, bitmaps and vectors
@@ -320,7 +331,31 @@ async function importIncoming(
     ]
   })
   if (sources.length && !vectors.length && !images.length) throw new Error('The SVG has no shapes to import.')
-  const prepared = [...vectors, ...images]
+  /* a PDF is one frame per page, at the page's printed size */
+  /* a PDF that cannot be read drops out on its own; its siblings still land */
+  const read = await Promise.allSettled(
+    incoming.pdfs.map(async (file) =>
+      importPdf(new Uint8Array(await file.arrayBuffer()), fileStem(file.name) || 'PDF', {
+        importSvg: importSvgInBrowser,
+        /* pictures become assets, so a photo-heavy page stays under the frame's size cap */
+        storeImage: async (bytes, mime) =>
+          (await api.uploadAsset(canvasId, new Blob([bytes as BlobPart], { type: mime }))).url,
+      }),
+    ),
+  )
+  const unreadable = read.find((r): r is PromiseRejectedResult => r.status === 'rejected')
+  if (unreadable) console.error('PDF import failed', unreadable.reason)
+  const pages: Prepared[] = read
+    .flatMap((r) => (r.status === 'fulfilled' ? r.value : []))
+    .map((page) => ({
+      kind: 'page' as const,
+      name: page.name,
+      size: { width: page.width, height: page.height, exact: true },
+      html: () => Promise.resolve(page.html),
+    }))
+  if (incoming.pdfs.length && !pages.length && !vectors.length && !images.length)
+    throw unreadable ? new Error('The PDF could not be read.') : new Error('The PDF has no pages to import.')
+  const prepared = [...vectors, ...pages, ...images]
   const placed = rowSlots(
     prepared.map((p) => p.size),
     at,
@@ -341,11 +376,12 @@ async function importIncoming(
   const upload = ready.find((r): r is PromiseRejectedResult => r.status === 'rejected')
   if (upload) console.error(`${ready.length - requests.length} of ${ready.length} file(s) failed`, upload.reason)
   const frames = await settleFrames(requests)
-  const landed: Landed = { images: 0, vectors: 0 }
+  const landed: Landed = { images: 0, vectors: 0, pages: 0 }
+  const counted = { image: 'images', vector: 'vectors', page: 'pages' } as const
   frames.forEach((frame, i) => {
-    if (frame) landed[requests[i]!.kind === 'image' ? 'images' : 'vectors']++
+    if (frame) landed[counted[requests[i]!.kind]]++
   })
-  if (!landed.images && !landed.vectors && prepared.length) {
+  if (!landed.images && !landed.vectors && !landed.pages && prepared.length) {
     if (upload) throw upload.reason instanceof Error ? upload.reason : new Error(String(upload.reason))
     throw new Error('Couldn’t add the files.')
   }
@@ -377,9 +413,101 @@ export function duplicateFrames(frames: Frame[]) {
         y: frame.y + 40,
         width: frame.width,
         height: frame.height,
+        ...(frame.rotation ? { rotation: frame.rotation } : {}),
       },
     })),
   ).then((created) => {
     if (created.length) posthog.capture('frame_duplicated', { count: created.length })
   })
+}
+
+/** ⇧⌘V on frames: the copied frames centred over the selected ones. */
+export function pasteFramesOver(canvasId: string, over: Frame[]): boolean {
+  const frames = readClip()
+  if (!frames.length || !over.length) return false
+  const { width, height } = clipBounds(frames)
+  const left = Math.min(...over.map((f) => f.x))
+  const top = Math.min(...over.map((f) => f.y))
+  const right = Math.max(...over.map((f) => f.x + f.width))
+  const bottom = Math.max(...over.map((f) => f.y + f.height))
+  createFromClip(canvasId, (left + right) / 2 - width / 2, (top + bottom) / 2 - height / 2)
+  return true
+}
+
+/* the frame as the canvas holds it now */
+function liveFrame(id: string): Frame | undefined {
+  return useStore.getState().canvas?.frames.find((f) => f.id === id)
+}
+
+/** ⇧⌘R on frames: the copied frames land at each selected frame's top-left,
+ *  and each selected frame goes once all of its replacements have landed.
+ *  One whose replacements did not all land stays, and the copies that did
+ *  are taken back; any that cannot be taken back stay in the undo step, so
+ *  Undo still removes them. */
+export function replaceFramesWithClip(canvasId: string, targets: Frame[]): boolean {
+  const frames = readClip()
+  const replaceable = targets.filter((f) => !f.locked)
+  if (!frames.length || !replaceable.length) return false
+  /* the canvas and history this replacement belongs to: left behind, it
+     must not land in another canvas's history */
+  const started = historyEpoch()
+  void Promise.all(
+    replaceable.map(async (target) => {
+      const results = await Promise.allSettled(
+        frames.map((f) =>
+          api.createFrame(canvasId, {
+            name: f.name,
+            html: f.html,
+            width: f.width,
+            height: f.height,
+            x: Math.round(target.x + f.x),
+            y: Math.round(target.y + f.y),
+            ...(f.rotation ? { rotation: f.rotation } : {}),
+          }),
+        ),
+      )
+      const created = results.flatMap((r) => (r.status === 'fulfilled' ? [r.value] : []))
+      if (created.length === frames.length) return { target, created, leftovers: [] }
+      console.error(`replacing ${target.id}: ${frames.length - created.length} frame(s) failed`)
+      const removed = await Promise.allSettled(created.map((f) => api.deleteFrame(f.id)))
+      const leftovers = created.filter((_, i) => removed[i]?.status === 'rejected')
+      return { target, created: null, leftovers }
+    }),
+  ).then(async (outcomes) => {
+    const finished = outcomes.flatMap((o) => (o.created ? [{ target: o.target, created: o.created }] : []))
+    const leftovers = outcomes.flatMap((o) => o.leftovers)
+    if (!finished.length && !leftovers.length) return
+    const movedOn = () => useStore.getState().canvas?.id !== canvasId || historyEpoch() !== started
+    /* the person moved on (another canvas, history cleared): no undo step
+       could take this back, so the replacements go and the originals stay */
+    const dropAll = () => {
+      for (const f of finished.flatMap((o) => o.created)) api.deleteFrame(f.id).catch(console.error)
+    }
+    if (movedOn()) return dropAll()
+    /* a target a teammate edited while its replacements were made keeps that
+       edit, and its replacements go; a copy that cannot go stays in the undo
+       step, so Undo still takes it back */
+    const stale = finished.filter(({ target }) => liveFrame(target.id)?.updatedAt !== target.updatedAt)
+    const ready = finished.filter((o) => !stale.includes(o))
+    const staleCopies = stale.filter(({ target }) => liveFrame(target.id)).flatMap((o) => o.created)
+    const cleanup = await Promise.allSettled(staleCopies.map((f) => api.deleteFrame(f.id)))
+    leftovers.push(...staleCopies.filter((_, i) => cleanup[i]?.status === 'rejected'))
+    /* one deleted meanwhile has nothing left to remove: its copies stay */
+    leftovers.push(...stale.filter(({ target }) => !liveFrame(target.id)).flatMap((o) => o.created))
+    if (movedOn()) return dropAll()
+    /* read once more after the cleanup: a target edited during it keeps its
+       edit too, and its copies stay as plain copies */
+    const done: { target: Frame; created: Frame[] }[] = []
+    for (const { target, created } of ready) {
+      const now = liveFrame(target.id)
+      if (now?.updatedAt === target.updatedAt) done.push({ target: now, created })
+      else leftovers.push(...created)
+    }
+    const created = [...done.flatMap((o) => o.created), ...leftovers]
+    if (!created.length) return
+    replaceFramesTracked(done, leftovers)
+    useStore.getState().selectMany(created.map((f) => f.id))
+    posthog.capture('frame_pasted', { count: created.length })
+  })
+  return true
 }

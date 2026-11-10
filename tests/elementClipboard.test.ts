@@ -1,14 +1,20 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Frame } from '../shared/types'
-import { copyLayer, copyLayers, hasElementClip, pasteLayer } from '../src/lib/elementClipboard'
+import { copyLayer, copyLayers, copyPicked, hasElementClip, pasteLayer } from '../src/lib/elementClipboard'
 import { copyFrames, hasFrameClip } from '../src/lib/frameClipboard'
 import { insertElement } from '../src/lib/layers'
 import { useStore } from '../src/lib/store'
-import { deleteLayer } from '../src/lib/layerEdits'
+import { deleteLayer, duplicateLayers, standaloneSelector } from '../src/lib/layerEdits'
 import { clearHistory, redo, undo } from '../src/lib/history'
 
-vi.mock('../src/lib/api', () => ({ api: { updateFrame: vi.fn().mockResolvedValue({}) } }))
+const createFrame = vi.fn((_canvasId: string, frame: Partial<Frame>) => Promise.resolve({ ...frame, id: 'new' }))
+vi.mock('../src/lib/api', () => ({
+  api: {
+    updateFrame: vi.fn().mockResolvedValue({}),
+    createFrame: (canvasId: string, frame: Partial<Frame>) => createFrame(canvasId, frame),
+  },
+}))
 vi.mock('../src/lib/posthog', () => ({ posthog: { capture: vi.fn() } }))
 
 const frame: Frame = {
@@ -32,6 +38,45 @@ beforeEach(() => {
 })
 
 afterEach(() => vi.restoreAllMocks())
+
+/* a shape drawn on the canvas: a transparent shell holding its one layer */
+const shape: Frame = {
+  ...frame,
+  id: 'shape',
+  html: '<!doctype html><html><head></head><body data-doop-canvas-element="true"><div data-doop-drawing="rect" data-name="Rectangle"></div></body></html>',
+}
+
+describe('standalone element copy', () => {
+  beforeEach(() => {
+    createFrame.mockClear()
+    useStore.getState().setCanvas({ id: 'c', name: 'Canvas', frames: [frame, shape], createdAt: 0, updatedAt: 0 })
+  })
+
+  it('copies a picked standalone shape as the element it is, not as a layer of its shell', () => {
+    const selector = standaloneSelector(shape)!
+    expect(copyPicked(shape, [selector])).toBe(true)
+    expect(hasFrameClip()).toBe(true)
+    expect(hasElementClip()).toBe(false)
+    /* a paste lands nothing inside the original's shell */
+    expect(pasteLayer(shape, selector)).toBe(false)
+    expect(useStore.getState().canvas!.frames[1]!.html).toBe(shape.html)
+  })
+
+  it('still copies a picked layer of an ordinary frame as a layer', () => {
+    expect(copyPicked(frame, ['#source'])).toBe(true)
+    expect(hasElementClip()).toBe(true)
+    expect(hasFrameClip()).toBe(false)
+  })
+
+  it('duplicates a picked standalone shape as a second element on the canvas', async () => {
+    const selector = standaloneSelector(shape)!
+    useStore.getState().pickElement({ frameId: shape.id, selector })
+    duplicateLayers(shape, [selector])
+    await vi.waitFor(() => expect(createFrame).toHaveBeenCalledTimes(1))
+    expect(createFrame.mock.calls[0]![1]).toMatchObject({ html: shape.html, x: 40, y: 40, width: 300, height: 200 })
+    expect(useStore.getState().canvas!.frames[1]!.html).toBe(shape.html)
+  })
+})
 
 describe('element clipboard', () => {
   it('undoes a rapid paste and delete as separate actions', async () => {

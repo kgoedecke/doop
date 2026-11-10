@@ -1,5 +1,6 @@
 import { PREVIEW_MAX_HEIGHT, type Frame } from '../shared/types.ts'
 import * as storage from './storage.ts'
+import { store } from './store.ts'
 
 /**
  * Persisted dashboard previews: `thumb/<frameId>.jpg` in byte storage,
@@ -48,7 +49,8 @@ async function render(frame: Frame): Promise<Buffer> {
   active++
   try {
     const { renderFrame } = await loadScreenshot()
-    return await renderFrame(frame, Math.min(1, 640 / frame.width), {
+    /* the html is read when the render starts, not when it was queued */
+    return await renderFrame(await store.renderSource(frame), Math.min(1, 640 / frame.width), {
       type: 'jpeg',
       quality: 70,
       maxHeight: PREVIEW_MAX_HEIGHT,

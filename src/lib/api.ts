@@ -3,6 +3,7 @@ import type { InstanceSettings, InstanceSettingsPatch } from '../../shared/insta
 import { beginFrameSave } from './frameSaves'
 import type { StackWrite } from '../../shared/frameStack'
 import type { LocalAgentPreference, LocalAgentJob, LocalAgentResult } from '../../shared/localAgent'
+import type { AgentRunners, RunnerPick, RunnerProvider } from '../../shared/agentRunner'
 import type { NotificationPrefs, NotificationSettings } from '../../shared/notifications'
 import type { WebhookDeliveryResult, WebhookEventType, WebhookInfo } from '../../shared/webhooks'
 import type { AgentFeedbackKind, AgentFeedbackReport } from '../../shared/agentFeedback'
@@ -28,6 +29,7 @@ import type { BillingInterval, Plan } from '../../shared/billing'
 import type { LinkAccess } from '../../shared/canvasRole'
 import type { CommentAnchorInput } from '../../shared/comments'
 import type { CustomFont } from '../../shared/fonts'
+import type { DesignToken, DesignTokenInput, ThemeRename, TokenEdit, TokenResult } from '../../shared/designTokens'
 
 export type HomeActivity = ActivityItem & { canvasId: string; canvasName: string }
 
@@ -148,7 +150,15 @@ export interface Allowance {
   onOwnAccount: boolean
 }
 
-export type ModelAccountKind = 'chatgpt' | 'openai-key' | 'anthropic-key' | 'openrouter-key' | 'gemini-key'
+export type ModelAccountKind =
+  | 'chatgpt'
+  | 'openai-key'
+  | 'anthropic-key'
+  | 'openrouter-key'
+  | 'gemini-key'
+  | 'deepseek-key'
+  | 'kimi-key'
+  | 'kimi-code'
 
 /** An in-flight device sign-in: the user types `userCode` at `verificationUrl`
  *  and the server polls OpenAI until they approve. */
@@ -177,20 +187,29 @@ export interface AgentModelCatalog {
   error?: string
 }
 
+/** One connected model account, as Settings shows it: never a token. */
 export interface ModelAccountStatus {
-  connected: boolean
-  kind?: ModelAccountKind
+  kind: ModelAccountKind
+  /** off keeps the credential but takes the account out of use */
+  enabled: boolean
   email?: string
   plan?: string
   /** the model tier this account runs on right now */
   model?: string
   /** the reasoning effort in effect; only the OpenAI kinds have one */
   effort?: string
-  connectedAt?: number
+  connectedAt: number
+}
+
+/** The Settings pane's view: every connected account, on or off, and which
+ *  connection runs work nobody picked one for. */
+export interface ModelAccounts {
+  accounts: ModelAccountStatus[]
+  default?: RunnerProvider
   /** false when the server has switched the ChatGPT flow off */
-  chatgptEnabled?: boolean
+  chatgptEnabled: boolean
   /** the curated menu each provider's picker offers */
-  menus?: Record<ModelAccountKind, AgentModelOption[]>
+  menus: Record<ModelAccountKind, AgentModelOption[]>
 }
 
 /** One image-model registry entry's availability for this user. */
@@ -401,6 +420,29 @@ export const api = {
       method: 'PUT',
       body: JSON.stringify({ markdown, ...(title !== undefined ? { title } : {}) }),
     }),
+  /* design tokens */
+  createTokens: (canvasId: string, tokens: DesignTokenInput[]) =>
+    req<{ results: TokenResult[]; tokens: DesignToken[] }>(`/api/canvases/${canvasId}/tokens`, {
+      method: 'POST',
+      body: JSON.stringify({ tokens }),
+    }),
+  setToken: (canvasId: string, name: string, edit: Omit<TokenEdit, 'name'>) =>
+    req<{ result: TokenResult; tokens: DesignToken[] }>(
+      `/api/canvases/${canvasId}/tokens/${encodeURIComponent(name)}`,
+      {
+        method: 'PUT',
+        body: JSON.stringify(edit),
+      },
+    ),
+  setTokenThemes: (canvasId: string, themes: string[], renames: ThemeRename[] = []) =>
+    req<{ themes: string[]; tokens: DesignToken[] }>(`/api/canvases/${canvasId}/token-themes`, {
+      method: 'PUT',
+      body: JSON.stringify({ themes, ...(renames.length ? { renames } : {}) }),
+    }),
+  deleteToken: (canvasId: string, name: string) =>
+    req<{ ok: boolean; tokens: DesignToken[] }>(`/api/canvases/${canvasId}/tokens/${encodeURIComponent(name)}`, {
+      method: 'DELETE',
+    }),
   /* design memory */
   pinReference: (canvasId: string, frameId: string) =>
     req(`/api/canvases/${canvasId}/references`, { method: 'POST', body: JSON.stringify({ frameId }) }),
@@ -519,35 +561,57 @@ export const api = {
       body: JSON.stringify({ urls }),
     }),
   agentAllowance: () => req<Allowance>('/api/agent-allowance'),
-  modelAccount: () => req<ModelAccountStatus>('/api/model-account'),
-  agentModels: () => req<AgentModelCatalog>('/api/model-account/models'),
+  /** the connections the composer may send a task to */
+  agentRunners: () => req<AgentRunners>('/api/agent-runners'),
+  /** which connection comments, @mentions and automations run on */
+  setDefaultRunner: (provider: RunnerProvider) =>
+    req<ModelAccounts>('/api/agent-runners/default', { method: 'PUT', body: JSON.stringify({ provider }) }),
+  modelAccounts: () => req<ModelAccounts>('/api/model-account'),
+  agentModels: (kind: ModelAccountKind) =>
+    req<AgentModelCatalog>(`/api/model-account/models?kind=${encodeURIComponent(kind)}`),
   chatgptAuthorize: () =>
     req<{ url: string; state: string; catching: boolean }>('/api/model-account/chatgpt/authorize', { method: 'POST' }),
   startDeviceAuth: () => req<DeviceFlow>('/api/model-account/chatgpt/device', { method: 'POST' }),
   deviceAuthStatus: () => req<DeviceFlow | { status: 'none' }>('/api/model-account/chatgpt/device'),
   cancelDeviceAuth: () => req('/api/model-account/chatgpt/device', { method: 'DELETE' }),
   connectChatgpt: (redirect: string) =>
-    req<ModelAccountStatus>('/api/model-account/chatgpt', { method: 'POST', body: JSON.stringify({ redirect }) }),
+    req<ModelAccounts>('/api/model-account/chatgpt', { method: 'POST', body: JSON.stringify({ redirect }) }),
   connectOpenAiKey: (apiKey: string) =>
-    req<ModelAccountStatus>('/api/model-account/openai-key', { method: 'POST', body: JSON.stringify({ apiKey }) }),
+    req<ModelAccounts>('/api/model-account/openai-key', { method: 'POST', body: JSON.stringify({ apiKey }) }),
   connectAnthropicKey: (apiKey: string) =>
-    req<ModelAccountStatus>('/api/model-account/anthropic-key', { method: 'POST', body: JSON.stringify({ apiKey }) }),
+    req<ModelAccounts>('/api/model-account/anthropic-key', { method: 'POST', body: JSON.stringify({ apiKey }) }),
   connectOpenRouterKey: (apiKey: string) =>
-    req<ModelAccountStatus>('/api/model-account/openrouter-key', { method: 'POST', body: JSON.stringify({ apiKey }) }),
+    req<ModelAccounts>('/api/model-account/openrouter-key', { method: 'POST', body: JSON.stringify({ apiKey }) }),
   connectGeminiKey: (apiKey: string) =>
-    req<ModelAccountStatus>('/api/model-account/gemini-key', { method: 'POST', body: JSON.stringify({ apiKey }) }),
-  disconnectModelAccount: () => req<ModelAccountStatus>('/api/model-account', { method: 'DELETE' }),
-  setAgentModel: (model: string) =>
-    req<ModelAccountStatus>('/api/model-account', { method: 'PATCH', body: JSON.stringify({ model }) }),
-  setAgentEffort: (effort: string) =>
-    req<ModelAccountStatus>('/api/model-account', { method: 'PATCH', body: JSON.stringify({ effort }) }),
+    req<ModelAccounts>('/api/model-account/gemini-key', { method: 'POST', body: JSON.stringify({ apiKey }) }),
+  connectDeepSeekKey: (apiKey: string) =>
+    req<ModelAccounts>('/api/model-account/deepseek-key', { method: 'POST', body: JSON.stringify({ apiKey }) }),
+  connectKimiKey: (apiKey: string) =>
+    req<ModelAccounts>('/api/model-account/kimi-key', { method: 'POST', body: JSON.stringify({ apiKey }) }),
+  connectKimiCodeKey: (apiKey: string) =>
+    req<ModelAccounts>('/api/model-account/kimi-code', { method: 'POST', body: JSON.stringify({ apiKey }) }),
+  disconnectModelAccount: (kind: ModelAccountKind) =>
+    req<ModelAccounts>(`/api/model-account/${kind}`, { method: 'DELETE' }),
+  setAgentModel: (kind: ModelAccountKind, model: string) =>
+    req<ModelAccounts>(`/api/model-account/${kind}`, { method: 'PATCH', body: JSON.stringify({ model }) }),
+  setAgentEffort: (kind: ModelAccountKind, effort: string) =>
+    req<ModelAccounts>(`/api/model-account/${kind}`, { method: 'PATCH', body: JSON.stringify({ effort }) }),
+  setModelAccountEnabled: (kind: ModelAccountKind, enabled: boolean) =>
+    req<ModelAccounts>(`/api/model-account/${kind}`, { method: 'PATCH', body: JSON.stringify({ enabled }) }),
   imageModels: () => req<{ models: ImageModelStatus[] }>('/api/image-model'),
   setImageModel: (model: string) =>
     req<{ models: ImageModelStatus[] }>('/api/image-model', { method: 'PUT', body: JSON.stringify({ model }) }),
-  addCard: (canvasId: string, title: string, agents: string[], attachments?: string[], scope?: CardScope) =>
+  addCard: (
+    canvasId: string,
+    title: string,
+    agents: string[],
+    attachments?: string[],
+    scope?: CardScope,
+    runner?: RunnerPick,
+  ) =>
     req(`/api/canvases/${canvasId}/cards`, {
       method: 'POST',
-      body: JSON.stringify({ title, agents, attachments, scope }),
+      body: JSON.stringify({ title, agents, attachments, scope, runner }),
     }),
   completeCard: (canvasId: string, cardId: string) =>
     req(`/api/canvases/${canvasId}/cards/${cardId}/done`, { method: 'POST' }),

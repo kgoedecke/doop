@@ -185,6 +185,21 @@ it('puts the previous colour back when the save fails', async () => {
   expect(api.setPageBackground).toHaveBeenCalledTimes(1)
 })
 
+it('leaves a colour a teammate painted meanwhile when an undo fails', async () => {
+  api.setPageBackground.mockImplementation(async () => [])
+  await setPageBackground(useStore.getState().canvas!, 'first', '#1e1e1e')
+  const pending = deferred<never>()
+  api.setPageBackground.mockReturnValue(pending.promise)
+  const undone = undo()
+  await vi.waitFor(() => expect(background('first')).toBeUndefined())
+  /* the room delivers someone else's colour while the undo is still in flight */
+  useStore.getState().setPageBackgroundLocal('first', '#ffd166')
+  vi.spyOn(console, 'error').mockImplementation(() => {})
+  pending.reject(new Error('offline'))
+  await undone
+  expect(background('first')).toBe('#ffd166')
+})
+
 it('brings a deleted painted page back with its colour on undo, and a duplicated one on redo', async () => {
   api.setPageBackground.mockImplementation(async () => [])
   useStore.getState().setPageBackgroundLocal('second', '#1e1e1e')

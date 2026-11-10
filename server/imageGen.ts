@@ -1,7 +1,7 @@
 import { env } from './env.ts'
 import { randomUUID } from 'node:crypto'
 import sharp from 'sharp'
-import { getAccount, withFreshToken } from './modelAccounts.ts'
+import { getAccounts, withFreshToken } from './modelAccounts.ts'
 import type { ModelAccount } from './modelAccounts.ts'
 import { getImagePref } from './imagePrefs.ts'
 import { IMAGE_MODELS } from '../shared/modelMenu.ts'
@@ -316,14 +316,37 @@ const NO_GENERATOR =
 /* A connected account pays for its own provider's models and nothing else:
    the server keys only ever cover users who connected nothing — with one
    deliberate exception, Seedream, which has no BYO path at all, so setting
-   ARK_API_KEY is the operator opting into paying for it. */
-function available(option: ImageModelOption, account: ModelAccount | null): boolean {
+   ARK_API_KEY is the operator opting into paying for it. Credentials come
+   from the accounts switched on; whether the server may pay depends on every
+   connected account, so switching them all off never moves the charge onto
+   the server. The ChatGPT subscription is preferred over an OpenAI key when
+   both are on, since it costs the person nothing extra. */
+interface PayerAccounts {
+  /** switched on: the credentials a run may use */
+  on: readonly ModelAccount[]
+  /** connected anything at all, on or off: no server key pays for them */
+  own: boolean
+}
+const NO_ACCOUNTS: PayerAccounts = { on: [], own: false }
+
+function openAiAccount(accounts: readonly ModelAccount[]): ModelAccount | undefined {
+  return (
+    accounts.find((account) => account.kind === 'chatgpt') ??
+    accounts.find((account) => account.kind === 'openai-key' && Boolean(account.apiKey))
+  )
+}
+
+function geminiAccount(accounts: readonly ModelAccount[]): ModelAccount | undefined {
+  return accounts.find((account) => account.kind === 'gemini-key' && Boolean(account.apiKey))
+}
+
+function available(option: ImageModelOption, accounts: PayerAccounts): boolean {
   switch (option.provider) {
     case 'openai':
-      if (account) return account.kind === 'chatgpt' || (account.kind === 'openai-key' && Boolean(account.apiKey))
+      if (accounts.own) return Boolean(openAiAccount(accounts.on))
       return Boolean(env.OPENAI_API_KEY)
     case 'gemini':
-      if (account) return account.kind === 'gemini-key' && Boolean(account.apiKey)
+      if (accounts.own) return Boolean(geminiAccount(accounts.on))
       return Boolean(env.GEMINI_API_KEY)
     case 'ark':
       return Boolean(env.ARK_API_KEY)
@@ -334,22 +357,27 @@ function available(option: ImageModelOption, account: ModelAccount | null): bool
 export async function imageModelAvailability(
   payerId?: string,
 ): Promise<{ id: string; available: boolean; selected: boolean }[]> {
-  const account = payerId ? await getAccount(payerId).catch(() => null) : null
-  const chosen = await chosenImageModel(payerId, account)
+  const accounts = payerId ? await payerAccounts(payerId).catch(() => NO_ACCOUNTS) : NO_ACCOUNTS
+  const chosen = await chosenImageModel(payerId, accounts)
   return IMAGE_MODELS.map((option) => ({
     id: option.id,
-    available: available(option, account),
+    available: available(option, accounts),
     selected: chosen?.id === option.id,
   }))
 }
 
 let warnedDefault = false
 
+async function payerAccounts(payerId: string): Promise<PayerAccounts> {
+  const all = await getAccounts(payerId)
+  return { on: all.filter((account) => account.enabled), own: all.length > 0 }
+}
+
 /** The model a run will draw with: the user's pick, else the server default,
  *  else the first entry their credentials can run. */
 async function chosenImageModel(
   payerId: string | undefined,
-  account: ModelAccount | null,
+  accounts: PayerAccounts,
 ): Promise<ImageModelOption | null> {
   const pref = payerId ? await getImagePref(payerId) : undefined
   if (pref) {
@@ -363,18 +391,21 @@ async function chosenImageModel(
       `[image-gen] DOOP_IMAGE_MODEL="${DEFAULT_IMAGE_MODEL}" is not on the image-model registry — ignoring it`,
     )
   }
-  if (fallback && available(fallback, account)) return fallback
-  return IMAGE_MODELS.find((entry) => available(entry, account)) ?? fallback ?? null
+  if (fallback && available(fallback, accounts)) return fallback
+  return IMAGE_MODELS.find((entry) => available(entry, accounts)) ?? fallback ?? null
 }
 
-function providerGenerator(option: ImageModelOption, account: ModelAccount | null): Generator {
+function providerGenerator(option: ImageModelOption, accounts: PayerAccounts): Generator {
+  /* a server key covers only someone with no account of their own, on or off */
+  const { own } = accounts
   switch (option.provider) {
     case 'openai': {
+      const account = openAiAccount(accounts.on)
       if (account?.kind === 'chatgpt') return chatgptGenerator(account, option.id)
       if (account?.kind === 'openai-key' && account.apiKey) {
         return apiKeyGenerator(account.apiKey, 'OpenAI', ROUTER_MODEL || modelFor(account), option.id)
       }
-      const serverKey = account ? undefined : env.OPENAI_API_KEY
+      const serverKey = own ? undefined : env.OPENAI_API_KEY
       if (serverKey) return apiKeyGenerator(serverKey, 'server', ROUTER_MODEL || DEFAULT_OPENAI_MODEL, option.id)
       return {
         ok: false,
@@ -382,8 +413,9 @@ function providerGenerator(option: ImageModelOption, account: ModelAccount | nul
       }
     }
     case 'gemini': {
-      if (account?.kind === 'gemini-key' && account.apiKey) return geminiGenerator(account.apiKey, 'Gemini', option.id)
-      const serverKey = account ? undefined : env.GEMINI_API_KEY
+      const account = geminiAccount(accounts.on)
+      if (account?.apiKey) return geminiGenerator(account.apiKey, 'Gemini', option.id)
+      const serverKey = own ? undefined : env.GEMINI_API_KEY
       if (serverKey) return geminiGenerator(serverKey, 'server', option.id)
       return {
         ok: false,
@@ -410,15 +442,15 @@ function providerGenerator(option: ImageModelOption, account: ModelAccount | nul
 export async function generatorFor(payerId?: string): Promise<Generator> {
   /* a lookup failure must not read as "no account": that would quietly move
      the charge from the user's own account onto the server key */
-  const account = payerId
-    ? await getAccount(payerId).catch((err) => {
-        console.error('[image-gen] could not read the connected model account', err)
-        throw new Error('could not read your connected model account — try again in a moment')
+  const accounts = payerId
+    ? await payerAccounts(payerId).catch((err) => {
+        console.error('[image-gen] could not read the connected model accounts', err)
+        throw new Error('could not read your connected model accounts — try again in a moment')
       })
-    : null
-  const option = await chosenImageModel(payerId, account)
+    : NO_ACCOUNTS
+  const option = await chosenImageModel(payerId, accounts)
   if (!option) return { ok: false, reason: NO_GENERATOR }
-  return providerGenerator(option, account)
+  return providerGenerator(option, accounts)
 }
 
 /* ---------------------------------------------------------------- */

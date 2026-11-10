@@ -2,10 +2,11 @@ import { env } from './env.ts'
 import { canvasPages, framePageId, samePages } from '../shared/pages.ts'
 import { normalizePageBackground } from '../shared/pageBackground.ts'
 import { MAX_STACK_WRITES, type StackWrite } from '../shared/frameStack.ts'
+import { normalizeRotation } from '../shared/frameRotation.ts'
 import type { CommentAnchorInput } from '../shared/comments.ts'
 import type { LocaleConfig } from '../shared/locales.ts'
 import { FIRST_CANVAS_PATH, SIGNUP_PARAM, parseSignupMethod } from '../shared/firstCanvas.ts'
-import { localAgentRouter, handleLocalAgentMcp } from './localAgent.ts'
+import { localAgentRouter, handleLocalAgentMcp, wake as wakeUserWork } from './localAgent.ts'
 import { handleGeminiCloudMcp } from './geminiCloudMcp.ts'
 import { geminiCloudWorkerFor } from './geminiCloudRuns.ts'
 import http from 'node:http'
@@ -31,10 +32,12 @@ import { fontsRouter } from './fontRoutes.ts'
 import { AvatarInputError, clearAvatar, setAvatar } from './avatars.ts'
 import { MAX_AVATAR_BYTES, avatarUrl } from '../shared/avatar.ts'
 import { fontsForCanvas, hydrateFonts } from './fonts.ts'
+import { tokensCss, tokensMarkdown, tokensTailwind } from '../shared/designTokens.ts'
 import {
   canEditCanvas,
   canManageCanvas,
   canvasRole,
+  guestCanvasRole,
   hasDurableCanvasAccess,
   isAdmin,
   roomMessageNeeds,
@@ -74,18 +77,19 @@ import * as githubApp from './githubApp.ts'
 import { seed } from './seed.ts'
 import * as allowance from './allowance.ts'
 import * as modelAccounts from './modelAccounts.ts'
-import { getLocalAgentPreference, saveLocalAgentPreference } from './localAgentPreferences.ts'
+import { getLocalAgentPreference } from './localAgentPreferences.ts'
 import { serverTierInfo } from './agentModel.ts'
 import { imageModelAvailability, serverImageGenEnabled } from './imageGen.ts'
 import { setImagePref } from './imagePrefs.ts'
-import { AGENT_MODELS } from './openaiAgent.ts'
+import { accountsView, listRunners, MODEL_MENUS } from './agentRunners.ts'
+import { setStoredDefault } from './agentDefaults.ts'
+import { isRunnerProvider } from '../shared/agentRunner.ts'
 import { modelCatalogFor } from './modelCatalog.ts'
-import { ANTHROPIC_MODELS, GEMINI_MODELS, OPENROUTER_MODELS } from '../shared/modelMenu.ts'
-import type { ModelOption } from '../shared/modelMenu.ts'
 import { mentionedRole } from '../shared/agents.ts'
 import { activeAgentTasks } from '../shared/agentActivity.ts'
 import { colorFor } from '../shared/types.ts'
 import { isPeerViewport } from '../shared/viewport.ts'
+import { exportScaleSuffix, fitExportScale, parseExportScale } from '../shared/exportScale.ts'
 import { emailShare } from './canvasShares.ts'
 import * as userEvents from './userEvents.ts'
 import type { Canvas, ClientMessage, Presence, ServerMessage } from '../shared/types.ts'
@@ -145,15 +149,12 @@ seed()
 
 /* asset bookkeeping (no deletion): every upload records its canvas, and
    asset_refs tracks which frames reference which assets — kept in sync on
-   every durable frame write, rebuilt here from the frames hydrate just
-   loaded. Nothing is ever deleted; asset_refs is the ledger any future
-   cleanup would be built on. */
-{
-  const frames = data.canvases.flatMap((c) => c.frames)
-  reconcileAssetRefs(frames)
-    .then((n) => n && console.log(`[assets] reconciled ${n} asset ref(s)`))
-    .catch((e) => console.error('[assets] reconcile failed', e))
-}
+   every durable frame write, rebuilt here from the stored frames. Nothing
+   is ever deleted; asset_refs is the ledger any future cleanup would be
+   built on. */
+reconcileAssetRefs()
+  .then((n) => n && console.log(`[assets] reconciled ${n} asset ref(s)`))
+  .catch((e) => console.error('[assets] reconcile failed', e))
 
 /* One stray rejection must never take down the multiplayer server: Node's
    default is to exit, which turned a single aborted analytics upload into
@@ -181,13 +182,42 @@ interface Conn {
   ws: WebSocket
   canvasId: string
   /** the session's user — the role is re-read from it on every message, so
-   *  a link changed mid-visit takes effect without a reconnect */
-  userId: string
+   *  a link changed mid-visit takes effect without a reconnect. Unset for a
+   *  signed-out guest on a link-shared canvas. */
+  userId?: string
   presence: Presence
   /** an admin viewing as someone else: receives updates, emits nothing.
    *  Showing their borrowed identity as a live cursor would tell the room
    *  the owner is here when they aren't. */
   silent?: boolean
+}
+
+/* What a signed-out guest is not sent: the team's conversation (comments,
+   agent tasks and their feedback, the activity feed) and its memory. A guest
+   sees the frames; the rest is for people with an account. */
+const GUEST_HIDDEN: ReadonlySet<ServerMessage['type']> = new Set([
+  'task',
+  'feedback',
+  'comment',
+  'activity',
+  'decision',
+  'proposal',
+  'reference',
+  'guidelines',
+  /* an agent's status line is its task's summary (setAgentStatus) */
+  'status',
+] satisfies ServerMessage['type'][])
+
+/** A presence as a guest sees it: without the status line, which carries
+ *  the same task summary GUEST_HIDDEN keeps from them. */
+function guestPresence<P extends Presence>({ status: _status, ...presence }: P): Omit<P, 'status'> {
+  return presence
+}
+
+/** A room message as a guest may see it, or null when it is withheld. */
+function forGuest(msg: ServerMessage): ServerMessage | null {
+  if (GUEST_HIDDEN.has(msg.type)) return null
+  return msg.type === 'presence:join' ? { ...msg, presence: guestPresence(msg.presence) } : msg
 }
 
 const conns = new Map<WebSocket, Conn>()
@@ -210,7 +240,8 @@ function refreshPresenceImage(userId: string, image: string | undefined): void {
 /** The live role of one room connection (null once access is gone). */
 function connRole(conn: Conn): CanvasRole | null {
   const canvas = store.getCanvas(conn.canvasId)
-  return canvas ? canvasRole(conn.userId, canvas) : null
+  if (!canvas) return null
+  return conn.userId ? canvasRole(conn.userId, canvas) : guestCanvasRole(canvas)
 }
 
 /* After a share-link change: everyone in the room learns their new role (the
@@ -240,7 +271,8 @@ function send(ws: WebSocket, msg: ServerMessage) {
 function broadcast(canvasId: string, msg: ServerMessage, excludeClientId?: string) {
   for (const c of room(canvasId)) {
     if (excludeClientId && c.presence.clientId === excludeClientId) continue
-    send(c.ws, msg)
+    const shown = c.userId ? msg : forGuest(msg)
+    if (shown) send(c.ws, shown)
   }
 }
 
@@ -326,6 +358,11 @@ app.set('trust proxy', 1)
 
 app.get('/healthz', (_req, res) => res.json({ ok: true }))
 
+/* how many canvases have their frame HTML in memory (store.load / evictIdle) */
+app.get('/healthz/store', (_req, res) => {
+  res.json(store.stats())
+})
+
 /* ------------------------------------------------------------------ */
 /* PostHog relay: the client sends analytics + session-replay traffic  */
 /* to this origin (/relay/...) and we forward it, so ad blockers that  */
@@ -394,14 +431,19 @@ app.use('/relay', async (req, res) => {
 app.get('/i/:id.:ext', async (req, res) => {
   const { id, ext } = req.params as { id: string; ext: string }
   if (ext !== 'png' && ext !== 'jpg') return res.status(404).end()
+  /* metadata only: a cached image needs no html, and a render reads the
+     one frame's html when it starts (store.renderableFrame) */
   const frame = store.getFrame(id)
   if (!frame) return res.status(404).end()
 
+  /* any multiplier the export picker offers; a missing or unreadable one
+     is 1x, as before there was a picker */
+  const scale = fitExportScale(frame, parseExportScale(req.query.scale) ?? 1)
   let result: Awaited<ReturnType<typeof getImage>>
   try {
     result = await getImage(frame, {
       ext,
-      scale: req.query.scale === '2' ? 2 : 1,
+      scale,
       quality: Math.min(100, Math.max(1, Number(req.query.quality) || 90)),
       /* ?preview — the dashboard-card variant; see previews.ts */
       preview: req.query.preview !== undefined,
@@ -426,7 +468,7 @@ app.get('/i/:id.:ext', async (req, res) => {
   res.set('Cache-Control', 'public, max-age=60')
   if (req.query.download !== undefined) {
     const safe = frame.name.replace(/[^\w\- ]+/g, '').trim() || 'frame'
-    res.set('Content-Disposition', `attachment; filename="${safe}.${ext}"`)
+    res.set('Content-Disposition', `attachment; filename="${safe}${exportScaleSuffix(scale)}.${ext}"`)
   }
   res.send(buf)
 })
@@ -713,6 +755,35 @@ app.use('/api', async (req, res, next) => {
   }
 })
 
+/* Every route naming a canvas, frame or comment gets that canvas's frame
+   HTML loaded before its handler runs (store.load), so handlers keep
+   reading the store synchronously, and held until the response is done, so
+   a handler awaiting something slow (an import, a render) keeps it.
+   Behind the session gate, so only a signed-in request can bring a canvas
+   into memory. */
+function loadFirst(canvasOf: (id: string) => string | undefined): express.RequestHandler {
+  return (req, res, next) => {
+    const canvasId = canvasOf(String(req.params.id))
+    if (!canvasId) return next()
+    store.load(canvasId).then(() => {
+      res.once('close', store.hold(canvasId))
+      next()
+    }, next)
+  }
+}
+app.use(
+  '/api/canvases/:id',
+  loadFirst((id) => id),
+)
+app.use(
+  '/api/frames/:id',
+  loadFirst((id) => store.getFrame(id)?.canvasId),
+)
+app.use(
+  '/api/comments/:id',
+  loadFirst((id) => actions.findComment(id)?.canvasId),
+)
+
 /* Home's push channel: tells an open dashboard its canvas list changed */
 app.get('/api/me/events', userEvents.subscribe)
 
@@ -924,38 +995,49 @@ app.get('/api/agent-allowance', (req, res) => {
     .catch(() => res.status(500).json({ error: 'allowance unavailable' }))
 })
 
+/* the connections the composer may send a task to, and the Settings default */
+app.get('/api/agent-runners', (req, res) => {
+  listRunners(req.user!.id)
+    .then((runners) => res.json(runners))
+    .catch(() => res.status(500).json({ error: 'runners unavailable' }))
+})
+
+/* which connection comments, @mentions and automations run on; it has to be
+   one that is connected and on right now */
+app.put('/api/agent-runners/default', async (req, res) => {
+  const provider: unknown = req.body?.provider
+  if (!isRunnerProvider(provider)) return res.status(400).json({ error: 'unknown connection' })
+  try {
+    const userId = req.user!.id
+    const usable =
+      provider === 'claude-local'
+        ? (await getLocalAgentPreference(userId)).enabled
+        : (await modelAccounts.getAccount(userId, provider))?.enabled
+    if (!usable) return res.status(400).json({ error: 'connect and switch that on first' })
+    await setStoredDefault(userId, provider)
+    res.json(await accountsView(userId))
+    wakeUserWork(userId)
+  } catch {
+    res.status(500).json({ error: 'could not change the default' })
+  }
+})
+
 /* ---- the user's own model account: what keeps the Doop Agent running once
    the free tasks are gone. Tokens live server-side and are never returned. */
 
-/* one curated menu per account kind, with the vision flag the picker renders;
-   the pre-roster providers all see images */
-const MODEL_MENUS: Record<modelAccounts.AccountKind, ModelOption[]> = {
-  chatgpt: AGENT_MODELS.map((m) => ({ ...m, vision: true })),
-  'openai-key': AGENT_MODELS.map((m) => ({ ...m, vision: true })),
-  'anthropic-key': ANTHROPIC_MODELS,
-  'openrouter-key': OPENROUTER_MODELS,
-  'gemini-key': GEMINI_MODELS,
-}
-
-/* Every route that returns an account status returns the SAME shape: the
-   client re-renders straight from the response, so dropping the menus on
-   a PATCH would collapse the picker until the next reload. */
-function accountView(status: modelAccounts.AccountStatus) {
-  return { ...status, chatgptEnabled: modelAccounts.chatgptConnectEnabled(), menus: MODEL_MENUS }
-}
-
+/* Every account route answers with the whole Settings view (every account,
+   on or off, and the default): the client re-renders straight from it. */
 app.get('/api/model-account', (req, res) => {
-  modelAccounts
-    .getStatus(req.user!.id)
-    .then((status) => res.json(accountView(status)))
+  accountsView(req.user!.id)
+    .then((view) => res.json(view))
     .catch(() => res.status(500).json({ error: 'account status unavailable' }))
 })
 
-/* the connected provider's live catalog, merged over its curated menu — asked
-   for when a picker opens, so a model released yesterday is already on it */
 app.get('/api/model-account/models', async (req, res) => {
   try {
-    const account = await modelAccounts.getAccount(req.user!.id)
+    const kind: unknown = req.query.kind
+    if (!modelAccounts.isAccountKind(kind)) return res.status(400).json({ error: 'unknown account kind' })
+    const account = await modelAccounts.getAccount(req.user!.id, kind)
     if (!account) return res.json({ models: [], live: false })
     /* a ChatGPT token may have lapsed since the last run; a refresh that
        fails leaves the stale token to be refused, which the catalog reports
@@ -972,19 +1054,22 @@ app.get('/api/model-account/models', async (req, res) => {
   }
 })
 
-/* which model tier the connected account runs on */
-/* which model tier the connected account runs on, and (OpenAI kinds) how
-   hard it thinks — one field per request, the status comes back either way */
-app.patch('/api/model-account', async (req, res) => {
+/* one account's model tier, (OpenAI kinds) how hard it thinks, or whether
+   it is switched on — one field per request, the view comes back either way */
+app.patch('/api/model-account/:kind', async (req, res) => {
+  const kind = req.params.kind
+  if (!modelAccounts.isAccountKind(kind)) return res.status(400).json({ error: 'unknown account kind' })
   try {
-    const { model, effort } = (req.body ?? {}) as { model?: unknown; effort?: unknown }
-    const status =
-      effort !== undefined
-        ? await modelAccounts.setAccountEffort(req.user!.id, String(effort))
-        : await modelAccounts.setAccountModel(req.user!.id, String(model ?? ''))
-    res.json(accountView(status))
+    const userId = req.user!.id
+    const { model, effort, enabled } = (req.body ?? {}) as { model?: unknown; effort?: unknown; enabled?: unknown }
+    if (typeof enabled === 'boolean') await modelAccounts.setAccountEnabled(userId, kind, enabled)
+    else if (effort !== undefined) await modelAccounts.setAccountEffort(userId, kind, String(effort))
+    else await modelAccounts.setAccountModel(userId, kind, String(model ?? ''))
+    res.json(await accountsView(userId))
+    /* switching one on can make queued work runnable */
+    if (enabled === true) wakeUserWork(userId)
   } catch (e) {
-    res.status(400).json({ error: e instanceof Error ? e.message : 'could not change the model' })
+    res.status(400).json({ error: e instanceof Error ? e.message : 'could not change that account' })
   }
 })
 
@@ -1016,7 +1101,8 @@ app.post('/api/model-account/chatgpt', async (req, res) => {
     return res.status(404).json({ error: 'ChatGPT connections are disabled on this server' })
   }
   try {
-    res.json(accountView(await modelAccounts.completeChatgptAuth(req.user!.id, String(req.body?.redirect ?? ''))))
+    await modelAccounts.completeChatgptAuth(req.user!.id, String(req.body?.redirect ?? ''))
+    res.json(await accountsView(req.user!.id))
   } catch (e) {
     res.status(400).json({ error: e instanceof Error ? e.message : 'could not connect that ChatGPT account' })
   }
@@ -1044,50 +1130,34 @@ app.delete('/api/model-account/chatgpt/device', (req, res) => {
   res.json({ ok: true })
 })
 
-app.post('/api/model-account/openai-key', async (req, res) => {
-  try {
-    res.json(accountView(await modelAccounts.connectApiKey(req.user!.id, String(req.body?.apiKey ?? ''))))
-  } catch (e) {
-    res.status(400).json({ error: e instanceof Error ? e.message : 'could not save that API key' })
-  }
-})
-
-app.post('/api/model-account/anthropic-key', async (req, res) => {
-  try {
-    const previous = await modelAccounts.getAccount(req.user!.id)
-    const status = await modelAccounts.connectAnthropicKey(req.user!.id, String(req.body?.apiKey ?? ''))
-    if (previous?.kind !== 'anthropic-key') {
-      const preference = await getLocalAgentPreference(req.user!.id)
-      await saveLocalAgentPreference(req.user!.id, { ...preference, enabled: false })
-    }
-    res.json(accountView(status))
-  } catch (e) {
-    res.status(400).json({ error: e instanceof Error ? e.message : 'could not save that API key' })
-  }
-})
-
-/* the two wide-roster keys share the anthropic-key route's shape, including
-   switching off the local-CLI preference so the new account is not shadowed */
-for (const kind of ['openrouter-key', 'gemini-key'] as const) {
-  const connect = kind === 'openrouter-key' ? modelAccounts.connectOpenRouterKey : modelAccounts.connectGeminiKey
+/* each key connects beside whatever else is connected: nothing is switched
+   off, and the default changes only when the person marks another one */
+const KEY_CONNECTS = {
+  'openai-key': modelAccounts.connectApiKey,
+  'anthropic-key': modelAccounts.connectAnthropicKey,
+  'openrouter-key': modelAccounts.connectOpenRouterKey,
+  'gemini-key': modelAccounts.connectGeminiKey,
+  'deepseek-key': modelAccounts.connectDeepSeekKey,
+  'kimi-key': modelAccounts.connectKimiKey,
+  'kimi-code': modelAccounts.connectKimiCodeKey,
+} as const
+for (const [kind, connect] of Object.entries(KEY_CONNECTS)) {
   app.post(`/api/model-account/${kind}`, async (req, res) => {
     try {
-      const previous = await modelAccounts.getAccount(req.user!.id)
-      const status = await connect(req.user!.id, String(req.body?.apiKey ?? ''))
-      if (previous?.kind !== kind) {
-        const preference = await getLocalAgentPreference(req.user!.id)
-        await saveLocalAgentPreference(req.user!.id, { ...preference, enabled: false })
-      }
-      res.json(accountView(status))
+      await connect(req.user!.id, String(req.body?.apiKey ?? ''))
+      res.json(await accountsView(req.user!.id))
+      wakeUserWork(req.user!.id)
     } catch (e) {
       res.status(400).json({ error: e instanceof Error ? e.message : 'could not save that API key' })
     }
   })
 }
 
-app.delete('/api/model-account', async (req, res) => {
-  await modelAccounts.disconnect(req.user!.id)
-  res.json(accountView({ connected: false }))
+app.delete('/api/model-account/:kind', async (req, res) => {
+  const kind = req.params.kind
+  if (!modelAccounts.isAccountKind(kind)) return res.status(400).json({ error: 'unknown account kind' })
+  await modelAccounts.disconnect(req.user!.id, kind)
+  res.json(await accountsView(req.user!.id))
 })
 
 /* ---- which image model generate_image draws with (the shared registry;
@@ -1670,6 +1740,88 @@ app.get('/api/canvases/:id/guidelines/:name/history', async (req, res) => {
   res.json(rows.map((v) => ({ markdown: v.markdown, savedAt: v.savedAt, savedBy: v.savedBy })))
 })
 
+/* design tokens (shared/designTokens.ts): the canvas's CSS custom properties.
+   `?format=css|tailwind|md` exports them for a codebase; the default is JSON. */
+app.get('/api/canvases/:id/tokens', (req, res) => {
+  if (!requireCanvas(req, res, req.params.id, 'view')) return
+  const tokens = store.getTokens(req.params.id)
+  const themes = store.getTokenThemes(req.params.id)
+  switch (req.query.format) {
+    case 'css':
+      return res.type('text/css').send(tokensCss(tokens, themes))
+    case 'tailwind':
+      return res.type('text/css').send(tokensTailwind(tokens, themes))
+    case 'md':
+      return res.type('text/markdown').send(tokensMarkdown(tokens, themes))
+    default:
+      return res.json(tokens)
+  }
+})
+
+/* the token themes (light, dark, …), in display order; a theme that leaves takes its values along */
+app.put('/api/canvases/:id/token-themes', (req, res) => {
+  if (!requireCanvas(req, res, req.params.id, 'edit')) return
+  try {
+    const themes = actions.setTokenThemes(req.params.id, req.body?.themes, userActor(req), req.body?.renames ?? [])
+    if (!themes) return res.status(404).json({ error: 'not found' })
+    res.json({ themes, tokens: store.getTokens(req.params.id) })
+  } catch (e) {
+    res.status(400).json({ error: e instanceof Error ? e.message : 'invalid themes' })
+  }
+})
+
+app.post('/api/canvases/:id/tokens', (req, res) => {
+  if (!requireCanvas(req, res, req.params.id, 'edit')) return
+  const inputs = Array.isArray(req.body?.tokens) ? req.body.tokens : [req.body]
+  if (inputs.length > 200) return res.status(400).json({ error: 'at most 200 tokens per request' })
+  const results = actions.createTokens(req.params.id, inputs, userActor(req))
+  if (!results) return res.status(404).json({ error: 'not found' })
+  res.json({ results, tokens: store.getTokens(req.params.id) })
+})
+
+/* change, rename (newName) or delete (delete: true) one token by name */
+app.put('/api/canvases/:id/tokens/:name', (req, res) => {
+  if (!requireCanvas(req, res, req.params.id, 'edit')) return
+  const body = typeof req.body === 'object' && req.body !== null ? req.body : {}
+  const edit = { ...body, name: req.params.name }
+  const results = actions.setTokens(req.params.id, [edit], userActor(req))
+  if (!results) return res.status(404).json({ error: 'not found' })
+  const [result] = results
+  if (result?.result === 'error') return res.status(400).json({ error: result.message })
+  res.json({ result, tokens: store.getTokens(req.params.id) })
+})
+
+app.delete('/api/canvases/:id/tokens/:name', (req, res) => {
+  if (!requireCanvas(req, res, req.params.id, 'edit')) return
+  const results = actions.setTokens(req.params.id, [{ name: req.params.name, delete: true }], userActor(req))
+  if (!results) return res.status(404).json({ error: 'not found' })
+  const [result] = results
+  if (result?.result === 'error') return res.status(400).json({ error: result.message })
+  res.json({ ok: true, tokens: store.getTokens(req.params.id) })
+})
+
+/* the styleguide: the canvas's tokens and its guidelines as one markdown
+   document — what a coding agent pulls into a repo as its DESIGN.md */
+app.get('/api/canvases/:id/styleguide.md', (req, res) => {
+  const canvas = requireCanvas(req, res, req.params.id, 'view')
+  if (!canvas) return
+  const tokens = store.getTokens(req.params.id)
+  const themes = store.getTokenThemes(req.params.id)
+  const docs = store.getGuidelines(req.params.id)
+  const parts = [
+    `# ${canvas.name} — styleguide`,
+    ...(tokens.length
+      ? [
+          `## Design tokens\n\nUse these as CSS custom properties (\`var(--name)\`); the Tailwind v4 \`@theme\` block and plain CSS are at \`/api/canvases/${canvas.id}/tokens?format=tailwind|css\`.`,
+          tokensMarkdown(tokens, themes),
+          '```css\n' + tokensCss(tokens, themes) + '\n```',
+        ]
+      : []),
+    ...docs.map((d) => `## ${actions.guidelineTitle(d)}\n\n${d.markdown}`),
+  ]
+  res.type('text/markdown').send(parts.join('\n\n') + '\n')
+})
+
 app.put('/api/canvases/:id/guidelines/:name', (req, res) => {
   if (!requireCanvas(req, res, req.params.id, 'edit')) return
   const actor = userActor(req)
@@ -1872,7 +2024,7 @@ app.post('/api/canvases/:id/pages/:pageId/duplicate', async (req, res) => {
 
 app.post('/api/canvases/:id/frames', (req, res) => {
   if (!requireCanvas(req, res, req.params.id, 'edit')) return
-  const { name, pageId, x, y, width, height, html, hidden, locked, z } = req.body ?? {}
+  const { name, pageId, x, y, width, height, html, hidden, locked, z, rotation } = req.body ?? {}
   if (pageId !== undefined && !store.getCanvas(req.params.id)?.pages?.some((p) => p.id === pageId))
     return res.status(400).json({ error: 'page not found' })
   const actor = userActor(req)
@@ -1890,6 +2042,7 @@ app.post('/api/canvases/:id/frames', (req, res) => {
       hidden: hidden === true,
       locked: locked === true,
       z: Number.isFinite(z) ? z : undefined,
+      rotation: normalizeRotation(rotation),
     },
     actor,
   )
@@ -1938,6 +2091,12 @@ app.patch('/api/frames/:id', (req, res) => {
   if (patch.z !== undefined) {
     if (!Number.isFinite(patch.z)) return res.status(400).json({ error: 'z must be a finite number' })
     clean.z = patch.z
+  }
+  /* a turn about the centre, stored in (-180, 180]; null or 0 straightens */
+  if (patch.rotation !== undefined) {
+    if (patch.rotation !== null && !Number.isFinite(patch.rotation))
+      return res.status(400).json({ error: 'rotation must be a finite number of degrees' })
+    clean.rotation = normalizeRotation(patch.rotation)
   }
   const frame = actions.updateFrame(req.params.id, clean, actor)
   if (!frame) return res.status(404).json({ error: 'frame not found' })
@@ -2286,6 +2445,7 @@ app.post('/api/canvases/:id/cards', async (req, res) => {
     req.body?.attachments,
     req.user!.id,
     req.body?.scope,
+    req.body?.runner,
   )
   if (!card) return res.status(404).json({ error: 'canvas not found or empty title' })
   res.json(card)
@@ -2347,7 +2507,7 @@ app.get('/api/frames/:id/screenshot.png', async (req, res) => {
   if (!frame) return
   try {
     const { renderFrame } = await import('./screenshot.ts')
-    const png = await renderFrame(frame, req.query.scale === '2' ? 2 : 1)
+    const png = await renderFrame(frame, fitExportScale(frame, parseExportScale(req.query.scale) ?? 1))
     res.type('png').send(png)
   } catch (e) {
     res.status(500).json({ error: e instanceof Error ? e.message : 'render failed' })
@@ -2456,6 +2616,40 @@ if (env.isProduction) {
 const server = http.createServer(app)
 const wss = new WebSocketServer({ server, path: '/ws' })
 
+/* A signed-out visitor on a link-shared canvas watches it as a guest
+   (guestCanvasRole): view only, silent like a view-as session (no presence,
+   no cursor, nothing it sends is relayed) and without the team's
+   conversation (GUEST_HIDDEN). Anything else — a private canvas, a missing
+   one — is the same 4401, so the sign-in screen does not reveal which. */
+function joinAsGuest(ws: WebSocket, canvasId: string, clientId: string, canvas: Canvas | undefined) {
+  const role = canvas && guestCanvasRole(canvas)
+  if (!canvas || !role) {
+    ws.close(4401, 'unauthorized')
+    return
+  }
+  const presence: Presence = { clientId, name: '', color: colorFor(clientId), kind: 'user', activeFrameId: null }
+  conns.set(ws, { ws, canvasId, presence, silent: true })
+  const { guidelines: _guidelines, references: _references, memberIds: _memberIds, ...shown } = canvas
+  send(ws, {
+    type: 'init',
+    canvas: { ...shown, role },
+    presences: [
+      ...room(canvasId)
+        .filter((c) => c.ws !== ws && !c.silent)
+        .map((c) => guestPresence(c.presence)),
+      ...[...(agentPresences.get(canvasId)?.values() ?? [])].map(guestPresence),
+    ],
+    activity: [],
+    tasks: [],
+    feedback: [],
+    comments: [],
+    decisions: [],
+    proposals: [],
+    selfColor: presence.color,
+    serverBuild: BUILD_ID,
+  })
+}
+
 wss.on('connection', (ws, upgradeReq) => {
   /* the session cookie rides the upgrade request; resolve it once */
   const sessionPromise = auth.api.getSession({ headers: fromNodeHeaders(upgradeReq.headers) }).catch(() => null)
@@ -2471,11 +2665,14 @@ wss.on('connection', (ws, upgradeReq) => {
 
     if (msg.type === 'join') {
       const session = await sessionPromise
+      let canvas = store.getCanvas(msg.canvasId)
       if (!session) {
-        ws.close(4401, 'unauthorized')
+        /* only a canvas the guest may open is loaded for them */
+        if (canvas && guestCanvasRole(canvas)) canvas = await store.load(msg.canvasId)
+        if (ws.readyState !== WebSocket.OPEN) return
+        joinAsGuest(ws, msg.canvasId, msg.clientId, canvas)
         return
       }
-      const canvas = store.getCanvas(msg.canvasId)
       if (!canvas) {
         /* a typo'd id or a canvas someone just deleted: say so and close,
            instead of leaving the socket open with nothing ever coming back.
@@ -2484,6 +2681,22 @@ wss.on('connection', (ws, upgradeReq) => {
         ws.close(4404, 'not found')
         return
       }
+      /* checked before loading, so a denied join never loads the canvas */
+      if (!canvasRole(session.user.id, canvas)) {
+        ws.close(4403, 'no access')
+        return
+      }
+      await store.load(msg.canvasId)
+      /* a socket that closed while it waited must not join: its close
+         already ran, so it would sit in the room and pin the canvas */
+      if (ws.readyState !== WebSocket.OPEN) return
+      canvas = store.getCanvas(msg.canvasId)
+      if (!canvas) {
+        ws.close(4404, 'not found')
+        return
+      }
+      /* and again after: access removed while the canvas loaded must not
+         still receive its designs and conversation */
       const role = canvasRole(session.user.id, canvas)
       if (!role) {
         ws.close(4403, 'no access')
@@ -2576,6 +2789,7 @@ wss.on('connection', (ws, upgradeReq) => {
             y: msg.y,
             width: msg.width,
             height: msg.height,
+            ...(msg.rotation !== undefined ? { rotation: msg.rotation } : {}),
           },
           presence.clientId,
         )
@@ -2594,6 +2808,20 @@ wss.on('connection', (ws, upgradeReq) => {
 
 server.listen(PORT, () => {
   console.log(`⟡ doop server     http://localhost:${PORT}`)
+  /* frame HTML is loaded per canvas; a canvas nobody has used for
+     CANVAS_IDLE_MS gives it back, unless a room, agent or stream is on it.
+     Started here, once the room state it asks about exists. */
+  store.setInUse(
+    (canvasId) =>
+      room(canvasId).length > 0 || (agentPresences.get(canvasId)?.size ?? 0) > 0 || actions.isCanvasStreaming(canvasId),
+  )
+  setInterval(
+    () => {
+      const dropped = store.evictIdle(env.CANVAS_IDLE_MS)
+      if (dropped) console.log(`[store] dropped the frame HTML of ${dropped} idle canvas(es)`)
+    },
+    Math.min(60_000, Math.max(1_000, env.CANVAS_IDLE_MS / 2)),
+  ).unref()
   /* comments anchored before element ids: stamped now, while serving, so a
      slow or failing row can never keep the server from coming up */
   if (data.legacyCommentSelectors.size > 0) {

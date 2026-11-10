@@ -32,8 +32,11 @@
             updatedAt: 0,
           })
         },
+        /* the canvas's design tokens, as the room would send them */
+        tokens: (tokens, modes) => useStore.getState().setTokensLocal(tokens, modes ?? []),
         remote: (frame) => useStore.getState().setCanvas({ ...useStore.getState().canvas, frames: [frame] }),
-        select: (selector) => useStore.getState().setSelectedElement({ frameId: 'f', selector }),
+        select: (selector) => useStore.getState().pickElement({ frameId: 'f', selector }),
+        panelOpen: () => useStore.getState().elementPanelOpen,
         geometry: (selector, edit) => editElementGeometry('f', selector, edit),
         selectFrame: () => useStore.getState().select('f'),
         deselectFrame: () => useStore.getState().select(null),
@@ -53,6 +56,8 @@
         const frames = useStore((s) => s.canvas?.frames)
         const frame = frames?.[0]
         const selected = useStore((s) => s.selectedElement)
+        /* the panel shows while open, as CanvasPage mounts it */
+        const panelOpen = useStore((s) => s.elementPanelOpen)
         const zoom = useStore((s) => s.viewport.zoom)
         /* size badges render into a screen-space layer, as the Stage provides */
         const [labelLayer, setLabelLayer] = React.useState(null)
@@ -78,7 +83,9 @@
               ),
             ),
           ),
-          selected && React.createElement(ElementPanel, { frame, selector: selected.selector, style: { right: 12 } }),
+          selected &&
+            panelOpen &&
+            React.createElement(ElementPanel, { frame, selector: selected.selector, style: { right: 12 } }),
         )
       }
       createRoot(document.getElementById('root')).render(React.createElement(Fixture))

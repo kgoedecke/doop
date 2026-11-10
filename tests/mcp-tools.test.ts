@@ -1,13 +1,33 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { buildMcpServer } from '../server/mcp.ts'
 import { FRAME_PREVIEW_URI } from '../server/chatgptApp.ts'
+import packageJson from '../package.json' with { type: 'json' }
+
+vi.mock('../server/db/persist.ts', () => ({ saveCanvas: () => {}, saveFrame: () => {}, saveActivity: () => {} }))
 
 interface ToolInputSchema {
   properties?: Record<string, unknown>
   required?: string[]
 }
+
+describe('MCP server info', () => {
+  it('reports the running release as its version', async () => {
+    const server = buildMcpServer('Test Owner', 'test-owner-id')
+    const client = new Client({ name: 'doop-version-test', version: '1.0.0' })
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair()
+
+    await server.connect(serverTransport)
+    await client.connect(clientTransport)
+
+    try {
+      expect(client.getServerVersion()).toEqual({ name: 'doop-canvas', version: packageJson.version })
+    } finally {
+      await client.close()
+    }
+  })
+})
 
 describe('MCP website tool contract', () => {
   it('separates read-only website viewing from editable webpage imports', async () => {
@@ -133,6 +153,119 @@ it('requires the original page list and rejects stale agent replacements', async
   }
 })
 
+async function pagesClient(canvas: { id: string; ownerId: string; name: string; pages?: unknown; frames: unknown[] }) {
+  const { store } = await import('../server/store.ts')
+  store.canvases.set(canvas.id, { createdAt: 0, updatedAt: 0, ...canvas } as never)
+  const server = buildMcpServer('Test Owner', 'test-owner-id')
+  const client = new Client({ name: 'pages-test', version: '1.0.0' })
+  const [a, b] = InMemoryTransport.createLinkedPair()
+  await server.connect(b)
+  await client.connect(a)
+  const close = async () => {
+    store.canvases.delete(canvas.id)
+    await client.close()
+    await server.close()
+  }
+  const body = (result: Awaited<ReturnType<Client['callTool']>>) => {
+    const first = (result.content as { text: string }[])[0]!
+    return JSON.parse(first.text) as Record<string, unknown>
+  }
+  return { client, close, body }
+}
+
+it('create_canvas_page adds a named page with a fresh id and keeps the rest', async () => {
+  const { client, close, body } = await pagesClient({
+    id: 'mcp-page-create',
+    ownerId: 'test-owner-id',
+    name: 'Pages',
+    pages: [{ id: 'first', name: 'Main', startFrameId: 'f1' }],
+    frames: [],
+  })
+  try {
+    const result = await client.callTool({
+      name: 'create_canvas_page',
+      arguments: { canvas_id: 'mcp-page-create', name: '  Mobile ', agent_name: 'Agent' },
+    })
+    expect(result.isError).toBeFalsy()
+    const { page, pages } = body(result) as { page: { id: string; name: string }; pages: unknown[] }
+    expect(page.name).toBe('Mobile')
+    expect(page.id).toMatch(/^[\w-]{10}$/)
+    expect(pages).toEqual([{ id: 'first', name: 'Main', startFrameId: 'f1' }, page])
+  } finally {
+    await close()
+  }
+})
+
+it('create_canvas_page refuses a page beyond the canvas limit', async () => {
+  const { MAX_PAGES } = await import('../server/store.ts')
+  const { client, close } = await pagesClient({
+    id: 'mcp-page-full',
+    ownerId: 'test-owner-id',
+    name: 'Pages',
+    pages: Array.from({ length: MAX_PAGES }, (_, i) => ({ id: `p${i}`, name: `Page ${i + 1}` })),
+    frames: [],
+  })
+  try {
+    const result = await client.callTool({
+      name: 'create_canvas_page',
+      arguments: { canvas_id: 'mcp-page-full', name: 'One more', agent_name: 'Agent' },
+    })
+    expect(result.isError).toBe(true)
+    expect(JSON.stringify(result)).toContain(`${MAX_PAGES} pages`)
+  } finally {
+    await close()
+  }
+})
+
+it('get_canvas lists the pages and narrows the frames to page_id', async () => {
+  const frame = (id: string, pageId?: string) => ({
+    id,
+    pageId,
+    name: id,
+    html: '<html></html>',
+    x: 0,
+    y: 0,
+    width: 10,
+    height: 10,
+    createdAt: 0,
+    updatedAt: 0,
+    updatedBy: 'Agent',
+  })
+  const { client, close, body } = await pagesClient({
+    id: 'mcp-page-filter',
+    ownerId: 'test-owner-id',
+    name: 'Pages',
+    pages: [
+      { id: 'first', name: 'Main' },
+      { id: 'second', name: 'Mobile' },
+    ],
+    frames: [frame('a', 'first'), frame('b', 'second'), frame('c', 'second')],
+  })
+  try {
+    const all = body(await client.callTool({ name: 'get_canvas', arguments: { canvas_id: 'mcp-page-filter' } }))
+    expect(all.pages).toEqual([
+      { id: 'first', name: 'Main' },
+      { id: 'second', name: 'Mobile' },
+    ])
+    expect((all.frames as { id: string }[]).map((f) => f.id)).toEqual(['a', 'b', 'c'])
+
+    const second = await client.callTool({
+      name: 'get_canvas',
+      arguments: { canvas_id: 'mcp-page-filter', page_id: 'second' },
+    })
+    expect((body(second).frames as { id: string; pageId: string }[]).map((f) => f.id)).toEqual(['b', 'c'])
+
+    const missing = await client.callTool({
+      name: 'get_canvas',
+      arguments: { canvas_id: 'mcp-page-filter', page_id: 'nope' },
+    })
+    expect(missing.isError).toBe(true)
+    expect(JSON.stringify(missing)).toContain('No page nope')
+  } finally {
+    await close()
+  }
+})
+
 /* What ChatGPT's app review checks on every tool (developers.openai.com/apps-sdk):
    the three safety hints set explicitly, a title, and — for the tools that
    render a preview card — the component wiring (server/chatgptApp.ts). */
@@ -222,12 +355,17 @@ describe('MCP ChatGPT app contract', () => {
       expect(html.text).toContain('var MAX_SHOWN = 6')
       /* an empty frame shows a placeholder, never a blank render */
       expect(html.text).toContain('Design in progress')
-      /* the retired v1 URI stays served for chats that still hold it */
-      expect(resources.map((r) => r.uri)).toContain('ui://doop/frame-preview-1.html')
+      /* retired URIs stay served for chats that still hold them */
+      expect(resources.map((r) => r.uri)).toEqual(
+        expect.arrayContaining(['ui://doop/frame-preview-1.html', 'ui://doop/frame-preview-2.html']),
+      )
       expect(html.text).toContain('class="retry"')
       const meta = html._meta as Record<string, unknown>
       expect(meta['openai/widgetCSP']).toMatchObject({ resource_domains: [expect.stringMatching(/^http/)] })
       expect(meta.ui).toMatchObject({ csp: { resourceDomains: [expect.stringMatching(/^http/)] } })
+      /* Claude refuses to render a card whose ui.domain is not its own sandbox origin */
+      expect(meta.ui).not.toHaveProperty('domain')
+      expect(meta['openai/widgetDomain']).toMatch(/^http/)
     } finally {
       await close()
     }
@@ -247,4 +385,39 @@ describe('MCP ChatGPT app contract', () => {
       await close()
     }
   })
+})
+
+it('update_frame normalizes and clears rotation while retaining page validation', async () => {
+  const canvasId = 'mcp-frame-rotation'
+  const { client, close, body } = await pagesClient({
+    id: canvasId,
+    ownerId: 'test-owner-id',
+    name: 'Rotation',
+    pages: [
+      { id: 'first', name: 'Main' },
+      { id: 'second', name: 'Mobile' },
+    ],
+    frames: [],
+  })
+  const { store } = await import('../server/store.ts')
+  const frame = store.createFrame(canvasId, { name: 'Turn', pageId: 'first', width: 100, height: 50 }, 'Agent')!
+  const update = (patch: Record<string, unknown>) =>
+    client.callTool({
+      name: 'update_frame',
+      arguments: { frame_id: frame.id, agent_name: 'Agent', ...patch },
+    })
+  try {
+    const moved = await update({ rotation: 630, pageId: 'second' })
+    expect(moved.isError).not.toBe(true)
+    expect(body(moved).frame).toMatchObject({ rotation: -90, pageId: 'second' })
+    const invalid = await update({ rotation: 45, pageId: 'missing' })
+    expect(invalid.isError).toBe(true)
+    expect(frame).toMatchObject({ rotation: -90, pageId: 'second' })
+    const straight = await update({ rotation: 0 })
+    expect(straight.isError).not.toBe(true)
+    expect(body(straight).frame).not.toHaveProperty('rotation')
+    expect(frame).toHaveProperty('rotation', undefined)
+  } finally {
+    await close()
+  }
 })

@@ -146,3 +146,12 @@ export function mentionedRoles(text: string): AgentRole[] {
 export function mentionedRole(text: string): AgentRole | undefined {
   return mentionedRoles(text)[0]
 }
+
+/** The same text with every resident @mention turned into a plain name, so
+ *  words that quote a request cannot become a new one. */
+export function withoutMentions(text: string): string {
+  let out = text
+  for (const role of AGENT_ROLES)
+    for (const mention of mentionsFor(role)) out = out.replace(new RegExp(`@+(${mention})\\b`, 'gi'), '$1')
+  return out
+}

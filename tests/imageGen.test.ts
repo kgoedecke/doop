@@ -9,7 +9,7 @@ import { stubEnv, unstubAllEnvs } from './envStub.ts'
  */
 
 vi.mock('../server/modelAccounts.ts', () => ({
-  getAccount: vi.fn(),
+  getAccounts: vi.fn(),
   withFreshToken: vi.fn((account: unknown) => Promise.resolve(account)),
 }))
 
@@ -18,12 +18,12 @@ vi.mock('../server/imagePrefs.ts', () => ({
   getImagePref: vi.fn(() => Promise.resolve(undefined)),
 }))
 
-import { getAccount } from '../server/modelAccounts.ts'
+import { getAccounts } from '../server/modelAccounts.ts'
 import { getImagePref } from '../server/imagePrefs.ts'
-import { _internal, generateImage, generatorFor } from '../server/imageGen.ts'
+import { _internal, generateImage, generatorFor, imageModelAvailability } from '../server/imageGen.ts'
 import sharp from 'sharp'
 
-const mockedGetAccount = vi.mocked(getAccount)
+const mockedGetAccounts = vi.mocked(getAccounts)
 const mockedGetImagePref = vi.mocked(getImagePref)
 
 async function tinyPng(): Promise<string> {
@@ -51,7 +51,7 @@ async function imageStream(): Promise<Response> {
 
 afterEach(() => {
   vi.restoreAllMocks()
-  mockedGetAccount.mockReset()
+  mockedGetAccounts.mockReset()
   mockedGetImagePref.mockReset()
   mockedGetImagePref.mockResolvedValue(undefined)
   unstubAllEnvs()
@@ -80,13 +80,9 @@ describe('the hosted image_generation request', () => {
 
 describe('who pays', () => {
   it('runs on a connected ChatGPT subscription through the Codex backend', async () => {
-    mockedGetAccount.mockResolvedValue({
-      userId: 'u1',
-      kind: 'chatgpt',
-      accessToken: 'tok',
-      accountId: 'acct',
-      connectedAt: 1,
-    })
+    mockedGetAccounts.mockResolvedValue([
+      { enabled: true, userId: 'u1', kind: 'chatgpt', accessToken: 'tok', accountId: 'acct', connectedAt: 1 },
+    ])
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(await imageStream())
 
     const image = await generateImage('u1', { prompt: 'a red circle' })
@@ -104,7 +100,9 @@ describe('who pays', () => {
   })
 
   it('runs on a connected OpenAI key against api.openai.com', async () => {
-    mockedGetAccount.mockResolvedValue({ userId: 'u1', kind: 'openai-key', apiKey: 'sk-user', connectedAt: 1 })
+    mockedGetAccounts.mockResolvedValue([
+      { enabled: true, userId: 'u1', kind: 'openai-key', apiKey: 'sk-user', connectedAt: 1 },
+    ])
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(await imageStream())
 
     const image = await generateImage('u1', { prompt: 'a red circle' })
@@ -117,7 +115,7 @@ describe('who pays', () => {
   })
 
   it('falls back to the server key only when the user connected nothing', async () => {
-    mockedGetAccount.mockResolvedValue(null)
+    mockedGetAccounts.mockResolvedValue([])
     expect((await generatorFor('u1')).ok).toBe(false)
     stubEnv('OPENAI_API_KEY', 'sk-server')
     const generator = await generatorFor('u1')
@@ -126,14 +124,14 @@ describe('who pays', () => {
 
   it('never bills the server when the account lookup itself fails', async () => {
     stubEnv('OPENAI_API_KEY', 'sk-server')
-    mockedGetAccount.mockRejectedValue(new Error('db down'))
+    mockedGetAccounts.mockRejectedValue(new Error('db down'))
     const fetchSpy = vi.spyOn(globalThis, 'fetch')
     await expect(generateImage('u1', { prompt: 'x' })).rejects.toThrow(/could not read your connected model account/)
     expect(fetchSpy).not.toHaveBeenCalled()
   })
 
   it('explains what to connect when nothing can pay', async () => {
-    mockedGetAccount.mockResolvedValue(null)
+    mockedGetAccounts.mockResolvedValue([])
     await expect(generateImage('u1', { prompt: 'x' })).rejects.toThrow(
       /connect a ChatGPT subscription or OpenAI API key/,
     )
@@ -149,7 +147,9 @@ describe('the image-model registry', () => {
   }
 
   it('draws Nano Banana on a connected Gemini key with the aspect ratio', async () => {
-    mockedGetAccount.mockResolvedValue({ userId: 'u1', kind: 'gemini-key', apiKey: 'AIzaTestKey123', connectedAt: 1 })
+    mockedGetAccounts.mockResolvedValue([
+      { enabled: true, userId: 'u1', kind: 'gemini-key', apiKey: 'AIzaTestKey123', connectedAt: 1 },
+    ])
     mockedGetImagePref.mockResolvedValue('gemini-3.1-flash-image')
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(await geminiResponse())
 
@@ -169,7 +169,7 @@ describe('the image-model registry', () => {
   })
 
   it('draws Seedream on the server ARK key with an explicit size', async () => {
-    mockedGetAccount.mockResolvedValue(null)
+    mockedGetAccounts.mockResolvedValue([])
     mockedGetImagePref.mockResolvedValue('seedream-5-0-pro')
     stubEnv('ARK_API_KEY', 'ark-server')
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
@@ -192,7 +192,9 @@ describe('the image-model registry', () => {
   })
 
   it('refuses an explicit pick whose provider has no credentials, naming the fix', async () => {
-    mockedGetAccount.mockResolvedValue({ userId: 'u1', kind: 'openai-key', apiKey: 'sk-user', connectedAt: 1 })
+    mockedGetAccounts.mockResolvedValue([
+      { enabled: true, userId: 'u1', kind: 'openai-key', apiKey: 'sk-user', connectedAt: 1 },
+    ])
     mockedGetImagePref.mockResolvedValue('gemini-3.1-flash-image')
     const fetchSpy = vi.spyOn(globalThis, 'fetch')
     await expect(generateImage('u1', { prompt: 'x' })).rejects.toThrow(/connect a Gemini API key/)
@@ -200,24 +202,39 @@ describe('the image-model registry', () => {
   })
 
   it('falls back to the first server-enabled model when nothing is connected and no pick was made', async () => {
-    mockedGetAccount.mockResolvedValue(null)
+    mockedGetAccounts.mockResolvedValue([])
     stubEnv('GEMINI_API_KEY', 'gm-server')
     const generator = await generatorFor('u1')
     expect(generator.ok && generator.label).toBe('server')
   })
 
   it('never runs a connected user on the server keys for another provider', async () => {
-    mockedGetAccount.mockResolvedValue({ userId: 'u1', kind: 'openrouter-key', apiKey: 'sk-or-x', connectedAt: 1 })
+    mockedGetAccounts.mockResolvedValue([
+      { enabled: true, userId: 'u1', kind: 'openrouter-key', apiKey: 'sk-or-x', connectedAt: 1 },
+    ])
     stubEnv('OPENAI_API_KEY', 'sk-server')
     stubEnv('GEMINI_API_KEY', 'gm-server')
     const generator = await generatorFor('u1')
     expect(generator.ok).toBe(false)
   })
+
+  it('never moves the charge onto the server when every account is switched off', async () => {
+    mockedGetAccounts.mockResolvedValue([
+      { enabled: false, userId: 'u1', kind: 'openai-key', apiKey: 'sk-own', connectedAt: 1 },
+    ])
+    stubEnv('OPENAI_API_KEY', 'sk-server')
+    stubEnv('GEMINI_API_KEY', 'gm-server')
+    const generator = await generatorFor('u1')
+    expect(generator.ok).toBe(false)
+    expect((await imageModelAvailability('u1')).filter((m) => m.available).map((m) => m.id)).toEqual([])
+  })
 })
 
 describe('failure modes', () => {
   it('surfaces a prose refusal instead of a missing image', async () => {
-    mockedGetAccount.mockResolvedValue({ userId: 'u1', kind: 'openai-key', apiKey: 'sk', connectedAt: 1 })
+    mockedGetAccounts.mockResolvedValue([
+      { enabled: true, userId: 'u1', kind: 'openai-key', apiKey: 'sk', connectedAt: 1 },
+    ])
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       sse([
         {
@@ -238,7 +255,9 @@ describe('failure modes', () => {
 })
 
 it('does not bill the server for image generation when a Claude API key is selected', async () => {
-  mockedGetAccount.mockResolvedValue({ userId: 'alice', kind: 'anthropic-key', apiKey: 'sk-ant-test', connectedAt: 1 })
+  mockedGetAccounts.mockResolvedValue([
+    { enabled: true, userId: 'alice', kind: 'anthropic-key', apiKey: 'sk-ant-test', connectedAt: 1 },
+  ])
   stubEnv('OPENAI_API_KEY', 'sk-server-test')
   try {
     expect(await generatorFor('alice')).toMatchObject({ ok: false })

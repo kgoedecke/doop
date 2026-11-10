@@ -1,7 +1,9 @@
 # Toolchain for building the Tauri desktop shell: the WebKitGTK build deps on
 # Linux, bun (for @tauri-apps/cli), a stable Rust with the requested targets,
 # a Rust build cache shared across workflows and jobs on the same OS, and the
-# desktop/ node_modules.
+# desktop/ node_modules. The macOS jobs build the Chromium crate
+# (desktop/src-tauri-chromium), which also needs ninja for CEF's C++ wrapper
+# and the CEF binary distribution, cached between runs.
 name: Set up desktop toolchain
 description: Bun, Rust (+targets), cargo cache and desktop/ dependencies for tauri build
 
@@ -10,6 +12,10 @@ inputs:
     description: Comma-separated extra Rust targets (e.g. aarch64-apple-darwin,x86_64-apple-darwin)
     required: false
     default: ''
+  workspace:
+    description: The crate to build, desktop/src-tauri (WebKit) or desktop/src-tauri-chromium (macOS)
+    required: false
+    default: desktop/src-tauri
 
 runs:
   using: composite
@@ -32,10 +38,22 @@ runs:
         targets: ${{ inputs.targets }}
     - uses: Swatinem/rust-cache@f0deed1e0edfc6a9be95417288c0e1099b1eeec3 # v2.7.7
       with:
-        workspaces: desktop/src-tauri
-        # one cache per OS instead of one per job, so the release build
-        # restores what the PR build compiled (and vice versa)
-        shared-key: desktop
+        workspaces: ${{ inputs.workspace }}
+        # one cache per OS and crate instead of one per job, so the release
+        # build restores what the PR build compiled (and vice versa)
+        shared-key: ${{ inputs.workspace == 'desktop/src-tauri' && 'desktop' || 'desktop-chromium' }}
+    # cef-dll-sys builds CEF's C++ wrapper with cmake (preinstalled) and ninja
+    - if: inputs.workspace == 'desktop/src-tauri-chromium'
+      shell: bash
+      run: brew install ninja
+    # the CEF binary distribution (about 300 MB per architecture), keyed on the
+    # cef-dll-sys version that names it
+    - if: inputs.workspace == 'desktop/src-tauri-chromium'
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ~/Library/Caches/tauri-cef
+        key: tauri-cef-${{ runner.os }}-${{ hashFiles('desktop/src-tauri-chromium/Cargo.lock') }}
+        restore-keys: tauri-cef-${{ runner.os }}-
     - run: bun install --frozen-lockfile
       shell: bash
       working-directory: desktop

@@ -21,12 +21,15 @@ import {
   BlocksIcon,
   BuildingIcon,
   CirclePlusIcon,
+  CreditCardIcon,
   FolderPlusIcon,
+  GearIcon,
   GridIcon,
   LockIcon,
   PanelCollapseIcon,
   PanelExpandIcon,
   SearchIcon,
+  TextIcon,
   UserIcon,
   UsersIcon,
   WebIcon,
@@ -43,9 +46,13 @@ import {
  * also draws its own rail from.
  *
  * It owns the search palette, the connect-an-agent modal and its collapsed
- * state (remembered per browser). A page that needs its own group — a
- * workspace's panes, the admin indexes — passes it as children, and it
- * lands after Resources.
+ * state (remembered per browser). A page that needs its own group — the
+ * admin indexes — passes it as children, and it lands after Resources.
+ *
+ * The workspace in view opens under its row: its canvases, people and fonts,
+ * plus plan & billing and settings for its owner and admins. On the
+ * Workspace page those rows switch its pane in place (onWorkspacePane);
+ * anywhere else they go to /w/<id>?pane=….
  *
  * Below md the same rail slides in as a drawer over the page; the header's
  * brand row (DashBrand) opens it, and any row that leads somewhere closes it.
@@ -55,9 +62,26 @@ import {
 export type RailActive =
   'all' | 'mine' | 'shared' | 'automations' | 'integrations' | 'community' | `ws:${string}` | null
 
+/** the Workspace page's panes, in the order the rail lists them */
+export type WorkspacePane = 'members' | 'fonts' | 'billing' | 'general'
+
+const WORKSPACE_PANES: readonly WorkspacePane[] = ['members', 'fonts', 'billing', 'general']
+
+/** the panes a workspace role may open: billing and settings are for its owner and admins */
+export function workspacePanesFor(role: WorkspaceSummary['role'] | undefined): WorkspacePane[] {
+  return WORKSPACE_PANES.filter((p) => role !== 'member' || p === 'members' || p === 'fonts')
+}
+
 /** an agent that worked this recently is treated as still at the desk */
 const LIVE_WINDOW = 5 * 60 * 1000
 const RAIL_STORAGE_KEY = 'doop-rail'
+
+type RailLists = { canvases: CanvasMeta[]; workspaces: WorkspaceSummary[] }
+
+/* the lists the last rail showed: moving between pages remounts the rail, and
+   starting from these instead of empty keeps its rows from blinking out until
+   the next fetch answers */
+let lastLists: RailLists | null = null
 
 function readRailOpen(): boolean {
   try {
@@ -73,22 +97,29 @@ export function AppRail({
   workspaces,
   onScope,
   onCreateWorkspace,
+  workspacePane,
+  onWorkspacePane,
   searchShortcut = true,
   children,
 }: {
   active: RailActive
-  /** the lists the rail counts and reads agents from; fetched here when a page has none */
-  canvases?: CanvasMeta[]
-  workspaces?: WorkspaceSummary[]
+  /** the lists the rail reads agents and the search palette from: fetched here when a page passes none
+   *  (undefined); null while the page is still loading its own, which shows the last lists drawn */
+  canvases?: CanvasMeta[] | null
+  workspaces?: WorkspaceSummary[] | null
   /** Home filters in place; any other page goes home with the scope in the URL */
   onScope?: (scope: 'all' | 'mine' | 'shared' | `ws:${string}`) => void
   onCreateWorkspace?: () => void
+  /** the pane the Workspace page shows; unset elsewhere, where the workspace's canvases are in view */
+  workspacePane?: WorkspacePane
+  /** the Workspace page switches panes in place; any other page goes to it */
+  onWorkspacePane?: (pane: WorkspacePane) => void
   /** off on a page whose own search owns ⌘K (the community gallery) */
   searchShortcut?: boolean
   children?: ReactNode
 }) {
   const t = useT()
-  const [own, setOwn] = useState<{ canvases: CanvasMeta[]; workspaces: WorkspaceSummary[] } | null>(null)
+  const [own, setOwn] = useState<RailLists | null>(() => lastLists)
   const needsOwn = canvases === undefined || workspaces === undefined
   useEffect(() => {
     if (!needsOwn) return
@@ -97,7 +128,12 @@ export function AppRail({
       .catch(console.error)
   }, [needsOwn])
   const list = useMemo(() => canvases ?? own?.canvases ?? [], [canvases, own])
-  const spaces = workspaces ?? own?.workspaces ?? []
+  const spaces = useMemo(() => workspaces ?? own?.workspaces ?? [], [workspaces, own])
+  /* only real lists are kept: a page still loading passes null, never an empty stand-in */
+  useEffect(() => {
+    if ((canvases ?? own?.canvases) && (workspaces ?? own?.workspaces))
+      lastLists = { canvases: list, workspaces: spaces }
+  }, [canvases, workspaces, own, list, spaces])
 
   const [open, setOpen] = useState(readRailOpen)
   const drawer = useRailDrawer((s) => s.open)
@@ -145,8 +181,12 @@ export function AppRail({
     return () => window.removeEventListener('keydown', onKey)
   }, [searchShortcut])
 
+  /* the fade belongs to the collapse toggle, not to arriving on a page */
+  const [toggled, setToggled] = useState(false)
+
   function setRail(next: boolean) {
     setOpen(next)
+    setToggled(true)
     try {
       localStorage.setItem(RAIL_STORAGE_KEY, next ? 'wide' : 'narrow')
     } catch {
@@ -172,6 +212,22 @@ export function AppRail({
     else navigate('/?workspace=new')
   }
 
+  function openPane(workspaceId: string, pane: WorkspacePane) {
+    setDrawer(false)
+    if (onWorkspacePane) onWorkspacePane(pane)
+    else navigate(`/w/${workspaceId}?pane=${pane}`)
+  }
+
+  /* the workspace in view, which opens its rows under its own */
+  const openWorkspace = active?.startsWith('ws:') ? active.slice(3) : null
+
+  const paneRows = {
+    members: { label: t('rail.workspacePeople'), icon: <UsersIcon size="rail" /> },
+    fonts: { label: t('rail.workspaceFonts'), icon: <TextIcon size="rail" /> },
+    billing: { label: t('rail.workspaceBilling'), icon: <CreditCardIcon size="rail" /> },
+    general: { label: t('rail.workspaceSettings'), icon: <GearIcon size="rail" /> },
+  } satisfies Record<WorkspacePane, { label: string; icon: ReactNode }>
+
   function openSearch() {
     setDrawer(false)
     setSearching(true)
@@ -185,12 +241,6 @@ export function AppRail({
   function openCanvas(c: CanvasMeta) {
     if (!openCanvasTab(c.id, c.name)) navigate(`/c/${c.id}`)
   }
-
-  const workspaceCounts = useMemo(() => {
-    const map = new Map<string, number>()
-    for (const c of list) if (c.workspaceId) map.set(c.workspaceId, (map.get(c.workspaceId) ?? 0) + 1)
-    return map
-  }, [list])
 
   /* every agent that has worked on these canvases, aggregated across them */
   const agents = useMemo(() => {
@@ -227,7 +277,10 @@ export function AppRail({
     <div
       key="narrow"
       data-icon-motion
-      className="flex min-h-full w-full animate-[fade-in_0.25s_ease] flex-col items-center motion-reduce:animate-none"
+      className={cn(
+        'flex min-h-full w-full flex-col items-center',
+        toggled && 'animate-[fade-in_0.25s_ease] motion-reduce:animate-none',
+      )}
     >
       <DashSidebarBrand onHome={() => go('/')} />
       <IconButton aria-label={t('rail.showSidebar')} onClick={() => setRail(true)}>
@@ -248,9 +301,26 @@ export function AppRail({
       </IconButton>
       <Rule />
       {spaces.map((w) => (
-        <IconButton key={w.id} aria-label={w.name} on={active === `ws:${w.id}`} onClick={() => scope(`ws:${w.id}`)}>
-          <BuildingIcon size="rail" />
-        </IconButton>
+        <div key={w.id} className="contents">
+          <IconButton
+            aria-label={w.name}
+            on={active === `ws:${w.id}` && !workspacePane}
+            onClick={() => scope(`ws:${w.id}`)}
+          >
+            <BuildingIcon size="rail" />
+          </IconButton>
+          {openWorkspace === w.id &&
+            workspacePanesFor(w.role).map((p) => (
+              <IconButton
+                key={p}
+                aria-label={`${w.name}: ${paneRows[p].label}`}
+                on={workspacePane === p}
+                onClick={() => openPane(w.id, p)}
+              >
+                {paneRows[p].icon}
+              </IconButton>
+            ))}
+        </div>
       ))}
       <IconButton aria-label={t('rail.newWorkspace')} onClick={createWorkspace}>
         <FolderPlusIcon size="rail" />
@@ -299,7 +369,10 @@ export function AppRail({
     <div
       key="wide"
       data-icon-motion
-      className="flex min-h-full w-full animate-[fade-in_0.25s_ease] flex-col motion-reduce:animate-none"
+      className={cn(
+        'flex min-h-full w-full flex-col',
+        toggled && 'animate-[fade-in_0.25s_ease] motion-reduce:animate-none',
+      )}
     >
       <DashSidebarBrand onHome={() => go('/')}>
         <span className="ml-auto flex items-center gap-2.5 text-ink-soft">
@@ -346,24 +419,48 @@ export function AppRail({
       <DashSectionLabel density="rail">{t('rail.workspaces')}</DashSectionLabel>
       <nav className="flex flex-col gap-0.5">
         {spaces.map((w) => (
-          <DashNavItem
-            key={w.id}
-            density="rail"
-            icon={<BuildingIcon size="rail" />}
-            count={
-              w.active ? (
-                <em className="not-italic">{workspaceCounts.get(w.id) ?? 0}</em>
-              ) : (
-                <span className="inline-flex items-center gap-1" title={t('rail.noPlanYet')}>
-                  <LockIcon width={12} height={12} aria-hidden />
-                </span>
-              )
-            }
-            active={active === `ws:${w.id}`}
-            onClick={() => scope(`ws:${w.id}`)}
-          >
-            {w.name}
-          </DashNavItem>
+          <div key={w.id} className="contents">
+            <DashNavItem
+              density="rail"
+              icon={<BuildingIcon size="rail" />}
+              count={
+                w.active ? undefined : (
+                  <span className="inline-flex items-center gap-1" title={t('rail.noPlanYet')}>
+                    <LockIcon width={12} height={12} aria-hidden />
+                  </span>
+                )
+              }
+              active={active === `ws:${w.id}` && openWorkspace !== w.id}
+              className={cn(openWorkspace === w.id && 'text-ink')}
+              aria-expanded={openWorkspace === w.id}
+              onClick={() => scope(`ws:${w.id}`)}
+            >
+              {w.name}
+            </DashNavItem>
+            {openWorkspace === w.id && (
+              <div role="group" aria-label={w.name} className="flex flex-col gap-0.5 pl-[18px]">
+                <DashNavItem
+                  density="rail"
+                  icon={<GridIcon size="rail" />}
+                  active={!workspacePane}
+                  onClick={() => scope(`ws:${w.id}`)}
+                >
+                  {t('rail.workspaceCanvases')}
+                </DashNavItem>
+                {workspacePanesFor(w.role).map((p) => (
+                  <DashNavItem
+                    key={p}
+                    density="rail"
+                    icon={paneRows[p].icon}
+                    active={workspacePane === p}
+                    onClick={() => openPane(w.id, p)}
+                  >
+                    {paneRows[p].label}
+                  </DashNavItem>
+                ))}
+              </div>
+            )}
+          </div>
         ))}
         <DashNavItem density="rail" icon={<FolderPlusIcon size="rail" />} onClick={createWorkspace}>
           {spaces.length ? t('rail.newWorkspace') : t('rail.createWorkspace')}

@@ -1,11 +1,10 @@
 import { env } from './env.ts'
-import { getLocalAgentPreference } from './localAgentPreferences.ts'
+import { readConnections, usableAccount, type Connections } from './agentDefaults.ts'
 import { geminiCloudWorkerFor } from './geminiCloudRuns.ts'
 import { eq, sql } from 'drizzle-orm'
 import { db } from './db/index.ts'
 import { residentUsage } from './db/schema.ts'
 import { oauthAccessToken } from './db/auth-schema.ts'
-import { getStatus } from './modelAccounts.ts'
 import type { AccountKind } from './modelAccounts.ts'
 
 /**
@@ -37,7 +36,7 @@ export interface Allowance {
   byoModel: boolean
   /** which kind, for the UI copy */
   byoKind?: AccountKind | 'claude-local' | 'gemini-cloud'
-  /** the ChatGPT account's email, so the UI can name what is connected */
+  /** the default account's email, so the UI can name what is connected */
   byoEmail?: string
   /** the agent is running on this user's own account right now — connecting
    *  takes effect immediately, it does not wait for the free tasks to run out */
@@ -66,26 +65,31 @@ async function usedCount(userId: string): Promise<number> {
 
 export async function getAllowance(userId: string): Promise<Allowance> {
   const geminiCloud = !!geminiCloudWorkerFor(userId)
-  const [connected, used, model, local] = await Promise.all([
+  const [connected, used, connections] = await Promise.all([
     hasOwnAgent(userId),
     usedCount(userId),
-    getStatus(userId).catch(() => ({ connected: false }) as Awaited<ReturnType<typeof getStatus>>),
-    getLocalAgentPreference(userId),
+    readConnections(userId).catch((): Connections => ({
+      plan: { enabled: false, model: 'default' },
+      accounts: [],
+      default: undefined,
+    })),
   ])
+  /* any connection that is on carries the agent, so the free tier stops
+     counting; the meter names the default, which is what unpicked work runs on */
+  const own = geminiCloud || connections.default !== undefined
+  const email = usableAccount(connections, connections.default)?.email
   return {
     used,
     limit: RESIDENT_TASK_LIMIT,
     connected,
-    byoModel: geminiCloud || local.enabled || model.connected,
+    byoModel: own,
     ...(geminiCloud
       ? { byoKind: 'gemini-cloud' as const }
-      : local.enabled
-        ? { byoKind: 'claude-local' as const }
-        : model.kind
-          ? { byoKind: model.kind }
-          : {}),
-    ...(!geminiCloud && model.email ? { byoEmail: model.email } : {}),
-    onOwnAccount: geminiCloud || local.enabled || model.connected,
+      : connections.default
+        ? { byoKind: connections.default }
+        : {}),
+    ...(!geminiCloud && email ? { byoEmail: email } : {}),
+    onOwnAccount: own,
   }
 }
 

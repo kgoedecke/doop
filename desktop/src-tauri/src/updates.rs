@@ -5,6 +5,12 @@
 //! the same check on demand and reports every outcome; background checks
 //! stay silent unless an update is ready.
 //!
+//! A page that draws its own update card (src/components/UpdateCard.tsx)
+//! says so through `update_card_ready` once it listens for `update-ready`;
+//! the offer then goes to it and comes back as `update_restart`. Every page
+//! load forgets that, so a page that never says so (an older web build, the
+//! seconds before the app has loaded) gets the native dialog instead.
+//!
 //! The feed (latest.json, written by desktop-release.yml) and every package
 //! it names are signed with the key whose public half is in tauri.conf.json;
 //! the plugin refuses a package whose signature does not verify.
@@ -13,13 +19,18 @@ use std::sync::Mutex;
 use std::time::Duration;
 
 use rfd::{AsyncMessageDialog, MessageButtons, MessageDialogResult, MessageLevel};
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_updater::{Update, UpdaterExt};
 
 const FIRST_CHECK: Duration = Duration::from_secs(15);
 const CHECK_EVERY: Duration = Duration::from_secs(24 * 60 * 60);
+/// How long the feed or a download may go silent before it is given up. Not
+/// a deadline: a slow connection that keeps delivering never hits it, while
+/// a dead one no longer holds `busy` (and every later check) until restart.
+const STALL: Duration = Duration::from_secs(60);
 const RESTART: &str = "Restart Now";
 const LATER: &str = "Later";
+pub const READY_EVENT: &str = "update-ready";
 
 #[derive(Default)]
 pub struct UpdateState {
@@ -28,6 +39,8 @@ pub struct UpdateState {
     /// A verified download the person put off. A later check offers it again
     /// without downloading, and on macOS it is installed on quit.
     ready: Mutex<Option<(Update, Vec<u8>)>>,
+    /// The loaded page listens for `update-ready` and draws the offer itself.
+    page_card: AtomicBool,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -38,7 +51,8 @@ enum Trigger {
 
 /// Official installers point at doop.design. Replacing a self-hosted shell
 /// with one would silently change its server, and a debug build would be
-/// replaced by a release.
+/// replaced by a release. On macOS the feed names the Chromium build, so the
+/// WebKit app updates into it and the Chromium app keeps updating from it.
 fn updates_enabled() -> bool {
     !cfg!(debug_assertions)
         && matches!(
@@ -126,7 +140,7 @@ async fn ready_update(app: &AppHandle) -> Result<Option<(Update, Vec<u8>)>, Stri
     let update = match newest(app).await {
         Ok(Some(update)) => update,
         Ok(None) => {
-            take_kept(app, |_| true);
+            withdraw(app, true);
             return Ok(None);
         }
         Err(error) => return take_kept(app, |_| true).map(Some).ok_or(error),
@@ -144,6 +158,7 @@ async fn ready_update(app: &AppHandle) -> Result<Option<(Update, Vec<u8>)>, Stri
 async fn newest(app: &AppHandle) -> Result<Option<Update>, String> {
     let handle = app.clone();
     app.updater_builder()
+        .configure_client(|client| client.connect_timeout(STALL).read_timeout(STALL))
         // Windows: the installer is launched and the process exits at once.
         .on_before_exit(move || {
             crate::claude::shutdown(&handle.state::<crate::claude::ClaudeState>())
@@ -164,6 +179,16 @@ fn take_kept(app: &AppHandle, wanted: impl FnOnce(&Update) -> bool) -> Option<(U
 }
 
 async fn offer(app: &AppHandle, update: Update, bytes: Vec<u8>) {
+    let state = app.state::<UpdateState>();
+    if state.page_card.load(Ordering::Acquire) {
+        let ready = card_offer(app, &update);
+        // announced under the lock, in order with `withdraw`
+        if let Ok(mut kept) = state.ready.lock() {
+            *kept = Some((update, bytes));
+            let _ = app.emit(READY_EVENT, ready);
+        }
+        return;
+    }
     let later = if cfg!(target_os = "macos") {
         "\n\nChoose Later to install it when you quit doop."
     } else {
@@ -182,11 +207,25 @@ async fn offer(app: &AppHandle, update: Update, bytes: Vec<u8>) {
     .show()
     .await;
     if !accepted(&choice) {
-        if let Ok(mut ready) = app.state::<UpdateState>().ready.lock() {
+        if let Ok(mut ready) = state.ready.lock() {
             *ready = Some((update, bytes));
         }
         return;
     }
+    let _ = install(app, update, bytes).await;
+}
+
+/// What the card shows: the version on offer and the one running.
+fn card_offer(app: &AppHandle, update: &Update) -> serde_json::Value {
+    serde_json::json!({
+        "version": update.version,
+        "current": app.package_info().version.to_string(),
+    })
+}
+
+/// Installs and restarts into the update; returns only when that failed,
+/// keeping the download so the offer can be taken up again.
+async fn install(app: &AppHandle, update: Update, bytes: Vec<u8>) -> Result<(), String> {
     crate::claude::shutdown(&app.state::<crate::claude::ClaudeState>());
     // Windows does not return from a successful install: the plugin starts
     // the installer, which relaunches the app, and exits.
@@ -202,7 +241,62 @@ async fn offer(app: &AppHandle, update: Update, bytes: Vec<u8>) {
             .set_level(MessageLevel::Error)
             .show()
             .await;
+            // a check that ran while the dialog was open may have kept a
+            // newer download; that one stays
+            if let Ok(mut ready) = app.state::<UpdateState>().ready.lock() {
+                ready.get_or_insert((update, bytes));
+            }
+            Err(error.to_string())
         }
+    }
+}
+
+/// A page load starts out without the card until the new page says otherwise.
+pub fn page_loading(app: &AppHandle) {
+    if let Some(state) = app.try_state::<UpdateState>() {
+        state.page_card.store(false, Ordering::Release);
+    }
+}
+
+/// The page listens for `update-ready` and will draw the offer itself. A
+/// download already waiting is handed straight back, so a reloaded page
+/// shows the card again instead of hiding the update until the next check.
+#[tauri::command]
+pub fn update_card_ready(app: AppHandle) -> Option<serde_json::Value> {
+    let state = app.state::<UpdateState>();
+    state.page_card.store(true, Ordering::Release);
+    let ready = state.ready.lock().ok()?;
+    ready.as_ref().map(|(update, _)| card_offer(&app, update))
+}
+
+/// Restart to update, from the page's card. Not now needs no call: the
+/// download stays kept, offered again by the next check and, on macOS,
+/// installed on quit.
+#[tauri::command]
+pub async fn update_restart(app: AppHandle) -> Result<(), String> {
+    let Some(kept) = take_kept(&app, |_| true) else {
+        withdraw(&app, false);
+        return Err("No update is ready".into());
+    };
+    install(&app, kept.0, kept.1).await
+}
+
+/// Tells the page to take its card down when no download is kept, after
+/// dropping the kept one first when `drop` says so. Both happen under the
+/// `ready` lock, which `offer` also holds while it saves and announces a
+/// download, so the page hears the two in the order the slot changed: a
+/// check that takes the download out for a moment and puts it back is never
+/// followed by a stale withdrawal.
+fn withdraw(app: &AppHandle, drop: bool) {
+    let state = app.state::<UpdateState>();
+    let Ok(mut ready) = state.ready.lock() else {
+        return;
+    };
+    if drop {
+        *ready = None;
+    }
+    if ready.is_none() {
+        let _ = app.emit(READY_EVENT, serde_json::Value::Null);
     }
 }
 
@@ -236,9 +330,9 @@ pub mod menu {
     pub const MENU_ID: &str = "check-for-updates";
     const LABEL: &str = "Check for Updates…";
 
-    struct UpdateMenu(MenuItem<tauri::Wry>);
+    struct UpdateMenu(MenuItem<crate::ShellRuntime>);
 
-    pub fn item(app: &AppHandle) -> tauri::Result<MenuItem<tauri::Wry>> {
+    pub fn item(app: &AppHandle) -> tauri::Result<MenuItem<crate::ShellRuntime>> {
         let item = MenuItem::with_id(app, MENU_ID, LABEL, true, None::<&str>)?;
         app.manage(UpdateMenu(item.clone()));
         Ok(item)

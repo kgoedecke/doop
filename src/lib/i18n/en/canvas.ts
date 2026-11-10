@@ -9,6 +9,7 @@ export const canvas = {
   toolPath: 'Vector path',
   toolText: 'Text',
   toolComment: 'Comment',
+  toolZoom: 'Zoom',
 
   /* top bar */
   untitled: 'Untitled',
@@ -16,6 +17,10 @@ export const canvas = {
   readOnlyBadgeTitle: 'Your share link lets you look around but not change the design',
   canComment: 'Can comment',
   viewOnly: 'View only',
+  readOnlyViewBanner: 'You can only view this canvas.',
+  readOnlyCommentBanner: 'You can only view and comment on this canvas.',
+  guestBanner: 'Sign up to comment, edit and more.',
+  dismissBanner: 'Dismiss',
   canvasIdTitle: 'Canvas id — agents use this with the MCP tools',
   canvasIdMenu: 'Canvas id',
   copyId: 'Copy ID',
@@ -78,8 +83,8 @@ export const canvas = {
   contactSupport: 'Contact support',
   youAre: 'You are “{name}” — click to change your name',
   changeDisplayName: 'Change your display name',
-  agents: 'Agents · ⌘K to ask the Doop Agent',
-  agentsWorking: 'Agents · {working} working · ⌘K to ask the Doop Agent',
+  agents: 'Agents · ⌘/ to ask the Doop Agent',
+  agentsWorking: 'Agents · {working} working · ⌘/ to ask the Doop Agent',
   comments: 'Comments',
   commentsOpen: 'Comments · {open} open',
   activity: 'Activity',
@@ -104,6 +109,12 @@ export const canvas = {
   zoomTo: 'Zoom to {percent}%',
   showRulers: 'Show rulers',
   hideRulers: 'Hide rulers',
+  showPixelGrid: 'Show pixel grid',
+  hidePixelGrid: 'Hide pixel grid',
+  showCursors: 'Show multiplayer cursors',
+  hideCursors: 'Hide multiplayer cursors',
+  showComments: 'Show comments',
+  hideComments: 'Hide comments',
 
   /* onboarding */
   gettingStarted: 'Getting started',

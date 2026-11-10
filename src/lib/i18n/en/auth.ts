@@ -89,6 +89,18 @@ export const auth = {
     'Doop finishes connecting in the app, for the account signed in there. You can close this tab afterwards.',
   desktopConnectFailed: 'Could not hand the connection over to the doop app. Go back to the app and try again.',
 
+  /* the desktop app's server settings, behind the sign-in screen's cog */
+  serverSettings: 'Server settings',
+  serverTitle: 'Doop server',
+  serverLede: 'This app is connected to {host}. Enter another address to use a self-hosted Doop server.',
+  serverLedeLoading: 'Enter the address of the Doop server this app should use.',
+  serverAddress: 'Server address',
+  serverHint: 'The app checks the server, asks you to confirm, then restarts.',
+  serverConnect: 'Connect',
+  serverConnecting: 'Checking…',
+  serverUseDefault: 'Use {host}',
+  serverFailed: 'Could not change the server. Try again.',
+
   /* "Viewing as <name> — read only, expires after 15 minutes." */
   viewingAsBefore: 'Viewing as',
   viewingAsAfter: '— read only, expires after 15 minutes.',

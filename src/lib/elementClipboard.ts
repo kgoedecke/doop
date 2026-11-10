@@ -1,12 +1,25 @@
 import type { Frame } from '../../shared/types'
-import { elementsHtml, insertElements, isElementLocked } from './layers'
-import { saveFrameHtml } from './layerEdits'
+import { elementsHtml, insertElements, isElementLocked, replaceElementsWith } from './layers'
+import { isStandalonePick, saveFrameHtml } from './layerEdits'
+import { copyFrames } from './frameClipboard'
 import { useStore } from './store'
 import { ELEMENT_CLIP_KEY, ELEMENT_CLIP_STYLE_KEY, FRAME_CLIP_KEY } from './clipboardKeys'
 import { carriedCss, newScope, renameInCss, SCOPE_ATTR, withCarriedCss } from './styleCarry'
 
 export function copyLayer(frame: Frame, selector: string): boolean {
   return copyLayers(frame, [selector])
+}
+
+/** Copy what is picked in `frame`. A standalone element's shape is the
+ *  element itself, so picking it and copying copies the frame it is: the
+ *  paste then lands a second element on the canvas, at the root, rather than
+ *  a second shape inside the original's shell. */
+export function copyPicked(frame: Frame, selectors: string[]): boolean {
+  if (isStandalonePick(frame, selectors)) {
+    copyFrames([frame])
+    return true
+  }
+  return copyLayers(frame, selectors)
 }
 
 /** Copy the elements in document order; a paste lands them together. */
@@ -95,5 +108,24 @@ export function pasteLayer(frame: Frame, selector: string | null): boolean {
   const store = useStore.getState()
   store.pickElement(null)
   for (const pasted of inserted.selectors) store.toggleElement({ frameId: frame.id, selector: pasted })
+  return true
+}
+
+/** ⇧⌘R on layers: the picked layers give way to the copied ones, which
+ *  land where the first of them was and end up picked. */
+export function replaceWithClip(frame: Frame, selectors: string[]): boolean {
+  const live = useStore.getState().canvas?.frames.find((f) => f.id === frame.id)
+  const html = localStorage.getItem(ELEMENT_CLIP_KEY)
+  if (!live || live.locked || !html || !selectors.length) return false
+  const styles = clipStyles()
+  const fresh = new Map((styles?.scopes ?? []).map((old) => [old, newScope()]))
+  const rescope = (text: string) => [...fresh].reduce((t, [old, next]) => t.split(old).join(next), text)
+  const replaced = replaceElementsWith(live.html, selectors, rescope(html))
+  if (!replaced) return false
+  const pasted = styles
+    ? withCarriedCss(replaced.html, renameInCss(rescope(styles.css), replaced.renamed), [...fresh.values()])
+    : replaced.html
+  saveFrameHtml(live, pasted)
+  useStore.getState().pickElements(frame.id, replaced.selectors)
   return true
 }

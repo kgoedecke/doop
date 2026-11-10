@@ -9,6 +9,7 @@
  */
 import {
   IDENTITY,
+  apply,
   lengthScale,
   multiply,
   paddedBounds,
@@ -44,6 +45,14 @@ export interface ImportOptions {
   /** Prefix for the file's ids, so two imports in one document never share a gradient. */
   key?: string
   styles?: StyleReader
+  /** `root` takes the file's own box (its width and height) as the element's
+   *  box, the way an artboard is: a PDF page whose clipped backgrounds reach
+   *  past its edges. Unset, the box is the union of what the file draws. */
+  box?: 'content' | 'root'
+  /** How many layers and how many elements to read before stopping (a PDF
+   *  page's chart runs past the defaults an icon file never nears). */
+  maxLayers?: number
+  maxElements?: number
 }
 
 const SVG_NS = 'http://www.w3.org/2000/svg'
@@ -114,7 +123,14 @@ const DEFAULTS: Record<string, string> = {
   'lighting-color': 'white',
   transform: 'none',
   'transform-origin': '0 0',
+  'clip-path': 'none',
+  mask: 'none',
+  filter: 'none',
 }
+/** The effects a text or image layer keeps from its stylesheet, since the
+ *  written document has no stylesheet; its `<g>` wrapper carries the transform,
+ *  so they stay in the element's own coordinates. */
+const EFFECT_PROPS = ['clip-path', 'mask', 'filter'] as const
 /** What a copied definition (a gradient stop, a clip's shape) keeps of its styles. */
 const DEF_PROPS = [
   ...PAINT_PROPS,
@@ -257,8 +273,8 @@ function hrefOf(el: Element): string | null {
 /** `<use>` becomes the element it points at, in place, with the use's
  *  position and inherited paint, so the walk sees ordinary shapes; a
  *  symbol becomes a nested svg sized by the use. */
-function expandUses(root: Element) {
-  let budget = MAX_ELEMENTS
+function expandUses(root: Element, maxElements = MAX_ELEMENTS) {
+  let budget = maxElements
   const stack: Element[] = []
   const expand = (use: Element, depth: number) => {
     const id = hrefOf(use)?.trim()
@@ -307,7 +323,7 @@ interface Paint {
   values: Record<string, string>
   /** The element's own opacity, which groups keep as their own and shapes wear. */
   opacity: number
-  mask: string | null
+  mask: Reference | null
   filter: string | null
 }
 
@@ -317,7 +333,7 @@ type Node =
       name: string
       opacity: number
       clip: Reference | null
-      mask: string | null
+      mask: Reference | null
       filter: string | null
       children: Node[]
     }
@@ -373,10 +389,12 @@ class Walker {
     private readonly read: StyleReader,
     /** The viewport a shape's percentages refer to: the nearest svg's viewBox. */
     private viewport: Viewport,
+    private readonly maxLayers = MAX_LAYERS,
+    private readonly maxElements = MAX_ELEMENTS,
   ) {}
 
   visit(el: Element, parentCtm: Matrix): Node | null {
-    if (++this.visited > MAX_ELEMENTS || this.layers >= MAX_LAYERS) return null
+    if (++this.visited > this.maxElements || this.layers >= this.maxLayers) return null
     const tag = el.localName
     if (el.namespaceURI !== SVG_NS || SKIP_TAGS.has(tag)) return null
     if (this.read(el, 'display') === 'none') return null
@@ -419,10 +437,11 @@ class Walker {
   /** A group's own effects, which the written group carries as a whole. */
   private effects(el: Element, ctm: Matrix) {
     const clip = referenceId(this.read(el, 'clip-path'))
+    const mask = referenceId(this.read(el, 'mask'))
     return {
       opacity: opacityOf(this.read(el, 'opacity')),
       clip: clip ? { id: clip, ctm } : null,
-      mask: referenceId(this.read(el, 'mask')),
+      mask: mask ? { id: mask, ctm } : null,
       filter: referenceId(this.read(el, 'filter')),
     }
   }
@@ -455,6 +474,7 @@ class Walker {
     values['stroke-dashoffset'] = String(round((parseFloat(values['stroke-dashoffset'] ?? '0') || 0) * scale))
     const stroke = values['stroke'] !== 'none' ? parseFloat(values['stroke-width'] ?? '0') || 0 : 0
     const clip = referenceId(this.read(el, 'clip-path'))
+    const mask = referenceId(this.read(el, 'mask'))
     this.layers++
     return {
       kind: 'shape',
@@ -464,7 +484,7 @@ class Walker {
       paint: {
         values,
         opacity: opacityOf(this.read(el, 'opacity')),
-        mask: referenceId(this.read(el, 'mask')),
+        mask: mask ? { id: mask, ctm } : null,
         filter: referenceId(this.read(el, 'filter')),
       },
       ctm,
@@ -477,7 +497,11 @@ class Walker {
     const element = el.cloneNode(true) as Element
     element.removeAttribute('transform')
     element.removeAttribute('id')
-    bakeStyles(element, el, this.read, [...PAINT_PROPS, ...TEXT_PROPS])
+    /* the layer's svg wears the opacity; left on the element too, it would apply twice */
+    element.removeAttribute('opacity')
+    ;(element as HTMLElement).style.removeProperty('opacity')
+    if (!element.getAttribute('style')) element.removeAttribute('style')
+    bakeStyles(element, el, this.read, [...PAINT_PROPS, ...TEXT_PROPS, ...EFFECT_PROPS])
     this.layers++
     return { kind: 'raw', name: nameOf(el), element, ctm, opacity: opacityOf(this.read(el, 'opacity')) }
   }
@@ -498,6 +522,33 @@ function bakeStyles(clone: Element, original: Element, read: StyleReader, proper
     const source = originals[index]
     if (source) bakeStyles(child, source, read, properties)
   })
+}
+
+/** The box an element's `x`/`y`/`width`/`height` name, as the transform lands
+ *  it (the box around the moved corners); `null` when any side is missing or
+ *  relative (a percentage, an `em`), since those resolve against something the
+ *  copy keeps and are left as written. */
+function transformedBounds(el: Element, ctm: Matrix): Box | null {
+  const side = (name: string) => {
+    const value = el.getAttribute(name)
+    return value && /^\s*[-+.\d]+(?:[eE][-+]?\d+)?\s*(?:px|pt|pc|mm|cm|in)?\s*$/.test(value) ? parseLength(value) : null
+  }
+  const x = side('x')
+  const y = side('y')
+  const width = side('width')
+  const height = side('height')
+  if (x === null || y === null || width === null || height === null) return null
+  const corners = [
+    { x, y },
+    { x: x + width, y },
+    { x, y: y + height },
+    { x: x + width, y: y + height },
+  ].map((corner) => apply(ctm, corner))
+  const xs = corners.map((p) => p.x)
+  const ys = corners.map((p) => p.y)
+  const left = Math.min(...xs)
+  const top = Math.min(...ys)
+  return { x: left, y: top, width: Math.max(...xs) - left, height: Math.max(...ys) - top }
 }
 
 function opacityOf(value: string): number {
@@ -551,6 +602,7 @@ function unwrap(nodes: Node[]): Node[] {
 class Writer {
   private readonly doc: Document
   private clipCount = 0
+  private maskCount = 0
   readonly defs: Element
   readonly gradientCopies = new Map<string, string>()
   /** Every id the file declared, plus the copies made here: what gets the prefix. */
@@ -622,7 +674,10 @@ class Writer {
       const id = this.bakedClip(node.clip, multiply(translation(-this.content.x, -this.content.y), node.clip.ctm))
       if (id) style += `clip-path:url(#${id});`
     }
-    if (node.mask) style += `mask:url(#${node.mask});`
+    if (node.mask) {
+      const id = this.bakedMask(node.mask, multiply(translation(-this.content.x, -this.content.y), node.mask.ctm))
+      if (id) style += `mask:url(#${id});`
+    }
     if (node.filter) style += `filter:url(#${node.filter});`
     div.setAttribute('style', style)
     for (const child of node.children) div.append(this.node(child))
@@ -648,7 +703,10 @@ class Writer {
       const id = this.bakedClip(node.clip, node.clip.ctm)
       if (id) path.setAttribute('clip-path', `url(#${id})`)
     }
-    if (node.paint.mask) path.setAttribute('mask', `url(#${node.paint.mask})`)
+    if (node.paint.mask) {
+      const id = this.bakedMask(node.paint.mask, node.paint.mask.ctm)
+      if (id) path.setAttribute('mask', `url(#${id})`)
+    }
     if (node.paint.filter) path.setAttribute('filter', `url(#${node.paint.filter})`)
     svg.append(path)
     return svg
@@ -732,6 +790,34 @@ class Writer {
     return copy
   }
 
+  /** A mask in user units gets a copy carrying the masked element's transform:
+   *  its content in a `<g>` (since `<mask>` itself takes none) and its bounds
+   *  moved to where they land. One wholly in the element's bounding box is
+   *  used as it is. */
+  private bakedMask(reference: Reference, ctm: Matrix): string | null {
+    const mask = this.find(reference.id)
+    if (!mask || mask.localName !== 'mask') return null
+    const userBounds = mask.getAttribute('maskUnits') === 'userSpaceOnUse'
+    const userContent = mask.getAttribute('maskContentUnits') !== 'objectBoundingBox'
+    if (!userBounds && !userContent) return reference.id
+    const copy = `${reference.id}-mask-${++this.maskCount}`
+    const clone = mask.cloneNode(true) as Element
+    clone.setAttribute('id', copy)
+    this.ids.add(copy)
+    if (userContent) {
+      const content = this.doc.createElementNS(SVG_NS, 'g')
+      content.setAttribute('transform', `matrix(${ctm.map(round).join(' ')})`)
+      content.append(...clone.childNodes)
+      clone.append(content)
+    }
+    if (userBounds) {
+      const bounds = transformedBounds(clone, ctm)
+      if (bounds) for (const [name, value] of Object.entries(bounds)) clone.setAttribute(name, String(round(value)))
+    }
+    this.defs.append(clone)
+    return copy
+  }
+
   private find(id: string): Element | null {
     return byId(this.defs, id) ?? byId(this.source, id)
   }
@@ -757,13 +843,13 @@ export function importSvg(root: SVGSVGElement, name: string, options: ImportOpti
   const viewBox = viewBoxOf(root) ?? { x: 0, y: 0, ...size }
   const rootCtm = viewBoxFit(viewBox, { x: 0, y: 0, ...size }, root.getAttribute('preserveAspectRatio'))
   if (read(root, 'display') === 'none') return null
-  const walker = new Walker(read, viewBox)
+  const walker = new Walker(read, viewBox, options.maxLayers, options.maxElements)
   /* the root's own effects (an opacity, a clip, a transform) belong to the
      whole: it is walked as the group it is */
   const whole = walker.group(root, multiply(walker['transformOf'](root), rootCtm))
   if (!whole) return null
   const unwrapped = unwrap([whole])
-  const content = contentBox(unwrapped, { x: 0, y: 0, ...size })
+  const content = options.box === 'root' ? { x: 0, y: 0, ...size } : contentBox(unwrapped, { x: 0, y: 0, ...size })
   if (!content || content.width <= 0 || content.height <= 0) return null
   const html = new Writer(root, content, key, read).document(unwrapped, name)
   return { html, width: content.width, height: content.height, layers: walker.layers }
@@ -774,7 +860,7 @@ export function importSvgMarkup(markup: string, name: string, options: ImportOpt
   const root = parseSvgMarkup(markup)
   if (!root) return null
   sanitize(root)
-  expandUses(root)
+  expandUses(root, options.maxElements)
   return importSvg(root, name, options)
 }
 
@@ -784,7 +870,7 @@ export function importSvgInBrowser(markup: string, name: string, options: Import
   const parsed = parseSvgMarkup(markup)
   if (!parsed) return null
   sanitize(parsed)
-  expandUses(parsed)
+  expandUses(parsed, options.maxElements)
   const host = document.createElement('div')
   host.setAttribute('aria-hidden', 'true')
   /* out of sight without `visibility`, which would inherit into the file and hide every shape */

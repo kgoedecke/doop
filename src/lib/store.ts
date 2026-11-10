@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { canvasPages, framePageId } from '../../shared/pages'
 import { sortByStack } from '../../shared/frameStack'
+import type { DesignToken } from '../../shared/designTokens'
 import type {
   ActivityItem,
   AgentTask,
@@ -19,6 +20,8 @@ import type {
 import { roleAllows, type CanvasRole } from '../../shared/canvasRole'
 import type { SnapGuide } from './snap'
 import { isDrawingTool, type Tool } from './tools'
+import { setOutlines } from './frameBridge'
+import { readViewOptions, writeViewOptions, type ViewOption, type ViewOptions } from './viewOptions'
 
 export interface Viewport {
   x: number
@@ -102,6 +105,8 @@ interface State {
   elementPanelOpen: boolean
   /** the Layers rail is showing (desktop); the choice sticks across visits */
   layersOpen: boolean
+  /** which face the Layers panel shows: the layer tree, or the design tokens */
+  layersTab: 'layers' | 'tokens'
   /** ⌘. — every panel and toolbar is off screen, leaving only the canvas.
    *  A plain overlay flag: the panels' own open/closed state is untouched
    *  underneath, so toggling back shows exactly what was open before */
@@ -114,13 +119,22 @@ interface State {
   snapGuides: SnapGuide[]
   /** ⇧R — the rulers along the stage's top and left edges; the choice sticks */
   rulers: boolean
+  /** the pixel grid, other people's cursors and the comment pins; the choice sticks */
+  viewOptions: ViewOptions
   /** the ruler guide clicked last, which Delete removes */
   selectedGuideId: string | null
+  /** ⌘Y — frames drawn as outlines, fills off; nothing is saved */
+  outlines: boolean
+  /** ⌥L asks the Layers panel to fold every row; it watches the stamp */
+  layersCollapseAt: number
   connected: boolean
   /** the join for the current canvasId was refused: no such canvas (deleted,
    *  or the id in the URL was never one) — CanvasPage shows a not-found
    *  screen instead of an unusable, unresponsive canvas UI */
   canvasNotFound: boolean
+  /** a signed-out guest's join was refused (a private canvas, or the owner
+   *  turned the link off mid-visit) — App shows the sign-in form instead */
+  signInRequired: boolean
   /** a reconnect revealed a newer client bundle on the server — offer a reload */
   updateReady: boolean
   /** frameId -> color, set briefly when a remote actor updates a frame */
@@ -144,7 +158,7 @@ interface State {
    *  the Comments panel raises it; the FrameView that owns the root consumes it */
   threadRequest: { id: string; at: number } | null
   /** when the "Design it" composer in the Agents tab was last asked to take
-   *  focus (⌘K) — a timestamp, so a composer that mounts long after an old
+   *  focus (⌘/) — a timestamp, so a composer that mounts long after an old
    *  request does not grab the keyboard */
   composerFocusAt: number
   /** the composer's unsent text per canvas — collapsing the panel or
@@ -163,6 +177,7 @@ interface State {
   setCanvas(c: Canvas | null): void
   setConnected(v: boolean): void
   setCanvasNotFound(v: boolean): void
+  setSignInRequired(v: boolean): void
   setUpdateReady(v: boolean): void
   setPresences(list: Presence[]): void
   upsertPresence(p: Presence): void
@@ -189,6 +204,8 @@ interface State {
   renameCanvasLocal(name: string): void
   /** upsert (doc set) or remove (doc null) a style guide on the open canvas */
   setGuidelineLocal(name: string, doc: GuidelineDoc | null): void
+  /** replace the open canvas's design tokens and themes (the room sends the whole list) */
+  setTokensLocal(tokens: DesignToken[], themes: string[]): void
   /** pin (reference set) or unpin (null) a Memory reference on the open canvas */
   setReferenceLocal(id: string, reference: MemoryReference | null): void
   setDecisions(decisions: DesignDecision[]): void
@@ -239,13 +256,20 @@ interface State {
   /** add the element to the picked set of its frame, or drop it from the
    *  set; an element in another frame starts a new set */
   toggleElement(el: { frameId: string; selector: string }): void
+  /** replace the picked set with these elements of one frame, the last
+   *  the primary (⌘A inside a frame, a keyboard walk of the tree) */
+  pickElements(frameId: string, selectors: string[]): void
   setElementPanelOpen(v: boolean): void
   setLayersOpen(v: boolean): void
+  setLayersTab(tab: 'layers' | 'tokens'): void
   toggleUiHidden(): void
   setPrototypeMode(on: boolean): void
   setViewport(v: Viewport): void
   setSnapGuides(guides: SnapGuide[]): void
   toggleRulers(): void
+  toggleViewOption(name: ViewOption): void
+  toggleOutlines(): void
+  requestCollapseLayers(): void
   selectGuide(id: string | null): void
   /** add or move (guide set) or remove (null) a ruler guide on the open canvas */
   setGuideLocal(id: string, guide: CanvasGuide | null): void
@@ -309,14 +333,19 @@ export const useStore = create<State>((set, get) => ({
   commentDrag: null,
   elementPanelOpen: false,
   layersOpen: readLayersOpen(),
+  layersTab: 'layers',
   uiHidden: false,
   prototypeMode: false,
   viewport: { x: 0, y: 0, zoom: 1 },
   snapGuides: [],
   rulers: readRulers(),
+  viewOptions: readViewOptions(),
   selectedGuideId: null,
+  outlines: false,
+  layersCollapseAt: 0,
   connected: false,
   canvasNotFound: false,
+  signInRequired: false,
   updateReady: false,
   notice: null,
   flashes: {},
@@ -392,6 +421,7 @@ export const useStore = create<State>((set, get) => ({
     }),
   setConnected: (connected) => set({ connected }),
   setCanvasNotFound: (canvasNotFound) => set({ canvasNotFound }),
+  setSignInRequired: (signInRequired) => set({ signInRequired }),
   setUpdateReady: (updateReady) => set({ updateReady }),
   setPresences: (list) =>
     set((s) => ({
@@ -518,6 +548,8 @@ export const useStore = create<State>((set, get) => ({
       }
       return { canvas: { ...s.canvas, guidelines: docs } }
     }),
+  setTokensLocal: (tokens, themes) =>
+    set((s) => (s.canvas ? { canvas: { ...s.canvas, tokens, tokenThemes: themes } } : {})),
   setReferenceLocal: (id, reference) =>
     set((s) => {
       if (!s.canvas) return {}
@@ -677,6 +709,11 @@ export const useStore = create<State>((set, get) => ({
         ? { selectedElement: { frameId: el.frameId, selector: primary }, selectedElements: rest }
         : { selectedElement: null, selectedElements: [], elementPanelOpen: false }
     }),
+  pickElements: (frameId, selectors) => {
+    const primary = selectors.at(-1)
+    if (!primary) return
+    set({ selectedElement: { frameId, selector: primary }, selectedElements: selectors, elementPanelOpen: true })
+  },
   setElementPanelOpen: (elementPanelOpen) => set({ elementPanelOpen }),
   setLayersOpen: (layersOpen) => {
     try {
@@ -686,6 +723,7 @@ export const useStore = create<State>((set, get) => ({
     }
     set({ layersOpen })
   },
+  setLayersTab: (layersTab) => set({ layersTab }),
   /* hidden guides cannot stay selected: Delete would remove one unseen */
   toggleUiHidden: () => set((s) => ({ uiHidden: !s.uiHidden, ...(s.uiHidden ? {} : { selectedGuideId: null }) })),
   setPrototypeMode: (prototypeMode) => set({ prototypeMode }),
@@ -703,6 +741,18 @@ export const useStore = create<State>((set, get) => ({
         /* private mode: the choice just doesn't stick */
       }
       return { rulers: !s.rulers, ...(s.rulers ? { selectedGuideId: null } : {}) }
+    }),
+  toggleOutlines: () =>
+    set((s) => {
+      setOutlines(!s.outlines)
+      return { outlines: !s.outlines }
+    }),
+  requestCollapseLayers: () => set({ layersCollapseAt: Date.now() }),
+  toggleViewOption: (name) =>
+    set((s) => {
+      const viewOptions = { ...s.viewOptions, [name]: !s.viewOptions[name] }
+      writeViewOptions(viewOptions)
+      return { viewOptions }
     }),
   selectGuide: (selectedGuideId) => set((s) => (s.selectedGuideId === selectedGuideId ? s : { selectedGuideId })),
   setGuideLocal: (id, guide) =>

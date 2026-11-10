@@ -113,7 +113,7 @@ describe('files pasted together', () => {
     expect(api.createFrame).toHaveBeenCalledTimes(2)
     expect(useStore.getState().selectedIds).toEqual(['f1'])
     /* what landed is counted by kind, never by what was asked for */
-    expect(posthog.capture).toHaveBeenCalledWith('files_pasted', { images: 1, vectors: 0 })
+    expect(posthog.capture).toHaveBeenCalledWith('files_pasted', { images: 1, vectors: 0, pages: 0 })
   })
 
   it('still lands the vector when a bitmap’s upload fails, and reports that failure when nothing lands', async () => {
@@ -121,7 +121,7 @@ describe('files pasted together', () => {
     await pasteFilesCentered('c1', splitIncoming([image('huge.png', 40, 40), icon()]))
     expect(api.createFrame).toHaveBeenCalledTimes(1)
     expect(api.createFrame.mock.calls[0]![1].name).toBe('icon')
-    expect(posthog.capture).toHaveBeenLastCalledWith('files_pasted', { images: 0, vectors: 1 })
+    expect(posthog.capture).toHaveBeenLastCalledWith('files_pasted', { images: 0, vectors: 1, pages: 0 })
     api.uploadAsset.mockRejectedValueOnce(new Error('Image is larger than 5 MB'))
     await expect(pasteFilesCentered('c1', splitIncoming([image('huge.png', 40, 40)]))).rejects.toThrow('5 MB')
   })

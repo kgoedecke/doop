@@ -1,6 +1,7 @@
 import { FRAME_REPLAY_RUNTIME } from './frameReplayRuntime'
 import { FRAME_DROP_RUNTIME } from './frameDropRuntime'
 import { FRAME_PROTO_RUNTIME } from './frameProtoRuntime'
+import { FRAME_TEXT_RUNTIME } from './frameTextRuntime'
 
 /**
  * Bootstrap document loaded once per frame iframe. The parent posts HTML in
@@ -22,6 +23,18 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
     vSheet.replaceSync('html,body{overscroll-behavior-x:none}[data-v-path-hidden]{visibility:hidden!important}')
     document.adoptedStyleSheets = document.adoptedStyleSheets.concat(vSheet)
   } catch (e) {}
+  /* ⌘Y outline mode: every box drawn as a hairline, fills and shadows off.
+     Adopted like the sheet above, so no save or export ever carries it. */
+  var vOutlineSheet = null
+  try {
+    vOutlineSheet = new CSSStyleSheet()
+    vOutlineSheet.replaceSync('html,body{background:transparent!important}body *{outline:1px solid rgba(1,119,211,.6)!important;outline-offset:-1px!important;background:transparent!important;box-shadow:none!important;text-shadow:none!important}body img,body video,body canvas,body svg{opacity:.25!important}')
+  } catch (e) {}
+  function setOutlines(on) {
+    if (!vOutlineSheet) return
+    var rest = document.adoptedStyleSheets.filter(function (s) { return s !== vOutlineSheet })
+    document.adoptedStyleSheets = on ? rest.concat(vOutlineSheet) : rest
+  }
   function syncAttrs(from, to) {
     for (var i = from.attributes.length - 1; i >= 0; i--) {
       var name = from.attributes[i].name
@@ -124,6 +137,7 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
   var editing = false
   var activeEl = null
   var editTimer = null
+  ${FRAME_TEXT_RUNTIME}
 
   /* the edited element's outline is the parent's (its selection hairline,
      drawn over the frame from the hit rect): in here only the caret cursor,
@@ -151,8 +165,20 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
   function candidate(start) {
     var el = start && start.nodeType === 3 ? start.parentElement : start
     if (isLocked(el)) return null
+    if (activeEl && activeEl.contains(el)) return activeEl
+    var root = el && el.closest('[data-doop-text],[data-doop-drawing="text"]')
+    if (root && !root.querySelector(LOCKED)) return root
     while (el && el !== document.body && el !== document.documentElement) {
-      if (hasOwnText(el)) return el
+      if (hasOwnText(el)) {
+        // Inline formatting belongs to its surrounding text block on re-entry.
+        while (el.parentElement && el.parentElement !== document.body &&
+          getComputedStyle(el).display === 'inline' && !el.parentElement.querySelector(LOCKED)) el = el.parentElement
+        if (el.tagName === 'LI') {
+          var list = el.closest('ul,ol')
+          return list && !list.querySelector(LOCKED) ? list : el
+        }
+        return el
+      }
       el = el.parentElement
     }
     return null
@@ -165,9 +191,15 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
 
   function deactivate() {
     if (!activeEl) return
+    var normalized = normalizeTextParagraph(activeEl, paragraphStyleDiff(activeEl))
+    if (normalized !== activeEl) {
+      activeEl = normalized
+      postActive() // keep the selected layer's selector in sync with its new tag
+    }
     activeEl.removeAttribute('contenteditable')
     activeEl.removeAttribute('data-v-active')
     activeEl = null
+    textRange = null
     /* the edit's highlight goes with it: a click outside the frame (or
        Escape) ends the edit, and the text must not stay selected */
     var sel = getSelection()
@@ -183,6 +215,7 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
 
   function postActive() {
     parent.postMessage({ type: 'doop:active', hit: activeInfo() }, '*')
+    postTextState()
   }
 
   function placeCaret(x, y) {
@@ -206,7 +239,8 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
       activeEl = el
       el.removeAttribute('data-v-hover')
       el.setAttribute('data-v-active', '1')
-      try { el.contentEditable = 'plaintext-only' } catch (e) { el.contentEditable = 'true' }
+      prepareText(el)
+      el.contentEditable = 'true'
       el.focus({ preventScroll: true })
       postActive()
     }
@@ -231,8 +265,9 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
     return !!s && !s.isCollapsed && el.contains(s.anchorNode) && el.contains(s.focusNode)
   }
 
-  function serialize() {
-    var root = document.documentElement.cloneNode(true)
+  /* strip the runtime's own marks from a clone of the document */
+  function cleanClone(root) {
+    serializeText(root)
     // Remove only our pending loader's clone, preserving design-owned attributes.
     if (replayScript && replayScript.parentNode === document.documentElement) {
       var replayIndex = Array.prototype.indexOf.call(document.documentElement.childNodes, replayScript)
@@ -254,7 +289,107 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
     root.querySelectorAll('[data-v-proto-flash]').forEach(function (el) { el.removeAttribute('data-v-proto-flash') })
     root.style.removeProperty('zoom') // crisp-render zoom is ours, not the design's
     if (!root.getAttribute('style')) root.removeAttribute('style')
-    return '<!doctype html>\\n' + root.outerHTML
+    return root
+  }
+
+  function serialize() {
+    return '<!doctype html>\\n' + cleanClone(document.documentElement.cloneNode(true)).outerHTML
+  }
+
+  function rulesText(sheet) {
+    try {
+      var out = []
+      for (var r = 0; r < sheet.cssRules.length; r++) out.push(sheet.cssRules[r].cssText)
+      return out.join('\\n')
+    } catch (e) {
+      return null // a cross-origin sheet keeps its rules to itself
+    }
+  }
+
+  /* The document for an image export: what the engine shows that a copy of
+     the HTML loses is captured onto the clone first — the pixels of every
+     <canvas>, the source the browser picked for each <img>, and the rules
+     of every stylesheet as the CSSOM holds them (insertRule, adopted
+     sheets), and an image at an object URL as its bytes, which only this
+     document can read. Resolves null when a canvas will not give up its
+     pixels (tainted) or a blob cannot be read, so the parent lets the
+     server render instead. Live and clone are walked by the same
+     selectors, so they pair by index. */
+  function exportSnapshot() {
+    var live = document.documentElement
+    var root = live.cloneNode(true)
+    var reads = []
+    var imgs = live.querySelectorAll('img'), imgClones = root.querySelectorAll('img')
+    for (var i = 0; i < imgs.length; i++) {
+      var src = imgs[i].currentSrc
+      if (src) imgClones[i].setAttribute('src', src)
+      imgClones[i].removeAttribute('srcset')
+      imgClones[i].removeAttribute('sizes')
+      /* an object URL names bytes only this document can reach */
+      if (src && src.indexOf('blob:') === 0) reads.push(readBlobUrl(src, imgClones[i]))
+    }
+    root.querySelectorAll('picture > source').forEach(function (source) { source.remove() })
+    var canvases = live.querySelectorAll('canvas'), canvasClones = root.querySelectorAll('canvas')
+    for (var c = 0; c < canvases.length; c++) {
+      var painted = document.createElement('img')
+      try {
+        painted.setAttribute('src', canvases[c].toDataURL())
+      } catch (e) {
+        return Promise.resolve(null)
+      }
+      var attrs = canvasClones[c].attributes
+      for (var a = 0; a < attrs.length; a++) painted.setAttribute(attrs[a].name, attrs[a].value)
+      canvasClones[c].replaceWith(painted)
+    }
+    var styles = live.querySelectorAll('style'), styleClones = root.querySelectorAll('style')
+    var links = live.querySelectorAll('link'), linkClones = root.querySelectorAll('link')
+    for (var s = 0; s < document.styleSheets.length; s++) {
+      var sheet = document.styleSheets[s]
+      var owner = sheet.ownerNode
+      var text = owner ? rulesText(sheet) : null
+      if (text === null) continue
+      if (owner.nodeName === 'STYLE') {
+        var styleClone = styleClones[Array.prototype.indexOf.call(styles, owner)]
+        if (styleClone) styleClone.textContent = text
+      } else if (owner.nodeName === 'LINK') {
+        var linkClone = linkClones[Array.prototype.indexOf.call(links, owner)]
+        if (!linkClone) continue
+        var inlined = document.createElement('style')
+        if (owner.media) inlined.setAttribute('media', owner.media)
+        inlined.textContent = text
+        linkClone.replaceWith(inlined)
+      }
+    }
+    var adopted = document.adoptedStyleSheets || []
+    for (var t = 0; t < adopted.length; t++) {
+      if (adopted[t] === vSheet || adopted[t] === vOutlineSheet) continue // the runtime's own
+      var adoptedText = rulesText(adopted[t])
+      if (adoptedText === null) continue
+      var adoptedStyle = document.createElement('style')
+      adoptedStyle.textContent = adoptedText
+      ;(root.querySelector('head') || root).appendChild(adoptedStyle)
+    }
+    /* cleaned now, while live and clone still match (a replay retry could
+       add its loader to the live document during the reads); the reads only
+       set src on image clones the cleaning leaves alone */
+    cleanClone(root)
+    return Promise.all(reads).then(
+      function () { return '<!doctype html>\\n' + root.outerHTML },
+      function () { return null },
+    )
+  }
+
+  function readBlobUrl(src, clone) {
+    return fetch(src)
+      .then(function (res) { return res.blob() })
+      .then(function (blob) {
+        return new Promise(function (resolve, reject) {
+          var reader = new FileReader()
+          reader.onload = function () { clone.setAttribute('src', reader.result); resolve() }
+          reader.onerror = function () { reject(reader.error) }
+          reader.readAsDataURL(blob)
+        })
+      })
   }
 
   function postEdited(discrete) {
@@ -300,7 +435,9 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
   }, true)
 
   document.addEventListener('input', function () {
-    if (!editing) return
+    if (!editing || !activeEl) return
+    activeEl.setAttribute('data-doop-text', '')
+    postTextState()
     if (editTimer) clearTimeout(editTimer)
     editTimer = setTimeout(postEdited, 400)
   })
@@ -355,22 +492,49 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
     return { x: r.left, y: r.top, width: r.width, height: r.height }
   }
 
+  /* The element's own turn, in degrees clockwise: its rotate property plus
+     the angle its transform carries, when that transform is a plain 2D turn
+     (a scale may ride along; a skew, a flip or a 3D turn makes it null). The
+     stage's grips and rotate zones follow this angle. */
+  function ownRotation(el) {
+    var cs = getComputedStyle(el)
+    if (cs.rotate !== 'none' && !/^-?[\\d.]+deg$/.test(cs.rotate)) return null
+    var turn = cs.rotate === 'none' ? 0 : parseFloat(cs.rotate)
+    if (cs.transform === 'none') return turn
+    var m = /^matrix\\(([^)]+)\\)$/.exec(cs.transform)
+    if (!m) return null
+    var p = m[1].split(',').map(parseFloat)
+    var a = p[0], b = p[1], c = p[2], d = p[3]
+    if (!(a * d - b * c > 0) || Math.abs(a * c + b * d) > 1e-6 * (a * a + b * b)) return null
+    return px(String(turn + Math.atan2(b, a) * 180 / Math.PI))
+  }
+
   /* Elements whose box takes a width/height: everything but inline text
      boxes. Replaced inline elements (an img) still size, so they count. */
   var REPLACED = ['img', 'video', 'canvas', 'svg', 'iframe', 'input', 'select', 'textarea', 'button', 'embed', 'object']
   function sizable(el) {
     var cs = getComputedStyle(el)
     if (cs.display === 'contents' || cs.display === 'none') return false
-    /* Screen deltas can only resize boxes whose axes still point right/down.
-       Individual transforms and every ancestor contribute to those axes. */
+    /* Screen deltas can only resize boxes whose axes the stage can follow:
+       the element's own turn it turns the deltas by, so a plain 2D turn of
+       its own is fine, but a turned, skewed or 3D ancestor is not.
+       Unequal ancestor scales also skew a turn: the rectangular grips and
+       rotate gesture cannot follow that affine transform, even if the
+       element starts straight. */
     for (var node = el; node; node = node.parentElement) {
       var transform = getComputedStyle(node)
-      if (transform.rotate !== 'none' && parseFloat(transform.rotate.split(/\\s+/).pop()) !== 0) return false
       if (transform.perspective !== 'none' || transform.transform.indexOf('matrix3d') === 0) return false
       if (transform.scale !== 'none') {
         var scales = transform.scale.split(/\\s+/).map(parseFloat)
         if (scales.length > 2 || scales.some(function (value) { return value <= 0 })) return false
       }
+      if (node === el) {
+        if (ownRotation(el) === null) return false
+        continue
+      }
+      var parentScale = ownScale(node)
+      if (Math.abs(parentScale.x - parentScale.y) > 1e-6 * Math.max(parentScale.x, parentScale.y)) return false
+      if (transform.rotate !== 'none' && parseFloat(transform.rotate.split(/\\s+/).pop()) !== 0) return false
       var m = /^matrix\\(([^)]+)\\)$/.exec(transform.transform)
       if (m) {
         var parts = m[1].split(',').map(parseFloat)
@@ -381,16 +545,56 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
   }
 
   /* how far the rendered box is from the layout box: the element's own and
-     its ancestors' scale, which a drag's pointer delta has to be divided by */
+     its ancestors' scale, which a drag's pointer delta has to be divided by.
+     A turned element's bounds are wider than its box: the scale is read off
+     the width those bounds would have at this turn, as one factor both ways */
+  /* the element's own scale, each way: its scale property times the
+     length of its transform's columns (a turn-and-scale matrix keeps them
+     orthogonal, so each column is one axis's scale) */
+  function ownScale(el) {
+    var cs = getComputedStyle(el)
+    var scale = cs.scale === 'none' ? [1, 1] : cs.scale.split(/\\s+/).map(parseFloat)
+    var sx = scale[0], sy = scale[1] === undefined ? scale[0] : scale[1]
+    var m = /^matrix\\(([^)]+)\\)$/.exec(cs.transform)
+    if (m) {
+      var p = m[1].split(',').map(parseFloat)
+      sx *= Math.hypot(p[0], p[1])
+      sy *= Math.hypot(p[2], p[3])
+    }
+    return { x: sx, y: sy }
+  }
+
   function renderScale(el, rect) {
     var w = el.offsetWidth
     var h = el.offsetHeight
+    var turn = ownRotation(el) || 0
+    if (turn && w > 0) {
+      /* the bounds' width is the turned box's span: the element's own scale
+         each way, turned, times whatever its ancestors scale it by */
+      var own = ownScale(el)
+      var rad = turn * Math.PI / 180
+      var span = w * own.x * Math.abs(Math.cos(rad)) + h * own.y * Math.abs(Math.sin(rad))
+      var k = span > 0 && rect.width > 0 ? rect.width / span : 1
+      return { x: k * own.x, y: k * own.y }
+    }
     return { x: w > 0 && rect.width > 0 ? rect.width / w : 1, y: h > 0 && rect.height > 0 ? rect.height / h : 1 }
+  }
+
+  /* the element's rendered box before its own turn: what the selection
+     furniture is drawn around, turned by ownRotation about the centre of
+     rect (its rendered bounds) */
+  function renderedBox(el, rect) {
+    var w = el.offsetWidth
+    var h = el.offsetHeight
+    if (!(w > 0) || !(h > 0)) return { width: rect.width, height: rect.height }
+    var s = renderScale(el, rect)
+    return { width: w * s.x, height: h * s.y }
   }
 
   function hitInfo(el) {
     var snippet = el.outerHTML || ''
     if (snippet.length > 400) snippet = snippet.slice(0, 397) + '...'
+    var canSize = sizable(el)
     return {
       selector: cssPath(el),
       /* the stable id comments and links use, when something has stamped one */
@@ -400,20 +604,54 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
       snippet: snippet,
       rect: designRect(el),
       /* the stage's resize grips: shown only where a drag can change the box */
-      sizable: sizable(el),
+      sizable: canSize,
+      /* Unsupported transforms use the axis-aligned bounds for selection. */
+      rotation: canSize ? ownRotation(el) || 0 : 0,
+      box: renderedBox(el, designRect(el)),
       locked: isLocked(el),
     }
+  }
+
+  /* what a moved element lines up with: its parent box and the visible
+     elements beside it (the frame itself is the stage's to add) */
+  function snapRects(el) {
+    var parent = el.parentElement
+    if (!parent) return []
+    var rects = parent === document.body || parent === document.documentElement ? [] : [designRect(parent)]
+    for (var i = 0; i < parent.children.length && rects.length < 80; i++) {
+      var sibling = parent.children[i]
+      if (sibling === el || sibling.hasAttribute('data-doop-defs')) continue
+      if (getComputedStyle(sibling).visibility !== 'visible') continue
+      var r = designRect(sibling)
+      if (r.width > 0 && r.height > 0) rects.push(r)
+    }
+    return rects
   }
 
   /* Ask the browser which element is actually on top, including stacking
      contexts, clipping, and transformed hit regions. Keep layout dimensions
      separate from the rendered rectangle so a move does not apply scale twice. */
+  /* the picked element (one selector, or every selector of a multi-pick)
+     that holds the element pressed, so a press on a child moves the pick */
+  function pickedAround(selected, el) {
+    var selectors = Array.isArray(selected) ? selected : selected ? [selected] : []
+    for (var i = 0; i < selectors.length; i++) {
+      var picked = styleTarget(selectors[i])
+      if (picked && picked !== el && picked.contains(el) && !isLocked(picked)) return picked
+    }
+    return null
+  }
+
   function drawingHit(x, y, standalone, selected) {
     var top = elementAt(x, y)
     var el = standalone ? document.body.firstElementChild : top && top.closest('[data-doop-drawing]')
     if (!el || !el.matches('[data-doop-drawing]') || isLocked(el)) return null
-    var picked = styleTarget(selected)
-    if (!standalone && picked && picked !== el && picked.contains(el) && elementGeometry(picked).enabled) return null
+    var picked = pickedAround(selected, el)
+    if (!standalone && picked && elementGeometry(picked).enabled) return null
+    // A drawing picked with other layers moves with them, through the layer
+    // gesture, not on its own.
+    if (!standalone && Array.isArray(selected) && selected.length > 1 && elementGeometry(el).enabled
+      && selected.some(function (sel) { return styleTarget(sel) === el })) return null
     var rect = designRect(el)
     var css = getComputedStyle(el)
     var width = parseFloat(css.width)
@@ -435,19 +673,22 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
       else el.setAttribute('style', originalStyle)
     }
     return {
-      selector: cssPath(el), rect: rect,
+      selector: cssPath(el), rect: rect, snapRects: snapRects(el),
       geometry: { width: width, height: height, offsetX: rect.x - untransformed.x,
         offsetY: rect.y - untransformed.y, styles: styles },
     }
   }
 
+  /* the path editor and a drawing being dragged out of place draw their own
+     copy over the canvas; the original stays laid out but unpainted */
   var pathEditingSelector = null
+  var movingDrawingSelector = null
   function syncPathVisibility() {
     document.querySelectorAll('[data-v-path-hidden]').forEach(function (el) { el.removeAttribute('data-v-path-hidden') })
-    if (pathEditingSelector) {
-      var pathSvg = document.querySelector(pathEditingSelector)
-      if (pathSvg) pathSvg.setAttribute('data-v-path-hidden', '')
-    }
+    ;[pathEditingSelector, movingDrawingSelector].forEach(function (selector) {
+      var hidden = selector && document.querySelector(selector)
+      if (hidden) hidden.setAttribute('data-v-path-hidden', '')
+    })
   }
   /* the topmost unlocked element under a point, a standalone's root included:
      a double-click on a shape inside an imported group edits that shape */
@@ -538,11 +779,15 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
 
   function moveHit(x, y, selected) {
     var el = elementAt(x, y)
-    var picked = styleTarget(selected)
     // A selected group moves as a whole even when the press hits a child.
-    if (el && picked && picked.contains(el) && !isLocked(picked)) el = picked
+    var picked = el && pickedAround(selected, el)
+    if (picked) el = picked
     while (el && el !== document.body && el !== document.documentElement) {
-      if (elementGeometry(el).enabled) return hitInfo(el)
+      if (elementGeometry(el).enabled) {
+        var info = hitInfo(el)
+        info.snapRects = snapRects(el)
+        return info
+      }
       // Inline text and SVG paths move with their containing box/SVG.
       el = el.parentElement
     }
@@ -676,6 +921,13 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
       dx = axis === 'x' ? target - rect.x : 0
       dy = axis === 'y' ? target - rect.y : 0
     }
+    // The rest of a multi-pick travels by the same design-px delta as the
+    // element pressed, each through its own translation basis.
+    if (styleEdit && styleEdit.selector === selector && (edit.kind === 'move' || edit.kind === 'nudge')) {
+      styleEdit.followers.forEach(function (follower) {
+        editGeometry(follower.selector, { kind: 'nudge', dx: dx, dy: dy })
+      })
+    }
     // Probe the local translation basis. This handles scaled/rotated ancestors and
     // percentage translations without flattening the element's existing transform.
     // All temporary styles are restored synchronously, before painting or saving.
@@ -795,6 +1047,13 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
       var name = el.style[j]
       inline[name] = el.style.getPropertyValue(name)
     }
+    // The list enumerates longhands, so a shorthand holding a var() (a design
+    // token on border-radius) is only visible through the shorthand itself.
+    var shorthands = ['border-radius', 'border-color', 'border-width', 'padding', 'gap']
+    for (var sh = 0; sh < shorthands.length; sh++) {
+      var shorthandValue = el.style.getPropertyValue(shorthands[sh])
+      if (shorthandValue) inline[shorthands[sh]] = shorthandValue
+    }
     var classes = (el.getAttribute('class') || '').trim().split(/[ ]+/).filter(Boolean)
     var text = ''
     for (var n = el.firstChild; n; n = n.nextSibling) if (n.nodeType === 3) text += n.nodeValue
@@ -802,6 +1061,8 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
     document.fonts.forEach(function (font) {
       if (fontFamilies.indexOf(font.family) === -1) fontFamilies.push(font.family)
     })
+    var textSummary = textStyleSummary(el)
+    var textValues = textSummary.values || cs
     var sides = ['Top', 'Right', 'Bottom', 'Left']
     var drawn = 'Top'
     for (var b = 0; b < sides.length; b++) {
@@ -820,10 +1081,11 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
       index: index,
       count: siblings.length,
       inline: inline,
-      hasText: text.replace(/\\s+/g, '') !== '',
+      hasText: text.replace(/\\s+/g, '') !== '' || isTextBlock(el),
       rect: designRect(el),
       geometry: elementGeometry(el),
       scale: renderScale(el, designRect(el)),
+      box: renderedBox(el, designRect(el)),
       position: cs.position,
       display: cs.display,
       flexDirection: cs.flexDirection,
@@ -863,10 +1125,11 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
       borderStyle: cs['border' + drawn + 'Style'],
       borderColor: cs['border' + drawn + 'Color'],
       borderRadius: px(cs.borderTopLeftRadius),
-      color: cs.color,
-      fontSize: px(cs.fontSize),
-      fontWeight: cs.fontWeight,
-      fontFamily: cs.fontFamily,
+      color: textValues.color,
+      fontSize: px(textValues.fontSize),
+      fontWeight: textValues.fontWeight,
+      fontFamily: textValues.fontFamily,
+      textMixed: textSummary.mixed,
       fontFamilies: fontFamilies,
       textAlign: cs.textAlign,
       direction: cs.direction,
@@ -907,17 +1170,52 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
           before.getPropertyPriority(name) !== el.style.getPropertyPriority(name)) styleEdit.touched[name] = true
     }
   }
-  function beginStyleEdit(selector) {
+  /* flush an element's restored position with transitions off, so the next
+     read is where it is and not the first frame of a transition there */
+  function settleGeometry(el) {
+    var restoredStyle = el.getAttribute('style')
+    el.style.setProperty('transition', 'none', 'important')
+    designRect(el)
+    if (restoredStyle === null) el.removeAttribute('style')
+    else el.setAttribute('style', restoredStyle)
+  }
+  /* the other elements of a multi-pick a geometry gesture carries along: each
+     movable on its own, none inside the pressed element or another follower,
+     none holding the pressed element */
+  function gestureFollowers(el, selectors) {
+    var movable = []
+    ;(Array.isArray(selectors) ? selectors : []).forEach(function (selector) {
+      var other = styleTarget(selector)
+      if (!other || other === el || other.contains(el) || el.contains(other) || isLocked(other)) return
+      if (!elementGeometry(other).enabled) return
+      if (movable.some(function (m) { return m.el === other })) return
+      movable.push({ selector: selector, el: other, original: other.getAttribute('style') })
+    })
+    // A picked parent carries its picked descendants, whatever order the pick
+    // names them in (as doop:nudge does).
+    return movable.filter(function (m) {
+      return !movable.some(function (other) { return other.el !== m.el && other.el.contains(m.el) })
+    })
+  }
+  function beginStyleEdit(selector, followers) {
     var el = styleTarget(selector)
     if (!el || isLocked(el)) return false
     if (styleEdit) endStyleEdit(styleEdit.selector, false)
-    // Save a previous typed/slider edit before opening this separate action.
+    // Save a previous typed/slider edit before opening this separate action:
+    // a save landing mid-gesture would carry the preview, which a cancel
+    // then has nothing to replace.
     if (styleTimer) {
       clearTimeout(styleTimer)
       styleTimer = null
       postEdited()
     }
-    styleEdit = { selector: selector, original: el.style.cssText, styles: {}, touched: {} }
+    if (editTimer) {
+      clearTimeout(editTimer)
+      editTimer = null
+      postEdited()
+    }
+    styleEdit = { selector: selector, original: el.style.cssText, styles: {}, touched: {}, runs: [], created: [], renamed: [],
+      followers: gestureFollowers(el, followers) }
     return true
   }
   function endStyleEdit(selector, cancel) {
@@ -927,6 +1225,12 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
     var el = styleTarget(selector)
     if (!el) return false
     if (cancel) {
+      restoreTextRuns(edit)
+      edit.followers.forEach(function (follower) {
+        if (follower.original === null) follower.el.removeAttribute('style')
+        else follower.el.setAttribute('style', follower.original)
+        settleGeometry(follower.el)
+      })
       var original = document.createElement('div').style
       original.cssText = edit.original
       for (var name in edit.touched) {
@@ -935,21 +1239,58 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
         else el.style.removeProperty(name)
       }
       if (!el.getAttribute('style')) el.removeAttribute('style')
-      if (edit.touched.translate || edit.touched.rotate || edit.touched.scale) {
-        // A cancelled geometry drag must report its restored coordinates,
-        // rather than the first frame of a transition back to them.
-        var restoredStyle = el.getAttribute('style')
-        el.style.setProperty('transition', 'none', 'important')
-        designRect(el)
-        if (restoredStyle === null) el.removeAttribute('style')
-        else el.setAttribute('style', restoredStyle)
-      }
-    } else if (Object.keys(edit.touched).length) postEdited(true)
+      // A cancelled geometry drag must report its restored coordinates,
+      // rather than the first frame of a transition back to them.
+      if (edit.touched.translate || edit.touched.rotate || edit.touched.scale) settleGeometry(el)
+    } else if (edit.range) {
+      // The preview was outside the undo history: put it back and apply the
+      // gesture's final styles through the undoable path, as one entry.
+      restoreTextRuns(edit)
+      if (selectedTextRange(el)) styleTextRange(el, edit.styles)
+      postEdited(true)
+      postTextState()
+    } else if (Object.keys(edit.touched).length || edit.runs.length || edit.created.length || edit.renamed.length) postEdited(true)
     return true
   }
   function applyStyle(selector, styles) {
     var el = styleTarget(selector)
     if (!el || isLocked(el)) return false
+    var textPatch = isTextPatch(styles)
+    var gesture = styleEdit && styleEdit.selector === selector
+    var following = styleEdit && !gesture && styleEdit.followers.some(function (f) { return f.selector === selector })
+    if (following) {
+      // A follower's move previews with the gesture and is restored, or saved,
+      // with it: never a save of its own mid-drag.
+      patchStyle(el.style, styles)
+      if (!el.getAttribute('style')) el.removeAttribute('style')
+      return true
+    }
+    function noteRuns(change) {
+      if (!gesture) return
+      change.before.forEach(function (run) {
+        if (!styleEdit.runs.some(function (known) { return known.el === run.el }) &&
+          styleEdit.created.indexOf(run.el) === -1) styleEdit.runs.push(run)
+      })
+      change.created.forEach(function (run) { styleEdit.created.push(run) })
+      if (change.nodes) styleEdit.nodes = change.nodes
+      if (change.renamed) change.renamed.forEach(function (run) { styleEdit.renamed.push(run) })
+    }
+    if (textPatch && selectedTextRange(el)) {
+      // Part of the text is selected: the edit belongs to that run alone. A
+      // scrub previews in place and lands once, undoably, when it commits.
+      if (gesture) {
+        Object.assign(styleEdit.styles, styles)
+        styleEdit.range = true
+        noteRuns(previewTextRange(el, styles))
+      } else {
+        styleTextRange(el, styles)
+        if (styleTimer) clearTimeout(styleTimer)
+        styleTimer = setTimeout(function () { styleTimer = null; postEdited() }, 250)
+      }
+      postTextState()
+      return true
+    }
+    if (textPatch) noteRuns(clearTextRuns(el, styles))
     if (styleEdit && styleEdit.selector === selector) {
       Object.assign(styleEdit.styles, styles)
       previewStyle(el, styles)
@@ -972,6 +1313,17 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
     if (!d) return
     if (d.type === 'doop:inspect') {
       parent.postMessage({ type: 'doop:inspect-result', reqId: d.reqId, info: inspect(d.selector) }, '*')
+    }
+    if (d.type === 'doop:outlines') setOutlines(d.on === true)
+    if (d.type === 'doop:computed' && Array.isArray(d.properties)) {
+      var computedEl = styleTarget(d.selector)
+      var values = null
+      if (computedEl) {
+        var cs = getComputedStyle(computedEl)
+        values = {}
+        d.properties.forEach(function (name) { values[name] = cs.getPropertyValue(name) })
+      }
+      parent.postMessage({ type: 'doop:computed-result', reqId: d.reqId, values: values }, '*')
     }
     if (d.type === 'doop:settle') {
       if (styleTimer) {
@@ -1003,7 +1355,7 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
       parent.postMessage({ type: 'doop:geometry-result', reqId: d.reqId, ok: changed, info: changed ? inspect(d.selector) : null }, '*')
     }
     if (d.type === 'doop:style-gesture') {
-      var changed = d.phase === 'begin' ? beginStyleEdit(d.selector)
+      var changed = d.phase === 'begin' ? beginStyleEdit(d.selector, d.followers)
         : d.phase === 'commit' || d.phase === 'cancel' ? endStyleEdit(d.selector, d.phase === 'cancel') : false
       parent.postMessage({ type: 'doop:style-gesture-result', reqId: d.reqId, info: changed ? inspect(d.selector) : null }, '*')
     }
@@ -1013,6 +1365,9 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
       protoHtmlChanged()
       if (d.reqId) parent.postMessage({ type: 'doop:html-result', reqId: d.reqId }, '*')
     }
+    if (d.type === 'doop:text-format' && Array.isArray(d.selectors)) {
+      parent.postMessage({ type: 'doop:text-format-result', reqId: d.reqId, selectors: formatLayers(d.selectors, d.command) }, '*')
+    } else if (d.type === 'doop:text-format') formatText(d.command)
     if (d.type === 'doop:edit') {
       setEdit(!!d.on)
       if (d.on && typeof d.x === 'number' && typeof d.y === 'number') {
@@ -1022,6 +1377,19 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
           selectAllIn(dblEl)
         }
       }
+    }
+    if (d.type === 'doop:rename') {
+      var namedEl = null
+      try { namedEl = d.selector ? document.querySelector(d.selector) : null } catch (e) { /* bad selector */ }
+      if (namedEl) {
+        if (typeof d.name === 'string') namedEl.setAttribute('data-doop-name', d.name)
+        else if (d.name === null) namedEl.removeAttribute('data-doop-name')
+        /* the saved document stamps the element's id with its name; the live
+           one follows, and a rolled-back stamp (null) comes off again */
+        if (typeof d.elementId === 'string' && !namedEl.hasAttribute('data-doop-id')) namedEl.setAttribute('data-doop-id', d.elementId)
+        else if (d.elementId === null) namedEl.removeAttribute('data-doop-id')
+      }
+      parent.postMessage({ type: 'doop:rename-result', reqId: d.reqId, ok: !!namedEl }, '*')
     }
     // Mirror the Layers eye in the live document, including during text edits.
     if (d.type === 'doop:visibility') {
@@ -1088,6 +1456,11 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
       syncPathVisibility()
       parent.postMessage({ type: 'doop:path-editing-result', reqId: d.reqId }, '*')
     }
+    if (d.type === 'doop:drawing-moving') {
+      movingDrawingSelector = d.selector || null
+      syncPathVisibility()
+      parent.postMessage({ type: 'doop:drawing-moving-result', reqId: d.reqId }, '*')
+    }
     if (d.type === 'doop:hover') {
       parent.postMessage({ type: 'doop:hover-result', reqId: d.reqId, hit: hoverProbe(d.x, d.y) }, '*')
     }
@@ -1097,13 +1470,31 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
     if (d.type === 'doop:code') {
       parent.postMessage({ type: 'doop:code-result', reqId: d.reqId, html: elementCode(d.selector) }, '*')
     }
+    if (d.type === 'doop:snapshot') {
+      /* the document as it stands, script-made elements included, for an
+         export of what the person sees */
+      var answer = function (html) {
+        parent.postMessage({ type: 'doop:snapshot-result', reqId: d.reqId, html: html }, '*')
+      }
+      try {
+        exportSnapshot().then(answer, function () { answer(null) })
+      } catch (e) {
+        answer(null)
+      }
+    }
     if (d.type === 'doop:locate') {
       var found = null
       try {
         var target = d.selector ? document.querySelector(d.selector) : null
         if (target) found = designRect(target)
       } catch (e) { /* bad selector -> null */ }
-      parent.postMessage({ type: 'doop:located', reqId: d.reqId, selector: d.selector, rect: found, sizable: !!target && sizable(target) }, '*')
+      var canSize = !!target && sizable(target)
+      parent.postMessage({
+        type: 'doop:located', reqId: d.reqId, selector: d.selector, rect: found,
+        sizable: canSize,
+        rotation: canSize ? ownRotation(target) || 0 : 0,
+        box: target && found ? renderedBox(target, found) : null,
+      }, '*')
     }
   })
   parent.postMessage({ type: 'doop:frame-ready' }, '*')

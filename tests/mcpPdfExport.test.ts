@@ -90,3 +90,27 @@ describe('export_frame format pdf', () => {
     60_000,
   )
 })
+
+describe('export_frame scale', () => {
+  const urls = async (args: Record<string, unknown>) => {
+    const result = await exportFrame(OWNER_ID, { frame_id: POSTER.id, ...args })
+    return JSON.parse(result.content[0]!.text!) as { image_url: string; scale: number; width: number; height: number }
+  }
+
+  it('defaults to 2x, as before there was a choice', async () => {
+    const out = await urls({})
+    expect(out.image_url).toMatch(/\/i\/poster\.png\?scale=2$/)
+    expect([out.scale, out.width, out.height]).toEqual([2, 600, 1000])
+  })
+
+  it('renders at the scale asked for and reports the pixels that come out', async () => {
+    const out = await urls({ format: 'jpg', scale: 3 })
+    expect(out.image_url).toMatch(/\/i\/poster\.jpg\?scale=3&quality=90$/)
+    expect([out.scale, out.width, out.height]).toEqual([3, 900, 1500])
+  })
+
+  it('refuses a scale past 4x', async () => {
+    const result = await exportFrame(OWNER_ID, { frame_id: POSTER.id, scale: 8 })
+    expect(result.isError).toBe(true)
+  })
+})

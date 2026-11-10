@@ -6,12 +6,13 @@ export const connect = {
   blurbCodex: 'ChatGPT desktop and Codex CLI',
   blurbCursor: 'Add Doop to Cursor',
   otherClientName: 'Other MCP client',
+  headlessName: 'Headless agent or server',
+  blurbHeadless: 'n8n, Mastra, CI and scripts, with an agent key',
   blurbOtherClient: 'Use a manual connection',
 
   chooseTitle: 'Choose your agent',
   chooseLede:
     'Let an agent you already use work on this canvas via MCP. Choose yours to see its connection instructions.',
-  connectButton: 'Connect',
 
   pointAtTitle: 'Point it at this canvas',
   pointAtWithPrompt: 'Paste this as your first message. Everything else the agent needs comes from the server.',
@@ -104,10 +105,18 @@ export const connect = {
   connectionHelp: 'Connection help',
   helpBefore: 'If Claude asks you to sign in first, return here and click Add to Claude again. You can also use ',
   helpAfter: ' in Claude with this address:',
-  headlessBefore: 'No browser to sign in with (n8n, Mastra, CI)? Mint an agent key in ',
-  headlessLink: 'Settings → Agent keys',
-  headlessMiddle: ' and send it as ',
-  headlessAfter: '. The key acts as you, on the canvases you can reach.',
+  mcpMethodAria: 'How the client signs in',
+  mcpBrowser: 'Sign in with a browser',
+  mcpAgentKey: 'Agent key (headless)',
+  agentKeyLede:
+    'For agents that run without a person at a browser. The key acts as you, on the canvases you can reach.',
+  agentKeyCreateTitle: 'Create an agent key',
+  agentKeyCreateBody:
+    'Name it after the agent that will use it. Copy the key when it appears: it is shown only once, and you can revoke it there at any time.',
+  agentKeyOpen: 'Open Settings → Agent keys',
+  agentKeySendTitle: 'Send it with every request',
+  agentKeySendBody:
+    'Add the server with your key as a bearer header, replacing dpk_… with it. n8n’s MCP Client node, Mastra’s MCPClient and most MCP SDKs take headers like this.',
   done: 'Done',
 
   arrived: '{name} is here — it worked',

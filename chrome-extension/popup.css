@@ -1,0 +1,145 @@
+:root {
+  color-scheme: light;
+  --paper: #fdfdfd;
+  --ink: #111;
+  --muted: #5f5e5b;
+  --blue: #0177d3;
+  --ring: 0 0 0 1px #0000000f, 0 1px 2px -1px #0000000f, 0 2px 4px #0000000a;
+}
+* {
+  box-sizing: border-box;
+}
+body {
+  width: 360px;
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font:
+    13px/1.5 'Inter',
+    'Helvetica Neue',
+    Helvetica,
+    Arial,
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 19px 22px;
+  border-bottom: 1px solid #ececec;
+}
+.wordmark {
+  font-size: 18px;
+  font-weight: 650;
+  letter-spacing: -0.65px;
+}
+.wordmark span {
+  font-weight: 400;
+  color: var(--muted);
+}
+main {
+  padding: 22px;
+}
+.intro {
+  color: var(--muted);
+  font-size: 12px;
+  margin: 0 0 18px;
+}
+.actions {
+  display: grid;
+  gap: 10px;
+}
+.capture {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  text-align: left;
+  padding: 14px;
+  border: 0;
+  background: white;
+  color: var(--ink);
+  border-radius: 12px;
+  box-shadow: var(--ring);
+  font: inherit;
+  cursor: pointer;
+  transition:
+    background 140ms,
+    box-shadow 140ms,
+    transform 140ms;
+}
+.capture > svg {
+  width: 21px;
+  height: 21px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.15;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  flex-shrink: 0;
+}
+.capture strong {
+  display: block;
+  font-size: 12.5px;
+  font-weight: 550;
+}
+.capture small {
+  display: block;
+  font-size: 10.5px;
+  color: var(--muted);
+  margin-top: 2px;
+}
+.capture.primary {
+  background: #191919;
+  color: white;
+}
+.primary small {
+  color: #bcbcbc;
+}
+.capture:hover {
+  background: #f5f5f5;
+  transform: translateY(-1px);
+}
+.primary:hover {
+  background: #303030;
+}
+.capture:active {
+  transform: translateY(0);
+}
+button:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: 3px;
+}
+.capture:disabled {
+  opacity: 0.55;
+  cursor: wait;
+  transform: none;
+}
+#status {
+  font-size: 10px;
+  line-height: 1.7;
+  color: var(--muted);
+  margin: 18px 0 0;
+  min-height: 20px;
+}
+#status[data-error='true'] {
+  color: #d0341f;
+  font-size: 12px;
+}
+kbd {
+  font:
+    10px 'Helvetica Neue',
+    sans-serif;
+  display: inline-block;
+  padding: 0 4px;
+  margin-left: 3px;
+  border-radius: 3px;
+  box-shadow: var(--ring);
+  background: white;
+}
+@media (prefers-reduced-motion: reduce) {
+  * {
+    transition: none !important;
+  }
+}

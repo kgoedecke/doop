@@ -7,10 +7,20 @@ import { afterEach, expect, it, vi } from 'vitest'
  */
 
 const mocks = vi.hoisted(() => ({ account: vi.fn() }))
+/* no default marked: the fallback order decides */
+vi.mock('../server/db/index.ts', () => ({ db: { select: () => ({ from: () => ({ where: async () => [] }) }) } }))
 vi.mock('../server/localAgentPreferences.ts', () => ({ getLocalAgentPreference: async () => ({ enabled: false }) }))
 vi.mock('../server/modelAccounts.ts', async (importOriginal) => {
   const original = await importOriginal<typeof import('../server/modelAccounts.ts')>()
-  return { ...original, getAccount: mocks.account }
+  return {
+    ...original,
+    getAccount: mocks.account,
+    /* the routing reads every account; a test connects one (or none) */
+    getAccounts: async (userId: string) => {
+      const account = (await mocks.account(userId)) as Record<string, unknown> | null | undefined
+      return account ? [{ enabled: true, connectedAt: 1, ...account }] : []
+    },
+  }
 })
 
 import { pickModel } from '../server/agentModel'
@@ -61,4 +71,45 @@ it('routes a Gemini account with its default model and vision intact', async () 
   expect(model).toMatchObject({ provider: 'gemini-key', vision: true, label: 'Gemini (gemini-3.7-flash)' })
   expect(await model!.run(request)).toMatchObject({ stop_reason: 'end_turn' })
   expect(String(fetchSpy.mock.calls[0]![0])).toContain('generativelanguage.googleapis.com')
+})
+
+it('routes a DeepSeek account to DeepSeek, Pro as text-only', async () => {
+  mocks.account.mockResolvedValue({ kind: 'deepseek-key', userId: 'c', apiKey: 'sk-deepseek-test-key-0123' })
+  const fetchSpy = vi
+    .spyOn(globalThis, 'fetch')
+    .mockResolvedValue(new Response(JSON.stringify({ choices: [{ message: { content: 'Done' } }] }), { status: 200 }))
+  const model = await pickModel('c')
+  expect(model).toMatchObject({ provider: 'deepseek-key', vision: true, label: 'DeepSeek (deepseek-flash)' })
+  expect(await model!.run(request)).toMatchObject({ stop_reason: 'end_turn' })
+  expect(String(fetchSpy.mock.calls[0]![0])).toContain('api.deepseek.com')
+
+  mocks.account.mockResolvedValue({ kind: 'deepseek-key', userId: 'c', apiKey: 'sk-d', model: 'deepseek-v4-pro' })
+  expect(await pickModel('c')).toMatchObject({ vision: false })
+  mocks.account.mockResolvedValue({ kind: 'deepseek-key', userId: 'c', apiKey: 'sk-d', model: 'deepseek-v9' })
+  expect(await pickModel('c')).toMatchObject({ vision: false })
+})
+
+it('routes a Kimi account to Moonshot with vision', async () => {
+  mocks.account.mockResolvedValue({ kind: 'kimi-key', userId: 'd', apiKey: 'sk-kimi-test-key-0123456' })
+  const fetchSpy = vi
+    .spyOn(globalThis, 'fetch')
+    .mockResolvedValue(new Response(JSON.stringify({ choices: [{ message: { content: 'Done' } }] }), { status: 200 }))
+  const model = await pickModel('d')
+  expect(model).toMatchObject({ provider: 'kimi-key', vision: true, label: 'Kimi (kimi-k3.1-pro)' })
+  expect(await model!.run(request)).toMatchObject({ stop_reason: 'end_turn' })
+  expect(String(fetchSpy.mock.calls[0]![0])).toContain('api.moonshot.ai')
+})
+
+it('routes a Kimi Code plan to the membership endpoint, naming Doop as the client', async () => {
+  mocks.account.mockResolvedValue({ kind: 'kimi-code', userId: 'e', apiKey: 'kimi-code-test-key-01234' })
+  const fetchSpy = vi
+    .spyOn(globalThis, 'fetch')
+    .mockResolvedValue(new Response(JSON.stringify({ choices: [{ message: { content: 'Done' } }] }), { status: 200 }))
+  const model = await pickModel('e')
+  expect(model).toMatchObject({ provider: 'kimi-code', vision: true, label: 'Kimi Code (k3.1-pro)' })
+  expect(await model!.run(request)).toMatchObject({ stop_reason: 'end_turn' })
+  const [url, init] = fetchSpy.mock.calls[0]!
+  expect(String(url)).toBe('https://api.kimi.ai/coding/v1/chat/completions')
+  expect((init!.headers as Record<string, string>)['User-Agent']).toMatch(/^Doop\/\d+\.\d+\.\d+/)
+  expect(JSON.parse(String(init!.body))).toMatchObject({ model: 'k3.1-pro' })
 })

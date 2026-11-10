@@ -1,23 +1,25 @@
 import type { ReactNode } from 'react'
 import { cn } from '@/lib/utils'
 import { Button } from './ui/button'
-import { ArrowLeftIcon, ArrowRightIcon } from './ui/icons'
+import { ChoiceList, ChoiceRow } from './ui/choice-list'
+import { ArrowLeftIcon } from './ui/icons'
 import { ModalLede, ModalTitle } from './ui/modal'
 import { useT } from '@/lib/i18n'
 
 /**
- * The import modal's two-step chrome: a picker of source cards, then one
- * screen per source. Each screen shares the same bones — an icon tile
- * beside the serif title, a lede, the source's own body, and a footer of
- * fine print with Back and the primary action.
+ * The import modal's two-step chrome: a list of sources, then one screen
+ * per source. Each screen shares the same bones — the source's app icon
+ * beside the title, a lede, the source's own body, and a footer of fine
+ * print with Back and the primary action.
  */
 
 export interface ImportSource {
   id: string
   title: string
   blurb: string
+  /** the source's `AppIcon` at the list's 32px */
   icon: ReactNode
-  /** greyed out with a "Soon" tag; the card does not navigate */
+  /** greyed out with a "Soon" tag; the row does not navigate */
   soon?: boolean
 }
 
@@ -27,46 +29,33 @@ export function SourcePicker({ sources, onPick }: { sources: ImportSource[]; onP
     <>
       <ModalTitle>{t('panels.importTitle')}</ModalTitle>
       <ModalLede>{t('panels.importLede')}</ModalLede>
-      <div className="mt-6 grid grid-cols-1 gap-3 xs:grid-cols-2 md:grid-cols-3">
+      <ChoiceList className="mt-5">
         {sources.map((source) => (
-          <button
+          <ChoiceRow
             key={source.id}
-            type="button"
+            icon={source.icon}
+            title={source.title}
+            description={source.blurb}
             disabled={source.soon}
-            className={cn(
-              'group relative flex min-h-[140px] flex-col rounded-xl border border-line bg-surface p-4 pt-[18px] text-left shadow-card outline-none transition-[transform,box-shadow,border-color]',
-              source.soon
-                ? 'opacity-60'
-                : 'hover:-translate-y-[3px] hover:border-ink-faint hover:shadow-pop focus-visible:-translate-y-[3px] focus-visible:border-ink-faint focus-visible:shadow-pop',
-            )}
+            trailing={source.soon ? <span className="text-caption">{t('panels.importSoon')}</span> : undefined}
             onClick={() => !source.soon && onPick(source.id)}
-          >
-            <span className="flex size-10 items-center justify-center overflow-hidden rounded-pill border border-line bg-surface">
-              {source.icon}
-            </span>
-            <b className="mt-4 text-lead font-semibold tracking-[-0.012em]">{source.title}</b>
-            <span className="mt-1 text-body leading-[1.45] text-ink-soft">{source.blurb}</span>
-            {source.soon ? (
-              <span className="absolute right-4 top-4 text-caption text-ink-faint">{t('panels.importSoon')}</span>
-            ) : (
-              <span className="absolute bottom-3.5 right-4 text-accent-ink opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100">
-                <ArrowRightIcon className="size-4" />
-              </span>
-            )}
-          </button>
+          />
         ))}
-      </div>
+      </ChoiceList>
     </>
   )
 }
 
-export function ImportStepHeader({ icon, title }: { icon: ReactNode; title: ReactNode }) {
+/** The source's `AppIcon` (40px) beside the screen's title and its lede,
+ *  as Connect AI heads an agent's steps. */
+export function ImportStepHeader({ icon, title, lede }: { icon: ReactNode; title: ReactNode; lede?: ReactNode }) {
   return (
-    <div className="flex items-center gap-3.5">
-      <span className="flex size-11 flex-none items-center justify-center overflow-hidden rounded-[11px] border border-line bg-surface">
-        {icon}
-      </span>
-      <ModalTitle>{title}</ModalTitle>
+    <div className={cn('flex gap-3.5', lede ? 'items-start' : 'items-center')}>
+      <span className="flex-none">{icon}</span>
+      <div className="min-w-0">
+        <ModalTitle>{title}</ModalTitle>
+        {lede && <ModalLede>{lede}</ModalLede>}
+      </div>
     </div>
   )
 }

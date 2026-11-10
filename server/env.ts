@@ -1,7 +1,13 @@
 import { bool, cleanEnv, EnvMissingError, makeExactValidator, port, str } from 'envalid'
 import type { ReporterOptions } from 'envalid'
 import { createHash } from 'node:crypto'
-import { DEFAULT_GEMINI_MODEL, DEFAULT_OPENROUTER_MODEL } from '../shared/modelMenu.ts'
+import {
+  DEFAULT_DEEPSEEK_MODEL,
+  DEFAULT_GEMINI_MODEL,
+  DEFAULT_KIMI_CODE_MODEL,
+  DEFAULT_KIMI_MODEL,
+  DEFAULT_OPENROUTER_MODEL,
+} from '../shared/modelMenu.ts'
 import { FALLBACK_LOCALE, LOCALES } from '../shared/locales.ts'
 
 /**
@@ -160,6 +166,9 @@ const schema = {
   DOOP_AGENT_OPENAI_EFFORT: str({ default: 'medium' }),
   DOOP_AGENT_OPENROUTER_MODEL: str({ default: DEFAULT_OPENROUTER_MODEL }),
   DOOP_AGENT_GEMINI_MODEL: str({ default: DEFAULT_GEMINI_MODEL }),
+  DOOP_AGENT_DEEPSEEK_MODEL: str({ default: DEFAULT_DEEPSEEK_MODEL }),
+  DOOP_AGENT_KIMI_MODEL: str({ default: DEFAULT_KIMI_MODEL }),
+  DOOP_AGENT_KIMI_CODE_MODEL: str({ default: DEFAULT_KIMI_CODE_MODEL }),
   /* JSON; parsed and shape-checked where it is used so a parse error never
      echoes the worker secrets it contains */
   DOOP_GEMINI_CLOUD_WORKERS: str({ default: undefined }),
@@ -182,6 +191,13 @@ const schema = {
   GEMINI_OPENAI_CHAT_URL: str({
     default: 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions',
   }),
+  DEEPSEEK_CHAT_URL: str({ default: 'https://api.deepseek.com/chat/completions' }),
+  /* Moonshot's international platform; keys from platform.moonshot.cn need
+     https://api.moonshot.cn/v1/chat/completions */
+  KIMI_CHAT_URL: str({ default: 'https://api.moonshot.ai/v1/chat/completions' }),
+  /* Kimi Code, a membership's coding quota; China's is
+     https://api.kimi.com/coding/v1/chat/completions */
+  KIMI_CODE_CHAT_URL: str({ default: 'https://api.kimi.ai/coding/v1/chat/completions' }),
 
   /* ------------------------------------------------ image generation */
   OPENAI_API_KEY: str({ default: undefined }),
@@ -249,6 +265,8 @@ const schema = {
   MCP_IMPORTS_PER_MIN: perMinute({ default: 5 }),
   SYNC_INGESTS_PER_MIN: perMinute({ default: 30 }),
   PREVIEW_RENDERS_PER_MIN: perMinute({ default: 12 }),
+  /* how long a canvas nobody uses keeps its frame HTML in memory (store.ts) */
+  CANVAS_IDLE_MS: nonNegativeInt({ default: 10 * 60_000 }),
   SYNC_PAGE_INTERVAL_MS: nonNegativeInt({ default: 30_000 }),
   SYNC_FREEZE_MS: nonNegativeInt({ default: 15 * 60_000 }),
 

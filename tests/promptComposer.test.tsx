@@ -6,7 +6,7 @@ import type { Canvas } from '../shared/types'
 
 /**
  * The prompt composer lives at the bottom of the Agents tab: Enter
- * queues the card, ⇧Enter breaks the line, and a ⌘K focus request from the
+ * queues the card, ⇧Enter breaks the line, and a ⌘/ focus request from the
  * page lands the keyboard in it.
  */
 
@@ -18,8 +18,8 @@ vi.mock('../src/lib/api', () => ({
   api: {
     addCard: mocks.addCard,
     agentAllowance: mocks.agentAllowance,
-    /* the composer's model picker reads the account it runs on */
-    modelAccount: () => Promise.resolve({ connected: false }),
+    /* the composer's model picker lists the connections a task can run on */
+    agentRunners: () => Promise.resolve({ runners: [] }),
   },
   ApiError: class ApiError extends Error {},
 }))
@@ -113,7 +113,15 @@ describe('the Agents tab composer', () => {
     expect(composer().value).toBe('a hero for the pricing page')
 
     await press('Enter')
-    expect(mocks.addCard).toHaveBeenCalledWith('c1', 'a hero for the pricing page', ['doop'], [], undefined)
+    expect(mocks.addCard).toHaveBeenCalledWith(
+      'c1',
+      'a hero for the pricing page',
+      ['doop'],
+      [],
+      undefined,
+      /* nothing connected: no pick, so the card runs on the default */
+      undefined,
+    )
     expect(composer().value).toBe('')
   })
 
@@ -131,7 +139,7 @@ describe('the Agents tab composer', () => {
     await render()
     await type('make it bolder')
     await press('Enter')
-    expect(mocks.addCard).toHaveBeenCalledWith('c1', 'make it bolder', ['doop'], [], { frameId: 'f1' })
+    expect(mocks.addCard).toHaveBeenCalledWith('c1', 'make it bolder', ['doop'], [], { frameId: 'f1' }, undefined)
   })
 
   it('takes the keyboard on a focus request', async () => {
