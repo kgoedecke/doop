@@ -58,10 +58,37 @@ cluster near 64 requests, but the screenshot alone does not expose their network
 status; do not claim an exact Iconify quota or confirmed hosted root cause from
 that count.
 
-PR #474 currently protects previously cached variants from upstream failure.
-It still needs a successful initial fetch per variant, so it does not solve cold
-bursts. Its own 64-concurrent-miss rejection is also a problem for large icon
-grids. Before marking the PR ready, address cold-burst behavior, respect upstream
-backoff, and validate the same fixture with the proposed change. Also account for
-the hosted off-network renderer path: it continues public requests directly in
-Chrome, bypassing a custom `fetchUrl` callback used only by the pinned-fetch path.
+## Revised implementation and validation
+
+PR #474 now stores immutable base icon data by icon id, shared across users, and
+renders color/size variants locally. Cold misses are batched by collection with
+at most two upstream requests active. HTTP 429 pauses uncached downloads for the
+upstream `Retry-After` interval; stored icons remain available. Search results are
+stored before their URLs are returned.
+
+The renderer preloads static icon dependencies and supplies SVG bytes through a
+request resolver before the trusted/direct-network bypass. This covers existing
+Iconify hotlinks as well as Doop URLs. Inline SVG edits remain independent copies.
+The resolver must stay ahead of the hosted renderer's `offNetwork` bypass when
+this change is ported to that deployment.
+
+Validated locally with the revised renderer and the real public Iconify API,
+using an empty storage directory for each cold scenario:
+
+| Fixture                                | Cold result                                                       | Upstream data requests  | Repeat JPEG export |
+| -------------------------------------- | ----------------------------------------------------------------- | ----------------------- | ------------------ |
+| 72 color variants of one icon          | 72 loaded, 0 failed, 0 pending                                    | 1                       | 0 Iconify requests |
+| 48 icons in four forms (192 resources) | 144 image elements loaded, 0 failed, 0 pending; CSS icons visible | 15 (one per collection) | 0 Iconify requests |
+
+![Revised renderer: all 72 color variants load](iconify-72-local-fixed.png)
+
+![Revised renderer: all four forms of the 48 icons load](iconify-192-local-fixed.png)
+
+Automated coverage uses mocked upstream data to verify cold batching, bounded
+concurrency, persistent reuse after a store restart, shared backoff (including
+queued work), copy isolation, and invalid input handling. Browser tests verify
+PNG/JPEG pixels and offline warm PDF export. A separate request-guard test checks
+that cached icon responses run before the direct-network bypass.
+
+These are local results. The hosted deployment has not been changed or retested
+with this implementation; its screenshots above show the original failure.

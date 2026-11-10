@@ -104,6 +104,22 @@ function requestStub(rawUrl: string, resourceType = 'document') {
 }
 
 describe('public Chromium request guard', () => {
+  it('serves a resolved icon before the direct-browser bypass without an upstream fetch', async () => {
+    const fetchUrl = vi.fn()
+    const harness = pageHarness()
+    await guardPublicPageRequests(harness.page, {
+      fetchUrl,
+      allowUrl: () => true,
+      resolveAsset: async () => ({ body: Buffer.from('<svg/>'), contentType: 'image/svg+xml' }),
+    })
+    const request = requestStub('https://api.iconify.design/mdi/home.svg', 'image')
+    harness.dispatch(request)
+    await vi.waitFor(() => expect(request.respond).toHaveBeenCalledOnce())
+    expect(request.continue).not.toHaveBeenCalled()
+    expect(fetchUrl).not.toHaveBeenCalled()
+    expect(request.respond.mock.calls[0]![0]).toMatchObject({ status: 200, contentType: 'image/svg+xml' })
+  })
+
   it('fulfills external requests through the pinned fetcher instead of continuing them in Chromium', async () => {
     const headers = new Headers({
       'content-type': 'text/html; charset=utf-8',

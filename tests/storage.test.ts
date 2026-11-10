@@ -23,10 +23,10 @@ describe('storage keys', () => {
   it('round-trips asset, thumbnail and icon cache keys', async () => {
     await storage.putObject('abc123.png', Buffer.from('asset'), 'image/png')
     await storage.putObject('thumb/frame-1.jpg', Buffer.from('thumb'), 'image/jpeg')
-    await storage.putObject('icons/abc123.svg', Buffer.from('<svg/>'), 'image/svg+xml')
+    await storage.putObject('icons/v1-abc123.json', Buffer.from('{"body":"<path/>"}'), 'application/json')
     expect((await storage.getObject('abc123.png'))?.toString()).toBe('asset')
     expect((await storage.getObject('thumb/frame-1.jpg'))?.toString()).toBe('thumb')
-    expect((await storage.getObject('icons/abc123.svg'))?.toString()).toBe('<svg/>')
+    expect((await storage.getObject('icons/v1-abc123.json'))?.toString()).toBe('{"body":"<path/>"}')
   })
 
   it('deletes objects and tolerates deleting what is not there', async () => {

@@ -1,5 +1,6 @@
 import { env } from './env.ts'
 import { iconAssetUrl } from './iconAssets.ts'
+import { iconData } from './iconData.ts'
 /**
  * Image sourcing for design agents: stock photo search (Pexels) and icon /
  * brand-logo search (Iconify). Both power the search_images / search_icons
@@ -10,7 +11,7 @@ import { iconAssetUrl } from './iconAssets.ts'
  * PEXELS_API_KEY; the Pexels license allows hotlinking, rehosting and
  * modification without attribution. Icon search is keyless: the Iconify API
  * indexes 200k+ open-source icons, including the simple-icons and logos
- * collections (brand marks), served through Doop's persisted SVG cache.
+ * collections (brand marks), served as SVGs from Doop's persisted base icon data.
  */
 
 const PEXELS_ENDPOINT = 'https://api.pexels.com/v1/search'
@@ -94,7 +95,7 @@ export async function fetchThumb(url: string): Promise<{ data: string; mime: str
 export interface IconResult {
   /** Iconify id, e.g. "mdi:home" or "logos:stripe". */
   id: string
-  /** Doop-hosted, cached SVG URL for frame HTML. */
+  /** Doop-hosted SVG URL derived from a stored base icon. */
   svg_url: string
 }
 
@@ -111,13 +112,15 @@ export async function searchIcons(
   })
   if (!res.ok) throw new Error(`icon search failed: HTTP ${res.status}`)
   const body = (await res.json()) as { icons?: string[] }
-  return (body.icons ?? []).slice(0, limit).map((id) => {
+  const ids = (body.icons ?? []).slice(0, limit)
+  await Promise.all(ids.map((id) => iconData.get(id)))
+  return ids.map((id) => {
     return { id, svg_url: iconAssetUrl(id, env.BETTER_AUTH_URL) }
   })
 }
 
 export const ICON_USAGE_NOTE =
-  'Embed the Doop-hosted svg_url in <img src> or CSS; icons are cached on first use. Monochrome icons render black by default — append ?color=%23<hex> (URL-encoded #) to recolor, and &height=<px> to size. Each variant is cached separately. For company/brand logos use search_logos instead.'
+  'Embed the Doop-hosted svg_url in <img src> or CSS; the original icon is already stored by Doop. Monochrome icons render black by default — append ?color=%23<hex> (URL-encoded #) to recolor, and &height=<px> to size. Variants are generated locally without changing the shared original. To edit paths, copy the SVG into the frame or a new asset and edit that copy. For company/brand logos use search_logos instead.'
 
 export function logoSearchEnabled(): boolean {
   return Boolean(env.BRANDFETCH_CLIENT_ID)

@@ -236,6 +236,7 @@ export async function guardPublicPageRequests(
   options: {
     allowUrl?: (url: URL) => boolean
     fetchUrl?: typeof fetchPinnedPublicUrl
+    resolveAsset?: (url: URL) => Promise<{ body: Uint8Array; contentType: string } | null>
   } = {},
 ): Promise<void> {
   const fetchUrl = options.fetchUrl ?? fetchPinnedPublicUrl
@@ -255,6 +256,29 @@ export async function guardPublicPageRequests(
       }
       try {
         const requested = new URL(raw)
+        if (request.method() === 'GET' || request.method() === 'HEAD') {
+          const asset = await options.resolveAsset?.(requested)
+          if (asset) {
+            if (
+              asset.body.byteLength > MAX_BROWSER_RESOURCE_BYTES ||
+              pageBytes + asset.body.byteLength > MAX_BROWSER_PAGE_BYTES
+            ) {
+              throw new Error('website resource budget exceeded')
+            }
+            pageBytes += asset.body.byteLength
+            await request.respond({
+              status: 200,
+              body: request.method() === 'HEAD' ? Buffer.alloc(0) : Buffer.from(asset.body),
+              contentType: asset.contentType,
+              headers: {
+                'access-control-allow-origin': '*',
+                'x-content-type-options': 'nosniff',
+                'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'",
+              },
+            })
+            return
+          }
+        }
         if (options.allowUrl?.(requested)) {
           await request.continue()
           return
