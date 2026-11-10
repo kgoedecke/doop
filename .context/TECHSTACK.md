@@ -422,7 +422,14 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   layer. Standalone elements use frame persistence with a `data-doop-canvas-element` body marker
   for transparent canvas chrome; no separate shape schema or protocol is required. Pasted and
   dropped images (`src/lib/frameClipboard.ts`) are standalone elements too: one
-  `<img data-doop-drawing="image">` named after its file. A standalone text or path takes its ink
+  `<img data-doop-drawing="image">` named after its file. Agents place one with MCP
+  `upload_asset`'s `place` (`{ x, y, page_id, name, width }`, all optional; `{}` auto-places):
+  `shared/canvasImage.ts` builds the element for the browser and the server alike,
+  `server/imageSize.ts` reads the picture's size from its header (PNG, JPEG with its EXIF turn,
+  GIF, WebP, SVG; no image library) and `server/placeImage.ts` creates the frame without a
+  reveal or a board task. A local file's placement rides its upload ticket and lands when
+  `PUT /u/<token>` receives the bytes. An agent's SVG stays an `<img>`: the vector import needs
+  the browser. Tests: `imageSize.test.ts`, `uploadAssetPlaceHttp.test.ts`. A standalone text or path takes its ink
   from the theme the person drew under (`drawingInk`: the dark theme's `--ink`, else `DRAWING_INK`),
   since it sits on the canvas paper; inside a frame the dark ink stays. The Layers
   panel shows one as a single layer at the root (no frame row, no name label on the canvas) and

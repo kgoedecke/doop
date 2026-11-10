@@ -65,6 +65,7 @@ import {
 import { ESCAPED_HTML_NOTE, looksEscapedHtml } from './escapedHtml.ts'
 import { describeSyncFlow, getSyncFlow } from './ingest.ts'
 import * as assets from './assets.ts'
+import { imageNameFromUrl, placeImage, placedImageResult, placementError } from './placeImage.ts'
 import * as imageSearch from './imageSearch.ts'
 import * as imageGen from './imageGen.ts'
 import * as backgrounds from './backgrounds.ts'
@@ -102,7 +103,7 @@ You MUST call get_guide({ topic: "doop-instructions" }) once before using other 
 - Small edits: edit_frame_html (exact find/replace — the change morphs into the rendered frame in place). Full redesigns: set_frame_html or a new stream. Rename/move/resize: update_frame.
 - Clickable prototypes: wire screens with data-doop-on / data-doop-action attributes in frame HTML (guide → Prototypes), set the flow start with set_prototype_start, and check the wiring with get_prototype.
 - History: every replace and stream files the design it overwrote. list_frame_versions shows a frame's earlier states; restore_frame_version brings one back (HTML and size) when a human asks for the previous version or your rework turned out worse.
-- Images: real imagery makes designs. search_images finds stock photos (you SEE thumbnails and pick), search_icons finds 200k+ UI icons as hotlinkable SVGs, search_logos finds real company logos by brand name or domain — call it once per brand BEFORE writing any logo wall, integration row, press bar or testimonial, and never ship a placeholder tile, "LOGO" text or an invented wordmark in its place, list_backgrounds shows a page of curated hero/section/bento backgrounds (glows, grainy meshes, aurora, painterly scenes) as thumbnails — browse it when a section wants atmosphere rather than defaulting to a flat CSS gradient, judge by eye whether one fits the frame, and draw your own when none does, upload_asset stores your own file (remote file → source_url; local file → local_file=true, returns a curl command) and returns a permanent URL. generate_image makes a new image from a prompt (a full-bleed hero background in the frame's exact palette, illustration, a product render, brand-specific hero art that stock cannot supply) and stores it as a permanent asset — reach for it when search_images cannot deliver the exact visual, or when the human asks for a generated image; it costs the human money or quota, so one considered prompt beats five drafts. Never inline images as data: URIs.
+- Images: real imagery makes designs. search_images finds stock photos (you SEE thumbnails and pick), search_icons finds 200k+ UI icons as hotlinkable SVGs, search_logos finds real company logos by brand name or domain — call it once per brand BEFORE writing any logo wall, integration row, press bar or testimonial, and never ship a placeholder tile, "LOGO" text or an invented wordmark in its place, list_backgrounds shows a page of curated hero/section/bento backgrounds (glows, grainy meshes, aurora, painterly scenes) as thumbnails — browse it when a section wants atmosphere rather than defaulting to a flat CSS gradient, judge by eye whether one fits the frame, and draw your own when none does, upload_asset stores your own file (remote file → source_url; local file → local_file=true, returns a curl command) and returns a permanent URL; add place to also drop it onto the canvas as a free-standing image, as a person dragging a file in does. generate_image makes a new image from a prompt (a full-bleed hero background in the frame's exact palette, illustration, a product render, brand-specific hero art that stock cannot supply) and stores it as a permanent asset — reach for it when search_images cannot deliver the exact visual, or when the human asks for a generated image; it costs the human money or quota, so one considered prompt beats five drafts. Never inline images as data: URIs.
 - Websites: when a request names an existing site or URL — a redesign of it, or "like acme.com" — call import_webpage FIRST so an editable HTML snapshot lands on the canvas. Leave that source frame unchanged and design in a separate frame. view_website is only for read-only inspection when the page should not be added. If Doop cannot capture the site, do not retry with view_website because it uses the same capture path. Use your own browser or web tool and work only from content you actually observe; if that is unavailable, ask the user for screenshots or an HTML export rather than inventing content.
 ${extensionGuideLines()}- Feedback: humans reply to your tasks; their notes arrive inside your tool results as HUMAN FEEDBACK blocks (read-only tools only announce them: claim those with get_feedback) — address them before continuing.
 - Comments: call get_comments to read comments and replies on a canvas — pinned to an element inside a frame, or to a point on the canvas (pageId, x, y) — optionally filtered by frame; reply_to_comment answers a thread and resolve_comment closes it. Reading does not claim feedback or comments. A reply that @mentions a resident role is metered like a comment left in the browser.
@@ -1498,7 +1499,7 @@ export function buildMcpServer(
     {
       title: 'Upload an image asset',
       description:
-        'Upload an image (png/jpg/webp/gif/svg, max 5 MB) and get back a permanent public URL to reference in frame HTML (<img src>, CSS background) — use this instead of inlining data: URIs. Pick ONE input by where the file lives: (1) remote — pass source_url and the server fetches it; (2) LOCAL FILE — pass local_file=true to receive a one-time upload URL and a ready-to-run curl command, run it in your shell, and the curl response JSON contains the permanent url. (3) data — base64, LAST RESORT for tiny files (under ~100 KB) when you cannot run shell commands; larger base64 payloads are slow and corrupt easily.',
+        'Upload an image (png/jpg/webp/gif/svg, max 5 MB) and get back a permanent public URL to reference in frame HTML (<img src>, CSS background) — use this instead of inlining data: URIs. Pass place to also drop the image onto the canvas as a free-standing image element, as a person dragging a file onto it does. Pick ONE input by where the file lives: (1) remote — pass source_url and the server fetches it; (2) LOCAL FILE — pass local_file=true to receive a one-time upload URL and a ready-to-run curl command, run it in your shell, and the curl response JSON contains the permanent url. (3) data — base64, LAST RESORT for tiny files (under ~100 KB) when you cannot run shell commands; larger base64 payloads are slow and corrupt easily.',
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
       inputSchema: {
         source_url: z.string().optional().describe('Public http(s) URL to fetch the file from (remote files)'),
@@ -1511,16 +1512,36 @@ export function buildMcpServer(
           .optional()
           .describe('The file as base64 (raw base64 or a data: URL). Last resort, tiny files only.'),
         canvas_id: z.string().describe('The canvas this asset belongs to'),
+        place: z
+          .object({
+            x: z.number().optional().describe('World x of its left edge'),
+            y: z.number().optional().describe('World y of its top edge'),
+            page_id: z.string().optional().describe('Target page ID from get_canvas; defaults to the first page'),
+            name: z.string().optional().describe('Layer name; defaults to the file name'),
+            width: z
+              .number()
+              .min(1)
+              .optional()
+              .describe('Width in px (height follows the picture); defaults to its own size, at most 900px a side'),
+          })
+          .optional()
+          .describe(
+            'Also put the image ON the canvas as a free-standing image, the way a person drops a file on it: pass {} to auto-place it right of the existing frames, or x/y to position it. Omit to only get the URL.',
+          ),
         agent_name: agentName,
       },
     },
-    async ({ data, source_url, local_file, canvas_id, agent_name }) => {
+    async ({ data, source_url, local_file, canvas_id, place, agent_name }) => {
       const provided = [data, source_url, local_file].filter(Boolean).length
       if (provided !== 1)
         return err(
           'provide exactly one of: source_url (remote file), local_file=true (local file — returns a curl command), or data (small base64)',
         )
-      if (!canvasFor(canvas_id, 'edit')) return noCanvas(canvas_id)
+      const canvas = canvasFor(canvas_id, 'edit')
+      if (!canvas) return noCanvas(canvas_id)
+      const placement = place && { ...place, pageId: place.page_id }
+      const refused = placement && placementError(canvas, placement)
+      if (refused) return err(refused)
       const now = Date.now()
       const limitKey = ownerId ?? agent_name
       const hits = (uploadHits.get(limitKey) ?? []).filter((t) => now - t < 60_000)
@@ -1532,6 +1553,7 @@ export function buildMcpServer(
           canvasId: canvas_id,
           ownerId,
           uploadedBy: agent_name,
+          place: placement && { placement, actor: actorFrom(agent_name) },
         })
         const upload_url = `${env.BETTER_AUTH_URL}/u/${token}`
         return withFeedback(
@@ -1540,7 +1562,7 @@ export function buildMcpServer(
             upload_url,
             command: `curl -sS -T "<path-to-your-file>" ${upload_url}`,
             expires_at: new Date(expiresAt).toISOString(),
-            note: 'One-time upload URL (single use, 15 min). Run the curl command in your shell with your real file path — its JSON response contains the permanent public url to use in frame HTML. Request a fresh ticket for each file.',
+            note: `One-time upload URL (single use, 15 min). Run the curl command in your shell with your real file path — its JSON response contains the permanent public url to use in frame HTML${placement ? ', and the frame the image was placed on the canvas as' : ''}. Request a fresh ticket for each file.`,
           }),
           canvas_id,
           actorFrom(agent_name),
@@ -1552,14 +1574,17 @@ export function buildMcpServer(
           : await assets.fetchRemote(source_url!)
         const asset = await assets.createAsset(buf, { canvasId: canvas_id, ownerId, uploadedBy: agent_name })
         const url = `${env.BETTER_AUTH_URL}/a/${asset.id}.${asset.ext}`
-        const result = text({
-          ok: true,
-          url,
-          mime: asset.mime,
-          size_bytes: asset.size,
-          usage: `<img src="${url}" alt="">`,
-          note: 'Permanent public URL — safe to reference in any frame on any canvas.',
-        })
+        const uploaded = { ok: true, url, mime: asset.mime, size_bytes: asset.size, usage: `<img src="${url}" alt="">` }
+        const named = placement && {
+          ...placement,
+          name: placement.name ?? (source_url && imageNameFromUrl(source_url)),
+        }
+        const result = named
+          ? text({
+              ...uploaded,
+              ...placedImageResult(placeImage(canvas_id, { url, buf, mime: asset.mime }, named, actorFrom(agent_name))),
+            })
+          : text({ ...uploaded, note: 'Permanent public URL — safe to reference in any frame on any canvas.' })
         return withFeedback(result, canvas_id, actorFrom(agent_name))
       } catch (e) {
         return err(e instanceof Error ? e.message : 'upload failed')

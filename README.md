@@ -912,7 +912,7 @@ read-only / destructive / idempotent annotations; the server registers no MCP pr
 | `list_backgrounds`       | Curated hero/section/bento backgrounds (glows, grainy meshes, aurora, painterly) as thumbnails                      |
 | `search_inspiration`     | Curated live landing pages with style, colour, fonts and sections (One Page Love)                                   |
 | `generate_image`         | Generate an image with the model the user picked in Settings (GPT Image, Nano Banana or Seedream) → asset URL       |
-| `upload_asset`           | Store your own file — from a URL, a one-time local-file upload URL, or inline base64                                |
+| `upload_asset`           | Store your own file (URL, one-time local-file upload URL or base64); `place` also drops it on the canvas            |
 | **Web**                  |                                                                                                                     |
 | `view_website`           | Inspect one public page read-only; returns a desktop screenshot and visible text without changing the canvas        |
 | `import_webpage`         | Import one public URL onto a canvas as an editable HTML snapshot/frame                                              |
