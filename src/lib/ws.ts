@@ -192,6 +192,9 @@ function handle(msg: ServerMessage) {
     case 'component':
       s.setComponentLocal(msg.id, msg.component)
       break
+    case 'library':
+      s.bumpLibrary()
+      break
     case 'guidelines':
       s.setGuidelineLocal(msg.name, msg.doc)
       break

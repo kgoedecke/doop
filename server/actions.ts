@@ -15,6 +15,7 @@ import { isElementId } from '../shared/elementId.ts'
 import { parseRunnerPick, runnerKey, type RunnerPick } from '../shared/agentRunner.ts'
 import { hasElementId, stampElementId } from './elementIds.ts'
 import { decodeEscapedHtml, looksEscapedHtml, repairEscapedHtml } from './escapedHtml.ts'
+import { forgetLibrary } from './componentLibrary.ts'
 import { withCanvasFaces, withCanvasFacesMidStream } from './canvasFaces.ts'
 import {
   MAX_TOKENS,
@@ -26,8 +27,10 @@ import {
   isTokenType,
   normalizeTokenName,
   normalizeTokenValue,
+  referencedTokens,
   renameThemeAttrs,
   resolveToken,
+  tokensUsedBy,
   usesToken,
   type DesignToken,
   type TokenEdit,
@@ -37,6 +40,7 @@ import {
 import { emitCanvasEvent } from './events.ts'
 import type {
   Actor,
+  Canvas,
   CanvasGuide,
   ActorKind,
   ActivityItem,
@@ -1761,6 +1765,11 @@ export function takeComponentIssues(frameId: string): ComponentIssue[] {
   return issues
 }
 
+/** Something found out about a frame's last write after it landed: heard with the rest. */
+export function addComponentIssue(frameId: string, issue: ComponentIssue) {
+  componentIssues.set(frameId, [...(componentIssues.get(frameId) ?? []), issue])
+}
+
 function prepareWrite(
   canvasId: string,
   frameId: string,
@@ -1777,8 +1786,66 @@ function prepareWrite(
   else componentIssues.delete(frameId)
   /* no new revision, so no propagation either: only "Go to main" needs to hear of it */
   for (const def of prepared.moved) broadcastComponent(canvasId, def, resolveActor({ name: by, kind: 'user' }))
+  announceAdopted(canvasId, prepared.adopted, resolveActor({ name: by, kind: 'user' }), true)
   /* faces after the components: an expanded <doop-use> may name a library family */
   return { ...prepared, html: withCanvasFaces(canvasId, prepared.html) }
+}
+
+/** Components a canvas just took up from its workspace library: the room gets
+ *  the definitions, and the canvas the library's tokens they name and it lacks
+ *  (an existing token of the same name is left alone). Inside a frame write the
+ *  token pass waits for that write to land, since adding tokens restyles frames. */
+export function announceAdopted(canvasId: string, adopted: ComponentDef[], actor: Actor, withinWrite = false) {
+  if (!adopted.length) return
+  for (const def of adopted) broadcastComponent(canvasId, def, actor)
+  const names = adopted.map((def) => `“${def.name}”`).join(', ')
+  logComponent(canvasId, actor, `added ${names} from the workspace library`)
+  const carry = () => carryLibraryTokens(canvasId, adopted, actor)
+  if (withinWrite) queueMicrotask(carry)
+  else carry()
+}
+
+/** Create the library's tokens these linked components name and the canvas
+ *  lacks: on first use, and again when a pulled update starts naming new ones. */
+export function carryLibraryTokens(canvasId: string, adopted: ComponentDef[], actor: Actor) {
+  const have = new Set(store.getTokens(canvasId).map((token) => token.name))
+  const missing = new Map<string, DesignToken>()
+  for (const def of adopted) {
+    if (!def.source) continue
+    const used = tokensUsedBy(`${def.template}\n${def.css}`, store.getTokens(def.source.canvasId))
+    for (const token of used) if (!have.has(token.name)) missing.set(token.name, token)
+  }
+  if (!missing.size || !store.getCanvas(canvasId)) return
+  const inputs = aliasesLast([...missing.values()]).map(({ name, type, value, themes, description }) => ({
+    name,
+    type,
+    value,
+    ...(themes ? { themes } : {}),
+    ...(description ? { description } : {}),
+  }))
+  createTokens(canvasId, inputs, actor)
+}
+
+/** Tokens ordered so each comes after the ones its values read: an alias is
+ *  refused while what it points at does not exist yet. */
+function aliasesLast(tokens: DesignToken[]): DesignToken[] {
+  const placed = new Set<string>()
+  const ordered: DesignToken[] = []
+  const names = new Set(tokens.map((token) => token.name))
+  const reads = (token: DesignToken) =>
+    [token.value, ...Object.values(token.themes ?? {})].flatMap(referencedTokens).filter((name) => names.has(name))
+  let waiting = tokens
+  while (waiting.length) {
+    const ready = waiting.filter((token) => reads(token).every((name) => placed.has(name)))
+    /* a cycle cannot be ordered: hand the rest over and let each be refused on its own */
+    const next = ready.length ? ready : waiting
+    for (const token of next) {
+      placed.add(token.name)
+      ordered.push(token)
+    }
+    waiting = waiting.filter((token) => !placed.has(token.name))
+  }
+  return ordered
 }
 
 /** A component's own line in the activity feed. */
@@ -1789,6 +1856,15 @@ export function logComponent(canvasId: string, actor: Actor, line: string) {
 
 export function broadcastComponent(canvasId: string, component: ComponentDef, actor: Actor) {
   broadcast(canvasId, { type: 'component', id: component.id, component, actor })
+}
+
+/** A library published or withdrew something: every canvas of its workspace hears,
+ *  the library canvas included (its own panel shows what is still unpublished). */
+export function broadcastLibrary(library: Pick<Canvas, 'id' | 'workspaceId'>, actor: Actor) {
+  for (const canvas of store.allCanvases()) {
+    if (canvas.id === library.id || (library.workspaceId && canvas.workspaceId === library.workspaceId))
+      broadcast(canvas.id, { type: 'library', actor })
+  }
 }
 
 export function broadcastComponentDeleted(canvasId: string, id: string, actor: Actor) {
@@ -1877,7 +1953,10 @@ export function appendFrameHtml(
   const escaped = starting ? looksEscapedHtml(chunk) : (streams.get(frameId)?.escaped ?? false)
   const piece = escaped ? decodeEscapedHtml(chunk) : chunk
   const canvas = store.getCanvas(before.canvasId)
-  const chunked = canvas ? prepareChunk(canvas, piece, opts.start ? '' : before.html) : { html: piece, issues: [] }
+  const chunked = canvas
+    ? prepareChunk(canvas, piece, opts.start ? '' : before.html, actor.name)
+    : { html: piece, issues: [], adopted: [] }
+  announceAdopted(before.canvasId, chunked.adopted, actor, true)
   const expanded = chunked.html
   const carried = [...(starting ? [] : (streamIssues.get(frameId) ?? [])), ...chunked.issues]
   if (opts.done) streamIssues.delete(frameId)
@@ -2185,6 +2264,7 @@ export function deleteFrame(frameId: string, actor: Actor): Frame | undefined {
 /** Remove a canvas with everything attached to it; viewers are told to leave. */
 export function deleteCanvas(canvasId: string): boolean {
   const c = store.deleteCanvas(canvasId)
+  forgetLibrary(canvasId)
   if (!c) return false
   for (const f of c.frames) {
     thumbs.purge(f.id)

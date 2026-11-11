@@ -33,7 +33,13 @@ import {
 import { LivePresence } from '../components/LivePresence'
 import { ensureTab, openExternal } from '../lib/desktop'
 import { Stage } from '../components/Stage'
-import { COMPONENT_DRAG_TYPE, dropComponent } from '../lib/components'
+import {
+  COMPONENT_DRAG_TYPE,
+  LIBRARY_COMPONENT_DRAG_TYPE,
+  dropComponent,
+  dropLibraryComponent,
+  parseLibraryDrag,
+} from '../lib/components'
 import { Inspector } from '../components/Inspector'
 import { PagePanel } from '../components/PagePanel'
 import { ElementPanel } from '../components/ElementPanel'
@@ -73,6 +79,7 @@ import {
 } from '../lib/frameClipboard'
 import { clearHistory } from '../lib/history'
 import { deleteSelection, nudgeSelection } from '../lib/layerEdits'
+import { libraryResumeWaits } from '../lib/libraryResume'
 import { copyPicked, hasElementClip, pasteLayer } from '../lib/elementClipboard'
 import { isCanvasClipboard, writeCanvasClipboard } from '../lib/canvasClipboard'
 import { authClient } from '../lib/auth'
@@ -347,6 +354,14 @@ export function CanvasPage({
     if (canvas?.id === canvasId) ensureTab(canvas.id, canvas.name)
   }, [canvas, canvasId])
 
+  /* back from checkout on the way to a component library: open the Components
+     tab, whose panel holds the note and takes it from here */
+  useEffect(() => {
+    if (guest || !libraryResumeWaits(canvasId)) return
+    useStore.getState().setLayersOpen(true)
+    useStore.getState().setLayersTab('components')
+  }, [canvasId, guest])
+
   useEffect(() => {
     connect(canvasId, guest)
     return () => {
@@ -500,7 +515,8 @@ export function CanvasPage({
   useEffect(() => {
     /* files from outside, or a component card from the Components panel; both
        need the frames' shields up so the drop reaches the window */
-    const carriesComponent = (e: DragEvent) => e.dataTransfer?.types.includes(COMPONENT_DRAG_TYPE) ?? false
+    const carriesComponent = (e: DragEvent) =>
+      [COMPONENT_DRAG_TYPE, LIBRARY_COMPONENT_DRAG_TYPE].some((type) => e.dataTransfer?.types.includes(type))
     const carriesFiles = (e: DragEvent) => (e.dataTransfer?.types.includes('Files') ?? false) || carriesComponent(e)
     let depth = 0
     const setDragging = useStore.getState().setFileDragging
@@ -531,6 +547,13 @@ export function CanvasPage({
       const componentId = e.dataTransfer?.getData(COMPONENT_DRAG_TYPE)
       if (componentId) {
         void dropComponent(componentId, { x: e.clientX, y: e.clientY })
+        return
+      }
+      /* a library's card: this canvas takes the component up on the drop, then places it */
+      const libraryData = e.dataTransfer?.getData(LIBRARY_COMPONENT_DRAG_TYPE)
+      if (libraryData) {
+        const drag = parseLibraryDrag(libraryData)
+        if (drag) void dropLibraryComponent(drag, { x: e.clientX, y: e.clientY })
         return
       }
       const incoming = splitIncoming([...(e.dataTransfer?.files ?? [])])

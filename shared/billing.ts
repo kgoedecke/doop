@@ -46,6 +46,7 @@ export const PLANS: readonly Plan[] = [
       'Roles: owner, admin, member',
       'Invite by email, seats billed as people join',
       'Move canvases between personal and workspace',
+      'A shared component library for every canvas',
       'Everything in Personal',
     ],
   },

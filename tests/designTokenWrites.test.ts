@@ -215,7 +215,7 @@ describe('design tokens on frame writes', () => {
 
   it('previews a component with the canvas tokens it names', () => {
     const canvasId = setup()
-    const def = createComponentFromHtml(
+    const { component: def } = createComponentFromHtml(
       canvasId,
       { name: 'Chip', html: '<span class="chip">New</span>', css: '.chip{color:var(--color-primary)}' },
       human,

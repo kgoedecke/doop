@@ -784,6 +784,25 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   `get_canvas` and the resident kickoff say a canvas has no tokens yet (`NO_TOKENS_BRIEF`).
   `upload_asset` states its per-minute limit and its refusal says when to retry. Tests:
   `reuseNotes.test.ts`.
+- Workspace component libraries (`.context/specs/workspace-component-library.md`,
+  `server/componentLibrary.ts`): a workspace canvas publishes snapshots of its components
+  (`library_components`, migration `0053_library_components`, mirrored in memory) and every other
+  canvas of the workspace can use them. Using one adds a linked definition with no main
+  (`source.library`), by `import_component`, by a click in the Components panel, or by a write
+  naming it (`contextFor`'s `LibraryAdoption` in `prepareFrameHtml` / `prepareChunk`); the tokens it
+  names come along (`actions.announceAdopted`). Updates wait until `sync_component` pulls them.
+  `update_library_everywhere` (`updateLibraryConsumers`) is the one explicit push: it loads each canvas
+  that is behind and pulls there. `workspaces.library_publish` (migration `0054_library_publish_policy`)
+  can keep publishing, and that push, to the owner and admins.
+  `libraryBlock` is the entitlement (a canvas in an active workspace; every workspace with billing
+  off), refused as a 402 the panel turns into `LibraryUpgradeFlow`, which resumes after Stripe
+  Checkout from a per-browser note (`src/lib/libraryResume.ts`). A workspace can keep publishing
+  to its owner and admins (`workspaces.library_publish`, migration `0054_library_publish_policy`,
+  set in the Workspace page's General pane; `requireLibraryPublisher`, a 403). Agents: `publish_library`,
+  `workspaceLibraries` in `get_canvas`. Editor: `LibrarySection.tsx`, and the Workspace page's Libraries pane
+  (`WorkspaceLibraries.tsx`). Tests:
+  `workspaceLibrary.test.ts`, `libraryTools.test.ts`, `librarySection.test.tsx`,
+  `workspaceLibraries.test.tsx`, `libraryResume.test.ts`.
 - Prototypes (`.context/specs/prototyping.md`): interactions are `data-doop-on` /
   `data-doop-action` (or the JSON `data-doop-interactions`) attributes in frame HTML, parsed by
   `shared/prototype.ts`, whose parser the frame runtime inlines by source. `PrototypePlayer.tsx`
@@ -948,8 +967,7 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   the ⌘K search palette (`CanvasSearchModal.tsx`), the connect-an-agent modal, the collapsed
   narrow state (remembered in `localStorage` under `doop-rail`) and the account face at the bottom.
   From another page the rail sends scope picks home as `/?scope=` and new workspaces as
-  `/?workspace=new`. The workspace in view opens under its row: All canvases, People, Fonts, and
-  for its owner and admins Plan & billing and Settings (`workspacePanesFor`); on the Workspace page
+  `/?workspace=new`. The workspace in view opens under its row: All canvases, People, Fonts, Libraries, and for its owner and admins Plan & billing and Settings (`workspacePanesFor`); on the Workspace page
   they switch its pane in place, elsewhere they go to `/w/<id>?pane=…`, and the page keeps the
   pane in its URL. The rail keeps the last lists it drew (`lastLists`), so a page change does not
   blink its rows out, and fades only when collapsed or expanded. Home warms the Workspace page's

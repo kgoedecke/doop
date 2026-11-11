@@ -808,6 +808,17 @@ export function useMarkup(
   return `${tag}>${slotChildren.join('')}</${USE_TAG}>`
 }
 
+/* Attributes that mean something on a template's own element and nothing on a `<doop-use>`: the
+   nested instance is written out in the main, so one of these would only ride along as an
+   attribute override on its root. Each says what to write instead. */
+const TEMPLATE_ONLY_ATTRS: Record<string, string> = {
+  [BIND_ATTR]:
+    'a component cannot pass its props on to a component inside it. Give that one fixed values (label="…"), or put an element with data-doop-slot there and let each instance supply its own <doop-use>',
+  [IF_ATTR]: 'put it on an element wrapped around the <doop-use>',
+  [SLOT_ATTR]: 'put it on an element wrapped around the <doop-use>, which is then the slot’s default content',
+  [SLOT_SUGGEST_ATTR]: 'it belongs on the element that carries data-doop-slot',
+}
+
 /** Build an instance's overrides from a `<doop-use>`'s attributes, reporting what does not fit. */
 export function stateFromUseAttrs(use: Element, def: Revision, ctx: EngineContext): InstanceState {
   const props: Record<string, string> = {}
@@ -826,6 +837,14 @@ export function stateFromUseAttrs(use: Element, def: Revision, ctx: EngineContex
   for (const attr of use.attrs) {
     const name = attr.name
     if (name === 'component' || name === 'id' || name === PART_ATTR || name === ELEMENT_ID_ATTR) continue
+    const instead = TEMPLATE_ONLY_ATTRS[name]
+    if (instead) {
+      ctx.issues.push({
+        code: 'ignored_attribute',
+        message: `${name} on <${USE_TAG} component="${def.name}"> does nothing and was dropped: ${instead}.`,
+      })
+      continue
+    }
     if (name === 'overrides') {
       parts = { ...parts, ...asPartRecord(JSON_OBJECT(attr.value)) }
       continue
@@ -1334,16 +1353,61 @@ export function derivePropsAndSlots(
 
 const descriptionOf = (prop: ComponentProp | undefined) => (prop?.description ? { description: prop.description } : {})
 
+/* what an element's text is called when nothing on it says: by what the element is */
+const ROLE_NAMES: Record<string, string> = {
+  h1: 'title',
+  h2: 'title',
+  h3: 'title',
+  h4: 'title',
+  h5: 'title',
+  h6: 'title',
+  button: 'label',
+  a: 'label',
+  label: 'label',
+  summary: 'label',
+  li: 'item',
+  figcaption: 'caption',
+  caption: 'caption',
+  small: 'caption',
+  blockquote: 'quote',
+  time: 'date',
+  th: 'heading',
+  td: 'cell',
+}
+
+/* a utility class says how an element looks, not what it is: `text-sm`, `mt-2`, `md:flex` */
+const UTILITY_CLASS =
+  /[:[\]/.]|^-|^(flex|grid|block|inline|hidden|relative|absolute|truncate|uppercase|italic|underline|antialiased)$|^(text|font|bg|border|rounded|shadow|leading|tracking|p|px|py|pt|pb|pl|pr|m|mx|my|mt|mb|ml|mr|w|h|min|max|gap|flex|grid|inline|items|justify|opacity|whitespace)-/
+
+/** The name an element gives itself: its `data-name`, else its last class that is not a utility. */
+function ownPropName(el: Element): string | undefined {
+  const classes = (attrOf(el, 'class') ?? '').split(/\s+/).filter((name) => name && !UTILITY_CLASS.test(name))
+  const raw = attrOf(el, 'data-name') ?? classes.at(-1) ?? ''
+  const name = raw && raw.length < 30 ? toPropName(raw) : 'value'
+  return name === 'value' ? undefined : name
+}
+
+/** The nearest element, from this one up to the main, whose tag says what its text is. */
+function roleName(el: Element, root: Element): string {
+  for (let node: Element | undefined = el; node;) {
+    const role = ROLE_NAMES[node.tagName]
+    if (role) return role
+    if (node === root) break
+    const parent: ParentNode | null = node.parentNode
+    node = parent && isElement(parent) ? parent : undefined
+  }
+  return el === root ? 'label' : 'text'
+}
+
 /** Name what a component would most likely vary: leaf text, image sources, link targets.
- *  Written onto the main as ordinary bindings, so a person or agent can see and change them. */
-export function inferBindings(root: Element, limit = 12): number {
+ *  Written onto the main as ordinary bindings, so a person or agent can see and change them.
+ *  Returns the prop names it made up, in template order. */
+export function inferBindings(root: Element, limit = 12): string[] {
   const used = new Set<string>()
   let count = 0
-  const nameFor = (el: Element, fallback: string) => {
-    const name = attrOf(el, 'data-name') ?? attrOf(el, 'class')?.split(/\s+/).at(-1) ?? ''
-    const base = toPropName(name && name.length < 30 ? name : fallback)
-    let candidate = base === 'value' ? fallback : base
-    for (let n = 2; used.has(candidate); n++) candidate = `${base === 'value' ? fallback : base}-${n}`
+  const take = (base: string) => {
+    let candidate = base
+    for (let n = 2; used.has(candidate); n++) candidate = `${base}-${n}`
     used.add(candidate)
     return candidate
   }
@@ -1351,22 +1415,25 @@ export function inferBindings(root: Element, limit = 12): number {
   const order: Element[] = []
   for (let el = stack.pop(); el; el = stack.pop()) {
     if (el.tagName === 'style' || el.tagName === 'script' || el.tagName === 'svg') continue
-    if (attrOf(el, INSTANCE_ATTR)) continue
+    /* a nested component, written out or still `<doop-use>`: its content is its own */
+    if (attrOf(el, INSTANCE_ATTR) || el.tagName === USE_TAG) continue
     order.push(el)
     stack.push(...elementKids(el).reverse())
   }
   for (const el of order) {
     if (count >= limit || attrOf(el, BIND_ATTR) !== undefined || attrOf(el, SLOT_ATTR) !== undefined) continue
     const bindings: string[] = []
-    if (el.tagName === 'img' && attrOf(el, 'src')) bindings.push(`src:${nameFor(el, 'image')}`)
-    if (el.tagName === 'a' && attrOf(el, 'href')) bindings.push(`href:${nameFor(el, 'link')}`)
-    if (elementKids(el).length === 0 && directText(el)) bindings.push(nameFor(el, el === root ? 'label' : 'text'))
+    const own = ownPropName(el)
+    if (el.tagName === 'img' && attrOf(el, 'src')) bindings.push(`src:${take(own ?? 'image')}`)
+    /* a link's target is named beside its text: `cta-link` next to `cta` */
+    if (el.tagName === 'a' && attrOf(el, 'href')) bindings.push(`href:${take(own ? `${own}-link` : 'link')}`)
+    if (elementKids(el).length === 0 && directText(el)) bindings.push(take(own ?? roleName(el, root)))
     if (bindings.length) {
       setAttr(el, BIND_ATTR, bindings.join(','))
       count += bindings.length
     }
   }
-  return count
+  return [...used]
 }
 
 /* ------------------------------------------------------------------ */

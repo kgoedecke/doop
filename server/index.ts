@@ -1,6 +1,5 @@
 import { env } from './env.ts'
 import {
-  catalogEntry,
   changeInstances,
   componentDetail,
   ComponentError,
@@ -9,12 +8,31 @@ import {
   deleteComponent,
   findComponent,
   findComponentCandidates,
+  importableEntry,
   importComponent,
   insertInstance,
+  libraryEntry,
+  LibraryPlanError,
+  libraryConsumers,
+  LibraryPublisherError,
+  libraryStatus,
+  mayPublishFrom,
+  publishToLibrary,
   restoreComponentVersion,
   syncComponent,
+  unpublishFromLibrary,
+  updateLibraryConsumers,
   updateComponent,
+  usageOf,
 } from './componentActions.ts'
+import {
+  hydrateLibraries,
+  libraryBlock,
+  librariesForCanvas,
+  librariesOfWorkspace,
+  originOf,
+  snapshotAsDef,
+} from './componentLibrary.ts'
 import { z } from 'zod'
 import { previewDocument } from './componentPreview.ts'
 import { codeSchema, propSchema } from './componentTools.ts'
@@ -159,6 +177,7 @@ await workspaces.hydrateWorkspaces() // before the first request: canvasRole rea
 await hydrateInstanceSettings() // the sign-in policy, read on every signup
 await webhooks.hydrateWebhooks()
 await hydrateFonts() // before the first request: frame writes add the faces they use
+await hydrateLibraries() // and the workspace library components they name
 billing.reportBillingConfig()
 actions.hydrateLogs(data)
 seed()
@@ -2318,6 +2337,11 @@ const componentCreateBody = z.object({
   width: z.number().optional(),
   height: z.number().optional(),
 })
+const libraryPublishBody = z.object({
+  components: z.array(z.string().max(200)).max(500).optional(),
+  dryRun: z.boolean().optional(),
+})
+const libraryUpdateBody = z.object({ dryRun: z.boolean().optional() })
 const componentPatchBody = z.object({
   name: z.string().max(200).optional(),
   description: z.string().max(2000).optional(),
@@ -2343,6 +2367,16 @@ function componentRoute(res: express.Response, run: () => unknown) {
   try {
     res.json(run())
   } catch (error) {
+    /* the 402 every client turns into the upgrade prompt: for the workspace
+       that needs a plan, or for making one when the canvas is personal */
+    if (error instanceof LibraryPlanError)
+      return res.status(402).json({
+        error: error.workspaceId ? 'workspace_plan_required' : 'library_needs_workspace',
+        ...(error.workspaceId ? { workspaceId: error.workspaceId } : {}),
+        message: error.message,
+      })
+    if (error instanceof LibraryPublisherError)
+      return res.status(403).json({ error: error.message, code: 'library_publish_restricted' })
     if (error instanceof ComponentError) return res.status(400).json({ error: error.message })
     throw error
   }
@@ -2354,18 +2388,155 @@ app.get('/api/canvases/:id/components', (req, res) => {
   res.json((canvas.components ?? []).map((def) => componentDetail(canvas, def)))
 })
 
-/* other canvases this person can read that hold components: the import picker.
-   Importing takes edit, and this walks every canvas the person can read, so a
-   viewer gets no such scan */
+/* what this canvas can take components from: its workspace's published libraries
+   first (`library`, read from their snapshots), then every other canvas this
+   person can read that holds components, as a linked copy. Importing takes edit,
+   and this walks every canvas the person can read, so a viewer gets no such scan */
 app.get('/api/canvases/:id/component-libraries', (req, res) => {
   const canvas = requireCanvas(req, res, req.params.id, 'edit')
   if (!canvas) return
-  res.json(
-    workspaces.canvasesFor(req.user!.id).flatMap((meta) => {
+  const shared = librariesForCanvas(canvas)
+  const sharedIds = new Set(shared.map((library) => library.canvasId))
+  res.json([
+    ...shared.map((library) => ({
+      id: library.canvasId,
+      name: library.name,
+      library: true,
+      components: library.components.map((entry) => ({ ...libraryEntry(entry), instances: 0 })),
+    })),
+    ...workspaces.canvasesFor(req.user!.id).flatMap((meta) => {
       const other = store.getCanvas(meta.id)
-      if (!other || other.id === canvas.id || !other.components?.length) return []
-      return [{ id: other.id, name: other.name, components: other.components.map((def) => catalogEntry(other, def)) }]
+      if (!other || other.id === canvas.id || sharedIds.has(other.id) || !other.components?.length) return []
+      return [
+        {
+          id: other.id,
+          name: other.name,
+          components: other.components.map((def) => ({ ...importableEntry(def), instances: 0 })),
+        },
+      ]
     }),
+  ])
+})
+
+/* this canvas and the workspace library: whether it may have one (and what is
+   in the way), what it has published, and which of its linked components have
+   a newer published state waiting to be pulled */
+app.get('/api/canvases/:id/library', (req, res) => {
+  const canvas = requireCanvas(req, res, req.params.id, 'view')
+  if (!canvas) return
+  const block = libraryBlock(canvas)
+  res.json({
+    billing: billing.billingEnabled(),
+    entitled: !block,
+    ...(block ? { blocked: block.reason } : {}),
+    ...(canvas.workspaceId ? { workspaceId: canvas.workspaceId } : {}),
+    /* the workspace's publish setting, for this viewer; editing the canvas is a separate question */
+    canPublish: mayPublishFrom(canvas, req.user?.id),
+    ...libraryStatus(canvas),
+    updates: (canvas.components ?? []).flatMap((def) => {
+      const origin = originOf(canvas, def)
+      return origin && def.source && origin.rev > def.source.rev
+        ? [{ id: def.id, name: def.name, instances: usageOf(canvas, def.id).instances }]
+        : []
+    }),
+    /* as a library: the canvases still on an older publication, among those this person can open */
+    behind: libraryConsumers(canvas).flatMap((consumer) => {
+      const other = store.getCanvas(consumer.canvas_id)
+      return consumer.update_waiting && other && roleAllows(canvasRole(req.user!.id, other), 'view')
+        ? [{ id: consumer.canvas_id, name: consumer.canvas_name, components: consumer.update_waiting }]
+        : []
+    }),
+  })
+})
+
+app.post('/api/canvases/:id/library/publish', (req, res) => {
+  const canvas = requireCanvas(req, res, req.params.id, 'edit')
+  if (!canvas) return
+  const body = componentBody(res, libraryPublishBody, req.body ?? {})
+  if (!body) return
+  componentRoute(res, () => {
+    const result = publishToLibrary(canvas.id, body.components, userActor(req), req.user!.id, body.dryRun === true)
+    if (!result.dry_run)
+      captureFeature(req.user!.id, 'library_published', 'ui', {
+        canvas_id: canvas.id,
+        published: result.published.length,
+        removed: result.removed.length,
+      })
+    return result
+  })
+})
+
+/* update everywhere: pull this library's latest publication into every canvas of
+   the workspace using it. Its own request, never part of a publish; it changes only
+   canvases this person may edit and answers with what it did, canvas by canvas */
+app.post('/api/canvases/:id/library/update-consumers', async (req, res) => {
+  const canvas = requireCanvas(req, res, req.params.id, 'edit')
+  if (!canvas) return
+  const body = componentBody(res, libraryUpdateBody, req.body ?? {})
+  if (!body) return
+  const userId = req.user!.id
+  const allowed = (need: CanvasRole) => (id: string) => {
+    const other = store.getCanvas(id)
+    return !!other && roleAllows(canvasRole(userId, other), need)
+  }
+  try {
+    const report = await updateLibraryConsumers(canvas.id, userActor(req), {
+      dryRun: body.dryRun === true,
+      canEdit: allowed('edit'),
+      canRead: allowed('view'),
+      publisherId: userId,
+    })
+    if (!report.dry_run)
+      captureFeature(userId, 'library_updated_everywhere', 'ui', {
+        canvas_id: canvas.id,
+        canvases: report.canvases.length,
+        skipped: report.skipped.length,
+      })
+    res.json(report)
+  } catch (error) {
+    /* the same answers as its neighbours: 402 for the plan, 400 for a refusal.
+       Anything else is answered here, since nothing catches an async handler's throw */
+    if (error instanceof ComponentError)
+      return componentRoute(res, () => {
+        throw error
+      })
+    console.error(`[library] could not update the canvases using ${canvas.id}:`, error)
+    res.status(500).json({ error: 'could not update the canvases using this library' })
+  }
+})
+
+/* stop sharing: the named components, or the whole library */
+app.delete('/api/canvases/:id/library', (req, res) => {
+  const canvas = requireCanvas(req, res, req.params.id, 'edit')
+  if (!canvas) return
+  const body = componentBody(res, libraryPublishBody, req.body ?? {})
+  if (!body) return
+  componentRoute(res, () => unpublishFromLibrary(canvas.id, body.components, userActor(req), req.user!.id))
+})
+
+function workspaceLibraryConsumers(libraryCanvasId: string) {
+  const library = store.getCanvas(libraryCanvasId)
+  return library ? libraryConsumers(library) : []
+}
+
+/* a workspace's libraries, for its own page: members only, like its fonts */
+app.get('/api/workspaces/:id/libraries', (req, res) => {
+  if (!workspaces.isWorkspaceMember(req.params.id, req.user!.id))
+    return res.status(404).json({ error: 'workspace not found' })
+  res.json(
+    librariesOfWorkspace(req.params.id).map((library) => ({
+      id: library.canvasId,
+      name: library.name,
+      components: library.components.length,
+      publishedAt: Math.max(...library.components.map((entry) => entry.publishedAt)),
+      usedBy: store
+        .allCanvases()
+        .filter((other) =>
+          (other.components ?? []).some((def) => def.source?.library && def.source.canvasId === library.canvasId),
+        ).length,
+      /* how many of them are on an older publication: what "Update everywhere" would reach */
+      behind: workspaceLibraryConsumers(library.canvasId).filter((consumer) => consumer.update_waiting).length,
+    })),
   )
 })
 
@@ -2389,7 +2560,7 @@ app.post('/api/canvases/:id/components', (req, res) => {
           canvas.id,
           { ...body, html: body.html, props: body.props as never, name: String(body.name ?? '') },
           actor,
-        ),
+        ).component,
         converted: [],
       }
     }
@@ -2418,9 +2589,15 @@ app.post('/api/canvases/:id/components/import', (req, res) => {
   if (!canvas) return
   const source = String(req.body?.sourceCanvasId ?? '')
   const origin = store.getCanvas(source)
-  if (!origin || !roleAllows(canvasRole(req.user!.id, origin), 'view'))
+  /* a workspace library goes by the canvas, like its fonts: whoever may edit here may use it */
+  const shared = librariesForCanvas(canvas).some((library) => library.canvasId === source)
+  if (!shared && (!origin || !roleAllows(canvasRole(req.user!.id, origin), 'view')))
     return res.status(403).json({ error: 'this account cannot read that canvas' })
-  componentRoute(res, () => importComponent(canvas.id, source, String(req.body?.component ?? ''), userActor(req)))
+  componentRoute(res, () => {
+    const def = importComponent(canvas.id, source, String(req.body?.component ?? ''), userActor(req))
+    if (def.source?.library) captureFeature(req.user!.id, 'library_component_used', 'ui', { canvas_id: canvas.id })
+    return def
+  })
 })
 
 app.patch('/api/canvases/:id/components/:componentId', (req, res) => {
@@ -2450,17 +2627,30 @@ app.post('/api/canvases/:id/components/:componentId/restore', (req, res) => {
 app.post('/api/canvases/:id/components/:componentId/sync', (req, res) => {
   const canvas = requireCanvas(req, res, req.params.id, 'edit')
   if (!canvas) return
-  componentRoute(res, () =>
-    syncComponent(canvas.id, req.params.componentId, userActor(req), (id) => {
+  componentRoute(res, () => {
+    const result = syncComponent(canvas.id, req.params.componentId, userActor(req), (id) => {
       const other = store.getCanvas(id)
       return !!other && roleAllows(canvasRole(req.user!.id, other), 'view')
-    }),
-  )
+    })
+    if (result.updated && result.component.source?.library)
+      captureFeature(req.user!.id, 'library_update_pulled', 'ui', { canvas_id: canvas.id })
+    return result
+  })
 })
 
 app.get('/api/canvases/:id/components/:componentId/preview', (req, res) => {
   const canvas = requireCanvas(req, res, req.params.id, 'view')
   if (!canvas) return
+  /* ?library=<canvas>: a component the workspace library publishes, as published,
+     for a canvas that does not use it yet */
+  const libraryId = typeof req.query.library === 'string' ? req.query.library : ''
+  if (libraryId) {
+    const snapshot = librariesForCanvas(canvas)
+      .find((library) => library.canvasId === libraryId)
+      ?.components.find((entry) => entry.id === req.params.componentId)
+    if (!snapshot) return res.status(404).json({ error: 'component not found' })
+    return res.json(previewDocument(libraryId, snapshotAsDef(snapshot), 'default'))
+  }
   const def = findComponent(canvas.id, req.params.componentId)
   if (!def) return res.status(404).json({ error: 'component not found' })
   res.json(previewDocument(canvas.id, def, 'default'))

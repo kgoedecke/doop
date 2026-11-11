@@ -111,7 +111,8 @@ stock Tailwind type sizes and radii, `leading-[…]` / `tracking-[…]`, weights
 and hex colours; only the not-yet-migrated editor chrome, listed in `LEGACY_CHROME`, is exempt).
 Each has a story.
 
-- `Button` - the ring button, one black `primary` per screen (`size="bar"` is the 32px header
+- `Button` - the ring button, one black `primary` per screen (`variant="brand"` is the accent
+  fill for the one action a live signal asks for, such as unpublished library changes; `size="bar"` is the 32px header
   and toolbar action with a leading glyph: Import, New canvas; `size="inline"` is a boxless text
   action at the caption step, `bare` in a selection bar, `link` in a card or callout);
   `IconButton` - a glyph in a quiet square (sm 24px / md 32px / lg 34px, `round` for row actions,

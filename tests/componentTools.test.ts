@@ -408,6 +408,173 @@ describe('an agent working with components', () => {
     ).toBeUndefined()
   })
 
+  it('is told that template attributes on a <doop-use> do nothing, and no override is stored for them', async () => {
+    const canvas = newCanvas()
+    await button(canvas.id)
+    const made = await call('create_component', {
+      canvas_id: canvas.id,
+      name: 'Card',
+      html: '<div class="card"><h3 data-doop-prop="title">Pro</h3><doop-use component="Button" data-doop-prop="label:cta" data-doop-if="show-cta"></doop-use></div>',
+    })
+    expect(made.isError).toBe(false)
+    expect(made.text).toContain('COMPONENT: data-doop-prop on <doop-use component="Button">')
+    expect(made.text).toContain('data-doop-slot')
+    expect(made.text).toContain('COMPONENT: data-doop-if on <doop-use component="Button">')
+    const card = findComponent(canvas.id, 'Card')!
+    expect(card.props.map((prop) => prop.name)).toEqual(['title'])
+    expect(card.template).not.toContain('overrides=')
+    expect(card.template).not.toContain('label:cta')
+    expect(store.getFrame(made.data.main_frame_id)!.html).not.toContain('label:cta')
+    expect(store.getFrame(made.data.main_frame_id)!.html).not.toContain('show-cta')
+
+    /* a binding that binds nothing does not stand in for the component's own props */
+    const tier = await call('create_component', {
+      canvas_id: canvas.id,
+      name: 'Tier',
+      html: '<div class="tier"><h3>Pro</h3><doop-use component="Button" data-doop-prop="label:cta">Buy</doop-use></div>',
+    })
+    expect(tier.data.inferred_props).toEqual(['title'])
+    expect(tier.text.match(/COMPONENT: data-doop-prop/g)).toHaveLength(1)
+    expect(findComponent(canvas.id, 'Tier')!.template).not.toContain('overrides=')
+
+    /* the same in a frame, where it is not nested in anything */
+    const placed = await call('create_frame', {
+      canvas_id: canvas.id,
+      name: 'Screen',
+      html: '<doop-use component="Button" data-doop-prop="label" data-doop-on="click"></doop-use>',
+    })
+    expect(placed.text).toContain('COMPONENT: data-doop-prop on <doop-use component="Button">')
+    const html = store.getFrame(placed.data.frame.id)!.html
+    expect(html).not.toContain('data-doop-prop')
+    /* prototype wiring on an instance is the instance's own, and stays */
+    expect(html).toContain('data-doop-on="click"')
+  })
+
+  it('keeps css that restyles a nested component from this one, and names the rules it did not keep', async () => {
+    const canvas = newCanvas()
+    await button(canvas.id)
+    const made = await call('create_component', {
+      canvas_id: canvas.id,
+      name: 'Plan',
+      html: '<div class="plan"><h3 class="name">Pro</h3><doop-use component="Button"></doop-use></div>',
+      css: '.plan { padding: 8px } .plan .btn { width: 100% } .plan > .btn .label { color: red } .btn .label { color: blue } .nope { color: green }',
+    })
+    expect(made.isError).toBe(false)
+    const plan = () => findComponent(canvas.id, 'Plan')!
+    expect(plan().rawCss).toContain('.plan .btn { width: 100% }')
+    expect(plan().rawCss).toContain('.plan > .btn .label { color: red }')
+    /* scoped to this component's instances, so it reaches the Button inside a Plan and no other */
+    expect(plan().css).toContain(`.plan:where([data-doop-instance="${plan().id}"]) .btn { width: 100% }`)
+    expect(plan().rawCss).not.toContain('color: blue')
+    expect(plan().rawCss).not.toContain('.nope')
+    expect(made.text).toContain('COMPONENT: these CSS rules name nothing in “Plan”')
+    expect(made.text).toContain('.btn .label, .nope')
+    expect(made.text).not.toContain('.plan .btn,')
+
+    const frameId = await framed(
+      canvas.id,
+      '<doop-use component="Plan"></doop-use><doop-use component="Button"></doop-use>',
+    )
+    expect(store.getFrame(frameId)!.html).toContain(`.plan:where([data-doop-instance="${plan().id}"]) .btn`)
+
+    const updated = await call('update_component', {
+      canvas_id: canvas.id,
+      component: 'Plan',
+      css: '.plan .btn { width: auto } .label { font-weight: 600 }',
+    })
+    expect(updated.isError).toBe(false)
+    expect(plan().rawCss).toContain('.plan .btn { width: auto }')
+    expect(updated.text).toContain('were not kept: .label.')
+    expect(store.getFrame(frameId)!.html).toContain('width: auto')
+
+    const clean = await call('update_component', {
+      canvas_id: canvas.id,
+      component: 'Plan',
+      css: '.plan .btn { width: 50% }',
+    })
+    expect(clean.text).not.toContain('were not kept')
+  })
+
+  it('names inferred props after what each element is, and lists them in the result', async () => {
+    const canvas = newCanvas()
+    const made = await call('create_component', {
+      canvas_id: canvas.id,
+      name: 'Offer',
+      html: '<article style="padding: 16px"><img src="/a/x.png" alt=""><h3 style="margin: 0">Pro</h3><p class="text-sm mt-2">For teams</p><p>Billed yearly</p><a href="/buy" style="color: blue"><span>Buy</span></a></article>',
+    })
+    expect(made.isError).toBe(false)
+    expect(made.data.component.signature).toBe(
+      'Offer(image: image, title: text, text: text, text-2: text, link: link, label: text)',
+    )
+    expect(made.data.inferred_props).toEqual(['image', 'title', 'text', 'text-2', 'link', 'label'])
+    expect(made.text).toContain('Props inferred from the markup: image, title, text, text-2, link, label')
+    expect(made.text).toContain('data-doop-prop')
+
+    /* names an author wrote are never touched, and nothing is listed as inferred */
+    const own = await call('create_component', {
+      canvas_id: canvas.id,
+      name: 'Named',
+      html: '<div><h3 data-doop-prop="headline">Pro</h3><p>Fixed copy</p></div>',
+    })
+    expect(own.data.component.signature).toBe('Named(headline: text)')
+    expect(own.data.inferred_props).toBeUndefined()
+    expect(own.text).not.toContain('Props inferred')
+  })
+
+  it('says where a component made from markup went, and how to use it', async () => {
+    const canvas = newCanvas()
+    const created = await call('create_component', { canvas_id: canvas.id, name: 'Button', html: BUTTON, css: CSS })
+    expect(created.text).toContain('Components page')
+    expect(created.text).toContain('No instance was placed')
+    expect(created.text).toContain('<doop-use component="Button"')
+    expect(created.text).toContain('insert_instance')
+    const { tools } = await client.listTools()
+    const description = tools.find((tool) => tool.name === 'create_component')!.description!
+    const opening = description.split('. ').slice(0, 2).join('. ')
+    expect(opening).toContain('Components page')
+    expect(opening).toContain('<doop-use')
+    expect(opening).toContain('insert_instance')
+  })
+
+  it('counts one update as one revision, whatever it changes together', async () => {
+    const canvas = newCanvas()
+    await button(canvas.id)
+    const frameId = await framed(canvas.id, '<doop-use component="Button"></doop-use>')
+    const before = findComponent(canvas.id, 'Button')!
+    expect(before.rev).toBe(1)
+
+    const both = await call('update_component', {
+      canvas_id: canvas.id,
+      component: 'Button',
+      html: '<button class="btn wide"><span class="label" data-doop-prop="label">Start</span></button>',
+      props: [{ name: 'tone', type: 'enum', options: ['ghost', 'solid'] }],
+    })
+    expect(both.data.rev).toBe(2)
+    const after = findComponent(canvas.id, 'Button')!
+    expect(after.history.map((entry) => entry.rev)).toEqual([1])
+    /* the kept revision is what instances were rendered from: the old markup with the old props */
+    expect(after.history[0]!.template).toBe(before.template)
+    expect(after.history[0]!.props).toEqual(before.props)
+    const html = store.getFrame(frameId)!.html
+    expect(html).toContain('btn wide')
+    expect(html).toContain('data-doop-rev="2"')
+    /* an instance that set nothing follows the new default */
+    expect(html).toContain('data-tone="ghost"')
+
+    const propsOnly = await call('update_component', {
+      canvas_id: canvas.id,
+      component: 'Button',
+      props: [{ name: 'tone', type: 'enum', options: ['solid', 'ghost', 'outline'] }],
+    })
+    expect(propsOnly.data.rev).toBe(3)
+    expect(store.getFrame(frameId)!.html).toContain('data-tone="solid"')
+
+    const back = await call('restore_component_version', { canvas_id: canvas.id, component: 'Button', rev: 1 })
+    expect(back.data.rev).toBe(4)
+    expect(findComponent(canvas.id, 'Button')!.history.map((entry) => entry.rev)).toEqual([1, 2, 3])
+    expect(store.getFrame(frameId)!.html).not.toContain('btn wide')
+  })
+
   it('cannot reach a canvas it cannot read', async () => {
     const other = store.createCanvas('Private', 'somebody-else')
     const canvas = newCanvas()

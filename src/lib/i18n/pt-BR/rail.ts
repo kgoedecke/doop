@@ -15,6 +15,7 @@ export const rail: Catalog['rail'] = {
   workspaceCanvases: 'Todos os canvases',
   workspacePeople: 'Pessoas',
   workspaceFonts: 'Fontes',
+  workspaceLibraries: 'Bibliotecas',
   workspaceBilling: 'Plano e cobrança',
   workspaceSettings: 'Configurações',
   explore: 'Explorar',

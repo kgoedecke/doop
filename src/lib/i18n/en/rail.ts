@@ -14,6 +14,7 @@ export const rail = {
   workspaceCanvases: 'All canvases',
   workspacePeople: 'People',
   workspaceFonts: 'Fonts',
+  workspaceLibraries: 'Libraries',
   workspaceBilling: 'Plan & billing',
   workspaceSettings: 'Settings',
   explore: 'Explore',

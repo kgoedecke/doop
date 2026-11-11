@@ -19,6 +19,7 @@ import {
   type ComponentDef,
   type ComponentProp,
   type InstanceOverrides,
+  type LibraryComponent,
   type PartOverride,
 } from '../shared/components.ts'
 import { ELEMENT_ID_ATTR, elementIdSelector } from '../shared/elementId.ts'
@@ -26,7 +27,8 @@ import type { Actor, Canvas, Frame } from '../shared/types.ts'
 import { decodeQuotes, familyKey, fontFaceRule, usesFamily, type CustomFont } from '../shared/fonts.ts'
 import { fontsForCanvas } from './fonts.ts'
 import * as actions from './actions.ts'
-import { blankComponent, bumpRevision, contextFor, referencesComponent } from './components.ts'
+import { blankComponent, bumpRevision, contextFor, referencesComponent, withinRevision } from './components.ts'
+import { unmatchedSelectors } from './componentCss.ts'
 import {
   alignParts,
   attrOf,
@@ -51,8 +53,25 @@ import {
   useMarkup,
   withDetachedCss,
 } from './componentEngine.ts'
+import {
+  adoptFromLibrary,
+  findInLibraries,
+  isLibrary,
+  LibraryAdoptError,
+  libraryBlock,
+  libraryChanges,
+  librariesForCanvas,
+  originOf,
+  publishable,
+  publishedOn,
+  publishLibrary as writeLibrary,
+  snapshotClosure,
+  unpublishLibrary as dropLibrary,
+  type LibraryChangeEntry,
+} from './componentLibrary.ts'
 import { resolveElement } from './elementIds.ts'
 import { store } from './store.ts'
+import { mayPublishLibrary } from './workspaces.ts'
 
 /**
  * What a person or an agent can do with components. Each operation ends in an
@@ -63,6 +82,21 @@ import { store } from './store.ts'
  */
 
 export class ComponentError extends Error {}
+
+/** A library action on a canvas that may not have one: personal, or in a
+ *  workspace whose plan lapsed. Routes turn it into the upgrade prompt. */
+export class LibraryPlanError extends ComponentError {
+  constructor(
+    message: string,
+    /** the workspace that needs a plan; undefined when the canvas is in none */
+    readonly workspaceId?: string,
+  ) {
+    super(message)
+  }
+}
+
+/** Publishing where the workspace keeps it to its owner and admins. REST answers 403. */
+export class LibraryPublisherError extends ComponentError {}
 
 type Element = Tree.Element
 
@@ -202,7 +236,7 @@ export function usageOf(canvas: Canvas, id: string): ComponentUsage {
   return { instances: frames.reduce((total, frame) => total + frame.instances, 0), frames }
 }
 
-export function usageExample(def: ComponentDef): string {
+export function usageExample(def: Pick<ComponentDef, 'name' | 'props' | 'slots'>): string {
   const props = def.props
     .filter((prop) => prop.type !== 'boolean')
     .slice(0, 4)
@@ -221,15 +255,44 @@ export function catalogEntry(canvas: Canvas, def: ComponentDef) {
     ...(def.description ? { description: def.description } : {}),
     usage: usageExample(def),
     instances: usageOf(canvas, def.id).instances,
-    ...(def.mainFrameId ? {} : { main_missing: true }),
+    ...(def.source?.library ? libraryLink(def) : def.mainFrameId ? {} : { main_missing: true }),
     ...(def.code ? { code: def.code } : {}),
-    ...updateAvailable(def),
+    ...updateAvailable(canvas, def),
   }
 }
 
-function updateAvailable(def: ComponentDef) {
+/** A component on another canvas, as something to import: what it is and how to
+ *  use it. Not how often it is used there: counting reads that canvas's frame
+ *  HTML, which is loaded per canvas and is not this caller's to load. */
+export function importableEntry(def: ComponentDef) {
+  return {
+    id: def.id,
+    name: def.name,
+    signature: componentSignature(def),
+    ...(def.description ? { description: def.description } : {}),
+    usage: usageExample(def),
+    ...(def.code ? { code: def.code } : {}),
+  }
+}
+
+/** Where a linked component is changed: its library canvas, not here. */
+function libraryLink(def: ComponentDef) {
+  const canvasId = def.source!.canvasId
+  return {
+    library: {
+      canvas_id: canvasId,
+      name: store.getCanvas(canvasId)?.name ?? canvasId,
+      /* the publication this follows; `rev` beside it counts changes on this canvas */
+      rev: def.source!.rev,
+    },
+  }
+}
+
+function updateAvailable(canvas: Canvas, def: ComponentDef) {
   if (!def.source) return {}
-  const origin = store.getComponents(def.source.canvasId).find((candidate) => candidate.id === def.source?.componentId)
+  const origin = def.source.library
+    ? originOf(canvas, def)
+    : store.getComponents(def.source.canvasId).find((candidate) => candidate.id === def.source?.componentId)
   return origin && origin.rev > def.source.rev
     ? { library_update_available: { from_rev: def.source.rev, to_rev: origin.rev, canvas_id: def.source.canvasId } }
     : {}
@@ -307,6 +370,8 @@ export interface CreateFromElement {
 export interface CreateResult {
   component: ComponentDef
   converted: { frameId: string; instances: number }[]
+  /** props named for the author, from what each element is: worth a look, and a rename */
+  inferred: string[]
 }
 
 function checkCapacity(canvasId: string) {
@@ -345,10 +410,11 @@ export function createComponentFromElement(canvasId: string, input: CreateFromEl
   const shape = shapeOf(el)
   const def = blankComponent({ name, description: clip(input.description), props, code: input.code, by: actor.name })
   store.saveComponent(canvasId, def)
+  let inferred: string[] = []
   try {
     setAttr(el, COMPONENT_ATTR, def.id)
     stampParts(el)
-    if (input.autoProps !== false && !hasBindings(el)) inferBindings(el)
+    if (input.autoProps !== false && !hasBindings(el)) inferred = inferBindings(el)
     const html = splice(frame.html, [{ start: located.start, end: located.end, text: serializeOuter(el) }])
     actions.updateFrame(frame.id, { html }, actor)
   } catch (error) {
@@ -359,12 +425,14 @@ export function createComponentFromElement(canvasId: string, input: CreateFromEl
   const saved = requireComponent(canvasId, def.id)
   const converted = input.replaceMatching ? convertMatching(canvasId, shape, saved, actor) : []
   actions.logComponent(canvasId, actor, `made “${saved.name}” a component`)
-  return { component: requireComponent(canvasId, def.id), converted }
+  return { component: requireComponent(canvasId, def.id), converted, inferred }
 }
 
 const clip = (text: string | undefined) => text?.slice(0, MAX_COMPONENT_DESCRIPTION)
 
 function hasBindings(el: Element): boolean {
+  /* on a <doop-use> it binds nothing, so it is no sign the author named their props */
+  if (el.tagName === USE_TAG) return false
   if (attrOf(el, BIND_ATTR) !== undefined) return true
   return kidsOf(el).some(hasBindings)
 }
@@ -423,7 +491,7 @@ export interface CreateFromHtml {
 }
 
 /** A new design with nowhere to live yet: its main goes on the Components page, as a frame of its own. */
-export function createComponentFromHtml(canvasId: string, input: CreateFromHtml, actor: Actor): ComponentDef {
+export function createComponentFromHtml(canvasId: string, input: CreateFromHtml, actor: Actor): CreateResult {
   checkCapacity(canvasId)
   const name = validName(input.name, canvasId)
   const def = blankComponent({
@@ -434,17 +502,41 @@ export function createComponentFromHtml(canvasId: string, input: CreateFromHtml,
     by: actor.name,
   })
   store.saveComponent(canvasId, def)
+  let inferred: string[] = []
   try {
     const root = singleRoot(input.html)
-    if (input.autoProps !== false && !hasBindings(root)) inferBindings(root)
+    if (input.autoProps !== false && !hasBindings(root)) inferred = inferBindings(root)
     setAttr(root, COMPONENT_ATTR, def.id)
     writeNewMain(canvasId, def, serializeOuter(root), input.css ?? '', actor, input.width, input.height)
   } catch (error) {
     store.deleteComponent(canvasId, def.id)
     throw error
   }
+  const component = requireComponent(canvasId, def.id)
+  if (input.css) reportCssNotKept(component, input.css)
   actions.logComponent(canvasId, actor, `created component “${name}”`)
-  return requireComponent(canvasId, def.id)
+  return { component, converted: [], inferred }
+}
+
+const MAX_SELECTORS_NAMED = 8
+
+/** Rules handed over as a component's CSS that it did not keep: said in the result of the call
+ *  that passed them, since the main's frame still shows them and nothing else would. */
+function reportCssNotKept(def: ComponentDef, css: string) {
+  const frame = def.mainFrameId ? store.getFrame(def.mainFrameId) : undefined
+  const main = frame
+    ? findMarked(frame.html, COMPONENT_ATTR).find((found) => attrOf(found.el, COMPONENT_ATTR) === def.id)
+    : undefined
+  if (!frame || !main) return
+  const variants = def.props.filter((prop) => prop.type === 'enum').map((prop) => `data-${prop.name}`)
+  const selectors = unmatchedSelectors(css, main.el, variants)
+  if (!selectors.length) return
+  const more = selectors.length - MAX_SELECTORS_NAMED
+  const named = `${selectors.slice(0, MAX_SELECTORS_NAMED).join(', ')}${more > 0 ? ` and ${more} more` : ''}`
+  actions.addComponentIssue(frame.id, {
+    code: 'css_not_kept',
+    message: `these CSS rules name nothing in “${def.name}” and were not kept: ${named}. A component keeps the rules for its own elements. To restyle a component nested in it, start the selector at one of its own elements (.card .btn), which applies inside this component only; to restyle that component everywhere, update_component it instead.`,
+  })
 }
 
 function writeNewMain(
@@ -522,7 +614,12 @@ function alignedRoot(html: string, def: ComponentDef): Element {
 function nextHtml(def: ComponentDef, input: UpdateInput): string | undefined {
   if (input.find !== undefined) {
     const count = def.template.split(input.find).length - 1
-    if (count === 0) fail('find text is not in the template — read it with get_component')
+    if (count === 0)
+      fail(
+        def.rawCss.includes(input.find)
+          ? 'find text is in the CSS, and find + replace works on the template only — pass the whole changed stylesheet as css (get_component returns the current one)'
+          : 'find text is not in the template — read it with get_component. find + replace works on the template markup only; CSS is replaced whole through css',
+      )
     if (count > 1) fail(`find text occurs ${count} times — include more context so it matches once`)
     return def.template.replace(input.find, input.replace ?? '')
   }
@@ -533,6 +630,10 @@ export function updateComponent(canvasId: string, ref: string, input: UpdateInpu
   const canvas = store.getCanvas(canvasId)
   if (!canvas) fail('canvas not found')
   const def = requireComponent(canvasId, ref)
+  if (def.source?.library && !input.dryRun)
+    fail(
+      `“${def.name}” comes from the workspace library on canvas ${def.source.canvasId}: change it there and publish, then sync_component here. For one instance that must differ, use update_instances.`,
+    )
   if (input.expectedRev !== undefined && input.expectedRev !== def.rev)
     fail(
       `component “${def.name}” is at revision ${def.rev}, not ${input.expectedRev} — someone changed it; read it again`,
@@ -565,13 +666,17 @@ export function updateComponent(canvasId: string, ref: string, input: UpdateInpu
 
   if (nextRoot || input.css !== undefined || input.props !== undefined) {
     const root = nextRoot ?? alignedRoot(def.template, def)
-    writeMain(canvasId, meta, root, input.css, actor, input.head ? def.head : undefined)
+    const write = () => writeMain(canvasId, meta, root, input.css, actor, input.head ? def.head : undefined)
+    /* the props above opened a revision: the main's write is the rest of it, not another */
+    if (propsChanged) withinRevision(canvasId, def.id, write)
+    else write()
   } else actions.broadcastComponent(canvasId, requireComponent(canvasId, def.id), actor)
   /* new defaults change what instances render even when the main's markup did not move */
   if (propsChanged) actions.propagateComponents(canvasId, [requireComponent(canvasId, def.id)], actor)
   if (input.name !== undefined && def.mainFrameId && store.getFrame(def.mainFrameId)?.name === def.name) {
     actions.updateFrame(def.mainFrameId, { name: meta.name }, actor)
   }
+  if (input.css) reportCssNotKept(requireComponent(canvasId, def.id), input.css)
   actions.logComponent(canvasId, actor, `updated component “${meta.name}”`)
   return { component: requireComponent(canvasId, def.id), dry_run: false, impact }
 }
@@ -1074,6 +1179,10 @@ export function importComponent(
   ref: string,
   actor: Actor,
 ): ComponentDef {
+  const target = store.getCanvas(targetCanvasId)
+  if (!target) fail('canvas not found')
+  const shared = librariesForCanvas(target).find((library) => library.canvasId === sourceCanvasId)
+  if (shared) return useLibraryComponent(target, sourceCanvasId, ref, actor)
   const origin = findComponent(sourceCanvasId, ref)
   if (!origin) fail(`no component “${ref}” on canvas ${sourceCanvasId}`)
   refuseSiblings(targetCanvasId, sourceCanvasId, origin)
@@ -1179,10 +1288,470 @@ function pullFrom(
 export function syncComponent(canvasId: string, ref: string, actor: Actor, canRead: (canvasId: string) => boolean) {
   const def = requireComponent(canvasId, ref)
   if (!def.source) fail(`“${def.name}” was not imported from a library`)
+  if (def.source.library) {
+    const { component, updated } = pullFromLibrary(canvasId, def, actor)
+    return { component, updated }
+  }
   if (!canRead(def.source.canvasId)) fail('this account cannot read that library canvas')
   const origin = findComponent(def.source.canvasId, def.source.componentId)
   if (!origin) fail('its library no longer has this component')
   /* the whole tree: a nested component can move without this one moving, and this one can start using new ones */
   const updated = importDependencies(canvasId, def.source.canvasId, origin, actor, new Set())
   return { component: requireComponent(canvasId, def.id), updated }
+}
+
+/* ------------------------------------------------------------------ */
+/* Workspace libraries: published once, used on every canvas there.     */
+/* Spec: .context/specs/workspace-component-library.md.                 */
+/* ------------------------------------------------------------------ */
+
+function requireLibraryPlan(canvas: Canvas, doing: string) {
+  const block = libraryBlock(canvas)
+  if (!block) return
+  if (block.reason === 'no_workspace')
+    throw new LibraryPlanError(
+      `${doing} needs this canvas to be in a workspace: shared component libraries are part of the Team plan. Tell the person, who can move the canvas into a workspace from Home.`,
+    )
+  throw new LibraryPlanError(
+    `${doing} needs this canvas's workspace to be on the Team plan. Tell the person, who can upgrade it from the workspace's billing page.`,
+    block.workspaceId,
+  )
+}
+
+/** Whether the workspace's publish setting lets this person publish from the
+ *  canvas (true where there is no workspace: the plan check speaks there). */
+export function mayPublishFrom(canvas: Pick<Canvas, 'workspaceId'>, userId: string | undefined): boolean {
+  return !canvas.workspaceId || mayPublishLibrary(canvas.workspaceId, userId)
+}
+
+/** The one gate on who publishes and withdraws: REST, MCP and the resident
+ *  agent all reach the library through the two functions that call it. */
+function requireLibraryPublisher(canvas: Canvas, userId: string | undefined) {
+  if (mayPublishFrom(canvas, userId)) return
+  throw new LibraryPublisherError(
+    "Publishing to this workspace's library is limited to its owner and admins. One of them can publish this, or change who may publish in the workspace's General settings.",
+  )
+}
+
+/** A published component as the catalog lists it, ready to use by name. */
+export function libraryEntry(snapshot: LibraryComponent) {
+  return {
+    id: snapshot.id,
+    name: snapshot.name,
+    signature: componentSignature(snapshot),
+    ...(snapshot.description ? { description: snapshot.description } : {}),
+    usage: usageExample(snapshot),
+    /* the publication's version: what a preview of it is keyed by */
+    rev: snapshot.rev,
+    ...(snapshot.code ? { code: snapshot.code } : {}),
+  }
+}
+
+/** What the canvas's workspace libraries publish that it does not use yet. */
+export function libraryCatalog(canvas: Canvas) {
+  const linked = new Set(
+    (canvas.components ?? []).flatMap((def) => (def.source?.library ? [`${def.source.canvasId}:${def.id}`] : [])),
+  )
+  return librariesForCanvas(canvas).flatMap((library) => {
+    const components = library.components.filter((entry) => !linked.has(`${entry.canvasId}:${entry.id}`))
+    return components.length
+      ? [{ canvas_id: library.canvasId, canvas_name: library.name, components: components.map(libraryEntry) }]
+      : []
+  })
+}
+
+/** Take a published component up on this canvas (a no-op when it already is). */
+export function useLibraryComponent(canvas: Canvas, libraryCanvasId: string, ref: string, actor: Actor): ComponentDef {
+  requireLibraryPlan(canvas, 'Using a library component')
+  const snapshot = findInLibraries(canvas, ref).find((entry) => entry.canvasId === libraryCanvasId)
+  if (!snapshot) {
+    const names = publishedOn(libraryCanvasId).map((entry) => entry.name)
+    fail(
+      `that library does not publish “${ref}”${names.length ? ` — it publishes: ${names.join(', ')}` : ''}. Its owner may need to publish it first.`,
+    )
+  }
+  try {
+    actions.announceAdopted(canvas.id, adoptFromLibrary(canvas.id, snapshot, actor.name), actor)
+  } catch (error) {
+    if (error instanceof LibraryAdoptError) fail(error.message)
+    throw error
+  }
+  return requireComponent(canvas.id, snapshot.id)
+}
+
+/** A linked definition takes its library's published state: a new revision here,
+ *  carried to every instance like any change to a main. */
+function relink(canvasId: string, def: ComponentDef, snapshot: LibraryComponent, actor: Actor): ComponentDef {
+  const bumped = bumpRevision(def, actor.name)
+  const next: ComponentDef = {
+    ...bumped,
+    /* a link's revision is the publication it shows, so a frame's markers and the
+       library agree on the number; never below the next local one, for links
+       made before the two were kept together */
+    rev: Math.max(bumped.rev, snapshot.rev),
+    description: snapshot.description,
+    template: snapshot.template,
+    css: snapshot.css,
+    rawCss: snapshot.rawCss,
+    head: snapshot.head,
+    props: snapshot.props,
+    slots: snapshot.slots,
+    source: { canvasId: snapshot.canvasId, componentId: snapshot.id, rev: snapshot.rev, library: true },
+  }
+  if (snapshot.code) next.code = snapshot.code
+  else delete next.code
+  store.saveComponent(canvasId, next)
+  return next
+}
+
+/** `quiet` leaves the activity line to the caller (updateLibraryConsumers writes one per canvas). */
+function pullFromLibrary(canvasId: string, def: ComponentDef, actor: Actor, quiet = false) {
+  const canvas = store.getCanvas(canvasId)
+  if (!canvas) fail('canvas not found')
+  const origin = originOf(canvas, def)
+  if (!origin) fail(`its library no longer publishes “${def.name}”; it stays as it is here`)
+  /* the whole tree: a nested component can move without this one moving, and this one can start using new ones */
+  const closure = snapshotClosure(origin)
+  /* all of it fits, or none of it is written: a pull refused half way would leave
+     some definitions on the new publication and their instances on the old one */
+  const before = store.getComponents(canvasId)
+  let missing = 0
+  for (const snapshot of closure) {
+    const local = before.find((candidate) => candidate.id === snapshot.id)
+    if (!local) missing += 1
+    else if (!local.source?.library || local.source.canvasId !== snapshot.canvasId)
+      fail(
+        `this update is built from “${snapshot.name}”, and this canvas has a component of its own under that id (“${local.name}”, ${local.id}; one canvas was copied from the other), so nothing was changed. Rename is not enough: detach or delete that component here first, or keep the version this canvas has.`,
+      )
+  }
+  if (before.length + missing > MAX_COMPONENTS)
+    fail(
+      `this update needs ${missing} more component${missing === 1 ? '' : 's'}, and a canvas holds at most ${MAX_COMPONENTS}; nothing was changed`,
+    )
+  const changed: ComponentDef[] = []
+  const added: ComponentDef[] = []
+  for (const snapshot of closure) {
+    const local = store.getComponents(canvasId).find((candidate) => candidate.id === snapshot.id)
+    if (!local) {
+      try {
+        added.push(...adoptFromLibrary(canvasId, snapshot, actor.name))
+      } catch (error) {
+        if (error instanceof LibraryAdoptError) fail(error.message)
+        throw error
+      }
+    } else if (local.source?.library && local.source.canvasId === snapshot.canvasId && local.source.rev < snapshot.rev)
+      changed.push(relink(canvasId, local, snapshot, actor))
+  }
+  actions.announceAdopted(canvasId, added, actor)
+  let frames: actions.PropagationReport['frames'] = []
+  if (changed.length) {
+    /* before the instances are rewritten, so each frame's token block has what the new CSS names */
+    actions.carryLibraryTokens(canvasId, changed, actor)
+    frames = actions.propagateComponents(canvasId, changed, actor).frames
+    if (!quiet)
+      actions.logComponent(
+        canvasId,
+        actor,
+        `updated ${changed.map((entry) => `“${entry.name}”`).join(', ')} from the workspace library`,
+      )
+  }
+  return {
+    component: requireComponent(canvasId, def.id),
+    updated: changed.length > 0 || added.length > 0,
+    /* what moved, for a caller reporting on it */
+    changed: changed.map((entry) => entry.name),
+    frames,
+  }
+}
+
+export interface LibraryStatus {
+  /** whether this canvas has published anything */
+  library: boolean
+  changes: LibraryChangeEntry[]
+  published_at?: number
+  published_by?: string
+}
+
+/** A canvas as a library: what it has published and what publishing now would change. */
+export function libraryStatus(canvas: Canvas): LibraryStatus {
+  const snapshots = publishedOn(canvas.id)
+  const latest = snapshots.reduce<LibraryComponent | undefined>(
+    (newest, entry) => (!newest || entry.publishedAt > newest.publishedAt ? entry : newest),
+    undefined,
+  )
+  return {
+    library: isLibrary(canvas.id),
+    changes: libraryChanges(canvas),
+    ...(latest ? { published_at: latest.publishedAt, published_by: latest.publishedBy } : {}),
+  }
+}
+
+/** The workspace's canvases using what this library publishes, and which of their
+ *  links are behind its latest publication: where a publish still has to be pulled. */
+export function libraryConsumers(canvas: Canvas) {
+  if (!canvas.workspaceId) return []
+  const snapshots = publishedOn(canvas.id)
+  return store.allCanvases().flatMap((other) => {
+    if (other.id === canvas.id || other.workspaceId !== canvas.workspaceId) return []
+    const linked = (other.components ?? []).filter((def) => def.source?.library && def.source.canvasId === canvas.id)
+    if (!linked.length) return []
+    const behind = linked.filter((def) => {
+      const snapshot = snapshots.find((entry) => entry.id === def.source?.componentId)
+      return !!snapshot && snapshot.rev > (def.source?.rev ?? 0)
+    })
+    return [
+      {
+        canvas_id: other.id,
+        canvas_name: other.name,
+        components: linked.map((def) => def.name),
+        ...(behind.length ? { update_waiting: behind.map((def) => def.name) } : {}),
+      },
+    ]
+  })
+}
+
+/** The linked components on a canvas whose library has published something newer. */
+export function waitingLibraryUpdates(canvas: Canvas): ComponentDef[] {
+  return (canvas.components ?? []).filter((def) => {
+    const origin = originOf(canvas, def)
+    return !!origin && !!def.source && origin.rev > def.source.rev
+  })
+}
+
+/** Publish this canvas's components to its workspace: all of them, or the ones named
+ *  (each with what it is built from). Other canvases see an update and pull it when they choose.
+ *  `publisherId` is the account acting (the agent's person, for an agent), checked against the
+ *  workspace's publish setting; a dry run is checked too, so an agent hears the refusal first. */
+export function publishToLibrary(
+  canvasId: string,
+  refs: readonly string[] | undefined,
+  actor: Actor,
+  publisherId: string | undefined,
+  dryRun = false,
+) {
+  const canvas = store.getCanvas(canvasId)
+  if (!canvas) fail('canvas not found')
+  requireLibraryPlan(canvas, 'Publishing a library')
+  requireLibraryPublisher(canvas, publisherId)
+  const ids = refs?.map((ref) => {
+    const def = requireComponent(canvasId, ref)
+    if (def.source?.library)
+      fail(`“${def.name}” comes from another library and is published there, not from this canvas`)
+    if (!publishable(def)) fail(`“${def.name}” has no design yet, so there is nothing to publish`)
+    return def.id
+  })
+  if (!ids && !(canvas.components ?? []).some(publishable) && !isLibrary(canvasId))
+    fail('this canvas has no components of its own to publish — make one with create_component first')
+  const result = writeLibrary(canvas, ids, actor.name, dryRun)
+  if (!dryRun && (result.published.length || result.removed.length)) {
+    const count = result.published.length
+    actions.logComponent(
+      canvasId,
+      actor,
+      count
+        ? `published ${count} component${count === 1 ? '' : 's'} to the workspace library`
+        : 'removed components from the workspace library',
+    )
+    actions.broadcastLibrary(canvas, actor)
+  }
+  return { dry_run: dryRun, ...result, library: libraryStatus(canvas) }
+}
+
+/** Stop offering this canvas's components to the workspace. Nothing changes on canvases using them. */
+export function unpublishFromLibrary(
+  canvasId: string,
+  refs: readonly string[] | undefined,
+  actor: Actor,
+  publisherId: string | undefined,
+) {
+  const canvas = store.getCanvas(canvasId)
+  if (!canvas) fail('canvas not found')
+  requireLibraryPublisher(canvas, publisherId)
+  const ids = refs?.map(
+    (ref) => publishedOn(canvasId).find((entry) => entry.id === ref || entry.name === ref)?.id ?? ref,
+  )
+  const gone = dropLibrary(canvasId, ids)
+  if (gone.length) {
+    actions.logComponent(
+      canvasId,
+      actor,
+      `stopped sharing ${gone.length} component${gone.length === 1 ? '' : 's'} with the workspace`,
+    )
+    actions.broadcastLibrary(canvas, actor)
+  }
+  return { unpublished: gone.map((entry) => ({ id: entry.id, name: entry.name })), library: libraryStatus(canvas) }
+}
+
+/* ---- update everywhere: the one way a publication is pushed ---- */
+
+export interface LibraryUpdateOptions {
+  /** report what would change and change nothing */
+  dryRun?: boolean
+  /** may the acting account change that canvas? one it may not is skipped and reported */
+  canEdit: (canvasId: string) => boolean
+  /** may it open that canvas? one it may not is reported without its id and name */
+  canRead: (canvasId: string) => boolean
+  /** who is acting: where a workspace keeps publishing to its owner and admins,
+   *  sending a library's changes to every canvas is theirs too */
+  publisherId: string | undefined
+}
+
+export interface LibraryConsumerUpdate {
+  canvas_id: string
+  canvas_name: string
+  /** the linked components brought up to the publication */
+  updated: string[]
+  /** frames rewritten; in a dry run, the frames holding an instance of what would update */
+  frames_changed: number
+  /** approved frames that went back to review; in a dry run, the approved ones among frames_changed */
+  approvals_withdrawn: number
+}
+
+export interface LibrarySkippedConsumer {
+  /** absent for a canvas the account cannot open */
+  canvas_id?: string
+  canvas_name?: string
+  reason: 'no_edit_access' | 'failed'
+  message: string
+}
+
+export interface LibraryUpdateReport {
+  dry_run: boolean
+  library: { canvas_id: string; canvas_name: string }
+  canvases: LibraryConsumerUpdate[]
+  skipped: LibrarySkippedConsumer[]
+}
+
+/** The links on a canvas that pulling this library's publication would move: the ones
+ *  behind it and, as pullFromLibrary walks them, whatever they are built from that is behind too. */
+function staleLinks(canvas: Canvas, libraryCanvasId: string): ComponentDef[] {
+  const stale = new Map<string, ComponentDef>()
+  for (const def of waitingLibraryUpdates(canvas)) {
+    const origin = def.source?.canvasId === libraryCanvasId ? originOf(canvas, def) : undefined
+    if (!origin) continue
+    for (const snapshot of snapshotClosure(origin)) {
+      const local = (canvas.components ?? []).find((candidate) => candidate.id === snapshot.id)
+      if (local?.source?.library && local.source.canvasId === snapshot.canvasId && local.source.rev < snapshot.rev)
+        stale.set(local.id, local)
+    }
+  }
+  return [...stale.values()]
+}
+
+function previewConsumerUpdate(canvas: Canvas, libraryCanvasId: string): LibraryConsumerUpdate | undefined {
+  const stale = staleLinks(canvas, libraryCanvasId)
+  if (!stale.length) return undefined
+  const frames = new Map<string, boolean>()
+  for (const def of stale) for (const frame of usageOf(canvas, def.id).frames) frames.set(frame.id, frame.approved)
+  return {
+    canvas_id: canvas.id,
+    canvas_name: canvas.name,
+    updated: stale.map((def) => def.name),
+    frames_changed: frames.size,
+    approvals_withdrawn: [...frames.values()].filter(Boolean).length,
+  }
+}
+
+/** Pull the library's publication into one loaded canvas. A refusal part of the way
+ *  leaves what was already pulled in place, so both halves are returned. */
+function pullIntoConsumer(canvas: Canvas, library: Canvas, actor: Actor) {
+  const updated = new Set<string>()
+  const frames = new Map<string, boolean>()
+  let refusal: string | undefined
+  try {
+    for (const def of waitingLibraryUpdates(canvas)) {
+      if (def.source?.canvasId !== library.id) continue
+      const pulled = pullFromLibrary(canvas.id, def, actor, true)
+      for (const name of pulled.changed) updated.add(name)
+      for (const frame of pulled.frames) frames.set(frame.id, frame.approvalLost || frames.get(frame.id) === true)
+    }
+  } catch (error) {
+    if (!(error instanceof ComponentError)) throw error
+    refusal = error.message
+  }
+  if (updated.size)
+    actions.logComponent(
+      canvas.id,
+      actor,
+      `updated ${[...updated].map((name) => `“${name}”`).join(', ')} from the workspace library “${library.name}”, which was updated on every canvas using it`,
+    )
+  const update: LibraryConsumerUpdate | undefined = updated.size
+    ? {
+        canvas_id: canvas.id,
+        canvas_name: canvas.name,
+        updated: [...updated],
+        frames_changed: frames.size,
+        approvals_withdrawn: [...frames.values()].filter(Boolean).length,
+      }
+    : undefined
+  return { update, refusal }
+}
+
+/** Bring every canvas of the workspace that uses this library up to its latest
+ *  publication, in one step. Publishing never does this: it is its own act, by someone
+ *  who may edit each canvas it changes, and it reports canvas by canvas what it did.
+ *  Each pull is the ordinary one (pullFromLibrary): history is filed, approved frames
+ *  that change go back to review and the canvas's room is told.
+ *
+ *  Frame HTML is loaded per canvas (store.load), and a pull reads and rewrites the
+ *  consumer's frames, so each consumer is loaded and held while it is worked on: one
+ *  at a time, so a workspace of many canvases is never all in memory for this. */
+export async function updateLibraryConsumers(
+  libraryCanvasId: string,
+  actor: Actor,
+  options: LibraryUpdateOptions,
+): Promise<LibraryUpdateReport> {
+  const library = store.getCanvas(libraryCanvasId)
+  if (!library) fail('canvas not found')
+  requireLibraryPlan(library, 'Updating the canvases that use a library')
+  requireLibraryPublisher(library, options.publisherId)
+  if (!isLibrary(library.id))
+    fail('this canvas has not published a library, so no canvas follows it — publish_library comes first')
+  const report: LibraryUpdateReport = {
+    dry_run: options.dryRun === true,
+    library: { canvas_id: library.id, canvas_name: library.name },
+    canvases: [],
+    skipped: [],
+  }
+  for (const consumer of libraryConsumers(library)) {
+    if (!consumer.update_waiting) continue
+    const named = options.canRead(consumer.canvas_id)
+      ? { canvas_id: consumer.canvas_id, canvas_name: consumer.canvas_name }
+      : {}
+    if (!options.canEdit(consumer.canvas_id)) {
+      report.skipped.push({
+        ...named,
+        reason: 'no_edit_access',
+        message: 'this account may not edit that canvas; someone who can has to pull the update there',
+      })
+      continue
+    }
+    const canvas = await store.load(consumer.canvas_id)
+    /* deleted, or moved out of the workspace, while an earlier canvas was being read */
+    if (!canvas) continue
+    const release = store.hold(canvas.id)
+    try {
+      if (report.dry_run) {
+        const preview = previewConsumerUpdate(canvas, library.id)
+        if (preview) report.canvases.push(preview)
+        continue
+      }
+      const { update, refusal } = pullIntoConsumer(canvas, library, actor)
+      if (update) report.canvases.push(update)
+      if (refusal) report.skipped.push({ ...named, reason: 'failed', message: refusal })
+    } finally {
+      release()
+    }
+  }
+  if (!report.dry_run && report.canvases.length) {
+    const count = report.canvases.length
+    actions.logComponent(
+      library.id,
+      actor,
+      `updated ${count} canvas${count === 1 ? '' : 'es'} to this library’s latest publication`,
+    )
+    /* the library's own panel counts who is behind: it reads again */
+    actions.broadcastLibrary(library, actor)
+  }
+  return report
 }

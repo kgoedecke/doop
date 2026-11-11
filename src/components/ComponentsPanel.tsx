@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import type { ComponentDef } from '../../shared/components'
 import { api, type ComponentCandidate, type ComponentLibrary } from '../lib/api'
 import {
@@ -10,8 +10,12 @@ import {
   renameComponent,
 } from '../lib/components'
 import { useT } from '../lib/i18n'
+import { useCanvasLibrary } from '../lib/library'
+import { useLibraryResume } from '../lib/libraryResume'
 import { cn } from '@/lib/utils'
 import { canEditOpenCanvas, useStore } from '../lib/store'
+import { ComponentThumb, useTokenStamp } from './ComponentThumb'
+import { LibraryNotices, LibrarySection, LibraryUpgradeFlow, PublishLibraryDialog } from './LibrarySection'
 import { ConfirmDialog } from './ui/alert-dialog'
 import { Button } from './ui/button'
 import {
@@ -21,71 +25,10 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from './ui/dropdown-menu'
-import { ComponentIcon, MoreHorizontalIcon } from './ui/icons'
+import { BookOpenIcon, ComponentIcon, MoreHorizontalIcon } from './ui/icons'
 import { IconButton } from './ui/icon-button'
 import { Input } from './ui/input'
 import { PanelSearch } from './ui/panel'
-
-/** A component's sheet in an inert iframe: no scripts, no clicks, scaled to the card. */
-/** A short fingerprint of a string, to key a refetch on content rather than identity. */
-function stamp(text: string): string {
-  let hash = 0
-  for (let i = 0; i < text.length; i++) hash = (Math.imul(hash, 31) + text.charCodeAt(i)) | 0
-  return (hash >>> 0).toString(36)
-}
-
-function ComponentThumb({ def, canvasId }: { def: ComponentDef; canvasId: string }) {
-  const t = useT()
-  const [sheet, setSheet] = useState<{ key: string; html: string; width: number; height: number } | null>(null)
-  /* the sheet carries the canvas's token values, so a token edit redraws it as a revision does */
-  const tokens = useStore((s) => s.canvas?.tokens)
-  const themes = useStore((s) => s.canvas?.tokenThemes)
-  const tokenStamp = useMemo(() => stamp(JSON.stringify([tokens ?? [], themes ?? []])), [tokens, themes])
-  const key = `${def.id}:${def.rev}:${tokenStamp}`
-  /* the panel is resizable, so the sheet scales to the card it is in */
-  const box = useRef<HTMLDivElement>(null)
-  const [boxWidth, setBoxWidth] = useState(0)
-  useEffect(() => {
-    if (!box.current) return
-    const observer = new ResizeObserver(([entry]) => {
-      if (entry) setBoxWidth(entry.contentRect.width)
-    })
-    observer.observe(box.current)
-    return () => observer.disconnect()
-  }, [])
-  useEffect(() => {
-    let live = true
-    api
-      .componentPreview(canvasId, def.id)
-      .then((next) => {
-        if (live) setSheet({ key, ...next })
-      })
-      .catch(console.error)
-    return () => {
-      live = false
-    }
-  }, [canvasId, def.id, key])
-  const ready = sheet?.key === key && boxWidth > 0
-  const scale = ready ? boxWidth / sheet.width : 1
-  return (
-    <div ref={box} className="w-full">
-      {ready ? (
-        <div className="overflow-hidden rounded-row bg-surface shadow-ring" style={{ height: sheet.height * scale }}>
-          <iframe
-            title={t('components.previewTitle', { name: def.name })}
-            sandbox=""
-            srcDoc={sheet.html}
-            tabIndex={-1}
-            className="pointer-events-none origin-top-left border-0"
-            style={{ width: sheet.width, height: sheet.height, transform: `scale(${scale})` }}
-          />
-        </div>
-      ) : (
-        <div className="h-16 rounded-row bg-paper-deep" />
-      )}
-    </div>
-  )
-}
 
 /** The card's name as a field: Enter or a blur saves, Escape puts it back. */
 function ComponentNameInput({ def, onDone }: { def: ComponentDef; onDone: () => void }) {
@@ -123,7 +66,21 @@ export function ComponentsPanel() {
   const t = useT()
   const canvasId = useStore((s) => s.canvas?.id)
   const components = useStore((s) => s.canvas?.components)
+  const canvasName = useStore((s) => s.canvas?.name)
   const canEdit = useStore(canEditOpenCanvas)
+  const tokenStamp = useTokenStamp()
+  const shared = useCanvasLibrary(canvasId ?? '', canEdit)
+  /* the publish dialog (`only` = opened from that component's menu) and the way to a library */
+  const [publishing, setPublishing] = useState<{ only?: string } | null>(null)
+  const [wall, setWall] = useState<{ workspaceId?: string; reason: string; only?: string } | null>(null)
+  /* back from checkout: the publish dialog they were on the way to */
+  useLibraryResume({
+    canvasId,
+    canEdit,
+    status: shared.status,
+    reload: shared.reload,
+    onPublish: (only) => setPublishing(only ? { only } : {}),
+  })
   const [query, setQuery] = useState('')
   const [candidates, setCandidates] = useState<ComponentCandidate[] | null>(null)
   const [libraries, setLibraries] = useState<ComponentLibrary[] | null>(null)
@@ -142,8 +99,24 @@ export function ComponentsPanel() {
   }, [components, query])
 
   if (!canvasId) return null
+  const status = shared.status
+  const updates = new Set(status?.updates.map((update) => update.id))
+  /* publish this component: the dialog where the canvas may have a library, else the way to one */
+  const share = (def?: ComponentDef) => {
+    if (!status) return
+    if (status.entitled) return setPublishing(def ? { only: def.id } : {})
+    setWall({
+      ...(status.blocked === 'plan_required' ? { workspaceId: status.workspaceId } : {}),
+      reason: def ? t('components.libraryWallReasonOne', { name: def.name }) : t('components.libraryWallReason'),
+      ...(def ? { only: def.id } : {}),
+    })
+  }
   const scan = () => api.componentCandidates(canvasId).then(setCandidates).catch(console.error)
-  const browse = () => api.componentLibraries(canvasId).then(setLibraries).catch(console.error)
+  const browse = () =>
+    api
+      .componentLibraries(canvasId)
+      .then((all) => setLibraries(all.filter((library) => !library.library)))
+      .catch(console.error)
   const convert = async (candidate: ComponentCandidate) => {
     const frame = useStore.getState().canvas?.frames.find((f) => f.id === candidate.example.frame_id)
     if (!frame) return
@@ -157,6 +130,7 @@ export function ComponentsPanel() {
         className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto overscroll-contain px-3 pt-2 pb-3"
         data-slot="components-panel"
       >
+        <LibraryNotices canvasId={canvasId} canEdit={canEdit} status={status} onPublish={() => share()} />
         {canEdit && (
           <div className="flex flex-col gap-1.5 border-b border-line-soft pb-2.5">
             <div className="flex flex-col gap-1.5">
@@ -224,13 +198,28 @@ export function ComponentsPanel() {
                 event.dataTransfer.effectAllowed = 'copy'
               }}
             >
-              <ComponentThumb def={def} canvasId={canvasId} />
+              <ComponentThumb
+                title={t('components.previewTitle', { name: def.name })}
+                sheetKey={`${def.id}:${def.rev}:${tokenStamp}`}
+                load={() => api.componentPreview(canvasId, def.id)}
+              />
               <span className="flex min-w-0 items-center gap-1.5 text-body text-ink">
-                <ComponentIcon size="rail" className="flex-none text-brand" />
+                {def.source?.library ? (
+                  <BookOpenIcon
+                    size="rail"
+                    className="flex-none text-brand"
+                    aria-label={t('components.libraryLinked')}
+                  />
+                ) : (
+                  <ComponentIcon size="rail" className="flex-none text-brand" />
+                )}
                 {renaming === def.id ? (
                   <ComponentNameInput def={def} onDone={() => setRenaming(null)} />
                 ) : (
-                  <span className="truncate" onDoubleClick={canEdit ? () => setRenaming(def.id) : undefined}>
+                  <span
+                    className="truncate"
+                    onDoubleClick={canEdit && !def.source?.library ? () => setRenaming(def.id) : undefined}
+                  >
                     {def.name}
                   </span>
                 )}
@@ -260,7 +249,7 @@ export function ComponentsPanel() {
                         {t('components.insertInstance')}
                       </DropdownMenuItem>
                     )}
-                    {canEdit && (
+                    {canEdit && !def.source?.library && (
                       <DropdownMenuItem
                         onSelect={() => {
                           renameFromMenu.current = true
@@ -269,8 +258,19 @@ export function ComponentsPanel() {
                         {t('components.rename')}
                       </DropdownMenuItem>
                     )}
-                    <DropdownMenuItem onSelect={() => goToMain(def)}>{t('components.goToMain')}</DropdownMenuItem>
-                    {canEdit && def.source && (
+                    <DropdownMenuItem onSelect={() => goToMain(def)}>
+                      {def.source?.library ? t('components.libraryOpen') : t('components.goToMain')}
+                    </DropdownMenuItem>
+                    {canEdit &&
+                      !def.source &&
+                      def.rev > 0 &&
+                      status?.canPublish &&
+                      (status.entitled || status.billing) && (
+                        <DropdownMenuItem onSelect={() => share(def)}>
+                          {t('components.libraryPublishOne')}
+                        </DropdownMenuItem>
+                      )}
+                    {canEdit && def.source && (!def.source.library || updates.has(def.id)) && (
                       <DropdownMenuItem
                         onSelect={() => {
                           api
@@ -306,6 +306,40 @@ export function ComponentsPanel() {
             {def.description && <p className="line-clamp-2 text-caption text-ink-soft">{def.description}</p>}
           </article>
         ))}
+        <LibrarySection
+          canvasId={canvasId}
+          canEdit={canEdit}
+          query={query}
+          status={status}
+          libraries={shared.libraries}
+          onPublish={() => share()}
+          onWall={(next) => setWall({ ...next, reason: t('components.libraryWallReason') })}
+        />
+        {publishing && status && (
+          <PublishLibraryDialog
+            canvasId={canvasId}
+            status={status}
+            only={publishing.only}
+            onClose={() => setPublishing(null)}
+            onDone={() => {
+              setPublishing(null)
+              shared.reload()
+            }}
+          />
+        )}
+        {wall && (
+          <LibraryUpgradeFlow
+            canvas={{ id: canvasId, name: canvasName ?? '' }}
+            wall={wall}
+            reason={wall.reason}
+            only={wall.only}
+            onClose={() => setWall(null)}
+            onDone={() => {
+              setWall(null)
+              shared.reload()
+            }}
+          />
+        )}
         <ConfirmDialog
           open={!!confirmDelete}
           onOpenChange={(open) => !open && setConfirmDelete(null)}

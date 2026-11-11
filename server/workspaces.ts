@@ -13,8 +13,9 @@ import { notifyUsers } from './userEvents.ts'
 import { avatarUrl } from '../shared/avatar.ts'
 import { isBillingInterval, isWorkspaceActive } from '../shared/billing.ts'
 import type { BillingInterval, WorkspaceStatus } from '../shared/billing.ts'
-import { isWorkspaceRole } from '../shared/types.ts'
+import { isLibraryPublishPolicy, isWorkspaceRole } from '../shared/types.ts'
 import type {
+  LibraryPublishPolicy,
   WorkspaceDetail,
   WorkspaceInvite,
   WorkspaceMember,
@@ -49,6 +50,8 @@ export interface WorkspaceRecord {
   currentPeriodEnd: number | null
   cancelAtPeriodEnd: boolean
   billingEventAt: number | null
+  /** who may publish to the component library; stored null for 'everyone' */
+  libraryPublish: LibraryPublishPolicy
   createdAt: number
   updatedAt: number
 }
@@ -86,6 +89,7 @@ export async function hydrateWorkspaces(): Promise<void> {
       currentPeriodEnd: r.currentPeriodEnd,
       cancelAtPeriodEnd: r.cancelAtPeriodEnd,
       billingEventAt: r.billingEventAt,
+      libraryPublish: r.libraryPublish === 'admins' ? 'admins' : 'everyone',
       createdAt: r.createdAt,
       updatedAt: r.updatedAt,
     })
@@ -170,9 +174,19 @@ export function summaryFor(ws: WorkspaceRecord, viewerId: string): WorkspaceSumm
     canvasCount: store.countWorkspaceCanvases(ws.id),
     ...(ws.currentPeriodEnd ? { currentPeriodEnd: ws.currentPeriodEnd } : {}),
     cancelAtPeriodEnd: ws.cancelAtPeriodEnd,
+    libraryPublish: ws.libraryPublish,
     createdAt: ws.createdAt,
     updatedAt: ws.updatedAt,
   }
+}
+
+/** May this person publish to (or withdraw from) the workspace's component
+ *  library, as far as the workspace's setting goes? Editing the library canvas
+ *  is the caller's check. A workspace that is gone restricts nothing. */
+export function mayPublishLibrary(workspaceId: string, userId: string | undefined): boolean {
+  const ws = records.get(workspaceId)
+  if (!ws || ws.libraryPublish === 'everyone') return true
+  return hasRole(workspaceId, userId, 'admin')
 }
 
 /** Every workspace on the instance, for the admin's default-workspace pick. */
@@ -207,6 +221,7 @@ export function createWorkspace(name: string, ownerId: string): WorkspaceRecord 
     currentPeriodEnd: null,
     cancelAtPeriodEnd: false,
     billingEventAt: null,
+    libraryPublish: 'everyone',
     createdAt: now,
     updatedAt: now,
   }
@@ -214,7 +229,7 @@ export function createWorkspace(name: string, ownerId: string): WorkspaceRecord 
   membersOf(ws.id).set(ownerId, { role: 'owner', addedAt: now })
   swallow(
     db.transaction(async (tx) => {
-      await tx.insert(t.workspaces).values(ws)
+      await tx.insert(t.workspaces).values({ ...ws, libraryPublish: null })
       await tx
         .insert(t.workspaceMembers)
         .values({ workspaceId: ws.id, userId: ownerId, role: 'owner', addedBy: ownerId, addedAt: now })
@@ -229,6 +244,20 @@ export function renameWorkspace(id: string, name: string): WorkspaceRecord | und
   ws.name = name
   ws.updatedAt = Date.now()
   swallow(db.update(t.workspaces).set({ name, updatedAt: ws.updatedAt }).where(eq(t.workspaces.id, id)))
+  return ws
+}
+
+export function setLibraryPublish(id: string, policy: LibraryPublishPolicy): WorkspaceRecord | undefined {
+  const ws = records.get(id)
+  if (!ws) return undefined
+  ws.libraryPublish = policy
+  ws.updatedAt = Date.now()
+  swallow(
+    db
+      .update(t.workspaces)
+      .set({ libraryPublish: policy === 'admins' ? 'admins' : null, updatedAt: ws.updatedAt })
+      .where(eq(t.workspaces.id, id)),
+  )
   return ws
 }
 
@@ -588,9 +617,14 @@ workspacesRouter.get('/:id', async (req, res) => {
 workspacesRouter.patch('/:id', (req, res) => {
   const ws = requireWorkspace(req, res, req.params.id, 'admin')
   if (!ws) return
+  /* a name, the library's publish setting, or both */
+  const policy: unknown = req.body?.libraryPublish
+  if (policy !== undefined && !isLibraryPublishPolicy(policy))
+    return res.status(400).json({ error: 'libraryPublish must be everyone or admins' })
   const name = typeof req.body?.name === 'string' ? req.body.name.trim().slice(0, 80) : ''
-  if (!name) return res.status(400).json({ error: 'name required' })
-  renameWorkspace(ws.id, name)
+  if (!name && policy === undefined) return res.status(400).json({ error: 'name required' })
+  if (name) renameWorkspace(ws.id, name)
+  if (policy !== undefined) setLibraryPublish(ws.id, policy)
   res.json(summaryFor(ws, req.user!.id))
 })
 

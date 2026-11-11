@@ -12,9 +12,10 @@ import {
 } from '../../shared/components'
 import { ELEMENT_ID_ATTR, elementIdSelector } from '../../shared/elementId'
 import type { Frame } from '../../shared/types'
-import { api, type InstanceChangeInput } from './api'
+import { api, errorMessage, type InstanceChangeInput } from './api'
 import { recordCreate, recordUpdate, recordUpdates } from './history'
 import { t } from './i18n'
+import { navigate } from './navigate'
 import { elementPath } from './layers'
 import { isLayerLocked, replaceLayerHtml } from './layerEdits'
 import { useStore } from './store'
@@ -232,9 +233,63 @@ export async function placeComponent(def: ComponentDef) {
 /** The drag payload a component card carries; the canvas drop reads the component id from it. */
 export const COMPONENT_DRAG_TYPE = 'application/x-doop-component'
 
+/** The payload of a workspace library's card, for a component this canvas does not
+ *  use yet: nothing is imported until the card is let go over the canvas. */
+export const LIBRARY_COMPONENT_DRAG_TYPE = 'application/x-doop-library-component'
+
+export interface LibraryComponentDrag {
+  /** the library's canvas */
+  libraryCanvasId: string
+  componentId: string
+}
+
+export function libraryDragData(drag: LibraryComponentDrag): string {
+  return JSON.stringify(drag)
+}
+
+/** Reads a drag's library payload; anything else that came under the type is no drop. */
+export function parseLibraryDrag(data: string): LibraryComponentDrag | null {
+  try {
+    const parsed: unknown = JSON.parse(data)
+    if (!parsed || typeof parsed !== 'object') return null
+    const { libraryCanvasId, componentId } = parsed as Record<string, unknown>
+    if (typeof libraryCanvasId !== 'string' || typeof componentId !== 'string') return null
+    return libraryCanvasId && componentId ? { libraryCanvasId, componentId } : null
+  } catch {
+    return null
+  }
+}
+
+type ClientPoint = { x: number; y: number }
+
+/** A library card let go over the canvas: the component is taken up here first,
+ *  then lands where one of the canvas's own would. A drop a locked frame refuses
+ *  takes nothing up. */
+export async function dropLibraryComponent(drag: LibraryComponentDrag, client: ClientPoint) {
+  const s = useStore.getState()
+  if (!s.canvas) return
+  const canvasId = s.canvas.id
+  if (frameAtPoint(s.canvas, s.activePageId ?? null, clientToWorld(client.x, client.y))?.locked) {
+    s.pushNotice(t('components.locked'))
+    return
+  }
+  let def: ComponentDef
+  try {
+    def = await api.importComponent(canvasId, drag.libraryCanvasId, drag.componentId)
+  } catch (error) {
+    s.pushNotice(errorMessage(error, t('components.importFailed')))
+    return
+  }
+  /* the person may have left for another canvas while the library answered */
+  if (useStore.getState().canvas?.id !== canvasId) return
+  /* the room's message may not have landed yet, and the drop reads the store */
+  useStore.getState().setComponentLocal(def.id, def)
+  await dropComponent(def.id, client)
+}
+
 /** A component card let go over the canvas: into the frame under the pointer,
  *  or as a new frame at that point when it lands on the paper. */
-export async function dropComponent(componentId: string, client: { x: number; y: number }) {
+export async function dropComponent(componentId: string, client: ClientPoint) {
   const s = useStore.getState()
   const def = s.canvas?.components?.find((candidate) => candidate.id === componentId)
   if (!s.canvas || !def) return
@@ -310,6 +365,11 @@ export async function renameComponent(def: ComponentDef, value: string): Promise
 
 export function goToMain(def: ComponentDef) {
   const s = useStore.getState()
+  /* a library component's main lives on its library canvas */
+  if (def.source?.library) {
+    navigate(`/c/${def.source.canvasId}`)
+    return
+  }
   const frame = def.mainFrameId ? s.canvas?.frames.find((candidate) => candidate.id === def.mainFrameId) : undefined
   if (!frame) {
     s.pushNotice(t('components.mainGone', { name: def.name }))

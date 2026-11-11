@@ -100,14 +100,47 @@ export interface ComponentDef {
   /** the frame whose element is the main; null once that element is gone */
   mainFrameId: string | null
   code?: ComponentCode
-  /** imported from a library canvas: pulled on request, never pushed */
-  source?: { canvasId: string; componentId: string; rev: number }
+  /** imported from a library canvas: pulled on request, never pushed. `library`
+   *  marks a link to a workspace library's published snapshot: such a component
+   *  has no main here, and is changed on its library canvas. */
+  source?: { canvasId: string; componentId: string; rev: number; library?: true }
   /** recent earlier states, newest last: rollback and three-way merge of stale saves */
   history: ComponentSnapshot[]
   createdAt: number
   updatedAt: number
   updatedBy: string
 }
+
+/** A component as its workspace library last published it. Canvases in the
+ *  workspace use this snapshot, never the library canvas's live definition, so
+ *  work in progress there reaches nobody until it is published. */
+export interface LibraryComponent {
+  /** the library canvas */
+  canvasId: string
+  id: string
+  name: string
+  description: string
+  template: string
+  css: string
+  rawCss: string
+  head: string[]
+  props: ComponentProp[]
+  slots: ComponentSlot[]
+  code?: ComponentCode
+  /** nested components this one is built from that come from ANOTHER library,
+   *  by component id → that library's canvas: recorded at publish time, so a
+   *  canvas taking this up follows the same library the publisher did. Ones
+   *  from this same library are not listed. */
+  nested?: Record<string, string>
+  /** this publication's version: the library canvas's revision when taken, raised
+   *  past the last publication's when a change left that revision alone */
+  rev: number
+  publishedAt: number
+  publishedBy: string
+}
+
+/** What publishing would do to one component of a library canvas. */
+export type LibraryChange = 'new' | 'changed' | 'unchanged' | 'removed'
 
 /** One template element's overrides on one instance. A value of null removes what the template set. */
 export interface PartOverride {
@@ -138,6 +171,9 @@ export type ComponentIssueCode =
   | 'unknown_main'
   | 'instance_removed'
   | 'too_deep'
+  | 'library_ambiguous'
+  | 'ignored_attribute'
+  | 'css_not_kept'
   | 'empty_template'
   | 'unclosed_use'
 
