@@ -1,6 +1,16 @@
 import { nanoid } from 'nanoid'
 import { canvasPages, copyPageName, pageFrames, samePages } from '../shared/pages.ts'
 import * as persist from './db/persist.ts'
+import {
+  canvasLoaded,
+  canvasUnloaded,
+  destroyActorCanvas,
+  ownerWantsActor,
+  placeCanvas,
+  registerActorCanvases,
+  revokeActorAccess,
+} from './actorFrames.ts'
+import { moveCanvasToActor, moveCanvasToPostgres } from './canvasMoves.ts'
 import type { LinkAccess } from '../shared/canvasRole.ts'
 import { MAX_GUIDES } from '../shared/guides.ts'
 import { remapFrameTargets } from '../shared/prototype.ts'
@@ -122,23 +132,87 @@ class Store {
   }
 
   private async fill(canvasId: string) {
+    await this.followOwnerFlag(canvasId)
     /* a canvas whose every frame was written since boot needs no read */
     if (this.canvases.get(canvasId)?.frames.every(htmlLoaded)) {
       this.loaded.set(canvasId, Date.now())
+      canvasLoaded(canvasId)
       return
     }
     const rows = await persist.loadFrameHtml(canvasId)
     const canvas = this.canvases.get(canvasId)
     if (!canvas) return
-    const stored = new Map(rows.map((row) => [row.id, row.html]))
+    const stored = new Map(rows.map((row) => [row.id, row]))
     /* a frame written while the read was in flight already holds newer html */
     for (const frame of canvas.frames) {
       if (htmlLoaded(frame)) continue
-      const html = stored.get(frame.id)
-      if (html === undefined) console.error('[store] frame has no stored html', frame.id)
-      setHtml(frame, html ?? '')
+      const row = stored.get(frame.id)
+      if (!row) console.error('[store] frame has no stored html', frame.id)
+      if (row?.held) this.takeHeld(frame, row.held)
+      setHtml(frame, row?.html ?? '')
     }
+    /* canvas-actors: a frame its actor holds and no row names (the server
+       died between the two writes) comes back rather than staying out of reach */
+    const unlisted = rows.flatMap((row) =>
+      row.held && !this.frameIndex.has(row.id) && !persist.frameWritePending(row.id) ? [row.held] : [],
+    )
+    for (const frame of this.restoreFrames(canvasId, unlisted) ?? []) persist.adoptActorFrame(frame)
     this.loaded.set(canvasId, Date.now())
+    canvasLoaded(canvasId)
+  }
+
+  /** canvas-actors: the owner's flag says where a canvas lives, so one in the
+   *  wrong place moves before it is read: onto its actor when the flag came
+   *  on, back into Postgres when it went off. Nothing else has the canvas in
+   *  hand here. A move that fails leaves the canvas where it was, to be tried
+   *  again the next time it loads. */
+  private async followOwnerFlag(canvasId: string) {
+    const canvas = this.canvases.get(canvasId)
+    const wanted = ownerWantsActor(canvas?.ownerId)
+    if (!canvas || wanted === undefined || wanted === (canvas.frameStore === 'actor')) return
+    /* a frame still on its way to the store it is leaving would be left behind */
+    if (canvas.frames.some((frame) => persist.frameWritePending(frame.id))) return
+    try {
+      await persist.frameVersionsSettled(canvasId)
+      if (wanted) {
+        await moveCanvasToActor(canvasId)
+        canvas.frameStore = 'actor'
+        registerActorCanvases([canvas])
+      } else {
+        await moveCanvasToPostgres(canvasId)
+        delete canvas.frameStore
+        destroyActorCanvas(canvasId)
+      }
+      /* what memory holds was read from the store the canvas just left */
+      for (const frame of canvas.frames) unloadHtml(frame)
+    } catch (error) {
+      console.error(`[canvas actors] ${wanted ? 'move to actor' : 'move back'} failed`, canvasId, error)
+    }
+  }
+
+  /** canvas-actors: a frame as its canvas's actor holds it, read on load.
+   *  Browsers edit the actor directly, so an edit made while the server was
+   *  not following it (a restart) shows up here as a newer frame: take what a
+   *  browser may change, and bring the frame's row up to date. */
+  private takeHeld(frame: Frame, held: Frame) {
+    if (held.updatedAt <= frame.updatedAt) return
+    frame.name = held.name
+    frame.x = held.x
+    frame.y = held.y
+    frame.width = held.width
+    frame.height = held.height
+    frame.updatedAt = held.updatedAt
+    frame.updatedBy = held.updatedBy
+    for (const flag of ['hidden', 'locked'] as const) {
+      if (held[flag]) frame[flag] = true
+      else delete frame[flag]
+    }
+    if (held.z !== undefined) frame.z = held.z
+    if (held.approval) frame.approval = held.approval
+    else delete frame.approval
+    setHtml(frame, held.html)
+    persist.adoptActorFrame(frame)
+    this.canvases.get(frame.canvasId)?.frames.sort(byStack)
   }
 
   /** Keep a canvas loaded while an agent run or job works on it; call the
@@ -196,6 +270,7 @@ class Store {
       }
       for (const frame of canvas?.frames ?? []) unloadHtml(frame)
       this.loaded.delete(canvasId)
+      canvasUnloaded(canvasId)
       evicted++
     }
     return evicted
@@ -305,10 +380,25 @@ class Store {
     }
   }
 
+  /** canvas-actors: frames the canvas's actor holds that the store does not
+   *  list. Returns the ones it added, or undefined for an unknown canvas. */
+  restoreFrames(canvasId: string, frames: Frame[]): Frame[] | undefined {
+    const c = this.canvases.get(canvasId)
+    if (!c) return undefined
+    const added = frames.filter((frame) => !this.frameIndex.has(frame.id))
+    for (const frame of added) {
+      c.frames.push(frame)
+      this.frameIndex.set(frame.id, canvasId)
+    }
+    c.frames.sort(byStack)
+    return added
+  }
+
   createCanvas(name: string, ownerId?: string, workspaceId?: string): Canvas {
     const now = Date.now()
     const canvas: Canvas = { id: nanoid(10), name, ownerId, createdAt: now, updatedAt: now, frames: [] }
     if (workspaceId) canvas.workspaceId = workspaceId
+    placeCanvas(canvas) // canvas-actors: an owner with the flag gets an actor for its frames
     this.canvases.set(canvas.id, canvas)
     this.loaded.set(canvas.id, now)
     canvas.pages = canvasPages(canvas)
@@ -384,6 +474,7 @@ class Store {
       ...(source.tokenThemes?.length ? { tokenThemes: [...source.tokenThemes] } : {}),
       ...(references?.length ? { references } : {}),
     }
+    placeCanvas(canvas) // canvas-actors: by the copier's flag
     await persist.saveCanvasCopy(canvas)
     this.canvases.set(canvas.id, canvas)
     this.loaded.set(canvas.id, Date.now())
@@ -577,7 +668,10 @@ class Store {
     for (const f of c.frames) this.frameIndex.delete(f.id)
     this.canvases.delete(id)
     this.loaded.delete(id)
-    persist.deleteCanvas(id)
+    persist.deleteCanvas(
+      id,
+      c.frames.map((frame) => frame.id),
+    )
     return c
   }
 
@@ -599,6 +693,7 @@ class Store {
     if (mode === 'none') delete c.linkAccess
     else c.linkAccess = mode
     persist.saveCanvas(c)
+    revokeActorAccess(id) // canvas-actors: actor sockets reconnect with the new role
     return c
   }
 
@@ -613,6 +708,7 @@ class Store {
     if (workspaceId) c.workspaceId = workspaceId
     else delete c.workspaceId
     persist.saveCanvas(c)
+    revokeActorAccess(id) // canvas-actors: the old workspace's members lose their actor sockets
     return c
   }
 
@@ -628,6 +724,7 @@ class Store {
       if (c.workspaceId === workspaceId) {
         delete c.workspaceId
         persist.saveCanvas(c)
+        revokeActorAccess(c.id) // canvas-actors
       }
     }
   }
@@ -692,6 +789,7 @@ class Store {
     if (!c || idx === -1) return false
     c.memberIds!.splice(idx, 1)
     persist.deleteMember(canvasId, userId)
+    revokeActorAccess(canvasId) // canvas-actors: the removed member's actor socket closes
     return true
   }
 
@@ -1046,6 +1144,9 @@ class Store {
       /** the html change only marks elements up (a `data-doop-id` stamp):
        *  nothing a reviewer signed off on moved, so sign-off stands */
       annotation?: boolean
+      /** canvas-actors: a browser already wrote this to the canvas's actor;
+       *  take the actor's stamp and save nothing (server/actorFrames.ts) */
+      adopted?: { updatedAt: number }
     } = {},
   ): Frame | undefined {
     const frame = this.getFrame(frameId)
@@ -1069,10 +1170,11 @@ class Store {
       frame.approval = { ...frame.approval, status: 'needs_review' }
     }
     // Also serves as the optimistic-save version, including writes in the same millisecond.
-    frame.updatedAt = Math.max(Date.now(), frame.updatedAt + 1)
+    frame.updatedAt = opts.adopted?.updatedAt ?? Math.max(Date.now(), frame.updatedAt + 1)
     frame.updatedBy = by
     c.updatedAt = frame.updatedAt
-    persist.saveFrame(frame) // debounced: streaming appends land as one write per burst
+    if (opts.adopted) persist.adoptActorFrame(frame)
+    else persist.saveFrame(frame) // debounced: streaming appends land as one write per burst
     persist.saveCanvas(c)
     return frame
   }

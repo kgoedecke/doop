@@ -365,6 +365,13 @@
       "when": 1794352711304,
       "tag": "0052_components",
       "breakpoints": true
+    },
+    {
+      "idx": 53,
+      "version": "7",
+      "when": 1794369478259,
+      "tag": "0053_canvas_actor_flag",
+      "breakpoints": true
     }
   ]
 }

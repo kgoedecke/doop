@@ -3,6 +3,25 @@ import path from 'node:path'
 import { nanoid } from 'nanoid'
 import { and, desc, eq, inArray, sql } from 'drizzle-orm'
 import { db } from './index.ts'
+import {
+  actorWritePending,
+  addActorFrameVersion,
+  getActorFrameVersion,
+  listActorFrameVersions,
+  deleteActorFrame,
+  destroyActorCanvas,
+  flushActorFrames,
+  insertActorFrames,
+  isActorCanvas,
+  isActorFrame,
+  loadActorFrame,
+  loadActorFrames,
+  moveActorFramePage,
+  registerActorCanvases,
+  removeActorFrames,
+  saveActorFrame,
+  saveActorFrameNow,
+} from '../actorFrames.ts'
 import * as t from './schema.ts'
 import { extractAssetIds } from '../assets.ts'
 import { roleByAgentName } from '../../shared/agents.ts'
@@ -56,6 +75,7 @@ function canvasColumns(c: Canvas) {
     category: c.category ?? null,
     copyCount: c.copyCount ?? 0,
     workspaceId: c.workspaceId ?? null,
+    frameStore: c.frameStore ?? null,
     updatedAt: c.updatedAt,
   }
 }
@@ -72,6 +92,18 @@ export function saveCanvas(c: Canvas) {
 /** Persist a newly duplicated canvas as one unit. Unlike ordinary live edits,
  * duplication must not report success until every copied row is durable. */
 export async function saveCanvasCopy(c: Canvas): Promise<void> {
+  /* canvas-actors: a copy on an actor keeps its frames there (server/actorFrames.ts) */
+  if (c.frameStore === 'actor')
+    return copyToActor(
+      c.id,
+      c.frames,
+      () => writeCanvasCopy(c),
+      () => destroyActorCanvas(c.id),
+    )
+  return writeCanvasCopy(c)
+}
+
+async function writeCanvasCopy(c: Canvas): Promise<void> {
   await db.transaction(async (tx) => {
     await tx.insert(t.canvases).values({ id: c.id, ...canvasColumns(c), createdAt: c.createdAt })
 
@@ -86,7 +118,7 @@ export async function saveCanvasCopy(c: Canvas): Promise<void> {
           y: frame.y,
           width: frame.width,
           height: frame.height,
-          html: frame.html,
+          html: storedHtml(frame),
           createdAt: frame.createdAt,
           updatedAt: frame.updatedAt,
           updatedBy: frame.updatedBy,
@@ -399,6 +431,11 @@ const FRAME_DEBOUNCE_MS = 400
  * every copied frame land together or not at all, so a copy is never half
  * there after a crash. Like saveCanvasCopy, success means durable. */
 export async function savePageCopy(c: Canvas, frames: Frame[]): Promise<void> {
+  if (isActorCanvas(c.id)) return copyToActor(c.id, frames, () => writePageCopy(c, frames))
+  return writePageCopy(c, frames)
+}
+
+async function writePageCopy(c: Canvas, frames: Frame[]): Promise<void> {
   await db.transaction(async (tx) => {
     await tx.update(t.canvases).set(canvasColumns(c)).where(eq(t.canvases.id, c.id))
     if (!frames.length) return
@@ -412,7 +449,7 @@ export async function savePageCopy(c: Canvas, frames: Frame[]): Promise<void> {
         y: frame.y,
         width: frame.width,
         height: frame.height,
-        html: frame.html,
+        html: storedHtml(frame),
         createdAt: frame.createdAt,
         updatedAt: frame.updatedAt,
         updatedBy: frame.updatedBy,
@@ -452,10 +489,24 @@ export async function saveFrameNow(f: Frame): Promise<void> {
   const existing = frameTimers.get(f.id)
   if (existing) clearTimeout(existing)
   frameTimers.delete(f.id)
-  await writeFrame(f)
+  /* canvas-actors: the design goes to the canvas's actor, the row here keeps the rest */
+  await Promise.all([isActorCanvas(f.canvasId) ? saveActorFrameNow(f) : undefined, writeFrame(f)])
+}
+
+/** canvas-actors: a browser's edit its actor already holds; the frame's row
+ *  here (everything but its html) and its asset refs are left to keep. */
+export function adoptActorFrame(f: Frame) {
+  queueFrameWrite(f, false)
 }
 
 export function saveFrame(f: Frame, immediate = false) {
+  /* canvas-actors: the design goes to the canvas's actor (server/actorFrames.ts);
+     the row written below then carries everything but the html */
+  if (isActorCanvas(f.canvasId)) saveActorFrame(f)
+  queueFrameWrite(f, immediate)
+}
+
+function queueFrameWrite(f: Frame, immediate: boolean) {
   markDirty(f.id)
   const existing = frameTimers.get(f.id)
   if (existing) clearTimeout(existing)
@@ -496,7 +547,7 @@ async function writeFrameRow(f: Frame) {
     y: f.y,
     width: f.width,
     height: f.height,
-    html,
+    html: isActorCanvas(f.canvasId) ? ACTOR_HELD_HTML : html,
     createdAt: f.createdAt,
     updatedAt: f.updatedAt,
     updatedBy: f.updatedBy,
@@ -517,7 +568,7 @@ async function writeFrameRow(f: Frame) {
 /** A frame whose latest state is not yet stored: waiting on its debounce,
  *  its write in flight, or its write failed. Its canvas must stay loaded. */
 export function frameWritePending(frameId: string): boolean {
-  return dirtyFrames.has(frameId)
+  return dirtyFrames.has(frameId) || actorWritePending(frameId)
 }
 
 /** Write again a dirty frame with nothing scheduled or in flight: one whose
@@ -530,6 +581,7 @@ export function retryFrameWrite(f: Frame) {
 /** Move a frame to another page without touching its html, for a frame
  *  whose canvas is not loaded (store.init's repair of an orphaned frame). */
 export function saveFramePage(frameId: string, pageId: string) {
+  if (isActorFrame(frameId)) moveActorFramePage(frameId, pageId)
   swallow(writeFramePage(frameId, pageId))
 }
 
@@ -537,13 +589,18 @@ async function writeFramePage(frameId: string, pageId: string) {
   await db.update(t.frames).set({ pageId }).where(eq(t.frames.id, frameId))
 }
 
-/** The html of every frame on a canvas, for store.load. */
-export function loadFrameHtml(canvasId: string): Promise<{ id: string; html: string }[]> {
+/** The html of every frame on a canvas, for store.load. A canvas on an actor
+ *  answers with its frames whole, as the actor holds them (`held`): browsers
+ *  edit those directly, so the rows here can be behind. */
+export async function loadFrameHtml(canvasId: string): Promise<{ id: string; html: string; held?: Frame }[]> {
+  if (isActorCanvas(canvasId))
+    return (await loadActorFrames(canvasId)).map((held) => ({ id: held.id, html: held.html, held }))
   return db.select({ id: t.frames.id, html: t.frames.html }).from(t.frames).where(eq(t.frames.canvasId, canvasId))
 }
 
 /** One frame's html, for a render of a frame whose canvas is not loaded. */
 export async function loadOneFrameHtml(frameId: string): Promise<string | undefined> {
+  if (isActorFrame(frameId)) return loadActorFrame(frameId)
   const [row] = await db.select({ html: t.frames.html }).from(t.frames).where(eq(t.frames.id, frameId))
   return row?.html
 }
@@ -587,7 +644,15 @@ function queueVersionWrite(frameId: string, canvasId: string, work: () => Promis
 }
 
 export function saveFrameVersion(version: FrameVersion) {
-  queueVersionWrite(version.frameId, version.canvasId, () => appendFrameVersion(version))
+  /* canvas-actors: a canvas on an actor keeps its history there too */
+  queueVersionWrite(version.frameId, version.canvasId, () =>
+    isActorCanvas(version.canvasId) ? addActorFrameVersion(version) : appendFrameVersion(version),
+  )
+}
+
+/** Settles once the canvas's queued history writes have landed (before it changes store). */
+export function frameVersionsSettled(canvasId: string): Promise<unknown> {
+  return pendingVersionWrites((_, owner) => owner === canvasId)
 }
 
 /** Settles once every queued version write the filter picks has landed. */
@@ -645,6 +710,7 @@ export async function listFrameVersions(frameId: string): Promise<FrameVersionIn
   /* a replace files its version behind the response; the list that follows
      it must show it */
   await pendingVersionWrites((id) => id === frameId)
+  if (isActorFrame(frameId)) return listActorFrameVersions(frameId)
   const rows = await db
     .select({
       id: t.frameVersions.id,
@@ -676,6 +742,7 @@ export async function listFrameVersions(frameId: string): Promise<FrameVersionIn
 /** One version in full; undefined when the id is unknown OR belongs to
  *  another frame, so a caller can never read across frames by id alone. */
 export async function getFrameVersion(frameId: string, versionId: string): Promise<FrameVersion | undefined> {
+  if (isActorFrame(frameId)) return getActorFrameVersion(frameId, versionId)
   const [row] = await db
     .select()
     .from(t.frameVersions)
@@ -710,7 +777,14 @@ async function syncAssetRefs(frameId: string, html: string) {
   }
 }
 
-export function deleteCanvas(canvasId: string) {
+export function deleteCanvas(canvasId: string, frameIds: readonly string[] = []) {
+  if (isActorCanvas(canvasId)) destroyActorCanvas(canvasId)
+  /* a frame saved just before must not be written back after its canvas is gone */
+  for (const frameId of frameIds) {
+    clearTimeout(frameTimers.get(frameId))
+    frameTimers.delete(frameId)
+    dirtyFrames.delete(frameId)
+  }
   /* refs must go before the frames rows the subquery reads */
   swallow(
     db
@@ -746,6 +820,7 @@ export function deleteCanvas(canvasId: string) {
 }
 
 export function deleteFrame(frameId: string) {
+  if (isActorFrame(frameId)) deleteActorFrame(frameId)
   dirtyFrames.delete(frameId)
   const timer = frameTimers.get(frameId)
   if (timer) {
@@ -964,6 +1039,8 @@ export function saveActivity(canvasId: string, item: ActivityItem) {
 /** Flush pending debounced frame writes and queued version writes (called
  *  on shutdown): a design must not survive a restart without its history. */
 export async function flush(getFrame: (id: string) => Frame | undefined): Promise<void> {
+  /* canvas-actors: alongside, so a slow actor never holds up the Postgres writes */
+  const actorWrites = flushActorFrames()
   /* every dirty frame, a failed write included, not only the debounced ones */
   const ids = [...dirtyFrames.keys()]
   for (const [, timer] of frameTimers) clearTimeout(timer)
@@ -975,6 +1052,7 @@ export async function flush(getFrame: (id: string) => Frame | undefined): Promis
     }),
   )
   await pendingVersionWrites(() => true)
+  await actorWrites
 }
 
 /* ------------------------------------------------------------------ */
@@ -1043,6 +1121,7 @@ export async function hydrate(): Promise<Hydrated> {
     ...(isCommunityCategory(c.category) ? { category: c.category } : {}),
     ...(c.copyCount ? { copyCount: c.copyCount } : {}),
     ...(c.workspaceId ? { workspaceId: c.workspaceId } : {}),
+    ...(c.frameStore === 'actor' ? { frameStore: 'actor' as const } : {}),
     createdAt: c.createdAt,
     updatedAt: c.updatedAt,
     frames: [],
@@ -1066,6 +1145,7 @@ export async function hydrate(): Promise<Hydrated> {
     byId.get(f.canvasId)?.frames.push(frame)
   }
   for (const c of canvases) c.frames.sort(byStack)
+  registerActorCanvases(canvases)
   for (const r of referenceRows) {
     const c = byId.get(r.canvasId)
     if (!c) continue
@@ -1310,3 +1390,32 @@ export async function importLegacyJson(): Promise<Canvas[] | null> {
   console.log(`[db] imported ${parsed.length} canvas(es) from legacy store.json`)
   return parsed
 }
+
+/** Copied frames go to the canvas's actor before `write` saves their rows and
+ *  the rest of the copy here. If either fails, `undo` takes them off the actor
+ *  again, so a failed copy leaves nothing behind; their asset refs are kept
+ *  once it lands. */
+async function copyToActor(
+  canvasId: string,
+  frames: Frame[],
+  write: () => Promise<void>,
+  undo = () => removeActorFrames(canvasId, frames),
+): Promise<void> {
+  try {
+    await insertActorFrames(canvasId, frames)
+    await write()
+  } catch (error) {
+    undo()
+    throw error
+  }
+  for (const frame of frames) swallow(syncAssetRefs(frame.id, frame.html))
+}
+
+/** What a frames row stores as html: the document, or nothing for a canvas
+ *  on an actor, whose actor holds it. The row keeps everything else, so boot
+ *  reads every canvas's frames here and asks no actor. */
+function storedHtml(frame: Frame): string {
+  return isActorCanvas(frame.canvasId) ? ACTOR_HELD_HTML : frame.html
+}
+
+const ACTOR_HELD_HTML = ''
