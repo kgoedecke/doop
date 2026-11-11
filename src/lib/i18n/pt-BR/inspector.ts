@@ -200,6 +200,7 @@ export const inspector: Catalog['inspector'] = {
   imageUrl: 'URL da imagem',
   applyImageUrl: 'Aplicar URL da imagem',
   uploadImage: 'Enviar imagem',
+  removeImage: 'Remover imagem',
   currentImage: 'Imagem atual',
   uploading: 'Enviando…',
   loading: 'Carregando…',

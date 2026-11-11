@@ -201,6 +201,7 @@ export const inspector = {
   imageUrl: 'Image URL',
   applyImageUrl: 'Apply image URL',
   uploadImage: 'Upload image',
+  removeImage: 'Remove image',
   currentImage: 'Current image',
   uploading: 'Uploading…',
   loading: 'Loading…',

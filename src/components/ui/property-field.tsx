@@ -54,7 +54,9 @@ export function PropertySection({
 export function PropertyRow({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div className="mt-1.5 grid min-h-[26px] grid-cols-[58px_1fr] items-center gap-1.5">
-      <span className="text-[11.5px] text-ink-faint">{label}</span>
+      <span className="truncate text-[11.5px] text-ink-faint" title={label}>
+        {label}
+      </span>
       <div className="flex min-w-0 gap-1.5">{children}</div>
     </div>
   )
@@ -221,15 +223,18 @@ export function TextField({
   onCommit,
   scrub: scrubbable = false,
   min,
+  disabled,
 }: {
   label?: string
   value: string
   unit?: string
   placeholder?: string
+  /** `font-sans` on a field holding prose rather than a value */
   className?: string
   onCommit: (v: string) => void
   scrub?: boolean
   min?: number
+  disabled?: boolean
 }) {
   const t = useT()
   const [draft, setDraft] = useState(value)
@@ -238,7 +243,7 @@ export function TextField({
   const scrub = useValueScrub({
     ...scrubLifecycle,
     value: draft,
-    enabled: scrubbable,
+    enabled: scrubbable && !disabled,
     min,
     onChange: (v) => {
       setDraft(v)
@@ -253,8 +258,9 @@ export function TextField({
     <label className={cn(fieldCls, className)}>
       <input
         aria-label={label}
-        className="w-full min-w-0 bg-transparent font-mono text-[11px] text-ink outline-none placeholder:text-ink-faint"
+        className="w-full min-w-0 bg-transparent font-[inherit] text-[length:inherit] text-ink outline-none placeholder:text-ink-faint disabled:opacity-50"
         value={draft}
+        disabled={disabled}
         placeholder={placeholder}
         onChange={(e) => setDraft(e.target.value)}
         onBlur={() => !scrub.scrubbing && draft !== value && onCommit(draft)}
@@ -308,8 +314,10 @@ export function SelectField<T extends string>({
   label,
   placeholder,
   className,
+  disabled,
   onChange,
 }: {
+  disabled?: boolean
   /** null shows `placeholder` (a mixed value) until an option is picked */
   value: T | null
   /* consecutive options sharing a `group` render under one <optgroup> */
@@ -335,8 +343,9 @@ export function SelectField<T extends string>({
     <span className={cn(fieldCls, 'relative font-sans text-[11.5px]', className)}>
       <select
         aria-label={label}
-        className="w-full min-w-0 appearance-none bg-transparent pr-3 text-ink outline-none"
+        className="w-full min-w-0 appearance-none bg-transparent pr-3 text-ink outline-none disabled:opacity-50"
         value={value ?? ''}
+        disabled={disabled}
         /* a native select only ever reports one of the options it was given */
         onChange={(e) => e.target.value !== '' && onChange(e.target.value as T)}
       >
