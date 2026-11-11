@@ -31,6 +31,7 @@ import {
   PanelExpandIcon,
   SearchIcon,
   TextIcon,
+  BookOpenIcon,
   UserIcon,
   UsersIcon,
   WebIcon,
@@ -64,13 +65,13 @@ export type RailActive =
   'all' | 'mine' | 'shared' | 'automations' | 'integrations' | 'community' | `ws:${string}` | null
 
 /** the Workspace page's panes, in the order the rail lists them */
-export type WorkspacePane = 'members' | 'fonts' | 'billing' | 'general'
+export type WorkspacePane = 'members' | 'fonts' | 'libraries' | 'billing' | 'general'
 
-const WORKSPACE_PANES: readonly WorkspacePane[] = ['members', 'fonts', 'billing', 'general']
+const WORKSPACE_PANES: readonly WorkspacePane[] = ['members', 'fonts', 'libraries', 'billing', 'general']
 
 /** the panes a workspace role may open: billing and settings are for its owner and admins */
 export function workspacePanesFor(role: WorkspaceSummary['role'] | undefined): WorkspacePane[] {
-  return WORKSPACE_PANES.filter((p) => role !== 'member' || p === 'members' || p === 'fonts')
+  return WORKSPACE_PANES.filter((p) => role !== 'member' || p === 'members' || p === 'fonts' || p === 'libraries')
 }
 
 /** an agent that worked this recently is treated as still at the desk */
@@ -225,6 +226,7 @@ export function AppRail({
   const paneRows = {
     members: { label: t('rail.workspacePeople'), icon: <UsersIcon size="rail" /> },
     fonts: { label: t('rail.workspaceFonts'), icon: <TextIcon size="rail" /> },
+    libraries: { label: t('rail.workspaceLibraries'), icon: <BookOpenIcon size="rail" /> },
     billing: { label: t('rail.workspaceBilling'), icon: <CreditCardIcon size="rail" /> },
     general: { label: t('rail.workspaceSettings'), icon: <GearIcon size="rail" /> },
   } satisfies Record<WorkspacePane, { label: string; icon: ReactNode }>

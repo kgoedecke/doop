@@ -239,14 +239,28 @@ function compoundMatches(compound: string, tokens: Tokens): boolean {
   )
 }
 
+/** What a main is made of: its own elements, and apart from them the components nested in it. */
+interface SubtreeTokens {
+  own: Tokens
+  nested: Tokens
+}
+
 /** The selector as far as it concerns the subtree: compounds naming ancestors outside it are cut off.
- *  Null when its subject is not in the subtree at all. */
-function relevantSelector(selector: string, tokens: Tokens): string | null {
+ *  Null when its subject is not in the subtree at all. A subject inside a nested component counts
+ *  only when the selector reaches it from one of the main's own elements (`.plan .btn`): that is
+ *  this component restyling what it holds, where a bare `.btn` is the nested component's business. */
+function relevantSelector(selector: string, { own, nested }: SubtreeTokens): string | null {
   const compounds = compoundsOf(selector)
-  const last = compounds[compounds.length - 1]
-  if (!last || !compoundMatches(last.compound, tokens)) return null
+  if (!compounds.length) return null
+  const isOwn = (index: number) => compoundMatches(compounds[index]!.compound, own)
+  const isNested = (index: number) => compoundMatches(compounds[index]!.compound, nested)
   let first = compounds.length - 1
-  while (first > 0 && compoundMatches(compounds[first - 1]!.compound, tokens)) first--
+  if (!isOwn(first)) {
+    if (!isNested(first)) return null
+    while (first > 0 && !isOwn(first - 1) && isNested(first - 1)) first--
+    if (first === 0 || !isOwn(first - 1)) return null
+  }
+  while (first > 0 && isOwn(first - 1)) first--
   return compounds
     .slice(first)
     .map((piece, index) => {
@@ -284,9 +298,13 @@ function walkElements(node: Tree.ParentNode, visit: (el: Element) => void) {
   }
 }
 
-function tokensOf(root: Element, skip: (el: Element) => boolean): Tokens {
-  const tokens: Tokens = { tags: new Set(), classes: new Set(), ids: new Set(), attrs: new Set() }
-  const add = (el: Element) => {
+const noTokens = (): Tokens => ({ tags: new Set(), classes: new Set(), ids: new Set(), attrs: new Set() })
+
+/** `isNested` marks the root of a nested instance: it and everything below it are that component's. */
+function tokensOf(root: Element, isNested: (el: Element) => boolean): SubtreeTokens {
+  const own = noTokens()
+  const nested = noTokens()
+  const add = (el: Element, tokens: Tokens) => {
     tokens.tags.add(el.tagName.toLowerCase())
     for (const attr of el.attrs) {
       tokens.attrs.add(attr.name.toLowerCase())
@@ -294,13 +312,39 @@ function tokensOf(root: Element, skip: (el: Element) => boolean): Tokens {
       if (attr.name === 'id') tokens.ids.add(attr.value)
     }
   }
-  const stack: Element[] = [root]
+  const stack: { el: Element; inside: boolean }[] = [{ el: root, inside: false }]
   for (let next = stack.pop(); next; next = stack.pop()) {
-    if (next !== root && skip(next)) continue
-    add(next)
-    for (const child of next.childNodes) if ('tagName' in child) stack.push(child)
+    const inside = next.inside || (next.el !== root && isNested(next.el))
+    add(next.el, inside ? nested : own)
+    for (const child of next.el.childNodes) if ('tagName' in child) stack.push({ el: child, inside })
   }
+  return { own, nested }
+}
+
+const isInstanceRoot = (el: Element) => el.attrs.some((attr) => attr.name === INSTANCE_ATTR)
+
+function mainTokens(root: Element, variantAttrs: string[]): SubtreeTokens {
+  const tokens = tokensOf(root, isInstanceRoot)
+  for (const name of variantAttrs) tokens.own.attrs.add(name)
   return tokens
+}
+
+/** The selectors in a stylesheet written for one component that name nothing in it, so that
+ *  `extractComponentCss` leaves their rules behind: what its author should hear about. */
+export function unmatchedSelectors(sheet: string, root: Element, variantAttrs: string[] = []): string[] {
+  const tokens = mainTokens(root, variantAttrs)
+  const unmatched: string[] = []
+  const visit = (list: CssNode[]) => {
+    for (const node of list) {
+      if (node.kind === 'group') visit(node.nodes)
+      if (node.kind !== 'rule') continue
+      for (const selector of splitTopLevel(node.selector, ',')) {
+        if (selector && !isDocumentSelector(selector) && !relevantSelector(selector, tokens)) unmatched.push(selector)
+      }
+    }
+  }
+  visit(parseCss(sheet))
+  return [...new Set(unmatched)]
 }
 
 const usedFonts = (css: string) =>
@@ -362,9 +406,7 @@ export function extractComponentCss(
   variantAttrs: string[] = [],
 ): ExtractedCss {
   const scope = `[${INSTANCE_ATTR}="${componentId}"]`
-  const nested = (el: Element) => el.attrs.some((attr) => attr.name === INSTANCE_ATTR)
-  const tokens = tokensOf(root, nested)
-  for (const name of variantAttrs) tokens.attrs.add(name)
+  const tokens = mainTokens(root, variantAttrs)
   const nodes = parseCss(sheet)
   const customProps = new Map<string, string>()
   const inherited: string[] = []

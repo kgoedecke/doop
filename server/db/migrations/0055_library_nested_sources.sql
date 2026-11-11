@@ -1,0 +1,1 @@
+ALTER TABLE "library_components" ADD COLUMN "nested" jsonb;

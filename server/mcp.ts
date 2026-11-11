@@ -92,8 +92,8 @@ import {
   type AgentFeedbackCategory,
   type AgentFeedbackKind,
 } from '../shared/agentFeedback.ts'
-import { catalogEntry, compactFrameHtml, findComponent, instancesIn } from './componentActions.ts'
-import { COMPONENT_TOOLS, componentWriteNotes, runComponentTool } from './componentTools.ts'
+import { catalogEntry, compactFrameHtml, findComponent, instancesIn, libraryCatalog } from './componentActions.ts'
+import { COMPONENT_TOOLS, componentWriteNotes, libraryFeatureEvent, runComponentTool } from './componentTools.ts'
 import { previewFrame } from './componentPreview.ts'
 import { INSTANCE_ATTR } from '../shared/components.ts'
 
@@ -110,7 +110,7 @@ You MUST call get_guide({ topic: "doop-instructions" }) once before using other 
 - Creating: create_frame, then stream the design with append_frame_html one complete section at a time (~1–4 KB chunks; start=true on the first, done=true on the last). Each chunk renders the moment it arrives — viewers watch you work.
 - Review: after every create or significant edit you MUST call get_frame_screenshot and fix what looks wrong before moving on.
 - Small edits: edit_frame_html (exact find/replace — the change morphs into the rendered frame in place). Full redesigns: set_frame_html or a new stream. Rename/move/resize: update_frame.
-- Components: anything reusable lives as a component (get_canvas lists them). Use it by writing <doop-use component="Button" label="Buy"></doop-use> in frame HTML, never by redrawing it: instances follow their main and read back in that short form. Repeating a block? create_component, then use that. Change every instance at once with update_component (guide → Components).
+- Components: anything reusable lives as a component (get_canvas lists them). Use it by writing <doop-use component="Button" label="Buy"></doop-use> in frame HTML, never by redrawing it: instances follow their main and read back in that short form. Repeating a block? create_component, then use that. Change every instance at once with update_component (guide → Components). A team's shared components are in get_canvas → workspaceLibraries: use them the same way, by name. To make a component available to the workspace's other canvases, publish_library.
 - Clickable prototypes: wire screens with data-doop-on / data-doop-action attributes in frame HTML (guide → Prototypes), set the flow start with set_prototype_start, and check the wiring with get_prototype.
 - History: every replace and stream files the design it overwrote. list_frame_versions shows a frame's earlier states; restore_frame_version brings one back (HTML and size) when a human asks for the previous version or your rework turned out worse.
 - Images: real imagery makes designs. search_images finds stock photos (you SEE thumbnails and pick), search_icons finds 200k+ UI icons as hotlinkable SVGs, search_logos finds real company logos by brand name or domain — call it once per brand BEFORE writing any logo wall, integration row, press bar or testimonial, and never ship a placeholder tile, "LOGO" text or an invented wordmark in its place, list_backgrounds shows a page of curated hero/section/bento backgrounds (glows, grainy meshes, aurora, painterly scenes) as thumbnails — browse it when a section wants atmosphere rather than defaulting to a flat CSS gradient, judge by eye whether one fits the frame, and draw your own when none does, upload_asset stores your own file (remote file → source_url; local file → local_file=true, returns a curl command) and returns a permanent URL. generate_image makes a new image from a prompt (a full-bleed hero background in the frame's exact palette, illustration, a product render, brand-specific hero art that stock cannot supply) and stores it as a permanent asset — reach for it when search_images cannot deliver the exact visual, or when the human asks for a generated image; it costs the human money or quota, so one considered prompt beats five drafts. Never inline images as data: URIs.
@@ -602,6 +602,7 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
       const docs = store.getGuidelines(canvas_id)
       const refs = store.getReferences(canvas_id)
       const library = fontsForCanvas(c)
+      const sharedLibraries = libraryCatalog(c)
       const tokens = store.getTokens(canvas_id)
       const tokenThemes = store.getTokenThemes(canvas_id)
       /* design-synced canvases carry a flow map: real user navigation between
@@ -655,6 +656,7 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
               pinnedBy: r.pinnedBy,
             })),
             ...(c.components?.length ? { components: c.components.map((def) => catalogEntry(c, def)) } : {}),
+            ...(sharedLibraries.length ? { workspaceLibraries: sharedLibraries } : {}),
             ...(library.length ? { fonts: describeLibrary(library) } : {}),
             webFonts: webFontFamilies(),
             ...(tokens.length ? { tokens: describeTokens(tokens) } : {}),
@@ -2094,15 +2096,19 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
         if (!canvas) return noCanvas(canvasId)
         arrive(canvasId, agent)
         const actor = actorFrom(agent)
-        const outcome = runComponentTool(tool.name, raw, {
+        const outcome = await runComponentTool(tool.name, raw, {
           canvas,
           actor,
           canRead: (id) => !!canvasFor(id, 'view'),
+          canEdit: (id) => !!canvasFor(id, 'edit'),
           readableCanvases: () =>
             workspaces.canvasesFor(ownerId ?? '').flatMap((meta) => store.getCanvas(meta.id) ?? []),
+          userId: ownerId,
         })
         if (!outcome.ok) return err(outcome.error)
         const { data, note, frames } = outcome.result
+        const libraryEvent = libraryFeatureEvent(tool.name, raw, data)
+        if (libraryEvent) captureFeature(ownerId, libraryEvent, 'mcp', { canvas_id: canvasId })
         const result = note ? textWithNudge(data, note) : text(data)
         for (const frame of frames ?? []) withComponentNotes(result, frame)
         return tool.readOnly

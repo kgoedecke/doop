@@ -100,11 +100,14 @@ export function UpgradeModal({
   workspaceId,
   reason,
   onClose,
+  onCheckout,
 }: {
   workspaceId: string
   /** what they were trying to do when the wall came up */
   reason?: string
   onClose: () => void
+  /** checkout is about to leave the page: the last moment to note what to come back to */
+  onCheckout?: () => void
 }) {
   const { data: session } = authClient.useSession()
   const t = useT()
@@ -141,6 +144,7 @@ export function UpgradeModal({
     try {
       posthog.capture('workspace_checkout_started', { workspaceId, interval: chosen, seats })
       const { url } = await api.workspaceCheckout(workspaceId, chosen)
+      onCheckout?.()
       location.assign(url)
     } catch (caught) {
       setError(errorMessage(caught, t('home.checkoutFailed')))
@@ -313,18 +317,22 @@ function PlanCard({ plan, interval, current }: { plan: Plan; interval: BillingIn
 export function MoveCanvasModal({
   canvas,
   workspaces,
+  suggested,
   onClose,
   onMoved,
   onPaywall,
 }: {
   canvas: { id: string; name: string; workspaceId?: string }
   workspaces: WorkspaceSummary[]
+  /** the destination to start on, when the caller knows where this is headed
+   *  (the library card moves a personal canvas into a workspace) */
+  suggested?: string
   onClose: () => void
   onMoved: (workspaceId: string | null) => void
   /** the target needs a plan first — the caller opens the wall */
   onPaywall: (workspaceId: string) => void
 }) {
-  const [target, setTarget] = useState<string>(canvas.workspaceId ?? '')
+  const [target, setTarget] = useState<string>(suggested ?? canvas.workspaceId ?? '')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const targetWs = workspaces.find((w) => w.id === target)

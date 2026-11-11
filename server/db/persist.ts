@@ -8,7 +8,7 @@ import { extractAssetIds } from '../assets.ts'
 import { roleByAgentName } from '../../shared/agents.ts'
 import { isCommunityCategory } from '../../shared/types.ts'
 import { storedLinkAccess } from '../../shared/canvasRole.ts'
-import type { ComponentDef } from '../../shared/components.ts'
+import type { ComponentDef, LibraryComponent } from '../../shared/components.ts'
 import type { DesignToken, TokenType } from '../../shared/designTokens.ts'
 import { parseRunnerPick } from '../../shared/agentRunner.ts'
 import { byStack } from '../../shared/frameStack.ts'
@@ -191,6 +191,30 @@ export function saveComponent(canvasId: string, def: ComponentDef) {
 
 export function deleteComponent(canvasId: string, id: string) {
   swallow(db.delete(t.components).where(and(eq(t.components.canvasId, canvasId), eq(t.components.id, id))))
+}
+
+export function saveLibraryComponent(snapshot: LibraryComponent) {
+  const row = { ...snapshot, code: snapshot.code ?? null, nested: snapshot.nested ?? null }
+  const { canvasId: _canvasId, id: _id, ...set } = row
+  swallow(
+    db
+      .insert(t.libraryComponents)
+      .values(row)
+      .onConflictDoUpdate({ target: [t.libraryComponents.canvasId, t.libraryComponents.id], set }),
+  )
+}
+
+export function deleteLibraryComponent(canvasId: string, id: string) {
+  swallow(
+    db
+      .delete(t.libraryComponents)
+      .where(and(eq(t.libraryComponents.canvasId, canvasId), eq(t.libraryComponents.id, id))),
+  )
+}
+
+export async function loadLibraryComponents(): Promise<LibraryComponent[]> {
+  const rows = await db.select().from(t.libraryComponents).orderBy(t.libraryComponents.name)
+  return rows.map(({ code, nested, ...row }) => ({ ...row, ...(code ? { code } : {}), ...(nested ? { nested } : {}) }))
 }
 
 export function saveGuideline(canvasId: string, doc: GuidelineDoc) {
@@ -729,6 +753,7 @@ export function deleteCanvas(canvasId: string) {
   swallow(db.delete(t.activity).where(eq(t.activity.canvasId, canvasId)))
   swallow(db.delete(t.guidelines).where(eq(t.guidelines.canvasId, canvasId)))
   swallow(db.delete(t.components).where(eq(t.components.canvasId, canvasId)))
+  swallow(db.delete(t.libraryComponents).where(eq(t.libraryComponents.canvasId, canvasId)))
   swallow(db.delete(t.guidelineVersions).where(eq(t.guidelineVersions.canvasId, canvasId)))
   swallow(
     pendingTokenWrites(canvasId).then(() => db.delete(t.designTokens).where(eq(t.designTokens.canvasId, canvasId))),

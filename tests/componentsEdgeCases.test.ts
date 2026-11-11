@@ -468,6 +468,23 @@ describe('components edge cases', () => {
     expect(created.component.props.map((prop) => prop.name)).not.toContain('id')
   })
 
+  it('infers a prop name from a class that says what the element is, never from a utility class', () => {
+    const created = createComponentFromElement(
+      canvasId,
+      {
+        name: 'Row',
+        frameId: makeFrame(
+          `<li class="row"><a class="cta flex" href="/go">Go</a><span class="price text-sm font-bold">$9</span><em class="font-bold">New</em><h4>Name</h4><h4>Other</h4></li>`,
+        ),
+        element: 'li',
+      },
+      actor,
+    )
+    const names = ['cta-link', 'cta', 'price', 'item', 'title', 'title-2']
+    expect(created.component.props.map((prop) => prop.name)).toEqual(names)
+    expect(created.inferred).toEqual(names)
+  })
+
   it('keeps a boolean default when the prop is also bound to an attribute', () => {
     const { def } = makeComponent(
       canvasId,

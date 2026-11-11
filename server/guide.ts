@@ -168,6 +168,13 @@ get_canvas and list_components show a canvas's components with their props.
 - auto_props=false skips the automatic text, image and link props; explicit data-doop-prop bindings
   and per-instance edits still work. Use it when you do not want those automatic props. A list that
   will change (navigation, menus, rows) is nested components or a slot, not text in one main.
+- create_component from html puts the main on the Components page and places nothing: use it
+  with <doop-use> in a frame, or insert_instance. Its result lists the props it inferred; name
+  your own with data-doop-prop.
+- A component inside a component: write <doop-use> in the template and give it fixed props. One
+  component cannot pass its props on to another (data-doop-prop on a <doop-use> is dropped, with
+  a COMPONENT note); where each instance should choose, make that spot a data-doop-slot. Its CSS
+  may restyle the nested one from its own element (.card .btn { width: 100% }), inside it only.
 - Write a description saying when to use it. Set code (file and export name) when the component
   exists in the human's repo: that is what makes the design implementable with their real code.
 - Vary with props, not copies. An enum prop sets data-<name> on the root, so a variant is plain
@@ -184,7 +191,16 @@ get_canvas and list_components show a canvas's components with their props.
   keys are how overrides stay attached.
 - A deleted component leaves its instances looking the same, as plain markup. To reuse components
   from another canvas: list_components with libraries=true, import_component, and sync_component
-  when list_components says library_update_available.`
+  when list_components says library_update_available.
+- Workspace libraries: get_canvas lists workspaceLibraries, the components the canvas's workspace
+  has published. Use one by writing <doop-use> with its name, exactly like a local component; it is
+  added to the canvas linked to its library. A linked component (library in list_components) has no
+  main here: change it on its library canvas, then publish_library there (its used_by lists the
+  canvases still to pull) and sync_component on each; without a component it pulls all that wait.
+  Publish when the human asks, in any words ("make it available to the team"), not on your own
+  initiative; it never changes another canvas until that canvas pulls. Only when the human asks
+  for the change on every canvas: update_library_everywhere on the library canvas (dry_run first;
+  it changes other people's canvases and withdraws sign-off on approved frames that change).`
 
 export const DOOP_GUIDE = `# Doop Agent Guide
 

@@ -12,6 +12,8 @@ through tools, and read them back in a short form.
 | Override ID paths are intricate                     | Attributes are props; part-keyed overrides are there when needed                    |
 | Agents read pre-override values                     | Instances read back with their real props and overridden parts                      |
 | Errors found only in a screenshot                   | Unknown names and values come back in the write's result, with what is valid        |
+| Markup or CSS dropped without a word                | A binding on `<doop-use>` and CSS rules not kept are named in the result            |
+| Inferred props named `text`, `text-2`               | Named by what the element is, and listed in `create_component`'s result             |
 | Edits break the link, or get thrown away            | Any edit becomes the narrowest override that holds it; no detach needed             |
 | Sweeping edits have unknown blast radius            | `update_component` reports impact, with `dry_run`                                   |
 | Variant explosion                                   | An enum prop is `data-<name>` on the root, and variants are CSS                     |
@@ -40,9 +42,19 @@ component loses nothing visually.
 - **Template markup**: `data-doop-prop` binds text, attributes, styles and custom properties;
   `data-doop-if` makes elements conditional; `data-doop-slot` / `data-doop-slot-suggest` declare slots.
   Enum props exist only in the definition and set `data-<name>` on the root. Nested components are
-  `<doop-use>` by id, so a rename cannot break them.
+  `<doop-use>` by id, so a rename cannot break them. The template attributes mean nothing on a
+  `<doop-use>`: they are dropped with an `ignored_attribute` issue that says what to write instead.
+- **Inferred props** (`inferBindings`, only for markup with no `data-doop-prop` of its own): leaf text,
+  image sources and link targets. A name comes from `data-name`, else the last class that is not a
+  utility class, else what the element or its nearest ancestor is (`h1`-`h6` title, `button` / `a`
+  label, `img` image, `li` item, otherwise text); a link's target is `link` or `<name>-link`.
+  `create_component` lists them as `inferred_props`.
 - **CSS**: the server has no CSSOM, so rules are matched on what their selectors name, over-keeping
-  occasionally. Rules are scoped with `:where([data-doop-instance="<id>"])`, which adds no specificity.
+  occasionally. A rule whose subject is inside a nested component is kept when its selector reaches
+  there from one of the component's own elements (`.plan .btn`), and applies inside this component's
+  instances only; a bare `.btn` is the nested component's to carry. Rules passed as `css` to
+  `create_component` / `update_component` that were not kept come back as a `css_not_kept` issue naming
+  their selectors. Rules are scoped with `:where([data-doop-instance="<id>"])`, which adds no specificity.
   Inherited declarations and used custom properties from `html` / `body` / `:root` land on the instance
   root. Stylesheet links and the Tailwind CDN script are carried as `head`.
 
@@ -51,7 +63,9 @@ component loses nothing visually.
 `prepareFrameHtml` runs synchronously inside every `actions.ts` write:
 
 1. Expand `<doop-use>` at string level (a parser would foster-parent one out of a `<table>`).
-2. Fold a changed main into its definition: a new revision, reported as `changed`.
+2. Fold a changed main into its definition: a new revision, reported as `changed`. One
+   `update_component` call is one revision: when it changes props it opens the revision itself, and
+   the main's write that follows fills it (`withinRevision`) rather than adding a second.
 3. Reconcile each outermost instance: render its own `rev` with its marker's state, diff against the
    incoming markup, record differences as overrides, render at the current revision. Unchanged input
    stays byte-identical. This three-way step is what stops a stale client's save being taken for edits.
@@ -87,8 +101,13 @@ instance; description and make-a-prop / make-a-slot on a main. Right-click and â
 - Placing is by click; no drag from the panel onto the canvas.
 - Selection outlines do not yet distinguish mains and instances; the Layers glyph and Design tab do.
 - The Components page frame for a main made from markup uses a default size until resized.
+- A component made from markup is not placed anywhere; the result says to write `<doop-use>` or call
+  `insert_instance`.
+- A component cannot pass its props on to a component nested in it. The nested one takes fixed
+  values, or the spot is a slot each instance fills.
 - Figma import does not map Figma components to these.
 - A restored revision older than the 20 kept cannot be used for merging: its instance keeps its marker
   state and upgrades.
 - `@scope` is not used, so a host frame's own rules for the same class still apply to an instance.
-- Resident agents cannot import libraries: their run is scoped to one canvas.
+- Workspace libraries (publish once, use on every canvas of the workspace) are their own spec:
+  [workspace-component-library.md](workspace-component-library.md).

@@ -31,13 +31,20 @@ const { componentWriteNotes, runComponentTool } = await import('../server/compon
 const agent: Actor = { name: 'Claude', kind: 'agent', color: '#e5533c' }
 const page = (body: string) => `<!doctype html><html><head></head><body>${body}</body></html>`
 
-function canvasWith(components: Record<string, string>) {
+async function canvasWith(components: Record<string, string>) {
   const canvasId = store.createCanvas('drops', 'kevin').id
   for (const [name, html] of Object.entries(components)) {
-    const outcome = runComponentTool(
+    const outcome = await runComponentTool(
       'create_component',
       { name, html, css: '', auto_props: false },
-      { canvas: store.getCanvas(canvasId)!, actor: agent, canRead: () => true, readableCanvases: () => [] },
+      {
+        canvas: store.getCanvas(canvasId)!,
+        actor: agent,
+        canRead: () => true,
+        canEdit: () => true,
+        userId: undefined,
+        readableCanvases: () => [],
+      },
     )
     if (!outcome.ok) throw new Error(outcome.error)
   }
@@ -57,8 +64,8 @@ describe('an image prop bound by a bare name', () => {
     expect(parseBindings('photo', 'IMG')).toEqual([{ target: 'src', prop: 'photo' }])
   })
 
-  it('fills the image’s src, and is typed as an image', () => {
-    const canvasId = canvasWith({
+  it('fills the image’s src, and is typed as an image', async () => {
+    const canvasId = await canvasWith({
       Cover:
         '<figure class="cover"><img data-doop-prop="artwork" src="/a/one.png" alt=""><figcaption data-doop-prop="title">One</figcaption></figure>',
     })
@@ -72,8 +79,8 @@ describe('an image prop bound by a bare name', () => {
 })
 
 describe('a <doop-use> that would render nothing', () => {
-  it('takes an unclosed one as empty, says so, and still expands the ones after it', () => {
-    const canvasId = canvasWith({
+  it('takes an unclosed one as empty, says so, and still expands the ones after it', async () => {
+    const canvasId = await canvasWith({
       Header: '<header class="hd"><b data-doop-prop="brand">Keep</b></header>',
       Footer: '<footer class="ft"><small data-doop-prop="note">© Keep</small></footer>',
     })
@@ -88,8 +95,8 @@ describe('a <doop-use> that would render nothing', () => {
     expect(notes).toEqual([expect.stringContaining('<doop-use component="Header"> was never closed')])
   })
 
-  it('leaves an open one alone mid-stream, until the stream is done', () => {
-    const canvasId = canvasWith({ Header: '<header class="hd"><b data-doop-prop="brand">Keep</b></header>' })
+  it('leaves an open one alone mid-stream, until the stream is done', async () => {
+    const canvasId = await canvasWith({ Header: '<header class="hd"><b data-doop-prop="brand">Keep</b></header>' })
     const frame = actions.createFrame(canvasId, { name: 'Stream' }, agent)!
     actions.appendFrameHtml(frame.id, '<html><head></head><body><doop-use component="Header" brand="Acme">', agent, {
       start: true,
@@ -104,7 +111,7 @@ describe('a <doop-use> that would render nothing', () => {
   it('places an unclosed one in a saved html override too, and expands what follows it there', async () => {
     const { contextFor } = await import('../server/components.ts')
     const { renderInstance } = await import('../server/componentEngine.ts')
-    const canvasId = canvasWith({
+    const canvasId = await canvasWith({
       Card: '<article class="card"><div data-doop-slot="body"></div></article>',
       Badge: '<span class="badge" data-doop-prop="label">New</span>',
     })
@@ -127,8 +134,8 @@ describe('a <doop-use> that would render nothing', () => {
     expect(ctx.issues.some((issue) => issue.code === 'unclosed_use')).toBe(true)
   })
 
-  it('reports an empty main that a stream chunk expanded before the stream ended', () => {
-    const canvasId = canvasWith({ Badge: '<span class="badge" data-doop-prop="label">New</span>' })
+  it('reports an empty main that a stream chunk expanded before the stream ended', async () => {
+    const canvasId = await canvasWith({ Badge: '<span class="badge" data-doop-prop="label">New</span>' })
     const def = store.getComponents(canvasId).find((component) => component.name === 'Badge')!
     store.saveComponent(canvasId, { ...def, template: '' })
     const frame = actions.createFrame(canvasId, { name: 'Stream' }, agent)!
@@ -141,8 +148,8 @@ describe('a <doop-use> that would render nothing', () => {
     ])
   })
 
-  it('says so when the component’s main has no markup', () => {
-    const canvasId = canvasWith({ Badge: '<span class="badge" data-doop-prop="label">New</span>' })
+  it('says so when the component’s main has no markup', async () => {
+    const canvasId = await canvasWith({ Badge: '<span class="badge" data-doop-prop="label">New</span>' })
     const def = store.getComponents(canvasId).find((component) => component.name === 'Badge')!
     store.saveComponent(canvasId, { ...def, template: '' })
     const { notes } = write(canvasId, '<p>Hi <doop-use component="Badge"></doop-use></p>')

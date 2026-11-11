@@ -11,6 +11,9 @@ const createFrame = vi.fn((canvasId: string, input: Partial<Frame> & { name: str
 )
 vi.mock('../src/lib/api', () => ({
   api: {
+    /* the Components tab's dot asks; nothing waits in these tests */
+    canvasLibrary: () => new Promise(() => {}),
+
     restackFrames: (canvasId: string, frames: StackWrite[]) => restackFrames(canvasId, frames),
     createFrame: (canvasId: string, input: Partial<Frame> & { name: string }) => createFrame(canvasId, input),
     updateFrame: () => Promise.resolve(),

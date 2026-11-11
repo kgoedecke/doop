@@ -365,6 +365,27 @@
       "when": 1794352711304,
       "tag": "0052_components",
       "breakpoints": true
+    },
+    {
+      "idx": 53,
+      "version": "7",
+      "when": 1794364584915,
+      "tag": "0053_library_components",
+      "breakpoints": true
+    },
+    {
+      "idx": 54,
+      "version": "7",
+      "when": 1794369628411,
+      "tag": "0054_library_publish_policy",
+      "breakpoints": true
+    },
+    {
+      "idx": 55,
+      "version": "7",
+      "when": 1794371994196,
+      "tag": "0055_library_nested_sources",
+      "breakpoints": true
     }
   ]
 }

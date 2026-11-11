@@ -20,6 +20,7 @@ import type {
   Frame,
   FrameVersion,
   FrameVersionInfo,
+  LibraryPublishPolicy,
   WorkspaceDetail,
   WorkspaceInvite,
   WorkspaceMember,
@@ -59,7 +60,56 @@ export interface ComponentCandidate {
 export interface ComponentLibrary {
   id: string
   name: string
-  components: { id: string; name: string; signature: string; description?: string; instances: number }[]
+  /** a library the canvas's workspace has published, rather than a canvas to copy from */
+  library?: boolean
+  components: {
+    id: string
+    name: string
+    signature: string
+    description?: string
+    instances: number
+    /** a published library's version of the component; absent on a canvas to copy from */
+    rev?: number
+  }[]
+}
+
+export interface LibraryChangeEntry {
+  id: string
+  name: string
+  change: import('../../shared/components').LibraryChange
+}
+
+/** A canvas and its workspace's library: may it have one, what it has published,
+ *  and which of its linked components have a newer published state. */
+export interface CanvasLibrary {
+  /** whether this server sells plans at all; off on a self-hosted one */
+  billing: boolean
+  entitled: boolean
+  blocked?: 'no_workspace' | 'plan_required'
+  workspaceId?: string
+  /** the workspace lets this viewer publish (it may keep that to its owner and admins) */
+  canPublish: boolean
+  library: boolean
+  changes: LibraryChangeEntry[]
+  published_at?: number
+  published_by?: string
+  updates: { id: string; name: string; instances: number }[]
+  /** as a library: the canvases using it that are on an older publication */
+  behind?: { id: string; name: string; components: string[] }[]
+}
+
+/** What "Update everywhere" did, or in a dry run would do, canvas by canvas. */
+export interface LibraryUpdateReport {
+  dry_run: boolean
+  canvases: {
+    canvas_id: string
+    canvas_name: string
+    updated: string[]
+    frames_changed: number
+    approvals_withdrawn: number
+  }[]
+  /** canvases left as they were: no edit access there, or the pull was refused */
+  skipped: { canvas_id?: string; canvas_name?: string; reason: 'no_edit_access' | 'failed'; message: string }[]
 }
 
 export interface ComponentImpact {
@@ -608,6 +658,32 @@ export const api = {
   componentCandidates: (canvasId: string) =>
     req<ComponentCandidate[]>(`/api/canvases/${canvasId}/component-candidates`),
   componentLibraries: (canvasId: string) => req<ComponentLibrary[]>(`/api/canvases/${canvasId}/component-libraries`),
+  canvasLibrary: (canvasId: string) => req<CanvasLibrary>(`/api/canvases/${canvasId}/library`),
+  publishLibrary: (canvasId: string, components?: string[]) =>
+    req<{ published: LibraryChangeEntry[]; removed: LibraryChangeEntry[] }>(
+      `/api/canvases/${canvasId}/library/publish`,
+      { method: 'POST', body: JSON.stringify(components ? { components } : {}) },
+    ),
+  unpublishLibrary: (canvasId: string, components?: string[]) =>
+    req<{ unpublished: { id: string; name: string }[] }>(`/api/canvases/${canvasId}/library`, {
+      method: 'DELETE',
+      body: JSON.stringify(components ? { components } : {}),
+    }),
+  /** a published component as its library last published it, before this canvas uses it */
+  libraryPreview: (canvasId: string, libraryCanvasId: string, componentId: string) =>
+    req<{ html: string; width: number; height: number; variants: number }>(
+      `/api/canvases/${canvasId}/components/${componentId}/preview?library=${encodeURIComponent(libraryCanvasId)}`,
+    ),
+  /** pull the library's latest publication into every canvas of the workspace using it */
+  updateLibraryEverywhere: (canvasId: string, dryRun = false) =>
+    req<LibraryUpdateReport>(`/api/canvases/${canvasId}/library/update-consumers`, {
+      method: 'POST',
+      body: JSON.stringify(dryRun ? { dryRun } : {}),
+    }),
+  workspaceLibraries: (workspaceId: string) =>
+    req<{ id: string; name: string; components: number; publishedAt: number; usedBy: number; behind?: number }[]>(
+      `/api/workspaces/${workspaceId}/libraries`,
+    ),
   createComponent: (
     canvasId: string,
     body: { name: string; frameId: string; element: string; replaceMatching?: boolean; description?: string },
@@ -835,6 +911,8 @@ export const api = {
   getWorkspace: (id: string) => req<WorkspaceDetail>(`/api/workspaces/${id}`),
   renameWorkspace: (id: string, name: string) =>
     req<WorkspaceSummary>(`/api/workspaces/${id}`, { method: 'PATCH', body: JSON.stringify({ name }) }),
+  setLibraryPublish: (id: string, libraryPublish: LibraryPublishPolicy) =>
+    req<WorkspaceSummary>(`/api/workspaces/${id}`, { method: 'PATCH', body: JSON.stringify({ libraryPublish }) }),
   deleteWorkspace: (id: string) => req(`/api/workspaces/${id}`, { method: 'DELETE' }),
   inviteToWorkspace: (id: string, email: string, role: WorkspaceRole = 'member') =>
     req<WorkspaceInviteResult>(`/api/workspaces/${id}/members`, {

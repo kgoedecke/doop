@@ -88,6 +88,8 @@ import {
   PlusIcon,
 } from './ui/icons'
 import { useT } from '@/lib/i18n'
+import { libraryAttention, useLibraryStatus } from '../lib/library'
+import { Dot } from './ui/dot'
 
 /* the tree indents 16px per level; frame rows sit at depth 0 */
 const INDENT = 16
@@ -240,6 +242,11 @@ export function LayersPanel({
   const setTab = useStore((s) => s.setLayersTab)
   /* view and comment links browse the tree; nothing in it moves or changes */
   const readOnly = useStore((s) => !canEditOpenCanvas(s))
+  /* the Components tab wears a dot while its library waits on someone: changes
+     not yet published, or published updates not yet taken */
+  const libraryStatus = useLibraryStatus(useStore((s) => s.canvas?.id))
+  const attention = libraryAttention(libraryStatus)
+  const libraryWaits = !readOnly && attention.unpublished + attention.updates > 0
   const pageCanvas = usePageCanvas()
   const frames = useMemo(() => pageCanvas?.frames ?? [], [pageCanvas])
   const selectedId = useStore((s) => s.selectedId)
@@ -546,7 +553,16 @@ export function LayersPanel({
             <PanelIconTab value="layers" icon={<LayersIcon />} title={t('panels.layersTitle')}>
               {t('panels.layersTitle')}
             </PanelIconTab>
-            <PanelIconTab value="components" icon={<ComponentIcon />} title={t('components.title')}>
+            <PanelIconTab
+              value="components"
+              icon={<ComponentIcon />}
+              title={libraryWaits ? t('components.libraryTabWaiting') : t('components.title')}
+              badge={
+                libraryWaits ? (
+                  <Dot size="sm" className="absolute top-0.5 right-0.5 text-brand" data-library-dot />
+                ) : undefined
+              }
+            >
               {t('components.title')}
             </PanelIconTab>
             <PanelIconTab value="tokens" icon={<BracesIcon />} title={t('panels.layersTabTokens')}>

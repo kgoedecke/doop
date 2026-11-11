@@ -206,6 +206,10 @@ interface State {
   setGuidelineLocal(name: string, doc: GuidelineDoc | null): void
   /** a component changed in the room, or was deleted (null) */
   setComponentLocal(id: string, component: import('../../shared/components').ComponentDef | null): void
+  /** counts what the workspace's libraries have published or withdrawn since this
+   *  page loaded: the Components panel reads its library again when it moves */
+  libraryTick: number
+  bumpLibrary(): void
   /** replace the open canvas's design tokens and themes (the room sends the whole list) */
   setTokensLocal(tokens: DesignToken[], themes: string[]): void
   /** pin (reference set) or unpin (null) a Memory reference on the open canvas */
@@ -546,6 +550,8 @@ export const useStore = create<State>((set, get) => ({
       const others = (s.canvas.components ?? []).filter((def) => def.id !== id)
       return { canvas: { ...s.canvas, components: component ? [...others, component] : others } }
     }),
+  libraryTick: 0,
+  bumpLibrary: () => set((s) => ({ libraryTick: s.libraryTick + 1 })),
   setGuidelineLocal: (name, doc) =>
     set((s) => {
       if (!s.canvas) return {}

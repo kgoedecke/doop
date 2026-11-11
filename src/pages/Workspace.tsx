@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { WorkspaceDetail, WorkspaceRole, WorkspaceSummary } from '../../shared/types'
+import type { LibraryPublishPolicy, WorkspaceDetail, WorkspaceRole, WorkspaceSummary } from '../../shared/types'
 import { formatUsd, TEAM_SEAT_PRICE, type WorkspaceStatus } from '../../shared/billing'
 import { navigate } from '../App'
 import { api, errorMessage, paywalledWorkspace } from '../lib/api'
 import { authClient } from '../lib/auth'
+import { cancelLibraryResume, confirmLibraryResume } from '../lib/libraryResume'
 import { posthog } from '../lib/posthog'
 import { cachedWorkspace, fetchWorkspace } from '../lib/workspaceCache'
 import { AppRail, railLayout, workspacePanesFor, type WorkspacePane } from '../components/AppRail'
@@ -22,13 +23,14 @@ import { Tabs, TabsList, TabsTrigger } from '../components/ui/tabs'
 import { Toast } from '../components/ui/toast'
 import { ChevronRightIcon } from '../components/ui/icons'
 import { FontLibrary } from '../components/FontLibrary'
+import { WorkspaceLibraries } from '../components/WorkspaceLibraries'
 import { DashContent, DashHeader, DashLayout, DashMain, DashSubtitle, DashTitle } from '../components/ui/dash'
 import { timeAgo } from '../lib/time'
 import { getLocale, t as translate, useT, type PlainMessageKey } from '../lib/i18n'
 
 type Pane = WorkspacePane
 
-const PANES: readonly string[] = ['members', 'fonts', 'billing', 'general'] satisfies Pane[]
+const PANES: readonly string[] = ['members', 'fonts', 'libraries', 'billing', 'general'] satisfies Pane[]
 
 function isPane(value: string | null): value is Pane {
   return value !== null && PANES.includes(value)
@@ -53,6 +55,7 @@ const ROLE_LABEL = {
 const TAB_LABEL = {
   members: 'workspace.people',
   fonts: 'workspace.fonts',
+  libraries: 'workspace.libraries',
   billing: 'workspace.billing',
   general: 'workspace.general',
 } as const satisfies Record<Pane, PlainMessageKey>
@@ -127,12 +130,19 @@ export function Workspace({ workspaceId }: { workspaceId: string }) {
           if (summary.active && summary.plan) {
             posthog.capture('workspace_plan_activated', { workspaceId, interval: summary.interval })
             showToast(translate('workspace.planActive'))
+            /* they were on the way to a component library when the plan came up:
+               back to that canvas, where the Components panel picks it up */
+            const back = confirmLibraryResume(workspaceId)
+            if (back) navigate(back)
           }
         })
         .catch(console.error)
         .finally(reload)
     } else {
-      if (landing.checkout === 'canceled') showToast(translate('workspace.checkoutCanceled'))
+      if (landing.checkout === 'canceled') {
+        cancelLibraryResume(workspaceId)
+        showToast(translate('workspace.checkoutCanceled'))
+      }
       reload()
     }
   }, [landing, workspaceId, reload])
@@ -244,6 +254,8 @@ export function Workspace({ workspaceId }: { workspaceId: string }) {
             <MembersPane ws={ws} meId={meId} admin={admin} onChange={reload} onError={handle} onToast={showToast} />
           ) : pane === 'fonts' ? (
             <FontLibrary workspaceId={ws.id} />
+          ) : pane === 'libraries' ? (
+            <WorkspaceLibraries workspaceId={ws.id} onToast={showToast} />
           ) : pane === 'billing' ? (
             <BillingPane
               ws={ws}
@@ -646,6 +658,20 @@ function GeneralPane({
     }
   }
 
+  async function setLibraryPublish(policy: LibraryPublishPolicy) {
+    if (policy === ws.libraryPublish || busy) return
+    setBusy(true)
+    try {
+      await api.setLibraryPublish(ws.id, policy)
+      onChange()
+      onToast(t('workspace.libraryPublishSaved'))
+    } catch (caught) {
+      onToast(errorMessage(caught, t('workspace.libraryPublishFailed')))
+    } finally {
+      setBusy(false)
+    }
+  }
+
   async function remove() {
     setBusy(true)
     try {
@@ -689,6 +715,26 @@ function GeneralPane({
         <CardRow label={t('workspace.created')}>
           <span className="text-body text-ink-soft">{timeAgo(ws.createdAt)}</span>
         </CardRow>
+        {admin && (
+          <CardRow
+            label={t('workspace.libraryPublish')}
+            control={
+              <Select
+                value={ws.libraryPublish}
+                disabled={busy}
+                onValueChange={(value) => void setLibraryPublish(value as LibraryPublishPolicy)}
+              >
+                <SelectTrigger className="w-full" aria-label={t('workspace.libraryPublishAria')}>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="everyone">{t('workspace.libraryPublishEveryone')}</SelectItem>
+                  <SelectItem value="admins">{t('workspace.libraryPublishAdmins')}</SelectItem>
+                </SelectContent>
+              </Select>
+            }
+          />
+        )}
       </SettingsCard>
       {isOwner && (
         <SettingsCard tone="flat" className="border-accent-ink/30">

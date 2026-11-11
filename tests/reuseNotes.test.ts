@@ -156,19 +156,21 @@ describe('reuse notes stay accurate', () => {
 })
 
 describe('reuse inside components', () => {
-  it('names rows a main repeats by hand, and what auto_props=false costs', () => {
+  it('names rows a main repeats by hand, and what auto_props=false costs', async () => {
     const canvasId = canvasWithTokens()
-    const run = (name: string, input: Record<string, unknown>) => {
-      const outcome = runComponentTool(name, input, {
+    const run = async (name: string, input: Record<string, unknown>) => {
+      const outcome = await runComponentTool(name, input, {
         canvas: store.getCanvas(canvasId)!,
         actor: agent,
         canRead: () => true,
+        canEdit: () => true,
+        userId: undefined,
         readableCanvases: () => [],
       })
       if (!outcome.ok) throw new Error(outcome.error)
       return outcome.result
     }
-    const created = run('create_component', {
+    const created = await run('create_component', {
       name: 'Sidebar',
       html: `<aside class="sb">${row('Overview', '12')}${row('Files', '1,284')}${row('Trash', '3')}</aside>`,
       css: '.sb{display:flex}',
@@ -178,8 +180,8 @@ describe('reuse inside components', () => {
     expect(created.note).toContain('update_component “Sidebar” with a <doop-use> for each')
     expect(created.note).toContain('auto_props=false')
     /* built from nested instances, the same main says nothing */
-    run('create_component', { name: 'NavItem', html: row('Overview', '12'), css: '.nav-item{display:flex}' })
-    const nested = run('create_component', {
+    await run('create_component', { name: 'NavItem', html: row('Overview', '12'), css: '.nav-item{display:flex}' })
+    const nested = await run('create_component', {
       name: 'Rail',
       html: `<aside class="rail"><doop-use component="NavItem"></doop-use><doop-use component="NavItem"></doop-use><doop-use component="NavItem"></doop-use></aside>`,
       css: '.rail{display:flex}',

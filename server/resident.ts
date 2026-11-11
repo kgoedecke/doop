@@ -34,8 +34,14 @@ import { createImportedWebpageFrame, findImportedWebpageFrame } from './webpageI
 import { COMPONENTS, DESIGN_BRIEF, DESIGN_QUALITY, FRAME_STYLES, PROTOTYPES } from './guide.ts'
 import { zodToJsonSchema } from 'zod-to-json-schema'
 import { z } from 'zod'
-import { catalogEntry, compactFrameHtml, findComponent } from './componentActions.ts'
-import { COMPONENT_TOOLS, COMPONENT_TOOL_NAMES, componentWriteNotes, runComponentTool } from './componentTools.ts'
+import { catalogEntry, compactFrameHtml, findComponent, libraryCatalog } from './componentActions.ts'
+import {
+  COMPONENT_TOOLS,
+  COMPONENT_TOOL_NAMES,
+  componentWriteNotes,
+  libraryFeatureEvent,
+  runComponentTool,
+} from './componentTools.ts'
 import { canvasRole } from './access.ts'
 import { roleAllows } from '../shared/canvasRole.ts'
 import { canvasesFor } from './workspaces.ts'
@@ -705,6 +711,27 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
               },
             ]
           : []
+      const sharedLibraries = canvas ? libraryCatalog(canvas) : []
+      const librariesBlock = sharedLibraries.length
+        ? [
+            {
+              text:
+                `# Workspace library\nPublished for every canvas in this workspace. Use one by writing <doop-use> with its name, exactly like a component on this canvas; it is added here, linked to its library. Never redraw one:\n\n` +
+                sharedLibraries
+                  .map(
+                    (library) =>
+                      `## ${library.canvas_name} (${library.canvas_id})\n` +
+                      library.components
+                        .map(
+                          (entry) =>
+                            `- ${entry.signature}${entry.description ? ` — ${entry.description}` : ''}\n  ${entry.usage}`,
+                        )
+                        .join('\n'),
+                  )
+                  .join('\n\n'),
+            },
+          ]
+        : []
       const noVisionBlock = runState.vision
         ? []
         : [
@@ -723,6 +750,7 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
             ...fontsBlock.map((b) => b.text),
             ...tokensBlock.map((b) => b.text),
             ...componentsBlock.map((b) => b.text),
+            ...librariesBlock.map((b) => b.text),
           ].join('\n\n'),
           // Image generation uses a separate paid model account; the local CLI
           // connection must never imply that the user's subscription covers it.
@@ -769,6 +797,7 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
                   ...fontsBlock,
                   ...tokensBlock,
                   ...componentsBlock,
+                  ...librariesBlock,
                   ...noVisionBlock,
                 ],
                 tools: TOOLS,
@@ -1627,6 +1656,11 @@ function canReadCanvas(userId: string, canvasId: string): boolean {
   return !!other && roleAllows(canvasRole(userId, other), 'view')
 }
 
+function canEditCanvas(userId: string, canvasId: string): boolean {
+  const other = store.getCanvas(canvasId)
+  return !!other && roleAllows(canvasRole(userId, other), 'edit')
+}
+
 /** The resident agents' tool names; tests hold them to the MCP server's (agentToolParity.test.ts). */
 export const RESIDENT_TOOL_NAMES = TOOLS.map((tool) => tool.name)
 
@@ -2396,17 +2430,24 @@ export async function execTool(
         if (!COMPONENT_TOOL_NAMES.includes(block.name)) return fail(`unknown tool ${block.name}`)
         const canvas = store.getCanvas(canvasId)
         if (!canvas) return fail('canvas not found')
-        const reader = runState.payerId
-        const outcome = runComponentTool(block.name, block.input as Record<string, unknown>, {
+        const reader = runState.requesterId ?? runState.payerId
+        const outcome = await runComponentTool(block.name, block.input as Record<string, unknown>, {
           canvas,
           actor,
           /* libraries are read as the person who asked: their canvases, and no one else's */
           canRead: (id) => id === canvasId || (!!reader && canReadCanvas(reader, id)),
+          /* other canvases are changed only where the person who asked may edit: a run nobody
+             asked for (an automation, billed to its payer) changes none of them */
+          canEdit: (id) => id === canvasId || (!!runState.requesterId && canEditCanvas(runState.requesterId, id)),
           readableCanvases: () =>
             reader ? canvasesFor(reader).flatMap((meta) => store.getCanvas(meta.id) ?? []) : [canvas],
+          /* publishing is the requester's to do; a run nobody asked for publishes only where everyone may */
+          userId: runState.requesterId,
         })
         if (!outcome.ok) return fail(outcome.error)
         const { data, note, frames } = outcome.result
+        const libraryEvent = libraryFeatureEvent(block.name, block.input as Record<string, unknown>, data)
+        if (libraryEvent) captureFeature(runState.requesterId, libraryEvent, 'resident', { canvas_id: canvasId })
         const notes = (frames ?? []).flatMap((frame) => {
           runState.mutatedFrames.add(frame.id)
           runState.verifiedFrames.delete(frame.id)

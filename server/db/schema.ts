@@ -118,6 +118,9 @@ export const workspaces = pgTable('workspaces', {
   /** Stripe's `created` of the last subscription event applied (epoch s) —
    *  an older event arriving late must not roll the mirror back */
   billingEventAt: bigint('billing_event_at', { mode: 'number' }),
+  /** who may publish to the workspace's component library: 'admins' (owner and
+   *  admins only); null is everyone who can edit the library canvas */
+  libraryPublish: text('library_publish'),
   createdAt: bigint('created_at', { mode: 'number' }).notNull(),
   updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
 })
@@ -538,6 +541,33 @@ export const components = pgTable(
     createdAt: bigint('created_at', { mode: 'number' }).notNull(),
     updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
     updatedBy: text('updated_by').notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.canvasId, t.id] })],
+)
+
+/** What a workspace library has published: one snapshot per component of a
+ *  library canvas. A canvas is a library while it has rows here, and serves the
+ *  workspace it is in at that moment (read from the canvas, not stored). Small
+ *  and read on frame writes, so mirrored in memory (server/componentLibrary.ts). */
+export const libraryComponents = pgTable(
+  'library_components',
+  {
+    canvasId: text('canvas_id').notNull(),
+    id: text('id').notNull(),
+    name: text('name').notNull(),
+    description: text('description').notNull(),
+    template: text('template').notNull(),
+    css: text('css').notNull(),
+    rawCss: text('raw_css').notNull(),
+    head: jsonb('head').$type<string[]>().notNull(),
+    props: jsonb('props').$type<ComponentProp[]>().notNull(),
+    slots: jsonb('slots').$type<ComponentSlot[]>().notNull(),
+    code: jsonb('code').$type<ComponentCode>(),
+    /** nested components from other libraries: component id → library canvas id */
+    nested: jsonb('nested').$type<Record<string, string>>(),
+    rev: integer('rev').notNull(),
+    publishedAt: bigint('published_at', { mode: 'number' }).notNull(),
+    publishedBy: text('published_by').notNull(),
   },
   (t) => [primaryKey({ columns: [t.canvasId, t.id] })],
 )

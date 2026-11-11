@@ -206,6 +206,15 @@ export function isWorkspaceRole(value: unknown): value is WorkspaceRole {
   return typeof value === 'string' && (WORKSPACE_ROLES as readonly string[]).includes(value)
 }
 
+/** Who may publish to a workspace's component library: everyone who can edit
+ *  the library canvas, or the workspace's owner and admins only. */
+export const LIBRARY_PUBLISH_POLICIES = ['everyone', 'admins'] as const
+export type LibraryPublishPolicy = (typeof LIBRARY_PUBLISH_POLICIES)[number]
+
+export function isLibraryPublishPolicy(value: unknown): value is LibraryPublishPolicy {
+  return LIBRARY_PUBLISH_POLICIES.includes(value as LibraryPublishPolicy)
+}
+
 /** A workspace as the dashboard lists it — for one viewer, hence `role`. */
 export interface WorkspaceSummary {
   id: string
@@ -226,6 +235,8 @@ export interface WorkspaceSummary {
   /** next renewal (or the end, when cancelAtPeriodEnd) — epoch ms */
   currentPeriodEnd?: number
   cancelAtPeriodEnd: boolean
+  /** who may publish to its component library */
+  libraryPublish: LibraryPublishPolicy
   createdAt: number
   updatedAt: number
 }
@@ -602,6 +613,9 @@ export type ServerMessage =
   | { type: 'guide'; id: string; guide: CanvasGuide | null; actor: Actor }
   /** a component changed, or was deleted (`component` null) */
   | { type: 'component'; id: string; component: ComponentDef | null; actor: Actor }
+  /** a workspace library this canvas can use published or withdrew components:
+   *  what the Components panel offers, and which updates wait, should be read again */
+  | { type: 'library'; actor: Actor }
   /** a style-guide doc was written, moved (doc set) or deleted (doc null) */
   | { type: 'guidelines'; name: string; doc: GuidelineDoc | null; actor: Actor }
   /** the canvas's design tokens changed: the whole list after the change */
