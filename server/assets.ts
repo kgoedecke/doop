@@ -1,6 +1,6 @@
 import { parse, type DefaultTreeAdapterTypes as Tree } from 'parse5'
 import { nanoid } from 'nanoid'
-import { asc, eq, gt, inArray } from 'drizzle-orm'
+import { and, asc, eq, gt, inArray, notInArray } from 'drizzle-orm'
 import { db } from './db/index.ts'
 import * as t from './db/schema.ts'
 import * as storage from './storage.ts'
@@ -258,12 +258,19 @@ const RECONCILE_PAGE = 500
  *  lives in db/persist.ts. */
 export async function reconcileAssetRefs(): Promise<number> {
   const rows: { assetId: string; frameId: string }[] = []
+  /* canvas-actors: a frame on an actor has no html in its row to rebuild from,
+     so the refs written with each of its saves are left as they are */
+  const actorHeld = db
+    .select({ id: t.frames.id })
+    .from(t.frames)
+    .innerJoin(t.canvases, eq(t.canvases.id, t.frames.canvasId))
+    .where(eq(t.canvases.frameStore, 'actor'))
   let after = ''
   for (;;) {
     const page = await db
       .select({ id: t.frames.id, html: t.frames.html })
       .from(t.frames)
-      .where(gt(t.frames.id, after))
+      .where(and(gt(t.frames.id, after), notInArray(t.frames.id, actorHeld)))
       .orderBy(asc(t.frames.id))
       .limit(RECONCILE_PAGE)
     for (const f of page) for (const assetId of extractAssetIds(f.html)) rows.push({ assetId, frameId: f.id })
@@ -271,7 +278,7 @@ export async function reconcileAssetRefs(): Promise<number> {
     if (!last || page.length < RECONCILE_PAGE) break
     after = last.id
   }
-  await db.delete(t.assetRefs)
+  await db.delete(t.assetRefs).where(notInArray(t.assetRefs.frameId, actorHeld))
   for (let i = 0; i < rows.length; i += 1000) {
     await db
       .insert(t.assetRefs)

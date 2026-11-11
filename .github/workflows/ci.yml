@@ -89,12 +89,28 @@ jobs:
       # would run Bun's own runner against the same files
       - run: bun run test -- --shard=${{ matrix.shard }}/${{ strategy.job-total }}
 
+  # canvas-actors: the generated client matches src/actor.ts, and the
+  # end-to-end test runs against a local actor runtime (Bun 1.4.2+)
+  test-actors:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.19.0'
+      - run: bun install --frozen-lockfile
+      - run: bun run actors:check
+      - run: bun run test:actors -- tests/canvasActors.test.ts
+
   # One status that stands for every shard, so a required check or a merge
   # queue names "tests" rather than each "test (N)"; renumbering the matrix
   # never silently drops a protection.
   tests:
-    needs: test
+    needs: [test, test-actors]
     if: always()
     runs-on: ubuntu-latest
     steps:
-      - run: test "${{ needs.test.result }}" = success
+      - run: test "${{ needs.test.result }}" = success && test "${{ needs.test-actors.result }}" = success

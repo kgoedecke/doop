@@ -5,6 +5,7 @@ import { COMPONENT_ATTR, type ComponentDef, type ComponentIssue } from '../share
 import { MAX_PAGES, PageLimitError, store } from './store.ts'
 import * as persist from './db/persist.ts'
 import * as thumbs from './thumbs.ts'
+import { wireActorFrames } from './actorFrames.ts'
 import { colorFor } from '../shared/types.ts'
 import type { StackWrite } from '../shared/frameStack.ts'
 import { DEFAULT_ROLE_ID, mentionedRole, normalizePipeline, roleByAgentName, roleName } from '../shared/agents.ts'
@@ -2036,13 +2037,22 @@ export function updateFrame(
     Pick<Frame, 'name' | 'pageId' | 'x' | 'y' | 'width' | 'height' | 'html' | 'hidden' | 'locked' | 'z' | 'rotation'>
   >,
   actor: Actor,
-  opts: { replace?: boolean } = {},
+  opts: {
+    replace?: boolean
+    /** canvas-actors: the edit is already in the canvas's actor, as written (adoptActorEdit) */
+    adopted?: { updatedAt: number }
+  } = {},
 ): Frame | undefined {
   const before = store.getFrame(frameId)
   if (!before) return undefined
   let changedComponents: ComponentDef[] = []
+  let adopted = opts.adopted
   if (patch.html !== undefined) {
     const prepared = prepareWrite(before.canvasId, frameId, repairEscapedHtml(patch.html), before.html, actor.name)
+    /* canvas-actors: HTML the server completed (components, library fonts,
+       tokens, escaped markup) is no longer what the actor holds, so it is
+       saved back like any edit */
+    if (prepared.html !== patch.html) adopted = undefined
     patch = { ...patch, html: prepared.html }
     changedComponents = prepared.changed
   }
@@ -2051,7 +2061,7 @@ export function updateFrame(
   const prevHidden = !!before.hidden
   const prevLocked = !!before.locked
   const prior = priorState(before)
-  const frame = store.updateFrame(frameId, patch, actor.name)
+  const frame = store.updateFrame(frameId, patch, actor.name, adopted ? { adopted } : {})
   if (!frame) return undefined
 
   const htmlChanged = patch.html !== undefined && patch.html !== prevHtml
@@ -2103,6 +2113,30 @@ export function updateFrame(
   touch(frame.canvasId, actor, frame.id)
   return frame
 }
+
+/** canvas-actors: a browser's edit, written straight to the canvas's actor,
+ *  taken in as if it had come through the API, so the room, design history,
+ *  components and activity see it. It is saved back only when the server
+ *  completed its HTML (updateFrame). */
+export function adoptActorEdit(next: Frame, by: Actor) {
+  const before = store.getFrame(next.id)
+  /* a canvas that is not loaded takes the edit in when it loads (store.load) */
+  if (!before || !store.isLoaded(before.canvasId)) return
+  const patch: Partial<Pick<Frame, 'name' | 'x' | 'y' | 'width' | 'height' | 'html' | 'hidden' | 'locked' | 'z'>> = {}
+  if (next.name !== before.name) patch.name = next.name
+  if (next.x !== before.x) patch.x = next.x
+  if (next.y !== before.y) patch.y = next.y
+  if (next.width !== before.width) patch.width = next.width
+  if (next.height !== before.height) patch.height = next.height
+  if (next.html !== before.html) patch.html = next.html
+  if (!!next.hidden !== !!before.hidden) patch.hidden = !!next.hidden
+  if (!!next.locked !== !!before.locked) patch.locked = !!next.locked
+  if (next.z !== undefined && next.z !== before.z) patch.z = next.z
+  if (!Object.keys(patch).length) return
+  updateFrame(next.id, patch, by, { adopted: { updatedAt: next.updatedAt } })
+}
+
+wireActorFrames({ adopt: adoptActorEdit })
 
 /** Several frames' places in the stack at once (the Layers panel renumbering
  *  a page, or undoing that): every frame is checked before any is written,

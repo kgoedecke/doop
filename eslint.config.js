@@ -135,6 +135,8 @@ export default tseslint.config(
       'desktop/src-tauri/target/',
       'desktop/src-tauri-chromium/target/',
       'storybook-static/',
+      'generated/',
+      'data/',
     ],
   },
   {

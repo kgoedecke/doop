@@ -306,6 +306,39 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
 ## 3. Data and Persistence
 
 - PostgreSQL 16 (`postgres:16-alpine` in `docker-compose.yml`) - primary database.
+- Canvas actors (`server/actorFrames.ts`, `server/canvasMoves.ts`): a canvas made by someone with the
+  `canvas-actors` feature flag (`feature_flags` table, `server/featureFlags.ts`, re-read every 30s; `bun run
+flags list|enable|disable|move-back`), or copied by them, is marked `canvases.frame_store = 'actor'`
+  (`placeCanvas`) and keeps its frames and their design history in a Terse `CanvasActor` (`src/actor.ts`,
+  SQLite through Drizzle, `terse-sdk` 0.15). Canvases the owner already had never move there. The way back is
+  the flag going off: `store.load` returns such a canvas to Postgres before reading it (`followOwnerFlag` ->
+  `moveCanvasToPostgres`: the actor stops taking browser edits, history and frames are copied, one transaction
+  clears the mark, then the actor is emptied; a failed move leaves the canvas on its actor). A canvas in use
+  moves once it has been idle and is opened again; `flags move-back` moves an owner's canvases at once
+  (server stopped, or restarted after). Its `frames` rows stay in Postgres with an empty `html` as the index
+  boot reads, so no actor is asked at boot. Pages, guides, tokens, activity, comments and tasks stay in
+  Postgres. Frame HTML follows `store.load` / `evictIdle` like any canvas: `persist.loadFrameHtml` reads
+  the frames whole from the actor (`loadActorFrames`; the load rejects if the actor does not answer),
+  `store.takeHeld` takes in anything newer than the row (an edit a browser wrote while the server was
+  down), and an idle drop closes the server's socket to the actor (`canvasUnloaded`); a write still on its
+  way to the actor keeps the canvas loaded (`actorWritePending`). History goes through
+  `persist.saveFrameVersion` / `listFrameVersions` / `getFrameVersion` to the actor's `addVersion` /
+  `versions` / `version`. `reconcileAssetRefs` leaves actor frames' refs alone, having no html to rebuild
+  them from. A browser edit that starts a new burst (another author, or a pause) files the state it replaced
+  on the actor itself, so history survives edits the server was not following. The flag points are hooks in
+  `server/db/persist.ts` (saves, deletes, copies, loads, history), `placeCanvas` in `store.createCanvas` /
+  `duplicateCanvas`, `store.load`, and `api.updateFrame` on the client, which sends plain edits on such a canvas straight
+  to its actor (`src/lib/actorFrames.ts`, ticket from `GET /api/canvases/:id/actor`) and falls back to the
+  app API. While a canvas is loaded the server follows its actor's socket and folds those edits in through
+  `actions.updateFrame` with `adopted` (saved back only when the server completed the HTML: components,
+  fonts, tokens); while one of its own writes to a frame is on the way it
+  skips that frame's events and reads the frame back afterwards. Actor sockets are checked only when they
+  open, so every access change (`store.setLinkAccess`, `removeMember`, `setWorkspace`, `detachWorkspace`, and
+  `workspaces.removeMember`) calls `revokeActorAccess`, retried until the actor confirms. Unset
+  `TERSE_ACTOR_URL`, the flag does nothing and the server never reads `feature_flags`; a failed
+  read at boot leaves every flag off. Tooling: `bun run dev:actors` / `test:actors` start a local actor
+  runtime (Bun 1.4.2+, which the `actors:*` scripts need too), `actors:migrations`, `actors:generate` /
+  `actors:check` (client in `generated/actors/`), `deploy:actors`. Test: `tests/canvasActors.test.ts`.
 - drizzle-orm 0.45.2 + drizzle-kit - schema in `server/db/schema.ts` and
   `server/db/auth-schema.ts`; migrations generated via `npx drizzle-kit generate` into
   `server/db/migrations`, applied at boot by `server/db/index.ts` (never by drizzle-kit itself).
