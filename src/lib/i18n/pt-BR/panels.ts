@@ -150,6 +150,11 @@ export const panels: Catalog['panels'] = {
   activityMemoryTitle: 'Memória de design — referências, regras e decisões com que cada agente deste canvas cria',
   activityClosePanel: 'Fechar painel',
   activityRecentTasks: 'Tarefas recentes',
+  chatResize: 'Arraste para redimensionar a conversa · clique duas vezes para redefinir',
+  chatLabel: 'Conversa com os agentes',
+  chatQueued: 'Aguardando um agente…',
+  chatWorking: 'Trabalhando nisso…',
+  chatDone: 'Pronto.',
   activityNoTasks:
     'Nenhuma tarefa ainda. Peça ao Doop Agent abaixo ou conecte o seu — o que os agentes fazem aparece aqui.',
   activityWorkingOn: 'Em andamento',

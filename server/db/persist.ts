@@ -747,8 +747,14 @@ export function deleteCanvas(canvasId: string) {
       )
       .then(() => db.delete(t.frames).where(eq(t.frames.canvasId, canvasId))),
   )
-  swallow(db.delete(t.tasks).where(eq(t.tasks.canvasId, canvasId)))
-  swallow(db.delete(t.feedback).where(eq(t.feedback.canvasId, canvasId)))
+  /* a queued task or feedback write (a run's reply, then its completion)
+     would otherwise re-insert its row after the delete */
+  swallow(pendingRowWrites(taskWrites, canvasId).then(() => db.delete(t.tasks).where(eq(t.tasks.canvasId, canvasId))))
+  swallow(
+    pendingRowWrites(feedbackWrites, canvasId).then(() =>
+      db.delete(t.feedback).where(eq(t.feedback.canvasId, canvasId)),
+    ),
+  )
   swallow(db.delete(t.comments).where(eq(t.comments.canvasId, canvasId)))
   swallow(db.delete(t.activity).where(eq(t.activity.canvasId, canvasId)))
   swallow(db.delete(t.guidelines).where(eq(t.guidelines.canvasId, canvasId)))
@@ -822,7 +828,26 @@ function repoCardFields(kind: string | null, payload: string | null): Pick<Agent
 /* Task rows are written as whole snapshots and never awaited by callers, so
    two quick edits could otherwise race on the pool and leave the older one
    in the table. Writes to the same task queue behind each other instead. */
-const taskWrites = new Map<string, Promise<unknown>>()
+/* queued writes per row id, with the canvas each belongs to, so deleting a
+   canvas can wait for its rows' writes instead of having one land after */
+interface QueuedWrite {
+  canvasId: string
+  write: Promise<unknown>
+}
+
+/** Chain `write` after the row's earlier writes, in order. */
+function queueRowWrite(queue: Map<string, QueuedWrite>, id: string, canvasId: string, write: () => Promise<unknown>) {
+  const queued = (queue.get(id)?.write ?? Promise.resolve()).then(write, write)
+  queue.set(id, { canvasId, write: queued })
+  swallow(queued.finally(() => queue.get(id)?.write === queued && queue.delete(id)))
+}
+
+/** Settles once every write queued so far for this canvas's rows has. */
+function pendingRowWrites(queue: Map<string, QueuedWrite>, canvasId: string): Promise<unknown> {
+  return Promise.allSettled([...queue.values()].filter((q) => q.canvasId === canvasId).map((q) => q.write))
+}
+
+const taskWrites = new Map<string, QueuedWrite>()
 
 export function saveTask(canvasId: string, task: AgentTask) {
   const row = {
@@ -848,6 +873,7 @@ export function saveTask(canvasId: string, task: AgentTask) {
     scope: task.scope ? JSON.stringify(task.scope) : null,
     frameIds: task.frameIds?.join(',') ?? null,
     runner: task.runner ? JSON.stringify(task.runner) : null,
+    reply: task.reply ?? null,
   }
   const write = () =>
     db
@@ -866,12 +892,16 @@ export function saveTask(canvasId: string, task: AgentTask) {
           pipeline: row.pipeline,
           stage: row.stage,
           frameIds: row.frameIds,
+          reply: row.reply,
         },
       })
-  const queued = (taskWrites.get(task.id) ?? Promise.resolve()).then(write, write)
-  taskWrites.set(task.id, queued)
-  swallow(queued.finally(() => taskWrites.get(task.id) === queued && taskWrites.delete(task.id)))
+  queueRowWrite(taskWrites, task.id, canvasId, write)
 }
+
+/* One feedback row is often saved twice in a row (its reply, then its
+   completion), and each write carries the whole state. Without an order the
+   older write can land last and undo the newer one, so writes per row queue. */
+const feedbackWrites = new Map<string, QueuedWrite>()
 
 export function saveFeedback(fb: TaskFeedback) {
   const row = {
@@ -890,8 +920,9 @@ export function saveFeedback(fb: TaskFeedback) {
     failedAt: fb.failedAt ?? null,
     failureReason: fb.failureReason ?? null,
     runner: fb.runner ? JSON.stringify(fb.runner) : null,
+    reply: fb.reply ?? null,
   }
-  swallow(
+  const write = () =>
     db
       .insert(t.feedback)
       .values(row)
@@ -903,9 +934,10 @@ export function saveFeedback(fb: TaskFeedback) {
           completedAt: row.completedAt,
           failedAt: row.failedAt,
           failureReason: row.failureReason,
+          reply: row.reply,
         },
-      }),
-  )
+      })
+  queueRowWrite(feedbackWrites, fb.id, fb.canvasId, write)
 }
 
 export function saveComment(c: ElementComment) {
@@ -1181,6 +1213,7 @@ export async function hydrate(): Promise<Hydrated> {
       ...scopeField(row.scope),
       ...(row.frameIds ? { frameIds: row.frameIds.split(',').filter(Boolean) } : {}),
       ...runnerField(row.runner),
+      ...(row.reply != null ? { reply: row.reply } : {}),
     })
     tasks.set(row.canvasId, list)
   }
@@ -1215,6 +1248,7 @@ export async function hydrate(): Promise<Hydrated> {
       ...(row.completedAt != null ? { completedAt: row.completedAt } : {}),
       ...(failedAt !== undefined ? { failedAt } : {}),
       ...(failureReason !== undefined ? { failureReason } : {}),
+      ...(row.reply != null ? { reply: row.reply } : {}),
     })
     feedback.set(row.canvasId, list)
   }

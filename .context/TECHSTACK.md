@@ -763,6 +763,14 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   (`actions.handBackComment`: unclaimed, no longer an agent item in memory and in its row, the thread open), so the
   person's `@mention` answer queues fresh work carrying the whole conversation. MCP agents have
   had the same two tools all along. Tests: `residentComments.test.ts`, `agentToolParity.test.ts`.
+- Chat in the Agents tab (`src/components/AgentChat.tsx`, `src/lib/agentChat.ts`): under Recent
+  tasks, each composer prompt (a board card without a `kind`) and any feedback left on it is a
+  turn, oldest first, with the agent's answer under it: waiting, working, the run's closing words,
+  or the failure reason. A finished resident run keeps those words on the cards and feedback it
+  handled (`actions.recordWorkReply`, `reply` on `tasks` and `feedback`, migration 0056; a later
+  pipeline stage replaces an earlier one's), so the answer survives a reload. The line between
+  Recent tasks and the chat drags, ↑/↓ on focus, double-click resets (`src/lib/agentsSplit.ts`,
+  per browser under `doop:agents-split`). Tests: `agentChat.test.ts`.
 - Comment pins move by drag (`src/lib/commentMove.ts`, gesture in `CommentPin`): anyone who may
   comment drags a thread's root pin; a ghost rides the pointer in the world layer
   (`CanvasComments`), above every frame, since the pin itself sits inside a clipped frame surface.

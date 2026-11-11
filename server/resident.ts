@@ -981,6 +981,12 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
           .join(' ')
         console.log(`[resident] summary canvas=${canvasId} ${summary.replace(/\s+/g, ' ').trim().slice(0, 500)}`)
         actions.agentSummary(canvasId, actor, summary)
+        /* the agent's answer in the Agents tab's chat, beside the prompt */
+        actions.recordWorkReply(
+          canvasId,
+          { cardIds: cards.map((c) => c.id), feedbackIds: claimed.map((f) => f.id) },
+          summary,
+        )
       }
     }
     if (canceled()) return 'ran'
