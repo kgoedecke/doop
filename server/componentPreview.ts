@@ -41,12 +41,20 @@ const label = (combo: Record<string, string>) =>
 
 const escapeHtml = (text: string) => text.replace(/&/g, '&amp;').replace(/</g, '&lt;')
 
+/**
+ * `all` is the review sheet agents look at, one captioned cell per variant;
+ * `default` is the Components panel's card: the component as it renders with
+ * no props given, uncaptioned.
+ */
+export type PreviewSheet = 'all' | 'default'
+
 export function previewDocument(
   canvasId: string,
   def: ComponentDef,
+  sheet: PreviewSheet = 'all',
 ): { html: string; width: number; height: number; variants: number } {
   const ctx = contextFor(canvasId)
-  const combos = combinations(def)
+  const combos = sheet === 'default' ? [{}] : combinations(def)
   const cells = combos.map((combo) => {
     const overrides: InstanceOverrides = Object.keys(combo).length ? { props: combo } : {}
     const root = renderInstance(def, def, overrides, '', { ctx, stack: [] })

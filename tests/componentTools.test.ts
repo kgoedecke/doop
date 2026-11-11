@@ -15,6 +15,8 @@ vi.mock('../server/db/persist.ts', () => ({
 import { buildMcpServer } from '../server/mcp.ts'
 import { store } from '../server/store.ts'
 import { takeComponentIssues } from '../server/actions.ts'
+import { findComponent } from '../server/componentActions.ts'
+import { previewDocument } from '../server/componentPreview.ts'
 
 const OWNER = 'owner-1'
 const AGENT = { agent_name: 'Tester' }
@@ -93,6 +95,26 @@ describe('an agent working with components', () => {
     const listed = await call('get_canvas', { canvas_id: canvas.id })
     expect(listed.data.components[0].name).toBe('Button')
     expect(listed.data.note).toContain('doop-use')
+  })
+
+  it('previews every variant for an agent, and only the default for the panel', async () => {
+    const canvas = newCanvas()
+    const { data: created } = await call('create_component', {
+      canvas_id: canvas.id,
+      name: 'Button',
+      html: BUTTON,
+      css: CSS,
+      props: [{ name: 'tone', type: 'enum', options: ['solid', 'ghost'], default: 'ghost' }],
+    })
+    const def = findComponent(canvas.id, created.component.id)!
+    const sheet = previewDocument(canvas.id, def)
+    expect(sheet.variants).toBe(2)
+    expect(sheet.html).toContain('tone=solid')
+    const card = previewDocument(canvas.id, def, 'default')
+    expect(card.variants).toBe(1)
+    expect(card.html).not.toContain('<figcaption>')
+    expect(card.html).toContain('data-tone="ghost"')
+    expect(card.html).not.toContain('data-tone="solid"')
   })
 
   it('reads a screen back in short form, at a fraction of the size, and can edit it', async () => {
