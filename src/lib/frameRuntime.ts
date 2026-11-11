@@ -10,8 +10,22 @@ import { CANVAS_MOD_CHORDS } from './keys'
  * elements are touched, so updates render in place with no white reload flash.
  * Works inside sandbox="allow-scripts" (no same-origin access needed).
  */
+/**
+ * Content Security Policy every frame document carries. The sandbox gives a
+ * frame an opaque origin, so it cannot reach the editor's session; without a
+ * CSP it could still beacon to any host, load remote code at view time (so
+ * the reviewed HTML is not what runs) or open fetches and sockets. Scripts
+ * and styles stay inline; fonts and images may load (designs embed them);
+ * connections are limited to blob: and data: (the runtime's own image
+ * cloning); no nested frames, no form submission.
+ */
+export const FRAME_CSP =
+  "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline' https://fonts.googleapis.com; " +
+  "font-src https://fonts.gstatic.com data:; img-src https: data: blob:; media-src https: data: blob:; " +
+  "connect-src blob: data:; frame-src 'none'; form-action 'none'; base-uri 'none'"
+
 export const FRAME_BOOTSTRAP = `<!doctype html>
-<html><head></head><body><script data-v-boot>
+<html><head><meta http-equiv="Content-Security-Policy" content="${FRAME_CSP}"></head><body><script data-v-boot>
 (function () {
   ${FRAME_REPLAY_RUNTIME}
   ${FRAME_DROP_RUNTIME}
