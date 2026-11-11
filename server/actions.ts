@@ -1097,6 +1097,31 @@ export function agentSummary(canvasId: string, actor: Actor, text: string) {
   logActivity(canvasId, actor, `finished: “${clean.length > 220 ? clean.slice(0, 217) + '…' : clean}”`)
 }
 
+/** Longest reply a card or feedback keeps; a run's closing words are a few
+ *  sentences, so this only bounds a runaway answer. */
+const MAX_REPLY_CHARS = 4000
+
+/** Keep a run's closing words on the cards and feedback it worked on: the
+ *  agent's answer in the Agents tab's chat. A later stage of a pipeline card
+ *  replaces its earlier stage's answer. */
+export function recordWorkReply(canvasId: string, work: { cardIds: string[]; feedbackIds: string[] }, text: string) {
+  const clean = text.trim()
+  if (!clean) return
+  const reply = clean.length > MAX_REPLY_CHARS ? `${clean.slice(0, MAX_REPLY_CHARS - 1)}…` : clean
+  for (const task of taskLog.get(canvasId) ?? []) {
+    if (!work.cardIds.includes(task.id)) continue
+    task.reply = reply
+    persist.saveTask(canvasId, task)
+    broadcast(canvasId, { type: 'task', task })
+  }
+  for (const feedback of feedbackLog.get(canvasId) ?? []) {
+    if (!work.feedbackIds.includes(feedback.id)) continue
+    feedback.reply = reply
+    persist.saveFeedback(feedback)
+    broadcast(canvasId, { type: 'feedback', feedback })
+  }
+}
+
 /** True if the agent has an explicitly announced (non-auto) task open. */
 export function hasAnnouncedTask(canvasId: string, actor: Actor): boolean {
   return (taskLog.get(canvasId) ?? []).some((t) => sameAgent(t, actor) && !t.endedAt && !t.auto)

@@ -365,6 +365,8 @@ export const tasks = pgTable(
     frameIds: text('frame_ids'),
     /** JSON RunnerPick: the connection and model the composer picked for a card */
     runner: text('runner'),
+    /** a card's agent answer: the latest run's closing words */
+    reply: text('reply'),
   },
   (t) => [index('tasks_canvas_idx').on(t.canvasId)],
 )
@@ -388,6 +390,8 @@ export const feedback = pgTable(
     failureReason: text('failure_reason'),
     /** JSON RunnerPick of the task it answers, kept from when it was left */
     runner: text('runner'),
+    /** the closing words of the run that handled it */
+    reply: text('reply'),
   },
   (t) => [index('feedback_canvas_idx').on(t.canvasId)],
 )

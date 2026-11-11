@@ -418,6 +418,9 @@ export interface AgentTask {
   /** unsuccessful agent attempt; failed work waits for an explicit human retry */
   failedAt?: number
   failureReason?: string
+  /** board cards: the closing words of the latest agent run that worked on
+   *  the card — what the Agents tab's chat shows as the agent's answer */
+  reply?: string
   /** board cards: ordered agent-role ids the card walks through, one at a time.
    *  Absent on status tasks and on cards queued before pipelines existed. */
   pipeline?: string[]
@@ -493,6 +496,8 @@ export interface TaskFeedback {
   /** unsuccessful resident-agent attempt; never retried automatically */
   failedAt?: number
   failureReason?: string
+  /** the closing words of the agent run that handled it */
+  reply?: string
 }
 
 /** A comment pinned to a specific element inside a frame, to a frame as a
