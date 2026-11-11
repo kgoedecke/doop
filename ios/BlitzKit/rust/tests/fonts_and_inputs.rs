@@ -262,3 +262,30 @@ fn placeholder_takes_a_web_font_that_loads_later() {
     let fallback = Frame::paint(420, 40, &input);
     assert_ne!(with_font.ink_span(0..40), fallback.ink_span(0..40));
 }
+
+#[test]
+fn symbols_missing_from_the_font_fall_back_to_a_system_symbol_font() {
+    // New York has neither the check mark nor the four-pointed star, and neither does
+    // the Latin fallback; iOS also lacks the ★ that macOS's Helvetica happens to carry.
+    let face = format!("<style>@font-face{{font-family:Web;src:url({NEW_YORK})}}</style>");
+    let glyph = |text: &str| {
+        Frame::paint(
+            80,
+            80,
+            &format!("{face}<div style='font:60px Web, sans-serif'>{text}</div>"),
+        )
+        .pixels
+    };
+    // A private-use character no system font maps: what a missing glyph looks like.
+    for symbol in ["✓", "✦", "★"] {
+        assert!(
+            glyph(symbol) != glyph("\u{E000}"),
+            "{symbol} drew as a missing glyph"
+        );
+    }
+    // A run of symbols and digits alone, as in a "★ 978" star count, has no script of its own.
+    assert!(
+        glyph("✓ 9") != glyph("\u{E000} 9"),
+        "✓ beside digits drew as a missing glyph"
+    );
+}

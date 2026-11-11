@@ -55,6 +55,7 @@ import {
   tidy,
   ungroupSelection,
 } from './edits'
+import { promptMakeComponent } from '../components'
 
 /** What the canvas page lends the registry: its own modals and panels. */
 export interface ActionHost {
@@ -68,6 +69,10 @@ export interface ActionHost {
   openPalette(): void
   openAgent(): void
   openShortcuts(): void
+  /** leave the canvas for the list of canvases */
+  goToFiles(): void
+  openDocs(): void
+  contactSupport(): void
   openFind(mode: 'find' | 'replace'): void
   findStep(dir: 1 | -1): void
   openExport(): void
@@ -175,7 +180,15 @@ const mod = (key: string, extra: Partial<Chord> = {}): Chord => ({ key, mod: tru
 const code = (c: string, extra: Partial<Chord> = {}): Chord => ({ code: c, ...extra })
 
 export const ACTIONS: readonly CanvasAction[] = [
-  /* ---- the palette's own line and the agent ---- */
+  /* ---- the way out, the palette's own line and the agent ---- */
+  {
+    id: 'go-to-files',
+    label: 'actions.goToFiles',
+    menu: 'general',
+    section: 0,
+    enabled: () => !h()?.guest,
+    run: () => h()?.goToFiles(),
+  },
   {
     id: 'palette',
     label: 'actions.palette',
@@ -570,6 +583,22 @@ export const ACTIONS: readonly CanvasAction[] = [
     edit: true,
     enabled: hasInnerPick,
     run: () => groupSelection('frame'),
+  },
+  {
+    /* ⌘⌥K, Figma's key: the picked layer becomes a component's main */
+    id: 'create-component',
+    label: 'actions.createComponent',
+    menu: 'object',
+    section: 0,
+    keys: [code('KeyK', { mod: true, alt: true })],
+    edit: true,
+    enabled: hasInnerPick,
+    run: () => {
+      const p = pickedLayers()
+      const selector = p?.selectors[p.selectors.length - 1]
+      if (!p || p.standalone || !selector) return false
+      promptMakeComponent(p.frame, selector)
+    },
   },
   {
     id: 'group',
@@ -1019,6 +1048,20 @@ export const ACTIONS: readonly CanvasAction[] = [
     section: 0,
     keys: [{ code: 'Slash', ctrl: true, shift: true }],
     run: () => h()?.openShortcuts(),
+  },
+  {
+    id: 'docs',
+    label: 'actions.docs',
+    menu: 'help',
+    section: 1,
+    run: () => h()?.openDocs(),
+  },
+  {
+    id: 'customer-support',
+    label: 'actions.customerSupport',
+    menu: 'help',
+    section: 1,
+    run: () => h()?.contactSupport(),
   },
 ]
 

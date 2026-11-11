@@ -1,7 +1,7 @@
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
 import type { Page } from 'puppeteer-core'
 import { findBrowserPath } from '../server/screenshot'
-import { fixtureUrl, openBrowser, type TestBrowser } from './browser'
+import { fixtureUrl, pagePerTest } from './browser'
 import type { Frame } from '../shared/types'
 
 /* the part of tests/fixtures/elementPanel.html's harness this suite drives */
@@ -16,13 +16,12 @@ type Harness = {
 /* The Prototype tab of the element panel writes interactions into the frame
    HTML through the ordinary save path, one undo step per change. */
 describe.skipIf(!findBrowserPath())('interactions panel', { timeout: 30_000 }, () => {
-  let browser: TestBrowser
+  const pages = pagePerTest()
   let page: Page
   let saved: Frame
 
-  beforeAll(async () => {
-    browser = await openBrowser()
-    page = await browser.newPage()
+  beforeEach(async () => {
+    page = await pages.open()
     page.setDefaultTimeout(8_000)
     await page.setViewport({ width: 1000, height: 800 })
     await page.setRequestInterception(true)
@@ -52,11 +51,6 @@ describe.skipIf(!findBrowserPath())('interactions panel', { timeout: 30_000 }, (
     await iframe.waitForSelector('#cta')
     await page.evaluate(() => (window as unknown as Harness).elementPanelHarness.select('#cta'))
   }, 60_000)
-
-  afterAll(async () => {
-    await page?.close()
-    await browser?.close()
-  })
 
   it('adds, edits, undoes and removes an interaction', async () => {
     const tab = await page.waitForSelector('[role="tab"]::-p-text(Prototype)')

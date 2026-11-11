@@ -31,8 +31,9 @@ import {
   barPrimaryCompactBtn,
 } from '../components/TopBar'
 import { LivePresence } from '../components/LivePresence'
-import { ensureTab } from '../lib/desktop'
+import { ensureTab, openExternal } from '../lib/desktop'
 import { Stage } from '../components/Stage'
+import { COMPONENT_DRAG_TYPE, dropComponent } from '../lib/components'
 import { Inspector } from '../components/Inspector'
 import { PagePanel } from '../components/PagePanel'
 import { ElementPanel } from '../components/ElementPanel'
@@ -75,7 +76,7 @@ import { copyPicked, hasElementClip, pasteLayer } from '../lib/elementClipboard'
 import { isCanvasClipboard, writeCanvasClipboard } from '../lib/canvasClipboard'
 import { authClient } from '../lib/auth'
 import { avatarUrl } from '../../shared/avatar'
-import { posthog } from '../lib/posthog'
+import { openSupportChat, posthog } from '../lib/posthog'
 import { useIsMobile } from '../hooks/use-mobile'
 import { cn } from '@/lib/utils'
 import { Button } from '../components/ui/button'
@@ -86,7 +87,6 @@ import {
   BrainIcon,
   CopyIcon,
   ExportIcon,
-  FolderIcon,
   GearIcon,
   GithubIcon,
   ImportIcon,
@@ -497,7 +497,10 @@ export function CanvasPage({
      frame being edited would swallow the drop in its iframe. Enter and leave
      fire for every element crossed, so a count tells when the drag is gone. */
   useEffect(() => {
-    const carriesFiles = (e: DragEvent) => e.dataTransfer?.types.includes('Files') ?? false
+    /* files from outside, or a component card from the Components panel; both
+       need the frames' shields up so the drop reaches the window */
+    const carriesComponent = (e: DragEvent) => e.dataTransfer?.types.includes(COMPONENT_DRAG_TYPE) ?? false
+    const carriesFiles = (e: DragEvent) => (e.dataTransfer?.types.includes('Files') ?? false) || carriesComponent(e)
     let depth = 0
     const setDragging = useStore.getState().setFileDragging
     function onDragEnter(e: DragEvent) {
@@ -524,6 +527,11 @@ export function CanvasPage({
       if (!carriesFiles(e) || e.defaultPrevented) return
       e.preventDefault()
       if (!canEditOpenCanvas(useStore.getState())) return
+      const componentId = e.dataTransfer?.getData(COMPONENT_DRAG_TYPE)
+      if (componentId) {
+        void dropComponent(componentId, { x: e.clientX, y: e.clientY })
+        return
+      }
       const incoming = splitIncoming([...(e.dataTransfer?.files ?? [])])
       if (!hasIncoming(incoming)) return
       dropFiles(canvasId, incoming, { x: e.clientX, y: e.clientY }).catch((err: Error) => {
@@ -589,6 +597,12 @@ export function CanvasPage({
       openPalette: () => setPaletteOpen(true),
       openAgent,
       openShortcuts: () => setShortcutsOpen(true),
+      goToFiles: () => navigate('/'),
+      openDocs: () => {
+        /* the desktop shell drops window.open, so it hands the page to the system browser */
+        if (!openExternal(`${location.origin}/docs`)) window.open('/docs', '_blank', 'noopener,noreferrer')
+      },
+      contactSupport: () => void openSupportChat(),
       openFind: (mode) => setFind((open) => (open === 'replace' ? open : mode)),
       findStep: (dir) => {
         setFind((open) => open ?? 'find')
@@ -833,19 +847,6 @@ export function CanvasPage({
                 </Button>
               }
             />
-            {!guest && (
-              <Tooltip label={t('canvas.allCanvases')} side="bottom" align="start">
-                <Button
-                  variant="bare"
-                  size="icon-sm"
-                  className={barPillIconBtn}
-                  aria-label={t('canvas.allCanvases')}
-                  onClick={() => navigate('/')}
-                >
-                  <FolderIcon className="size-3.5" />
-                </Button>
-              </Tooltip>
-            )}
             <CanvasName readOnly={readOnly} />
             {readOnly && (
               <Badge tone="outline" title={t('canvas.readOnlyBadgeTitle')}>

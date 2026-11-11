@@ -111,9 +111,14 @@ function svgSize(buf: Buffer): ImageSize | undefined {
     .trim()
     .split(/[\s,]+/)
     .map(Number)
-  const width = svgLength(attribute('width')) ?? box[2]
-  const height = svgLength(attribute('height')) ?? box[3]
-  if (!width || !height || !Number.isFinite(width) || !Number.isFinite(height)) return undefined
+  /* a size stated on one side only takes the other from the viewBox's
+     proportions, as the browser lays it out */
+  const ratio = box.length === 4 && box[2]! > 0 && box[3]! > 0 ? box[2]! / box[3]! : undefined
+  const statedWidth = svgLength(attribute('width'))
+  const statedHeight = svgLength(attribute('height'))
+  const width = statedWidth ?? (ratio && (statedHeight ? statedHeight * ratio : box[2]))
+  const height = statedHeight ?? (ratio && (statedWidth ? statedWidth / ratio : box[3]))
+  if (!width || !height) return undefined
   return sized(Math.round(width), Math.round(height))
 }
 

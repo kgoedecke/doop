@@ -43,11 +43,35 @@ fn base_font_context() -> FontContext {
                 collection: Collection::new(CollectionOptions { shared: false, system_fonts: true }),
             };
             ctx.collection.register_fonts(Blob::new(Arc::new(blitz_dom::BULLET_FONT) as _), None);
+            add_symbol_fallbacks(&mut ctx.collection);
             Mutex::new(ctx)
         })
         .lock()
         .unwrap()
         .clone()
+}
+
+/// System families that carry the symbols pages use as text (★ ✓ → ● ⌘ ✦), first match wins.
+/// System Font and Apple Symbols come first, as WebKit's cascade picks them; a family the
+/// device lacks is skipped.
+const SYMBOL_FAMILIES: &[&str] =
+    &["System Font", "Apple Symbols", "Hiragino Sans", "Menlo", "Zapf Dingbats", "STIX Two Math"];
+
+/// Fontique finds a fallback per script from one sample letter, and symbols belong to no
+/// script of their own: a ★ in a Latin run only gets the Latin fallback (Helvetica), and a
+/// run of symbols and digits gets none. On macOS Helvetica happens to carry ★; on iOS it
+/// does not, so the glyph came from LastResort. Append the symbol families after the
+/// system's own fallback for Latin and for the common, inherited and unknown scripts.
+fn add_symbol_fallbacks(collection: &mut parley::fontique::Collection) {
+    use parley::fontique::{FallbackKey, Script};
+    let symbols: Vec<_> = SYMBOL_FAMILIES.iter().filter_map(|name| collection.family_id(name)).collect();
+    for script in [*b"Latn", *b"Zyyy", *b"Zinh", *b"Zzzz"] {
+        let key = FallbackKey::new(Script::from_bytes(script), None);
+        // Asking first records the system's own choice, which appending would otherwise replace.
+        let system: Vec<_> = collection.fallback_families(key).collect();
+        let extra = symbols.iter().copied().filter(|id| !system.contains(id));
+        collection.append_fallbacks(key, extra);
+    }
 }
 
 fn runtime() -> &'static tokio::runtime::Runtime {
@@ -442,6 +466,49 @@ pub extern "C" fn doopblitz_doc_element_from_point(doc: *mut Doc, x: f32, y: f32
     let _guard = runtime().enter();
     doc.base_mut().resolve(0.0);
     raw(doc.base().element_from_point(x, y))
+}
+
+/// The element a tap at a CSS point selects, or 0, as the web runtime's
+/// `probe` picks it: the drawing (`[data-doop-drawing]`) the hit is part of,
+/// so a text layer is selected whole rather than the run of bold inside it.
+/// Outside a drawing, a hit without a box of its own (inline formatting, whose
+/// glyphs live in the parent's inline layout) resolves to the nearest ancestor
+/// that has one, or the selection would be an outline of zero size.
+#[unsafe(no_mangle)]
+pub extern "C" fn doopblitz_doc_pick_from_point(doc: *mut Doc, x: f32, y: f32) -> u64 {
+    let doc = unsafe { &mut *doc };
+    let _guard = runtime().enter();
+    doc.base_mut().resolve(0.0);
+    let base = doc.base();
+    let Some(hit) = base.element_from_point(x, y) else { return 0 };
+    if let Some(drawing) = self_or_ancestor(base, hit, |id| is_drawing(base, id)) {
+        return raw(Some(drawing));
+    }
+    raw(self_or_ancestor(base, hit, |id| has_box(base, id)).or(Some(hit)))
+}
+
+fn self_or_ancestor(base: &BaseDocument, id: NodeId, matches: impl Fn(NodeId) -> bool) -> Option<NodeId> {
+    let mut current = Some(id);
+    while let Some(node) = current {
+        if is_real_element(base, node) && matches(node) {
+            return Some(node);
+        }
+        current = element_parent(base, node);
+    }
+    None
+}
+
+fn is_drawing(base: &BaseDocument, id: NodeId) -> bool {
+    base.get_node(id)
+        .and_then(|n| n.element_data())
+        .is_some_and(|e| e.attrs().iter().any(|a| &*a.name.local == "data-doop-drawing"))
+}
+
+fn has_box(base: &BaseDocument, id: NodeId) -> bool {
+    base.get_node(id).is_some_and(|n| {
+        let size = n.final_layout().size;
+        size.width > 0.0 && size.height > 0.0
+    })
 }
 
 /// First element matching a CSS selector, or 0.

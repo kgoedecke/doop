@@ -1,7 +1,7 @@
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
 import type { Page } from 'puppeteer-core'
 import { findBrowserPath } from '../server/screenshot'
-import { fixtureUrl, openBrowser, type TestBrowser } from './browser'
+import { fixtureUrl, pagePerTest } from './browser'
 
 interface Rendered {
   type: string
@@ -22,18 +22,13 @@ interface Rendered {
    the document, its images and fonts inlined into one SVG, painted to a
    canvas, with no server render */
 describe.skipIf(!findBrowserPath())('rasterizing a frame in the browser', () => {
-  let browser: TestBrowser
+  const pages = pagePerTest()
   let page: Page
-  beforeAll(async () => {
-    browser = await openBrowser()
-    page = await browser.newPage()
+  beforeEach(async () => {
+    page = await pages.open()
     await page.goto(fixtureUrl('frameRaster.html'))
     await page.waitForFunction(() => typeof (window as { render?: unknown }).render === 'function')
   }, 30_000)
-  afterAll(async () => {
-    await page?.close()
-    await browser?.close()
-  })
 
   const render = (opts: Record<string, unknown> = {}) =>
     page.evaluate((o) => (window as unknown as { render: (o: unknown) => Promise<Rendered> }).render(o), opts)
@@ -98,30 +93,26 @@ describe.skipIf(!findBrowserPath())('rasterizing a frame in the browser', () => 
       html,
     )
     /* a window far wider and taller than the 300px frame */
-    const standalone = await browser.newPage()
-    try {
-      await standalone.setViewport({ width: 1400, height: 900 })
-      await standalone.goto(`data:image/svg+xml;charset=utf-8,${encodeURIComponent(text)}`)
-      const laid = await standalone.evaluate(() => {
-        const style = (selector: string) => getComputedStyle(document.querySelector(selector)!)
-        return {
-          box: style('.box').backgroundColor,
-          outline: style('.box').outlineStyle,
-          half: style('.half').width,
-          tall: style('.tall').height,
-          imported: style('.imported').backgroundColor,
-        }
-      })
-      expect(laid).toEqual({
-        box: 'rgb(255, 0, 0)',
-        outline: 'none',
-        half: '150px',
-        tall: '300px',
-        imported: 'rgba(0, 0, 0, 0)',
-      })
-    } finally {
-      await standalone.close()
-    }
+    const standalone = await pages.open()
+    await standalone.setViewport({ width: 1400, height: 900 })
+    await standalone.goto(`data:image/svg+xml;charset=utf-8,${encodeURIComponent(text)}`)
+    const laid = await standalone.evaluate(() => {
+      const style = (selector: string) => getComputedStyle(document.querySelector(selector)!)
+      return {
+        box: style('.box').backgroundColor,
+        outline: style('.box').outlineStyle,
+        half: style('.half').width,
+        tall: style('.tall').height,
+        imported: style('.imported').backgroundColor,
+      }
+    })
+    expect(laid).toEqual({
+      box: 'rgb(255, 0, 0)',
+      outline: 'none',
+      half: '150px',
+      tall: '300px',
+      imported: 'rgba(0, 0, 0, 0)',
+    })
   })
 
   it('keeps only the clipped box, drawn from the whole document, for an element export', async () => {
@@ -153,8 +144,7 @@ describe.skipIf(!findBrowserPath())('rasterizing a frame in the browser', () => 
   })
 
   it('rejects a frame with an image the browser cannot fetch, for the server to render', async () => {
-    /* a host nothing answers on; the fixture server itself answers any
-       path with the app page */
+    /* a host nothing answers on */
     const failed = await page.evaluate(() =>
       (window as unknown as { render: (o: unknown) => Promise<Rendered> })
         .render({ html: '<html><body><img src="http://127.0.0.1:9/no-cors.png"></body></html>' })

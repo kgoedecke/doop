@@ -106,7 +106,7 @@ interface State {
   /** the Layers rail is showing (desktop); the choice sticks across visits */
   layersOpen: boolean
   /** which face the Layers panel shows: the layer tree, or the design tokens */
-  layersTab: 'layers' | 'tokens'
+  layersTab: 'layers' | 'components' | 'tokens'
   /** ⌘. — every panel and toolbar is off screen, leaving only the canvas.
    *  A plain overlay flag: the panels' own open/closed state is untouched
    *  underneath, so toggling back shows exactly what was open before */
@@ -204,6 +204,8 @@ interface State {
   renameCanvasLocal(name: string): void
   /** upsert (doc set) or remove (doc null) a style guide on the open canvas */
   setGuidelineLocal(name: string, doc: GuidelineDoc | null): void
+  /** a component changed in the room, or was deleted (null) */
+  setComponentLocal(id: string, component: import('../../shared/components').ComponentDef | null): void
   /** replace the open canvas's design tokens and themes (the room sends the whole list) */
   setTokensLocal(tokens: DesignToken[], themes: string[]): void
   /** pin (reference set) or unpin (null) a Memory reference on the open canvas */
@@ -261,7 +263,7 @@ interface State {
   pickElements(frameId: string, selectors: string[]): void
   setElementPanelOpen(v: boolean): void
   setLayersOpen(v: boolean): void
-  setLayersTab(tab: 'layers' | 'tokens'): void
+  setLayersTab(tab: 'layers' | 'components' | 'tokens'): void
   toggleUiHidden(): void
   setPrototypeMode(on: boolean): void
   setViewport(v: Viewport): void
@@ -538,6 +540,12 @@ export const useStore = create<State>((set, get) => ({
       }
     }),
   renameCanvasLocal: (name) => set((s) => (s.canvas ? { canvas: { ...s.canvas, name } } : {})),
+  setComponentLocal: (id, component) =>
+    set((s) => {
+      if (!s.canvas) return {}
+      const others = (s.canvas.components ?? []).filter((def) => def.id !== id)
+      return { canvas: { ...s.canvas, components: component ? [...others, component] : others } }
+    }),
   setGuidelineLocal: (name, doc) =>
     set((s) => {
       if (!s.canvas) return {}

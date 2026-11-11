@@ -198,6 +198,13 @@ const schema = {
   /* Kimi Code, a membership's coding quota; China's is
      https://api.kimi.com/coding/v1/chat/completions */
   KIMI_CODE_CHAT_URL: str({ default: 'https://api.kimi.ai/coding/v1/chat/completions' }),
+  /* custom providers (Settings → Doop Agent → Custom provider): any OpenAI-
+     or Anthropic-compatible endpoint a person names. Off switches the feature
+     off and takes existing ones out of use. Their URLs are user input, so they
+     are reached only over public addresses unless PRIVATE_HOSTS is on, for a
+     self-hosted instance whose models run on its own network */
+  DOOP_CUSTOM_PROVIDERS: bool({ default: true }),
+  DOOP_CUSTOM_PROVIDER_PRIVATE_HOSTS: bool({ default: false }),
 
   /* ------------------------------------------------ image generation */
   OPENAI_API_KEY: str({ default: undefined }),
@@ -265,6 +272,11 @@ const schema = {
   MCP_IMPORTS_PER_MIN: perMinute({ default: 5 }),
   SYNC_INGESTS_PER_MIN: perMinute({ default: 30 }),
   PREVIEW_RENDERS_PER_MIN: perMinute({ default: 12 }),
+  /* image descriptions (server/imageDescriptions.ts): a day's budget per
+     canvas, and how many describe calls run at once */
+  DESCRIBE_PER_CANVAS_PER_DAY: nonNegativeInt({ default: 200 }),
+  DESCRIBE_CONCURRENCY: perMinute({ default: 2 }),
+  DESCRIBE_RETRY_MS: nonNegativeInt({ default: 30_000 }),
   /* how long a canvas nobody uses keeps its frame HTML in memory (store.ts) */
   CANVAS_IDLE_MS: nonNegativeInt({ default: 10 * 60_000 }),
   SYNC_PAGE_INTERVAL_MS: nonNegativeInt({ default: 30_000 }),

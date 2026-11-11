@@ -10,6 +10,8 @@ import { deleteLayer, duplicateLayer, setLayerHidden, setLayerLocked, shiftLayer
 import { buildLayerTree, elementHtml, findLayer, isElementHidden, isElementLocked, layerName } from '../lib/layers'
 import { MOD_KEY } from '../lib/keys'
 import { useT } from '../lib/i18n'
+import { useStore } from '../lib/store'
+import { changeInstance, componentContextOf, goToMain, promptMakeComponent } from '../lib/components'
 import { ContextMenuContent, ContextMenuItem, ContextMenuSeparator } from './ui/context-menu'
 import { MenuHint } from './ui/menu'
 import { FrameExportModal } from './FrameExportModal'
@@ -75,6 +77,9 @@ function ElementMenuItems({ frame, selector, hit, onRename, onExport }: ElementI
   const ownLock = selector ? isElementLocked(frame.html, selector, true) : false
   const locked = !!frame.locked || (selector ? isElementLocked(frame.html, selector) : false)
   const t = useT()
+  const component = selector
+    ? componentContextOf(frame.html, selector, useStore.getState().canvas?.components ?? [])
+    : null
   const { scale } = useExportSettings()
   /* a copied standalone shape is a frame on the clipboard: its paste lands
      a second element on the canvas, as ⌘V does, not a layer in this frame */
@@ -115,6 +120,44 @@ function ElementMenuItems({ frame, selector, hit, onRename, onExport }: ElementI
             {hidden ? t('stage.show') : t('stage.hide')}
             <MenuHint>{MOD_KEY}⇧H</MenuHint>
           </ContextMenuItem>
+          <ContextMenuSeparator />
+          {!component && (
+            <ContextMenuItem disabled={locked} onSelect={() => promptMakeComponent(frame, selector)}>
+              {t('components.create')}
+              <MenuHint>{MOD_KEY}⌥K</MenuHint>
+            </ContextMenuItem>
+          )}
+          {component && (
+            <ContextMenuItem onSelect={() => goToMain(component.def)}>
+              {t('components.goToMainComponent')}
+            </ContextMenuItem>
+          )}
+          {component?.kind === 'instance' && (
+            <>
+              {component.part && component.overriddenParts.includes(component.part) && (
+                <ContextMenuItem
+                  disabled={locked}
+                  onSelect={() =>
+                    void changeInstance(frame, { instanceId: component.instanceId, reset: [component.part!] })
+                  }
+                >
+                  {t('components.resetElement')}
+                </ContextMenuItem>
+              )}
+              <ContextMenuItem
+                disabled={locked}
+                onSelect={() => void changeInstance(frame, { instanceId: component.instanceId, reset: true })}
+              >
+                {t('components.resetOverrides')}
+              </ContextMenuItem>
+              <ContextMenuItem
+                disabled={locked}
+                onSelect={() => void changeInstance(frame, { instanceId: component.instanceId, detach: true })}
+              >
+                {t('components.detachInstance')}
+              </ContextMenuItem>
+            </>
+          )}
           <ContextMenuSeparator />
           <ContextMenuItem
             onSelect={() => {

@@ -1,5 +1,6 @@
 import type { Canvas, ElementComment, Frame } from '../../shared/types'
 import { canvasPages, framePageId } from '../../shared/pages'
+import { frameDesignPoint } from '../../shared/frameRotation'
 import { FRAME_COMMENT_SELECTOR, sameCommentAnchor, type CommentAnchorInput } from '../../shared/comments'
 import { useStore } from './store'
 import { api } from './api'
@@ -48,17 +49,12 @@ export function frameAtPoint(
   pageId: string | null,
   point: Point,
 ): Frame | undefined {
-  return [...canvas.frames]
-    .reverse()
-    .find(
-      (f) =>
-        !f.hidden &&
-        (pageId === null || framePageId(canvas, f) === pageId) &&
-        point.x >= f.x &&
-        point.y >= f.y &&
-        point.x <= f.x + f.width &&
-        point.y <= f.y + f.height,
-    )
+  return [...canvas.frames].reverse().find((f) => {
+    if (f.hidden || (pageId !== null && framePageId(canvas, f) !== pageId)) return false
+    /* a turned frame is hit where it is drawn: the point goes into its own axes first */
+    const d = frameDesignPoint(point, f)
+    return d.x >= 0 && d.y >= 0 && d.x <= f.width && d.y <= f.height
+  })
 }
 
 /** The anchor a pin dropped at a world point takes. `probe` asks a frame's
@@ -72,8 +68,8 @@ export async function resolveCommentDrop(
 ): Promise<CommentAnchorInput> {
   const frame = frameAtPoint(canvas, pageId, point)
   if (!frame) return { pageId, x: point.x, y: point.y }
-  const x = point.x - frame.x
-  const y = point.y - frame.y
+  /* in the frame's own axes, so a turned frame is probed and pinned where the pin was let go */
+  const { x, y } = frameDesignPoint(point, frame)
   const hit = await probe(frame.id, x, y)
   if (hit && hit.selector !== FRAME_COMMENT_SELECTOR) {
     /* the point rides along: should the element not be found in the saved

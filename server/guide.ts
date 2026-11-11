@@ -97,6 +97,67 @@ only run in the player):
   and flags targets that do not exist — call it after wiring and fix what it flags. The player
   lives at /c/<canvasId>/proto (append ?frame=<id> to open on a specific screen).`
 
+/** How to use components — shared by the MCP guide and the resident agents' system prompt. */
+/** Where a frame's CSS goes. People edit a frame element by element, and the
+ *  editor reads and writes the style attribute, so that is where an agent's
+ *  styles are most editable. Guidance only: nothing rejects a stylesheet. */
+export const FRAME_STYLES = `- Style an element on the element itself: style="…". People edit a frame element by element in the
+  editor, which reads and writes that attribute, so a style written there is one they can change,
+  move and copy without surprises. A stylesheet rule can outrank their edit, or stop matching the
+  moment they group or reorder layers.
+- A <style> block is for what an attribute cannot say: @keyframes, @font-face, custom properties on
+  :root, states (:hover, :focus, :active, :disabled, :checked), pseudo-elements (::before,
+  ::placeholder), @media and @container queries, a component's variant and state rules, and the
+  reset. Keep using it for those: never drop a hover state or an animation to avoid the block.
+- A property that changes with a state, a variant or a query goes in the stylesheet in both forms,
+  the resting value included. An inline value outranks every rule, so style="background:#111" would
+  keep .btn:hover { background:#333 } from ever showing. Only what never changes on the element
+  stays inline.
+- Set inherited text styles (font-family, color, line-height) once, on the body or a section, not on
+  every text element.
+- A block you would repeat is a component, not a class (Components, below).
+- Do not write !important, least of all to make a rule beat an inline value: move the property into
+  the stylesheet as above.
+- This is how to write new markup. A frame that already styles itself with classes keeps them: edit
+  it in its own idiom, and do not convert it.`
+
+export const COMPONENTS = `A component is one design used in many places: change its main and every instance follows.
+get_canvas and list_components show a canvas's components with their props.
+
+- Anything on that list goes in through <doop-use>, never redrawn. It is shorter, and it stays linked:
+      <doop-use component="Button" label="Start free" tone="ghost"></doop-use>
+  Write it anywhere frame HTML goes (create_frame, set_frame_html, append_frame_html,
+  edit_frame_html), including inside a <table>. Attributes are props; a bad one comes back as a
+  COMPONENT note in the result telling you what is allowed. Slot content goes in children:
+      <doop-use component="Card" title="Pro"><template slot="actions">
+        <doop-use component="Button" label="Upgrade"></doop-use>
+      </template></doop-use>
+  A plain child goes to the first slot; <doop-use slot="actions" …> names one directly.
+- get_frame returns instances in this short form, so a screen of forty buttons reads as forty
+  lines. Keep the id="…" when you write one back: comments and links point at it. Pass
+  expand_components=true only if you must read the full markup. edit_frame_html matches either
+  form.
+- Before you write the same block a third time, make it a component and use that. On a canvas
+  that already repeated itself: find_component_candidates, then create_component with
+  replace_matching=true.
+- Write a description saying when to use it. Set code (file and export name) when the component
+  exists in the human's repo: that is what makes the design implementable with their real code.
+- Vary with props, not copies. An enum prop sets data-<name> on the root, so a variant is plain
+  CSS: .btn[data-tone="ghost"] { … }. Hover and focus are ordinary CSS too. You do not need a
+  component per state, or per size.
+- For one instance that must differ: use update_instances, or just edit it; edits inside an instance
+  are captured as overrides on that element alone and survive every later change to the main. Do
+  not detach to make a small change.
+- To change them all, call update_component with find + replace, and read the impact it reports.
+  Approved frames that change lose sign-off, and it says which. Use dry_run first on anything
+  widely used. Never edit each instance by hand.
+- get_component_preview shows you every variant at once. Look at it after changing a component.
+- Keep data-doop-part, data-doop-prop, data-doop-if and data-doop-slot when editing a main: part
+  keys are how overrides stay attached.
+- A deleted component leaves its instances looking the same, as plain markup. To reuse components
+  from another canvas: list_components with libraries=true, import_component, and sync_component
+  when list_components says library_update_available.`
+
 export const DOOP_GUIDE = `# Doop Agent Guide
 
 ## The room you're in
@@ -226,11 +287,18 @@ Viewers watch designs assemble live. Stream with append_frame_html:
   to find approved screens, then re-read get_frame before implementing. HTML and size edits
   invalidate sign-off; needs_review requires another human approval. Approval alone does not
   assign an implementation job — follow the human's request.
-- A frame renders a complete HTML document in a sandboxed iframe. Inline <style> and
-  <script> work; Google Fonts via <link> work.
+- A frame renders a complete HTML document in a sandboxed iframe. <style> and <script>
+  work; Google Fonts via <link> work.
+${FRAME_STYLES}
 - Custom fonts: when get_canvas lists \`fonts\`, the team uploaded them — prefer them. Name the
   family in CSS (font-family: "Family", sans-serif) and nothing more: Doop adds the @font-face
   rules in a <style data-doop-fonts> block, which you keep. Never fetch them from Google Fonts.
+- Pictures on the canvas: a frame listed with \`images\` references raster images people
+  uploaded or pasted, each with a \`description\` of what it shows, written by a vision model
+  (null while pending). Read them before designing, and call get_frame_screenshot on the
+  relevant frames to see the pixels. A frame that is nothing but one image (its description is
+  the whole frame) is a reference someone pasted for you: leave it unchanged and deliver in a
+  separate frame. A design that happens to use images is an ordinary frame — edit it when asked.
 - Always reset: * { margin: 0; box-sizing: border-box; } and design to the exact frame size.
 - Size frames to their content: mobile screen 390×844, desktop page 1280×800, card or
   component 480×360, square social post 640×640. Set width/height on create_frame, or
@@ -439,6 +507,10 @@ ${DESIGN_QUALITY}
 
 ${PROTOTYPES}
 - Frame ids come from get_canvas.
+
+## Components — design once, use everywhere
+
+${COMPONENTS}
 
 ## Exporting frames (images, PDF)
 

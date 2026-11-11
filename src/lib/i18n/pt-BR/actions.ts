@@ -17,6 +17,7 @@ export const actions: Catalog['actions'] = {
   paletteEmpty: 'Nenhuma ação encontrada',
   paletteAsk: 'Perguntar ao agente: “{query}”',
   askAgent: 'Perguntar ao agente',
+  goToFiles: 'Ir para os arquivos',
 
   /* File */
   newCanvas: 'Novo canvas',
@@ -72,6 +73,7 @@ export const actions: Catalog['actions'] = {
 
   /* Object */
   frameSelection: 'Criar frame com a seleção',
+  createComponent: 'Criar componente',
   group: 'Agrupar seleção',
   ungroup: 'Desagrupar seleção',
   groupName: 'Grupo',
@@ -138,6 +140,8 @@ export const actions: Catalog['actions'] = {
 
   /* Help */
   keyboardShortcuts: 'Atalhos de teclado',
+  docs: 'Documentação',
+  customerSupport: 'Suporte ao cliente',
   shortcutsSearch: 'Buscar atalhos',
   shortcutsEmpty: 'Nenhum atalho corresponde a “{query}”',
 

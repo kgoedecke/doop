@@ -33,6 +33,12 @@ HTML/CSS engine (Stylo + Taffy + Parley), compiled into the app as a static libr
   Labels, selection outlines and collaborator
   cursors are native layers, so a board with many frames costs one small bitmap per
   frame instead of one web document per frame.
+  Agents at work show on their frame as on the web (`Blitz/FrameWorkBadge.swift`, who from
+  `Core/FrameWorkers.swift`): an agent streaming a design (`frame:streaming`) gets a dashed ring
+  pulsing in its colour and a "Claude is designing…" chip in the title row; an agent with the
+  frame open (`editing`) gets a solid ring and its name. A chip moves above the title when both
+  do not fit, and says less (name, then mark) on a frame narrower than its words. Like the web,
+  a stream that began before the app joined shows as an open frame.
 - **Blitz engine** (`Doop/Blitz/BlitzDocument.swift` over `BlitzKit/`): each frame's
   HTML is parsed once into a Blitz document. The canvas asks for a bitmap at the
   density the current zoom needs (up to 3 bitmap pixels per CSS pixel, 4096 px max
@@ -71,7 +77,11 @@ HTML/CSS engine (Stylo + Taffy + Parley), compiled into the app as a static libr
   as browsers' `font-optical-sizing: auto` does. Empty inputs paint their `placeholder`
   in the `::placeholder` style. `doopblitz_doc_loading` stays true while a fetched
   resource waits to be applied, since applying a stylesheet starts its font and image
-  fetches. `tests/fonts_and_inputs.rs` covers these with macOS's own variable fonts.
+  fetches. Symbols a page writes as text (★ ✓ → ⌘) fall back to the system's symbol
+  families (System Font, Apple Symbols, Hiragino Sans, Menlo, Zapf Dingbats), appended to
+  the Latin and common-script fallbacks: fontique picks fallbacks per script, symbols have
+  none, and iOS's Latin fallback lacks them, so they drew as LastResort boxes.
+  `tests/fonts_and_inputs.rs` covers these with macOS's own variable fonts.
 - **Device-pixel layout**: Taffy rounds every box to whole CSS pixels after layout,
   which at a paint scale above 1 puts a different number of device pixels on each
   side of a box sitting on a half pixel (a 1.5px outline, a handle centred on it),

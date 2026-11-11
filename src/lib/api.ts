@@ -1,8 +1,11 @@
 import { useStore } from './store'
+import type { InstanceSettings, InstanceSettingsPatch } from '../../shared/instanceSettings'
 import { beginFrameSave } from './frameSaves'
 import type { StackWrite } from '../../shared/frameStack'
 import type { LocalAgentPreference, LocalAgentJob, LocalAgentResult } from '../../shared/localAgent'
+import type { ImageDescriptionMode, ImageDescriptionPreference } from '../../shared/imageDescriptions'
 import type { AgentRunners, RunnerPick, RunnerProvider } from '../../shared/agentRunner'
+import type { CustomProviderConfig, CustomProviderKind } from '../../shared/customProvider'
 import type { NotificationPrefs, NotificationSettings } from '../../shared/notifications'
 import type { WebhookDeliveryResult, WebhookEventType, WebhookInfo } from '../../shared/webhooks'
 import type { AgentFeedbackKind, AgentFeedbackReport } from '../../shared/agentFeedback'
@@ -27,6 +30,56 @@ import type { Automation, AutomationRun, AutomationTrigger, Schedule, Step } fro
 import type { BillingInterval, Plan } from '../../shared/billing'
 import type { LinkAccess } from '../../shared/canvasRole'
 import type { CommentAnchorInput } from '../../shared/comments'
+import type { ComponentCode, ComponentDef, ComponentProp, PartOverride } from '../../shared/components'
+
+/** What the server says about a component beyond the definition itself. */
+export interface ComponentInfo {
+  id: string
+  name: string
+  signature: string
+  description?: string
+  usage: string
+  instances: number
+  main_missing?: boolean
+  code?: ComponentCode
+  library_update_available?: { from_rev: number; to_rev: number; canvas_id: string }
+  rev: number
+  usage_by_frame: { id: string; name: string; instances: number; approved: boolean }[]
+}
+
+export interface ComponentCandidate {
+  suggested_name: string
+  occurrences: number
+  frames: number
+  elements_each: number
+  sample_text: string
+  example: { frame_id: string; frame_name: string; element: string }
+}
+
+export interface ComponentLibrary {
+  id: string
+  name: string
+  components: { id: string; name: string; signature: string; description?: string; instances: number }[]
+}
+
+export interface ComponentImpact {
+  component: ComponentDef
+  dry_run: boolean
+  impact: {
+    instances: number
+    frames: { id: string; name: string; instances: number; approved: boolean }[]
+    approvals_affected: number
+    overrides_orphaned: { frame_id: string; instance_id: string; parts: string[] }[]
+  }
+}
+
+export interface InstanceChangeInput {
+  instanceId: string
+  props?: Record<string, string>
+  overrides?: Record<string, PartOverride>
+  reset?: boolean | string[]
+  detach?: boolean
+}
 import type { CustomFont } from '../../shared/fonts'
 import type { DesignToken, DesignTokenInput, ThemeRename, TokenEdit, TokenResult } from '../../shared/designTokens'
 
@@ -145,11 +198,16 @@ export interface Allowance {
   byoModel: boolean
   byoKind?: ModelAccountKind | 'claude-local' | 'gemini-cloud'
   byoEmail?: string
+  /** a custom provider's name, when that is the default */
+  byoName?: string
   /** free tasks are spent and their own account is carrying the agent */
   onOwnAccount: boolean
 }
 
-export type ModelAccountKind =
+/** A built-in provider, or a custom one a person added (`custom:<id>`). */
+export type ModelAccountKind = BuiltinModelAccountKind | CustomProviderKind
+
+export type BuiltinModelAccountKind =
   | 'chatgpt'
   | 'openai-key'
   | 'anthropic-key'
@@ -198,6 +256,20 @@ export interface ModelAccountStatus {
   /** the reasoning effort in effect; only the OpenAI kinds have one */
   effort?: string
   connectedAt: number
+  /** a custom provider's description: never its key or header values */
+  custom?: CustomProviderStatus
+}
+
+export interface CustomProviderStatus extends CustomProviderConfig {
+  headerNames: string[]
+  hasKey: boolean
+}
+
+/** What the custom provider form sends. A key or headers left out keep the
+ *  stored ones on an edit; an empty key clears it. */
+export interface CustomProviderInput extends CustomProviderConfig {
+  apiKey?: string
+  headers?: Record<string, string>
 }
 
 /** The Settings pane's view: every connected account, on or off, and which
@@ -207,8 +279,11 @@ export interface ModelAccounts {
   default?: RunnerProvider
   /** false when the server has switched the ChatGPT flow off */
   chatgptEnabled: boolean
-  /** the curated menu each provider's picker offers */
-  menus: Record<ModelAccountKind, AgentModelOption[]>
+  /** the menu each provider's picker offers: curated for the built-in
+   *  kinds, as listed for each connected custom provider */
+  menus: Partial<Record<ModelAccountKind, AgentModelOption[]>>
+  /** false when the server has switched custom providers off */
+  customProviders?: boolean
 }
 
 /** One image-model registry entry's availability for this user. */
@@ -334,6 +409,9 @@ export const api = {
   notificationSettings: () => req<NotificationSettings>('/api/notifications'),
   setNotificationPrefs: (prefs: NotificationPrefs) =>
     req<NotificationSettings>('/api/notifications', { method: 'PUT', body: JSON.stringify(prefs) }),
+  imageDescriptions: () => req<ImageDescriptionPreference>('/api/image-descriptions'),
+  setImageDescriptions: (mode: ImageDescriptionMode) =>
+    req<ImageDescriptionPreference>('/api/image-descriptions', { method: 'PUT', body: JSON.stringify({ mode }) }),
   localAgent: () => req<LocalAgentPreference>('/api/local-agent'),
   setLocalAgent: (preference: LocalAgentPreference) =>
     req<LocalAgentPreference>('/api/local-agent', { method: 'PUT', body: JSON.stringify(preference) }),
@@ -522,6 +600,68 @@ export const api = {
       finish()
     }
   },
+  components: (canvasId: string) => req<ComponentInfo[]>(`/api/canvases/${canvasId}/components`),
+  componentPreview: (canvasId: string, componentId: string) =>
+    req<{ html: string; width: number; height: number; variants: number }>(
+      `/api/canvases/${canvasId}/components/${componentId}/preview`,
+    ),
+  componentCandidates: (canvasId: string) =>
+    req<ComponentCandidate[]>(`/api/canvases/${canvasId}/component-candidates`),
+  componentLibraries: (canvasId: string) => req<ComponentLibrary[]>(`/api/canvases/${canvasId}/component-libraries`),
+  createComponent: (
+    canvasId: string,
+    body: { name: string; frameId: string; element: string; replaceMatching?: boolean; description?: string },
+  ) =>
+    req<{ component: ComponentDef; converted: { frameId: string; instances: number }[]; frames: Frame[] }>(
+      `/api/canvases/${canvasId}/components`,
+      { method: 'POST', body: JSON.stringify(body) },
+    ),
+  updateComponent: (
+    canvasId: string,
+    componentId: string,
+    body: {
+      name?: string
+      description?: string
+      props?: ComponentProp[]
+      code?: ComponentCode | null
+      dryRun?: boolean
+    },
+  ) =>
+    req<ComponentImpact>(`/api/canvases/${canvasId}/components/${componentId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+    }),
+  deleteComponent: (canvasId: string, componentId: string) =>
+    req<{ deleted: string; instances_detached: number }>(`/api/canvases/${canvasId}/components/${componentId}`, {
+      method: 'DELETE',
+    }),
+  restoreComponent: (canvasId: string, componentId: string, rev: number) =>
+    req<ComponentImpact>(`/api/canvases/${canvasId}/components/${componentId}/restore`, {
+      method: 'POST',
+      body: JSON.stringify({ rev }),
+    }),
+  importComponent: (canvasId: string, sourceCanvasId: string, component: string) =>
+    req<ComponentDef>(`/api/canvases/${canvasId}/components/import`, {
+      method: 'POST',
+      body: JSON.stringify({ sourceCanvasId, component }),
+    }),
+  syncComponent: (canvasId: string, componentId: string) =>
+    req<{ component: ComponentDef; updated: boolean }>(`/api/canvases/${canvasId}/components/${componentId}/sync`, {
+      method: 'POST',
+    }),
+  insertInstance: (
+    frameId: string,
+    body: { component: string; props?: Record<string, string>; target?: string; position?: string },
+  ) =>
+    req<{ frame: Frame; instanceId: string }>(`/api/frames/${frameId}/instances`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  changeInstances: (frameId: string, changes: InstanceChangeInput[]) =>
+    req<{ frame: Frame; missing: string[] }>(`/api/frames/${frameId}/instances`, {
+      method: 'PATCH',
+      body: JSON.stringify({ changes }),
+    }),
   /* several frames' stacking order at once, all or nothing */
   restackFrames: (canvasId: string, frames: StackWrite[]) =>
     req<Frame[]>(`/api/canvases/${canvasId}/stack`, { method: 'PUT', body: JSON.stringify({ frames }) }),
@@ -590,13 +730,40 @@ export const api = {
   connectKimiCodeKey: (apiKey: string) =>
     req<ModelAccounts>('/api/model-account/kimi-code', { method: 'POST', body: JSON.stringify({ apiKey }) }),
   disconnectModelAccount: (kind: ModelAccountKind) =>
-    req<ModelAccounts>(`/api/model-account/${kind}`, { method: 'DELETE' }),
+    req<ModelAccounts>(`/api/model-account/${encodeURIComponent(kind)}`, { method: 'DELETE' }),
   setAgentModel: (kind: ModelAccountKind, model: string) =>
-    req<ModelAccounts>(`/api/model-account/${kind}`, { method: 'PATCH', body: JSON.stringify({ model }) }),
+    req<ModelAccounts>(`/api/model-account/${encodeURIComponent(kind)}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ model }),
+    }),
   setAgentEffort: (kind: ModelAccountKind, effort: string) =>
-    req<ModelAccounts>(`/api/model-account/${kind}`, { method: 'PATCH', body: JSON.stringify({ effort }) }),
+    req<ModelAccounts>(`/api/model-account/${encodeURIComponent(kind)}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ effort }),
+    }),
   setModelAccountEnabled: (kind: ModelAccountKind, enabled: boolean) =>
-    req<ModelAccounts>(`/api/model-account/${kind}`, { method: 'PATCH', body: JSON.stringify({ enabled }) }),
+    req<ModelAccounts>(`/api/model-account/${encodeURIComponent(kind)}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ enabled }),
+    }),
+  addCustomProvider: (input: CustomProviderInput) =>
+    req<ModelAccounts>('/api/custom-providers', { method: 'POST', body: JSON.stringify(input) }),
+  updateCustomProvider: (kind: CustomProviderKind, input: CustomProviderInput) =>
+    req<ModelAccounts>(`/api/custom-providers/${encodeURIComponent(kind)}`, {
+      method: 'PUT',
+      body: JSON.stringify(input),
+    }),
+  /** the endpoint's own model ids; `kind` lets an edit use the stored key */
+  discoverCustomModels: (input: {
+    apiType: CustomProviderConfig['apiType']
+    baseUrl: string
+    apiKey?: string
+    headers?: Record<string, string>
+    kind?: CustomProviderKind
+  }) => req<{ models: string[] }>('/api/custom-providers/models', { method: 'POST', body: JSON.stringify(input) }),
+  /** one turn that must call a tool, on `model` */
+  testCustomProvider: (input: CustomProviderInput & { model: string; kind?: CustomProviderKind }) =>
+    req<{ ok: true; model: string }>('/api/custom-providers/test', { method: 'POST', body: JSON.stringify(input) }),
   imageModels: () => req<{ models: ImageModelStatus[] }>('/api/image-model'),
   setImageModel: (model: string) =>
     req<{ models: ImageModelStatus[] }>('/api/image-model', { method: 'PUT', body: JSON.stringify({ model }) }),
@@ -732,10 +899,22 @@ export interface AdminStats {
   agentFeedback: number
 }
 
+/** Admin → Sign-in: the policy, and what it depends on. */
+export interface AdminInstanceSettings {
+  settings: InstanceSettings
+  providers: { enabled: boolean; displayName?: string; google: boolean; microsoft: boolean; apple: boolean }
+  workspaces: { id: string; name: string; memberCount: number }[]
+  /** has an admin signed in through SSO yet? (the auto-redirect guard) */
+  ssoAdminSignedIn: boolean
+}
+
 /** Instance-admin surface. Every route 404s for non-admins, so a failure here
  *  is indistinguishable from the feature not existing — which is the point. */
 export const adminApi = {
   canvases: () => req<{ total: number; canvases: AdminCanvas[] }>('/api/admin/canvases'),
+  instanceSettings: () => req<AdminInstanceSettings>('/api/admin/instance-settings'),
+  updateInstanceSettings: (patch: InstanceSettingsPatch) =>
+    req<AdminInstanceSettings>('/api/admin/instance-settings', { method: 'PATCH', body: JSON.stringify(patch) }),
   stats: () => req<AdminStats>('/api/admin/stats'),
   users: () => req<AdminUser[]>('/api/admin/users'),
   agentFeedback: (query: { kind?: AgentFeedbackKind; q?: string; before?: AdminAgentFeedback }) => {

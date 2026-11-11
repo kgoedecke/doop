@@ -337,6 +337,34 @@
       "when": 1794104742941,
       "tag": "0048_frame_rotation",
       "breakpoints": true
+    },
+    {
+      "idx": 49,
+      "version": "7",
+      "when": 1794106479747,
+      "tag": "0049_image_descriptions",
+      "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "7",
+      "when": 1794299332162,
+      "tag": "0050_instance_settings",
+      "breakpoints": true
+    },
+    {
+      "idx": 51,
+      "version": "7",
+      "when": 1794347436684,
+      "tag": "0051_custom_providers",
+      "breakpoints": true
+    },
+    {
+      "idx": 52,
+      "version": "7",
+      "when": 1794352711304,
+      "tag": "0052_components",
+      "breakpoints": true
     }
   ]
 }

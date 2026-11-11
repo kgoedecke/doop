@@ -19,6 +19,7 @@ import { workspace } from './workspace'
 import { community } from './community'
 import { admin } from './admin'
 import { ui } from './ui'
+import { components } from './components'
 import { actions } from './actions'
 
 /** The source catalog, one namespace per area of the app. */
@@ -44,5 +45,6 @@ export const en = {
   community,
   admin,
   ui,
+  components,
   actions,
 }

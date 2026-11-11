@@ -1,7 +1,7 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
 import type { Frame, Page } from 'puppeteer-core'
 import { findBrowserPath } from '../server/screenshot'
-import { fixtureUrl, openBrowser, type TestBrowser } from './browser'
+import { fixtureUrl, pagePerTest } from './browser'
 import type { TextFormatCommand } from '../src/lib/richText'
 import type { ElementInfo, StylePatch } from '../src/lib/frameBridge'
 
@@ -10,19 +10,12 @@ type Fixture = {
 }
 
 describe.skipIf(!findBrowserPath())('rich text editing', { timeout: 30_000 }, () => {
-  let browser: TestBrowser
+  const pages = pagePerTest()
   let page: Page
   let frame: Frame
 
-  beforeAll(async () => {
-    browser = await openBrowser()
-    page = await browser.newPage()
-  })
-  afterAll(async () => {
-    await page?.close()
-    await browser?.close()
-  })
   beforeEach(async () => {
+    page = await pages.open()
     await page.goto(fixtureUrl('frameReplay.html'))
     await page.waitForFunction(() =>
       (window as unknown as Fixture).messages?.some((m) => m.type === 'doop:frame-ready'),
@@ -160,6 +153,113 @@ describe.skipIf(!findBrowserPath())('rich text editing', { timeout: 30_000 }, ()
     await page.keyboard.type('Outside')
     expect(await frame.$$eval('#text li', (items) => items.map((li) => li.textContent))).toEqual(['One', 'Two'])
     expect(await frame.$eval('#text', (el) => el.textContent)).toContain('Outside')
+  })
+
+  it.each([
+    ['- ', 'ul'],
+    ['* ', 'ul'],
+    ['1. ', 'ol'],
+  ] as const)('turns "%s" typed at the start of a line into a list', async (marker, tag) => {
+    await render('<p id="text" style="margin:0;font:24px Arial">One</p>')
+    await page.keyboard.press('End')
+    await page.keyboard.press('Enter')
+    await new Promise((resolve) => setTimeout(resolve, 500))
+    await page.evaluate(() => {
+      ;(window as unknown as Fixture).messages = []
+    })
+    await page.keyboard.type(marker)
+    expect(await frame.$$eval(`#text ${tag} li`, (items) => items.map((li) => li.textContent))).toEqual([''])
+    // The list is saved as one discrete edit, not left to the typing debounce.
+    await page.waitForFunction(
+      (tag) =>
+        (window as unknown as Fixture).messages.some((m) => m.type === 'doop:edited' && m.html?.includes(`<${tag}`)),
+      {},
+      tag,
+    )
+    // Past the typing debounce: the conversion was saved once, not again by the space that made it.
+    await new Promise((resolve) => setTimeout(resolve, 500))
+    expect(
+      await page.evaluate(() => (window as unknown as Fixture).messages.filter((m) => m.type === 'doop:edited').length),
+    ).toBe(1)
+    await page.keyboard.type('Two')
+    expect(await frame.$$eval(`#text ${tag} li`, (items) => items.map((li) => li.textContent))).toEqual(['Two'])
+    expect(await frame.$eval('#text', (el) => el.textContent)).toBe('OneTwo')
+    // Undo takes the typing, then the list, then gives the typed marker back.
+    for (let i = 0; i < 3; i++) await frame.evaluate(() => document.execCommand('undo'))
+    expect(await frame.$(`#text ${tag}`)).toBeNull()
+    expect(await frame.$eval('#text', (el) => el.textContent?.replace(/\u00a0/g, ' '))).toBe(`One${marker}`)
+  })
+
+  it('leaves a marker typed mid-line or inside a list as text', async () => {
+    await render('<p id="text" style="margin:0;font:24px Arial">One</p>')
+    await page.keyboard.press('End')
+    await page.keyboard.type(' - 1. * x')
+    expect(await frame.$('#text ul, #text ol')).toBeNull()
+    await format('insertUnorderedList')
+    await caretAtEnd('#text li')
+    await page.keyboard.press('Enter')
+    await page.keyboard.type('1. Two')
+    expect(await frame.$('#text ol')).toBeNull()
+    expect(
+      await frame.$$eval('#text li', (items) => items.map((li) => li.textContent?.replace(/\u00a0/g, ' '))),
+    ).toEqual(['One - 1. * x', '1. Two'])
+  })
+
+  async function caretAtEnd(selector: string) {
+    await frame.evaluate((selector) => {
+      const range = document.createRange()
+      range.selectNodeContents(document.querySelector(selector)!)
+      range.collapse(false)
+      getSelection()!.removeAllRanges()
+      getSelection()!.addRange(range)
+    }, selector)
+  }
+
+  it('reads a marker typed across runs', async () => {
+    await render('<p id="text" style="margin:0;font:24px Arial">One</p>')
+    await page.keyboard.press('End')
+    await page.keyboard.press('Enter')
+    await page.keyboard.type('1')
+    await page.keyboard.down('Control')
+    await page.keyboard.press('b')
+    await page.keyboard.up('Control')
+    await page.keyboard.type('. Two')
+    expect(await frame.$$eval('#text ol li', (items) => items.map((li) => li.textContent))).toEqual(['Two'])
+  })
+
+  it('starts a line after a <br> that ends an inline run', async () => {
+    await render('<p id="text" style="margin:0;font:24px Arial"><b>One<br></b><i>-</i></p>')
+    await caretAtEnd('#text i')
+    await page.keyboard.type(' Two')
+    expect(await frame.$$eval('#text ul li', (items) => items.map((li) => li.textContent))).toEqual(['Two'])
+  })
+
+  it('leaves a marker after an inline-block on its line as text', async () => {
+    await render(
+      '<p id="text" style="margin:0;font:24px Arial">One<br><span style="display:inline-block">B</span><i>-</i></p>',
+    )
+    await caretAtEnd('#text i')
+    await page.keyboard.type(' x')
+    expect(await frame.$('#text ul')).toBeNull()
+  })
+
+  it('leaves a marker that takes in locked text alone', async () => {
+    await render('<p id="text" style="margin:0;font:24px Arial">One<br><span data-doop-locked>1</span><i>.</i></p>')
+    await caretAtEnd('#text i')
+    await page.keyboard.type(' x')
+    expect(await frame.$('#text ol')).toBeNull()
+    expect(await frame.$eval('#text [data-doop-locked]', (el) => el.textContent)).toBe('1')
+  })
+
+  it('leaves a marker in a text root inside a list item as text', async () => {
+    await render(
+      '<ul style="margin:0;padding:0;list-style:none"><li><p id="text" style="margin:0;font:24px Arial">One</p></li></ul>',
+    )
+    expect(await frame.$eval('[contenteditable]', (el) => el.id)).toBe('text')
+    await caretAtEnd('#text')
+    await page.keyboard.press('Enter')
+    await page.keyboard.type('- x')
+    expect(await frame.$('#text ul')).toBeNull()
   })
 
   it('keeps the text root when clicking formatted words, and supports native undo and redo', async () => {
@@ -308,6 +408,90 @@ describe.skipIf(!findBrowserPath())('rich text editing', { timeout: 30_000 }, ()
     await style({ 'font-weight': '400' })
     expect(await frame.$eval('#text', (el) => el.innerHTML)).toBe('Hello <span data-doop-id="w">world</span>')
     expect((await inspect())?.textMixed).toEqual({})
+  })
+
+  it('copies the type of a layer formatted with ⌘B / ⌘I and pastes it over the formatting of another', async () => {
+    await send({
+      type: 'doop:html',
+      html:
+        '<p id="source" style="margin:0;font:24px Arial;text-decoration:underline"><b><i><s>Bold</s></i></b></p>' +
+        '<p id="text" style="margin:0;font:16px Arial;background:red">Plain <b>and</b> <u>marked</u></p>',
+      reqId: 'render',
+    })
+    await frame.waitForSelector('#source')
+    const reqId = `computed-${++nextReq}`
+    await send({
+      type: 'doop:computed',
+      selector: '#source',
+      properties: ['font-weight', 'font-style', 'font-size', 'text-decoration-line'],
+      fromTextRun: true,
+      reqId,
+    })
+    await page.waitForFunction(
+      (reqId) => (window as unknown as Fixture).messages.some((m) => m.reqId === reqId),
+      {},
+      reqId,
+    )
+    const copied = await page.evaluate(
+      (reqId) =>
+        (
+          (window as unknown as Fixture).messages.find((m) => m.reqId === reqId) as unknown as {
+            values: Record<string, string>
+          }
+        ).values,
+      reqId,
+    )
+    // The paragraph's underline is painted on the run too, though not inherited.
+    expect(copied).toEqual({
+      'font-weight': '700',
+      'font-style': 'italic',
+      'font-size': '24px',
+      'text-decoration-line': 'line-through underline',
+    })
+
+    await ask('doop:style', {
+      selector: '#text',
+      styles: {
+        'background-color': 'blue',
+        'font-weight': '400',
+        'font-style': 'italic',
+        'text-decoration-line': 'none',
+      },
+      uniformText: true,
+    })
+    expect(await frame.$eval('#text', (el) => el.innerHTML)).toBe('Plain <span>and</span> <span>marked</span>')
+    expect(await frame.$$eval('#text span', (runs) => runs.map((r) => getComputedStyle(r).fontWeight))).toEqual([
+      '400',
+      '400',
+    ])
+    expect(await frame.$eval('#text', (el) => getComputedStyle(el).backgroundColor)).toBe('rgb(0, 0, 255)')
+  })
+
+  it('keeps an edit on selected words above a rule marked !important, typed or scrubbed', async () => {
+    const html =
+      '<style>#text span { font-size: 16px !important }</style><p id="text" style="margin:0;font:24px Arial">Hello world</p>'
+    const run = () =>
+      frame.$eval('#text span', (el) => [el.getAttribute('style'), getComputedStyle(el).fontSize, el.textContent])
+    await render(html)
+    await select(0, 5)
+    await style({ 'font-size': '32px' })
+    expect(await run()).toEqual(['font-size: 32px !important;', '32px', 'Hello'])
+    // Nothing of the stand-in used to match the rule stays behind.
+    expect(await frame.$eval('#text', (el) => el.children.length)).toBe(1)
+
+    await send({ type: 'doop:edit', on: false })
+    await frame.waitForFunction(() => !document.querySelector('[contenteditable]'))
+    await render(html)
+    await frame.waitForFunction(() => !document.querySelector('#text span'))
+    await select(0, 5)
+    const gesture = (phase: 'begin' | 'commit') =>
+      ask('doop:style-gesture' as 'doop:style', { selector: '#text', phase })
+    await gesture('begin')
+    await style({ 'font-size': '40px' })
+    expect((await run())[1]).toBe('40px')
+    await gesture('commit')
+    expect(await run()).toEqual(['font-size: 40px !important;', '40px', 'Hello'])
+    await expect.poll(savedHtml).toContain('<span style="font-size: 40px !important;">Hello</span> world')
   })
 
   it('restores a cancelled size scrub on selected words and saves a committed one once', async () => {

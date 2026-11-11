@@ -133,3 +133,19 @@ it('only returns the URL without place, and refuses a page the canvas lacks', as
   expect(refused.raw).toContain('no page nowhere')
   expect((await load(canvas.id)).frames).toHaveLength(0)
 })
+
+it('stores but does not place a ticketed file once its uploader lost edit access', async () => {
+  const host = await new Client(server).signUp('place-host@test.dev', 'Place Host')
+  const canvas: Canvas = await (await host.post('/api/canvases', { name: 'Shared' })).json()
+  const invited = await (await host.post(`/api/canvases/${canvas.id}/members`, { email: 'placer@test.dev' })).json()
+  const ticket = await upload({ canvas_id: canvas.id, local_file: true, place: { x: 0, y: 0 } })
+  expect(ticket.json.upload_url).toBeDefined()
+
+  expect((await host.delete(`/api/canvases/${canvas.id}/members/${invited.userId}`)).status).toBe(200)
+  const sent = await fetch(ticket.json.upload_url!, { method: 'PUT', body: new Uint8Array(png(64, 64)) })
+  const stored = (await sent.json()) as Placed
+  expect(stored.url).toContain('/a/')
+  expect(stored.frame).toBeUndefined()
+  const frames = ((await (await host.get(`/api/canvases/${canvas.id}`)).json()) as Canvas).frames
+  expect(frames).toHaveLength(0)
+})

@@ -38,6 +38,8 @@ export interface Allowance {
   byoKind?: AccountKind | 'claude-local' | 'gemini-cloud'
   /** the default account's email, so the UI can name what is connected */
   byoEmail?: string
+  /** a custom provider's name, which no label table knows */
+  byoName?: string
   /** the agent is running on this user's own account right now — connecting
    *  takes effect immediately, it does not wait for the free tasks to run out */
   onOwnAccount: boolean
@@ -77,7 +79,9 @@ export async function getAllowance(userId: string): Promise<Allowance> {
   /* any connection that is on carries the agent, so the free tier stops
      counting; the meter names the default, which is what unpicked work runs on */
   const own = geminiCloud || connections.default !== undefined
-  const email = usableAccount(connections, connections.default)?.email
+  const defaultAccount = usableAccount(connections, connections.default)
+  const email = defaultAccount?.email
+  const customName = defaultAccount?.custom?.name
   return {
     used,
     limit: RESIDENT_TASK_LIMIT,
@@ -89,6 +93,7 @@ export async function getAllowance(userId: string): Promise<Allowance> {
         ? { byoKind: connections.default }
         : {}),
     ...(!geminiCloud && email ? { byoEmail: email } : {}),
+    ...(!geminiCloud && customName ? { byoName: customName } : {}),
     onOwnAccount: own,
   }
 }

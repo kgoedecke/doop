@@ -1,0 +1,27 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module">
+      import React from 'react'
+      import { createRoot } from 'react-dom/client'
+      import { CanvasPage } from '/src/pages/CanvasPage.tsx'
+      import { TooltipProvider } from '/src/components/ui/tooltip.tsx'
+      import { useStore } from '/src/lib/store.ts'
+      import '/src/styles.css'
+
+      /* the canvas page as an editor has it open, with all its chrome; the
+         test hands it the canvas the room would have sent */
+      window.canvasPageHarness = {
+        seed: (frames) =>
+          useStore.getState().setCanvas({ id: 'c', name: 'Canvas', frames, role: 'edit', createdAt: 0, updatedAt: 0 }),
+      }
+      createRoot(document.getElementById('root')).render(
+        React.createElement(TooltipProvider, null, React.createElement(CanvasPage, { canvasId: 'c' })),
+      )
+    </script>
+  </body>
+</html>

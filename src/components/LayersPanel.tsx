@@ -10,11 +10,14 @@ import {
   type ReactNode,
 } from 'react'
 import type { Frame } from '../../shared/types'
+import type { ComponentDef } from '../../shared/components'
 import { canEditOpenCanvas, pickedSelectors, useStore } from '../lib/store'
 import { currentPageCanvas, usePageCanvas } from '../lib/pages'
 import { PagesPanel, sectionHeading } from './PagesPanel'
 import { getIdentity } from '../lib/identity'
 import { deleteFramesTracked } from '../lib/history'
+import { api } from '../lib/api'
+import { renameComponent } from '../lib/components'
 import {
   ancestorsOf,
   buildLayerTree,
@@ -47,6 +50,7 @@ import {
 import { cn } from '@/lib/utils'
 import { AgentIcon } from './AgentIcon'
 import { LayerKindIcon } from './LayerKindIcon'
+import { ComponentsPanel } from './ComponentsPanel'
 import { FrameContextMenu } from './FrameContextMenu'
 import { FrameApprovalBadge } from './FrameApproval'
 import {
@@ -75,6 +79,7 @@ import {
   EyeIcon,
   FrameIcon,
   LayersIcon,
+  ComponentIcon,
   BracesIcon,
   LockIcon,
   LockOpenIcon,
@@ -83,7 +88,7 @@ import {
   PlusIcon,
   SearchIcon,
 } from './ui/icons'
-import { useT } from '@/lib/i18n'
+import { t as translate, useT } from '@/lib/i18n'
 
 /* the tree indents 16px per level; frame rows sit at depth 0 */
 const INDENT = 16
@@ -542,6 +547,9 @@ export function LayersPanel({
             <PanelIconTab value="layers" icon={<LayersIcon />} title={t('panels.layersTitle')}>
               {t('panels.layersTitle')}
             </PanelIconTab>
+            <PanelIconTab value="components" icon={<ComponentIcon />} title={t('components.title')}>
+              {t('components.title')}
+            </PanelIconTab>
             <PanelIconTab value="tokens" icon={<BracesIcon />} title={t('panels.layersTabTokens')}>
               {t('panels.layersTabTokens')}
             </PanelIconTab>
@@ -563,6 +571,7 @@ export function LayersPanel({
           )}
         </PanelHeader>
       </PanelTabsRoot>
+      {tab === 'components' && <ComponentsPanel />}
       {tab === 'tokens' && (
         <PanelBody className="flex flex-col pb-2">
           <TokensSection />
@@ -703,6 +712,16 @@ export function LayersRailToggle({ docked = false }: { docked?: boolean }) {
         <LayersIcon />
       </ToolbarControl>
       <ToolbarControl
+        label={t('components.title')}
+        side="right"
+        onClick={() => {
+          useStore.getState().setLayersTab('components')
+          setLayersOpen(true)
+        }}
+      >
+        <ComponentIcon />
+      </ToolbarControl>
+      <ToolbarControl
         label={t('panels.layersTabTokens')}
         side="right"
         onClick={() => {
@@ -758,6 +777,29 @@ function ItemNameInput({
       }}
     />
   )
+}
+
+/* A standalone main's row shows its frame's name; the server renames that
+   frame with the component only while the two names agree, so otherwise the
+   frame takes the saved name here. A component rename has no undo, so this
+   companion write records none either. */
+async function renameMain(def: ComponentDef, frame: Frame, standalone: boolean, value: string) {
+  const saved = await renameComponent(def, value)
+  const current = useStore.getState().canvas?.frames.find((f) => f.id === frame.id)
+  if (!saved || !standalone || !current || current.name === saved) return
+  useStore.getState().patchFrameLocal(current.id, { name: saved })
+  try {
+    await api.updateFrame(current.id, { name: saved })
+  } catch (error) {
+    const s = useStore.getState()
+    if (s.canvas?.frames.find((f) => f.id === current.id)?.name === saved)
+      s.patchFrameLocal(current.id, { name: current.name })
+    s.pushNotice(
+      error instanceof Error && error.message
+        ? error.message
+        : translate('panels.layersRenameFailed', { name: current.name }),
+    )
+  }
 }
 
 function useItemRename(name: string, allowed: boolean, onCommit: (value: string) => void) {
@@ -899,13 +941,26 @@ function NodeRow({
   const { frame, node } = row
   const readOnly = useStore((s) => !canEditOpenCanvas(s))
   const hasChildren = node.children.length > 0
+  const component = useStore((s) =>
+    node.componentId ? s.canvas?.components?.find((def) => def.id === node.componentId) : undefined,
+  )
+  const componentName = component?.name
   /* a standalone element is its frame: its name, eye, lock and menu all
      belong to the frame */
   const standalone = !!row.standalone
+  /* a component's rows are named after it: the main's row renames the
+     component, an instance's is not renamed on its own */
   const { label, startRename } = useItemRename(
-    standalone ? frame.name : node.label,
-    !readOnly && !frame.locked && !node.locked,
-    (value) => (standalone ? renameFrame(frame.id, value) : renameLayer(frame.id, node.selector, value)),
+    standalone ? frame.name : (componentName ?? node.label),
+    !readOnly && !frame.locked && !node.locked && (!component || node.component === 'main'),
+    (value) => {
+      if (component) {
+        void renameMain(component, frame, standalone, value)
+        return
+      }
+      if (standalone) renameFrame(frame.id, value)
+      else renameLayer(frame.id, node.selector, value)
+    },
   )
   const pasteAt = useRef({ x: 0, y: 0 })
   return (
@@ -917,9 +972,19 @@ function NodeRow({
           drop={drop}
           caret={<Caret open={row.open} present={hasChildren} />}
           onCaret={hasChildren ? onToggle : undefined}
-          icon={<LayerKindIcon kind={node.kind} />}
+          icon={
+            node.component ? (
+              <ComponentIcon
+                width={14}
+                height={14}
+                className={node.component === 'main' ? 'text-brand' : 'text-brand opacity-70'}
+              />
+            ) : (
+              <LayerKindIcon kind={node.kind} />
+            )
+          }
           label={label}
-          detail={standalone ? undefined : node.detail}
+          detail={standalone || componentName ? undefined : node.detail}
           selected={selected}
           /* a standalone element is hidden by its frame or by its own
              attribute (⌘⇧H sets the latter): the row shows either, and its

@@ -54,7 +54,9 @@ function placedSize(buf: Buffer, mime: string, width: number | undefined) {
 /** What an agent is told once its upload was asked onto the canvas. */
 export function placedImageResult(frame: Frame | undefined) {
   if (!frame)
-    return { note: 'Uploaded, but not placed: the canvas or page is gone. The permanent public URL still works.' }
+    return {
+      note: 'Uploaded, but not placed: the canvas or page is gone, or you can no longer edit it. The permanent public URL still works.',
+    }
   const { id, pageId, name, x, y, width, height } = frame
   return {
     frame: { id, pageId, name, x, y, width, height },

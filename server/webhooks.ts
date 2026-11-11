@@ -346,6 +346,9 @@ export function payloadFor(event: CanvasEvent): Record<string, unknown> {
         task: publicTask(event.task),
         reason: event.reason,
       }
+    /* internal bookkeeping (server/imageDescriptions.ts), not a hook event */
+    case 'asset.stored':
+      return {}
   }
 }
 
@@ -472,7 +475,7 @@ async function send(
 /** The canvas event bus listener: fan an event out to every hook that
  *  subscribed to it and whose owner durably has access to the canvas. */
 export function onCanvasEvent(canvasId: string, event: CanvasEvent): void {
-  if (!hooks.size) return
+  if (!hooks.size || event.type === 'asset.stored') return
   const canvas = store.getCanvas(canvasId)
   if (!canvas) return
   const targets = [...hooks.values()].filter(

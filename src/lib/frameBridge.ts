@@ -302,8 +302,15 @@ export async function inspectElement(frameId: string, selector: string): Promise
 /** Write inline styles onto the element. The runtime saves the edited
  *  document through the frame's normal edit path and answers with the
  *  element's fresh properties. */
-export async function styleElement(frameId: string, selector: string, styles: StylePatch): Promise<ElementInfo | null> {
-  return infoOf(await requestFrame(frameId, 'doop:style', { selector, styles }))
+/** `uniformText` makes the patch's type the whole layer's: the inline runs
+ *  under it drop their own values, and <b> / <i> / <u> runs their formatting. */
+export async function styleElement(
+  frameId: string,
+  selector: string,
+  styles: StylePatch,
+  { uniformText = false }: { uniformText?: boolean } = {},
+): Promise<ElementInfo | null> {
+  return infoOf(await requestFrame(frameId, 'doop:style', { selector, styles, uniformText }))
 }
 
 /** Replace image content through the same live edit/undo path as styles. */
@@ -330,13 +337,16 @@ export async function scanHotspots(frameId: string): Promise<ScannedHotspot[]> {
   return Array.isArray(reply?.items) ? (reply.items as ScannedHotspot[]) : []
 }
 
-/** Preview a whole scrub locally, then save once or restore its original CSS. */
+/** Preview a whole scrub locally, then save once or restore its original CSS.
+ *  `followers` (a `begin` only) are the rest of a multi-pick: a `move` of the
+ *  element carries them by the same delta, and a cancel puts them back too. */
 export async function styleGesture(
   frameId: string,
   selector: string,
   phase: 'begin' | 'commit' | 'cancel',
+  followers: string[] = [],
 ): Promise<ElementInfo | null> {
-  return infoOf(await requestFrame(frameId, 'doop:style-gesture', { selector, phase }))
+  return infoOf(await requestFrame(frameId, 'doop:style-gesture', { selector, phase, followers }))
 }
 
 /** Toggle a text format over whole layers, as ⌘B does with a text layer
@@ -352,13 +362,16 @@ export async function formatElementText(
 }
 
 /** The element's computed values for `properties`, or null when the selector
- *  no longer resolves or the frame is not mounted. */
+ *  no longer resolves or the frame is not mounted. `fromTextRun` reads them
+ *  off the element's first text run instead, where a bold or italic run's
+ *  formatting shows. */
 export async function computedStyles(
   frameId: string,
   selector: string,
   properties: readonly string[],
+  { fromTextRun = false }: { fromTextRun?: boolean } = {},
 ): Promise<Record<string, string> | null> {
-  const reply = await requestFrame(frameId, 'doop:computed', { selector, properties: [...properties] })
+  const reply = await requestFrame(frameId, 'doop:computed', { selector, properties: [...properties], fromTextRun })
   return reply && reply.values && typeof reply.values === 'object' ? (reply.values as Record<string, string>) : null
 }
 

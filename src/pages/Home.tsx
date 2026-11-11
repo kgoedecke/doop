@@ -358,6 +358,7 @@ export function Home() {
               onConnectAgents: () => setShowConnect(true),
               onAutomations: () => navigate('/automations'),
               onIntegrations: () => navigate('/integrations'),
+              onCommunity: () => navigate('/community'),
             }}
           />
 

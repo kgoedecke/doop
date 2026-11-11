@@ -1,4 +1,23 @@
 import { env } from './env.ts'
+import {
+  catalogEntry,
+  changeInstances,
+  componentDetail,
+  ComponentError,
+  createComponentFromElement,
+  createComponentFromHtml,
+  deleteComponent,
+  findComponent,
+  findComponentCandidates,
+  importComponent,
+  insertInstance,
+  restoreComponentVersion,
+  syncComponent,
+  updateComponent,
+} from './componentActions.ts'
+import { z } from 'zod'
+import { previewDocument } from './componentPreview.ts'
+import { codeSchema, propSchema } from './componentTools.ts'
 import { canvasPages, framePageId, samePages } from '../shared/pages.ts'
 import { normalizePageBackground } from '../shared/pageBackground.ts'
 import { MAX_STACK_WRITES, type StackWrite } from '../shared/frameStack.ts'
@@ -24,6 +43,7 @@ import { getImage } from './previews.ts'
 import * as actions from './actions.ts'
 import { liveActivitiesRouter, logLiveActivityRequests, startLiveActivityDelivery } from './liveActivities.ts'
 import { onCanvasEvent } from './events.ts'
+import * as imageDescriptions from './imageDescriptions.ts'
 import * as commentNotifications from './commentNotifications.ts'
 import { notificationsRouter } from './notifications.ts'
 import * as webhooks from './webhooks.ts'
@@ -44,6 +64,7 @@ import {
 } from './access.ts'
 import { isLinkAccess, roleAllows, type CanvasRole } from '../shared/canvasRole.ts'
 import { auth, initAuth, syncAdmins, getUserName, loginProvidersConfig } from './auth.ts'
+import { getInstanceSettings, hydrateInstanceSettings, loginPolicy } from './instanceSettings.ts'
 import { adminRouter } from './admin.ts'
 import { communityRouter, parseListing, publishableFrames } from './community.ts'
 import { automationsRouter, startScheduler } from './automations.ts'
@@ -81,7 +102,17 @@ import { getLocalAgentPreference } from './localAgentPreferences.ts'
 import { serverTierInfo } from './agentModel.ts'
 import { imageModelAvailability, serverImageGenEnabled } from './imageGen.ts'
 import { setImagePref } from './imagePrefs.ts'
-import { accountsView, listRunners, MODEL_MENUS } from './agentRunners.ts'
+import { accountsView, listRunners, menuFor } from './agentRunners.ts'
+import { CustomProviderError, discoverCustomModels, takeProbeSlot, testCustomProvider } from './customProviders.ts'
+import { CustomProviderUrlError, customProvidersEnabled, reachableUrl } from './customProviderFetch.ts'
+import {
+  isCustomProviderKind,
+  normalizeBaseUrl,
+  parseCustomHeaders,
+  parseCustomKey,
+  parseCustomProviderConfig,
+  CUSTOM_API_TYPES,
+} from '../shared/customProvider.ts'
 import { setStoredDefault } from './agentDefaults.ts'
 import { isRunnerProvider } from '../shared/agentRunner.ts'
 import { modelCatalogFor } from './modelCatalog.ts'
@@ -122,6 +153,7 @@ if (data.canvases.length === 0 && (await persist.importLegacyJson())) {
 }
 store.init(data.canvases)
 await workspaces.hydrateWorkspaces() // before the first request: canvasRole reads membership
+await hydrateInstanceSettings() // the sign-in policy, read on every signup
 await webhooks.hydrateWebhooks()
 await hydrateFonts() // before the first request: frame writes add the faces they use
 billing.reportBillingConfig()
@@ -154,6 +186,8 @@ seed()
 reconcileAssetRefs()
   .then((n) => n && console.log(`[assets] reconciled ${n} asset ref(s)`))
   .catch((e) => console.error('[assets] reconcile failed', e))
+/* image descriptions for agents: recover the backlog and listen for new assets. */
+void imageDescriptions.startImageDescriptions(broadcast)
 
 /* One stray rejection must never take down the multiplayer server: Node's
    default is to exit, which turned a single aborted analytics upload into
@@ -346,6 +380,7 @@ actions.wire(broadcast, agentTouch)
 /* after the room has been told: email for the people who were not in it */
 onCanvasEvent(commentNotifications.onCanvasEvent)
 onCanvasEvent(webhooks.onCanvasEvent)
+onCanvasEvent(imageDescriptions.onCanvasEvent)
 
 /* ------------------------------------------------- http api */
 
@@ -566,8 +601,12 @@ app.put('/u/:token', async (req, res) => {
     const uploaded = { ok: true, url, mime: asset.mime, size_bytes: asset.size, usage: `<img src="${url}" alt="">` }
     const { place } = ticket
     if (!place) return res.json({ ...uploaded, note: 'Permanent public URL — reference it in frame HTML.' })
-    const frame = await store.withCanvas(ticket.canvasId, async () =>
-      placeImage(ticket.canvasId, { url, buf, mime: asset.mime }, place.placement, place.actor),
+    /* the ticket was minted with edit access, up to 15 minutes ago: placing
+       changes the canvas, so access is asked again now that the bytes are here */
+    const frame = await store.withCanvas(ticket.canvasId, async (canvas) =>
+      canvas && canEditCanvas(ticket.ownerId, canvas)
+        ? placeImage(ticket.canvasId, { url, buf, mime: asset.mime }, place.placement, place.actor)
+        : undefined,
     )
     res.json({ ...uploaded, ...placedImageResult(frame) })
   } catch (e) {
@@ -592,6 +631,14 @@ app.put('/u/:token', async (req, res) => {
 const MCP_OAUTH_PATHS = /^\/api\/auth\/(mcp\/|oauth2\/(authorize|consent|token))/
 const VIEW_AS_ALLOWED = /^\/api\/auth\/(sign-out|admin\/stop-impersonating)$/
 app.all('/api/auth/*', async (req, res, next) => {
+  /* Admin → Sign-in turned email/password sign-up off: the form is hidden,
+     and the call it would make is refused too. Sign-in, password resets and
+     provider sign-ups go on as before. */
+  if (req.path === '/api/auth/sign-up/email' && !getInstanceSettings().emailPasswordSignup) {
+    return res
+      .status(403)
+      .json({ code: 'SIGNUP_DISABLED', message: 'Sign-up with email and password is off on this instance.' })
+  }
   const restricted = MCP_OAUTH_PATHS.test(req.path) || (req.method !== 'GET' && !VIEW_AS_ALLOWED.test(req.path))
   if (restricted) {
     const session = await auth.api.getSession({ headers: fromNodeHeaders(req.headers) }).catch(() => null)
@@ -670,7 +717,8 @@ app.post('/api/account-exists', async (req, res) => {
    build shared across self-hosted deploys can't know this at build time —
    see server/auth.ts loginProvidersConfig for what's safe to expose here. */
 app.get('/api/oidc-config', (req, res) => {
-  res.json(loginProvidersConfig())
+  const providers = loginProvidersConfig()
+  res.json({ ...providers, ...loginPolicy(providers.enabled) })
 })
 
 /* Public: the interface language for visitors who have not picked one. The
@@ -959,6 +1007,7 @@ function requireFrame(
 }
 
 app.use('/api/local-agent', localAgentRouter)
+app.use('/api/image-descriptions', imageDescriptions.imageDescriptionsRouter)
 app.use('/api/notifications', notificationsRouter)
 app.use('/api/webhooks', webhooksRouter)
 app.use('/api/fonts', fontsRouter)
@@ -1038,7 +1087,7 @@ app.get('/api/model-account/models', async (req, res) => {
          must not hold the picker past the catalog's own budget */
       new Promise<typeof account>((resolve) => setTimeout(resolve, 8_000, account).unref()),
     ])
-    res.json(await modelCatalogFor(live, MODEL_MENUS[account.kind]))
+    res.json(await modelCatalogFor(live, menuFor(account)))
   } catch {
     res.status(500).json({ error: 'models unavailable' })
   }
@@ -1142,6 +1191,122 @@ for (const [kind, connect] of Object.entries(KEY_CONNECTS)) {
     }
   })
 }
+
+/* ---- custom providers: any OpenAI- or Anthropic-compatible endpoint, by
+   its base URL. One is a model account of kind `custom:<id>`, so switching it
+   on or off, picking its model, making it the default and disconnecting it
+   are the routes above; these create and edit it, and help set it up. */
+
+app.use('/api/custom-providers', (_req, res, next) => {
+  if (!customProvidersEnabled()) return res.status(404).json({ error: 'custom providers are off on this server' })
+  next()
+})
+
+/** The key and headers a request carries: a field left out is undefined, so
+ *  an edit keeps the stored one; an empty key clears it. */
+function customSecrets(body: Record<string, unknown>): { apiKey?: string; headers?: Record<string, string> } {
+  const secrets: { apiKey?: string; headers?: Record<string, string> } = {}
+  if (body.apiKey !== undefined) {
+    const key = parseCustomKey(body.apiKey)
+    if (!key.ok) throw new CustomProviderError(key.error)
+    secrets.apiKey = key.value
+  }
+  if (body.headers !== undefined) {
+    const headers = parseCustomHeaders(body.headers)
+    if (!headers.ok) throw new CustomProviderError(headers.error)
+    secrets.headers = headers.value
+  }
+  return secrets
+}
+
+/** A validated provider description whose URL this server may reach. */
+function customConfig(body: unknown) {
+  const config = parseCustomProviderConfig(body)
+  if (!config.ok) throw new CustomProviderError(config.error)
+  reachableUrl(config.value.baseUrl)
+  return config.value
+}
+
+/** The secrets a set-up request should use: what it carries, else (for a
+ *  provider being edited) what is stored for it. */
+async function probeSecrets(userId: string, body: Record<string, unknown>) {
+  const given = customSecrets(body)
+  const stored = isCustomProviderKind(body.kind) ? await modelAccounts.getAccount(userId, body.kind) : null
+  const apiKey = given.apiKey ?? stored?.apiKey
+  const headers = given.headers ?? stored?.headers
+  return { ...(apiKey ? { apiKey } : {}), ...(headers ? { headers } : {}) }
+}
+
+function customFailure(res: express.Response, error: unknown, fallback: string) {
+  if (error instanceof CustomProviderError || error instanceof CustomProviderUrlError) {
+    return res.status(400).json({ error: error.message })
+  }
+  /* the provider's own error text (a 400 body, a refused model) is what the
+     person needs to fix their endpoint; never a stack */
+  const message = error instanceof Error ? error.message.slice(0, 500) : fallback
+  return res.status(400).json({ error: message || fallback })
+}
+
+app.post('/api/custom-providers', async (req, res) => {
+  try {
+    const body = (req.body ?? {}) as Record<string, unknown>
+    const config = customConfig(body)
+    await modelAccounts.connectCustomProvider(req.user!.id, config, customSecrets(body))
+    res.json(await accountsView(req.user!.id))
+    wakeUserWork(req.user!.id)
+  } catch (error) {
+    customFailure(res, error, 'could not add that provider')
+  }
+})
+
+app.put('/api/custom-providers/:kind', async (req, res) => {
+  const kind = req.params.kind
+  if (!isCustomProviderKind(kind)) return res.status(400).json({ error: 'unknown provider' })
+  try {
+    const body = (req.body ?? {}) as Record<string, unknown>
+    await modelAccounts.updateCustomProvider(req.user!.id, kind, customConfig(body), customSecrets(body))
+    res.json(await accountsView(req.user!.id))
+    wakeUserWork(req.user!.id)
+  } catch (error) {
+    customFailure(res, error, 'could not save that provider')
+  }
+})
+
+/* the endpoint's own model list, to fill the form's rows */
+app.post('/api/custom-providers/models', async (req, res) => {
+  const userId = req.user!.id
+  if (!takeProbeSlot(userId)) return res.status(429).json({ error: 'Too many requests. Wait a few minutes.' })
+  try {
+    const body = (req.body ?? {}) as Record<string, unknown>
+    const apiType = CUSTOM_API_TYPES.find((type) => type === body.apiType)
+    if (!apiType) throw new CustomProviderError('Pick the API type')
+    const baseUrl = normalizeBaseUrl(typeof body.baseUrl === 'string' ? body.baseUrl : '')
+    if (!baseUrl.ok) throw new CustomProviderError(baseUrl.error)
+    const models = await discoverCustomModels({
+      config: { apiType, baseUrl: baseUrl.value },
+      ...(await probeSecrets(userId, body)),
+    })
+    res.json({ models })
+  } catch (error) {
+    customFailure(res, error, 'could not list that endpoint’s models')
+  }
+})
+
+/* one short turn that has to call a tool: the agent cannot work without it */
+app.post('/api/custom-providers/test', async (req, res) => {
+  const userId = req.user!.id
+  if (!takeProbeSlot(userId)) return res.status(429).json({ error: 'Too many requests. Wait a few minutes.' })
+  try {
+    const body = (req.body ?? {}) as Record<string, unknown>
+    const config = customConfig(body)
+    const model = config.models.find((option) => option.id === body.model) ?? config.models[0]
+    if (!model) throw new CustomProviderError('Add a model to test')
+    await testCustomProvider({ config, ...(await probeSecrets(userId, body)) }, model)
+    res.json({ ok: true, model: model.id })
+  } catch (error) {
+    customFailure(res, error, 'the test turn failed')
+  }
+})
 
 app.delete('/api/model-account/:kind', async (req, res) => {
   const kind = req.params.kind
@@ -2091,6 +2256,202 @@ app.patch('/api/frames/:id', (req, res) => {
   const frame = actions.updateFrame(req.params.id, clean, actor)
   if (!frame) return res.status(404).json({ error: 'frame not found' })
   res.json(frame)
+})
+
+/* Components. Reads are for anyone who can see the canvas; everything else edits it. */
+function componentContext(req: express.Request, canvas: Canvas) {
+  return { canvas, actor: userActor(req) }
+}
+
+/* The REST bodies, typed like the MCP tools' input (the same zod pieces), so a
+   malformed field is a 400 and never reaches the engine; `head` is a library
+   pull's alone and is not accepted here. */
+const componentCreateBody = z.object({
+  name: z.string().max(200).optional(),
+  description: z.string().max(2000).optional(),
+  props: z.array(propSchema).optional(),
+  code: codeSchema.optional(),
+  frameId: z.string().optional(),
+  element: z.string().optional(),
+  autoProps: z.boolean().optional(),
+  replaceMatching: z.boolean().optional(),
+  html: z.string().optional(),
+  css: z.string().optional(),
+  width: z.number().optional(),
+  height: z.number().optional(),
+})
+const componentPatchBody = z.object({
+  name: z.string().max(200).optional(),
+  description: z.string().max(2000).optional(),
+  props: z.array(propSchema).optional(),
+  code: codeSchema.nullable().optional(),
+  html: z.string().optional(),
+  css: z.string().optional(),
+  find: z.string().optional(),
+  replace: z.string().optional(),
+  expectedRev: z.number().optional(),
+  dryRun: z.boolean().optional(),
+})
+
+function componentBody<T>(res: express.Response, schema: z.ZodType<T>, body: unknown): T | undefined {
+  const parsed = schema.safeParse(body ?? {})
+  if (parsed.success) return parsed.data
+  const issue = parsed.error.issues[0]
+  res.status(400).json({ error: `${issue?.path.join('.') || 'body'}: ${issue?.message ?? 'invalid'}` })
+  return undefined
+}
+
+function componentRoute(res: express.Response, run: () => unknown) {
+  try {
+    res.json(run())
+  } catch (error) {
+    if (error instanceof ComponentError) return res.status(400).json({ error: error.message })
+    throw error
+  }
+}
+
+app.get('/api/canvases/:id/components', (req, res) => {
+  const canvas = requireCanvas(req, res, req.params.id, 'view')
+  if (!canvas) return
+  res.json((canvas.components ?? []).map((def) => componentDetail(canvas, def)))
+})
+
+/* other canvases this person can read that hold components: the import picker.
+   Importing takes edit, and this walks every canvas the person can read, so a
+   viewer gets no such scan */
+app.get('/api/canvases/:id/component-libraries', (req, res) => {
+  const canvas = requireCanvas(req, res, req.params.id, 'edit')
+  if (!canvas) return
+  res.json(
+    workspaces.canvasesFor(req.user!.id).flatMap((meta) => {
+      const other = store.getCanvas(meta.id)
+      if (!other || other.id === canvas.id || !other.components?.length) return []
+      return [{ id: other.id, name: other.name, components: other.components.map((def) => catalogEntry(other, def)) }]
+    }),
+  )
+})
+
+/* parses every frame on the canvas: for the editors who can act on it */
+app.get('/api/canvases/:id/component-candidates', (req, res) => {
+  const canvas = requireCanvas(req, res, req.params.id, 'edit')
+  if (!canvas) return
+  res.json(findComponentCandidates(canvas))
+})
+
+app.post('/api/canvases/:id/components', (req, res) => {
+  const canvas = requireCanvas(req, res, req.params.id, 'edit')
+  if (!canvas) return
+  const { actor } = componentContext(req, canvas)
+  const body = componentBody(res, componentCreateBody, req.body)
+  if (!body) return
+  componentRoute(res, () => {
+    if (typeof body.html === 'string') {
+      return {
+        component: createComponentFromHtml(
+          canvas.id,
+          { ...body, html: body.html, props: body.props as never, name: String(body.name ?? '') },
+          actor,
+        ),
+        converted: [],
+      }
+    }
+    const created = createComponentFromElement(
+      canvas.id,
+      {
+        name: String(body.name ?? ''),
+        description: body.description,
+        props: body.props as never,
+        code: body.code,
+        frameId: String(body.frameId ?? ''),
+        element: String(body.element ?? ''),
+        autoProps: body.autoProps,
+        replaceMatching: body.replaceMatching === true,
+      },
+      actor,
+    )
+    /* what the editor needs to undo this as one step */
+    const changed = new Set([String(body.frameId), ...created.converted.map((entry) => entry.frameId)])
+    return { ...created, frames: [...changed].flatMap((id) => store.getFrame(id) ?? []) }
+  })
+})
+
+app.post('/api/canvases/:id/components/import', (req, res) => {
+  const canvas = requireCanvas(req, res, req.params.id, 'edit')
+  if (!canvas) return
+  const source = String(req.body?.sourceCanvasId ?? '')
+  const origin = store.getCanvas(source)
+  if (!origin || !roleAllows(canvasRole(req.user!.id, origin), 'view'))
+    return res.status(403).json({ error: 'this account cannot read that canvas' })
+  componentRoute(res, () => importComponent(canvas.id, source, String(req.body?.component ?? ''), userActor(req)))
+})
+
+app.patch('/api/canvases/:id/components/:componentId', (req, res) => {
+  const canvas = requireCanvas(req, res, req.params.id, 'edit')
+  if (!canvas) return
+  const body = componentBody(res, componentPatchBody, req.body)
+  if (!body) return
+  componentRoute(res, () =>
+    updateComponent(canvas.id, req.params.componentId, { ...body, props: body.props as never }, userActor(req)),
+  )
+})
+
+app.delete('/api/canvases/:id/components/:componentId', (req, res) => {
+  const canvas = requireCanvas(req, res, req.params.id, 'edit')
+  if (!canvas) return
+  componentRoute(res, () => deleteComponent(canvas.id, req.params.componentId, userActor(req)))
+})
+
+app.post('/api/canvases/:id/components/:componentId/restore', (req, res) => {
+  const canvas = requireCanvas(req, res, req.params.id, 'edit')
+  if (!canvas) return
+  componentRoute(res, () =>
+    restoreComponentVersion(canvas.id, req.params.componentId, Number(req.body?.rev), userActor(req)),
+  )
+})
+
+app.post('/api/canvases/:id/components/:componentId/sync', (req, res) => {
+  const canvas = requireCanvas(req, res, req.params.id, 'edit')
+  if (!canvas) return
+  componentRoute(res, () =>
+    syncComponent(canvas.id, req.params.componentId, userActor(req), (id) => {
+      const other = store.getCanvas(id)
+      return !!other && roleAllows(canvasRole(req.user!.id, other), 'view')
+    }),
+  )
+})
+
+app.get('/api/canvases/:id/components/:componentId/preview', (req, res) => {
+  const canvas = requireCanvas(req, res, req.params.id, 'view')
+  if (!canvas) return
+  const def = findComponent(canvas.id, req.params.componentId)
+  if (!def) return res.status(404).json({ error: 'component not found' })
+  res.json(previewDocument(canvas.id, def))
+})
+
+app.post('/api/frames/:id/instances', (req, res) => {
+  const current = requireFrame(req, res, req.params.id, 'edit')
+  if (!current) return
+  const body = req.body ?? {}
+  componentRoute(res, () =>
+    insertInstance(
+      current.canvasId,
+      {
+        frameId: current.id,
+        component: String(body.component ?? ''),
+        props: body.props,
+        target: body.target,
+        position: body.position,
+      },
+      userActor(req),
+    ),
+  )
+})
+
+app.patch('/api/frames/:id/instances', (req, res) => {
+  const current = requireFrame(req, res, req.params.id, 'edit')
+  if (!current) return
+  const changes = Array.isArray(req.body?.changes) ? req.body.changes : []
+  componentRoute(res, () => changeInstances(current.canvasId, current.id, changes, userActor(req)))
 })
 
 app.put('/api/frames/:id/approval', (req, res) => {

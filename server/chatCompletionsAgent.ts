@@ -11,6 +11,7 @@ import {
   responseError,
 } from './openaiAgent.ts'
 import type { StopReason, TurnBlock, TurnRequest, TurnResult } from './openaiAgent.ts'
+import type { CustomTokenParam } from '../shared/customProvider.ts'
 
 /**
  * Runs one Doop Agent turn against an OpenAI-compatible Chat Completions
@@ -23,9 +24,11 @@ import type { StopReason, TurnBlock, TurnRequest, TurnResult } from './openaiAge
  *  - DeepSeek and Kimi (Moonshot), whose own APIs speak Chat Completions,
  *    and Kimi Code, a Kimi membership's coding quota.
  *
- * Every URL is a fixed constant. Like the Azure transport, this module never
- * takes a user-supplied endpoint: a configurable base URL would be a
- * server-side fetch target, i.e. an SSRF into whatever network Doop runs on.
+ * The built-in providers' URLs are fixed constants: a configurable base URL
+ * would be a server-side fetch target, i.e. an SSRF into whatever network
+ * Doop runs on. The one exception is a custom provider, whose URL a person
+ * typed; its config carries server/customProviderFetch.ts as its `fetch`,
+ * which only reaches public addresses unless the operator allows more.
  *
  * Chat Completions shares the Responses API's one real impedance mismatch:
  * `role: 'tool'` messages are text-only, so images inside tool results are
@@ -53,7 +56,8 @@ export const IMAGE_OMITTED_NOTE = '[image omitted — the selected model cannot 
 const APP_ORIGIN = env.BETTER_AUTH_URL
 
 export interface ChatCompletionsConfig {
-  /** one of the fixed URL constants above — never user input */
+  /** one of the fixed URL constants above, or a custom provider's URL — which
+   *  then comes with the guarded `fetch` */
   url: string
   headers: Record<string, string>
   model: string
@@ -63,6 +67,10 @@ export interface ChatCompletionsConfig {
   vision: boolean
   /** true = send earlier turns' reasoning back as `reasoning_content` */
   echoReasoning?: boolean
+  /** the field the output budget goes in; `max_tokens` when unset */
+  tokenParam?: CustomTokenParam
+  /** the transport for the request; the global fetch when unset */
+  fetch?: (url: string, init: RequestInit) => Promise<Response>
 }
 
 export function openrouterConfig(apiKey: string, model: string, vision: boolean): ChatCompletionsConfig {
@@ -300,7 +308,8 @@ function fromCompletion(body: CompletionBody, label: string): TurnResult {
 /* ---------------------------------------------------------------- */
 
 export async function runChatCompletionsTurn(config: ChatCompletionsConfig, req: TurnRequest): Promise<TurnResult> {
-  const res = await fetch(config.url, {
+  const send = config.fetch ?? fetch
+  const res = await send(config.url, {
     method: 'POST',
     headers: { ...config.headers, 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -308,9 +317,9 @@ export async function runChatCompletionsTurn(config: ChatCompletionsConfig, req:
       messages: toMessages(req.system, req.messages, config.vision, config.echoReasoning),
       tools: toTools(req.tools),
       tool_choice: 'auto',
-      max_tokens: req.maxTokens,
+      [config.tokenParam ?? 'max_tokens']: req.maxTokens,
     }),
-    signal: req.signal,
+    ...(req.signal ? { signal: req.signal } : {}),
   })
   if (!res.ok) throw await responseError(res, config.label)
   return fromCompletion((await res.json()) as CompletionBody, config.label)

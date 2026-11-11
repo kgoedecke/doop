@@ -8,6 +8,7 @@ import { extractAssetIds } from '../assets.ts'
 import { roleByAgentName } from '../../shared/agents.ts'
 import { isCommunityCategory } from '../../shared/types.ts'
 import { storedLinkAccess } from '../../shared/canvasRole.ts'
+import type { ComponentDef } from '../../shared/components.ts'
 import type { DesignToken, TokenType } from '../../shared/designTokens.ts'
 import { parseRunnerPick } from '../../shared/agentRunner.ts'
 import { byStack } from '../../shared/frameStack.ts'
@@ -113,6 +114,9 @@ export async function saveCanvasCopy(c: Canvas): Promise<void> {
       )
     }
 
+    if (c.components?.length) {
+      await tx.insert(t.components).values(c.components.map((def) => componentRow(c.id, def)))
+    }
     if (c.tokens?.length) {
       await tx.insert(t.designTokens).values(c.tokens.map((token) => tokenRow(c.id, token)))
     }
@@ -151,6 +155,44 @@ export function deleteMember(canvasId: string, userId: string) {
 }
 
 /* Single-shot writes (one save per explicit edit) — no debounce needed. */
+function componentRow(canvasId: string, def: ComponentDef) {
+  return {
+    canvasId,
+    id: def.id,
+    name: def.name,
+    description: def.description,
+    template: def.template,
+    css: def.css,
+    rawCss: def.rawCss,
+    head: def.head,
+    props: def.props,
+    slots: def.slots,
+    rev: def.rev,
+    mainFrameId: def.mainFrameId,
+    code: def.code ?? null,
+    source: def.source ?? null,
+    history: def.history,
+    createdAt: def.createdAt,
+    updatedAt: def.updatedAt,
+    updatedBy: def.updatedBy,
+  }
+}
+
+export function saveComponent(canvasId: string, def: ComponentDef) {
+  const row = componentRow(canvasId, def)
+  const { canvasId: _canvasId, id: _id, createdAt: _createdAt, ...set } = row
+  swallow(
+    db
+      .insert(t.components)
+      .values(row)
+      .onConflictDoUpdate({ target: [t.components.canvasId, t.components.id], set }),
+  )
+}
+
+export function deleteComponent(canvasId: string, id: string) {
+  swallow(db.delete(t.components).where(and(eq(t.components.canvasId, canvasId), eq(t.components.id, id))))
+}
+
 export function saveGuideline(canvasId: string, doc: GuidelineDoc) {
   const row = {
     canvasId,
@@ -686,6 +728,7 @@ export function deleteCanvas(canvasId: string) {
   swallow(db.delete(t.comments).where(eq(t.comments.canvasId, canvasId)))
   swallow(db.delete(t.activity).where(eq(t.activity.canvasId, canvasId)))
   swallow(db.delete(t.guidelines).where(eq(t.guidelines.canvasId, canvasId)))
+  swallow(db.delete(t.components).where(eq(t.components.canvasId, canvasId)))
   swallow(db.delete(t.guidelineVersions).where(eq(t.guidelineVersions.canvasId, canvasId)))
   swallow(
     pendingTokenWrites(canvasId).then(() => db.delete(t.designTokens).where(eq(t.designTokens.canvasId, canvasId))),
@@ -962,6 +1005,7 @@ export async function hydrate(): Promise<Hydrated> {
     commentRows,
     activityRows,
     guidelineRows,
+    componentRows,
     tokenRows,
     referenceRows,
     decisionRows,
@@ -977,6 +1021,7 @@ export async function hydrate(): Promise<Hydrated> {
     db.select().from(t.comments).orderBy(desc(t.comments.at)),
     db.select().from(t.activity).orderBy(desc(t.activity.at)),
     db.select().from(t.guidelines).orderBy(t.guidelines.name),
+    db.select().from(t.components).orderBy(t.components.name),
     db.select().from(t.designTokens).orderBy(t.designTokens.order, t.designTokens.name),
     db.select().from(t.memoryReferences).orderBy(desc(t.memoryReferences.pinnedAt)),
     db.select().from(t.decisions).orderBy(desc(t.decisions.at)),
@@ -1034,6 +1079,12 @@ export async function hydrate(): Promise<Hydrated> {
       pinnedBy: r.pinnedBy,
       pinnedAt: r.pinnedAt,
     })
+  }
+  for (const row of componentRows) {
+    const c = byId.get(row.canvasId)
+    if (!c) continue
+    const { canvasId: _canvasId, code, source, ...def } = row
+    ;(c.components ??= []).push({ ...def, ...(code ? { code } : {}), ...(source ? { source } : {}) })
   }
   for (const g of guidelineRows) {
     const c = byId.get(g.canvasId)

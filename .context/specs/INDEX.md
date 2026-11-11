@@ -6,6 +6,12 @@ lists every file in this folder.
 
 ## Active
 
+- [image-descriptions.md](image-descriptions.md) - Model-written descriptions of uploaded images,
+  stored once per asset, billed to the uploader, eligible owner or server behind an
+  Agents setting, and surfaced to MCP and resident agents as `images` per frame.
+- [components.md](components.md) - Reusable components: mains, materialized instances, `<doop-use>`,
+  props, enum variants, slots, overrides and three-way merge, propagation and sign-off, libraries,
+  the MCP and resident tools, and the editor UI.
 - [design-tokens.md](design-tokens.md) - Design tokens and themes: Paper's eleven token types as
   CSS custom properties per canvas, the managed `<style data-doop-tokens>` block every frame
   carries, propagation as annotation writes, modes via `data-doop-mode`, REST + MCP + the

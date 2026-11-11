@@ -23,11 +23,21 @@ import { runnerKey } from '../shared/agentRunner.ts'
 import * as imageSearch from './imageSearch.ts'
 import * as imageGen from './imageGen.ts'
 import * as assets from './assets.ts'
+import { imagesForFrames, isStandaloneImage } from './assets.ts'
+import type { FrameImage } from '../shared/imageDescriptions.ts'
 import * as backgrounds from './backgrounds.ts'
 import * as ingest from './ingest.ts'
 import { viewWebsite, referencedUrls } from './website.ts'
 import { createImportedWebpageFrame, findImportedWebpageFrame } from './webpageImport.ts'
-import { DESIGN_BRIEF, DESIGN_QUALITY, PROTOTYPES } from './guide.ts'
+import { COMPONENTS, DESIGN_BRIEF, DESIGN_QUALITY, FRAME_STYLES, PROTOTYPES } from './guide.ts'
+import { zodToJsonSchema } from 'zod-to-json-schema'
+import { z } from 'zod'
+import { catalogEntry, compactFrameHtml, findComponent } from './componentActions.ts'
+import { COMPONENT_TOOLS, COMPONENT_TOOL_NAMES, componentWriteNotes, runComponentTool } from './componentTools.ts'
+import { canvasRole } from './access.ts'
+import { roleAllows } from '../shared/canvasRole.ts'
+import { canvasesFor } from './workspaces.ts'
+import { previewFrame } from './componentPreview.ts'
 import { prototypeReport, setPrototypeStart } from './prototypeTools.ts'
 import {
   describeInspiration,
@@ -150,7 +160,8 @@ Rules:
 - For requests to copy, match, or borrow another frame's design: screenshot and inspect BOTH the target and reference before editing. Use the reference screenshot and computed design tokens as the source of visual truth. Read target HTML only when you need to preserve its content; do not load a large reference document just to learn its style. For a full redesign, use begin_frame_rewrite, append_frame_rewrite in chunks under 12,000 characters, and commit_frame_rewrite; then screenshot the changed frame.
 - Element comments are pinned to ONE element (you get its data-doop-id and an HTML excerpt at comment time). Change that element or its immediate context — never rework unrelated parts of the frame because of an element comment.
 - Canvas comments are pinned to a point on the page, not to an element (you get the point and the frames nearest to it). The request is about what sits around that point: edit those frames in place, or add a new frame near the point when the comment asks for something new — never rework the whole page because of a canvas comment.
-- Frames are complete HTML documents with inline CSS. Keep each frame's existing style and structure; change what the feedback requires.
+- Frames are complete, self-contained HTML documents. Keep each frame's existing style and structure; change what the feedback requires.
+${FRAME_STYLES}
 - Prefer edit_frame_html (exact find/replace) for small changes; use set_frame_html only when the change is structural.
 - After any visual change, call screenshot_frame and LOOK at the result. If it doesn't clearly satisfy the feedback, fix it before finishing.
 - Call set_status when you start ("Fixing: …") and when your focus shifts. One line, under 80 chars, present tense. People watch this live.
@@ -169,10 +180,13 @@ ${DESIGN_BRIEF}
 
 Clickable prototypes:
 ${PROTOTYPES}
-- Frame ids are the id= values in the frame list of your request.`
+- Frame ids are the id= values in the frame list of your request.
+
+Components:
+${COMPONENTS}`
 
 /** The system prompt for one agent: the shared harness rules plus its specialty. */
-function systemFor(role: AgentRole): string {
+export function systemFor(role: AgentRole): string {
   const reviewer = role.reviewer
     ? '\n\nYou are a review pass. Judge what is already on the canvas against your specialty and fix only what fails it. Changing nothing is a valid outcome — if the frame already meets your bar, say so plainly in your final message instead of inventing work.'
     : ''
@@ -481,12 +495,7 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
        the canvas's established style */
     const visibleFrames = (canvas?.frames ?? []).filter((f) => !f.demo)
     const pages = canvas ? pageList(canvas) : []
-    const frameList = visibleFrames
-      .map(
-        (f, index) =>
-          `- Frame ${index + 1}: id=${f.id}, name="${f.name}", page=${canvas ? framePageId(canvas, f) : '?'}, at (${Math.round(f.x)}, ${Math.round(f.y)}), ${Math.round(f.width)}x${Math.round(f.height)} (last edit: ${f.updatedBy}, ${f.html.length} bytes${f.html.length > LARGE_HTML_CHARS ? '; large document — avoid a full read for visual-reference work' : ''}); approval=${JSON.stringify(f.approval ?? { status: 'draft' })}`,
-      )
-      .join('\n')
+    const frameList = describeFrameList(visibleFrames, await imagesForFrames(visibleFrames.map((f) => f.id)), canvas)
 
     const sections: string[] = []
     /* design-synced canvases: real navigation between the synced screens is
@@ -671,6 +680,23 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
         : []
       /* a text-only model would otherwise chase tools whose whole value is
          pixels; steer its verification to the textual surfaces instead */
+      /* the same catalog get_canvas gives a connected agent, so reuse is the first thing a run sees */
+      const componentDocs = store.getComponents(canvasId)
+      const componentsBlock =
+        componentDocs.length && canvas
+          ? [
+              {
+                text:
+                  `# Components on this canvas\nAnything these cover goes in through <doop-use>, never redrawn:\n\n` +
+                  componentDocs
+                    .map((def) => {
+                      const entry = catalogEntry(canvas, def)
+                      return `- ${entry.signature}${def.description ? ` — ${def.description}` : ''}\n  ${entry.usage}`
+                    })
+                    .join('\n'),
+              },
+            ]
+          : []
       const noVisionBlock = runState.vision
         ? []
         : [
@@ -688,6 +714,7 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
             ...guidelinesBlock.map((b) => b.text),
             ...fontsBlock.map((b) => b.text),
             ...tokensBlock.map((b) => b.text),
+            ...componentsBlock.map((b) => b.text),
           ].join('\n\n'),
           // Image generation uses a separate paid model account; the local CLI
           // connection must never imply that the user's subscription covers it.
@@ -733,6 +760,7 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
                   ...guidelinesBlock,
                   ...fontsBlock,
                   ...tokensBlock,
+                  ...componentsBlock,
                   ...noVisionBlock,
                 ],
                 tools: TOOLS,
@@ -1049,7 +1077,7 @@ const TOOLS: Anthropic.Tool[] = [
         name: { type: 'string' },
         width: { type: 'number', description: 'px, e.g. 1200' },
         height: { type: 'number', description: 'px, e.g. 630' },
-        html: { type: 'string', description: 'Complete HTML document with inline CSS' },
+        html: { type: 'string', description: 'Complete, self-contained HTML document' },
         x: {
           type: 'number',
           description:
@@ -1110,7 +1138,7 @@ const TOOLS: Anthropic.Tool[] = [
       type: 'object',
       properties: {
         frame_id: { type: 'string' },
-        html: { type: 'string', description: 'Complete HTML document with inline CSS' },
+        html: { type: 'string', description: 'Complete, self-contained HTML document' },
       },
       required: ['frame_id', 'html'],
     },
@@ -1567,12 +1595,61 @@ const TOOLS: Anthropic.Tool[] = [
   },
 ]
 
+/* the same tools as MCP, minus the arguments a resident run already has */
+for (const tool of COMPONENT_TOOLS) {
+  TOOLS.push({
+    name: tool.name,
+    description: tool.description,
+    input_schema: zodToJsonSchema(z.object(tool.shape)) as Anthropic.Tool['input_schema'],
+  })
+}
+TOOLS.push({
+  name: 'screenshot_component',
+  description:
+    'Render a component in every combination of its enum props and see it. Look at it after creating or changing a component.',
+  input_schema: {
+    type: 'object',
+    properties: { component: { type: 'string', description: 'Component name or id' } },
+    required: ['component'],
+  },
+})
+
+function canReadCanvas(userId: string, canvasId: string): boolean {
+  const other = store.getCanvas(canvasId)
+  return !!other && roleAllows(canvasRole(userId, other), 'view')
+}
+
 /** The resident agents' tool names; tests hold them to the MCP server's (agentToolParity.test.ts). */
 export const RESIDENT_TOOL_NAMES = TOOLS.map((tool) => tool.name)
 
 /* tall frames (imported landing pages) are CROPPED to the top 4000px at full
    detail rather than downscaled to mush; width still scales down if it would
    breach the API's 8000px image limit */
+/** How many characters of an image's description the kickoff quotes. */
+const KICKOFF_IMAGE_CHARS = 300
+
+/** The kickoff's frame list: one line per frame, and under it one line per
+ *  image the frame shows with the description the describer wrote
+ *  (shared/imageDescriptions.ts), so a pasted screenshot reads as what it
+ *  is rather than as a 600-byte frame named after a file. */
+export function describeFrameList(frames: Frame[], images: Map<string, FrameImage[]>, canvas?: Canvas): string {
+  const lines = frames.map((f, index) => {
+    const shown = images.get(f.id) ?? []
+    const pasted = shown.length === 1 && isStandaloneImage(f.html) ? ' (pasted image)' : ''
+    const head = `- Frame ${index + 1}: id=${f.id}, name="${f.name}"${pasted}, page=${canvas ? framePageId(canvas, f) : (f.pageId ?? '?')}, at (${Math.round(f.x)}, ${Math.round(f.y)}), ${Math.round(f.width)}x${Math.round(f.height)} (last edit: ${f.updatedBy}, ${f.html.length} bytes${f.html.length > LARGE_HTML_CHARS ? '; large document — avoid a full read for visual-reference work' : ''}); approval=${JSON.stringify(f.approval ?? { status: 'draft' })}`
+    const pictures = shown.map(
+      (image) =>
+        `    image ${image.src}: ${image.description ? image.description.slice(0, KICKOFF_IMAGE_CHARS) : '(description pending)'}`,
+    )
+    return [head, ...pictures].join('\n')
+  })
+  if (images.size > 0)
+    lines.push(
+      'Read the image descriptions above and call screenshot_frame on the relevant frames before designing. A frame marked (pasted image) is a reference someone put there for you: leave it as it is and deliver in a separate frame. A design that uses images is an ordinary frame.',
+    )
+  return lines.join('\n')
+}
+
 const MAX_SHOT_HEIGHT = 4000
 
 async function frameImageBlocks(
@@ -1674,10 +1751,12 @@ export async function execTool(
         if (typeof f.html !== 'string') return fail('frame HTML is unavailable; retry after the frame reloads')
         const raw = block.input as { query?: string; offset?: number; limit?: number }
         const approval = `Approval: ${JSON.stringify(f.approval ?? { status: 'draft' })}`
+        /* instances read as <doop-use>: a long way down from their full markup */
+        const source = compactFrameHtml(f)
         const query = String(raw.query || '').trim()
         const limit = Math.max(1000, Math.min(Number(raw.limit) || 20_000, MAX_HTML_READ_CHARS))
         if (query) {
-          const haystack = f.html.toLowerCase()
+          const haystack = source.toLowerCase()
           const needle = query.toLowerCase()
           const matches: number[] = []
           let cursor = 0
@@ -1691,17 +1770,17 @@ export async function execTool(
           const perMatch = Math.max(1000, Math.floor(limit / matches.length))
           const snippets = matches.map((index, match) => {
             const start = Math.max(0, index - Math.floor(perMatch / 2))
-            const end = Math.min(f.html.length, start + perMatch)
-            return `--- match ${match + 1} at ${index}, chars ${start}-${end} ---\n${f.html.slice(start, end)}`
+            const end = Math.min(source.length, start + perMatch)
+            return `--- match ${match + 1} at ${index}, chars ${start}-${end} ---\n${source.slice(start, end)}`
           })
           return ok(
-            `Frame HTML: ${f.html.length} characters; ${matches.length} match(es) for "${query}".\n${approval}\n${snippets.join('\n')}`,
+            `Frame HTML: ${source.length} characters; ${matches.length} match(es) for "${query}".\n${approval}\n${snippets.join('\n')}`,
           )
         }
-        const offset = Math.max(0, Math.min(Number(raw.offset) || 0, f.html.length))
-        const end = Math.min(f.html.length, offset + limit)
+        const offset = Math.max(0, Math.min(Number(raw.offset) || 0, source.length))
+        const end = Math.min(source.length, offset + limit)
         return ok(
-          `Frame HTML: ${f.html.length} characters. Returning chars ${offset}-${end}.${end < f.html.length ? ` Continue with offset=${end}, or use query for a targeted snippet.` : ''}\n${approval}\n\n${f.html.slice(offset, end)}`,
+          `Frame HTML: ${source.length} characters. Returning chars ${offset}-${end}.${end < source.length ? ` Continue with offset=${end}, or use query for a targeted snippet.` : ''}\n${approval}\n\n${source.slice(offset, end)}`,
         )
       }
       case 'edit_frame_html': {
@@ -1710,14 +1789,19 @@ export async function execTool(
         if (typeof f.html !== 'string') return fail('frame HTML is unavailable; retry after the frame reloads')
         if (typeof input.find !== 'string' || !input.find) return fail('find must be a non-empty exact HTML string')
         if (typeof input.replace !== 'string') return fail('replace must be an HTML string')
-        const count = f.html.split(input.find).length - 1
+        /* in the form get_frame_html showed, or the expanded one if that is what was copied */
+        const compact = compactFrameHtml(f)
+        const source = compact.split(input.find).length - 1 > 0 ? compact : f.html
+        const count = source.split(input.find).length - 1
         if (count === 0) return fail('"find" text not found — call get_frame_html and copy the exact text')
         if (count > 1)
           return fail(`"find" text occurs ${count} times — include more surrounding context to make it unique`)
-        actions.updateFrame(input.frame_id, { html: f.html.replace(input.find, input.replace) }, actor)
+        const replace = input.replace
+        actions.updateFrame(input.frame_id, { html: source.replace(input.find, () => replace) }, actor)
         runState.mutatedFrames.add(input.frame_id)
         runState.verifiedFrames.delete(input.frame_id)
-        return ok('applied')
+        const notes = componentWriteNotes(store.getFrame(input.frame_id)!)
+        return ok(notes.length ? `applied\n${notes.join('\n')}` : 'applied')
       }
       case 'set_frame_html': {
         const f = store.getFrame(input.frame_id)
@@ -2261,8 +2345,34 @@ export async function execTool(
         }
         return ok(blocks)
       }
-      default:
-        return fail(`unknown tool ${block.name}`)
+      case 'screenshot_component': {
+        const def = findComponent(canvasId, String(input.component ?? ''))
+        if (!def) return fail(`no component "${String(input.component)}" on this canvas`)
+        if (!runState.vision) return ok('Preview skipped: the selected model cannot view images.')
+        return ok(await frameImageBlocks(previewFrame(canvasId, def)))
+      }
+      default: {
+        if (!COMPONENT_TOOL_NAMES.includes(block.name)) return fail(`unknown tool ${block.name}`)
+        const canvas = store.getCanvas(canvasId)
+        if (!canvas) return fail('canvas not found')
+        const reader = runState.payerId
+        const outcome = runComponentTool(block.name, block.input as Record<string, unknown>, {
+          canvas,
+          actor,
+          /* libraries are read as the person who asked: their canvases, and no one else's */
+          canRead: (id) => id === canvasId || (!!reader && canReadCanvas(reader, id)),
+          readableCanvases: () =>
+            reader ? canvasesFor(reader).flatMap((meta) => store.getCanvas(meta.id) ?? []) : [canvas],
+        })
+        if (!outcome.ok) return fail(outcome.error)
+        const { data, note, frames } = outcome.result
+        const notes = (frames ?? []).flatMap((frame) => {
+          runState.mutatedFrames.add(frame.id)
+          runState.verifiedFrames.delete(frame.id)
+          return componentWriteNotes(frame)
+        })
+        return ok([JSON.stringify(data), ...(note ? [note] : []), ...notes].join('\n'))
+      }
     }
   } catch (e) {
     const blocked = websiteAccessErrorMessage(e, 'resident')

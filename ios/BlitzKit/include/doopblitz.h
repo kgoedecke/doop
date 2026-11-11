@@ -41,6 +41,8 @@ void doopblitz_buffer_free(uint8_t *ptr, size_t len);
 
 /// Node ids are opaque non-zero values; 0 means none.
 uint64_t doopblitz_doc_element_from_point(DoopBlitzDoc *doc, float x, float y);
+/// The element a tap there selects: its drawing, else the nearest element with a box.
+uint64_t doopblitz_doc_pick_from_point(DoopBlitzDoc *doc, float x, float y);
 uint64_t doopblitz_doc_query_selector(const DoopBlitzDoc *doc, const char *selector);
 uint64_t doopblitz_node_parent(const DoopBlitzDoc *doc, uint64_t node);
 /// out receives x, y, width, height in CSS pixels.

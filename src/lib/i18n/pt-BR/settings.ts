@@ -37,6 +37,20 @@ export const settings: Catalog['settings'] = {
     other: '{left} de {count} tarefas gratuitas restantes.',
   },
 
+  imageDescriptionsTitle: 'Descrições de imagens',
+  imageDescriptionsDescription:
+    'Uma descrição curta ajuda os agentes a entender imagens enviadas. Minha conta usa sua conta para seus envios, depois uma conta elegível do dono do canvas e, por último, este servidor. Também permite que sua conta cubra envios nos seus canvases quando quem enviou não tem um modelo elegível. Este servidor usa apenas as credenciais do servidor para seus envios e exclui sua conta das alternativas. Desligado impede descrições dos seus envios e dos seus canvases. As cobranças do seu provedor se aplicam.',
+  imageDescriptionsAria: 'Descrições de imagens',
+  imageDescriptionsOff: 'Desligado',
+  imageDescriptionsAccount: 'Minha conta',
+  imageDescriptionsServer: 'Este servidor',
+  imageDescriptionsRunsOn: 'Modelo disponível: {label}. Novas tentativas mantêm o pagador original.',
+  imageDescriptionsReasonOff: 'Seus envios e as imagens dos seus canvases não são descritos.',
+  imageDescriptionsReasonTextOnly:
+    'Sua conta não tem um modelo de visão elegível e este servidor não tem um modelo. Uma conta elegível do dono de outro canvas pode descrever seus envios; caso contrário, ficam sem descrição.',
+  imageDescriptionsReasonNoModel:
+    'Nenhum modelo para envios está disponível aqui. No modo Minha conta, uma conta elegível do dono de outro canvas ainda pode descrever seus envios.',
+
   themeTitle: 'Tema',
   themeDescription:
     'Claro ou escuro, em todos os canvases e páginas deste navegador. Sistema segue o seu sistema operacional e muda sempre que ele mudar.',

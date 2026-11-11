@@ -100,6 +100,10 @@ describe('image sizes read from the header', () => {
       width: 48,
       height: 24,
     })
+    /* one side stated: the other follows the viewBox's proportions */
+    expect(imageSize(svg('width="600" viewBox="0 0 100 50"'), 'image/svg+xml')).toEqual({ width: 600, height: 300 })
+    expect(imageSize(svg('height="10" viewBox="0 0 100 50"'), 'image/svg+xml')).toEqual({ width: 20, height: 10 })
+    expect(imageSize(svg('width="600"'), 'image/svg+xml')).toEqual(UNKNOWN_IMAGE_SIZE)
     expect(imageSize(svg(''), 'image/svg+xml')).toEqual(UNKNOWN_IMAGE_SIZE)
   })
 

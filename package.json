@@ -11,6 +11,7 @@
     "start": "NODE_ENV=production tsx server/index.ts",
     "typecheck": "tsgo --noEmit",
     "test": "vitest run",
+    "test:linux": "sh scripts/test-linux.sh",
     "lint": "oxlint --type-aware --deny-warnings . && eslint . --max-warnings 0",
     "lint:fix": "oxlint --type-aware --deny-warnings --fix . && eslint . --fix",
     "format": "prettier --write .",
@@ -75,6 +76,7 @@
     "undici": "^8.10.2",
     "ws": "^8.18.0",
     "zod": "^3.23.8",
+    "zod-to-json-schema": "^3.25.2",
     "zustand": "^4.5.4"
   },
   "devDependencies": {

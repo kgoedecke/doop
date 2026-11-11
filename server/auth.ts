@@ -9,7 +9,8 @@ import * as authSchema from './db/auth-schema.ts'
 import { store } from './store.ts'
 import * as demo from './demo.ts'
 import { mailerConfigured, sendMail } from './mailer.ts'
-import { acceptInvites } from './workspaces.ts'
+import { acceptInvites, joinDefaultWorkspace } from './workspaces.ts'
+import { getInstanceSettings } from './instanceSettings.ts'
 import { purgeUserData } from './accountDeletion.ts'
 import { MCP_REFRESH_TOKEN_TTL_S } from './mcpTokens.ts'
 import { createHash } from 'node:crypto'
@@ -60,6 +61,10 @@ function mayPromote(user: { email: string; emailVerified: boolean }): boolean {
   if (user.emailVerified) return true
   if (mailerConfigured) return false // verification is possible — wait for it
   return !env.isProduction
+}
+
+function defaultWorkspaceId(): string | null {
+  return getInstanceSettings().defaultWorkspaceId
 }
 
 async function promote(userId: string, email: string): Promise<void> {
@@ -452,6 +457,7 @@ function buildAuth() {
         if (mayPromote({ email: user.email, emailVerified: true })) await promote(user.id, user.email)
         /* a verified address is the moment a workspace invite may be honoured */
         await acceptInvites(user.id, user.email)
+        joinDefaultWorkspace(user.id, defaultWorkspaceId())
       },
       sendVerificationEmail: async ({ user, url }) => {
         await sendMail({
@@ -496,6 +502,10 @@ function buildAuth() {
                front (workspaces.unknownEmailInvitesAllowed), the line
                ADMIN_EMAILS draws too */
             if (!mailerConfigured && !env.isProduction) await acceptInvites(user.id, user.email)
+            /* the default workspace is a membership like an invite, so it
+               waits for a proven address the same way; a provider sign-up
+               (SSO, Google) arrives verified and joins at once */
+            if (!mailerConfigured || user.emailVerified) joinDefaultWorkspace(user.id, defaultWorkspaceId())
           },
         },
       },

@@ -35,6 +35,8 @@ import * as workspaces from './workspaces.ts'
 import { auth, getUserName, isBanned } from './auth.ts'
 import { capture, captureThrottled } from './analytics.ts'
 import { renderFrame } from './screenshot.ts'
+import { imagesForFrames } from './assets.ts'
+import type { FrameImage } from '../shared/imageDescriptions.ts'
 import {
   MAX_PDF_FRAMES,
   PDF_UNAVAILABLE_MESSAGE,
@@ -87,6 +89,10 @@ import {
   type AgentFeedbackCategory,
   type AgentFeedbackKind,
 } from '../shared/agentFeedback.ts'
+import { catalogEntry, compactFrameHtml, findComponent, instancesIn } from './componentActions.ts'
+import { COMPONENT_TOOLS, componentWriteNotes, runComponentTool } from './componentTools.ts'
+import { previewFrame } from './componentPreview.ts'
+import { INSTANCE_ATTR } from '../shared/components.ts'
 
 const INSTRUCTIONS = `Doop is a shared multiplayer design canvas: humans and AI agents design together in real time. Canvases contain frames — artboards that render complete HTML documents live for everyone viewing.
 
@@ -101,6 +107,7 @@ You MUST call get_guide({ topic: "doop-instructions" }) once before using other 
 - Creating: create_frame, then stream the design with append_frame_html one complete section at a time (~1–4 KB chunks; start=true on the first, done=true on the last). Each chunk renders the moment it arrives — viewers watch you work.
 - Review: after every create or significant edit you MUST call get_frame_screenshot and fix what looks wrong before moving on.
 - Small edits: edit_frame_html (exact find/replace — the change morphs into the rendered frame in place). Full redesigns: set_frame_html or a new stream. Rename/move/resize: update_frame.
+- Components: anything reusable lives as a component (get_canvas lists them). Use it by writing <doop-use component="Button" label="Buy"></doop-use> in frame HTML, never by redrawing it: instances follow their main and read back in that short form. Repeating a block? create_component, then use that. Change every instance at once with update_component (guide → Components).
 - Clickable prototypes: wire screens with data-doop-on / data-doop-action attributes in frame HTML (guide → Prototypes), set the flow start with set_prototype_start, and check the wiring with get_prototype.
 - History: every replace and stream files the design it overwrote. list_frame_versions shows a frame's earlier states; restore_frame_version brings one back (HTML and size) when a human asks for the previous version or your rework turned out worse.
 - Images: real imagery makes designs. search_images finds stock photos (you SEE thumbnails and pick), search_icons finds 200k+ UI icons as hotlinkable SVGs, search_logos finds real company logos by brand name or domain — call it once per brand BEFORE writing any logo wall, integration row, press bar or testimonial, and never ship a placeholder tile, "LOGO" text or an invented wordmark in its place, list_backgrounds shows a page of curated hero/section/bento backgrounds (glows, grainy meshes, aurora, painterly scenes) as thumbnails — browse it when a section wants atmosphere rather than defaulting to a flat CSS gradient, judge by eye whether one fits the frame, and draw your own when none does, upload_asset stores your own file (remote file → source_url; local file → local_file=true, returns a curl command) and returns a permanent URL; add place to also drop it onto the canvas as a free-standing image, as a person dragging a file in does. generate_image makes a new image from a prompt (a full-bleed hero background in the frame's exact palette, illustration, a product render, brand-specific hero art that stock cannot supply) and stores it as a permanent asset — reach for it when search_images cannot deliver the exact visual, or when the human asks for a generated image; it costs the human money or quota, so one considered prompt beats five drafts. Never inline images as data: URIs.
@@ -161,6 +168,25 @@ function withEscapeNote<T extends { content: { type: 'text' | 'image'; [k: strin
 ): T {
   if (looksEscapedHtml(sent)) result.content.push({ type: 'text' as const, text: ESCAPED_HTML_NOTE })
   return result
+}
+
+/** What a frame write could not do with components, and components it redrew by hand. */
+function withComponentNotes<T extends ToolContent>(result: T, frame: Frame): T {
+  for (const note of componentWriteNotes(frame)) result.content.push({ type: 'text' as const, text: note })
+  return result
+}
+
+/** Find and replace in a frame, in the form get_frame shows it first: an agent copies from that. */
+function editFrameSource(frame: Frame, find: string, replace: string): { html: string } | { error: string } {
+  const compact = compactFrameHtml(frame)
+  const sources = compact === frame.html ? [frame.html] : [compact, frame.html]
+  for (const source of sources) {
+    const count = source.split(find).length - 1
+    if (count === 1) return { html: source.replace(find, () => replace) }
+    if (count > 1)
+      return { error: `old_str occurs ${count} times — include more surrounding context so it matches exactly once.` }
+  }
+  return { error: 'old_str not found in the frame HTML. Call get_frame to see the current content.' }
 }
 
 /** A PDF returned inline as base64; beyond this, export fewer frames. */
@@ -258,23 +284,30 @@ const agentName = z
     'Your display name, shown live to everyone on the canvas (e.g. "Claude", "Codex"). Reuse the SAME name on every call so your work is attributed consistently.',
   )
 
-function frameSummary(f: {
-  pageId?: string
-  id: string
-  name: string
-  x: number
-  y: number
-  width: number
-  height: number
-  updatedAt: number
-  updatedBy: string
-  html: string
-  demo?: boolean
-  hidden?: boolean
-  locked?: boolean
-  rotation?: number
-  approval?: FrameApproval | null
-}) {
+/** Said once in get_canvas when any listed frame carries an image. */
+const IMAGES_NOTE =
+  'Frames with `images` reference pictures people uploaded or pasted; each carries a `description` of what it shows (null while it is being written). Read them, and call get_frame_screenshot on the relevant ones before designing. A frame that is nothing but one image is a reference pasted for you: leave it as it is and deliver in a separate frame. A design that uses images is an ordinary frame.'
+
+function frameSummary(
+  f: {
+    pageId?: string
+    id: string
+    name: string
+    x: number
+    y: number
+    width: number
+    height: number
+    updatedAt: number
+    updatedBy: string
+    html: string
+    demo?: boolean
+    hidden?: boolean
+    locked?: boolean
+    rotation?: number
+    approval?: FrameApproval | null
+  },
+  images?: FrameImage[],
+) {
   return {
     id: f.id,
     pageId: f.pageId,
@@ -291,6 +324,7 @@ function frameSummary(f: {
     ...(f.rotation ? { rotation: f.rotation } : {}),
     updatedAt: new Date(f.updatedAt).toISOString(),
     updatedBy: f.updatedBy,
+    ...(images?.length ? { images } : {}),
     htmlBytes: f.html.length,
     /* public render of the CURRENT design — downloadable/hotlinkable
        (append &download, or .jpg?quality=90 for JPEG) */
@@ -566,7 +600,9 @@ export function buildMcpServer(
       /* design-synced canvases carry a flow map: real user navigation between
          the synced screens — context a redesign must respect */
       const flow = describeSyncFlow(await getSyncFlow(c), c.frames)
+      const images = await imagesForFrames(shown.map((f) => f.id))
       const notes = [
+        ...(images.size ? [IMAGES_NOTE] : []),
         ...(flow.length
           ? [
               'This canvas is synced from a live app and `flow` shows how its screens connect — including how often real users take each path. Do not bury or weaken elements that carry heavy navigation.',
@@ -585,6 +621,11 @@ export function buildMcpServer(
               'This canvas has pinned style references — exemplar designs humans marked as "more like this". Call get_reference on the relevant one and match its look (palette, type, spacing) in what you design.',
             ]
           : []),
+        ...(c.components?.length
+          ? [
+              'This canvas has components. Anything they cover goes in through <doop-use> as shown in each entry’s usage, never redrawn by hand.',
+            ]
+          : []),
       ]
       return withPreview(
         withFeedbackNotice(
@@ -592,7 +633,7 @@ export function buildMcpServer(
             id: c.id,
             name: c.name,
             pages: canvasPages(c),
-            frames: shown.map(frameSummary),
+            frames: shown.map((f) => frameSummary(f, images.get(f.id))),
             guidelines: docs.map((d) => ({
               name: d.name,
               title: actions.guidelineTitle(d),
@@ -606,6 +647,7 @@ export function buildMcpServer(
               htmlBytes: r.html.length,
               pinnedBy: r.pinnedBy,
             })),
+            ...(c.components?.length ? { components: c.components.map((def) => catalogEntry(c, def)) } : {}),
             ...(library.length ? { fonts: describeLibrary(library) } : {}),
             webFonts: webFontFamilies(),
             ...(tokens.length ? { tokens: describeTokens(tokens) } : {}),
@@ -1357,7 +1399,7 @@ export function buildMcpServer(
          has no card either). The review screenshot after the stream is the
          first card the person sees. */
       description:
-        'Create a new frame on a canvas with an HTML design. A frame is a rectangular artboard that renders a full HTML document (inline <style> and <script> allowed, no external network access needed). If x/y are omitted the frame is auto-placed to the right of existing frames. Everyone viewing the canvas sees it appear live.',
+        'Create a new frame on a canvas with an HTML design. A frame is a rectangular artboard that renders a full HTML document (no external network access needed). Put the styles of an element in its style attribute; a <style> block is for what an attribute cannot say (keyframes, states, pseudo-elements, media queries, the reset), and <script> is allowed. If x/y are omitted the frame is auto-placed to the right of existing frames. Everyone viewing the canvas sees it appear live. Use <doop-use> for anything get_canvas lists under components.',
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
       inputSchema: {
         canvas_id: z.string(),
@@ -1379,11 +1421,14 @@ export function buildMcpServer(
       if (!canvasFor(canvas_id, 'edit')) return noCanvas(canvas_id)
       const frame = actions.createFrame(canvas_id, { name, pageId, html, x, y, width, height }, actorFrom(agent_name))
       if (!frame) return noCanvas(canvas_id)
-      const result = withEscapeNote(
-        frame.html.length > 0
-          ? textWithNudge({ ok: true, frame: frameSummary(frame) }, REVIEW_NUDGE)
-          : text({ ok: true, frame: frameSummary(frame) }),
-        html,
+      const result = withComponentNotes(
+        withEscapeNote(
+          frame.html.length > 0
+            ? textWithNudge({ ok: true, frame: frameSummary(frame) }, REVIEW_NUDGE)
+            : text({ ok: true, frame: frameSummary(frame) }),
+          html,
+        ),
+        frame,
       )
       return withGuidelinesNudge(
         withStatusNudge(withFeedback(result, canvas_id, actorFrom(agent_name)), canvas_id, actorFrom(agent_name)),
@@ -1397,16 +1442,30 @@ export function buildMcpServer(
     'get_frame',
     {
       title: 'Get a frame and its HTML',
-      description: 'Get a frame including its full HTML content.',
+      description:
+        'Get a frame including its HTML. Component instances come back as <doop-use> (see the Components section of the guide), and `instances` lists each with its id, props and overridden parts. Write them back the same way.',
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
-      inputSchema: { frame_id: z.string(), agent_name: agentName.optional() },
+      inputSchema: {
+        frame_id: z.string(),
+        expand_components: z
+          .boolean()
+          .optional()
+          .describe('true = every instance written out in full, for when you must read what is rendered'),
+        agent_name: agentName.optional(),
+      },
     },
-    async ({ frame_id, agent_name }) => {
+    async ({ frame_id, expand_components, agent_name }) => {
       const f = frameFor(frame_id, 'view')
       if (!f) return noFrame(frame_id)
       arrive(f.canvasId, agent_name)
+      const images = (await imagesForFrames([f.id])).get(f.id)
+      const instances = f.html.includes(INSTANCE_ATTR) ? instancesIn(f) : []
       return withFeedbackNotice(
-        text({ ...frameSummary(f), html: f.html }),
+        text({
+          ...frameSummary(f, images),
+          html: expand_components ? f.html : compactFrameHtml(f),
+          ...(instances.length ? { instances } : {}),
+        }),
         f.canvasId,
         agent_name ? actorFrom(agent_name) : undefined,
       )
@@ -1431,7 +1490,10 @@ export function buildMcpServer(
         withGuidelinesNudge(
           withStatusNudge(
             withFeedback(
-              withEscapeNote(textWithNudge({ ok: true, frame: frameSummary(frame) }, REVIEW_NUDGE), html),
+              withComponentNotes(
+                withEscapeNote(textWithNudge({ ok: true, frame: frameSummary(frame) }, REVIEW_NUDGE), html),
+                frame,
+              ),
               frame.canvasId,
               actorFrom(agent_name),
             ),
@@ -2011,6 +2073,74 @@ export function buildMcpServer(
   }
   for (const extension of extensions) extension.registerMcpTools?.(server, extensionHelpers)
 
+  for (const tool of COMPONENT_TOOLS) {
+    server.registerTool(
+      tool.name,
+      {
+        title: tool.title,
+        description: tool.description,
+        annotations: {
+          readOnlyHint: tool.readOnly,
+          destructiveHint: tool.destructive ?? false,
+          idempotentHint: tool.readOnly,
+          openWorldHint: false,
+        },
+        inputSchema: { canvas_id: z.string(), ...tool.shape, agent_name: agentName.optional() } as never,
+      },
+      (async (raw: Record<string, unknown>) => {
+        const canvasId = String(raw.canvas_id)
+        const agent = raw.agent_name as string | undefined
+        const canvas = canvasFor(canvasId, tool.readOnly ? 'view' : 'edit')
+        if (!canvas) return noCanvas(canvasId)
+        arrive(canvasId, agent)
+        const actor = actorFrom(agent)
+        const outcome = runComponentTool(tool.name, raw, {
+          canvas,
+          actor,
+          canRead: (id) => !!canvasFor(id, 'view'),
+          readableCanvases: () =>
+            workspaces.canvasesFor(ownerId ?? '').flatMap((meta) => store.getCanvas(meta.id) ?? []),
+        })
+        if (!outcome.ok) return err(outcome.error)
+        const { data, note, frames } = outcome.result
+        const result = note ? textWithNudge(data, note) : text(data)
+        for (const frame of frames ?? []) withComponentNotes(result, frame)
+        return tool.readOnly
+          ? withFeedbackNotice(result, canvasId, agent ? actor : undefined)
+          : withFeedback(result, canvasId, actor)
+      }) as never,
+    )
+  }
+
+  server.registerTool(
+    'get_component_preview',
+    {
+      title: 'See a component',
+      description:
+        'Render a component in every combination of its enum props (up to 12) and return one image — how you SEE variants, which exist only as CSS. Look at it after creating or changing a component.',
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      inputSchema: { canvas_id: z.string(), component: z.string(), agent_name: agentName.optional() },
+    },
+    async ({ canvas_id, component, agent_name }) => {
+      if (!canvasFor(canvas_id, 'view')) return noCanvas(canvas_id)
+      arrive(canvas_id, agent_name)
+      const def = findComponent(canvas_id, component)
+      if (!def) return err(`no component “${component}” on this canvas`)
+      const sheet = previewFrame(canvas_id, def)
+      try {
+        const png = await renderFrame(sheet, 1)
+        return {
+          content: [
+            { type: 'image' as const, data: png.toString('base64'), mimeType: 'image/png' },
+            { type: 'text' as const, text: `“${def.name}” at revision ${def.rev}, ${sheet.variants} variant(s).` },
+          ],
+        }
+      } catch (e) {
+        return err(e instanceof Error ? e.message : 'render failed')
+      }
+    },
+  )
+
   server.registerTool(
     'get_frame_screenshot',
     {
@@ -2085,9 +2215,12 @@ export function buildMcpServer(
       const frame = actions.appendFrameHtml(frame_id, html_chunk, actorFrom(agent_name), { start, done })
       if (!frame) return noFrame(frame_id)
       const result = done
-        ? textWithNudge(
-            { ok: true, streaming: false, htmlBytes: frame.html.length },
-            `Stream complete. ${REVIEW_NUDGE}`,
+        ? withComponentNotes(
+            textWithNudge(
+              { ok: true, streaming: false, htmlBytes: frame.html.length },
+              `Stream complete. ${REVIEW_NUDGE}`,
+            ),
+            frame,
           )
         : text({ ok: true, streaming: true, htmlBytes: frame.html.length })
       /* nudge only on the first chunk — mid-stream results should stay lean.
@@ -2109,7 +2242,7 @@ export function buildMcpServer(
       title: 'Edit a frame’s HTML in place',
       _meta: previewToolMeta('Editing the frame…', 'Frame edited'),
       description:
-        'Make a targeted edit to a frame: exact find-and-replace in its HTML. Use this for small tweaks (copy, a color, spacing, one element) instead of resending the whole document — the change morphs into the rendered frame in place. old_str must appear EXACTLY ONCE in the current HTML (call get_frame first if unsure); include enough surrounding context to make it unique. Keep data-doop-* attributes on the element you edit: comments and links point at its data-doop-id.',
+        'Make a targeted edit to a frame: exact find-and-replace in its HTML, as get_frame returned it (a <doop-use> can be edited like any tag). Use this for small tweaks (copy, a color, spacing, one element) instead of resending the whole document — the change morphs into the rendered frame in place. old_str must appear EXACTLY ONCE in the current HTML (call get_frame first if unsure); include enough surrounding context to make it unique. Keep data-doop-* attributes on the element you edit: comments and links point at its data-doop-id.',
       annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
       inputSchema: {
         frame_id: z.string(),
@@ -2121,15 +2254,13 @@ export function buildMcpServer(
     async ({ frame_id, old_str, new_str, agent_name }) => {
       const f = frameFor(frame_id, 'edit')
       if (!f) return noFrame(frame_id)
-      const count = f.html.split(old_str).length - 1
-      if (count === 0) return err('old_str not found in the frame HTML. Call get_frame to see the current content.')
-      if (count > 1)
-        return err(`old_str occurs ${count} times — include more surrounding context so it matches exactly once.`)
-      const frame = actions.updateFrame(frame_id, { html: f.html.replace(old_str, new_str) }, actorFrom(agent_name))!
+      const edited = editFrameSource(f, old_str, new_str)
+      if ('error' in edited) return err(edited.error)
+      const frame = actions.updateFrame(frame_id, { html: edited.html }, actorFrom(agent_name))!
       return withPreview(
         withStatusNudge(
           withFeedback(
-            textWithNudge({ ok: true, frame: frameSummary(frame) }, REVIEW_NUDGE),
+            withComponentNotes(textWithNudge({ ok: true, frame: frameSummary(frame) }, REVIEW_NUDGE), frame),
             frame.canvasId,
             actorFrom(agent_name),
           ),

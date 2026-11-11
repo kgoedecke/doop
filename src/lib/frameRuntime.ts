@@ -2,6 +2,7 @@ import { FRAME_REPLAY_RUNTIME } from './frameReplayRuntime'
 import { FRAME_DROP_RUNTIME } from './frameDropRuntime'
 import { FRAME_PROTO_RUNTIME } from './frameProtoRuntime'
 import { FRAME_TEXT_RUNTIME } from './frameTextRuntime'
+import { CANVAS_MOD_CHORDS } from './keys'
 
 /**
  * Bootstrap document loaded once per frame iframe. The parent posts HTML in
@@ -18,8 +19,9 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
   /* horizontal overscroll inside a frame must not chain to the parent page,
      where the browser turns it into a history back/forward swipe. Adopted
      sheet, not a <style> tag — the morph would wipe a tag from <head>. */
+  var vSheet = null
   try {
-    var vSheet = new CSSStyleSheet()
+    vSheet = new CSSStyleSheet()
     vSheet.replaceSync('html,body{overscroll-behavior-x:none}[data-v-path-hidden]{visibility:hidden!important}')
     document.adoptedStyleSheets = document.adoptedStyleSheets.concat(vSheet)
   } catch (e) {}
@@ -451,6 +453,85 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
     parent.postMessage({ type: 'doop:context-menu', x: ev.clientX, y: ev.clientY }, '*')
   }, true)
 
+  /* Focus stays in the frame after text editing ends, and the canvas page
+     never sees a key pressed in here: relay every key, so its shortcuts
+     (undo, delete, tools, Space to pan) keep working. Not while editing
+     text, not in a field of the design, not while a prototype plays, and
+     added ahead of the Escape listener below, which ends editing on the
+     very key it would otherwise see as a canvas Escape. */
+  var CANVAS_MOD_CHORDS = ${JSON.stringify(CANVAS_MOD_CHORDS)}
+  /* keys travel over a MessagePort the parent hands this runtime once, so a
+     design's own script, which shares the window, has nothing to post a
+     forged key through: not the port (it lives in this closure), not
+     postMessage (the parent takes keys from the port alone), and no
+     synthetic event (only trusted ones are relayed). Everything the relay
+     touches is pinned here, before any design script runs: the port's send,
+     Reflect.apply (so no patched Function.prototype.call ever sees the port)
+     and the event's own getters (so a patched prototype cannot turn the key
+     the person pressed into another). */
+  var keyPort = null
+  var portSend = MessagePort.prototype.postMessage
+  var apply = Reflect.apply
+  function getter(proto, name) {
+    var d = Object.getOwnPropertyDescriptor(proto, name)
+    return d && d.get
+  }
+  var readType = getter(Event.prototype, 'type')
+  var readTarget = getter(Event.prototype, 'target')
+  var readTrusted = getter(Event.prototype, 'isTrusted')
+  var readNodeType = getter(Node.prototype, 'nodeType')
+  var readEditable = getter(HTMLElement.prototype, 'isContentEditable')
+  var elementMatches = Element.prototype.matches
+  var keyGetters = {}
+  var KEY_FIELDS = ['key', 'code', 'ctrlKey', 'metaKey', 'shiftKey', 'altKey', 'repeat']
+  for (var kf = 0; kf < KEY_FIELDS.length; kf++) keyGetters[KEY_FIELDS[kf]] = getter(KeyboardEvent.prototype, KEY_FIELDS[kf])
+  function relayKey(ev) {
+    if (!keyPort || editing || protoOn) return
+    /* isTrusted is the event's own, unforgeable property; it is read through
+       the prototype getter only where an engine puts it there */
+    if (!(readTrusted ? apply(readTrusted, ev, []) : ev.isTrusted)) return
+    var t = apply(readTarget, ev, [])
+    if (t && apply(readNodeType, t, []) === 1) {
+      if (apply(elementMatches, t, ['input, textarea, select'])) return
+      if (t instanceof HTMLElement && apply(readEditable, t, [])) return
+    }
+    var k = {}
+    for (var f = 0; f < KEY_FIELDS.length; f++) k[KEY_FIELDS[f]] = apply(keyGetters[KEY_FIELDS[f]], ev, [])
+    var type = apply(readType, ev, [])
+    var mod = (k.metaKey || k.ctrlKey) && !k.altKey
+    var letter = String(k.key).toLowerCase()
+    /* ⌘C / ⌘X stay this document's: the page cannot see text selected in
+       here, and would take the chord for its own selection instead */
+    if (mod && !k.shiftKey && (letter === 'c' || letter === 'x')) return
+    /* ⌫ and Delete are never relayed: the page removes what is selected on them */
+    if (k.key === 'Backspace' || k.key === 'Delete') return
+    var digit = k.shiftKey && /^Digit[0-9]$/.test(k.code) ? k.code.slice(5) : ''
+    var chord = (k.shiftKey ? 'shift+' : '') + letter
+    var byCode = digit ? 'shift+' + digit : chord
+    /* Space would scroll this document while the page pans on it */
+    if (type === 'keydown' && k.key === ' ' && !mod) ev.preventDefault()
+    if (
+      type === 'keydown' &&
+      mod &&
+      (CANVAS_MOD_CHORDS.indexOf(chord) >= 0 || CANVAS_MOD_CHORDS.indexOf(byCode) >= 0)
+    )
+      ev.preventDefault()
+    apply(portSend, keyPort, [
+      {
+        event: type,
+        key: k.key,
+        code: k.code,
+        ctrlKey: k.ctrlKey,
+        metaKey: k.metaKey,
+        shiftKey: k.shiftKey,
+        altKey: k.altKey,
+        repeat: k.repeat,
+      },
+    ])
+  }
+  document.addEventListener('keydown', relayKey)
+  document.addEventListener('keyup', relayKey)
+
   /* Escape pressed with focus inside the frame: the parent never sees the
      key event itself, so relay it (present mode closes on it) */
   document.addEventListener('keydown', function (ev) {
@@ -631,12 +712,27 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
   /* Ask the browser which element is actually on top, including stacking
      contexts, clipping, and transformed hit regions. Keep layout dimensions
      separate from the rendered rectangle so a move does not apply scale twice. */
+  /* the picked element (one selector, or every selector of a multi-pick)
+     that holds the element pressed, so a press on a child moves the pick */
+  function pickedAround(selected, el) {
+    var selectors = Array.isArray(selected) ? selected : selected ? [selected] : []
+    for (var i = 0; i < selectors.length; i++) {
+      var picked = styleTarget(selectors[i])
+      if (picked && picked !== el && picked.contains(el) && !isLocked(picked)) return picked
+    }
+    return null
+  }
+
   function drawingHit(x, y, standalone, selected) {
     var top = elementAt(x, y)
     var el = standalone ? document.body.firstElementChild : top && top.closest('[data-doop-drawing]')
     if (!el || !el.matches('[data-doop-drawing]') || isLocked(el)) return null
-    var picked = styleTarget(selected)
-    if (!standalone && picked && picked !== el && picked.contains(el) && elementGeometry(picked).enabled) return null
+    var picked = pickedAround(selected, el)
+    if (!standalone && picked && elementGeometry(picked).enabled) return null
+    // A drawing picked with other layers moves with them, through the layer
+    // gesture, not on its own.
+    if (!standalone && Array.isArray(selected) && selected.length > 1 && elementGeometry(el).enabled
+      && selected.some(function (sel) { return styleTarget(sel) === el })) return null
     var rect = designRect(el)
     var css = getComputedStyle(el)
     var width = parseFloat(css.width)
@@ -764,9 +860,9 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
 
   function moveHit(x, y, selected) {
     var el = elementAt(x, y)
-    var picked = styleTarget(selected)
     // A selected group moves as a whole even when the press hits a child.
-    if (el && picked && picked.contains(el) && !isLocked(picked)) el = picked
+    var picked = el && pickedAround(selected, el)
+    if (picked) el = picked
     while (el && el !== document.body && el !== document.documentElement) {
       if (elementGeometry(el).enabled) {
         var info = hitInfo(el)
@@ -905,6 +1001,13 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
       } else return false
       dx = axis === 'x' ? target - rect.x : 0
       dy = axis === 'y' ? target - rect.y : 0
+    }
+    // The rest of a multi-pick travels by the same design-px delta as the
+    // element pressed, each through its own translation basis.
+    if (styleEdit && styleEdit.selector === selector && (edit.kind === 'move' || edit.kind === 'nudge')) {
+      styleEdit.followers.forEach(function (follower) {
+        editGeometry(follower.selector, { kind: 'nudge', dx: dx, dy: dy })
+      })
     }
     // Probe the local translation basis. This handles scaled/rotated ancestors and
     // percentage translations without flattening the element's existing transform.
@@ -1121,14 +1224,93 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
     try { el = selector ? document.querySelector(selector) : null } catch (e) { /* bad selector */ }
     return el
   }
-  function patchStyle(style, styles, original) {
+  /* the longhands a declaration sets: a rule may mark only one side of a
+     shorthand !important, and the CSSOM reports priority per longhand */
+  function longhandsOf(name, value) {
+    var probe = document.createElement('div').style
+    probe.setProperty(name, value)
+    var names = []
+    for (var i = 0; i < probe.length; i++) names.push(probe[i])
+    if (!names.length) names.push(name)
+    // A rule may name the same box side logically. Which logical side maps to
+    // a physical one depends on the writing mode, so every candidate counts:
+    // an !important the edit did not need is harmless, a missed one is not.
+    for (var n = names.length - 1; n >= 0; n--) {
+      var logical = logicalNames(names[n])
+      for (var l = 0; l < logical.length; l++) names.push(logical[l])
+    }
+    return names
+  }
+  function logicalNames(name) {
+    var m
+    if ((m = /^(min-|max-)?(width|height)$/.exec(name))) return [(m[1] || '') + 'inline-size', (m[1] || '') + 'block-size']
+    if ((m = /^(margin|padding)-(top|right|bottom|left)$/.exec(name))) {
+      return [m[1] + '-block-start', m[1] + '-block-end', m[1] + '-inline-start', m[1] + '-inline-end']
+    }
+    if ((m = /^border-(top|right|bottom|left)-(width|style|color)$/.exec(name))) {
+      return ['border-block-start-' + m[2], 'border-block-end-' + m[2], 'border-inline-start-' + m[2], 'border-inline-end-' + m[2]]
+    }
+    if (/^(top|right|bottom|left)$/.test(name)) return ['inset-block-start', 'inset-block-end', 'inset-inline-start', 'inset-inline-end']
+    if (/^border-(top|bottom)-(left|right)-radius$/.test(name)) {
+      return ['border-start-start-radius', 'border-start-end-radius', 'border-end-start-radius', 'border-end-end-radius']
+    }
+    return []
+  }
+  function ruleOutranksInline(rules, el, names) {
+    for (var i = 0; i < rules.length; i++) {
+      var rule = rules[i]
+      if (rule.selectorText && rule.style) {
+        // "all" is its own entry in the CSSOM, never expanded into longhands
+        var marked = rule.style.getPropertyPriority('all') === 'important'
+        for (var n = 0; n < names.length && !marked; n++) marked = rule.style.getPropertyPriority(names[n]) === 'important'
+        if (!marked) continue
+        try { if (el.matches(rule.selectorText)) return true } catch (e) { /* a selector this engine cannot match */ }
+        continue
+      }
+      if (rule.media && rule.media.mediaText && !matchMedia(rule.media.mediaText).matches) continue
+      var inner = null
+      try { inner = rule.styleSheet ? rule.styleSheet.cssRules : rule.cssRules } catch (e) { /* cross-origin import */ }
+      if (inner && ruleOutranksInline(inner, el, names)) return true
+    }
+    return false
+  }
+  /* A design's own rule marked !important beats a plain inline declaration,
+     so an edit written the usual way would change nothing on screen. True
+     when a rule matching el declares any of the edit's longhands that way.
+     Sheets a design script adopted count like its <style> tags; our own (the
+     adopted ones by identity, the editing tag by its mark) never do, and a
+     cross-origin sheet cannot be read and is passed over. */
+  function isRuntimeSheet(sheet) {
+    var owner = sheet.ownerNode
+    return sheet === vSheet || sheet === vOutlineSheet || sheet === protoSheet ||
+      !!(owner && owner.hasAttribute && owner.hasAttribute('data-v-edit'))
+  }
+  function sheetOutranksInline(el, name, value) {
+    var names = longhandsOf(name, value)
+    var sheets = Array.prototype.slice.call(document.styleSheets).concat(document.adoptedStyleSheets || [])
+    for (var s = 0; s < sheets.length; s++) {
+      var sheet = sheets[s]
+      if (sheet.disabled || isRuntimeSheet(sheet)) continue
+      if (sheet.media && sheet.media.mediaText && !matchMedia(sheet.media.mediaText).matches) continue
+      var rules = null
+      try { rules = sheet.cssRules } catch (e) { /* cross-origin */ }
+      if (rules && ruleOutranksInline(rules, el, names)) return true
+    }
+    return false
+  }
+  /* "context" is the element whose place in the document decides which rules
+     apply, when el itself is detached (a run in a copied fragment). */
+  function patchStyle(el, styles, original, context) {
+    var style = el.style
     for (var k in styles) {
       if (!Object.prototype.hasOwnProperty.call(styles, k)) continue
       if (styles[k] === null || styles[k] === '') style.removeProperty(k)
       else {
+        var value = String(styles[k])
         // Returning to a gesture's original value must also restore its priority.
         var priority = original && styles[k] === original.getPropertyValue(k) ? original.getPropertyPriority(k) : ''
-        style.setProperty(k, String(styles[k]), priority)
+        if (!priority && sheetOutranksInline(context || el, k, value)) priority = 'important'
+        style.setProperty(k, value, priority)
       }
     }
   }
@@ -1137,7 +1319,7 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
     before.cssText = el.style.cssText
     var original = document.createElement('div').style
     original.cssText = styleEdit.original
-    patchStyle(el.style, styles, original)
+    patchStyle(el, styles, original)
     // CSS enumerates longhands, so padding/border shorthands and !important
     // declarations can be restored without replacing unrelated inline styles.
     var names = {}
@@ -1148,7 +1330,34 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
           before.getPropertyPriority(name) !== el.style.getPropertyPriority(name)) styleEdit.touched[name] = true
     }
   }
-  function beginStyleEdit(selector) {
+  /* flush an element's restored position with transitions off, so the next
+     read is where it is and not the first frame of a transition there */
+  function settleGeometry(el) {
+    var restoredStyle = el.getAttribute('style')
+    el.style.setProperty('transition', 'none', 'important')
+    designRect(el)
+    if (restoredStyle === null) el.removeAttribute('style')
+    else el.setAttribute('style', restoredStyle)
+  }
+  /* the other elements of a multi-pick a geometry gesture carries along: each
+     movable on its own, none inside the pressed element or another follower,
+     none holding the pressed element */
+  function gestureFollowers(el, selectors) {
+    var movable = []
+    ;(Array.isArray(selectors) ? selectors : []).forEach(function (selector) {
+      var other = styleTarget(selector)
+      if (!other || other === el || other.contains(el) || el.contains(other) || isLocked(other)) return
+      if (!elementGeometry(other).enabled) return
+      if (movable.some(function (m) { return m.el === other })) return
+      movable.push({ selector: selector, el: other, original: other.getAttribute('style') })
+    })
+    // A picked parent carries its picked descendants, whatever order the pick
+    // names them in (as doop:nudge does).
+    return movable.filter(function (m) {
+      return !movable.some(function (other) { return other.el !== m.el && other.el.contains(m.el) })
+    })
+  }
+  function beginStyleEdit(selector, followers) {
     var el = styleTarget(selector)
     if (!el || isLocked(el)) return false
     if (styleEdit) endStyleEdit(styleEdit.selector, false)
@@ -1165,7 +1374,8 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
       editTimer = null
       postEdited()
     }
-    styleEdit = { selector: selector, original: el.style.cssText, styles: {}, touched: {}, runs: [], created: [], renamed: [] }
+    styleEdit = { selector: selector, original: el.style.cssText, styles: {}, touched: {}, runs: [], created: [], renamed: [],
+      followers: gestureFollowers(el, followers) }
     return true
   }
   function endStyleEdit(selector, cancel) {
@@ -1176,6 +1386,11 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
     if (!el) return false
     if (cancel) {
       restoreTextRuns(edit)
+      edit.followers.forEach(function (follower) {
+        if (follower.original === null) follower.el.removeAttribute('style')
+        else follower.el.setAttribute('style', follower.original)
+        settleGeometry(follower.el)
+      })
       var original = document.createElement('div').style
       original.cssText = edit.original
       for (var name in edit.touched) {
@@ -1184,15 +1399,9 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
         else el.style.removeProperty(name)
       }
       if (!el.getAttribute('style')) el.removeAttribute('style')
-      if (edit.touched.translate || edit.touched.rotate || edit.touched.scale) {
-        // A cancelled geometry drag must report its restored coordinates,
-        // rather than the first frame of a transition back to them.
-        var restoredStyle = el.getAttribute('style')
-        el.style.setProperty('transition', 'none', 'important')
-        designRect(el)
-        if (restoredStyle === null) el.removeAttribute('style')
-        else el.setAttribute('style', restoredStyle)
-      }
+      // A cancelled geometry drag must report its restored coordinates,
+      // rather than the first frame of a transition back to them.
+      if (edit.touched.translate || edit.touched.rotate || edit.touched.scale) settleGeometry(el)
     } else if (edit.range) {
       // The preview was outside the undo history: put it back and apply the
       // gesture's final styles through the undoable path, as one entry.
@@ -1203,11 +1412,19 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
     } else if (Object.keys(edit.touched).length || edit.runs.length || edit.created.length || edit.renamed.length) postEdited(true)
     return true
   }
-  function applyStyle(selector, styles) {
+  function applyStyle(selector, styles, uniformText) {
     var el = styleTarget(selector)
     if (!el || isLocked(el)) return false
     var textPatch = isTextPatch(styles)
     var gesture = styleEdit && styleEdit.selector === selector
+    var following = styleEdit && !gesture && styleEdit.followers.some(function (f) { return f.selector === selector })
+    if (following) {
+      // A follower's move previews with the gesture and is restored, or saved,
+      // with it: never a save of its own mid-drag.
+      patchStyle(el, styles)
+      if (!el.getAttribute('style')) el.removeAttribute('style')
+      return true
+    }
     function noteRuns(change) {
       if (!gesture) return
       change.before.forEach(function (run) {
@@ -1234,13 +1451,14 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
       return true
     }
     if (textPatch) noteRuns(clearTextRuns(el, styles))
+    else if (uniformText) noteRuns(clearTextRuns(el, layerTextPatch(styles)))
     if (styleEdit && styleEdit.selector === selector) {
       Object.assign(styleEdit.styles, styles)
       previewStyle(el, styles)
       if (!el.getAttribute('style')) el.removeAttribute('style')
       return true
     }
-    patchStyle(el.style, styles)
+    patchStyle(el, styles)
     if (!el.getAttribute('style')) el.removeAttribute('style')
     /* a slider fires many of these a second — one save once it settles */
     if (styleTimer) clearTimeout(styleTimer)
@@ -1254,6 +1472,9 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
     if (ev.source !== parent) return
     var d = ev.data
     if (!d) return
+    /* the first port offered is the one for life: a later message carrying
+       one could be answering a design script's forged ready signal */
+    if (d.type === 'doop:key-port' && !keyPort && ev.ports && ev.ports[0]) keyPort = ev.ports[0]
     if (d.type === 'doop:inspect') {
       parent.postMessage({ type: 'doop:inspect-result', reqId: d.reqId, info: inspect(d.selector) }, '*')
     }
@@ -1262,9 +1483,12 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
       var computedEl = styleTarget(d.selector)
       var values = null
       if (computedEl) {
-        var cs = getComputedStyle(computedEl)
+        var run = d.fromTextRun === true ? firstTextRun(computedEl) : computedEl
+        var cs = getComputedStyle(run)
         values = {}
-        d.properties.forEach(function (name) { values[name] = cs.getPropertyValue(name) })
+        d.properties.forEach(function (name) {
+          values[name] = name === 'text-decoration-line' && run !== computedEl ? runDecoration(run, computedEl) : cs.getPropertyValue(name)
+        })
       }
       parent.postMessage({ type: 'doop:computed-result', reqId: d.reqId, values: values }, '*')
     }
@@ -1277,7 +1501,7 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
       parent.postMessage({ type: 'doop:settle-result', reqId: d.reqId }, '*')
     }
     if (d.type === 'doop:style' && d.styles && typeof d.styles === 'object') {
-      var applied = applyStyle(d.selector, d.styles)
+      var applied = applyStyle(d.selector, d.styles, d.uniformText === true)
       parent.postMessage({ type: 'doop:style-result', reqId: d.reqId, ok: applied, info: applied ? inspect(d.selector) : null }, '*')
     }
     if (d.type === 'doop:replace-image') {
@@ -1298,7 +1522,7 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
       parent.postMessage({ type: 'doop:geometry-result', reqId: d.reqId, ok: changed, info: changed ? inspect(d.selector) : null }, '*')
     }
     if (d.type === 'doop:style-gesture') {
-      var changed = d.phase === 'begin' ? beginStyleEdit(d.selector)
+      var changed = d.phase === 'begin' ? beginStyleEdit(d.selector, d.followers)
         : d.phase === 'commit' || d.phase === 'cancel' ? endStyleEdit(d.selector, d.phase === 'cancel') : false
       parent.postMessage({ type: 'doop:style-gesture-result', reqId: d.reqId, info: changed ? inspect(d.selector) : null }, '*')
     }

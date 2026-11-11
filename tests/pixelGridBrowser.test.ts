@@ -1,7 +1,7 @@
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeEach, describe, expect, it } from 'vitest'
 import type { Page } from 'puppeteer-core'
 import { findBrowserPath } from '../server/screenshot'
-import { fixtureUrl, openBrowser, type TestBrowser } from './browser'
+import { fixtureUrl, pagePerTest } from './browser'
 import type { ElementComment, Frame } from '../shared/types'
 
 /* The fixture's stage starts 40px down the page. At 800% the grid is fully on. */
@@ -67,13 +67,12 @@ function stackAt(page: Page, [x, y]: [number, number]) {
 }
 
 describe.skipIf(!findBrowserPath())('pixel grid', { timeout: 30_000 }, () => {
-  let browser: TestBrowser
+  const pages = pagePerTest()
   let page: Page
   const errors: string[] = []
 
-  beforeAll(async () => {
-    browser = await openBrowser()
-    page = await browser.newPage()
+  beforeEach(async () => {
+    page = await pages.open()
     page.setDefaultTimeout(10_000)
     page.on('pageerror', (err) => errors.push(String(err)))
     await page.setViewport({ width: 1200, height: 800 })
@@ -106,11 +105,9 @@ describe.skipIf(!findBrowserPath())('pixel grid', { timeout: 30_000 }, () => {
           .map((a) => a.finished),
       ),
     )
-  }, 60_000)
+  })
 
-  afterAll(async () => {
-    await page?.close()
-    await browser?.close()
+  afterAll(() => {
     expect(errors).toEqual([])
   })
 

@@ -17,6 +17,7 @@ export const actions = {
   paletteEmpty: 'No matching action',
   paletteAsk: 'Ask the agent: “{query}”',
   askAgent: 'Ask the agent',
+  goToFiles: 'Go to files',
 
   /* File */
   newCanvas: 'New canvas',
@@ -72,6 +73,7 @@ export const actions = {
 
   /* Object */
   frameSelection: 'Frame selection',
+  createComponent: 'Create component',
   group: 'Group selection',
   ungroup: 'Ungroup selection',
   groupName: 'Group',
@@ -138,6 +140,8 @@ export const actions = {
 
   /* Help */
   keyboardShortcuts: 'Keyboard shortcuts',
+  docs: 'Docs',
+  customerSupport: 'Customer support',
   shortcutsSearch: 'Search shortcuts',
   shortcutsEmpty: 'No shortcut matches “{query}”',
 

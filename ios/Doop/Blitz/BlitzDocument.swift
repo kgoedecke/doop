@@ -114,6 +114,14 @@ final class BlitzDocument: @unchecked Sendable {
         return node == 0 ? nil : node
     }
 
+    /// The element a tap at a CSS point selects, as the web runtime's probe picks
+    /// it: the whole drawing (a text layer, not a bold run inside it), else the
+    /// nearest element with a box of its own.
+    func pickableElement(at point: CGPoint) -> UInt64? {
+        let node = doopblitz_doc_pick_from_point(handle, Float(point.x), Float(point.y))
+        return node == 0 ? nil : node
+    }
+
     func element(matching selector: String) -> UInt64? {
         let node = doopblitz_doc_query_selector(handle, selector)
         return node == 0 ? nil : node

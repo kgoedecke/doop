@@ -1,5 +1,6 @@
 import type { BillingInterval, WorkspaceStatus } from './billing.ts'
 import type { CanvasRole, LinkAccess } from './canvasRole.ts'
+import type { ComponentDef } from './components.ts'
 import type { DesignToken } from './designTokens.ts'
 import type { RunnerPick } from './agentRunner.ts'
 
@@ -163,6 +164,8 @@ export interface Canvas {
   role?: CanvasRole
   /** user ids invited to collaborate (the owner is not listed) */
   memberIds?: string[]
+  /** reusable designs on this canvas; unset = none. See shared/components.ts. */
+  components?: ComponentDef[]
   /** the shared workspace this canvas belongs to — every workspace member
    *  can open it, on top of the owner and invited members. Unset = the
    *  owner's personal space. */
@@ -592,6 +595,8 @@ export type ServerMessage =
   | { type: 'canvas:pages'; pages: CanvasPageInfo[]; actor: Actor }
   /** a ruler guide was added or moved (guide set) or removed (null) */
   | { type: 'guide'; id: string; guide: CanvasGuide | null; actor: Actor }
+  /** a component changed, or was deleted (`component` null) */
+  | { type: 'component'; id: string; component: ComponentDef | null; actor: Actor }
   /** a style-guide doc was written, moved (doc set) or deleted (doc null) */
   | { type: 'guidelines'; name: string; doc: GuidelineDoc | null; actor: Actor }
   /** the canvas's design tokens changed: the whole list after the change */
@@ -602,6 +607,8 @@ export type ServerMessage =
   | { type: 'decision'; decision: DesignDecision }
   /** the distiller proposed a rule, or a proposal was accepted/dismissed */
   | { type: 'proposal'; proposal: MemoryProposal }
+  /** an uploaded image got its description for agents (shared/imageDescriptions.ts) */
+  | { type: 'asset:described'; assetId: string; description: string }
   | { type: 'canvas:deleted' }
   | { type: 'activity'; item: ActivityItem }
 

@@ -32,6 +32,20 @@ export const settings = {
   meterUsedUp: 'Your free tasks are used up.',
   meterLeft: { one: '{left} of {count} free task left.', other: '{left} of {count} free tasks left.' },
 
+  imageDescriptionsTitle: 'Image descriptions',
+  imageDescriptionsDescription:
+    'A short description helps agents understand uploaded images. My account uses your account for your uploads, then the canvas owner’s eligible account, then this server. It also allows your account to cover uploads on canvases you own when the uploader has no eligible model. This server uses only server credentials for your uploads and excludes your account from fallback. Off stops descriptions for your uploads and canvases. Your provider’s charges apply.',
+  imageDescriptionsAria: 'Image descriptions',
+  imageDescriptionsOff: 'Off',
+  imageDescriptionsAccount: 'My account',
+  imageDescriptionsServer: 'This server',
+  imageDescriptionsRunsOn: 'Available model: {label}. Retries keep the original payer.',
+  imageDescriptionsReasonOff: 'Your uploads and images on canvases you own are not described.',
+  imageDescriptionsReasonTextOnly:
+    'Your account has no eligible vision model and this server has no model. Another canvas owner’s eligible account can describe your uploads; otherwise they stay undescribed.',
+  imageDescriptionsReasonNoModel:
+    'No upload model is available here. In My account mode, another canvas owner’s eligible account can still describe your uploads.',
+
   themeTitle: 'Theme',
   themeDescription:
     'Light or dark, across every canvas and page in this browser. System follows your operating system and switches whenever it does.',

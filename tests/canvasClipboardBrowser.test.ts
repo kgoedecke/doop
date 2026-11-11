@@ -1,9 +1,9 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { afterAll, beforeEach, describe, expect, it } from 'vitest'
 import type { Page } from 'puppeteer-core'
 import type { CanvasRole } from '../shared/canvasRole'
 import type { Frame } from '../shared/types'
 import { findBrowserPath } from '../server/screenshot'
-import { fixtureUrl, openBrowser, type TestBrowser } from './browser'
+import { fixtureUrl, pagePerTest } from './browser'
 
 declare global {
   interface Window {
@@ -43,7 +43,7 @@ const FRAME: Frame = {
 const CLIPBOARD_IS_RELIABLE = process.platform !== 'darwin' || !!process.env.DOOP_CLIPBOARD_TESTS
 
 describe.skipIf(!findBrowserPath() || !CLIPBOARD_IS_RELIABLE)('canvas clipboard shortcuts', { timeout: 20_000 }, () => {
-  let browser: TestBrowser
+  const pages = pagePerTest({ permissions: ['clipboard-read', 'clipboard-sanitized-write'] })
   let page: Page
   let created: Partial<Frame>[] = []
   let uploads = 0
@@ -116,10 +116,10 @@ describe.skipIf(!findBrowserPath() || !CLIPBOARD_IS_RELIABLE)('canvas clipboard 
     return doc
   }
 
-  beforeAll(async () => {
-    browser = await openBrowser()
-    await browser.grantPermissions(['clipboard-read', 'clipboard-sanitized-write'])
-    page = await browser.newPage()
+  beforeEach(async () => {
+    created = []
+    uploads = 0
+    page = await pages.open()
     page.setDefaultTimeout(4_000)
     await page.setViewport({ width: 1200, height: 900 })
     page.on('pageerror', (err) => errors.push(String(err)))
@@ -160,11 +160,6 @@ describe.skipIf(!findBrowserPath() || !CLIPBOARD_IS_RELIABLE)('canvas clipboard 
         await request.respond({ status: 200, contentType: 'application/json', body: '{}' })
       } else await request.continue()
     })
-  }, 60_000)
-
-  beforeEach(async () => {
-    created = []
-    uploads = 0
     await page.goto(fixtureUrl('canvasClipboard.html'))
     await page.waitForFunction(() => !!window.canvasClipboardHarness && !!document.querySelector('.stage'))
     await page.evaluate((frame) => {
@@ -177,9 +172,7 @@ describe.skipIf(!findBrowserPath() || !CLIPBOARD_IS_RELIABLE)('canvas clipboard 
     await page.evaluate(() => navigator.clipboard.writeText('external text'))
   })
 
-  afterAll(async () => {
-    await page?.close()
-    await browser?.close()
+  afterAll(() => {
     expect(errors).toEqual([])
   })
 
@@ -203,6 +196,10 @@ describe.skipIf(!findBrowserPath() || !CLIPBOARD_IS_RELIABLE)('canvas clipboard 
     await copyImage()
     await chord('v')
     await expect.poll(() => uploads).toBe(1)
+    /* the picture lands as a frame of its own once it has uploaded. The test
+       waits for that request: left in flight, it arrived during the next
+       test, after `created` was emptied, and was counted as that test's */
+    await expect.poll(() => created.length).toBe(1)
     expect(await count('section')).toBe(1)
   })
 
@@ -210,6 +207,9 @@ describe.skipIf(!findBrowserPath() || !CLIPBOARD_IS_RELIABLE)('canvas clipboard 
     await page.evaluate(() => window.canvasClipboardHarness.pick('#card'))
     await chord('c')
     await page.evaluate(() => navigator.clipboard.writeText('new external text'))
+    /* the write's promise settles before headless Chromium has committed it to the
+       clipboard the paste reads, so a paste right away could still see the token */
+    await page.waitForFunction(() => navigator.clipboard.readText().then((text) => text === 'new external text'))
     await chord('v')
     await page.evaluate(
       () => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))),
