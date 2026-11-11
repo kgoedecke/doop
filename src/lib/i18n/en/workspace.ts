@@ -10,6 +10,7 @@ export const workspace = {
   workspace: 'Workspace',
   people: 'People',
   fonts: 'Fonts',
+  agents: 'Agents',
   libraries: 'Libraries',
   librariesTitle: 'Component libraries',
   librariesDescription:

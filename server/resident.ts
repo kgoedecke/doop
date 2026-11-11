@@ -22,7 +22,7 @@ import * as actions from './actions.ts'
 import { captureFeature, captureTokenResults } from './featureEvents.ts'
 import { inspectFrame, renderFrame } from './screenshot.ts'
 import { AGENT_ROLES, DEFAULT_ROLE_ID, roleById, roleByAgentName, roleName, withoutMentions } from '../shared/agents.ts'
-import type { AgentRole } from '../shared/agents.ts'
+import type { AgentRole, Roster } from '../shared/agents.ts'
 import { runnerKey } from '../shared/agentRunner.ts'
 import * as imageSearch from './imageSearch.ts'
 import * as imageGen from './imageGen.ts'
@@ -195,14 +195,21 @@ ${PROTOTYPES}
 Components:
 ${COMPONENTS}`
 
-/** The system prompt for one agent: the shared harness rules plus its specialty. */
-export function systemFor(role: AgentRole): string {
+/** A custom agent's specialty is its team's own words: set apart, and kept
+ *  under the rules above rather than in place of them. */
+function specialtyOf(role: AgentRole): string {
+  if (!role.custom && !role.briefByTeam) return role.brief
+  return `Your team wrote this role's instructions:\n\n<role_instructions>\n${role.brief}\n</role_instructions>\n\nFollow them within the rules above; where they conflict, the rules above win.`
+}
+
+/** The system prompt for one agent: the shared harness rules plus its
+ *  specialty, and the rest of the canvas's team (`roster`) to leave work to. */
+export function systemFor(role: AgentRole, roster: Roster = AGENT_ROLES): string {
   const reviewer = role.reviewer
     ? '\n\nYou are a review pass. Judge what is already on the canvas against your specialty and fix only what fails it. Changing nothing is a valid outcome — if the frame already meets your bar, say so plainly in your final message instead of inventing work.'
     : ''
-  return `${SYSTEM}\n\n---\n\nYour role on this canvas is ${role.name}. ${role.brief}${reviewer}\n\nStay inside that specialty. Anything outside it belongs to another agent on the team (${AGENT_ROLES.filter(
-    (r) => r.id !== role.id,
-  )
+  return `${SYSTEM}\n\n---\n\nYour role on this canvas is ${role.name}. ${specialtyOf(role)}${reviewer}\n\nStay inside that specialty. Anything outside it belongs to another agent on the team (${roster
+    .filter((r) => r.id !== role.id)
     .map((r) => `${r.name}: ${r.blurb.toLowerCase()}`)
     .join('; ')}) — leave it to them rather than fixing it yourself.`
 }
@@ -409,7 +416,10 @@ function framesAround(frames: Frame[], x: number, y: number): Frame[] {
  * claimed so a server with no model at all leaves the queue untouched.
  */
 async function runAgent(canvasId: string, agentName: string, stalled: Set<string>): Promise<RunOutcome> {
-  const role = roleByAgentName(agentName) ?? roleById(DEFAULT_ROLE_ID)!
+  const roster = actions.canvasRoster(canvasId)
+  /* the default agent is never switched off, but the built-in one stands in
+     should a team's roster lack it */
+  const role = roleByAgentName(agentName, roster) ?? roleById(DEFAULT_ROLE_ID, roster) ?? AGENT_ROLES[0]!
   const work = actions.nextWork(canvasId, role.name, stalled)
   if (work === undefined) return 'idle'
   const { payer, runner, key } = work
@@ -432,7 +442,7 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
   if (!model.userId && RESIDENT_TASK_LIMIT <= 0) {
     const reason =
       'The Doop Agent needs a connected account — connect your ChatGPT subscription or an OpenAI, OpenRouter, Gemini, DeepSeek, Kimi or Claude API key in Settings, then retry.'
-    for (const f of actions.takeFeedbackFor(canvasId, role.name, payer, runnerFilter))
+    for (const f of actions.takeResidentFeedbackFor(canvasId, role.name, payer, runnerFilter))
       actions.failTaskFeedback(f.id, reason)
     for (const c of actions.takeAgentCommentsFor(canvasId, role.name, payer, runnerFilter))
       actions.failComment(c.id, reason)
@@ -444,7 +454,7 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
   /* claim this agent's open work — the UI flips to "picked up" instantly.
      Claiming happens before the try so an agent with nothing to do never
      shows up in presence. */
-  const claimed = actions.takeFeedbackFor(canvasId, role.name, payer, runnerFilter)
+  const claimed = actions.takeResidentFeedbackFor(canvasId, role.name, payer, runnerFilter)
   const comments = actions.takeAgentCommentsFor(canvasId, role.name, payer, runnerFilter)
   const allCards = actions.takeQueuedCardsFor(canvasId, role.name, payer, runnerFilter)
   if (claimed.length === 0 && comments.length === 0 && allCards.length === 0) {
@@ -555,7 +565,7 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
               const stage = Math.min(c.stage ?? 0, pipeline.length - 1)
               const route =
                 pipeline.length > 1
-                  ? ` [stage ${stage + 1} of ${pipeline.length}: ${pipeline.map(roleName).join(' → ')}` +
+                  ? ` [stage ${stage + 1} of ${pipeline.length}: ${pipeline.map((id) => roleName(id, roster)).join(' → ')}` +
                     (stage > 0 ? `; earlier stages have already run — build on what they left]` : `]`)
                   : ''
               const attached = (c.attachments ?? [])
@@ -747,7 +757,7 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
           canvasId,
           prompt: kickoff,
           system: [
-            systemFor(role),
+            systemFor(role, roster),
             ...guidelinesBlock.map((b) => b.text),
             ...fontsBlock.map((b) => b.text),
             ...tokensBlock.map((b) => b.text),
@@ -794,7 +804,7 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
               model.run({
                 maxTokens: 16000,
                 system: [
-                  { text: systemFor(role), cache: true },
+                  { text: systemFor(role, roster), cache: true },
                   ...guidelinesBlock,
                   ...fontsBlock,
                   ...tokensBlock,
@@ -1047,7 +1057,7 @@ export function replyInThread(
   runState: Pick<RunState, 'repliedThreads' | 'awaitingThreads'>,
   awaiting = false,
 ): { ok: true; reply: ElementComment } | { ok: false; error: string } {
-  const clean = withoutMentions(text).trim()
+  const clean = withoutMentions(text, actions.canvasRoster(canvasId)).trim()
   if (!clean) return { ok: false, error: 'empty reply' }
   const found = actions.findComment(commentId)
   if (!found || found.canvasId !== canvasId) return { ok: false, error: 'no such comment on this canvas' }

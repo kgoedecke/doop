@@ -11,6 +11,7 @@ import { GeneralSettings } from '../components/GeneralSettings'
 import { AgentKeys } from '../components/AgentKeys'
 import { Webhooks } from '../components/Webhooks'
 import { FontLibrary } from '../components/FontLibrary'
+import { CustomAgents } from '../components/CustomAgents'
 import { AccountMenu } from '../components/DashShell'
 import { railLayout } from '../components/AppRail'
 import {
@@ -238,6 +239,7 @@ export function Settings() {
               <ModelAccountPanel onChange={refresh} />
               <ImageModelCard />
               <ImageDescriptionsCard />
+              <CustomAgents />
             </>
           ) : pane === 'fonts' ? (
             <FontLibrary />

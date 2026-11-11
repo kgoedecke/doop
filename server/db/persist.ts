@@ -5,7 +5,7 @@ import { and, desc, eq, inArray, sql } from 'drizzle-orm'
 import { db } from './index.ts'
 import * as t from './schema.ts'
 import { extractAssetIds } from '../assets.ts'
-import { roleByAgentName } from '../../shared/agents.ts'
+import { AGENT_ROLES, roleByAgentName } from '../../shared/agents.ts'
 import { isCommunityCategory } from '../../shared/types.ts'
 import { storedLinkAccess } from '../../shared/canvasRole.ts'
 import type { ComponentDef, LibraryComponent } from '../../shared/components.ts'
@@ -916,6 +916,7 @@ export function saveFeedback(fb: TaskFeedback) {
     at: fb.at,
     deliveredAt: fb.deliveredAt ?? null,
     claimedBy: fb.claimedBy ?? null,
+    claimedByResident: fb.claimedByResident ?? null,
     completedAt: fb.completedAt ?? null,
     failedAt: fb.failedAt ?? null,
     failureReason: fb.failureReason ?? null,
@@ -931,6 +932,7 @@ export function saveFeedback(fb: TaskFeedback) {
         set: {
           deliveredAt: row.deliveredAt,
           claimedBy: row.claimedBy,
+          claimedByResident: row.claimedByResident,
           completedAt: row.completedAt,
           failedAt: row.failedAt,
           failureReason: row.failureReason,
@@ -1222,10 +1224,12 @@ export async function hydrate(): Promise<Hydrated> {
   for (const row of feedbackRows) {
     const list = feedback.get(row.canvasId) ?? []
     if (list.length >= LOG_CAP) continue
-    /* only resident agents run in-process; feedback claimed by an outside MCP
-       agent may still be in flight elsewhere, so it is left alone */
+    /* only resident runs are in-process; feedback claimed by an outside MCP
+       agent may still be in flight elsewhere, so it is left alone. The claim
+       records which it was, since a custom agent may share an outside agent's
+       name; a claim from before that record could only be a built-in's */
     const interrupted =
-      roleByAgentName(row.claimedBy ?? undefined) != null &&
+      (row.claimedByResident ?? roleByAgentName(row.claimedBy ?? undefined, AGENT_ROLES) != null) &&
       row.deliveredAt != null &&
       row.completedAt == null &&
       row.failedAt == null
@@ -1245,6 +1249,7 @@ export async function hydrate(): Promise<Hydrated> {
       at: row.at,
       ...(row.deliveredAt != null ? { deliveredAt: row.deliveredAt } : {}),
       ...(row.claimedBy != null ? { claimedBy: row.claimedBy } : {}),
+      ...(row.claimedByResident != null ? { claimedByResident: row.claimedByResident } : {}),
       ...(row.completedAt != null ? { completedAt: row.completedAt } : {}),
       ...(failedAt !== undefined ? { failedAt } : {}),
       ...(failureReason !== undefined ? { failureReason } : {}),

@@ -123,6 +123,7 @@ import {
   Unlink,
   User,
   Users,
+  Bot,
   Workflow,
   Server,
   Flag,
@@ -275,6 +276,7 @@ export const GridIcon = icon(LayoutGrid)
 export const ListIcon = icon(Menu)
 export const UserIcon = icon(User)
 export const UsersIcon = icon(Users)
+export const BotIcon = icon(Bot)
 export const ClockIcon = icon(Clock)
 export const GearIcon = icon(Settings)
 export const ShieldIcon = icon(Shield)

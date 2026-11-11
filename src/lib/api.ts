@@ -131,6 +131,14 @@ export interface InstanceChangeInput {
   detach?: boolean
 }
 import type { CustomFont } from '../../shared/fonts'
+import type {
+  BuiltInAgent,
+  BuiltInAgentPatch,
+  CustomAgent,
+  CustomAgentInput,
+  CustomAgentPatch,
+} from '../../shared/customAgents'
+import type { AgentRole } from '../../shared/agents'
 import type { DesignToken, DesignTokenInput, ThemeRename, TokenEdit, TokenResult } from '../../shared/designTokens'
 
 export type HomeActivity = ActivityItem & { canvasId: string; canvasName: string }
@@ -372,6 +380,10 @@ export interface IntegrationsStatus {
 }
 import { getIdentity } from './identity'
 
+function agentScope(workspaceId: string | undefined): string {
+  return workspaceId ? `?workspace=${encodeURIComponent(workspaceId)}` : ''
+}
+
 export interface WorkspacesResponse {
   workspaces: WorkspaceSummary[]
   billing: { enabled: boolean }
@@ -454,6 +466,29 @@ export const api = {
     }),
   removeAvatar: () => req<{ ok: boolean }>('/api/me/avatar', { method: 'DELETE' }),
   canvasFonts: (canvasId: string) => req<CustomFont[]>(`/api/canvases/${canvasId}/fonts`),
+  /** custom agents: a workspace's, or without one the signed-in person's own */
+  listCustomAgents: (workspaceId?: string) => req<CustomAgent[]>(`/api/agents${agentScope(workspaceId)}`),
+  createCustomAgent: (input: CustomAgentInput, workspaceId?: string) =>
+    req<CustomAgent>(`/api/agents${agentScope(workspaceId)}`, { method: 'POST', body: JSON.stringify(input) }),
+  updateCustomAgent: (handle: string, patch: CustomAgentPatch, workspaceId?: string) =>
+    req<CustomAgent>(`/api/agents/${encodeURIComponent(handle)}${agentScope(workspaceId)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(patch),
+    }),
+  deleteCustomAgent: (handle: string, workspaceId?: string) =>
+    req<{ ok: true }>(`/api/agents/${encodeURIComponent(handle)}${agentScope(workspaceId)}`, { method: 'DELETE' }),
+  /** a canvas's team (the built-in agents it has on, then its custom ones) */
+  canvasTeam: (canvasId: string) => req<AgentRole[]>(`/api/canvases/${canvasId}/agents`),
+  listBuiltInAgents: (workspaceId?: string) => req<BuiltInAgent[]>(`/api/agents/builtin${agentScope(workspaceId)}`),
+  updateBuiltInAgent: (id: string, patch: BuiltInAgentPatch, workspaceId?: string) =>
+    req<BuiltInAgent>(`/api/agents/builtin/${encodeURIComponent(id)}${agentScope(workspaceId)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(patch),
+    }),
+  resetBuiltInAgent: (id: string, workspaceId?: string) =>
+    req<BuiltInAgent>(`/api/agents/builtin/${encodeURIComponent(id)}${agentScope(workspaceId)}`, {
+      method: 'DELETE',
+    }),
   rotateWebhookSecret: (id: string) => req<{ secret: string }>(`/api/webhooks/${id}/rotate`, { method: 'POST' }),
   testWebhook: (id: string) => req<WebhookDeliveryResult>(`/api/webhooks/${id}/test`, { method: 'POST' }),
   notificationSettings: () => req<NotificationSettings>('/api/notifications'),

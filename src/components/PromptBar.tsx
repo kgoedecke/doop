@@ -13,6 +13,7 @@ import { ArrowUpIcon, AttachmentIcon, FrameIcon, XIcon } from './ui/icons'
 import { ModelPicker } from './ModelPicker'
 import { currentRunnerPick, useRunnerPick } from '../lib/runnerPick'
 import { resolveRunnerPick } from '../../shared/agentRunner'
+import { AGENT_ROLES, DEFAULT_ROLE_ID, mentionedRoles } from '../../shared/agents'
 import { LayerKindIcon } from './LayerKindIcon'
 import { buildLayerTree, findLayer, layerName } from '../lib/layers'
 import type { CardScope } from '../../shared/types'
@@ -141,16 +142,20 @@ async function sendPrompt(args: {
     /* the composer's pick rides on the card, so the task runs on what the
        picker beside the send button shows */
     const runner = currentRunnerPick()
+    /* "@copy tighten the hero" goes to the Copywriter, "@copy @a11y …" to
+       both in that order; no mention is Doop's */
+    const mentioned = mentionedRoles(text, store.canvas?.team ?? AGENT_ROLES).map((role) => role.id)
     await api.addCard(
       canvasId,
       text,
-      ['doop'],
+      mentioned.length > 0 ? mentioned : [DEFAULT_ROLE_ID],
       refFrames.map((f) => f.id),
       scope,
       runner,
     )
     posthog.capture('prompt_bar_submitted', {
       attachments: refFrames.length,
+      agents: mentioned.length,
       scope: scope ? (scope.selector ? 'element' : 'frame') : 'none',
       runner: runner?.provider ?? 'default',
     })

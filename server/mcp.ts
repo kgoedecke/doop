@@ -17,6 +17,7 @@ import { z } from 'zod'
 import { store } from './store.ts'
 import { addPage, savePages, updateFrameMeta } from './pageTools.ts'
 import { fontsForCanvas } from './fonts.ts'
+import { customAgentsForCanvas } from './customAgents.ts'
 import { describeLibrary, libraryBrief } from '../shared/fonts.ts'
 import {
   MAX_TOKEN_DESCRIPTION,
@@ -604,6 +605,7 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
       const docs = store.getGuidelines(canvas_id)
       const refs = store.getReferences(canvas_id)
       const library = fontsForCanvas(c)
+      const customAgents = customAgentsForCanvas(c)
       const sharedLibraries = libraryCatalog(c)
       const tokens = store.getTokens(canvas_id)
       const tokenThemes = store.getTokenThemes(canvas_id)
@@ -660,6 +662,16 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
             ...(c.components?.length ? { components: c.components.map((def) => catalogEntry(c, def)) } : {}),
             ...(sharedLibraries.length ? { workspaceLibraries: sharedLibraries } : {}),
             ...(library.length ? { fonts: describeLibrary(library) } : {}),
+            ...(customAgents.length
+              ? {
+                  customAgents: customAgents.map((a) => ({
+                    name: a.name,
+                    mention: `@${a.id}`,
+                    blurb: a.blurb,
+                    ...(a.reviewer ? { reviewer: true } : {}),
+                  })),
+                }
+              : {}),
             webFonts: webFontFamilies(),
             ...(tokens.length ? { tokens: describeTokens(tokens) } : {}),
             ...(tokenThemes.length ? { tokenThemes } : {}),
@@ -1106,7 +1118,8 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
       if (!body.trim() || !actions.openThread(comment_id)) return err('thread resolved or empty text')
       /* an @mention commands the resident agent to change frames — the REST
          reply route holds comment-only visitors to the same rule */
-      if (mentionedRole(body) && !canvasFor(canvas_id, 'edit'))
+      const mentioned = mentionedRole(body, actions.canvasRoster(canvas_id))
+      if (mentioned && !canvasFor(canvas_id, 'edit'))
         return err('asking an agent to change the canvas needs edit access')
       const actor = actorFrom(agent_name)
       arrive(canvas_id, agent_name)
@@ -1114,7 +1127,7 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
          metered like a card; plain replies stay free. Mirrors the REST reply
          route so the meter is spent exactly once either way. */
       let gate: Awaited<ReturnType<typeof allowance.consumeResidentTask>> | undefined
-      if (mentionedRole(body) && ownerId) {
+      if (mentioned && ownerId) {
         gate = await allowance.consumeResidentTask(ownerId)
         if (!gate.ok)
           return err(

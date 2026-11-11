@@ -8,7 +8,16 @@ import * as thumbs from './thumbs.ts'
 import { colorFor } from '../shared/types.ts'
 import type { AgentBrand } from '../shared/agentBrand.ts'
 import type { StackWrite } from '../shared/frameStack.ts'
-import { DEFAULT_ROLE_ID, mentionedRole, normalizePipeline, roleByAgentName, roleName } from '../shared/agents.ts'
+import {
+  DEFAULT_ROLE_ID,
+  DEFAULT_ROLE_NAME,
+  mentionedRole,
+  normalizePipeline,
+  roleByAgentName,
+  roleName,
+  type Roster,
+} from '../shared/agents.ts'
+import { rosterFor, teamOfCanvas } from './customAgents.ts'
 import { canvasPages } from '../shared/pages.ts'
 import { FRAME_COMMENT_SELECTOR, isCanvasComment, type CommentAnchorInput } from '../shared/comments.ts'
 import { isElementId } from '../shared/elementId.ts'
@@ -200,10 +209,24 @@ export function pipelineOf(task: AgentTask): string[] {
   return task.pipeline?.length ? task.pipeline : [DEFAULT_ROLE_ID]
 }
 
+/** The roster a canvas's work is addressed with: the built-in team plus its
+ *  custom agents. */
+export function canvasRoster(canvasId: string): Roster {
+  return rosterFor(store.getCanvas(canvasId))
+}
+
+/** The resident agent a comment or reply is for, by the name it was addressed
+ *  to: that agent while the canvas still has it, else the default agent (a
+ *  custom agent deleted with work still waiting on it). Unset stays unset. */
+function addressee(target: string | undefined, roster: Roster): string | undefined {
+  if (!target) return undefined
+  return roleByAgentName(target, roster)?.name ?? DEFAULT_ROLE_NAME
+}
+
 /** The agent whose turn it is on this card. */
-function stageAgent(task: AgentTask): string {
+function stageAgent(task: AgentTask, roster: Roster): string {
   const pipeline = pipelineOf(task)
-  return roleName(pipeline[Math.min(task.stage ?? 0, pipeline.length - 1)])
+  return roleName(pipeline[Math.min(task.stage ?? 0, pipeline.length - 1)], roster)
 }
 
 /** Distinct resident agents with work waiting, in the order work arrived. */
@@ -212,15 +235,17 @@ export function pendingWorkAgents(canvasId: string): string[] {
   const add = (name: string) => {
     if (!names.includes(name)) names.push(name)
   }
+  const roster = canvasRoster(canvasId)
   /* oldest first so a queue is worked in the order humans filled it */
   for (const card of [...(taskLog.get(canvasId) ?? [])].reverse()) {
-    if (card.queuedBy && !card.agentName && !card.failedAt && !card.endedAt) add(stageAgent(card))
+    if (card.queuedBy && !card.agentName && !card.failedAt && !card.endedAt) add(stageAgent(card, roster))
   }
   for (const f of [...(feedbackLog.get(canvasId) ?? [])].reverse()) {
-    if (!f.deliveredAt && !f.failedAt) add(f.targetAgent ?? roleName(DEFAULT_ROLE_ID))
+    if (!f.deliveredAt && !f.failedAt) add(addressee(f.targetAgent, roster) ?? DEFAULT_ROLE_NAME)
   }
   for (const c of [...(commentLog.get(canvasId) ?? [])].reverse()) {
-    if (c.forAgent && !c.claimedBy && !c.failedAt && !c.resolvedAt) add(c.targetAgent ?? roleName(DEFAULT_ROLE_ID))
+    if (c.forAgent && !c.claimedBy && !c.failedAt && !c.resolvedAt)
+      add(addressee(c.targetAgent, roster) ?? DEFAULT_ROLE_NAME)
   }
   return names
 }
@@ -274,8 +299,9 @@ function oldestWork(canvasId: string, agentName: string, passOver: (work: NextWo
     if (passOver({ payer, key })) return
     if (!oldest || at < oldest.at) oldest = { at, work: { payer, ...(runner ? { runner } : {}), key } }
   }
+  const roster = canvasRoster(canvasId)
   for (const card of taskLog.get(canvasId) ?? []) {
-    if (card.queuedBy && !card.agentName && !card.failedAt && !card.endedAt && stageAgent(card) === agentName) {
+    if (card.queuedBy && !card.agentName && !card.failedAt && !card.endedAt && stageAgent(card, roster) === agentName) {
       consider(card.startedAt, card.queuedByUserId, card.runner)
     }
   }
@@ -285,17 +311,24 @@ function oldestWork(canvasId: string, agentName: string, passOver: (work: NextWo
       !c.claimedBy &&
       !c.failedAt &&
       !c.resolvedAt &&
-      (c.targetAgent ?? roleName(DEFAULT_ROLE_ID)) === agentName
+      (addressee(c.targetAgent, roster) ?? DEFAULT_ROLE_NAME) === agentName
     ) {
       consider(c.at, c.fromUserId, undefined)
     }
   }
   for (const f of feedbackLog.get(canvasId) ?? []) {
-    if (!f.deliveredAt && !f.failedAt && (!f.targetAgent || f.targetAgent === agentName)) {
+    if (!f.deliveredAt && !f.failedAt && feedbackFor(f, agentName, roster)) {
       consider(f.at, f.fromUserId, feedbackRunner(f))
     }
   }
   return oldest?.work
+}
+
+/** Whether this agent may take a reply: one addressed to it, or one left for
+ *  whoever shows up (the work it answers was an outside agent's). */
+function feedbackFor(f: TaskFeedback, agentName: string, roster: Roster): boolean {
+  const target = addressee(f.targetAgent, roster)
+  return !target || target === agentName
 }
 
 /** The requester behind the oldest work, for callers that bill but do not
@@ -392,7 +425,7 @@ export function addTaskFeedback(
     if (!task) continue
     /* a reply goes back to the agent whose work it is about — unless that was
        an outside agent, in which case it stays open to whoever shows up */
-    const target = roleByAgentName(task.agentName)?.name
+    const target = roleByAgentName(task.agentName, canvasRoster(canvasId))?.name
     const fb: TaskFeedback = {
       id: nanoid(8),
       taskId,
@@ -427,11 +460,12 @@ export function addTaskFeedback(
 /** The feedback takeFeedbackFor would claim, left unclaimed: what read-only
  *  tools mention without assigning anything. */
 export function openFeedbackFor(canvasId: string, agentName: string, payer?: string, runner?: string): TaskFeedback[] {
+  const roster = canvasRoster(canvasId)
   return (feedbackLog.get(canvasId) ?? []).filter(
     (f) =>
       !f.deliveredAt &&
       !f.failedAt &&
-      (!f.targetAgent || f.targetAgent === agentName) &&
+      feedbackFor(f, agentName, roster) &&
       (payer === undefined || (f.fromUserId ?? '') === payer) &&
       (runner === undefined || runnerKey(feedbackRunner(f)) === runner),
   )
@@ -442,10 +476,32 @@ export function openFeedbackFor(canvasId: string, agentName: string, payer?: str
  *  identified agent call wins. `runner` (a `runnerKey`) narrows the claim to
  *  one connection, since a run calls one model. */
 export function takeFeedbackFor(canvasId: string, agentName: string, payer?: string, runner?: string): TaskFeedback[] {
+  return claimFeedback(canvasId, agentName, false, payer, runner)
+}
+
+/** takeFeedbackFor for a resident run: the claim is marked in-process, which
+ *  is what restart recovery fails as interrupted. */
+export function takeResidentFeedbackFor(
+  canvasId: string,
+  agentName: string,
+  payer?: string,
+  runner?: string,
+): TaskFeedback[] {
+  return claimFeedback(canvasId, agentName, true, payer, runner)
+}
+
+function claimFeedback(
+  canvasId: string,
+  agentName: string,
+  resident: boolean,
+  payer?: string,
+  runner?: string,
+): TaskFeedback[] {
   const pending = openFeedbackFor(canvasId, agentName, payer, runner)
   for (const f of pending) {
     f.deliveredAt = Date.now()
     f.claimedBy = agentName
+    f.claimedByResident = resident
     persist.saveFeedback(f)
     broadcast(canvasId, { type: 'feedback', feedback: f }) // clients flip the entry to "picked up"
   }
@@ -912,7 +968,7 @@ function postComment(
   const clean = text.trim()
   if (!clean) return undefined
   /* @Doop, @brand, @a11y… — whichever resident agent is mentioned picks it up */
-  const mentioned = mentionedRole(clean)
+  const mentioned = mentionedRole(clean, canvasRoster(canvasId))
   const list = commentLog.get(canvasId) ?? []
   /* strictly increasing per canvas: thread order is reconstructed from `at`
      after a restart, so two messages must never share a timestamp */
@@ -981,13 +1037,14 @@ export function takeAgentCommentsFor(
   runner?: string,
 ): ElementComment[] {
   if (runner) return []
+  const roster = canvasRoster(canvasId)
   const pending = (commentLog.get(canvasId) ?? []).filter(
     (c) =>
       c.forAgent &&
       !c.claimedBy &&
       !c.failedAt &&
       !c.resolvedAt &&
-      (c.targetAgent ?? roleName(DEFAULT_ROLE_ID)) === agentName &&
+      (addressee(c.targetAgent, roster) ?? DEFAULT_ROLE_NAME) === agentName &&
       (payer === undefined || (c.fromUserId ?? '') === payer),
   )
   for (const c of pending) {
@@ -1231,7 +1288,7 @@ export function addQueuedCard(
 ): AgentTask | undefined {
   const clean = title.trim().slice(0, MAX_CARD_CHARS)
   if (!clean || !store.getCanvas(canvasId)) return undefined
-  const pipeline = normalizePipeline(agents)
+  const pipeline = normalizePipeline(agents, canvasRoster(canvasId))
   const target = normalizeScope(canvasId, scope)
   const pick = parseRunnerPick(runner)
   /* reference-image frame ids: only frames that actually live on this canvas */
@@ -1272,7 +1329,7 @@ export function addQueuedCard(
   logActivity(
     canvasId,
     resolveActor({ name: from, kind: 'user' }),
-    `queued a card for ${pipeline.map(roleName).join(' → ')}: “${clean}”`,
+    `queued a card for ${pipeline.map((id) => roleName(id, canvasRoster(canvasId))).join(' → ')}: “${clean}”`,
   )
   /* the resident agents pick queued cards up instantly (no-op without a key) */
   import('./resident.ts').then((r) => r.onFeedback(canvasId)).catch(() => {})
@@ -1397,13 +1454,14 @@ export function addRepoCards(canvasId: string, input: RepoImportInput, from: str
 /** `runner` (a `runnerKey`) narrows the claim to cards sent to one
  *  connection; unset takes them all. */
 export function takeQueuedCardsFor(canvasId: string, agentName: string, payer?: string, runner?: string): AgentTask[] {
+  const roster = canvasRoster(canvasId)
   const pending = (taskLog.get(canvasId) ?? []).filter(
     (t) =>
       t.queuedBy &&
       !t.agentName &&
       !t.failedAt &&
       !t.endedAt &&
-      stageAgent(t) === agentName &&
+      stageAgent(t, roster) === agentName &&
       (payer === undefined || (t.queuedByUserId ?? '') === payer) &&
       (runner === undefined || runnerKey(t.runner) === runner),
   )
@@ -1434,7 +1492,7 @@ export function advanceCard(canvasId: string, cardId: string, by: Actor): AgentT
   delete card.failureReason
   persist.saveTask(canvasId, card)
   broadcast(canvasId, { type: 'task', task: card })
-  logActivity(canvasId, by, `handed “${card.status}” to ${roleName(pipeline[next])}`)
+  logActivity(canvasId, by, `handed “${card.status}” to ${roleName(pipeline[next], canvasRoster(canvasId))}`)
   import('./resident.ts').then((r) => r.onFeedback(canvasId)).catch(() => {})
   return card
 }
@@ -1889,6 +1947,26 @@ export function broadcastLibrary(library: Pick<Canvas, 'id' | 'workspaceId'>, ac
   for (const canvas of store.allCanvases()) {
     if (canvas.id === library.id || (library.workspaceId && canvas.workspaceId === library.workspaceId))
       broadcast(canvas.id, { type: 'library', actor })
+  }
+}
+
+/** A canvas moved between a workspace and its owner's personal space (or got
+ *  an owner): its team is now another scope's, so its room hears the new one. */
+export function announceTeam(canvasId: string) {
+  const canvas = store.getCanvas(canvasId)
+  if (canvas) broadcast(canvas.id, { type: 'team', team: teamOfCanvas(canvas) })
+}
+
+/** A workspace's (or a person's own) custom agents changed: every canvas
+ *  that takes its agents from there gets the new list, so its mention picker
+ *  and its automation steps offer what the team now has. */
+export function broadcastCustomAgents(scope: { workspaceId: string } | { ownerId: string }) {
+  for (const canvas of store.allCanvases()) {
+    const hears =
+      'workspaceId' in scope
+        ? canvas.workspaceId === scope.workspaceId
+        : !canvas.workspaceId && canvas.ownerId === scope.ownerId
+    if (hears) broadcast(canvas.id, { type: 'team', team: teamOfCanvas(canvas) })
   }
 }
 

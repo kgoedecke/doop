@@ -385,6 +385,10 @@ export const feedback = pgTable(
     at: bigint('at', { mode: 'number' }).notNull(),
     deliveredAt: bigint('delivered_at', { mode: 'number' }),
     claimedBy: text('claimed_by'),
+    /** the claim came from a resident run (in-process), not an outside agent
+     *  that happens to share a resident's name; null on claims made before
+     *  custom agents, when only built-in names were resident */
+    claimedByResident: boolean('claimed_by_resident'),
     completedAt: bigint('completed_at', { mode: 'number' }),
     failedAt: bigint('failed_at', { mode: 'number' }),
     failureReason: text('failure_reason'),
@@ -499,6 +503,50 @@ export const fonts = pgTable(
     createdAt: bigint('created_at', { mode: 'number' }).notNull(),
   },
   (t) => [index('fonts_workspace_idx').on(t.workspaceId), index('fonts_owner_idx').on(t.ownerId)],
+)
+
+/** Custom agents (shared/customAgents.ts): specialists a workspace or a
+ *  person adds to the built-in team. `scope` is 'ws:<workspaceId>' or
+ *  'user:<userId>'; a handle is unique within it. */
+export const customAgents = pgTable(
+  'custom_agents',
+  {
+    id: text('id').primaryKey(),
+    scope: text('scope').notNull(),
+    handle: text('handle').notNull(),
+    name: text('name').notNull(),
+    color: text('color').notNull(),
+    blurb: text('blurb').notNull(),
+    brief: text('brief').notNull(),
+    reviewer: boolean('reviewer').notNull().default(false),
+    createdBy: text('created_by').notNull(),
+    createdAt: bigint('created_at', { mode: 'number' }).notNull(),
+    updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
+  },
+  (t) => [
+    uniqueIndex('custom_agents_scope_handle_idx').on(t.scope, t.handle),
+    uniqueIndex('custom_agents_scope_name_idx').on(t.scope, t.name),
+  ],
+)
+
+/** A workspace's or a person's changes to one built-in agent
+ *  (shared/agents.ts): switched off, or its colour, one-liner, instructions or
+ *  reviewer flag replaced. A null field keeps the built-in value; no row is
+ *  the built-in agent as it ships. `scope` as in `custom_agents`. */
+export const agentOverrides = pgTable(
+  'agent_overrides',
+  {
+    scope: text('scope').notNull(),
+    roleId: text('role_id').notNull(),
+    disabled: boolean('disabled').notNull().default(false),
+    color: text('color'),
+    blurb: text('blurb'),
+    brief: text('brief'),
+    reviewer: boolean('reviewer'),
+    updatedBy: text('updated_by').notNull(),
+    updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.scope, t.roleId] })],
 )
 
 /** Named design docs per canvas (brand rules, style recipes) — markdown

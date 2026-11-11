@@ -219,6 +219,9 @@ through several in order — design, then copy, then brand, then accessibility:
 
 ${AGENT_ROLES.map((r) => `- **${r.name}** (@${r.id}) — ${r.blurb}`).join('\n')}
 
+A canvas's team can have more specialists of its own (its workspace's, or its owner's):
+get_canvas lists them as \`customAgents\`, each with the @mention that reaches it.
+
 They only take work addressed to them: a board card at their stage, an element comment
 that @mentions them, or feedback on a task they ran. Anything left unaddressed is open
 to you. If a human asks you for something one of these roles owns, just do it — the

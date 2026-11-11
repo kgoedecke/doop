@@ -140,6 +140,8 @@ import { setStoredDefault } from './agentDefaults.ts'
 import { isRunnerProvider } from '../shared/agentRunner.ts'
 import { modelCatalogFor } from './modelCatalog.ts'
 import { mentionedRole } from '../shared/agents.ts'
+import { hydrateCustomAgents, rosterFor, teamOfCanvas } from './customAgents.ts'
+import { customAgentsRouter } from './customAgentRoutes.ts'
 import { activeAgentTasks } from '../shared/agentActivity.ts'
 import { colorFor } from '../shared/types.ts'
 import { isPeerViewport } from '../shared/viewport.ts'
@@ -170,6 +172,7 @@ await initDb()
 await backgrounds.initBackgrounds()
 initAuth()
 await syncAdmins() // ADMIN_EMAILS -> user.role, for accounts that already exist
+await hydrateCustomAgents() // before the logs: an interrupted claim is told apart by its agent's name
 let data = await persist.hydrate()
 if (data.canvases.length === 0 && (await persist.importLegacyJson())) {
   data = await persist.hydrate()
@@ -1024,7 +1027,7 @@ const ROLE_DENIED: Record<CanvasRole, string> = {
    agent would make the edits the link withholds. Answers the 403 itself. */
 function refuseAgentMention(req: express.Request, res: express.Response, canvasId: string, text: string): boolean {
   const canvas = store.getCanvas(canvasId)
-  if (!mentionedRole(text) || (canvas && canEditCanvas(req.user!.id, canvas))) return false
+  if (!mentionedRole(text, rosterFor(canvas)) || (canvas && canEditCanvas(req.user!.id, canvas))) return false
   res.status(403).json({ error: 'asking an agent to change the canvas needs edit access' })
   return true
 }
@@ -1066,6 +1069,14 @@ app.use('/api/image-descriptions', imageDescriptions.imageDescriptionsRouter)
 app.use('/api/notifications', notificationsRouter)
 app.use('/api/webhooks', webhooksRouter)
 app.use('/api/fonts', fontsRouter)
+app.use('/api/agents', customAgentsRouter)
+
+/* the custom agents a canvas's team has: its workspace's, or its owner's (the
+   automation editor asks for a step's canvas) */
+app.get('/api/canvases/:id/agents', (req, res) => {
+  const canvas = requireCanvas(req, res, req.params.id, 'view')
+  if (canvas) res.json(teamOfCanvas(canvas))
+})
 
 /* the font library a canvas designs with: its workspace's, or its owner's */
 app.get('/api/canvases/:id/fonts', (req, res) => {
@@ -1503,7 +1514,13 @@ app.post('/api/canvases/:id/duplicate', async (req, res) => {
 app.get('/api/canvases/:id', (req, res) => {
   const c = requireCanvas(req, res, req.params.id, 'view')
   /* the caller's own role rides along, so the editor knows to go read-only */
-  if (c) res.json({ ...c, role: canvasRole(req.user!.id, c), landingPageId: landingPageOf(c) })
+  if (c)
+    res.json({
+      ...c,
+      role: canvasRole(req.user!.id, c),
+      landingPageId: landingPageOf(c),
+      team: teamOfCanvas(c),
+    })
 })
 
 /* Community gallery listing — the owner's call alone, like link access.
@@ -1549,12 +1566,14 @@ app.put('/api/canvases/:id/workspace', (req, res) => {
     if (!requireGrowableWorkspace(req, res, target)) return
   }
   store.setWorkspace(c.id, target ?? undefined)
+  actions.announceTeam(c.id)
   res.json({ ok: true })
 })
 
 app.post('/api/canvases/:id/claim', (req, res) => {
   const c = store.claimCanvas(req.params.id, req.user!.id)
   if (!c) return res.status(409).json({ error: 'not found or already owned' })
+  actions.announceTeam(c.id)
   res.json({ ok: true })
 })
 
@@ -2755,7 +2774,7 @@ app.post('/api/frames/:id/comments', async (req, res) => {
   if (refuseAgentMention(req, res, frame.canvasId, String(text ?? ''))) return
   /* a comment that @mentions a resident agent is a new command to the team,
      so it's metered like a card; plain comments and replies stay free */
-  if (mentionedRole(String(text ?? ''))) {
+  if (mentionedRole(String(text ?? ''), actions.canvasRoster(frame.canvasId))) {
     const gate = await allowance.consumeResidentTask(req.user!.id)
     if (!gate.ok) {
       return res.status(403).json({ error: 'resident_limit', used: gate.used, limit: gate.limit })
@@ -2802,7 +2821,7 @@ app.post('/api/canvases/:id/comments', async (req, res) => {
   if (!body.trim()) return res.status(400).json({ error: 'empty text' })
   if (refuseAgentMention(req, res, canvas.id, body)) return
   let gate: Awaited<ReturnType<typeof allowance.consumeResidentTask>> | undefined
-  if (mentionedRole(body)) {
+  if (mentionedRole(body, actions.canvasRoster(canvas.id))) {
     gate = await allowance.consumeResidentTask(req.user!.id)
     if (!gate.ok) {
       return res.status(403).json({ error: 'resident_limit', used: gate.used, limit: gate.limit })
@@ -2838,7 +2857,7 @@ app.post('/api/comments/:id/replies', async (req, res) => {
   if (refuseAgentMention(req, res, found.canvasId, text)) return
   /* same rule as a fresh comment: only an @mention costs a resident task */
   let gate: Awaited<ReturnType<typeof allowance.consumeResidentTask>> | undefined
-  if (mentionedRole(text)) {
+  if (mentionedRole(text, actions.canvasRoster(found.canvasId))) {
     gate = await allowance.consumeResidentTask(req.user!.id)
     if (!gate.ok) {
       return res.status(403).json({ error: 'resident_limit', used: gate.used, limit: gate.limit })
@@ -3220,7 +3239,7 @@ function joinAsGuest(ws: WebSocket, canvasId: string, clientId: string, canvas: 
   const { guidelines: _guidelines, references: _references, memberIds: _memberIds, ...shown } = canvas
   send(ws, {
     type: 'init',
-    canvas: { ...shown, role, landingPageId: landingPageOf(canvas) },
+    canvas: { ...shown, role, landingPageId: landingPageOf(canvas), team: teamOfCanvas(canvas) },
     presences: [
       ...room(canvasId)
         .filter((c) => c.ws !== ws && !c.silent)
@@ -3307,7 +3326,7 @@ wss.on('connection', (ws, upgradeReq) => {
       const agents = [...(agentPresences.get(msg.canvasId)?.values() ?? [])]
       send(ws, {
         type: 'init',
-        canvas: { ...canvas, role, landingPageId: landingPageOf(canvas) },
+        canvas: { ...canvas, role, landingPageId: landingPageOf(canvas), team: teamOfCanvas(canvas) },
         presences: [...others, ...agents],
         activity: actions.getActivity(msg.canvasId),
         tasks: actions.getTasks(msg.canvasId),

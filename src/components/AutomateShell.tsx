@@ -1,5 +1,5 @@
 import type { SVGProps } from 'react'
-import { roleById } from '../../shared/agents'
+import { AGENT_ROLES, roleById } from '../../shared/agents'
 import { RoleMark } from './RoleMark'
 import { BrandMark } from './ui/brand-mark'
 import { Dot } from './ui/dot'
@@ -96,7 +96,8 @@ export function StepChain({
           {s.roles.map((id, j) => (
             <RoleMark
               key={id}
-              role={roleById(id)}
+              /* a custom agent wears the neutral mark here: a list spans canvases */
+              role={roleById(id, AGENT_ROLES)}
               size={size}
               className={cn(j > 0 && 'ring-[1.5px] ring-surface')}
               style={j > 0 ? { marginLeft: -Math.round(size * 0.3) } : undefined}

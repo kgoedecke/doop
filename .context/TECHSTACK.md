@@ -89,6 +89,27 @@
   of the values); `FRAME_STYLES` says to use `var(--…)` and never a frame's own `:root` palette;
   `COMPONENTS` says mains nest `<doop-use>` and the repetition rule holds inside them; the review
   checklist has a Reuse item. Tests: `frameStyleGuidance.test.ts`, `tokenComponentGuidance.test.ts`.
+- Agent teams (`shared/customAgents.ts`, `server/customAgents.ts`, `server/customAgentRoutes.ts`,
+  `src/components/CustomAgents.tsx`): the Doop Agent roster each workspace (Workspace → Agents) and
+  each person (Settings → Doop Agent, for their personal canvases) has, the way font libraries split.
+  The six built-in roles of `shared/agents.ts` can be switched off (Doop excepted: unaddressed work
+  goes to it) or edited (colour, one-liner, instructions, reviewer flag; Reset undoes the edits and
+  leaves on/off alone), stored per scope in `agent_overrides` with null for "as shipped". Custom
+  agents are `AgentRole`s with `custom: true`: a fixed handle (its role id and its only @mention
+  spelling) and name (its presence identity), editable colour, one-liner, instructions (up to 2,000
+  characters) and reviewer flag, at most 20 per scope, in `custom_agents`. `scope` is `ws:<id>` or
+  `user:<id>` in both tables (migration 0057), mirrored in memory. Instructions a team wrote (a
+  custom agent's, a rewritten built-in's: `briefByTeam`) sit in the resident's system prompt inside
+  `<role_instructions>`, under the shared rules. Every role lookup takes a `Roster`
+  (`actions.canvasRoster` / `rosterFor` on the server, `useRoster` / `useCanvasRoster` in the
+  browser): the canvas GET and room `init` carry `team` (every `brief` emptied, so view links never
+  read instructions) and a `team` room message updates open canvases, also when a canvas moves
+  between a workspace and its owner's personal space (`actions.announceTeam`). Comments, the composer (an
+  @mention there picks the card's pipeline), automation steps (the shared parser keeps the
+  candidate ids, `narrowStepRoles` picks the canvas's first real one on save, and the step's canvas
+  is checked again when it runs) and `get_canvas` (`customAgents`) read it. Work left for an agent
+  that is deleted or off goes to Doop. Routes: `/api/agents` and `/api/agents/builtin`
+  (`?workspace=`, members only). Tests: `customAgents.test.ts`, `customAgentsHttp.test.ts`.
 - Agent feedback (`server/agentFeedback.ts`, `shared/agentFeedback.ts`): agents talk to the Doop
   team through two MCP tools, which the resident agent has under the same names. `report_issue`
   (kind `issue`: `bug`, `tool_error`, `confusing`, `missing_capability`, `other`) is for where Doop
