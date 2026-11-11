@@ -163,6 +163,10 @@ export interface Canvas {
   /** the caller's own role, set on the copy a canvas GET or a room `init`
    *  hands one person; never stored */
   role?: CanvasRole
+  /** on a canvas that publishes a workspace library, the page its component
+   *  mains are on, where a link naming no page opens (shared/pages.ts). Set on
+   *  the copy a canvas GET or a room `init` hands out; never stored */
+  landingPageId?: string
   /** user ids invited to collaborate (the owner is not listed) */
   memberIds?: string[]
   /** reusable designs on this canvas; unset = none. See shared/components.ts. */

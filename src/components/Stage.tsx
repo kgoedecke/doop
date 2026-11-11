@@ -580,11 +580,14 @@ export function Stage({
     }
     const page = params?.get('page')
     const whole = useStore.getState().canvas
-    if (page && whole && page !== activePageId && canvasPages(whole).some((p) => p.id === page)) {
-      /* the page switch re-runs this effect, which then fits that page */
+    if (page && whole && canvasPages(whole).some((p) => p.id === page)) {
+      /* answered once: a page the person switches to later is theirs */
       deepLinkHandled.current = true
-      useStore.getState().setActivePage(page)
-      return
+      if (page !== activePageId) {
+        /* the page switch re-runs this effect, which then fits that page */
+        useStore.getState().setActivePage(page)
+        return
+      }
     }
     fit()
   }, [canvas, activePageId, fit, focusFrame, focusPoint, linkSearch])

@@ -176,6 +176,19 @@ restricts), `libraryPublish` on `WorkspaceSummary`, changed by an admin through
   frames that change go back to review, then a notice with what was updated, sent back to review
   and skipped. The tab's dot does not count this. A linked component wears the book glyph, has no Rename, and "Open its
   library" in place of "Go to main".
+- **Opening a library**: a library canvas opened by a link naming no page, frame or element lands
+  on the page its components are on, not the first page. The server decides which
+  (`landingPageOf` in `server/componentLibrary.ts`, from frame metadata, so no frame HTML is
+  loaded): the page holding the most published components' main frames, a tie going to the page
+  named "Components", then to page order. It rides on the canvas the GET and the room's `init`
+  hand out as `landingPageId`, never stored, so the editor opens on that page in its first paint
+  (`openingPageId` in `src/lib/pageLink.ts`). It is unset for a canvas that has published
+  nothing, or whose published components have no main on a page, and such a canvas opens on its
+  first page; a canvas that has components but is not a library is not affected. It applies when
+  the canvas is opened only: a page the person switches to, or a `page` / `frame` link, wins, and
+  on a library the first page's URL carries `?page=` since a bare link opens the components. The
+  value is read at join, so a canvas that starts or stops being a library while open keeps its
+  old default until it is opened again.
 - **Workspace page**: a Libraries pane beside Fonts (`WorkspaceLibraries.tsx`, every member):
   each library canvas with its component count, how many canvases use it, how many of those are
   on an older version and when it last published, a button to open it and, while any are behind,

@@ -1,6 +1,7 @@
 import { CAPTURE_PREFIX, pasteWebCapture } from '../lib/webCapture'
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { canEditOpenCanvas, pickedSelectors, roleOf, useStore } from '../lib/store'
+import { followPageInUrl } from '../lib/pageUrl'
 import { MOD_KEY, PRESENT_SHORTCUT_HINT, isControlTarget, isTypingTarget } from '../lib/keys'
 import { enterSelection, exitSelection, selectSibling } from '../lib/selectionKeys'
 import { dispatchActionKey, setActionHost, type ActionHost } from '../lib/actions/registry'
@@ -361,6 +362,9 @@ export function CanvasPage({
     useStore.getState().setLayersOpen(true)
     useStore.getState().setLayersTab('components')
   }, [canvasId, guest])
+
+  /* the open page rides in the URL (?page=), so a reload or a shared link lands on it */
+  useEffect(() => followPageInUrl(canvasId), [canvasId])
 
   useEffect(() => {
     connect(canvasId, guest)
