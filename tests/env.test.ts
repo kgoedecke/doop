@@ -17,19 +17,27 @@ describe('server/env.ts', () => {
     stubEnv('WEBHOOK_ALLOW_PRIVATE_URLS', '1')
     stubEnv('TRUSTED_ORIGINS', ' https://a.example, https://b.example ,')
     stubEnv('BETTER_AUTH_URL', 'https://doop.example/')
+    stubEnv('AUTH_IP_HEADERS', ' fly-client-ip, cf-connecting-ip , ')
+    stubEnv('AUTH_TRUSTED_PROXIES', ' 10.0.0.0/8, 172.16.0.0/12 , ')
     expect(env.MCP_UPLOADS_PER_MIN).toBe(2)
     expect(env.WEBHOOK_ALLOW_PRIVATE_URLS).toBe(true)
     expect(env.TRUSTED_ORIGINS).toEqual(['https://a.example', 'https://b.example'])
     expect(env.BETTER_AUTH_URL).toBe('https://doop.example')
+    expect(env.AUTH_IP_HEADERS).toEqual(['fly-client-ip', 'cf-connecting-ip'])
+    expect(env.AUTH_TRUSTED_PROXIES).toEqual(['10.0.0.0/8', '172.16.0.0/12'])
   })
 
   it('treats a blank value as unset and applies the default', () => {
     stubEnv('MCP_UPLOADS_PER_MIN', '')
     stubEnv('SMTP_SECURE', '   ')
     stubEnv('OPENAI_API_KEY', '')
+    stubEnv('AUTH_IP_HEADERS', '   ')
+    stubEnv('AUTH_TRUSTED_PROXIES', '')
     expect(env.MCP_UPLOADS_PER_MIN).toBe(15)
     expect(env.SMTP_SECURE).toBe(false)
     expect(env.OPENAI_API_KEY).toBeUndefined()
+    expect(env.AUTH_IP_HEADERS).toEqual([])
+    expect(env.AUTH_TRUSTED_PROXIES).toEqual([])
   })
 
   it('refuses a bad value at parse time and names the variable', () => {
