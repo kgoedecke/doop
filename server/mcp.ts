@@ -51,6 +51,7 @@ import {
   takePdfExportSlot,
 } from './pdfExport.ts'
 import { primeImage } from './previews.ts'
+import { MAX_LAYER_SELECTOR_CHARS, layerExport } from './layerExport.ts'
 import {
   DEFAULT_EXPORT_SCALE,
   MAX_EXPORT_SCALE,
@@ -1569,6 +1570,46 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
         height: pixels.height,
         note: 'Public URL, no auth needed. To publish: fetch the URL and upload the bytes to the target platform (e.g. WordPress POST /wp/v2/media), or hotlink it directly — it always shows the current design.',
       })
+    },
+  )
+
+  server.registerTool(
+    'export_layer',
+    {
+      title: 'Export one layer of a frame as an image',
+      description:
+        "Export ONE element (layer) of a frame as a PNG or JPG: the frame's CURRENT design rendered whole, then cut to that element's box, so inherited styles and whatever paints behind it are in the picture (as Figma exports a layer). Returns public URLs that re-render when the frame changes. Name the element by element_id (its data-doop-id attribute, as get_frame shows it) or, when it has none, by selector (any CSS selector; the first match is used). For the whole frame use export_frame.",
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      inputSchema: {
+        frame_id: z.string(),
+        element_id: z.string().optional().describe("the element's data-doop-id; preferred, it survives edits"),
+        selector: z
+          .string()
+          .max(MAX_LAYER_SELECTOR_CHARS)
+          .optional()
+          .describe('a CSS selector for an element without a data-doop-id, e.g. "#pricing .card:nth-of-type(2)"'),
+        format: z.enum(['png', 'jpg']).optional().describe('default png'),
+        quality: z.number().min(1).max(100).optional().describe('jpg only, default 90'),
+        scale: z
+          .number()
+          .min(MIN_EXPORT_SCALE)
+          .max(MAX_EXPORT_SCALE)
+          .optional()
+          .describe(`pixel density, default ${DEFAULT_EXPORT_SCALE}`),
+      },
+    },
+    async ({ frame_id, element_id, selector, format, quality, scale }) => {
+      const f = frameFor(frame_id, 'view')
+      if (!f) return noFrame(frame_id)
+      if (!element_id === !selector) return err('pass exactly one of element_id or selector')
+      const result = layerExport(f, element_id ? { elementId: element_id } : { selector: selector! }, {
+        format,
+        quality,
+        scale,
+      })
+      if (!result.ok) return err(result.error)
+      const { ok: _ok, ...urls } = result
+      return text(urls)
     },
   )
 

@@ -7,6 +7,7 @@ import { guardPublicPageRequests } from './publicUrl.ts'
 import { withHostedIcons } from './iconProxy.ts'
 import { withHostedPhotos } from './photoProxy.ts'
 import { renderedHeight } from './renderLimits.ts'
+import { LayerNotFoundError } from './layerExport.ts'
 import {
   createRenderer,
   remoteConnectFailure,
@@ -430,6 +431,10 @@ export interface RenderOptions extends PageOptions {
   type?: 'png' | 'jpeg'
   quality?: number
   maxHeight?: number
+  /** cut the render to the box of the first element this CSS selector
+   *  matches (a layer export); rejects with LayerNotFoundError when nothing
+   *  visible matches */
+  layer?: string
 }
 
 export function renderFrame(
@@ -449,6 +454,49 @@ export function renderFrame(
   )
 }
 
+interface Clip {
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
+/** The layer's rendered box in design px, whole pixels outward, within
+ *  the frame: what the canvas shows of it, since a frame clips what
+ *  overflows it. The pixel budget bounds the crop itself, not the frame,
+ *  so a layer low on a huge frame still renders. */
+async function layerClip(page: Page, selector: string, frame: Frame, scale: number): Promise<Clip> {
+  const box = await page.evaluate((sel: string) => {
+    let el: Element | null
+    try {
+      el = document.querySelector(sel)
+    } catch {
+      return 'invalid' as const
+    }
+    if (!el) return null
+    const r = el.getBoundingClientRect()
+    return {
+      left: r.left + window.scrollX,
+      top: r.top + window.scrollY,
+      right: r.right + window.scrollX,
+      bottom: r.bottom + window.scrollY,
+    }
+  }, selector)
+  if (box === 'invalid') throw new LayerNotFoundError(`"${selector}" is not a valid CSS selector`)
+  if (!box) throw new LayerNotFoundError(`no element matches ${selector}`)
+  const width = Math.max(1, Math.round(frame.width))
+  const height = Math.max(1, Math.round(frame.height))
+  /* judged before rounding outward, which would give an empty box a pixel */
+  const visible =
+    Math.min(width, box.right) - Math.max(0, box.left) > 0 && Math.min(height, box.bottom) - Math.max(0, box.top) > 0
+  if (!visible) throw new LayerNotFoundError(`${selector} has no visible size inside the frame`)
+  const x = Math.max(0, Math.floor(box.left))
+  const y = Math.max(0, Math.floor(box.top))
+  const clipWidth = Math.min(width, Math.ceil(box.right)) - x
+  const budget = renderedHeight({ width: clipWidth, height }, scale)
+  return { x, y, width: clipWidth, height: Math.min(Math.ceil(box.bottom), height, y + budget) - y }
+}
+
 async function screenshotOn(page: Page, frame: Frame, scale: number, opts: RenderOptions): Promise<Buffer> {
   const width = Math.max(1, Math.round(frame.width))
   const fullHeight = Math.max(1, Math.round(frame.height))
@@ -458,7 +506,11 @@ async function screenshotOn(page: Page, frame: Frame, scale: number, opts: Rende
      pixel budget bounds only the captured image below */
   await page.setViewport({ width, height: fullHeight, deviceScaleFactor: scale })
   const type = opts.type ?? 'png'
-  const clip = height < fullHeight ? { x: 0, y: 0, width, height } : undefined
+  const clip = opts.layer
+    ? await layerClip(page, opts.layer, frame, scale)
+    : height < fullHeight
+      ? { x: 0, y: 0, width, height }
+      : undefined
   const buf = await page.screenshot({
     type,
     ...(type === 'jpeg' ? { quality: opts.quality ?? 90 } : {}),

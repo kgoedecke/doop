@@ -12,6 +12,8 @@ export const inspector = {
   groupMemory: 'Memory',
   exportImageTitle: 'Download the frame at the scale and format picked above',
   copyPngTitle: 'Copy the image ({scale}) to paste anywhere',
+  exportLayer: 'Export {name}',
+  exportLayerTitle: 'Download this layer at the scale and format picked above, cut from its frame as you see it',
   copyPng: 'Copy as PNG',
   copyImageUrlTitle:
     'Public image URL — always renders the current design; paste it as og:image or a blog featured image',
