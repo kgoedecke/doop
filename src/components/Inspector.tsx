@@ -290,7 +290,7 @@ export function Inspector({
         <InspectorGroup title={t('inspector.groupExport')}>
           <div className="grid grid-cols-2 gap-1.5">
             <div className="col-span-2">
-              <ExportOptions value={exportSettings} onChange={setExportSettings} />
+              <ExportOptions value={exportSettings} onChange={setExportSettings} compact />
             </div>
             <Button
               variant="bare"

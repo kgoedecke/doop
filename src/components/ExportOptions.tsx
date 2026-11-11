@@ -22,11 +22,15 @@ export function ExportOptions({
   value,
   onChange,
   withFormat = true,
+  compact = false,
 }: {
   value: ExportSettings
   onChange: (patch: Partial<ExportSettings>) => void
   withFormat?: boolean
+  /** the Inspector's 26px property wells instead of the modal's ring controls */
+  compact?: boolean
 }) {
+  const triggerSize = compact ? 'field' : 'sm'
   const t = useT()
   /* picking Custom shows the field even while the scale is still a preset */
   const [typing, setTyping] = useState(false)
@@ -54,7 +58,7 @@ export function ExportOptions({
             onChange({ scale: Number(next) })
           }}
         >
-          <SelectTrigger size="sm" className="min-w-0 flex-1" aria-label={t('panels.exportScale')}>
+          <SelectTrigger size={triggerSize} className="min-w-0 flex-1" aria-label={t('panels.exportScale')}>
             <SelectValue>{formatExportScale(vector ? 1 : value.scale)}</SelectValue>
           </SelectTrigger>
           <SelectContent>
@@ -69,7 +73,7 @@ export function ExportOptions({
         </Select>
         {withFormat && (
           <Select value={value.format} onValueChange={(next) => onChange({ format: next as FrameExportFormat })}>
-            <SelectTrigger size="sm" className="min-w-0 flex-1" aria-label={t('panels.exportFormat')}>
+            <SelectTrigger size={triggerSize} className="min-w-0 flex-1" aria-label={t('panels.exportFormat')}>
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -86,8 +90,8 @@ export function ExportOptions({
         <Input
           /* a new committed scale resets what the field shows */
           key={value.scale}
-          variant="mono"
-          inputSize="sm"
+          variant={compact ? 'field' : 'mono'}
+          inputSize={compact ? 'auto' : 'sm'}
           inputMode="decimal"
           defaultValue={String(value.scale)}
           aria-label={t('panels.exportScaleCustomLabel')}

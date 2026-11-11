@@ -29,6 +29,9 @@ const selectTriggerVariants = cva(
       size: {
         sm: 'h-8 text-body',
         md: 'h-9 text-copy',
+        /* the inspector's property well, as `SelectField` draws it */
+        field:
+          'h-[26px] gap-1 rounded-[7px] bg-sub px-2 font-sans text-[11.5px] font-normal shadow-none hover:shadow-none [&>svg]:size-2.5',
       },
     },
     defaultVariants: { size: 'md' },
