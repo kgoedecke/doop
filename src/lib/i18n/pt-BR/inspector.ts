@@ -11,6 +11,8 @@ export const inspector: Catalog['inspector'] = {
   groupMemory: 'Memória',
   exportImageTitle: 'Baixar o frame na escala e no formato escolhidos acima',
   copyPngTitle: 'Copiar a imagem ({scale}) para colar em qualquer lugar',
+  exportLayer: 'Exportar {name}',
+  exportLayerTitle: 'Baixar esta camada na escala e no formato escolhidos acima, recortada do frame como você a vê',
   copyPng: 'Copiar como PNG',
   copyImageUrlTitle:
     'URL pública da imagem — sempre mostra o design atual; cole como og:image ou imagem de destaque de um blog',

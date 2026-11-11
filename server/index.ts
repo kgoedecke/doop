@@ -58,6 +58,7 @@ import { WebSocketServer, WebSocket } from 'ws'
 import { GuideLimitError, PageLimitError, store } from './store.ts'
 import { parseGuide } from '../shared/guides.ts'
 import { getImage } from './previews.ts'
+import { LayerNotFoundError, layerRefFromQuery, layerSelector } from './layerExport.ts'
 import * as actions from './actions.ts'
 import { captureFeature, captureTokenResults } from './featureEvents.ts'
 import { liveActivitiesRouter, logLiveActivityRequests, startLiveActivityDelivery } from './liveActivities.ts'
@@ -516,6 +517,9 @@ app.get('/i/:id.:ext', async (req, res) => {
   const frame = store.getFrame(id)
   if (!frame) return res.status(404).end()
 
+  /* ?element=<data-doop-id> or ?selector=<css>: one layer, cut from the render */
+  const layer = layerRefFromQuery(req.query)
+  if (layer === null) return res.status(400).json({ error: 'element must be a data-doop-id; selector a CSS selector' })
   /* any multiplier the export picker offers; a missing or unreadable one
      is 1x, as before there was a picker */
   const scale = fitExportScale(frame, parseExportScale(req.query.scale) ?? 1)
@@ -526,7 +530,8 @@ app.get('/i/:id.:ext', async (req, res) => {
       scale,
       quality: Math.min(100, Math.max(1, Number(req.query.quality) || 90)),
       /* ?preview — the dashboard-card variant; see previews.ts */
-      preview: req.query.preview !== undefined,
+      preview: !layer && req.query.preview !== undefined,
+      layer: layer ? layerSelector(layer) : undefined,
       ip: req.ip ?? 'unknown',
       /* the render limit targets anonymous hotlink abuse — a logged-in user
          loading a dashboard of many canvases shouldn't hit it (and behind
@@ -536,6 +541,7 @@ app.get('/i/:id.:ext', async (req, res) => {
         !!(await auth.api.getSession({ headers: fromNodeHeaders(req.headers) }).catch(() => null)),
     })
   } catch (e) {
+    if (e instanceof LayerNotFoundError) return res.status(404).json({ error: e.message })
     return sendRenderFailure(res, e)
   }
   if (result.status === 'rate-limited') {
@@ -548,7 +554,8 @@ app.get('/i/:id.:ext', async (req, res) => {
   res.set('Cache-Control', 'public, max-age=60')
   if (req.query.download !== undefined) {
     const safe = frame.name.replace(/[^\w\- ]+/g, '').trim() || 'frame'
-    res.set('Content-Disposition', `attachment; filename="${safe}${exportScaleSuffix(scale)}.${ext}"`)
+    const part = layer ? ` ${'elementId' in layer ? layer.elementId : 'layer'}` : ''
+    res.set('Content-Disposition', `attachment; filename="${safe}${part}${exportScaleSuffix(scale)}.${ext}"`)
   }
   res.send(buf)
 })

@@ -565,6 +565,8 @@ For print, a client handoff or a deck, export_frame with format "pdf" returns th
 (an embedded application/pdf resource, not a URL): vector, text selectable, one page per frame
 at the frame's own size. Pass frame_ids to bind several frames of one canvas into one multi-page
 PDF; pages follow the order given (frame_id first, then frame_ids as listed).
+For one element of a frame (a card, a logo, a chart) use export_layer: the frame renders whole and is
+cut to that element's box. Name it by element_id (its data-doop-id) or a CSS selector.
 
 ## Multiplayer etiquette
 

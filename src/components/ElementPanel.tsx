@@ -103,6 +103,7 @@ import {
   StaticField,
 } from './ui/property-field'
 import { useT, type PlainMessageKey } from '../lib/i18n'
+import { LayerExportSection } from './LayerExportSection'
 
 const TAB_KEY = 'doop:element-panel-tab'
 /* Only refreshes wait for streaming chunks to settle; a new selection is
@@ -310,6 +311,7 @@ export function ElementPanel({
             ) : (
               <Waiting hasText={hasText} />
             )}
+            <LayerExportSection frame={frame} target={{ selector, name: name ?? 'element' }} />
           </PanelBody>
         </PanelTabPanel>
         <PanelTabPanel value="html">

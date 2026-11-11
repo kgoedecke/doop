@@ -302,7 +302,14 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   `copyElementPng`): the frame is rendered whole and cut to the element's live box
   (`doop:inspect` rect, `clipToFrame`, the raster's `clip` option), so every style it inherits
   and whatever paints behind it stay in the picture; a server render is cropped here the same
-  way (`cropRaster`), and a frame off screen says so. Tests: `frameRaster.test.ts`,
+  way (`cropRaster`), and a frame off screen says so. The element panel's Design tab ends with the same
+  Export section (`LayerExportSection.tsx`: the shared scale and format, "Export <layer>", Copy as
+  PNG), as Figma ends a layer's properties. Agents export a layer with `export_layer` (MCP and the
+  resident, `server/layerExport.ts`), named by `element_id` (its `data-doop-id`) or a CSS
+  `selector`; it returns `/i/<frameId>.<ext>?scale=&element=` (or `&selector=`), which renders the
+  frame whole and screenshots the first match's box clipped to the frame (`layer` in
+  `renderFrame`; a missing, invalid or empty match is a 404). Tests: `layerExport.test.ts`, `layerExportHttp.test.ts`,
+  `layerExportSection.test.tsx`. Tests: `frameRaster.test.ts`,
   `frameRasterBrowser.test.ts` (pixels in Chromium, the live runtime included),
   `frameExport.test.ts`. Scale and format (`shared/exportScale.ts`, `src/lib/exportSettings.ts`,
   `ExportOptions.tsx`): the Inspector's Export group and the Export… dialog (frames, and elements

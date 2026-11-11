@@ -2,6 +2,8 @@ import { env } from './env.ts'
 import { MAX_DECISION_CHARS } from '../shared/designDecisions.ts'
 import type Anthropic from '@anthropic-ai/sdk'
 import { store } from './store.ts'
+import { layerExport } from './layerExport.ts'
+import { MAX_EXPORT_SCALE, MIN_EXPORT_SCALE } from '../shared/exportScale.ts'
 import { fontsForCanvas } from './fonts.ts'
 import { libraryBrief } from '../shared/fonts.ts'
 import { webFontsBrief } from '../shared/webFonts.ts'
@@ -1630,6 +1632,23 @@ const TOOLS: Anthropic.Tool[] = [
       required: ['frame_id'],
     },
   },
+  {
+    name: 'export_layer',
+    description:
+      "Export ONE element (layer) of a frame as a PNG or JPG: the frame rendered whole, cut to that element's box. Returns public URLs that re-render when the frame changes. Name the element by element_id (its data-doop-id) or, when it has none, by selector (any CSS selector; the first match is used).",
+    input_schema: {
+      type: 'object',
+      properties: {
+        frame_id: { type: 'string' },
+        element_id: { type: 'string', description: "the element's data-doop-id" },
+        selector: { type: 'string', description: 'a CSS selector, for an element without a data-doop-id' },
+        format: { type: 'string', enum: ['png', 'jpg'] },
+        quality: { type: 'number', minimum: 1, maximum: 100 },
+        scale: { type: 'number', minimum: MIN_EXPORT_SCALE, maximum: MAX_EXPORT_SCALE },
+      },
+      required: ['frame_id'],
+    },
+  },
 ]
 
 /* the same tools as MCP, minus the arguments a resident run already has */
@@ -2405,6 +2424,29 @@ export async function execTool(
           cleared: frameId === null,
         })
         return ok(JSON.stringify({ pages: result.pages }))
+      }
+      case 'export_layer': {
+        const raw = block.input as {
+          frame_id?: unknown
+          element_id?: unknown
+          selector?: unknown
+          format?: unknown
+          quality?: unknown
+          scale?: unknown
+        }
+        const f = typeof raw.frame_id === 'string' ? store.getFrame(raw.frame_id) : undefined
+        if (!f || f.canvasId !== canvasId) return fail('frame not found on this canvas')
+        const elementId = typeof raw.element_id === 'string' ? raw.element_id : undefined
+        const selector = typeof raw.selector === 'string' ? raw.selector : undefined
+        if (!elementId === !selector) return fail('pass exactly one of element_id or selector')
+        const result = layerExport(f, elementId ? { elementId } : { selector: selector! }, {
+          format: raw.format === 'jpg' ? 'jpg' : 'png',
+          quality: typeof raw.quality === 'number' ? Math.min(100, Math.max(1, raw.quality)) : undefined,
+          scale: typeof raw.scale === 'number' ? raw.scale : undefined,
+        })
+        if (!result.ok) return fail(result.error)
+        const { ok: _ok, ...urls } = result
+        return ok(JSON.stringify(urls))
       }
       case 'screenshot_frame': {
         const f = store.getFrame(input.frame_id)
