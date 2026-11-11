@@ -280,6 +280,15 @@ export async function removeComponent(def: ComponentDef) {
   }
 }
 
+/** The part key of a component's root. Its instances' overrides of the root sit
+ *  under it, even on a nested instance, whose own part attribute names its
+ *  place in the outer component instead. */
+export function rootPartKey(def: ComponentDef): string | undefined {
+  const holder = document.createElement('template')
+  holder.innerHTML = def.template
+  return holder.content.firstElementChild?.getAttribute(PART_ATTR) ?? undefined
+}
+
 /** Rename a component. Its instances are linked by id, so they keep working; the server
  *  refuses a name another component here has, and that reason is what the person sees.
  *  Not undoable, like its description. Resolves to the name the component now has (the

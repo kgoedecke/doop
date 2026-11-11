@@ -740,8 +740,9 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   resident agent. `src/lib/components.ts` and `ComponentsPanel.tsx` (the Layers panel's Components
   tab, beside Tokens) / `ComponentSection.tsx` are the editor's side. A component is renamed from its card's menu
   or a double-click on its name in that tab, or from its main's Layers row (`renameComponent`; instances are
-  linked by id, so they follow); an instance's row is not renamed on its own. Stored in `components`
-  (migration `0052_components`). Tests: `components.test.ts`, `componentsEdgeCases.test.ts`,
+  linked by id, so they follow). As in Figma, renaming an instance's row names that layer
+  alone (`data-doop-name`, kept as an override of that instance, still linked). Stored in `components`
+  (migration `0049_components`). Tests: `components.test.ts`, `componentsEdgeCases.test.ts`,
   `componentTools.test.ts`, `componentsRoutes.test.ts`, `componentsBrowser.test.ts`.
 - Prototypes (`.context/specs/prototyping.md`): interactions are `data-doop-on` /
   `data-doop-action` (or the JSON `data-doop-interactions`) attributes in frame HTML, parsed by
