@@ -752,7 +752,9 @@ export function buildMcpServer(
     async ({ canvas_id, name, markdown, title, agent_name }) => {
       if (!canvasFor(canvas_id, 'edit')) return noCanvas(canvas_id)
       if (!env.AGENT_GUIDELINE_WRITES)
-        return err('style guides on this instance are written by people (AGENT_GUIDELINE_WRITES=false); propose the change in a comment instead')
+        return err(
+          'style guides on this instance are written by people (AGENT_GUIDELINE_WRITES=false); propose the change in a comment instead',
+        )
       const actor = actorFrom(agent_name)
       try {
         const doc = actions.setGuideline(canvas_id, name, markdown, actor, undefined, title)

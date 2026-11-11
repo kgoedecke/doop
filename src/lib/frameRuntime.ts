@@ -19,13 +19,22 @@ import { CANVAS_MOD_CHORDS } from './keys'
  * connections are limited to blob: and data: (the runtime's own image
  * cloning); no nested frames, no form submission.
  */
-export const FRAME_CSP =
-  "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline' https://fonts.googleapis.com; " +
-  "font-src https://fonts.gstatic.com data:; img-src https: data: blob:; media-src https: data: blob:; " +
-  "connect-src blob: data:; frame-src 'none'; form-action 'none'; base-uri 'none'"
+export function frameCsp(appOrigin: string): string {
+  const own = appOrigin ? ` ${appOrigin}` : ''
+  return (
+    `default-src 'none'; script-src 'unsafe-inline'${own}; style-src 'unsafe-inline'${own} https:; ` +
+    `font-src${own} https: data:; img-src${own} https: data: blob:; media-src${own} https: data: blob:; ` +
+    `connect-src${own} blob: data:; frame-src 'none'; form-action 'none'; base-uri 'none'`
+  )
+}
 
-export const FRAME_BOOTSTRAP = `<!doctype html>
-<html><head><meta http-equiv="Content-Security-Policy" content="${FRAME_CSP}"></head><body><script data-v-boot>
+/** The bootstrap document for one app origin: the origin may serve the frame scripts, styles and assets. */
+export function frameBootstrap(appOrigin: string): string {
+  return FRAME_BOOTSTRAP_TEMPLATE.replace('__FRAME_CSP__', frameCsp(appOrigin))
+}
+
+const FRAME_BOOTSTRAP_TEMPLATE = `<!doctype html>
+<html><head><meta http-equiv="Content-Security-Policy" content="__FRAME_CSP__" data-v-boot></head><body><script data-v-boot>
 (function () {
   ${FRAME_REPLAY_RUNTIME}
   ${FRAME_DROP_RUNTIME}
@@ -291,6 +300,8 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
     }
     var boot = root.querySelector('script[data-v-boot]')
     if (boot && boot.parentNode) boot.parentNode.removeChild(boot)
+    var csp = root.querySelector('meta[data-v-boot]')
+    if (csp && csp.parentNode) csp.parentNode.removeChild(csp) // the policy is ours, not the design's
     var es = root.querySelector('style[data-v-edit]')
     if (es && es.parentNode) es.parentNode.removeChild(es)
     var ran = root.querySelectorAll('[data-v-ran]')
@@ -1681,3 +1692,6 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
   parent.postMessage({ type: 'doop:frame-ready' }, '*')
 })()
 </script></body></html>`
+
+/** The bootstrap for this app's origin (the module is only ever loaded in the browser). */
+export const FRAME_BOOTSTRAP = frameBootstrap(typeof location !== 'undefined' ? location.origin : '')
