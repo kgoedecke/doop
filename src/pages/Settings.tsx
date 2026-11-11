@@ -39,7 +39,7 @@ import {
   DashTitle,
 } from '../components/ui/dash'
 
-type Pane = 'general' | 'agent' | 'fonts' | 'keys' | 'webhooks' | 'account' | 'appearance'
+type Pane = 'general' | 'account' | 'appearance' | 'agent' | 'keys' | 'webhooks' | 'fonts'
 
 /* the heading over each pane, and the line under it */
 const panes: Record<Pane, { title: PlainMessageKey; blurb: PlainMessageKey }> = {
@@ -119,19 +119,27 @@ export function Settings() {
           </DashNavItem>
           <DashNavItem
             density="rail"
+            icon={<UserIcon size="rail" />}
+            active={pane === 'account'}
+            onClick={() => setPane('account')}
+          >
+            {t('settings.accountTitle')}
+          </DashNavItem>
+          <DashNavItem
+            density="rail"
+            icon={<MoonIcon size="rail" />}
+            active={pane === 'appearance'}
+            onClick={() => setPane('appearance')}
+          >
+            {t('settings.appearanceTitle')}
+          </DashNavItem>
+          <DashNavItem
+            density="rail"
             icon={<SparkIcon size="rail" />}
             active={pane === 'agent'}
             onClick={() => setPane('agent')}
           >
             {t('settings.agentTitle')}
-          </DashNavItem>
-          <DashNavItem
-            density="rail"
-            icon={<TextIcon size="rail" />}
-            active={pane === 'fonts'}
-            onClick={() => setPane('fonts')}
-          >
-            {t('settings.fontsTitle')}
           </DashNavItem>
           <DashNavItem
             density="rail"
@@ -151,19 +159,11 @@ export function Settings() {
           </DashNavItem>
           <DashNavItem
             density="rail"
-            icon={<UserIcon size="rail" />}
-            active={pane === 'account'}
-            onClick={() => setPane('account')}
+            icon={<TextIcon size="rail" />}
+            active={pane === 'fonts'}
+            onClick={() => setPane('fonts')}
           >
-            {t('settings.accountTitle')}
-          </DashNavItem>
-          <DashNavItem
-            density="rail"
-            icon={<MoonIcon size="rail" />}
-            active={pane === 'appearance'}
-            onClick={() => setPane('appearance')}
-          >
-            {t('settings.appearanceTitle')}
+            {t('settings.fontsTitle')}
           </DashNavItem>
         </nav>
         <div className="mt-auto flex items-center gap-2.5 px-1 pt-4">
