@@ -1,6 +1,7 @@
 import { serializeOuter } from 'parse5'
 import { CSS_ATTR, type ComponentDef, type InstanceOverrides } from '../shared/components.ts'
 import type { Frame } from '../shared/types.ts'
+import { withCanvasFaces } from './canvasFaces.ts'
 import { contextFor } from './components.ts'
 import { renderInstance } from './componentEngine.ts'
 
@@ -64,12 +65,17 @@ export function previewDocument(
   })
   const columns = Math.min(combos.length, 3)
   const rows = Math.ceil(combos.length / columns)
-  const html = `<!doctype html><html><head>${stylesFor(canvasId, def)}<style>
+  /* the canvas's tokens and fonts, as on every frame: a component styled through
+     var(--…) would otherwise preview with none of its values */
+  const html = withCanvasFaces(
+    canvasId,
+    `<!doctype html><html><head>${stylesFor(canvasId, def)}<style>
 html,body{margin:0;background:#fff}
 main{display:grid;grid-template-columns:repeat(${columns},1fr);gap:1px;background:#eee;min-height:100vh}
 figure{margin:0;background:#fff;padding:20px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;min-width:0;overflow:hidden}
 figcaption{font:11px/1.3 ui-monospace,monospace;color:#777}
-</style></head><body><main>${cells.join('')}</main></body></html>`
+</style></head><body><main>${cells.join('')}</main></body></html>`,
+  )
   return { html, width: SHEET_WIDTH, height: rows * CELL_HEIGHT, variants: combos.length }
 }
 

@@ -27,10 +27,21 @@ import { Input } from './ui/input'
 import { PanelSearch } from './ui/panel'
 
 /** A component's sheet in an inert iframe: no scripts, no clicks, scaled to the card. */
+/** A short fingerprint of a string, to key a refetch on content rather than identity. */
+function stamp(text: string): string {
+  let hash = 0
+  for (let i = 0; i < text.length; i++) hash = (Math.imul(hash, 31) + text.charCodeAt(i)) | 0
+  return (hash >>> 0).toString(36)
+}
+
 function ComponentThumb({ def, canvasId }: { def: ComponentDef; canvasId: string }) {
   const t = useT()
   const [sheet, setSheet] = useState<{ key: string; html: string; width: number; height: number } | null>(null)
-  const key = `${def.id}:${def.rev}`
+  /* the sheet carries the canvas's token values, so a token edit redraws it as a revision does */
+  const tokens = useStore((s) => s.canvas?.tokens)
+  const themes = useStore((s) => s.canvas?.tokenThemes)
+  const tokenStamp = useMemo(() => stamp(JSON.stringify([tokens ?? [], themes ?? []])), [tokens, themes])
+  const key = `${def.id}:${def.rev}:${tokenStamp}`
   /* the panel is resizable, so the sheet scales to the card it is in */
   const box = useRef<HTMLDivElement>(null)
   const [boxWidth, setBoxWidth] = useState(0)
