@@ -32,7 +32,7 @@ export function WorkingNow({ style, className }: { style?: CSSProperties; classN
         >
           {p.kind === 'agent' ? (
             <span className="grid size-[13px] flex-none place-items-center">
-              <AgentIcon name={p.name} size={13} />
+              <AgentIcon name={p.name} brand={p.brand} size={13} />
             </span>
           ) : (
             <span className="size-2 flex-none rounded-full" style={{ background: p.color }} />

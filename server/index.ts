@@ -126,7 +126,7 @@ import { isPeerViewport } from '../shared/viewport.ts'
 import { exportScaleSuffix, fitExportScale, parseExportScale } from '../shared/exportScale.ts'
 import { emailShare } from './canvasShares.ts'
 import * as userEvents from './userEvents.ts'
-import type { Canvas, ClientMessage, Presence, ServerMessage } from '../shared/types.ts'
+import type { Actor, Canvas, ClientMessage, Presence, ServerMessage } from '../shared/types.ts'
 
 const PORT = env.PORT
 
@@ -323,8 +323,9 @@ function agentTouch(
   agentName: string,
   frameId?: string | null,
   status?: string | null,
-  owner?: string,
+  identity?: Pick<Actor, 'owner' | 'brand'>,
 ) {
+  const owner = identity?.owner
   let byName = agentPresences.get(canvasId)
   if (!byName) agentPresences.set(canvasId, (byName = new Map()))
   let p = byName.get(agentName)
@@ -336,6 +337,7 @@ function agentTouch(
       color: colorFor(agentName),
       kind: 'agent',
       owner,
+      brand: identity?.brand,
       lastSeen: Date.now(),
       activeFrameId: frameId ?? null,
     }
@@ -343,6 +345,10 @@ function agentTouch(
   }
   p.lastSeen = Date.now()
   if (owner && !p.owner) p.owner = owner
+  /* a presence first seen through a task update has no client to read; the
+     next tool call brings one, and viewers get the presence again */
+  const learnedBrand = !isNew && !!identity?.brand && p.brand !== identity.brand
+  if (learnedBrand) p.brand = identity?.brand
   if (frameId !== undefined) p.activeFrameId = frameId
   let statusChanged = false
   if (status !== undefined) {
@@ -352,7 +358,7 @@ function agentTouch(
       statusChanged = true
     }
   }
-  if (isNew) {
+  if (isNew || learnedBrand) {
     broadcast(canvasId, { type: 'presence:join', presence: p })
   } else {
     if (frameId !== undefined) {

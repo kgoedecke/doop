@@ -1,4 +1,5 @@
 import { env } from './env.ts'
+import { resolveAgentBrand } from '../shared/agentBrand.ts'
 import { MAX_DECISION_CHARS } from '../shared/designDecisions.ts'
 import packageJson from '../package.json' with { type: 'json' }
 import { createHash } from 'node:crypto'
@@ -343,14 +344,12 @@ function frameSummary(
 /** owner is the connecting user's display name (for attribution); ownerId is
  *  their user id — canvases the agent creates or lists are scoped to it, the
  *  same isolation the web UI gets. clientName names the connecting client
- *  when this server did not see its initialize (handleMcpRequest builds one
- *  server per stateless request). */
-export function buildMcpServer(
-  owner?: string,
-  ownerId?: string,
-  clientName?: () => Promise<string | undefined>,
-): McpServer {
-  const actorFrom = (agent_name?: string) => actions.resolveActor({ name: agent_name, kind: 'agent', owner })
+ *  (handleMcpRequest builds one server per stateless request, so it is the
+ *  name remembered from initialize, else the OAuth application's): feedback
+ *  records it and agent presence reads its brand from it. */
+export function buildMcpServer(owner?: string, ownerId?: string, clientName?: string): McpServer {
+  const actorFrom = (agent_name?: string) =>
+    actions.resolveActor({ name: agent_name, kind: 'agent', owner, brand: resolveAgentBrand(clientName, agent_name) })
   /* Canvas access for agents mirrors the web UI: the OAuth user's id runs
      through the same canvasRole gate as browser sessions, so an agent
      connected by someone holding a view or comment link reads but cannot
@@ -1213,7 +1212,7 @@ export function buildMcpServer(
       message: input.message,
       tool: input.tool,
       agentName: input.agent_name,
-      client: server.server.getClientVersion()?.name ?? (await clientName?.()),
+      client: server.server.getClientVersion()?.name ?? clientName,
       canvasId: input.canvas_id,
       userId: ownerId,
     })
@@ -2519,7 +2518,7 @@ export async function handleMcpRequest(req: Request, res: Response) {
   }
   const owner = session?.userId ? await getUserName(session.userId) : undefined
   const oauthClientId = session?.clientId
-  const clientName = async () =>
+  const clientName =
     (bearer ? clientNamesByCredential.get(credentialKey(bearer)) : undefined) ??
     (oauthClientId ? await oauthClientName(oauthClientId) : undefined)
   const server = buildMcpServer(owner, session?.userId ?? undefined, clientName)
