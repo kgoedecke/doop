@@ -1,4 +1,5 @@
 import type { Frame } from '../../shared/types'
+import { MAX_PLACED_IMAGE_DIM, canvasImageHtml, placedImageSize } from '../../shared/canvasImage'
 import { api } from './api'
 import { useStore } from './store'
 import { posthog } from './posthog'
@@ -136,32 +137,6 @@ export function pasteFrameCentered(canvasId: string) {
 
 /* ---- image paste: clipboard bitmap -> uploaded asset -> image frame ---- */
 
-/** Frames larger than this get scaled down on paste (retina screenshots
- *  would otherwise land enormous); the asset keeps its full resolution. */
-const MAX_PASTE_DIM = 900
-
-/** A pasted or dropped image is a top-level canvas element, the way a drawn
- *  shape is: a transparent shell the size of its one image, which the Layers
- *  panel lists at the root under its name, moves into frames and back out of,
- *  and scales with when resized. */
-function imageElementHtml(url: string, name: string): string {
-  const doc = new DOMParser().parseFromString('<!doctype html><html><head></head><body></body></html>', 'text/html')
-  doc.documentElement.style.cssText = 'width:100%;height:100%;margin:0;'
-  doc.body.style.cssText = 'width:100%;height:100%;margin:0;'
-  doc.body.setAttribute('data-doop-canvas-element', 'true')
-  const img = doc.createElement('img')
-  img.setAttribute('data-doop-drawing', 'image')
-  img.setAttribute('data-name', name)
-  img.src = url
-  img.alt = name
-  img.setAttribute(
-    'style',
-    'position:absolute;left:0;top:0;width:100%;height:100%;box-sizing:border-box;margin:0;display:block;object-fit:contain;',
-  )
-  doc.body.append(img)
-  return '<!doctype html>\n' + doc.documentElement.outerHTML
-}
-
 function imageSize(blob: Blob): Promise<{ width: number; height: number }> {
   return new Promise((resolve) => {
     const url = URL.createObjectURL(blob)
@@ -195,10 +170,9 @@ interface Slot {
 function rowSlots(sizes: Slot[], at?: { x: number; y: number }) {
   const scaled = sizes.map((d) => {
     if (d.exact) return { width: d.width, height: d.height }
-    const scale = Math.min(1, MAX_PASTE_DIM / Math.max(d.width, d.height))
-    if (d.uniform)
-      return { width: Math.max(1, Math.round(d.width * scale)), height: Math.max(1, Math.round(d.height * scale)) }
-    return { width: Math.max(40, Math.round(d.width * scale)), height: Math.max(40, Math.round(d.height * scale)) }
+    if (!d.uniform) return placedImageSize(d)
+    const scale = Math.min(1, MAX_PLACED_IMAGE_DIM / Math.max(d.width, d.height))
+    return { width: Math.max(1, Math.round(d.width * scale)), height: Math.max(1, Math.round(d.height * scale)) }
   })
   const vp = useStore.getState().viewport
   /* a drop point is in window coordinates, the viewport in the stage's (the
@@ -234,7 +208,7 @@ export async function uploadImageFrames(
       const name = fileStem(file.name) || fallbackName
       return api.createFrame(canvasId, {
         name,
-        html: imageElementHtml(url, name),
+        html: canvasImageHtml(url, name),
         width: slot.width,
         height: slot.height,
         x: slot.x,
@@ -309,7 +283,7 @@ async function importIncoming(
       size: await imageSize(file),
       html: async () => {
         const { url } = await api.uploadAsset(canvasId, file)
-        return imageElementHtml(url, fileStem(file.name) || fallbackName)
+        return canvasImageHtml(url, fileStem(file.name) || fallbackName)
       },
     })),
   )

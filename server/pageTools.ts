@@ -24,7 +24,7 @@ export function pageList(canvas: Canvas): CanvasPageInfo[] {
   return canvasPages(canvas).map(({ id, name }) => ({ id, name }))
 }
 
-function pageListText(canvas: Canvas): string {
+export function pageListText(canvas: Canvas): string {
   return pageList(canvas)
     .map((page) => `${page.id} ("${page.name}")`)
     .join(', ')

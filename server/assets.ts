@@ -5,7 +5,9 @@ import { db } from './db/index.ts'
 import * as t from './db/schema.ts'
 import * as storage from './storage.ts'
 import type { FrameImage } from '../shared/imageDescriptions.ts'
+import type { Actor } from '../shared/types.ts'
 import { emitCanvasEvent } from './events.ts'
+import type { ImagePlacement } from './placeImage.ts'
 
 /**
  * Uploaded assets (images, and the files of font libraries): bytes in object storage (server/storage.ts), one
@@ -60,12 +62,14 @@ interface UploadTicket {
   canvasId: string
   ownerId?: string
   uploadedBy: string
+  /** set when the upload should also land on the canvas (server/placeImage.ts) */
+  place?: { placement: ImagePlacement; actor: Actor }
   expiresAt: number
   inFlight: boolean
 }
 const tickets = new Map<string, UploadTicket>()
 
-export function createUploadTicket(meta: { canvasId: string; ownerId?: string; uploadedBy: string }): {
+export function createUploadTicket(meta: Omit<UploadTicket, 'expiresAt' | 'inFlight'>): {
   token: string
   expiresAt: number
 } {

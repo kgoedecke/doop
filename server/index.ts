@@ -88,6 +88,7 @@ import {
   createAsset,
   MAX_ASSET_BYTES,
 } from './assets.ts'
+import { placeImage, placedImageResult } from './placeImage.ts'
 import * as ingest from './ingest.ts'
 import * as agentKeys from './agentKeys.ts'
 import * as backgrounds from './backgrounds.ts'
@@ -589,21 +590,25 @@ app.put('/u/:token', async (req, res) => {
       }
       chunks.push(chunk as Buffer)
     }
-    const asset = await createAsset(Buffer.concat(chunks), {
+    const buf = Buffer.concat(chunks)
+    const asset = await createAsset(buf, {
       canvasId: ticket.canvasId,
       ownerId: ticket.ownerId,
       uploadedBy: ticket.uploadedBy,
     })
     success = true
     const url = `${env.BETTER_AUTH_URL}/a/${asset.id}.${asset.ext}`
-    res.json({
-      ok: true,
-      url,
-      mime: asset.mime,
-      size_bytes: asset.size,
-      usage: `<img src="${url}" alt="">`,
-      note: 'Permanent public URL — reference it in frame HTML.',
-    })
+    const uploaded = { ok: true, url, mime: asset.mime, size_bytes: asset.size, usage: `<img src="${url}" alt="">` }
+    const { place } = ticket
+    if (!place) return res.json({ ...uploaded, note: 'Permanent public URL — reference it in frame HTML.' })
+    /* the ticket was minted with edit access, up to 15 minutes ago: placing
+       changes the canvas, so access is asked again now that the bytes are here */
+    const frame = await store.withCanvas(ticket.canvasId, async (canvas) =>
+      canvas && canEditCanvas(ticket.ownerId, canvas)
+        ? placeImage(ticket.canvasId, { url, buf, mime: asset.mime }, place.placement, place.actor)
+        : undefined,
+    )
+    res.json({ ...uploaded, ...placedImageResult(frame) })
   } catch (e) {
     res.status(400).json({ error: e instanceof Error ? e.message : 'upload failed' })
   } finally {

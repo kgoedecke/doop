@@ -400,6 +400,13 @@ any public image URL. Source images in this order:
     commands.
   Either way you get a permanent URL on this origin (/a/<id>.<ext>) to use in <img> or
   CSS.
+  - On the canvas itself: add place to also drop the image onto the canvas as a
+    free-standing image, the way a person drags a file onto it — a reference photo, a
+    moodboard tile, a logo to hand over. place: {} puts it right of the page's frames;
+    x / y position it, width sizes it (the height follows the picture), page_id and name
+    choose its page and layer name. The result carries its frame id: move or resize it
+    with update_frame, remove it with delete_frame. An image that belongs INSIDE a design
+    goes in that frame's HTML instead.
 - **When to use them.** Enumerated content — feature cards, step lists, capability
   grids, value rows — needs a visual anchor per item: an icon (search_icons), a big
   number, or a mono label. Naked text lists read as drafts. Pick ONE anchor style per

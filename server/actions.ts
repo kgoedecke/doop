@@ -2001,6 +2001,9 @@ export function createFrame(
     rotation?: number
   },
   actor: Actor,
+  /** `reveal: false` shows an agent's frame at once: a placed image is not a
+   *  design to watch being written, and is no task on the board. */
+  { reveal = true }: { reveal?: boolean } = {},
 ): Frame | undefined {
   if (input.html !== undefined) {
     /* no id yet: a main marker arriving in a new frame is a copy of that main */
@@ -2012,7 +2015,7 @@ export function createFrame(
   const createIssues = takeComponentIssues('')
   if (createIssues.length) componentIssues.set(frame.id, createIssues)
   bursts.set(frame.id, { actor, lastAt: frame.createdAt })
-  if (actor.kind === 'agent' && frame.html.length > 0) {
+  if (reveal && actor.kind === 'agent' && frame.html.length > 0) {
     /* agent one-shot creation still plays back as a reveal */
     broadcast(canvasId, { type: 'frame:created', frame: { ...frame, html: '' }, actor })
     startReveal(frame, actor, 0)
