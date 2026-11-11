@@ -11,7 +11,7 @@
 # shared dependencies below in step with ../src-tauri.
 [package]
 name = "doop-desktop-chromium"
-version = "0.13.0"
+version = "0.14.0"
 description = "Desktop shell for doop on Chromium (CEF) — the same thin shell over the hosted app"
 edition = "2021"
 build = "../src-tauri/build.rs"
