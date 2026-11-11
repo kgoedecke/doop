@@ -20,6 +20,7 @@ import {
   type Step,
 } from '../../shared/automations'
 import { api, ApiError, type IntegrationsStatus } from '../lib/api'
+import { RUN_SHORTCUT_HINT, isRunShortcut, isTypingTarget } from '../lib/keys'
 import { navigate } from '../App'
 import { posthog } from '../lib/posthog'
 import { FrameThumb } from '../components/FramePreview'
@@ -276,18 +277,6 @@ export function AutomationEditor({ automationId }: { automationId: string }) {
     }
   }
 
-  /* ⌘S saves — the editor is a form people will expect it from */
-  useEffect(() => {
-    function onKey(e: KeyboardEvent) {
-      if (e.key === 's' && (e.metaKey || e.ctrlKey)) {
-        e.preventDefault()
-        void save()
-      }
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  })
-
   /* the name saves on its own, like a canvas rename — it is not part of the
      draft people expect to confirm with Save */
   async function rename(name: string) {
@@ -382,6 +371,37 @@ export function AutomationEditor({ automationId }: { automationId: string }) {
   const stepCanvases = approvalCanvasId === undefined ? canvases : canvases.filter((c) => c.id === approvalCanvasId)
   const incompleteRaw = draft ? incompleteReason(draft.steps, draft.trigger) : undefined
   const incomplete = incompleteRaw && incompleteText(t, incompleteRaw)
+  const canRun = Boolean(automation && automation.enabled && !incomplete && !runningNow && !saving)
+  const canRunRef = useRef(canRun)
+  const runNowRef = useRef(runNow)
+  const saveRef = useRef(save)
+
+  useEffect(() => {
+    canRunRef.current = canRun
+    runNowRef.current = runNow
+    saveRef.current = save
+  })
+
+  /* ⌘S saves, ⌘R runs — the editor is a form people will expect them from */
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 's' && (e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey) {
+        e.preventDefault()
+        void saveRef.current()
+        return
+      }
+      if (isRunShortcut(e)) {
+        if (isTypingTarget(e.target)) return
+        e.preventDefault()
+        if (e.repeat) return
+        if (canRunRef.current) {
+          void runNowRef.current()
+        }
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
 
   return (
     <div className="fixed inset-x-0 bottom-0 top-[var(--app-inset,0px)] flex flex-col">
@@ -413,7 +433,11 @@ export function AutomationEditor({ automationId }: { automationId: string }) {
               className={barGhostBtn}
               disabled={runningNow || !!incomplete || !automation.enabled}
               onClick={runNow}
-              title={incomplete ? t('automations.reasonFirst', { reason: incomplete }) : t('automations.runNowTitle')}
+              title={
+                incomplete
+                  ? t('automations.reasonFirst', { reason: incomplete })
+                  : `${t('automations.runNowTitle')} · ${RUN_SHORTCUT_HINT}`
+              }
             >
               <PlayIcon className="size-3.5" />
               {runningNow ? t('automations.runningEllipsis') : t('automations.runNow')}
@@ -1255,7 +1279,13 @@ function RunsPanel({
                     ? t('automations.noRunsScheduled')
                     : t('automations.noRunsFinish')}
                 {!savedIncompleteRaw && (
-                  <Button variant="ghost" size="sm" className="mt-2.5 block" onClick={onRunNow}>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="mt-2.5 block"
+                    onClick={onRunNow}
+                    title={`${t('automations.runNowTitle')} · ${RUN_SHORTCUT_HINT}`}
+                  >
                     {t('automations.runNow')}
                   </Button>
                 )}
