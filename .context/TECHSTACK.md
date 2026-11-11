@@ -751,6 +751,18 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   alone (`data-doop-name`, kept as an override of that instance, still linked). Stored in `components`
   (migration `0049_components`). Tests: `components.test.ts`, `componentsEdgeCases.test.ts`,
   `componentTools.test.ts`, `componentsRoutes.test.ts`, `componentsBrowser.test.ts`.
+- Reuse notes (`server/reuseNotes.ts`): a whole-frame write (MCP `create_frame`, `set_frame_html`, the
+  `done` chunk of a stream; the resident's `create_frame`, `set_frame_html`, `commit_frame_rewrite`)
+  gets `componentWriteNotes(frame, { review: true })`, which adds what the frame should have reused:
+  a block written out three or more times (`REUSE`, with the `create_component` + `replace_matching`
+  call), colours the canvas has as tokens (`TOKENS`, `#hex → var(--name)`, aliases resolved), a
+  colour palette declared on `:root` or tokens redefined there, and on a canvas with no tokens a frame
+  hardcoding four or more colours. Doop's own blocks (tokens, fonts, component CSS) are not counted;
+  `edit_frame_html` stays quiet. `create_component` / `update_component` name rows a main repeats by
+  hand (make one a component, `<doop-use>` it in the main) and what `auto_props=false` costs.
+  `get_canvas` and the resident kickoff say a canvas has no tokens yet (`NO_TOKENS_BRIEF`).
+  `upload_asset` states its per-minute limit and its refusal says when to retry. Tests:
+  `reuseNotes.test.ts`.
 - Prototypes (`.context/specs/prototyping.md`): interactions are `data-doop-on` /
   `data-doop-action` (or the JSON `data-doop-interactions`) attributes in frame HTML, parsed by
   `shared/prototype.ts`, whose parser the frame runtime inlines by source. `PrototypePlayer.tsx`

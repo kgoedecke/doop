@@ -22,6 +22,8 @@ import {
   usageOf,
 } from './componentActions.ts'
 import * as actions from './actions.ts'
+import { componentReuseNotes, frameReuseNotes } from './reuseNotes.ts'
+import { store } from './store.ts'
 
 /**
  * The component tools every agent gets, over MCP (server/mcp.ts) or in the server
@@ -185,7 +187,10 @@ export const COMPONENT_TOOLS: ComponentTool[] = [
         )
         return {
           data: { ok: true, component: summary(canvas, def), main_frame_id: def.mainFrameId },
-          note: `Use it with ${usageExample(def)}. Call get_frame_screenshot on main_frame_id, and resize that frame to fit with update_frame.`,
+          note: [
+            `Use it with ${usageExample(def)}. Call get_frame_screenshot on main_frame_id, and resize that frame to fit with update_frame.`,
+            ...componentReuseNotes(canvas, def, shared.autoProps),
+          ].join('\n'),
           frames: outcomeFrames({ canvas } as ToolContext, def),
         }
       }
@@ -208,7 +213,10 @@ export const COMPONENT_TOOLS: ComponentTool[] = [
           main_frame_id: component.mainFrameId,
           converted,
         },
-        note: `Use it with ${usageExample(component)}.`,
+        note: [
+          `Use it with ${usageExample(component)}.`,
+          ...componentReuseNotes(canvas, component, shared.autoProps),
+        ].join('\n'),
         frames: outcomeFrames(
           { canvas } as ToolContext,
           component,
@@ -261,7 +269,10 @@ export const COMPONENT_TOOLS: ComponentTool[] = [
         data: { ok: true, ...result, component: summary(canvas, result.component), rev: result.component.rev },
         ...(result.dry_run
           ? {}
-          : { note: IMPACT_NOTE, frames: outcomeFrames({ canvas } as ToolContext, result.component) }),
+          : {
+              note: [IMPACT_NOTE, ...componentReuseNotes(canvas, result.component)].join('\n'),
+              frames: outcomeFrames({ canvas } as ToolContext, result.component),
+            }),
       }
     },
   },
@@ -444,9 +455,13 @@ export function runComponentTool(
   }
 }
 
-/** What an agent should hear after writing a frame: what could not be done, and components it redrew by hand. */
-export function componentWriteNotes(frame: Frame): string[] {
+/** What an agent should hear after writing a frame: what could not be done, and components it redrew by hand.
+ *  `review` is a whole-frame write (create, replace, a finished stream), which also hears what it should
+ *  have reused: blocks repeated by hand and colours the canvas has as tokens. */
+export function componentWriteNotes(frame: Frame, { review = false }: { review?: boolean } = {}): string[] {
   const notes = actions.takeComponentIssues(frame.id).map((issue) => `COMPONENT: ${issue.message}`)
+  const canvas = review ? store.getCanvas(frame.canvasId) : undefined
+  if (canvas) notes.push(...frameReuseNotes(canvas, frame))
   for (const lookalike of lookalikesIn(frame)) {
     notes.push(
       `COMPONENT: ${lookalike.occurrences} element${lookalike.occurrences === 1 ? '' : 's'} in this frame match${lookalike.occurrences === 1 ? 'es' : ''} “${lookalike.component}” but ${lookalike.occurrences === 1 ? 'is' : 'are'} not linked to it, so ${lookalike.occurrences === 1 ? 'it' : 'they'} will not follow changes. Use ${lookalike.usage} instead.`,

@@ -465,6 +465,12 @@ export function tokensBrief(tokens: readonly DesignToken[], themeOrder: readonly
       ? `Themes (${themes.join(', ')}) give some tokens a different value: put ${THEME_ATTR}="${themes[0]}" on a frame's <html> (or on one subtree) to switch it there. `
       : '') +
     `Breakpoint tokens describe responsive variants, which on a canvas are separate frames. ` +
-    `Add tokens with create_tokens when a brief names a palette, scale or type ramp.`
+    `Add a value the design needs and no token holds with create_tokens, rather than writing it into a frame.`
   )
 }
+
+/** What an agent hears on a canvas with no tokens: where a brief's values go. */
+export const NO_TOKENS_BRIEF =
+  'This canvas has no design tokens yet. Before the first frame, create the palette, fonts, type scale, radii and ' +
+  'spacing your brief settles on with create_tokens, and write var(--name) in frames, so every frame shares one set ' +
+  'of values. save_decision is for why you chose them, not for the values.'

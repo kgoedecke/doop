@@ -22,6 +22,7 @@ import {
   TOKEN_TYPES,
   describeTokens,
   tokensBrief,
+  NO_TOKENS_BRIEF,
   tokensCss,
   tokensMarkdown,
   tokensTailwind,
@@ -116,8 +117,8 @@ You MUST call get_guide({ topic: "doop-instructions" }) once before using other 
 ${extensionGuideLines()}- Feedback: humans reply to your tasks; their notes arrive inside your tool results as HUMAN FEEDBACK blocks (read-only tools only announce them: claim those with get_feedback) — address them before continuing.
 - Comments: call get_comments to read comments and replies on a canvas — pinned to an element inside a frame, or to a point on the canvas (pageId, x, y) — optionally filtered by frame; reply_to_comment answers a thread and resolve_comment closes it. Reading does not claim feedback or comments. A reply that @mentions a resident role is metered like a comment left in the browser.
 - Guidelines: canvases can carry named style guides (brand rules, style recipes). get_canvas lists them with one-line summaries — read the relevant ones with get_guidelines BEFORE designing and follow them.
-- Design tokens: canvases can carry typed design tokens (colour, spacing, radius, type scale — CSS custom properties), each with a value per theme (light, dark, …) where it differs. get_canvas lists them; use one by writing var(--name) in CSS, never the literal, so a token change restyles every frame; switch a frame's theme with data-doop-theme="dark" on its <html>. create_tokens adds them when a brief names a palette or scale; set_tokens changes, renames or deletes; set_token_themes declares the themes; get_tokens exports them as JSON, CSS or a Tailwind @theme block.
-- Memory: canvases can also carry pinned style references — exemplar designs humans marked as "more like this". get_canvas lists them; read the relevant one with get_reference and match its look. When your human gives you design feedback in conversation and you address it, record it with save_decision so the canvas remembers their taste.
+- Design tokens: canvases can carry typed design tokens (colour, spacing, radius, type scale — CSS custom properties), each with a value per theme (light, dark, …) where it differs. get_canvas lists them; use one by writing var(--name) in CSS, never the literal, so a token change restyles every frame; switch a frame's theme with data-doop-theme="dark" on its <html>. create_tokens adds them before the first frame — a brief's palette, fonts and scale live there, not in save_decision; set_tokens changes, renames or deletes; set_token_themes declares the themes; get_tokens exports them as JSON, CSS or a Tailwind @theme block.
+- Memory: canvases can also carry pinned style references — exemplar designs humans marked as "more like this". get_canvas lists them; read the relevant one with get_reference and match its look. When your human gives you design feedback in conversation and you address it, or you commit to a direction, record the decision and why with save_decision so the canvas remembers it.
 - Problems with Doop itself: when a Doop tool errors, misbehaves or lacks something you need, or the guide leaves you guessing, call report_issue with what you tried and what happened, then carry on. Ideas for making Doop better for agents, or something that worked well, go to share_feedback. Both reach the Doop team, not the humans on the canvas.`
 
 function extensionGuideLines(): string {
@@ -172,8 +173,8 @@ function withEscapeNote<T extends { content: { type: 'text' | 'image'; [k: strin
 }
 
 /** What a frame write could not do with components, and components it redrew by hand. */
-function withComponentNotes<T extends ToolContent>(result: T, frame: Frame): T {
-  for (const note of componentWriteNotes(frame)) result.content.push({ type: 'text' as const, text: note })
+function withComponentNotes<T extends ToolContent>(result: T, frame: Frame, options?: { review?: boolean }): T {
+  for (const note of componentWriteNotes(frame, options)) result.content.push({ type: 'text' as const, text: note })
   return result
 }
 
@@ -622,7 +623,7 @@ export function buildMcpServer(
           : []),
         ...(library.length ? [libraryBrief(library)] : []),
         webFontsBrief(),
-        ...(tokens.length ? [tokensBrief(tokens, tokenThemes)] : []),
+        tokens.length ? tokensBrief(tokens, tokenThemes) : NO_TOKENS_BRIEF,
         ...(refs.length
           ? [
               'This canvas has pinned style references — exemplar designs humans marked as "more like this". Call get_reference on the relevant one and match its look (palette, type, spacing) in what you design.',
@@ -1441,6 +1442,7 @@ export function buildMcpServer(
           html,
         ),
         frame,
+        { review: frame.html.length > 0 },
       )
       return withGuidelinesNudge(
         withStatusNudge(withFeedback(result, canvas_id, actorFrom(agent_name)), canvas_id, actorFrom(agent_name)),
@@ -1505,6 +1507,7 @@ export function buildMcpServer(
               withComponentNotes(
                 withEscapeNote(textWithNudge({ ok: true, frame: frameSummary(frame) }, REVIEW_NUDGE), html),
                 frame,
+                { review: true },
               ),
               frame.canvasId,
               actorFrom(agent_name),
@@ -1572,8 +1575,7 @@ export function buildMcpServer(
     'upload_asset',
     {
       title: 'Upload an image asset',
-      description:
-        'Upload an image (png/jpg/webp/gif/svg, max 5 MB) and get back a permanent public URL to reference in frame HTML (<img src>, CSS background) — use this instead of inlining data: URIs. Pick ONE input by where the file lives: (1) remote — pass source_url and the server fetches it; (2) LOCAL FILE — pass local_file=true to receive a one-time upload URL and a ready-to-run curl command, run it in your shell, and the curl response JSON contains the permanent url. (3) data — base64, LAST RESORT for tiny files (under ~100 KB) when you cannot run shell commands; larger base64 payloads are slow and corrupt easily.',
+      description: `Upload an image (png/jpg/webp/gif/svg, max 5 MB) and get back a permanent public URL to reference in frame HTML (<img src>, CSS background) — use this instead of inlining data: URIs. Pick ONE input by where the file lives: (1) remote — pass source_url and the server fetches it; (2) LOCAL FILE — pass local_file=true to receive a one-time upload URL and a ready-to-run curl command, run it in your shell, and the curl response JSON contains the permanent url. (3) data — base64, LAST RESORT for tiny files (under ~100 KB) when you cannot run shell commands; larger base64 payloads are slow and corrupt easily. At most ${UPLOADS_PER_MIN} uploads a minute per account, so upload one after another rather than in a parallel burst. Icons from search_icons and photos from search_images are already hosted and need no upload.`,
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
       inputSchema: {
         source_url: z.string().optional().describe('Public http(s) URL to fetch the file from (remote files)'),
@@ -1599,7 +1601,12 @@ export function buildMcpServer(
       const now = Date.now()
       const limitKey = ownerId ?? agent_name
       const hits = (uploadHits.get(limitKey) ?? []).filter((t) => now - t < 60_000)
-      if (hits.length >= UPLOADS_PER_MIN) return err('upload rate limit — wait a minute')
+      if (hits.length >= UPLOADS_PER_MIN) {
+        const retryIn = Math.max(1, Math.ceil((hits[0]! + 60_000 - now) / 1000))
+        return err(
+          `upload rate limit: at most ${UPLOADS_PER_MIN} uploads a minute per account. Retry in ${retryIn}s, one upload at a time.`,
+        )
+      }
       hits.push(now)
       uploadHits.set(limitKey, hits)
       if (local_file) {
@@ -2215,6 +2222,7 @@ export function buildMcpServer(
               `Stream complete. ${REVIEW_NUDGE}`,
             ),
             frame,
+            { review: true },
           )
         : text({ ok: true, streaming: true, htmlBytes: frame.html.length })
       /* nudge only on the first chunk — mid-stream results should stay lean.
