@@ -54,7 +54,11 @@
   inline value outranks every rule. Guidance
   only: nothing rejects or rewrites a stylesheet, and a frame already styled by classes keeps them.
   The MCP guide, `create_frame`'s description and the resident agent's system prompt carry the same
-  text. Tests: `frameStyleGuidance.test.ts`.
+  text. Tokens and components in the same guidance: the brief (`DESIGN_BRIEF`) creates the canvas's
+  tokens before the first frame and keeps `save_decision` for the why behind a choice (never a copy
+  of the values); `FRAME_STYLES` says to use `var(--…)` and never a frame's own `:root` palette;
+  `COMPONENTS` says mains nest `<doop-use>` and the repetition rule holds inside them; the review
+  checklist has a Reuse item. Tests: `frameStyleGuidance.test.ts`, `tokenComponentGuidance.test.ts`.
 - Agent feedback (`server/agentFeedback.ts`, `shared/agentFeedback.ts`): agents talk to the Doop
   team through two MCP tools, which the resident agent has under the same names. `report_issue`
   (kind `issue`: `bug`, `tool_error`, `confusing`, `missing_capability`, `other`) is for where Doop
