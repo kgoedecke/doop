@@ -93,6 +93,7 @@ import {
 import * as ingest from './ingest.ts'
 import * as agentKeys from './agentKeys.ts'
 import * as backgrounds from './backgrounds.ts'
+import { serveIcon } from './iconProxy.ts'
 import * as storage from './storage.ts'
 import * as github from './github.ts'
 import * as githubApp from './githubApp.ts'
@@ -573,6 +574,9 @@ app.get('/bg/:file', async (req, res) => {
     res.status(500).json({ error: e instanceof Error ? e.message : 'background fetch failed' })
   }
 })
+
+/* search_icons' icons from Doop's origin (server/iconProxy.ts) */
+app.get('/icons/iconify/:prefix/:file', (req, res) => void serveIcon(req, res))
 
 /* ------------------------------------------------------------------ */
 /* One-time asset uploads: the upload_asset MCP tool mints a ticket and */
