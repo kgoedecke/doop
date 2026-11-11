@@ -1,6 +1,7 @@
 import { env } from './env.ts'
 import { createAsset, fetchRemote } from './assets.ts'
 import { readImage } from './icoImage.ts'
+import { ICONIFY_ENDPOINT, iconUrl } from './iconProxy.ts'
 /**
  * Image sourcing for design agents: stock photo search (Pexels) and icon /
  * brand-logo search (Iconify). Both power the search_images / search_icons
@@ -11,11 +12,10 @@ import { readImage } from './icoImage.ts'
  * PEXELS_API_KEY; the Pexels license allows hotlinking, rehosting and
  * modification without attribution. Icon search is keyless: the Iconify API
  * indexes 200k+ open-source icons, including the simple-icons and logos
- * collections (brand marks), served as hotlinkable SVGs.
+ * collections (brand marks), served from Doop's own origin (server/iconProxy.ts).
  */
 
 const PEXELS_ENDPOINT = 'https://api.pexels.com/v1/search'
-const ICONIFY_ENDPOINT = 'https://api.iconify.design'
 const FETCH_TIMEOUT_MS = 15_000
 
 export function photoSearchEnabled(): boolean {
@@ -95,7 +95,7 @@ export async function fetchThumb(url: string): Promise<{ data: string; mime: str
 export interface IconResult {
   /** Iconify id, e.g. "mdi:home" or "logos:stripe". */
   id: string
-  /** Hotlinkable SVG URL for frame HTML. */
+  /** The icon on Doop's origin (/icons/…, server/iconProxy.ts), for frame HTML. */
   svg_url: string
 }
 
@@ -114,7 +114,7 @@ export async function searchIcons(
   const body = (await res.json()) as { icons?: string[] }
   return (body.icons ?? []).slice(0, limit).map((id) => {
     const [prefix, name] = id.split(':')
-    return { id, svg_url: `${ICONIFY_ENDPOINT}/${prefix}/${name}.svg` }
+    return { id, svg_url: iconUrl(prefix!, name!) }
   })
 }
 
