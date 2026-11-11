@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.14.0](https://github.com/kgoedecke/doop/compare/desktop-v0.13.0...desktop-v0.14.0) (2026-11-11)
+
+
+### Features
+
+* **canvas:** action registry with ⌘K palette, main menu and editor shortcuts ([#448](https://github.com/kgoedecke/doop/issues/448)) ([1970798](https://github.com/kgoedecke/doop/commit/1970798b4f13c65c90654116d1dcf0ae634856c0))
+* **desktop:** choose the Doop server from the sign-in screen ([#452](https://github.com/kgoedecke/doop/issues/452)) ([f98867a](https://github.com/kgoedecke/doop/commit/f98867a0917c36fcb2e1139b2f984a3ef9b4f0da))
+
 ## [0.13.0](https://github.com/kgoedecke/doop/compare/desktop-v0.12.0...desktop-v0.13.0) (2026-11-08)
 
 
