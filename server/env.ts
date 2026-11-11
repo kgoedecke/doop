@@ -160,6 +160,9 @@ const schema = {
   AZURE_OPENAI_API_VERSION: str({ default: undefined }),
   AZURE_OPENAI_REASONING_EFFORT: str({ default: undefined }),
   RESIDENT_TASK_LIMIT: nonNegativeInt({ default: 0 }),
+  /* incident kill switch: a frame write stops pushing a changed main into every
+     other frame synchronously (each catches up on its own next write) */
+  DOOP_DEFER_COMPONENT_PROPAGATION: bool({ default: false }),
   DOOP_AGENT_MODEL: str({ default: 'claude-opus-5' }),
   DOOP_DISTILL_MODEL: str({ default: 'claude-haiku-4-5-20251001' }),
   DOOP_AGENT_OPENAI_MODEL: str({ default: 'gpt-5.6-terra' }),

@@ -1,5 +1,6 @@
 import { nanoid } from 'nanoid'
 import { MAX_DECISION_CHARS } from '../shared/designDecisions.ts'
+import { env } from './env.ts'
 import { dedupeIssues, prepareChunk, prepareFrameHtml, referencesComponent } from './components.ts'
 import { COMPONENT_ATTR, type ComponentDef, type ComponentIssue } from '../shared/components.ts'
 import { MAX_PAGES, PageLimitError, store } from './store.ts'
@@ -1640,7 +1641,7 @@ export async function restoreFrameVersion(
   if (!frame) return undefined
   noteHtmlChange(prior, actor, false)
   broadcast(frame.canvasId, { type: 'frame:updated', frame, actor })
-  if (prepared.changed.length) propagateComponents(frame.canvasId, prepared.changed, actor, frameId)
+  if (prepared.changed.length) propagateFromFrameWrite(frame.canvasId, prepared.changed, actor, frameId)
   logActivity(frame.canvasId, actor, `restored “${frame.name}” to an earlier version by ${version.savedBy}`, frame.id)
   touch(frame.canvasId, actor, frame.id)
   return { frame, replaced }
@@ -1814,7 +1815,7 @@ export function expireIdleStreams(now = Date.now()) {
       })
     }
     finishStream(frameId, false)
-    if (before && prepared?.changed.length) propagateComponents(before.canvasId, prepared.changed, s.actor, frameId)
+    if (before && prepared?.changed.length) propagateFromFrameWrite(before.canvasId, prepared.changed, s.actor, frameId)
   }
 }
 
@@ -1979,6 +1980,18 @@ export interface PropagationReport {
   frames: { id: string; name: string; approvalLost: boolean }[]
 }
 
+/** A frame write that changed a main. Normally every other frame using it is brought up
+ *  to date at once; with DOOP_DEFER_COMPONENT_PROPAGATION each catches up on its own next
+ *  write instead (prepareFrameHtml upgrades instances), because the synchronous sweep is
+ *  unbounded on large component libraries and blocked the event loop for minutes. */
+function propagateFromFrameWrite(canvasId: string, changed: ComponentDef[], actor: Actor, originFrameId: string) {
+  if (env.DOOP_DEFER_COMPONENT_PROPAGATION) {
+    for (const def of changed) broadcast(canvasId, { type: 'component', id: def.id, component: def, actor })
+    return
+  }
+  propagateComponents(canvasId, changed, actor, originFrameId)
+}
+
 /** A main changed: bring every frame using it up to date, and tell the room. Frames
  *  mid-stream catch up when their stream ends, since prepareFrameHtml upgrades instances. */
 export function propagateComponents(
@@ -2102,7 +2115,7 @@ export function appendFrameHtml(
   })
   if (opts.done) {
     finishStream(frameId, true)
-    if (prepared.changed.length) propagateComponents(frame.canvasId, prepared.changed, actor, frameId)
+    if (prepared.changed.length) propagateFromFrameWrite(frame.canvasId, prepared.changed, actor, frameId)
   }
 
   touch(frame.canvasId, actor, frameId)
@@ -2287,7 +2300,7 @@ export function updateFrame(
     logActivity(frame.canvasId, actor, `${frame.locked ? 'locked' : 'unlocked'} “${frame.name}”`, frame.id)
   }
 
-  if (changedComponents.length) propagateComponents(frame.canvasId, changedComponents, actor, frameId)
+  if (changedComponents.length) propagateFromFrameWrite(frame.canvasId, changedComponents, actor, frameId)
   touch(frame.canvasId, actor, frame.id)
   return frame
 }
