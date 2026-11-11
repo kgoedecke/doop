@@ -9,6 +9,7 @@ import {
   TOKEN_TYPES,
   describeTokens,
   tokensBrief,
+  NO_TOKENS_BRIEF,
   tokensCss,
   tokensTailwind,
   type TokenResult,
@@ -680,9 +681,11 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
       /* the canvas's design tokens: which exist, and that var(--name) is how
          a frame uses one (the server writes the values into the frame) */
       const tokens = store.getTokens(canvasId)
-      const tokensBlock = tokens.length
-        ? [{ text: `# Design tokens\n${tokensBrief(tokens, store.getTokenThemes(canvasId))}` }]
-        : []
+      const tokensBlock = [
+        {
+          text: `# Design tokens\n${tokens.length ? tokensBrief(tokens, store.getTokenThemes(canvasId)) : NO_TOKENS_BRIEF}`,
+        },
+      ]
       /* a text-only model would otherwise chase tools whose whole value is
          pixels; steer its verification to the textual surfaces instead */
       /* the same catalog get_canvas gives a connected agent, so reuse is the first thing a run sees */
@@ -1735,7 +1738,10 @@ export async function execTool(
         runState.mutatedFrames.add(f.id)
         runState.verifiedFrames.delete(f.id)
         return ok(
-          `created frame ${f.id} ("${f.name}", ${Math.round(f.width)}x${Math.round(f.height)}) — it is revealing to viewers now`,
+          [
+            `created frame ${f.id} ("${f.name}", ${Math.round(f.width)}x${Math.round(f.height)}) — it is revealing to viewers now`,
+            ...componentWriteNotes(f, { review: true }),
+          ].join('\n'),
         )
       }
       case 'inspect_frame': {
@@ -1825,7 +1831,12 @@ export async function execTool(
         actions.updateFrame(input.frame_id, { html }, actor)
         runState.mutatedFrames.add(input.frame_id)
         runState.verifiedFrames.delete(input.frame_id)
-        return ok('applied — the new design is revealing to viewers now')
+        return ok(
+          [
+            'applied — the new design is revealing to viewers now',
+            ...componentWriteNotes(store.getFrame(input.frame_id)!, { review: true }),
+          ].join('\n'),
+        )
       }
       case 'begin_frame_rewrite': {
         const f = store.getFrame(input.frame_id)
@@ -1863,7 +1874,12 @@ export async function execTool(
         runState.rewriteDrafts.delete(input.frame_id)
         runState.mutatedFrames.add(input.frame_id)
         runState.verifiedFrames.delete(input.frame_id)
-        return ok(`committed ${html.length} characters — the new design is revealing to viewers now`)
+        return ok(
+          [
+            `committed ${html.length} characters — the new design is revealing to viewers now`,
+            ...componentWriteNotes(store.getFrame(input.frame_id)!, { review: true }),
+          ].join('\n'),
+        )
       }
       case 'search_images': {
         if (!imageSearch.photoSearchEnabled())
