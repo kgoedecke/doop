@@ -2189,6 +2189,8 @@ export async function execTool(
         return saved.ok ? ok('sent to the Doop team — carry on with the task') : fail(saved.error)
       }
       case 'set_guidelines': {
+        if (!env.AGENT_GUIDELINE_WRITES)
+          return fail('style guides on this instance are written by people (AGENT_GUIDELINE_WRITES=false); propose the change in a comment instead')
         const raw = block.input as { name?: string; markdown?: string; title?: string }
         if (typeof raw.name !== 'string' || !raw.name.trim()) return fail('name must be a non-empty slug')
         if (typeof raw.markdown !== 'string') return fail('markdown must be a string (empty string deletes the doc)')

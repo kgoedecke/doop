@@ -173,6 +173,12 @@ const schema = {
      echoes the worker secrets it contains */
   DOOP_GEMINI_CLOUD_WORKERS: str({ default: undefined }),
   CHATGPT_CONNECT_DISABLED: bool({ default: false }),
+  /* Canvas style guides ride in the resident agent's system prompt and are read
+     by every connected agent as rules to execute. When false, only people may
+     write them (the REST route and the distiller's proposals, which a person
+     accepts); the set_guidelines tool refuses for agents, so a prompt-injected
+     agent cannot plant instructions every later run inherits. */
+  AGENT_GUIDELINE_WRITES: bool({ default: true }),
   CHATGPT_OAUTH_ISSUER: origin({ default: 'https://auth.openai.com' }),
   CHATGPT_OAUTH_CLIENT_ID: str({ default: 'app_EMoamEEZ73f0CkXaXp7hrann' }),
   CHATGPT_OAUTH_REDIRECT_URI: str({ default: 'http://localhost:1455/auth/callback' }),
