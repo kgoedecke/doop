@@ -199,7 +199,9 @@
   (writes queue per library, so racing uploads of one face leave one row).
   A frame stays self-contained: `withFontFaces` adds the `@font-face` rules for the library
   families its CSS names to one `<style data-doop-fonts>` block in its own HTML (only adds, never
-  removes). `actions.createFrame` / `updateFrame` / the final append chunk run it on every write,
+  removes). `actions.createFrame` / `updateFrame` / every append chunk run it on every write
+  (`withCanvasFaces` in `server/canvasFaces.ts`; mid-stream once a complete `<head>` or `<body>`
+  tag has arrived, so the first section's screenshot already has its fonts and tokens),
   and `FrameView`'s save path runs it too, so a family picked from the Design panel's "Custom
   fonts" group renders at once. Every renderer that reads frame HTML (screenshots, PDF
   export, iOS) gets the font that way. Agents see the library as `fonts` plus a note in
@@ -212,7 +214,8 @@
   breakpoint, font family / weight / size, line height, letter spacing), each a CSS custom
   property frames use as `var(--name)`, with a value per theme (`canvas.tokenThemes`; a frame
   switches with `data-doop-theme="dark"` on its `<html>`). `withTokenBlock` writes the values a
-  frame names into its own `<style data-doop-tokens>` block wherever `withFontFaces` runs, and a
+  frame names into its own `<style data-doop-tokens>` block wherever `withFontFaces` runs (the
+  component preview sheet included), and a
   token change rewrites that block in every frame naming it as an annotation (sign-off stands, no
   version). Stored in `design_tokens` + `canvases.token_themes` (migration 0050); REST under
   `/api/canvases/:id/tokens`, `/token-themes` and `/styleguide.md` (tokens + guidelines as one

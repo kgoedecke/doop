@@ -14,9 +14,7 @@ import { isElementId } from '../shared/elementId.ts'
 import { parseRunnerPick, runnerKey, type RunnerPick } from '../shared/agentRunner.ts'
 import { hasElementId, stampElementId } from './elementIds.ts'
 import { decodeEscapedHtml, looksEscapedHtml, repairEscapedHtml } from './escapedHtml.ts'
-import { fontsForCanvas } from './fonts.ts'
-import { withFontFaces } from '../shared/fonts.ts'
-import { withWebFontLinks } from '../shared/webFonts.ts'
+import { withCanvasFaces, withCanvasFacesMidStream } from './canvasFaces.ts'
 import {
   MAX_TOKENS,
   MAX_TOKEN_DESCRIPTION,
@@ -30,7 +28,6 @@ import {
   renameThemeAttrs,
   resolveToken,
   usesToken,
-  withTokenBlock,
   type DesignToken,
   type TokenEdit,
   type TokenResult,
@@ -1665,7 +1662,7 @@ function finishStream(frameId: string, logDone: boolean) {
   let renamed = current.html
   for (const rename of pendingRenames.get(frameId) ?? []) renamed = applyRename(renamed, rename)
   pendingRenames.delete(frameId)
-  const html = withLibraryFaces(current.canvasId, renamed)
+  const html = withCanvasFaces(current.canvasId, renamed)
   /* compare the HTML, not the objects: updateFrame edits the frame in place */
   const htmlChanged = html !== current.html
   const frame = htmlChanged ? store.updateFrame(frameId, { html }, s.actor.name)! : current
@@ -1769,7 +1766,7 @@ function prepareWrite(canvasId: string, frameId: string, html: string, priorHtml
   /* no new revision, so no propagation either: only "Go to main" needs to hear of it */
   for (const def of prepared.moved) broadcastComponent(canvasId, def, resolveActor({ name: by, kind: 'user' }))
   /* faces after the components: an expanded <doop-use> may name a library family */
-  return { ...prepared, html: withLibraryFaces(canvasId, prepared.html) }
+  return { ...prepared, html: withCanvasFaces(canvasId, prepared.html) }
 }
 
 /** A component's own line in the activity feed. */
@@ -1821,7 +1818,7 @@ export function propagateComponents(
       queue.push(...prepared.changed)
       /* the ordinary write's font pass too: a main that took up a library family
          brings its face along to every frame it reaches */
-      const html = withLibraryFaces(canvasId, prepared.html)
+      const html = withCanvasFaces(canvasId, prepared.html)
       if (html === frame.html) continue
       const prior = priorState(frame)
       const wasApproved = frame.approval?.status === 'ready_for_dev'
@@ -1852,19 +1849,6 @@ export function propagateComponents(
   return report
 }
 
-/** A finished document with the @font-face rules for the canvas's library
- *  fonts it uses (shared/fonts.ts) and the stylesheet link for the hosted
- *  fonts it names (shared/webFonts.ts), so naming a family is all it takes. */
-function withLibraryFaces(canvasId: string, html: string): string {
-  const canvas = store.getCanvas(canvasId)
-  if (!canvas) return html
-  const library = fontsForCanvas(canvas)
-  /* tokens first: a family named only through a font token is then in the
-     document for the font scan to find */
-  const withTokens = withTokenBlock(html, canvas.tokens ?? [], canvas.tokenThemes ?? [])
-  return withWebFontLinks(withFontFaces(withTokens, library), library)
-}
-
 export function appendFrameHtml(
   frameId: string,
   chunk: string,
@@ -1884,11 +1868,17 @@ export function appendFrameHtml(
   const expanded = canvas ? prepareChunk(canvas, piece, opts.start ? '' : before.html) : piece
   /* the last chunk settles the whole document: a <doop-use> split across
      chunks, the component stylesheets, a main written in the stream, the
-     faces of the library fonts it names */
+     faces of the library fonts it names. Until then each chunk gets the
+     canvas's tokens and fonts, so a mid-stream screenshot shows them. A
+     token renamed mid-stream waits for the stream to close (pendingRenames):
+     until then the block stays as written, under the names the frame uses. */
   const joined = opts.start ? expanded : before.html + expanded
   const prepared = opts.done
     ? prepareWrite(before.canvasId, frameId, joined, before.html, actor.name)
-    : { html: joined, changed: [] as ComponentDef[] }
+    : {
+        html: pendingRenames.has(frameId) ? joined : withCanvasFacesMidStream(before.canvasId, joined),
+        changed: [] as ComponentDef[],
+      }
   const html = prepared.html
   const prior = priorState(before)
   const frame = store.updateFrame(frameId, { html }, actor.name)!
@@ -2425,7 +2415,7 @@ function restyleTokenFrames(canvasId: string, actor: Actor, rename?: TokenRename
     }
     let html = frame.html
     if (rename) html = applyRename(html, rename)
-    html = withLibraryFaces(canvasId, html)
+    html = withCanvasFaces(canvasId, html)
     if (html === frame.html) continue
     const prevHtml = frame.html
     const updated = store.updateFrame(frame.id, { html }, actor.name, { annotation: true })
