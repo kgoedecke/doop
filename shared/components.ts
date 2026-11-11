@@ -138,6 +138,8 @@ export type ComponentIssueCode =
   | 'unknown_main'
   | 'instance_removed'
   | 'too_deep'
+  | 'empty_template'
+  | 'unclosed_use'
 
 /** Something an agent should hear about instead of finding out from a screenshot. */
 export interface ComponentIssue {
@@ -200,7 +202,22 @@ export interface Binding {
   prop: string
 }
 
-export function parseBindings(value: string): Binding[] {
+/** What a bare binding (`data-doop-prop="photo"`) fills on an element that holds no text:
+ *  an image's source, a field's value. Elsewhere a bare binding is the text. */
+const BARE_TARGET = new Map([
+  ['img', 'src'],
+  ['source', 'src'],
+  ['video', 'src'],
+  ['audio', 'src'],
+  ['iframe', 'src'],
+  ['embed', 'src'],
+  ['input', 'value'],
+])
+
+/** The bindings in a data-doop-prop value. Pass the element's tag so a bare name on an <img>
+ *  binds its src: as text it would fill nothing, and the prop would silently do nothing. */
+export function parseBindings(value: string, tagName?: string): Binding[] {
+  const bare = (tagName && BARE_TARGET.get(tagName.toLowerCase())) ?? null
   const bindings: Binding[] = []
   for (const piece of value.split(',')) {
     const text = piece.trim()
@@ -208,7 +225,7 @@ export function parseBindings(value: string): Binding[] {
     const at = text.lastIndexOf(':')
     const prop = (at === -1 ? text : text.slice(at + 1)).trim()
     if (!isPropName(prop)) continue
-    bindings.push({ target: at === -1 ? null : text.slice(0, at).trim().toLowerCase(), prop })
+    bindings.push({ target: at === -1 ? bare : text.slice(0, at).trim().toLowerCase(), prop })
   }
   return bindings
 }

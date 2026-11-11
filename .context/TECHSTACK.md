@@ -765,7 +765,13 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   linked by id, so they follow). As in Figma, renaming an instance's row names that layer
   alone (`data-doop-name`, kept as an override of that instance, still linked). Stored in `components`
   (migration `0049_components`). Tests: `components.test.ts`, `componentsEdgeCases.test.ts`,
-  `componentTools.test.ts`, `componentsRoutes.test.ts`, `componentsBrowser.test.ts`.
+  `componentTools.test.ts`, `componentsRoutes.test.ts`, `componentsBrowser.test.ts`. A bare
+  `data-doop-prop="name"` binds an element's text, except where there is none: on `img`, `source`,
+  `video`, `audio`, `iframe` and `embed` it binds `src`, on `input` its `value` (`parseBindings`
+  takes the tag). A `<doop-use>` that renders nothing is reported, never dropped quietly: a main with
+  no markup (`empty_template`), and on a whole write one never closed (`unclosed_use`), which is
+  placed with no slot content so the ones after it still expand (mid-stream it waits for its
+  end). Tests: `componentDrops.test.ts`.
 - Reuse notes (`server/reuseNotes.ts`): a whole-frame write (MCP `create_frame`, `set_frame_html`, the
   `done` chunk of a stream; the resident's `create_frame`, `set_frame_html`, `commit_frame_rewrite`)
   gets `componentWriteNotes(frame, { review: true })`, which adds what the frame should have reused:

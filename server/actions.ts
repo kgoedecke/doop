@@ -1,6 +1,6 @@
 import { nanoid } from 'nanoid'
 import { MAX_DECISION_CHARS } from '../shared/designDecisions.ts'
-import { prepareChunk, prepareFrameHtml, referencesComponent } from './components.ts'
+import { dedupeIssues, prepareChunk, prepareFrameHtml, referencesComponent } from './components.ts'
 import { COMPONENT_ATTR, type ComponentDef, type ComponentIssue } from '../shared/components.ts'
 import { MAX_PAGES, PageLimitError, store } from './store.ts'
 import * as persist from './db/persist.ts'
@@ -1654,6 +1654,7 @@ function finishStream(frameId: string, logDone: boolean) {
   const s = streams.get(frameId)
   if (!s) return
   streams.delete(frameId)
+  streamIssues.delete(frameId)
   const current = store.getFrame(frameId)
   if (!current) return
   /* a stream that ends without its done chunk (the agent went idle, or a
@@ -1749,6 +1750,8 @@ function releaseMains(canvasId: string, frameId: string, actor: Actor) {
 /* ------------------------------------------------------------------ */
 
 const componentIssues = new Map<string, ComponentIssue[]>()
+/** What a stream's chunks had to say about the uses they expanded, held for its done chunk. */
+const streamIssues = new Map<string, ComponentIssue[]>()
 
 /** What the last write to this frame had to say about its components; reading clears it. */
 export function takeComponentIssues(frameId: string): ComponentIssue[] {
@@ -1757,11 +1760,19 @@ export function takeComponentIssues(frameId: string): ComponentIssue[] {
   return issues
 }
 
-function prepareWrite(canvasId: string, frameId: string, html: string, priorHtml: string, by: string) {
+function prepareWrite(
+  canvasId: string,
+  frameId: string,
+  html: string,
+  priorHtml: string,
+  by: string,
+  carried: ComponentIssue[] = [],
+) {
   const canvas = store.getCanvas(canvasId)
   if (!canvas) return { html, changed: [] as ComponentDef[] }
   const prepared = prepareFrameHtml(canvas, frameId, html, by, priorHtml)
-  if (prepared.issues.length) componentIssues.set(frameId, prepared.issues)
+  const issues = dedupeIssues([...carried, ...prepared.issues])
+  if (issues.length) componentIssues.set(frameId, issues)
   else componentIssues.delete(frameId)
   /* no new revision, so no propagation either: only "Go to main" needs to hear of it */
   for (const def of prepared.moved) broadcastComponent(canvasId, def, resolveActor({ name: by, kind: 'user' }))
@@ -1865,7 +1876,11 @@ export function appendFrameHtml(
   const escaped = starting ? looksEscapedHtml(chunk) : (streams.get(frameId)?.escaped ?? false)
   const piece = escaped ? decodeEscapedHtml(chunk) : chunk
   const canvas = store.getCanvas(before.canvasId)
-  const expanded = canvas ? prepareChunk(canvas, piece, opts.start ? '' : before.html) : piece
+  const chunked = canvas ? prepareChunk(canvas, piece, opts.start ? '' : before.html) : { html: piece, issues: [] }
+  const expanded = chunked.html
+  const carried = [...(starting ? [] : (streamIssues.get(frameId) ?? [])), ...chunked.issues]
+  if (opts.done) streamIssues.delete(frameId)
+  else streamIssues.set(frameId, carried)
   /* the last chunk settles the whole document: a <doop-use> split across
      chunks, the component stylesheets, a main written in the stream, the
      faces of the library fonts it names. Until then each chunk gets the
@@ -1874,7 +1889,7 @@ export function appendFrameHtml(
      until then the block stays as written, under the names the frame uses. */
   const joined = opts.start ? expanded : before.html + expanded
   const prepared = opts.done
-    ? prepareWrite(before.canvasId, frameId, joined, before.html, actor.name)
+    ? prepareWrite(before.canvasId, frameId, joined, before.html, actor.name, carried)
     : {
         html: pendingRenames.has(frameId) ? joined : withCanvasFacesMidStream(before.canvasId, joined),
         changed: [] as ComponentDef[],
