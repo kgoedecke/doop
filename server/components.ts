@@ -197,8 +197,12 @@ function prepareMains(canvas: Canvas, frameId: string, html: string, by: string,
   const moved: ComponentDef[] = []
   const claimed = new Set<string>()
   const edits: { start: number; end: number; text: string }[] = []
-  const sheet = () => frameStylesheets(html)
-  const headTags = () => frameHeadTags(html)
+  /* each parses the whole frame, so once per call, not once per main: a frame
+     holding hundreds of mains re-parsed itself hundreds of times per propagation */
+  let sheetCache: string | undefined
+  let headCache: string[] | undefined
+  const sheet = () => (sheetCache ??= frameStylesheets(html))
+  const headTags = () => [...(headCache ??= frameHeadTags(html))]
   for (const found of findMarked(html, COMPONENT_ATTR)) {
     const id = attrOf(found.el, COMPONENT_ATTR) ?? ''
     const def = store.getComponents(canvas.id).find((candidate) => candidate.id === id)
