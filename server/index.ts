@@ -2450,7 +2450,7 @@ app.get('/api/canvases/:id/components/:componentId/preview', (req, res) => {
   if (!canvas) return
   const def = findComponent(canvas.id, req.params.componentId)
   if (!def) return res.status(404).json({ error: 'component not found' })
-  res.json(previewDocument(canvas.id, def))
+  res.json(previewDocument(canvas.id, def, 'default'))
 })
 
 app.post('/api/frames/:id/instances', (req, res) => {
