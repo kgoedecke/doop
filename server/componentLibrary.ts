@@ -7,6 +7,7 @@ import {
   type LibraryComponent,
 } from '../shared/components.ts'
 import type { Canvas } from '../shared/types.ts'
+import { libraryLandingPageId } from '../shared/pages.ts'
 import * as persist from './db/persist.ts'
 import { store } from './store.ts'
 import { getWorkspace, isActive } from './workspaces.ts'
@@ -37,6 +38,17 @@ export function publishedOn(canvasId: string): LibraryComponent[] {
 
 export function isLibrary(canvasId: string): boolean {
   return publishedOn(canvasId).length > 0
+}
+
+/** Where a library canvas opens: see `libraryLandingPageId`. Reads frame
+ *  metadata only, so it needs no frame HTML loaded. */
+export function landingPageOf(canvas: Canvas): string | undefined {
+  const snapshots = publishedOn(canvas.id)
+  if (!snapshots.length) return undefined
+  return libraryLandingPageId(
+    canvas,
+    snapshots.map((snapshot) => snapshot.id),
+  )
 }
 
 /** Why a canvas cannot publish or use a library, or null when it can: libraries

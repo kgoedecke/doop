@@ -1,5 +1,5 @@
 import { parse, parseFragment, serializeOuter, type DefaultTreeAdapterTypes as Tree } from 'parse5'
-import { canvasPages } from '../shared/pages.ts'
+import { canvasPages, COMPONENTS_PAGE } from '../shared/pages.ts'
 import {
   BIND_ATTR,
   COMPONENT_ATTR,
@@ -99,8 +99,6 @@ export class LibraryPlanError extends ComponentError {
 export class LibraryPublisherError extends ComponentError {}
 
 type Element = Tree.Element
-
-const COMPONENTS_PAGE = 'Components'
 
 function fail(message: string): never {
   throw new ComponentError(message)

@@ -35,6 +35,21 @@
   back to frame details if nothing carries the id. Browser regressions in
   `tests/pageCanvasBrowser.test.ts` cover initial loading, cross-page links, stamping on copy,
   clipboard round trips, history and script-created or script-removed elements.
+- Page links are `/c/<canvasId>?page=<pageId>` (`src/lib/pageLink.ts`, pure). `openingPageId` is
+  the one rule for the page a canvas URL opens: the page of the frame it links, else the page it
+  names, else the default (the first page; on a library canvas its components page, see Workspace
+  component libraries). A frame or page that is not on the canvas counts as not named. The store's
+  `setCanvas` applies it when a canvas is first opened, so the first paint is that page; a rejoin
+  keeps the page the person is on. `followPageInUrl` (`src/lib/pageUrl.ts`, mounted by
+  `CanvasPage`) then keeps the address bar on the open page with `history.replaceState`, as
+  `?pane=` does on the Workspace page, so Back leaves the canvas rather than walking page
+  switches: `pageSearch` drops `page` on the default page, leaves a frame link on the open page
+  alone, drops a frame, element or comment link to another page, and keeps every other parameter.
+  A history entry that names a page opens it. The URL is this browser's view: a remote page-list
+  change moves nobody, except off a deleted page. "Copy link to page" is in the page row's menu
+  (`PagesPanel.tsx`, viewers too; the link always names its page). Agents get the form in the MCP
+  instructions, the guide's Pages bullet and the resident kickoff. Tests: `pageLink.test.ts`, the
+  "pages in the URL" cases in `tests/pageCanvasBrowser.test.ts`.
 - Radix UI primitives (`@radix-ui/react-*`, ^1.x-2.x) + shadcn 4.19.0 - accessible UI primitives
   generated into `src/components/ui`.
 - `@anthropic-ai/sdk` 0.115.0 and `@modelcontextprotocol/sdk` 1.12.0 - power the built-in Doop
@@ -807,7 +822,11 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   to its owner and admins (`workspaces.library_publish`, migration `0054_library_publish_policy`,
   set in the Workspace page's General pane; `requireLibraryPublisher`, a 403). Agents: `publish_library`,
   `workspaceLibraries` in `get_canvas`. Editor: `LibrarySection.tsx`, and the Workspace page's Libraries pane
-  (`WorkspaceLibraries.tsx`). Tests:
+  (`WorkspaceLibraries.tsx`). A library canvas opens on its components: the canvas GET and the
+  room's `init` carry `landingPageId` (`landingPageOf`; `libraryLandingPageId` in
+  `shared/pages.ts`: the page holding the most published components' mains, a tie to the page
+  named "Components", then page order; unset when the canvas has published nothing or no
+  published main is on a page), which the editor uses as the default page of a link naming none. Tests:
   `workspaceLibrary.test.ts`, `libraryTools.test.ts`, `librarySection.test.tsx`,
   `workspaceLibraries.test.tsx`, `libraryResume.test.ts`.
 - Prototypes (`.context/specs/prototyping.md`): interactions are `data-doop-on` /

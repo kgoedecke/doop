@@ -27,6 +27,7 @@ import {
 } from './componentActions.ts'
 import {
   hydrateLibraries,
+  landingPageOf,
   libraryBlock,
   librariesForCanvas,
   librariesOfWorkspace,
@@ -1502,7 +1503,7 @@ app.post('/api/canvases/:id/duplicate', async (req, res) => {
 app.get('/api/canvases/:id', (req, res) => {
   const c = requireCanvas(req, res, req.params.id, 'view')
   /* the caller's own role rides along, so the editor knows to go read-only */
-  if (c) res.json({ ...c, role: canvasRole(req.user!.id, c) })
+  if (c) res.json({ ...c, role: canvasRole(req.user!.id, c), landingPageId: landingPageOf(c) })
 })
 
 /* Community gallery listing — the owner's call alone, like link access.
@@ -3219,7 +3220,7 @@ function joinAsGuest(ws: WebSocket, canvasId: string, clientId: string, canvas: 
   const { guidelines: _guidelines, references: _references, memberIds: _memberIds, ...shown } = canvas
   send(ws, {
     type: 'init',
-    canvas: { ...shown, role },
+    canvas: { ...shown, role, landingPageId: landingPageOf(canvas) },
     presences: [
       ...room(canvasId)
         .filter((c) => c.ws !== ws && !c.silent)
@@ -3306,7 +3307,7 @@ wss.on('connection', (ws, upgradeReq) => {
       const agents = [...(agentPresences.get(msg.canvasId)?.values() ?? [])]
       send(ws, {
         type: 'init',
-        canvas: { ...canvas, role },
+        canvas: { ...canvas, role, landingPageId: landingPageOf(canvas) },
         presences: [...others, ...agents],
         activity: actions.getActivity(msg.canvasId),
         tasks: actions.getTasks(msg.canvasId),

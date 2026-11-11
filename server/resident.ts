@@ -617,7 +617,7 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
         : ''
     const kickoff =
       sections.join('\n\n') +
-      `\n\nPages, in order (pass this exact list as expectedPages to set_canvas_pages):\n${JSON.stringify(pages)}` +
+      `\n\nPages, in order (pass this exact list as expectedPages to set_canvas_pages; a link to a page is /c/${canvasId}?page=<id>):\n${JSON.stringify(pages)}` +
       `\n\nFrames currently on the canvas:\n${frameList}` +
       referenceList +
       `\n\nExecution strategy selected by the harness:\n${strategyFor(workText, visibleFrames)}` +

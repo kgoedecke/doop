@@ -20,6 +20,8 @@ interface CanvasBody {
   components?: Def[]
   tokens?: { name: string; value: string }[]
   frames: { id: string; html: string }[]
+  pages?: { id: string; name: string }[]
+  landingPageId?: string
 }
 interface LibraryBody {
   entitled: boolean
@@ -72,6 +74,8 @@ describe('workspace component library', () => {
       await owner.get(`/api/canvases/${consumerId}/component-libraries`),
     )
     expect(offered.filter((entry) => entry.library)).toEqual([])
+    /* with nothing published it opens on its first page, as any canvas does */
+    expect((await canvasOf(libraryId)).landingPageId).toBeUndefined()
   })
 
   it('publishes a snapshot, and a dry run publishes nothing', async () => {
@@ -91,6 +95,16 @@ describe('workspace component library', () => {
     const shared = offered.find((entry) => entry.library)
     expect(shared?.id).toBe(libraryId)
     expect(shared?.components.map((entry) => entry.name)).toEqual(['Button'])
+  })
+
+  it('tells the editor to open a library on the page its published mains are on', async () => {
+    const canvas = await canvasOf(libraryId)
+    const components = canvas.pages?.find((page) => page.name === 'Components')
+    expect(components).toBeDefined()
+    expect(canvas.pages?.[0]?.id).not.toBe(components?.id)
+    expect(canvas.landingPageId).toBe(components?.id)
+    /* a canvas that only uses the library is not one */
+    expect((await canvasOf(consumerId)).landingPageId).toBeUndefined()
   })
 
   it('a frame naming a published component takes it up, linked and without a main', async () => {

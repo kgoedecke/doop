@@ -4,6 +4,7 @@ import { canvasPages } from '../../shared/pages'
 import type { CanvasPageInfo } from '../../shared/types'
 import { canEditOpenCanvas, useStore } from '../lib/store'
 import { savePages, duplicatePage, moveFramesToPage } from '../lib/pageEdits'
+import { copyPageLink } from '../lib/pageUrl'
 import { ApiError } from '../lib/api'
 import { Button } from './ui/button'
 import { PageIcon, PlusIcon } from './ui/icons'
@@ -201,7 +202,7 @@ export function PagesPanel({ fill = false }: { fill?: boolean }) {
     <>
       {pages.map((page) => (
         <ContextMenu key={page.id}>
-          <ContextMenuTrigger asChild disabled={readOnly}>
+          <ContextMenuTrigger asChild>
             <div
               data-page-id={page.id}
               onContextMenu={() => useStore.getState().setActivePage(page.id)}
@@ -279,21 +280,31 @@ export function PagesPanel({ fill = false }: { fill?: boolean }) {
               if (renaming === page.id) e.preventDefault()
             }}
           >
-            <ContextMenuItem disabled={busy} onSelect={() => startRename(page)}>
-              {t('panels.pagesRename')}
+            {!readOnly && (
+              <>
+                <ContextMenuItem disabled={busy} onSelect={() => startRename(page)}>
+                  {t('panels.pagesRename')}
+                </ContextMenuItem>
+                <ContextMenuItem disabled={busy || pages.length >= 100} onSelect={() => void duplicate(page.id)}>
+                  {t('panels.pagesDuplicate')}
+                </ContextMenuItem>
+              </>
+            )}
+            {/* the one entry a viewer has too: a link changes nothing */}
+            <ContextMenuItem onSelect={() => void copyPageLink(canvas.id, page.id)}>
+              {t('panels.pagesCopyLink')}
             </ContextMenuItem>
-            <ContextMenuItem disabled={busy || pages.length >= 100} onSelect={() => void duplicate(page.id)}>
-              {t('panels.pagesDuplicate')}
-            </ContextMenuItem>
-            <ContextMenuItem
-              tone="danger"
-              disabled={busy || pages.length === 1}
-              onSelect={() =>
-                void save((current) => (current.length > 1 ? current.filter((p) => p.id !== page.id) : null))
-              }
-            >
-              {t('panels.pagesDelete')}
-            </ContextMenuItem>
+            {!readOnly && (
+              <ContextMenuItem
+                tone="danger"
+                disabled={busy || pages.length === 1}
+                onSelect={() =>
+                  void save((current) => (current.length > 1 ? current.filter((p) => p.id !== page.id) : null))
+                }
+              >
+                {t('panels.pagesDelete')}
+              </ContextMenuItem>
+            )}
           </ContextMenuContent>
         </ContextMenu>
       ))}

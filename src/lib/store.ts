@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { canvasPages, framePageId } from '../../shared/pages'
+import { openingPageId } from './pageLink'
 import { sortByStack } from '../../shared/frameStack'
 import type { DesignToken } from '../../shared/designTokens'
 import type {
@@ -368,7 +369,9 @@ export const useStore = create<State>((set, get) => ({
       activePageId: canvas
         ? canvas.id === s.canvas?.id && canvasPages(canvas).some((p) => p.id === s.activePageId)
           ? s.activePageId
-          : canvasPages(canvas)[0]!.id
+          : /* a canvas being opened starts on the page its URL asks for, so
+               the first paint is already that page */
+            openingPageId(canvas, typeof location === 'undefined' ? '' : location.search)
         : null,
     })),
   setActivePage: (id) =>

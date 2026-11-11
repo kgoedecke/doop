@@ -91,3 +91,32 @@ export function applyPageChanges(
   }
   return next
 }
+
+/** The page components made from markup keep their mains on. */
+export const COMPONENTS_PAGE = 'Components'
+
+/** The page a library canvas opens on when its link names none: the one
+ *  holding the most published components' mains (a tie goes to the page named
+ *  "Components", then to page order). Undefined when no published component
+ *  has a main frame on a page, and the canvas opens as any other does. */
+export function libraryLandingPageId(
+  canvas: Pick<Canvas, 'id' | 'pages' | 'frames' | 'components'>,
+  publishedIds: readonly string[],
+): string | undefined {
+  const mains = new Map<string, number>()
+  for (const def of canvas.components ?? []) {
+    if (!def.mainFrameId || !publishedIds.includes(def.id)) continue
+    const frame = canvas.frames.find((candidate) => candidate.id === def.mainFrameId)
+    if (!frame) continue
+    const pageId = framePageId(canvas, frame)
+    mains.set(pageId, (mains.get(pageId) ?? 0) + 1)
+  }
+  let best: CanvasPageInfo | undefined
+  for (const page of canvasPages(canvas)) {
+    const count = mains.get(page.id) ?? 0
+    if (!count) continue
+    const lead = best ? (mains.get(best.id) ?? 0) : 0
+    if (count > lead || (count === lead && page.name === COMPONENTS_PAGE && best?.name !== COMPONENTS_PAGE)) best = page
+  }
+  return best?.id
+}
