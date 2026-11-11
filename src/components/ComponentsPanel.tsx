@@ -24,7 +24,7 @@ import {
 import { ComponentIcon, MoreHorizontalIcon } from './ui/icons'
 import { IconButton } from './ui/icon-button'
 import { Input } from './ui/input'
-import { SearchField } from './ui/search-field'
+import { PanelSearch } from './ui/panel'
 
 /** A component's sheet in an inert iframe: no scripts, no clicks, scaled to the card. */
 function ComponentThumb({ def, canvasId }: { def: ComponentDef; canvasId: string }) {
@@ -141,172 +141,175 @@ export function ComponentsPanel() {
   }
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto px-3 pt-2 pb-3" data-slot="components-panel">
-      <SearchField
-        value={query}
-        onChange={(event) => setQuery(event.target.value)}
-        placeholder={t('components.search')}
-      />
-      {shown.length === 0 && (
-        <p className="px-0.5 text-caption text-ink-soft">
-          {components?.length ? t('components.noMatch') : t('components.empty')}
-        </p>
-      )}
-      {shown.map((def) => (
-        <article key={def.id} className="flex flex-col gap-1.5" data-component-card={def.name}>
-          {/* the card is picked up and dropped onto the canvas; the menu holds the rest */}
-          <div
-            draggable={canEdit && renaming !== def.id}
-            aria-label={canEdit ? t('components.dragHint', { name: def.name }) : def.name}
-            className={cn('flex w-full flex-col gap-1.5 text-left', canEdit && 'cursor-grab active:cursor-grabbing')}
-            onDragStart={(event) => {
-              event.dataTransfer.setData(COMPONENT_DRAG_TYPE, def.id)
-              event.dataTransfer.effectAllowed = 'copy'
-            }}
-          >
-            <ComponentThumb def={def} canvasId={canvasId} />
-            <span className="flex min-w-0 items-center gap-1.5 text-body text-ink">
-              <ComponentIcon size="rail" className="flex-none text-brand" />
-              {renaming === def.id ? (
-                <ComponentNameInput def={def} onDone={() => setRenaming(null)} />
-              ) : (
-                <span className="truncate" onDoubleClick={canEdit ? () => setRenaming(def.id) : undefined}>
-                  {def.name}
-                </span>
-              )}
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <IconButton
-                    size="sm"
-                    className="ml-auto flex-none"
-                    aria-label={t('components.moreActions', { name: def.name })}
-                    data-component-menu
-                  >
-                    <MoreHorizontalIcon size="rail" aria-hidden />
-                  </IconButton>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent
-                  align="end"
-                  width="md"
-                  onCloseAutoFocus={(event) => {
-                    if (!renameFromMenu.current) return
-                    renameFromMenu.current = false
-                    event.preventDefault()
-                    setRenaming(def.id)
-                  }}
-                >
-                  {canEdit && (
-                    <DropdownMenuItem onSelect={() => void placeComponent(def)}>
-                      {t('components.insertInstance')}
-                    </DropdownMenuItem>
-                  )}
-                  {canEdit && (
-                    <DropdownMenuItem
-                      onSelect={() => {
-                        renameFromMenu.current = true
-                      }}
-                    >
-                      {t('components.rename')}
-                    </DropdownMenuItem>
-                  )}
-                  <DropdownMenuItem onSelect={() => goToMain(def)}>{t('components.goToMain')}</DropdownMenuItem>
-                  {canEdit && def.source && (
-                    <DropdownMenuItem
-                      onSelect={() => {
-                        api
-                          .syncComponent(canvasId, def.id)
-                          .then(({ updated }) =>
-                            useStore
-                              .getState()
-                              .pushNotice(
-                                updated ? t('components.pulled', { name: def.name }) : t('components.upToDate'),
-                              ),
-                          )
-                          .catch(console.error)
-                      }}
-                    >
-                      {t('components.pullUpdate')}
-                    </DropdownMenuItem>
-                  )}
-                  {canEdit && (
-                    <>
-                      <DropdownMenuSeparator />
-                      <DropdownMenuItem
-                        className="text-accent-ink data-[highlighted]:text-accent-ink"
-                        onSelect={() => setConfirmDelete(def)}
-                      >
-                        {t('components.deleteComponent')}
-                      </DropdownMenuItem>
-                    </>
-                  )}
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </span>
-          </div>
-          {def.description && <p className="line-clamp-2 text-caption text-ink-soft">{def.description}</p>}
-        </article>
-      ))}
-      <ConfirmDialog
-        open={!!confirmDelete}
-        onOpenChange={(open) => !open && setConfirmDelete(null)}
-        title={t('components.deleteConfirmTitle', { name: confirmDelete?.name ?? '' })}
-        description={t('components.deleteConfirmDescription')}
-        confirmLabel={t('components.deleteComponent')}
-        destructive
-        onConfirm={() => {
-          const target = confirmDelete
-          setConfirmDelete(null)
-          if (target) void removeComponent(target)
-        }}
-      />
-      {canEdit && (
-        <div className="mt-1 flex flex-col gap-1.5 border-t border-line-soft pt-2.5">
-          <Button size="sm" onClick={() => void scan()}>
-            {t('components.findRepeated')}
-          </Button>
-          {candidates?.length === 0 && <p className="text-caption text-ink-soft">{t('components.nothingRepeats')}</p>}
-          {candidates?.map((candidate) => (
-            <div key={`${candidate.example.frame_id}:${candidate.example.element}`} className="flex flex-col gap-0.5">
-              <span className="text-body text-ink">{candidate.suggested_name}</span>
-              <span className="text-caption text-ink-soft">
-                {t('components.copiesInFrames', { copies: candidate.occurrences, count: candidate.frames })}
-                {candidate.sample_text ? `, “${candidate.sample_text}”` : ''}
-              </span>
-              <Button size="inline" variant="link" onClick={() => void convert(candidate)}>
-                {t('components.makeAndLink')}
+    <>
+      <div
+        className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto overscroll-contain px-3 pt-2 pb-3"
+        data-slot="components-panel"
+      >
+        {canEdit && (
+          <div className="flex flex-col gap-1.5 border-b border-line-soft pb-2.5">
+            <div className="flex flex-col gap-1.5">
+              <Button size="sm" onClick={() => void scan()}>
+                {t('components.findRepeated')}
+              </Button>
+              <Button size="sm" onClick={() => void browse()}>
+                {t('components.importFromCanvas')}
               </Button>
             </div>
-          ))}
-          <Button size="sm" onClick={() => void browse()}>
-            {t('components.importFromCanvas')}
-          </Button>
-          {libraries?.length === 0 && <p className="text-caption text-ink-soft">{t('components.noLibraries')}</p>}
-          {libraries?.map((library) => (
-            <div key={library.id} className="flex flex-col gap-0.5">
-              <span className="text-caption text-ink-soft">{library.name}</span>
-              {library.components.map((entry) => (
-                <Button
-                  key={entry.id}
-                  size="inline"
-                  variant="link"
-                  onClick={() => {
-                    api
-                      .importComponent(canvasId, library.id, entry.id)
-                      .then(() => useStore.getState().pushNotice(t('components.imported', { name: entry.name })))
-                      .catch((error: unknown) =>
-                        useStore
-                          .getState()
-                          .pushNotice(error instanceof Error ? error.message : t('components.importFailed')),
-                      )
-                  }}
-                >
-                  {entry.name}
+            {candidates?.length === 0 && <p className="text-caption text-ink-soft">{t('components.nothingRepeats')}</p>}
+            {candidates?.map((candidate) => (
+              <div key={`${candidate.example.frame_id}:${candidate.example.element}`} className="flex flex-col gap-0.5">
+                <span className="text-body text-ink">{candidate.suggested_name}</span>
+                <span className="text-caption text-ink-soft">
+                  {t('components.copiesInFrames', { copies: candidate.occurrences, count: candidate.frames })}
+                  {candidate.sample_text ? `, “${candidate.sample_text}”` : ''}
+                </span>
+                <Button size="inline" variant="link" onClick={() => void convert(candidate)}>
+                  {t('components.makeAndLink')}
                 </Button>
-              ))}
+              </div>
+            ))}
+            {libraries?.length === 0 && <p className="text-caption text-ink-soft">{t('components.noLibraries')}</p>}
+            {libraries?.map((library) => (
+              <div key={library.id} className="flex flex-col gap-0.5">
+                <span className="text-caption text-ink-soft">{library.name}</span>
+                {library.components.map((entry) => (
+                  <Button
+                    key={entry.id}
+                    size="inline"
+                    variant="link"
+                    onClick={() => {
+                      api
+                        .importComponent(canvasId, library.id, entry.id)
+                        .then(() => useStore.getState().pushNotice(t('components.imported', { name: entry.name })))
+                        .catch((error: unknown) =>
+                          useStore
+                            .getState()
+                            .pushNotice(error instanceof Error ? error.message : t('components.importFailed')),
+                        )
+                    }}
+                  >
+                    {entry.name}
+                  </Button>
+                ))}
+              </div>
+            ))}
+          </div>
+        )}
+        {shown.length === 0 && (
+          <p className="px-0.5 text-caption text-ink-soft">
+            {components?.length ? t('components.noMatch') : t('components.empty')}
+          </p>
+        )}
+        {shown.map((def) => (
+          <article key={def.id} className="flex flex-col gap-1.5" data-component-card={def.name}>
+            {/* the card is picked up and dropped onto the canvas; the menu holds the rest */}
+            <div
+              draggable={canEdit && renaming !== def.id}
+              aria-label={canEdit ? t('components.dragHint', { name: def.name }) : def.name}
+              className={cn('flex w-full flex-col gap-1.5 text-left', canEdit && 'cursor-grab active:cursor-grabbing')}
+              onDragStart={(event) => {
+                event.dataTransfer.setData(COMPONENT_DRAG_TYPE, def.id)
+                event.dataTransfer.effectAllowed = 'copy'
+              }}
+            >
+              <ComponentThumb def={def} canvasId={canvasId} />
+              <span className="flex min-w-0 items-center gap-1.5 text-body text-ink">
+                <ComponentIcon size="rail" className="flex-none text-brand" />
+                {renaming === def.id ? (
+                  <ComponentNameInput def={def} onDone={() => setRenaming(null)} />
+                ) : (
+                  <span className="truncate" onDoubleClick={canEdit ? () => setRenaming(def.id) : undefined}>
+                    {def.name}
+                  </span>
+                )}
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <IconButton
+                      size="sm"
+                      className="ml-auto flex-none"
+                      aria-label={t('components.moreActions', { name: def.name })}
+                      data-component-menu
+                    >
+                      <MoreHorizontalIcon size="rail" aria-hidden />
+                    </IconButton>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent
+                    align="end"
+                    width="md"
+                    onCloseAutoFocus={(event) => {
+                      if (!renameFromMenu.current) return
+                      renameFromMenu.current = false
+                      event.preventDefault()
+                      setRenaming(def.id)
+                    }}
+                  >
+                    {canEdit && (
+                      <DropdownMenuItem onSelect={() => void placeComponent(def)}>
+                        {t('components.insertInstance')}
+                      </DropdownMenuItem>
+                    )}
+                    {canEdit && (
+                      <DropdownMenuItem
+                        onSelect={() => {
+                          renameFromMenu.current = true
+                        }}
+                      >
+                        {t('components.rename')}
+                      </DropdownMenuItem>
+                    )}
+                    <DropdownMenuItem onSelect={() => goToMain(def)}>{t('components.goToMain')}</DropdownMenuItem>
+                    {canEdit && def.source && (
+                      <DropdownMenuItem
+                        onSelect={() => {
+                          api
+                            .syncComponent(canvasId, def.id)
+                            .then(({ updated }) =>
+                              useStore
+                                .getState()
+                                .pushNotice(
+                                  updated ? t('components.pulled', { name: def.name }) : t('components.upToDate'),
+                                ),
+                            )
+                            .catch(console.error)
+                        }}
+                      >
+                        {t('components.pullUpdate')}
+                      </DropdownMenuItem>
+                    )}
+                    {canEdit && (
+                      <>
+                        <DropdownMenuSeparator />
+                        <DropdownMenuItem
+                          className="text-accent-ink data-[highlighted]:text-accent-ink"
+                          onSelect={() => setConfirmDelete(def)}
+                        >
+                          {t('components.deleteComponent')}
+                        </DropdownMenuItem>
+                      </>
+                    )}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </span>
             </div>
-          ))}
-        </div>
-      )}
-    </div>
+            {def.description && <p className="line-clamp-2 text-caption text-ink-soft">{def.description}</p>}
+          </article>
+        ))}
+        <ConfirmDialog
+          open={!!confirmDelete}
+          onOpenChange={(open) => !open && setConfirmDelete(null)}
+          title={t('components.deleteConfirmTitle', { name: confirmDelete?.name ?? '' })}
+          description={t('components.deleteConfirmDescription')}
+          confirmLabel={t('components.deleteComponent')}
+          destructive
+          onConfirm={() => {
+            const target = confirmDelete
+            setConfirmDelete(null)
+            if (target) void removeComponent(target)
+          }}
+        />
+      </div>
+      <PanelSearch value={query} placeholder={t('components.search')} onChange={setQuery} />
+    </>
   )
 }
