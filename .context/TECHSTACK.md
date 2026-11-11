@@ -46,15 +46,21 @@
   something matches; six-hour in-memory cache for the free plan's 1,000 requests a day. Every
   result credits One Page Love and the authors with the entry's link (their terms). Tests:
   `inspiration.test.ts`.
-- Icons (`server/iconProxy.ts`): `search_icons` searches Iconify but hands out
-  `/icons/iconify/<prefix>/<name>.svg` on Doop's origin (the provider in the path), which the server fetches from Iconify (only its
-  known customisations pass: `color`, `width`, `height`, `rotate`, `flip`, `box`) once and keeps in the
-  bucket (`iconify/<sha256 of the Iconify URL>.svg`) and an in-memory LRU; at most 16 Iconify fetches run
-  and 64 wait, past that the route answers 503 with `Retry-After`. Served like an `/a/` SVG (nosniff, a script-free CSP, open CORS). Hotlinks to
+- Icons and stock photos from Doop's origin (`server/hostedCopies.ts`, `server/iconProxy.ts`,
+  `server/photoProxy.ts`): `search_icons` hands out `/icons/iconify/<prefix>/<name>.svg` and `search_images`
+  `/photos/pexels/<id>.jpeg?w=&h=` (the provider in the path, so another source can sit beside it), which the server fetches from Iconify or Pexels the first time
+  anything loads them and keeps in the bucket (`iconify/` and `pexels/<sha256 of the source URL>.<ext>`)
+  and a small in-memory LRU. Only each source's known options pass (Iconify `color`, `width`,
+  `height`, `rotate`, `flip`, `box`; Pexels `w`, `h`, `dpr`, `fit`, an unsized photo getting the
+  940x650 search size, never the original), redirects are refused, and source fetches are capped
+  (icons 16 running and 64 waiting, photos 8 and 32; past that a 503 with `Retry-After`). Served
+  like an `/a/` asset (nosniff, open CORS, a script-free CSP on SVG; photos immutable). Hotlinks to
   `api.iconify.design` rendered blank in screenshots on and off, since the hosted renderer fetched
-  them itself; the renderer (`loadFrameInto`) also points a frame's existing Iconify hotlinks at
-  Doop before loading it, and Figma export reads a Doop icon in-process (`hostedIconSvg`) since a
-  private `BETTER_AUTH_URL` is refused by `fetchRemote`. Tests: `iconProxy.test.ts`.
+  them itself; the renderer (`loadFrameInto`) also points a frame's existing Iconify and Pexels
+  hotlinks at Doop before loading it, and Figma export reads both in-process (`hostedIconSvg`,
+  `hostedPhoto`) since a private `BETTER_AUTH_URL` is refused by `fetchRemote`. Pexels' licence
+  allows rehosting; arbitrary hotlinked images are never copied. Tests: `iconProxy.test.ts`,
+  `photoProxy.test.ts`.
 - Where frame CSS goes (`FRAME_STYLES` in `server/guide.ts`): agents are asked to style an element
   in its own `style` attribute, which is what the editor reads and writes, and to keep a `<style>`
   block for what an attribute cannot say (keyframes, font faces, `:root` custom properties, states,

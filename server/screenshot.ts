@@ -5,6 +5,7 @@ import puppeteer, { type Browser, type Page } from 'puppeteer-core'
 import type { Frame } from '../shared/types.ts'
 import { guardPublicPageRequests } from './publicUrl.ts'
 import { withHostedIcons } from './iconProxy.ts'
+import { withHostedPhotos } from './photoProxy.ts'
 import { renderedHeight } from './renderLimits.ts'
 import {
   createRenderer,
@@ -167,7 +168,7 @@ async function loadFrameInto(page: Page, frame: Frame): Promise<void> {
   const assetOrigin = new URL(env.BETTER_AUTH_URL).origin
   await guardPublicPageRequests(page, {
     allowUrl: (url) =>
-      (url.origin === assetOrigin && (url.pathname.startsWith('/a/') || url.pathname.startsWith('/icons/'))) ||
+      (url.origin === assetOrigin && /^\/(?:a|icons|photos)\//.test(url.pathname)) ||
       /* webfonts referenced by imported frames (imports request the
          source design's families from Google Fonts) */
       url.origin === 'https://fonts.googleapis.com' ||
@@ -184,7 +185,7 @@ async function loadFrameInto(page: Page, frame: Frame): Promise<void> {
      asset URLs of imported frames resolve nowhere. In the app an iframe
      inherits the page origin; here a <base> stands in for it — unless the
      frame brought its own (website imports do). */
-  let html = withHostedIcons(frame.html || '<!doctype html><html><body></body></html>')
+  let html = withHostedPhotos(withHostedIcons(frame.html || '<!doctype html><html><body></body></html>'))
   if (!/<base\s/i.test(html)) {
     const baseTag = `<base href="${assetOrigin.replace(/"/g, '&quot;')}/">`
     html = /<head[^>]*>/i.test(html) ? html.replace(/<head([^>]*)>/i, `<head$1>${baseTag}`) : baseTag + html
