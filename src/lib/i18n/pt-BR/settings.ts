@@ -39,17 +39,26 @@ export const settings: Catalog['settings'] = {
 
   imageDescriptionsTitle: 'Descrições de imagens',
   imageDescriptionsDescription:
-    'Uma descrição curta ajuda os agentes a entender imagens enviadas. Minha conta usa sua conta para seus envios, depois uma conta elegível do dono do canvas e, por último, este servidor. Também permite que sua conta cubra envios nos seus canvases quando quem enviou não tem um modelo elegível. Este servidor usa apenas as credenciais do servidor para seus envios e exclui sua conta das alternativas. Desligado impede descrições dos seus envios e dos seus canvases. As cobranças do seu provedor se aplicam.',
+    'Os agentes recebem uma descrição curta de cada imagem que você envia, para saber o que há nela sem abri-la.',
+  imageDescriptionsRow: 'Descrever com',
   imageDescriptionsAria: 'Descrições de imagens',
   imageDescriptionsOff: 'Desligado',
-  imageDescriptionsAccount: 'Minha conta',
-  imageDescriptionsServer: 'Este servidor',
-  imageDescriptionsRunsOn: 'Modelo disponível: {label}. Novas tentativas mantêm o pagador original.',
+  imageDescriptionsAccount: 'Meu modelo',
+  imageDescriptionsServer: 'Modelo do servidor',
+  imageDescriptionsRunsOn: 'Pronto: {label}',
+  imageDescriptionsAccountNote:
+    'Usa sua conta conectada e também cobre envios nos canvases que você possui quando quem enviou não tem modelo. As cobranças do seu provedor se aplicam.',
+  imageDescriptionsServerNote: 'Usa o modelo deste servidor. Sua conta nunca é cobrada.',
+  imageDescriptionsFallbackNote:
+    'Nenhuma das suas contas conectadas vê imagens, então seus envios usam o modelo deste servidor e sua conta não é cobrada. Conecte uma para usá-la no lugar.',
   imageDescriptionsReasonOff: 'Seus envios e as imagens dos seus canvases não são descritos.',
   imageDescriptionsReasonTextOnly:
-    'Sua conta não tem um modelo de visão elegível e este servidor não tem um modelo. Uma conta elegível do dono de outro canvas pode descrever seus envios; caso contrário, ficam sem descrição.',
+    'Sua conta não tem um modelo que veja imagens, e este servidor não tem nenhum. O dono de um canvas para o qual você envia ainda pode cobrir; caso contrário, as imagens ficam sem descrição.',
   imageDescriptionsReasonNoModel:
-    'Nenhum modelo para envios está disponível aqui. No modo Minha conta, uma conta elegível do dono de outro canvas ainda pode descrever seus envios.',
+    'Nenhum modelo está disponível para isso. Com Meu modelo, o dono de um canvas para o qual você envia ainda pode cobrir.',
+  imageDescriptionsHowTitle: 'Quem paga por uma descrição',
+  imageDescriptionsHow:
+    'Com Meu modelo, um envio é descrito na conta de quem enviou, senão na do dono do canvas, senão na deste servidor. Modelo do servidor usa apenas este servidor e deixa sua conta fora dessa ordem. Desligado impede descrições dos seus envios e dos canvases que você possui. Uma nova tentativa é cobrada de quem pagou a primeira.',
 
   themeTitle: 'Tema',
   themeDescription:
