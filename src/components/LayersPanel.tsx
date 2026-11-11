@@ -16,8 +16,7 @@ import { currentPageCanvas, usePageCanvas } from '../lib/pages'
 import { PagesPanel, sectionHeading } from './PagesPanel'
 import { getIdentity } from '../lib/identity'
 import { deleteFramesTracked } from '../lib/history'
-import { api } from '../lib/api'
-import { renameComponent } from '../lib/components'
+import { renameComponent, rootPartKey } from '../lib/components'
 import {
   ancestorsOf,
   buildLayerTree,
@@ -88,7 +87,7 @@ import {
   PlusIcon,
   SearchIcon,
 } from './ui/icons'
-import { t as translate, useT } from '@/lib/i18n'
+import { useT } from '@/lib/i18n'
 
 /* the tree indents 16px per level; frame rows sit at depth 0 */
 const INDENT = 16
@@ -781,25 +780,11 @@ function ItemNameInput({
 
 /* A standalone main's row shows its frame's name; the server renames that
    frame with the component only while the two names agree, so otherwise the
-   frame takes the saved name here. A component rename has no undo, so this
-   companion write records none either. */
+   frame takes the saved name here, in turn with its other renames and without
+   an undo step, since the component rename it follows has none. */
 async function renameMain(def: ComponentDef, frame: Frame, standalone: boolean, value: string) {
   const saved = await renameComponent(def, value)
-  const current = useStore.getState().canvas?.frames.find((f) => f.id === frame.id)
-  if (!saved || !standalone || !current || current.name === saved) return
-  useStore.getState().patchFrameLocal(current.id, { name: saved })
-  try {
-    await api.updateFrame(current.id, { name: saved })
-  } catch (error) {
-    const s = useStore.getState()
-    if (s.canvas?.frames.find((f) => f.id === current.id)?.name === saved)
-      s.patchFrameLocal(current.id, { name: current.name })
-    s.pushNotice(
-      error instanceof Error && error.message
-        ? error.message
-        : translate('panels.layersRenameFailed', { name: current.name }),
-    )
-  }
+  if (saved && standalone) renameFrame(frame.id, saved, { record: false })
 }
 
 function useItemRename(name: string, allowed: boolean, onCommit: (value: string) => void) {
@@ -948,17 +933,19 @@ function NodeRow({
   /* a standalone element is its frame: its name, eye, lock and menu all
      belong to the frame */
   const standalone = !!row.standalone
-  /* a component's rows are named after it: the main's row renames the
-     component, an instance's is not renamed on its own */
+  /* as in Figma, a component's rows are named after it: renaming the main's
+     renames the component, renaming an instance's names that layer alone (an
+     override the instance keeps, still linked) */
+  const main = node.component === 'main' ? component : undefined
+  /* a name inherited from the main is not the instance's own */
+  const rootKey = useMemo(() => (component ? rootPartKey(component) : undefined), [component])
+  const ownName = node.component === 'instance' && !!rootKey && !!node.namedParts?.includes(rootKey)
   const { label, startRename } = useItemRename(
-    standalone ? frame.name : (componentName ?? node.label),
-    !readOnly && !frame.locked && !node.locked && (!component || node.component === 'main'),
+    standalone ? frame.name : ownName ? node.label : (componentName ?? node.label),
+    !readOnly && !frame.locked && !node.locked,
     (value) => {
-      if (component) {
-        void renameMain(component, frame, standalone, value)
-        return
-      }
-      if (standalone) renameFrame(frame.id, value)
+      if (main) void renameMain(main, frame, standalone, value)
+      else if (standalone) renameFrame(frame.id, value)
       else renameLayer(frame.id, node.selector, value)
     },
   )

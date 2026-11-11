@@ -73,12 +73,14 @@ function queueRename(frameId: string, edit: (frame: Frame) => Promise<void>) {
   trackSave(pending)
 }
 
-export function renameFrame(frameId: string, value: string) {
+/** `record: false` saves without an undo step, for a name that follows another
+ *  change that has none of its own (a component's rename). */
+export function renameFrame(frameId: string, value: string, { record = true }: { record?: boolean } = {}) {
   const name = value.trim()
   if (!name) return
   queueRename(frameId, async (frame) => {
     if (isStackLocked(frame) || name === frame.name) return
-    const entry = recordUpdate(frame.id, { name: frame.name }, { name }, true)
+    const entry = record ? recordUpdate(frame.id, { name: frame.name }, { name }, true) : undefined
     const started = historyEpoch()
     useStore.getState().patchFrameLocal(frame.id, { name })
     try {

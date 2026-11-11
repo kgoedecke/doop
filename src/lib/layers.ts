@@ -1,4 +1,4 @@
-import { COMPONENT_ATTR, INSTANCE_ATTR } from '../../shared/components'
+import { COMPONENT_ATTR, INSTANCE_ATTR, OVERRIDES_ATTR } from '../../shared/components'
 import { ELEMENT_ID_ATTR, newElementId } from '../../shared/elementId'
 
 /**
@@ -27,6 +27,11 @@ export interface LayerNode {
   component?: 'main' | 'instance'
   /** which component, for the row to show its name */
   componentId?: string
+  /** the label is a name given in the Layers panel, not one read off the element */
+  named?: boolean
+  /** on an instance root: the part keys its saved overrides name, which tells
+   *  its own name from one inherited from its main */
+  namedParts?: string[]
   children: LayerNode[]
 }
 
@@ -150,7 +155,25 @@ function detailOf(el: Element): string {
 function toNode(el: Element): LayerNode {
   const node = defaultNode(el)
   const name = el.getAttribute(NAME_ATTR)?.trim()
-  return name ? { ...node, label: name, detail: '' } : node
+  if (!name) return node
+  const namedParts = nameOverrides(el)
+  return { ...node, label: name, detail: '', named: true, ...(namedParts.length ? { namedParts } : {}) }
+}
+
+/** The part keys an instance root's saved overrides give a name to. A name its
+ *  main carries is rendered onto every instance too, so the attribute alone
+ *  cannot tell an instance's own name from an inherited one. */
+function nameOverrides(el: Element): string[] {
+  if (!el.hasAttribute(INSTANCE_ATTR)) return []
+  try {
+    const parts: unknown = JSON.parse(el.getAttribute(OVERRIDES_ATTR) ?? '{}')
+    if (!parts || typeof parts !== 'object') return []
+    return Object.entries(parts as Record<string, { attrs?: Record<string, unknown> } | null>)
+      .filter(([, part]) => typeof part?.attrs?.[NAME_ATTR] === 'string')
+      .map(([key]) => key)
+  } catch {
+    return []
+  }
 }
 
 function defaultNode(el: Element): LayerNode {
