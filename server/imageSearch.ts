@@ -2,6 +2,7 @@ import { env } from './env.ts'
 import { createAsset, fetchRemote } from './assets.ts'
 import { readImage } from './icoImage.ts'
 import { ICONIFY_ENDPOINT, iconUrl } from './iconProxy.ts'
+import { photoUrl } from './photoProxy.ts'
 /**
  * Image sourcing for design agents: stock photo search (Pexels) and icon /
  * brand-logo search (Iconify). Both power the search_images / search_icons
@@ -23,7 +24,7 @@ export function photoSearchEnabled(): boolean {
 }
 
 export interface PhotoResult {
-  /** Display-resolution CDN URL (~940px wide) — what goes in frame HTML. */
+  /** Display resolution (~940px wide) on Doop's origin (/photos/…) — what goes in frame HTML. */
   image_url: string
   /** Small preview (~280px) used for the visual thumbnail. */
   thumb_url: string
@@ -61,12 +62,13 @@ export async function searchPhotos(
   if (!res.ok) throw new Error(`photo search failed: HTTP ${res.status}`)
   const body = (await res.json()) as { photos?: PexelsPhoto[] }
   return (body.photos ?? []).flatMap((p) => {
-    const image_url = p.src?.large
+    const large = p.src?.large
     const thumb_url = p.src?.tiny
-    if (!image_url || !thumb_url) return []
+    if (!large || !thumb_url) return []
     return [
       {
-        image_url,
+        /* Doop's copy (server/photoProxy.ts), so the photo renders wherever the frame does */
+        image_url: photoUrl(large),
         thumb_url,
         alt: p.alt || '',
         photographer: p.photographer,

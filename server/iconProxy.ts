@@ -1,17 +1,15 @@
-import { createHash } from 'node:crypto'
 import type { Request, Response } from 'express'
 import { env } from './env.ts'
-import * as storage from './storage.ts'
+import { hostedCopies, sendCopy } from './hostedCopies.ts'
 
 /**
  * Icons from search_icons, served from Doop: /icons/iconify/<prefix>/<name>.svg (the provider in the path, so another icon source
  * can sit beside it), fetched from the
- * Iconify API by the server and kept in memory. A frame hotlinking api.iconify.design rendered
+ * Iconify API by the server. A frame hotlinking api.iconify.design rendered
  * blank in screenshots and exports on and off (the renderer is a hosted browser that fetches
  * outside pages itself), while Doop's own /a/ assets always loaded; an icon on Doop's origin
- * loads like those, for viewers and every renderer alike. Each icon is fetched from Iconify once:
- * it is kept in the bucket (iconify/<hash>.svg) and in memory, so restarts and an Iconify outage
- * leave every icon already used loading.
+ * loads like those, for viewers and every renderer alike. Each icon is fetched from Iconify once
+ * and kept in the bucket (server/hostedCopies.ts).
  */
 
 export const ICONIFY_ENDPOINT = 'https://api.iconify.design'
@@ -53,78 +51,18 @@ export function upstreamFor(prefix: string, file: string, query: Record<string, 
   return `${ICONIFY_ENDPOINT}/${prefix}/${name}.svg${search}`
 }
 
-/* insertion order is recency: a hit moves to the back, the front is evicted */
-const cache = new Map<string, Buffer>()
-const inFlight = new Map<string, Promise<Buffer | null>>()
-
-function remember(key: string, svg: Buffer) {
-  cache.delete(key)
-  cache.set(key, svg)
-  if (cache.size > CACHE_LIMIT) cache.delete(cache.keys().next().value!)
-}
-
-/** Too many icons are being fetched at once: try again shortly. */
-export class IconsBusyError extends Error {
-  constructor() {
-    super('icon fetches are busy')
-  }
-}
-
-let active = 0
-const waiting: (() => void)[] = []
-
-async function limited<T>(work: () => Promise<T>): Promise<T> {
-  if (active >= MAX_ACTIVE) {
-    if (waiting.length >= MAX_WAITING) throw new IconsBusyError()
-    await new Promise<void>((resolve) => waiting.push(resolve))
-  }
-  active++
-  try {
-    return await work()
-  } finally {
-    active--
-    waiting.shift()?.()
-  }
-}
-
-async function fetchIcon(url: string): Promise<Buffer | null> {
-  const res = await fetch(url, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) })
-  if (res.status === 404) return null
-  if (!res.ok) throw new Error(`icon fetch failed: HTTP ${res.status}`)
-  if (!res.headers.get('content-type')?.startsWith('image/svg+xml')) throw new Error('icon fetch returned no SVG')
-  const svg = Buffer.from(await res.arrayBuffer())
-  if (svg.length > MAX_ICON_BYTES) throw new Error('icon is too large')
-  return svg
-}
-
-const storageKey = (url: string) => `iconify/${createHash('sha256').update(url).digest('hex')}.svg`
-
-/** The bucket's copy, else Iconify's (stored for next time). A bucket that fails is skipped, not fatal. */
-async function loadIcon(url: string): Promise<Buffer | null> {
-  const key = storageKey(url)
-  const stored = await storage.getObject(key).catch(() => null)
-  if (stored) return stored
-  const svg = await limited(() => fetchIcon(url))
-  if (svg)
-    await storage.putObject(key, svg, 'image/svg+xml').catch((error: unknown) => console.warn('[icons] store', error))
-  return svg
-}
+const icons = hostedCopies({
+  provider: 'iconify',
+  maxBytes: MAX_ICON_BYTES,
+  cacheLimit: CACHE_LIMIT,
+  maxActive: MAX_ACTIVE,
+  maxWaiting: MAX_WAITING,
+  timeoutMs: FETCH_TIMEOUT_MS,
+})
 
 /** One icon's SVG, from memory, the bucket or Iconify; null when Iconify has no such icon. */
 export async function iconSvg(url: string): Promise<Buffer | null> {
-  const cached = cache.get(url)
-  if (cached) {
-    remember(url, cached)
-    return cached
-  }
-  let pending = inFlight.get(url)
-  if (!pending) {
-    pending = loadIcon(url).finally(() => inFlight.delete(url))
-    inFlight.set(url, pending)
-  }
-  const svg = await pending
-  if (svg) remember(url, svg)
-  return svg
+  return (await icons.get(url))?.body ?? null
 }
 
 /** A Doop icon URL read in-process (exports that must not fetch their own origin); undefined when it is not one. */
@@ -140,24 +78,7 @@ export async function serveIcon(req: Request, res: Response) {
   const { prefix, file } = req.params as { prefix: string; file: string }
   const upstream = upstreamFor(prefix, file, req.query)
   if (!upstream) return res.status(404).end()
-  try {
-    const svg = await iconSvg(upstream)
-    if (!svg) return res.status(404).end()
-    res.set('Content-Type', 'image/svg+xml')
-    res.set('Cache-Control', 'public, max-age=604800')
-    res.set('X-Content-Type-Options', 'nosniff')
-    /* CSS mask-image fetches with CORS from a sandboxed frame's opaque origin */
-    res.set('Access-Control-Allow-Origin', '*')
-    /* an SVG opened as a document can script: neuter it, as /a/ does */
-    res.set('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'")
-    res.send(svg)
-  } catch (error) {
-    if (error instanceof IconsBusyError) {
-      res.set('Retry-After', '2')
-      return res.status(503).end()
-    }
-    res.status(502).end()
-  }
+  await sendCopy(res, icons.get(upstream), 'public, max-age=604800')
 }
 
 const HOTLINK = /https:\/\/api\.iconify\.design\/([a-z0-9-]+)\/([a-z0-9-]+\.svg)/g
