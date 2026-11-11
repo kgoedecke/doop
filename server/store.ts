@@ -622,14 +622,18 @@ class Store {
     return n
   }
 
-  /** A workspace is going away: every canvas in it becomes personal again. */
-  detachWorkspace(workspaceId: string): void {
+  /** A workspace is going away: every canvas in it becomes personal again.
+   *  Returns the ids of the canvases it moved. */
+  detachWorkspace(workspaceId: string): string[] {
+    const moved: string[] = []
     for (const c of this.canvases.values()) {
       if (c.workspaceId === workspaceId) {
         delete c.workspaceId
         persist.saveCanvas(c)
+        moved.push(c.id)
       }
     }
+    return moved
   }
 
   /* ---- community gallery ---- */

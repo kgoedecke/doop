@@ -11,6 +11,7 @@ export const workspace: Catalog['workspace'] = {
   workspace: 'Workspace',
   people: 'Pessoas',
   fonts: 'Fontes',
+  agents: 'Agentes',
   libraries: 'Bibliotecas',
   librariesTitle: 'Bibliotecas de componentes',
   librariesDescription:

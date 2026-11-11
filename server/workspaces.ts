@@ -9,6 +9,7 @@ import { store } from './store.ts'
 import * as billing from './billing.ts'
 import { mailerConfigured, sendMail } from './mailer.ts'
 import { dropWorkspaceFonts } from './fonts.ts'
+import { dropWorkspaceAgents } from './customAgents.ts'
 import { notifyUsers } from './userEvents.ts'
 import { avatarUrl } from '../shared/avatar.ts'
 import { isBillingInterval, isWorkspaceActive } from '../shared/billing.ts'
@@ -267,7 +268,7 @@ export async function deleteWorkspace(id: string): Promise<void> {
   const ws = records.get(id)
   if (!ws) return
   if (billing.billingEnabled()) await billing.cancelSubscription(ws)
-  store.detachWorkspace(id)
+  const detached = store.detachWorkspace(id)
   records.delete(id)
   const former = [...(members.get(id)?.keys() ?? [])]
   members.delete(id)
@@ -278,6 +279,11 @@ export async function deleteWorkspace(id: string): Promise<void> {
     await tx.delete(t.workspaces).where(eq(t.workspaces.id, id))
   })
   await dropWorkspaceFonts(id)
+  await dropWorkspaceAgents(id)
+  /* each canvas now has its owner's personal team; open rooms hear it. Lazy:
+     actions depends on this module through the font library */
+  const { announceTeam } = await import('./actions.ts')
+  for (const canvasId of detached) announceTeam(canvasId)
 }
 
 /** Mirror a Stripe subscription onto the row. The one place billing state

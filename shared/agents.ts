@@ -23,7 +23,19 @@ export interface AgentRole {
   reviewer?: boolean
   /** extra @mention spellings beyond the id and the squashed name */
   aliases?: string[]
+  /** defined by a person or a workspace (shared/customAgents.ts) rather than
+   *  built in: its id is the handle people @mention, and it answers to
+   *  nothing else, since a name typed by a person need not be a word */
+  custom?: boolean
+  /** a built-in agent whose instructions its team rewrote: the resident sets
+   *  them apart as it does a custom agent's (shared/customAgents.ts) */
+  briefByTeam?: boolean
 }
+
+/** The agents one canvas has: the built-in team, then the custom agents of its
+ *  workspace (or, on a personal canvas, of its owner). Every lookup below
+ *  takes one, so an agent defined in one workspace never answers in another. */
+export type Roster = readonly AgentRole[]
 
 export const AGENT_ROLES: AgentRole[] = [
   {
@@ -86,6 +98,7 @@ export const AGENT_ROLES: AgentRole[] = [
 ]
 
 export const DEFAULT_ROLE_ID = 'doop'
+export const DEFAULT_ROLE_NAME = 'Doop'
 
 /** Ready-made pipelines for the board's compose box. */
 export const PIPELINE_PRESETS: { id: string; label: string; roles: string[] }[] = [
@@ -95,46 +108,57 @@ export const PIPELINE_PRESETS: { id: string; label: string; roles: string[] }[] 
   { id: 'audit', label: 'Review only', roles: ['ux', 'brand', 'a11y'] },
 ]
 
-const byId = new Map(AGENT_ROLES.map((r) => [r.id, r]))
-const byName = new Map(AGENT_ROLES.map((r) => [r.name.toLowerCase(), r]))
+/** The built-in team plus a canvas's custom agents. */
+export function rosterWith(custom: readonly AgentRole[] | undefined): Roster {
+  return custom?.length ? [...AGENT_ROLES, ...custom] : AGENT_ROLES
+}
 
-export function roleById(id: string | undefined): AgentRole | undefined {
-  return id ? byId.get(id) : undefined
+export function roleById(id: string | undefined, roster: Roster): AgentRole | undefined {
+  return id ? roster.find((r) => r.id === id) : undefined
 }
 
 /** The role an agent name belongs to — undefined for outside agents (MCP). */
-export function roleByAgentName(name: string | undefined): AgentRole | undefined {
-  return name ? byName.get(name.toLowerCase()) : undefined
+export function roleByAgentName(name: string | undefined, roster: Roster): AgentRole | undefined {
+  const key = name?.toLowerCase()
+  return key ? roster.find((r) => r.name.toLowerCase() === key) : undefined
 }
 
-export function roleName(id: string | undefined): string {
-  return roleById(id)?.name ?? roleById(DEFAULT_ROLE_ID)!.name
+/** The name a role id works under. An id the roster no longer has (a custom
+ *  agent deleted while a card waited on it) falls to the default agent. */
+export function roleName(id: string | undefined, roster: Roster = AGENT_ROLES): string {
+  return roleById(id, roster)?.name ?? DEFAULT_ROLE_NAME
 }
 
 /** Keep only real role ids, in order, without repeats. Empty input = default. */
-export function normalizePipeline(ids: unknown): string[] {
+export function normalizePipeline(ids: unknown, roster: Roster): string[] {
   const list = Array.isArray(ids) ? ids : []
   const out: string[] = []
   for (const raw of list) {
     const id = String(raw)
-    if (byId.has(id) && !out.includes(id)) out.push(id)
+    if (roleById(id, roster) && !out.includes(id)) out.push(id)
   }
-  return out.length > 0 ? out.slice(0, AGENT_ROLES.length) : [DEFAULT_ROLE_ID]
+  return out.length > 0 ? out.slice(0, roster.length) : [DEFAULT_ROLE_ID]
 }
 
-/** Every spelling that addresses a role in a comment: @doop, @UXLead, @ux… */
+/** Every spelling that addresses a role in a comment: @doop, @UXLead, @ux…
+ *  A custom agent answers to its handle alone. */
 export function mentionsFor(role: AgentRole): string[] {
+  if (role.custom) return [role.id]
   return [role.id, role.name.replace(/\s+/g, ''), ...(role.aliases ?? [])].map((m) => m.toLowerCase())
+}
+
+function mentionPattern(mention: string, flags: string): RegExp {
+  return new RegExp(`@+(${mention.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})\\b`, flags)
 }
 
 /** Every role a piece of text @mentions, in order of first appearance and
  *  without repeats. */
-export function mentionedRoles(text: string): AgentRole[] {
+export function mentionedRoles(text: string, roster: Roster): AgentRole[] {
   const found: { role: AgentRole; at: number }[] = []
-  for (const role of AGENT_ROLES) {
+  for (const role of roster) {
     let first = -1
     for (const mention of mentionsFor(role)) {
-      const at = text.search(new RegExp(`@${mention}\\b`, 'i'))
+      const at = text.search(mentionPattern(mention, 'i'))
       if (at >= 0 && (first < 0 || at < first)) first = at
     }
     if (first >= 0) found.push({ role, at: first })
@@ -143,15 +167,15 @@ export function mentionedRoles(text: string): AgentRole[] {
 }
 
 /** The role a piece of text @mentions, if any. First mention wins. */
-export function mentionedRole(text: string): AgentRole | undefined {
-  return mentionedRoles(text)[0]
+export function mentionedRole(text: string, roster: Roster): AgentRole | undefined {
+  return mentionedRoles(text, roster)[0]
 }
 
 /** The same text with every resident @mention turned into a plain name, so
  *  words that quote a request cannot become a new one. */
-export function withoutMentions(text: string): string {
+export function withoutMentions(text: string, roster: Roster): string {
   let out = text
-  for (const role of AGENT_ROLES)
-    for (const mention of mentionsFor(role)) out = out.replace(new RegExp(`@+(${mention})\\b`, 'gi'), '$1')
+  for (const role of roster)
+    for (const mention of mentionsFor(role)) out = out.replace(mentionPattern(mention, 'gi'), '$1')
   return out
 }

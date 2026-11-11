@@ -23,6 +23,7 @@ import { Tabs, TabsList, TabsTrigger } from '../components/ui/tabs'
 import { Toast } from '../components/ui/toast'
 import { ChevronRightIcon } from '../components/ui/icons'
 import { FontLibrary } from '../components/FontLibrary'
+import { CustomAgents } from '../components/CustomAgents'
 import { WorkspaceLibraries } from '../components/WorkspaceLibraries'
 import { DashContent, DashHeader, DashLayout, DashMain, DashSubtitle, DashTitle } from '../components/ui/dash'
 import { timeAgo } from '../lib/time'
@@ -30,7 +31,7 @@ import { getLocale, t as translate, useT, type PlainMessageKey } from '../lib/i1
 
 type Pane = WorkspacePane
 
-const PANES: readonly string[] = ['members', 'fonts', 'libraries', 'billing', 'general'] satisfies Pane[]
+const PANES: readonly string[] = ['members', 'fonts', 'agents', 'libraries', 'billing', 'general'] satisfies Pane[]
 
 function isPane(value: string | null): value is Pane {
   return value !== null && PANES.includes(value)
@@ -55,6 +56,7 @@ const ROLE_LABEL = {
 const TAB_LABEL = {
   members: 'workspace.people',
   fonts: 'workspace.fonts',
+  agents: 'workspace.agents',
   libraries: 'workspace.libraries',
   billing: 'workspace.billing',
   general: 'workspace.general',
@@ -254,6 +256,8 @@ export function Workspace({ workspaceId }: { workspaceId: string }) {
             <MembersPane ws={ws} meId={meId} admin={admin} onChange={reload} onError={handle} onToast={showToast} />
           ) : pane === 'fonts' ? (
             <FontLibrary workspaceId={ws.id} />
+          ) : pane === 'agents' ? (
+            <CustomAgents workspaceId={ws.id} />
           ) : pane === 'libraries' ? (
             <WorkspaceLibraries workspaceId={ws.id} onToast={showToast} />
           ) : pane === 'billing' ? (

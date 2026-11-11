@@ -2,6 +2,7 @@ import type { AgentBrand } from './agentBrand.ts'
 import type { BillingInterval, WorkspaceStatus } from './billing.ts'
 import type { CanvasRole, LinkAccess } from './canvasRole.ts'
 import type { ComponentDef } from './components.ts'
+import type { AgentRole } from './agents.ts'
 import type { DesignToken } from './designTokens.ts'
 import type { RunnerPick } from './agentRunner.ts'
 
@@ -167,6 +168,12 @@ export interface Canvas {
    *  mains are on, where a link naming no page opens (shared/pages.ts). Set on
    *  the copy a canvas GET or a room `init` hands out; never stored */
   landingPageId?: string
+  /** the canvas's Doop Agent team: the built-in agents its workspace (or, on a
+   *  personal canvas, its owner) has on, with their changes, then its custom
+   *  agents (shared/customAgents.ts), every `brief` left empty. Set on the copy
+   *  a canvas GET or a room `init` hands out; never stored. Unset reads as the
+   *  built-in team as it ships */
+  team?: AgentRole[]
   /** user ids invited to collaborate (the owner is not listed) */
   memberIds?: string[]
   /** reusable designs on this canvas; unset = none. See shared/components.ts. */
@@ -491,6 +498,9 @@ export interface TaskFeedback {
   deliveredAt?: number
   /** the agent that picked it up */
   claimedBy?: string
+  /** the claim was a resident run's (in-process), not an outside agent's
+   *  with the same name: what restart recovery fails as interrupted */
+  claimedByResident?: boolean
   /** resident Doop finished handling this feedback */
   completedAt?: number
   /** unsuccessful resident-agent attempt; never retried automatically */
@@ -625,6 +635,8 @@ export type ServerMessage =
   /** a workspace library this canvas can use published or withdrew components:
    *  what the Components panel offers, and which updates wait, should be read again */
   | { type: 'library'; actor: Actor }
+  /** the canvas's team changed (shared/customAgents.ts): the whole new one */
+  | { type: 'team'; team: AgentRole[] }
   /** a style-guide doc was written, moved (doc set) or deleted (doc null) */
   | { type: 'guidelines'; name: string; doc: GuidelineDoc | null; actor: Actor }
   /** the canvas's design tokens changed: the whole list after the change */

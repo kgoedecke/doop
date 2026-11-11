@@ -201,6 +201,9 @@ function handle(msg: ServerMessage) {
     case 'tokens':
       s.setTokensLocal(msg.tokens, msg.themes)
       break
+    case 'team':
+      s.setTeamLocal(msg.team)
+      break
     case 'reference':
       s.setReferenceLocal(msg.id, msg.reference)
       break

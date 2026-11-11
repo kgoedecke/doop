@@ -3,6 +3,7 @@ import { canvasPages, framePageId } from '../../shared/pages'
 import { openingPageId } from './pageLink'
 import { sortByStack } from '../../shared/frameStack'
 import type { DesignToken } from '../../shared/designTokens'
+import type { AgentRole } from '../../shared/agents'
 import type {
   ActivityItem,
   AgentTask,
@@ -213,6 +214,8 @@ interface State {
   bumpLibrary(): void
   /** replace the open canvas's design tokens and themes (the room sends the whole list) */
   setTokensLocal(tokens: DesignToken[], themes: string[]): void
+  /** the canvas's Doop Agent team changed (a room `team` message) */
+  setTeamLocal(team: AgentRole[]): void
   /** pin (reference set) or unpin (null) a Memory reference on the open canvas */
   setReferenceLocal(id: string, reference: MemoryReference | null): void
   setDecisions(decisions: DesignDecision[]): void
@@ -567,6 +570,7 @@ export const useStore = create<State>((set, get) => ({
     }),
   setTokensLocal: (tokens, themes) =>
     set((s) => (s.canvas ? { canvas: { ...s.canvas, tokens, tokenThemes: themes } } : {})),
+  setTeamLocal: (team) => set((s) => (s.canvas ? { canvas: { ...s.canvas, team } } : {})),
   setReferenceLocal: (id, reference) =>
     set((s) => {
       if (!s.canvas) return {}
