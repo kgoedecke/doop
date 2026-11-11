@@ -6,6 +6,7 @@ import { MAX_PAGES, PageLimitError, store } from './store.ts'
 import * as persist from './db/persist.ts'
 import * as thumbs from './thumbs.ts'
 import { colorFor } from '../shared/types.ts'
+import type { AgentBrand } from '../shared/agentBrand.ts'
 import type { StackWrite } from '../shared/frameStack.ts'
 import { DEFAULT_ROLE_ID, mentionedRole, normalizePipeline, roleByAgentName, roleName } from '../shared/agents.ts'
 import { canvasPages } from '../shared/pages.ts'
@@ -65,7 +66,7 @@ type AgentTouch = (
   agentName: string,
   frameId?: string | null,
   status?: string | null,
-  owner?: string,
+  identity?: Pick<Actor, 'owner' | 'brand'>,
 ) => void
 
 let broadcast: Broadcast = () => {}
@@ -159,15 +160,15 @@ function logActivity(canvasId: string, actor: Actor, message: string, frameId?: 
 }
 
 export function resolveActor(
-  raw: { name?: string; kind?: string; clientId?: string; owner?: string } | undefined,
+  raw: { name?: string; kind?: string; clientId?: string; owner?: string; brand?: AgentBrand } | undefined,
 ): Actor {
   const kind = raw?.kind === 'agent' ? 'agent' : raw?.kind === 'user' ? 'user' : 'agent'
   const name = raw?.name?.trim() || (kind === 'agent' ? 'AI Agent' : 'Anonymous')
-  return { name, kind, color: colorFor(name), clientId: raw?.clientId, owner: raw?.owner }
+  return { name, kind, color: colorFor(name), clientId: raw?.clientId, owner: raw?.owner, brand: raw?.brand }
 }
 
 function touch(canvasId: string, actor: Actor, frameId?: string | null) {
-  if (actor.kind === 'agent') agentTouch(canvasId, actor.name, frameId, undefined, actor.owner)
+  if (actor.kind === 'agent') agentTouch(canvasId, actor.name, frameId, undefined, actor)
 }
 
 /** Refresh an agent's presence without changing its frame or status. A model
@@ -321,7 +322,7 @@ export function taskCanvasId(taskId: string): string | undefined {
 /** Agent announces what it is working on right now (empty string clears it). */
 export function setAgentStatus(canvasId: string, actor: Actor, status: string) {
   const clean = status.trim()
-  agentTouch(canvasId, actor.name, undefined, clean || null, actor.owner)
+  agentTouch(canvasId, actor.name, undefined, clean || null, actor)
 
   const list = taskLog.get(canvasId) ?? []
   /* board cards stay open until explicitly completed — a status change

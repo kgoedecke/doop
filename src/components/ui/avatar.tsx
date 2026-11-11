@@ -2,6 +2,7 @@ import * as React from 'react'
 import { useState, type CSSProperties } from 'react'
 
 import { cn } from '@/lib/utils'
+import type { AgentBrand } from '../../../shared/agentBrand'
 import { AgentIcon } from '../AgentIcon'
 
 /** The one or two letters a person is shown as: first and last initial, the
@@ -32,6 +33,8 @@ export interface AvatarProps extends Omit<React.ComponentProps<'span'>, 'color' 
   /** the person's presence colour; their disc is a 22% tint of it */
   color?: string
   kind?: 'user' | 'agent'
+  /** an agent's brand, from its presence (shared/agentBrand.ts); its name decides when unset */
+  brand?: AgentBrand
   /** `ink`: the account's own face on the dashboard, initials on an ink disc
    *  with no collar, instead of the tint of a presence colour */
   tone?: 'tint' | 'ink'
@@ -55,6 +58,7 @@ export interface AvatarProps extends Omit<React.ComponentProps<'span'>, 'color' 
 function Avatar({
   name,
   image,
+  brand,
   color = 'var(--ink)',
   kind = 'user',
   tone = 'tint',
@@ -101,7 +105,8 @@ function Avatar({
       {photo ? (
         <img src={photo} alt="" draggable={false} className="size-full object-cover" onError={() => setFailed(photo)} />
       ) : (
-        (children ?? (kind === 'agent' ? <AgentIcon name={name} size={Math.round(size * 0.58)} /> : initials(name)))
+        (children ??
+        (kind === 'agent' ? <AgentIcon name={name} brand={brand} size={Math.round(size * 0.58)} /> : initials(name)))
       )}
     </span>
   )

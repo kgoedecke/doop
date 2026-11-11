@@ -187,7 +187,7 @@ density="rail"` (the group caption with its chevron) and `DashNavItem density="r
   disc), `tone="ink"` (the account's own face: initials on an ink disc, no collar), `initials()`
   (the one first-and-last-letter rule), `BrandMark` - every third-party logo (`<BrandMark brand="figma" size={16} />`; figma, github,
   canva, photoshop, meta, claude, openai, cursor, gemini, google, apple, microsoft, slack, linear, openrouter,
-  deepseek, kimi);
+  deepseek, kimi, grok, opencode, pi);
   `AppIcon` is a model provider, import source or export format as doop.design's "Works with" row draws it:
   the brand tile (23% corners, inset edge and soft drop) with its glyph at 56% (`claude`, `claude-code`, `openai`,
   `gemini`, `openrouter`, `deepseek`, `kimi`, `seedream`, `codex`, `cursor`, `mcp`, `headless`, `github`, `figma`, `photoshop`, `canva`, `website`, `live-app`, `pdf`, `png`, `svg`,

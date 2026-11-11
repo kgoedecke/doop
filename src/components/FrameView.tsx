@@ -1736,7 +1736,11 @@ export const FrameView = memo(function FrameView({
                   .filter((p) => p.name !== stream?.name)
                   .map((p) => (
                     <span key={p.clientId} className={EDITOR_CHIP} style={{ background: p.color }} title={p.name}>
-                      {p.kind === 'agent' ? <AgentIcon name={p.name} size={9} color="#fff" /> : <EditIcon size={9} />}
+                      {p.kind === 'agent' ? (
+                        <AgentIcon name={p.name} brand={p.brand} size={9} color="#fff" />
+                      ) : (
+                        <EditIcon size={9} />
+                      )}
                       <span className={EDITOR_CHIP_TEXT}>{p.name}</span>
                     </span>
                   ))}

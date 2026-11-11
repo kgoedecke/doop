@@ -40,7 +40,7 @@ export const Cursors = memo(function Cursors() {
             >
               {p.kind === 'agent' && (
                 <>
-                  <AgentIcon name={p.name} size={9} color="#fff" />{' '}
+                  <AgentIcon name={p.name} brand={p.brand} size={9} color="#fff" />{' '}
                 </>
               )}
               {p.name}
