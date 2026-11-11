@@ -8,7 +8,8 @@ import * as TabsPrimitive from '@radix-ui/react-tabs'
 import { Button } from './button'
 import { CollapsibleTrigger } from './collapsible'
 import { Tooltip } from './tooltip'
-import { XIcon } from './icons'
+import { SearchIcon, XIcon } from './icons'
+import { Input } from './input'
 
 /* The canvas rails (Activity, Inspector). On a wide screen they float over the
    board; inside a mobile Sheet they fill it. That used to be a `.side-panel`
@@ -268,8 +269,36 @@ function PanelClose({
   )
 }
 
+/** A rail's search, pinned under its list within thumb's reach, as Figma keeps it. */
+function PanelSearch({
+  value,
+  placeholder,
+  onChange,
+}: {
+  value: string
+  placeholder: string
+  onChange: (value: string) => void
+}) {
+  return (
+    <footer data-slot="panel-search" className="flex-none px-2.5 pt-1 pb-2.5">
+      <label className="flex h-[30px] items-center gap-2 rounded-[8px] px-2.5 text-ink-faint shadow-ring focus-within:shadow-elevation-1-focus">
+        <SearchIcon className="size-3.5 flex-none" />
+        <Input
+          variant="bare"
+          inputSize="auto"
+          className="h-full placeholder:text-ink-ghost md:text-[12px]"
+          placeholder={placeholder}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+        />
+      </label>
+    </footer>
+  )
+}
+
 export {
   Panel,
+  PanelSearch,
   PanelHeader,
   PanelBody,
   PanelTabsRoot,

@@ -58,6 +58,7 @@ import {
   PanelClose,
   PanelHeader,
   PanelIconTab,
+  PanelSearch,
   PanelTabs,
   PanelTabsRoot,
   type PanelResize,
@@ -85,7 +86,6 @@ import {
   PanelCollapseIcon,
   PanelExpandIcon,
   PlusIcon,
-  SearchIcon,
 } from './ui/icons'
 import { useT } from '@/lib/i18n'
 
@@ -661,19 +661,7 @@ export function LayersPanel({
               <div aria-hidden className="pointer-events-none mx-1.5 h-0.5 rounded-full bg-brand" />
             )}
           </PanelBody>
-          <footer className="flex-none px-2.5 pt-1 pb-2.5">
-            <label className="flex h-[30px] items-center gap-2 rounded-[8px] px-2.5 text-ink-faint shadow-ring focus-within:shadow-elevation-1-focus">
-              <SearchIcon className="size-3.5 flex-none" />
-              <Input
-                variant="bare"
-                inputSize="auto"
-                className="h-full text-[12px] placeholder:text-ink-ghost md:text-[12px]"
-                placeholder={t('panels.layersSearch')}
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-              />
-            </label>
-          </footer>
+          <PanelSearch value={query} placeholder={t('panels.layersSearch')} onChange={setQuery} />
         </>
       )}
     </Panel>
