@@ -63,16 +63,22 @@ brief. It is part of the deliverable, not private scratch work:
    hero device → one-line direction. NAME the one exemplar you are following and say
    why it won — or state that none fit and the brief derives from the design-quality
    principles alone.
-3. **Post it.** Summarize in set_status ("Designing grocery landing — candlelit mood,
-   after Oatside") and persist the brief as separate save_decision calls so humans
-   and later agents see what you committed to. Each call holds one decision and its
-   rationale, at most ${MAX_DECISION_CHARS} characters. Split by topic (exemplar, palette, typography,
-   layout), keeping the reason for each choice with that choice; do not split sentences
-   into arbitrary chunks or discard rationale to squeeze the whole brief into one call.
+3. **Make it the canvas's tokens.** Before your first frame, create the brief's values
+   with create_tokens: the palette by role (--color-ground, --color-ink, --color-accent…),
+   font families, the type scale, radii and spacing. Frames and components then use them
+   as var(--…), and a change to a token restyles every frame that names it. The tokens
+   are where the values live; nothing else holds them.
+4. **Post it.** Summarize in set_status ("Designing grocery landing — candlelit mood,
+   after Oatside") and record the choices that need a reason with save_decision: the
+   exemplar you followed and why it won, why this mood, why this accent. A decision is
+   the why, not a copy of the values. Each call holds one decision and its rationale, at
+   most ${MAX_DECISION_CHARS} characters; do not split sentences into arbitrary chunks or drop the
+   rationale to squeeze several decisions into one call.
 
-Skip the brief only when the canvas already dictates the style — established frames,
-style guides or pinned references — or when the human handed you a complete design
-system. Then those are the brief; follow them.`
+Skip the brief only when the canvas already dictates the style — tokens (get_tokens),
+established frames, style guides or pinned references — or when the human handed you a
+complete design system. Then those are the brief; follow them, and if a value you need
+has no token yet, add one with create_tokens rather than writing it into a frame.`
 
 /** How to wire a clickable prototype — shared by the MCP guide and the resident agents' system prompt. */
 export const PROTOTYPES = `When a human asks for a clickable prototype or a flow, wire the screens with data attributes on
@@ -105,8 +111,13 @@ export const FRAME_STYLES = `- Style an element on the element itself: style="�
   editor, which reads and writes that attribute, so a style written there is one they can change,
   move and copy without surprises. A stylesheet rule can outrank their edit, or stop matching the
   moment they group or reorder layers.
-- A <style> block is for what an attribute cannot say: @keyframes, @font-face, custom properties on
-  :root, states (:hover, :focus, :active, :disabled, :checked), pseudo-elements (::before,
+- Colours, fonts, sizes, radii and spacing come from the canvas's design tokens (get_tokens) as
+  var(--name), in a style attribute or a rule alike. Never declare your own palette on :root or
+  redefine a token in a frame: Doop writes the values a frame names into it, and a local copy stops
+  following the canvas. If a value you need has no token, add it with create_tokens instead of
+  writing a hex.
+- A <style> block is for what an attribute cannot say: @keyframes, @font-face, custom properties
+  that are not canvas values, states (:hover, :focus, :active, :disabled, :checked), pseudo-elements (::before,
   ::placeholder), @media and @container queries, a component's variant and state rules, and the
   reset. Keep using it for those: never drop a hover state or an animation to avoid the block.
 - A property that changes with a state, a variant or a query goes in the stylesheet in both forms,
@@ -140,6 +151,23 @@ get_canvas and list_components show a canvas's components with their props.
 - Before you write the same block a third time, make it a component and use that. On a canvas
   that already repeated itself: find_component_candidates, then create_component with
   replace_matching=true.
+- Components nest, and every rule here applies inside a main too. A main's markup can hold
+  <doop-use>, and a change to the inner component reaches every main that uses it and every
+  instance of those. A NavItem written out by hand nine times inside a Sidebar is the same mistake
+  as a Button written out by hand inside a frame. Check list_components before writing a main, as
+  you would before writing a frame.
+- Build from the smallest piece up: name the pieces a large component repeats (Button, NavItem)
+  and create those first, then the one that holds them:
+      <aside class="sb">
+        <doop-use component="NavItem" label="Overview" active="true"></doop-use>
+        <doop-use component="NavItem" label="Files" count="1,284"></doop-use>
+      </aside>
+- A state belongs to the item, as a prop (active, state="selected", disabled), not to a rule on
+  the parent that picks one child out. If adding an item means writing a new selector on the
+  parent, the state is in the wrong place.
+- auto_props=false skips the automatic text, image and link props; explicit data-doop-prop bindings
+  and per-instance edits still work. Use it when you do not want those automatic props. A list that
+  will change (navigation, menus, rows) is nested components or a slot, not text in one main.
 - Write a description saying when to use it. Set code (file and export name) when the component
   exists in the human's repo: that is what makes the design implementable with their real code.
 - Vary with props, not copies. An enum prop sets data-<name> on the root, so a variant is plain
@@ -248,6 +276,9 @@ and fix real issues before moving on:
   copy (invented product names, believable numbers, human sentences).
 - **Logos**: any placeholder brand mark (gray tile, "LOGO", initials, an invented company
   wordmark) still in the frame — replace it with a real logo from search_logos.
+- **Reuse**: a block repeated three or more times, in this frame or inside a component it
+  uses, or copied from another frame, that is not a <doop-use>? A hex, font or size that a
+  token already names? Make the component or use the token.
 
 Prefer targeted fixes over rewrites. Never delete and restart a mostly-good frame — the
 humans watching lose work they may have been reacting to.
@@ -444,7 +475,9 @@ Memory also learns from feedback. Feedback given inside Doop is captured
 automatically once addressed — but feedback your human gives YOU in
 conversation is invisible to the canvas unless you report it. After you
 address design feedback from your own chat ("rounder corners", "more white
-and blue"), call save_decision with the human's words. Save one decision and its
+and blue"), call save_decision with the human's words and the reason. The same goes
+for a direction you choose yourself: the decision and why, never a list of values
+(those are tokens). Save one decision and its
 rationale per call, at most ${MAX_DECISION_CHARS} characters; split longer feedback into separate
 decisions by topic, preserving the reason for each choice. Design taste only —
 never one-off content edits like typos or copy tweaks.

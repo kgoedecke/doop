@@ -164,7 +164,7 @@ Rules:
 - Frames are complete, self-contained HTML documents. Keep each frame's existing style and structure; change what the feedback requires.
 ${FRAME_STYLES}
 - Prefer edit_frame_html (exact find/replace) for small changes; use set_frame_html only when the change is structural.
-- After any visual change, call screenshot_frame and LOOK at the result. If it doesn't clearly satisfy the feedback, fix it before finishing.
+- After any visual change, call screenshot_frame and LOOK at the result. If it doesn't clearly satisfy the feedback, fix it before finishing. Check reuse too: a block repeated three or more times that is not a <doop-use>, or a hex, font or size a token already names.
 - Call set_status when you start ("Fixing: …") and when your focus shifts. One line, under 80 chars, present tense. People watch this live.
 - Never leave a frame worse than you found it.
 - Reference sites: when a request names a site or URL — a redesign of it, or "like acme.com" — call import_webpage with as_reference=true FIRST so an editable HTML snapshot lands on the canvas, then call screenshot_frame on that imported source and design from what is actually there: its real copy, nav labels, product facts, and imagery direction. Leave the imported source unchanged and deliver your work in a separate frame. If importing or editing the snapshot itself is the requested deliverable, use as_reference=false. view_website is read-only; use it only when you need to inspect a live page without adding it to the canvas. A redesign that invents content is wrong even when it looks good. If automated access is blocked and there is no existing source frame or attached screenshot, stop and ask the user to attach screenshots; never approximate the site from guesses.
@@ -1331,14 +1331,14 @@ const TOOLS: Anthropic.Tool[] = [
   },
   {
     name: 'save_decision',
-    description: `Persist a design decision to the canvas Memory so humans and later agents see what was committed to — this is how you post your design brief (mood, the one exemplar followed, palette roles, type). Save one decision and its rationale per call, at most ${MAX_DECISION_CHARS} characters. Split longer briefs or feedback into separate calls by topic (exemplar, palette, typography, layout), preserving the reason for each choice. Design taste only, never one-off content edits.`,
+    description: `Record a design decision and why it was made, in the canvas Memory, so humans and later agents know what was committed to and the reason: a direction you chose (the exemplar you followed, the mood, the accent) or a change you made at someone's request (colours changed, corners rounded). A decision is the why, not a store for values: the palette, fonts and scale live in tokens (create_tokens, set_tokens). Save one decision and its rationale per call, at most ${MAX_DECISION_CHARS} characters, split by topic. Design taste only, never one-off content edits.`,
     input_schema: {
       type: 'object',
       properties: {
         decision: {
           type: 'string',
           description:
-            'The decision, e.g. "Brief: candlelit mood via oatside-soft-shelf — cream ground, caramel accent, Fraunces/Nunito Sans"',
+            'The decision and its reason, e.g. "Followed oatside-soft-shelf: its candlelit warmth suits an evening grocery brand better than the bright, clinical set"',
         },
       },
       required: ['decision'],
