@@ -2046,9 +2046,13 @@ export function updateFrame(
   const before = store.getFrame(frameId)
   if (!before) return undefined
   let changedComponents: ComponentDef[] = []
-  /* canvas-actors: an adopted edit is already what the actor holds, so it is taken as written */
-  if (patch.html !== undefined && !opts.adopted) {
+  let adopted = opts.adopted
+  if (patch.html !== undefined) {
     const prepared = prepareWrite(before.canvasId, frameId, repairEscapedHtml(patch.html), before.html, actor.name)
+    /* canvas-actors: HTML the server completed (components, library fonts,
+       tokens, escaped markup) is no longer what the actor holds, so it is
+       saved back like any edit */
+    if (prepared.html !== patch.html) adopted = undefined
     patch = { ...patch, html: prepared.html }
     changedComponents = prepared.changed
   }
@@ -2057,7 +2061,7 @@ export function updateFrame(
   const prevHidden = !!before.hidden
   const prevLocked = !!before.locked
   const prior = priorState(before)
-  const frame = store.updateFrame(frameId, patch, actor.name, opts.adopted ? { adopted: opts.adopted } : {})
+  const frame = store.updateFrame(frameId, patch, actor.name, adopted ? { adopted } : {})
   if (!frame) return undefined
 
   const htmlChanged = patch.html !== undefined && patch.html !== prevHtml
@@ -2111,8 +2115,9 @@ export function updateFrame(
 }
 
 /** canvas-actors: a browser's edit, written straight to the canvas's actor,
- *  taken in as if it had come through the API, so the room, design history
- *  and activity see it. Nothing is saved back (server/actorFrames.ts). */
+ *  taken in as if it had come through the API, so the room, design history,
+ *  components and activity see it. It is saved back only when the server
+ *  completed its HTML (updateFrame). */
 export function adoptActorEdit(next: Frame, by: Actor) {
   const before = store.getFrame(next.id)
   /* a canvas that is not loaded takes the edit in when it loads (store.load) */
@@ -2128,11 +2133,7 @@ export function adoptActorEdit(next: Frame, by: Actor) {
   if (!!next.locked !== !!before.locked) patch.locked = !!next.locked
   if (next.z !== undefined && next.z !== before.z) patch.z = next.z
   if (!Object.keys(patch).length) return
-  /* HTML the server would complete (library fonts, tokens, escaped markup) is
-     taken as an ordinary edit instead, which saves the completed HTML back */
-  const completes =
-    patch.html !== undefined && withLibraryFaces(next.canvasId, repairEscapedHtml(patch.html)) !== patch.html
-  updateFrame(next.id, patch, by, completes ? {} : { adopted: { updatedAt: next.updatedAt } })
+  updateFrame(next.id, patch, by, { adopted: { updatedAt: next.updatedAt } })
 }
 
 wireActorFrames({ adopt: adoptActorEdit })

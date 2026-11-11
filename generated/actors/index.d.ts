@@ -59,6 +59,10 @@ export declare namespace actors {
                 Args: Parameters<Stub["addVersion"]>
                 Result: Awaited<ReturnType<Stub["addVersion"]>>
             }
+            ["close"]: {
+                Args: Parameters<Stub["close"]>
+                Result: Awaited<ReturnType<Stub["close"]>>
+            }
             ["destroy"]: {
                 Args: Parameters<Stub["destroy"]>
                 Result: Awaited<ReturnType<Stub["destroy"]>>
@@ -71,9 +75,9 @@ export declare namespace actors {
                 Args: Parameters<Stub["frame"]>
                 Result: Awaited<ReturnType<Stub["frame"]>>
             }
-            ["importVersions"]: {
-                Args: Parameters<Stub["importVersions"]>
-                Result: Awaited<ReturnType<Stub["importVersions"]>>
+            ["reopen"]: {
+                Args: Parameters<Stub["reopen"]>
+                Result: Awaited<ReturnType<Stub["reopen"]>>
             }
             ["revokeAccess"]: {
                 Args: Parameters<Stub["revokeAccess"]>
@@ -112,6 +116,10 @@ export declare namespace actors {
                 type Args = $MethodTypes["addVersion"]["Args"]
                 type Result = $MethodTypes["addVersion"]["Result"]
             }
+            namespace close {
+                type Args = $MethodTypes["close"]["Args"]
+                type Result = $MethodTypes["close"]["Result"]
+            }
             namespace destroy {
                 type Args = $MethodTypes["destroy"]["Args"]
                 type Result = $MethodTypes["destroy"]["Result"]
@@ -124,9 +132,9 @@ export declare namespace actors {
                 type Args = $MethodTypes["frame"]["Args"]
                 type Result = $MethodTypes["frame"]["Result"]
             }
-            namespace importVersions {
-                type Args = $MethodTypes["importVersions"]["Args"]
-                type Result = $MethodTypes["importVersions"]["Result"]
+            namespace reopen {
+                type Args = $MethodTypes["reopen"]["Args"]
+                type Result = $MethodTypes["reopen"]["Result"]
             }
             namespace revokeAccess {
                 type Args = $MethodTypes["revokeAccess"]["Args"]

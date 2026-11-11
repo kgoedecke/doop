@@ -7,10 +7,9 @@ import {
   destroyActorCanvas,
   ownerWantsActor,
   placeCanvas,
-  registerActorCanvases,
   revokeActorAccess,
 } from './actorFrames.ts'
-import { moveCanvasToActor, moveCanvasToPostgres } from './canvasMoves.ts'
+import { moveCanvasToPostgres } from './canvasMoves.ts'
 import type { LinkAccess } from '../shared/canvasRole.ts'
 import { MAX_GUIDES } from '../shared/guides.ts'
 import { remapFrameTargets } from '../shared/prototype.ts'
@@ -161,33 +160,42 @@ class Store {
     canvasLoaded(canvasId)
   }
 
-  /** canvas-actors: the owner's flag says where a canvas lives, so one in the
-   *  wrong place moves before it is read: onto its actor when the flag came
-   *  on, back into Postgres when it went off. Nothing else has the canvas in
-   *  hand here. A move that fails leaves the canvas where it was, to be tried
-   *  again the next time it loads. */
+  /** canvas-actors: the way back. A canvas on an actor whose owner no longer
+   *  has the flag returns to Postgres before it is read; nothing else has
+   *  the canvas in hand here. Nothing moves the other way: a canvas made
+   *  without the flag stays in Postgres. A move that fails leaves the canvas
+   *  on its actor, to be tried again the next time it loads. */
   private async followOwnerFlag(canvasId: string) {
     const canvas = this.canvases.get(canvasId)
-    const wanted = ownerWantsActor(canvas?.ownerId)
-    if (!canvas || wanted === undefined || wanted === (canvas.frameStore === 'actor')) return
-    /* a frame still on its way to the store it is leaving would be left behind */
+    if (canvas?.frameStore !== 'actor' || ownerWantsActor(canvas.ownerId) !== false) return
+    /* a frame still on its way to the actor would be left behind */
     if (canvas.frames.some((frame) => persist.frameWritePending(frame.id))) return
     try {
       await persist.frameVersionsSettled(canvasId)
-      if (wanted) {
-        await moveCanvasToActor(canvasId)
-        canvas.frameStore = 'actor'
-        registerActorCanvases([canvas])
-      } else {
-        await moveCanvasToPostgres(canvasId)
-        delete canvas.frameStore
-        destroyActorCanvas(canvasId)
-      }
-      /* what memory holds was read from the store the canvas just left */
-      for (const frame of canvas.frames) unloadHtml(frame)
+      const { held } = await moveCanvasToPostgres(canvasId)
+      delete canvas.frameStore
+      destroyActorCanvas(canvasId)
+      this.takeMoved(canvasId, held)
     } catch (error) {
-      console.error(`[canvas actors] ${wanted ? 'move to actor' : 'move back'} failed`, canvasId, error)
+      console.error('[canvas actors] move back failed', canvasId, error)
     }
+  }
+
+  /** canvas-actors: the frames a canvas came back to Postgres with. Memory
+   *  holds them as boot read their rows, which a browser's edit made on the
+   *  actor while the server was not following never reached: take the moved
+   *  frames as they are, and the ones boot never listed. Their rows are
+   *  already written. */
+  private takeMoved(canvasId: string, held: Frame[]) {
+    const unlisted: Frame[] = []
+    for (const moved of held) {
+      const frame = this.getFrame(moved.id)
+      if (!frame) unlisted.push(moved)
+      else if (moved.updatedAt > frame.updatedAt) this.copyHeld(frame, moved)
+      else setHtml(frame, moved.html)
+    }
+    this.restoreFrames(canvasId, unlisted)
+    this.canvases.get(canvasId)?.frames.sort(byStack)
   }
 
   /** canvas-actors: a frame as its canvas's actor holds it, read on load.
@@ -196,6 +204,13 @@ class Store {
    *  browser may change, and bring the frame's row up to date. */
   private takeHeld(frame: Frame, held: Frame) {
     if (held.updatedAt <= frame.updatedAt) return
+    this.copyHeld(frame, held)
+    persist.adoptActorFrame(frame)
+    this.canvases.get(frame.canvasId)?.frames.sort(byStack)
+  }
+
+  /** What a browser may change on the actor, copied onto the frame in memory. */
+  private copyHeld(frame: Frame, held: Frame) {
     frame.name = held.name
     frame.x = held.x
     frame.y = held.y
@@ -211,8 +226,6 @@ class Store {
     if (held.approval) frame.approval = held.approval
     else delete frame.approval
     setHtml(frame, held.html)
-    persist.adoptActorFrame(frame)
-    this.canvases.get(frame.canvasId)?.frames.sort(byStack)
   }
 
   /** Keep a canvas loaded while an agent run or job works on it; call the

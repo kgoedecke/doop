@@ -11,11 +11,12 @@
  *   bun run flags disable   <flag> <email>...
  *   bun run flags move-back <email>...
  *
- * canvas-actors: every canvas these people own keeps its frames and their
- * design history in a Terse canvas actor; it needs TERSE_ACTOR_URL and
- * TERSE_API_KEY on the server. New canvases start there; one they already had
- * moves the next time it is opened. Turning the flag off is the way back: each
- * canvas returns to Postgres the next time it is opened.
+ * canvas-actors: canvases these people make from now on (new ones and their
+ * copies of any canvas) keep their frames and design history in a Terse
+ * canvas actor; it needs TERSE_ACTOR_URL and TERSE_API_KEY on the server.
+ * Canvases they already had stay in Postgres. Turning the flag off is the way
+ * back: each canvas on an actor returns to Postgres the next time it is
+ * opened.
  *
  * move-back turns canvas-actors off for these people and moves every canvas
  * they still have on an actor back at once, as the actor holds it now (it

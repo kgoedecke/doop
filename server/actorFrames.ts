@@ -7,14 +7,15 @@ import type { ActorFrame, FramesEvent, FramesSnapshot, ServerWrite, SocketMetada
 import type { Actor, Canvas, Frame, FrameVersion, FrameVersionInfo } from '../shared/types.ts'
 
 /**
- * Canvases on Terse canvas actors: every canvas whose owner has the
+ * Canvases on Terse canvas actors: the ones made by an owner with the
  * canvas-actors feature flag. Everything here runs for those canvases only;
  * every other canvas never reaches this file and works exactly as on main.
  *
  * The actor is where such a canvas's frames and their design history live.
- * The owner's flag decides, canvas by canvas, when the canvas is next opened
- * (store.load -> canvasMoves.ts): turned on, an existing canvas moves to its
- * actor; turned off, it moves back to Postgres. Postgres keeps one row per
+ * Only new canvases (and copies) start there (placeCanvas); a canvas made
+ * without the flag stays in Postgres whatever its owner's flag says later.
+ * The way back is the flag going off: the canvas returns to Postgres when it
+ * is next opened (store.load -> canvasMoves.ts). Postgres keeps one row per
  * frame with everything but the html, so boot reads every frame's place and
  * name there and asks no actor.
  *
@@ -46,9 +47,9 @@ export function isActorFrame(frameId: string): boolean {
   return frameCanvas.has(frameId)
 }
 
-/** Whether this owner's canvases belong on actors; undefined when this
+/** Whether this owner's new canvases go on actors; undefined when this
  *  server has no actors at all, or has not managed to read the flags yet, so
- *  nothing moves either way. */
+ *  nothing moves back either. */
 export function ownerWantsActor(ownerId: string | undefined): boolean | undefined {
   if (!env.TERSE_ACTOR_URL || !featureFlags.known) return undefined
   return featureFlags.has(ownerId, CANVAS_ACTORS)

@@ -25,10 +25,11 @@ export const actors = {
                 [
                     { name: "accessVersion", result: "value" },
                     { name: "addVersion", result: "void" },
+                    { name: "close", result: "void" },
                     { name: "destroy", result: "void" },
                     { name: "exportVersions", result: "value" },
                     { name: "frame", result: "value" },
-                    { name: "importVersions", result: "void" },
+                    { name: "reopen", result: "void" },
                     { name: "revokeAccess", result: "void" },
                     { name: "save", result: "value" },
                     { name: "snapshot", result: "value" },

@@ -14,15 +14,19 @@ interface $CanvasActorContract {
         /** File the state a frame had before a burst of edits, unless the newest
          *  version already holds it; the oldest beyond MAX_FRAME_VERSIONS go. */
         addVersion(version: ActorFrameVersion): Promise<void>
+        /** Stop taking browsers' edits and close their sockets, so what `snapshot`
+         *  returns next is final (the canvas is moving back to Postgres). The
+         *  server's own calls still work. */
+        close(): Promise<void>
         /** Delete every frame and its history (the canvas was deleted, or moved
-         *  back to Postgres) and close every socket. */
+         *  back to Postgres) and close every socket. What comes next starts clean. */
         destroy(): Promise<void>
         /** The whole history in id order, a page at a time, for the move back to
          *  Postgres: the versions after `after`, up to about `maxBytes` of HTML. */
         exportVersions(after: string | null, maxBytes: number): Promise<ActorFrameVersion[]>
         frame(id: string): Promise<ActorFrame | null>
-        /** History moved in from Postgres, as it was filed there. */
-        importVersions(versions: ActorFrameVersion[]): Promise<void>
+        /** Take browsers' edits again (the move back failed). */
+        reopen(): Promise<void>
         /** Close every socket and void tickets issued before (an access change). */
         revokeAccess(): Promise<void>
         /** The server's writes, in order and in one transaction; returns the revision they landed at. */

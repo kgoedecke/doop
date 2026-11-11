@@ -17,6 +17,8 @@ import * as schema from './actor-db/schema.js'
 export class CanvasActor extends Actor<SocketMetadata, FrameCommand, FramesSnapshot | EditError> {
   @Persisted private revision = 0
   @Persisted private accessRevision = 0
+  /** set while the canvas moves back to Postgres: no browser connects or edits */
+  @Persisted private closed = false
   @Ephemeral private orm: Orm
   @Persisted @Emittable committed: FramesEvent | null = null
 
@@ -27,12 +29,14 @@ export class CanvasActor extends Actor<SocketMetadata, FrameCommand, FramesSnaps
   }
 
   override async onConnect(socket: ActorSocketOf<CanvasActor>) {
-    if (socket.metadata.accessVersion !== this.accessRevision) return socket.reject(4003, 'Access changed')
+    if (this.closed || socket.metadata.accessVersion !== this.accessRevision)
+      return socket.reject(4003, 'Access changed')
     socket.send(await this.snapshot())
   }
 
   override async onMessage(socket: ActorSocketOf<CanvasActor>, command: FrameCommand) {
-    if (socket.metadata.accessVersion !== this.accessRevision) return socket.close(4003, 'Access changed')
+    if (this.closed || socket.metadata.accessVersion !== this.accessRevision)
+      return socket.close(4003, 'Access changed')
     if (command.type === 'snapshot') return socket.send(await this.snapshot())
     try {
       if (socket.metadata.readOnly) throw new Error('This connection is read only')
@@ -67,6 +71,19 @@ export class CanvasActor extends Actor<SocketMetadata, FrameCommand, FramesSnaps
   async revokeAccess(): Promise<void> {
     this.accessRevision++
     for (const socket of await this.getConnections()) socket.close(4003, 'Access changed')
+  }
+
+  /** Stop taking browsers' edits and close their sockets, so what `snapshot`
+   *  returns next is final (the canvas is moving back to Postgres). The
+   *  server's own calls still work. */
+  async close(): Promise<void> {
+    this.closed = true
+    await this.revokeAccess()
+  }
+
+  /** Take browsers' edits again (the move back failed). */
+  async reopen(): Promise<void> {
+    this.closed = false
   }
 
   /** The server's writes, in order and in one transaction; returns the revision they landed at. */
@@ -108,31 +125,7 @@ export class CanvasActor extends Actor<SocketMetadata, FrameCommand, FramesSnaps
   /** File the state a frame had before a burst of edits, unless the newest
    *  version already holds it; the oldest beyond MAX_FRAME_VERSIONS go. */
   async addVersion(version: ActorFrameVersion): Promise<void> {
-    await this.db.transaction(async () => {
-      const latest = await this.orm
-        .select({ html: frameVersions.html, width: frameVersions.width, height: frameVersions.height })
-        .from(frameVersions)
-        .where(eq(frameVersions.frameId, version.frameId))
-        .orderBy(desc(frameVersions.savedAt))
-        .limit(1)
-        .get()
-      if (latest && latest.html === version.html && latest.width === version.width && latest.height === version.height)
-        return
-      await this.orm.insert(frameVersions).values(toVersionRow(version)).onConflictDoNothing()
-      const kept = await this.orm
-        .select({ id: frameVersions.id })
-        .from(frameVersions)
-        .where(eq(frameVersions.frameId, version.frameId))
-        .orderBy(desc(frameVersions.savedAt))
-      const excess = kept.slice(MAX_FRAME_VERSIONS)
-      if (excess.length)
-        await this.orm.delete(frameVersions).where(
-          inArray(
-            frameVersions.id,
-            excess.map((row) => row.id),
-          ),
-        )
-    })
+    await this.db.transaction(() => this.fileVersion(version))
   }
 
   /** A frame's history, newest first, without the HTML. */
@@ -164,14 +157,6 @@ export class CanvasActor extends Actor<SocketMetadata, FrameCommand, FramesSnaps
     return row ? toVersion(row) : null
   }
 
-  /** History moved in from Postgres, as it was filed there. */
-  async importVersions(versions: ActorFrameVersion[]): Promise<void> {
-    await this.db.transaction(async () => {
-      for (const version of versions)
-        await this.orm.insert(frameVersions).values(toVersionRow(version)).onConflictDoNothing()
-    })
-  }
-
   /** The whole history in id order, a page at a time, for the move back to
    *  Postgres: the versions after `after`, up to about `maxBytes` of HTML. */
   async exportVersions(after: string | null, maxBytes: number): Promise<ActorFrameVersion[]> {
@@ -198,14 +183,43 @@ export class CanvasActor extends Actor<SocketMetadata, FrameCommand, FramesSnaps
   }
 
   /** Delete every frame and its history (the canvas was deleted, or moved
-   *  back to Postgres) and close every socket. */
+   *  back to Postgres) and close every socket. What comes next starts clean. */
   async destroy(): Promise<void> {
+    this.closed = false
     await this.db.transaction(async () => {
       await this.orm.delete(frames)
       await this.orm.delete(frameVersions)
       this.committed = { type: 'server-save', revision: ++this.revision, frameIds: [] }
     })
     await this.revokeAccess()
+  }
+
+  /** Inside a transaction: insert the version unless the newest already
+   *  holds that state, then drop the oldest beyond MAX_FRAME_VERSIONS. */
+  private async fileVersion(version: ActorFrameVersion): Promise<void> {
+    const latest = await this.orm
+      .select({ html: frameVersions.html, width: frameVersions.width, height: frameVersions.height })
+      .from(frameVersions)
+      .where(eq(frameVersions.frameId, version.frameId))
+      .orderBy(desc(frameVersions.savedAt))
+      .limit(1)
+      .get()
+    if (latest && latest.html === version.html && latest.width === version.width && latest.height === version.height)
+      return
+    await this.orm.insert(frameVersions).values(toVersionRow(version)).onConflictDoNothing()
+    const kept = await this.orm
+      .select({ id: frameVersions.id })
+      .from(frameVersions)
+      .where(eq(frameVersions.frameId, version.frameId))
+      .orderBy(desc(frameVersions.savedAt))
+    const excess = kept.slice(MAX_FRAME_VERSIONS)
+    if (excess.length)
+      await this.orm.delete(frameVersions).where(
+        inArray(
+          frameVersions.id,
+          excess.map((row) => row.id),
+        ),
+      )
   }
 
   /** A browser's edit: only the fields it may change, sign-off invalidated by a design change. */
@@ -225,6 +239,21 @@ export class CanvasActor extends Actor<SocketMetadata, FrameCommand, FramesSnaps
       }
       if (!next.hidden) delete next.hidden
       if (!next.locked) delete next.locked
+      /* The server files history for the edits it sees (actions.noteHtmlChange),
+         but it is not always following. So the state a new burst of edits
+         replaces is filed here too: another author, or the same one after a
+         pause. The server's copy of the same state is then skipped as a duplicate. */
+      const startsBurst = before.updatedBy !== next.updatedBy || next.updatedAt - before.updatedAt >= BURST_IDLE_MS
+      if (next.html !== before.html && before.html && startsBurst)
+        await this.fileVersion({
+          id: `${frameId}-${before.updatedAt}`,
+          frameId,
+          html: before.html,
+          width: before.width,
+          height: before.height,
+          savedAt: before.updatedAt,
+          savedBy: before.updatedBy,
+        })
       const designChanged = next.html !== before.html || next.width !== before.width || next.height !== before.height
       if (designChanged && next.approval?.status === 'ready_for_dev')
         next.approval = { ...next.approval, status: 'needs_review' }
@@ -316,6 +345,8 @@ type EditError = { type: 'error'; requestId: string; message: string }
 type Orm = DurableActorsDatabase<typeof schema>
 const { frames, frameVersions } = schema
 const MAX_FRAME_VERSIONS = 50
+/** actions.ts BURST_IDLE_MS: edits by one author closer together than this are one burst */
+const BURST_IDLE_MS = 2 * 60_000
 const EXPORT_PAGE_ROWS = 200
 const BROWSER_EDITABLE: readonly (keyof BrowserPatch)[] = [
   'name',

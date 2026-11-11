@@ -8,11 +8,11 @@ import type { ActorFrame, FramesEvent, FramesSnapshot } from '../src/actor'
 import type { Canvas, Frame, FrameVersionInfo, ServerMessage } from '../shared/types'
 
 /* canvas-actors end to end, on a real server and a local actor runtime
-   (`bun run test:actors`; skipped without one). A flagged person's canvases,
-   the ones they had and the ones they make, keep their frames and design
-   history in a Terse canvas actor, browsers write edits straight to it, and
-   the server folds them into the room, history and activity; everyone else's
-   canvases are untouched, and turning the flag off brings a canvas back. */
+   (`bun run test:actors`; skipped without one). A flagged person's new
+   canvases keep their frames and design history in a Terse canvas actor,
+   browsers write edits straight to it, and the server folds them into the
+   room, history and activity; the canvases they already had and everyone
+   else's are untouched, and turning the flag off brings a canvas back. */
 
 const ROOT = process.cwd()
 const ACTORS = !!process.env.TERSE_ACTOR_URL
@@ -23,6 +23,9 @@ describe.skipIf(!ACTORS)('canvas-actors', () => {
   let bob: Client
   let canvas: Canvas
   let frame: Frame
+  /** a second actor canvas, left unopened once the flag goes off */
+  let spare: Canvas
+  let spareFrame: Frame
   /** made before Ada had the flag */
   let earlier: Canvas
   let earlierFrame: Frame
@@ -50,33 +53,17 @@ describe.skipIf(!ACTORS)('canvas-actors', () => {
     expect((await bob.get(`/api/canvases/${plain.id}/actor`)).status).toBe(404)
   })
 
-  it('moves a canvas its owner already had onto an actor when it is next opened', async () => {
+  it('leaves a canvas its owner already had in Postgres', async () => {
     const before = await reboot(() => stored(earlier.id))
-    expect(before).toMatchObject({ frameStore: null, htmlBytes: '<main>Rewritten from scratch</main>'.length })
-    expect(before.versions).toBeGreaterThan(0)
-
     const read = await json<Canvas>(ada.get(`/api/canvases/${earlier.id}`))
-    expect(read.frameStore).toBe('actor')
+    expect(read.frameStore).toBeUndefined()
     expect(read.frames.find((f) => f.id === earlierFrame.id)).toMatchObject({
       html: '<main>Rewritten from scratch</main>',
       rotation: 30,
     })
-    const held = (await actorSnapshot(ada, earlier.id)).frames.find((f) => f.id === earlierFrame.id)
-    expect(held).toMatchObject({ html: '<main>Rewritten from scratch</main>', rotation: 30 })
-
-    /* its history went along, and a version can still be read whole */
-    const versions = await versionsOf(earlierFrame.id)
-    expect(versions).toHaveLength(before.versions)
-    const version = await json<{ html: string }>(ada.get(`/api/frames/${earlierFrame.id}/versions/${versions[0]!.id}`))
-    expect(version.html).toBe('<p>first draft</p>')
-
-    /* Postgres keeps the frame's row as an index, without its html or history */
-    expect(await reboot(() => stored(earlier.id))).toEqual({
-      frameStore: 'actor',
-      frames: 1,
-      htmlBytes: 0,
-      versions: 0,
-    })
+    expect((await ada.get(`/api/canvases/${earlier.id}/actor`)).status).toBe(404)
+    await json(ada.patch(`/api/frames/${earlierFrame.id}`, { name: 'Old, renamed' }))
+    expect(await reboot(() => stored(earlier.id))).toEqual(before)
   }, 60_000)
 
   it('gives a flagged person’s new canvas an actor, where server writes land', async () => {
@@ -85,6 +72,11 @@ describe.skipIf(!ACTORS)('canvas-actors', () => {
     frame = await json<Frame>(ada.post(`/api/canvases/${canvas.id}/frames`, { name: 'Hero', html: '<p>one</p>' }))
     await json(ada.patch(`/api/frames/${frame.id}`, { html: '<p>two</p>' }))
     await until(async () => (await actorSnapshot(ada)).frames.find((f) => f.id === frame.id)?.html === '<p>two</p>')
+    spare = await json<Canvas>(ada.post('/api/canvases', { name: 'Spare' }))
+    spareFrame = await json<Frame>(
+      ada.post(`/api/canvases/${spare.id}/frames`, { name: 'Kept', html: '<p>spare</p>', rotation: 30 }),
+    )
+    await until(async () => (await actorSnapshot(ada, spare.id)).frames.some((f) => f.id === spareFrame.id))
   })
 
   it('takes in an edit a browser writes straight to the actor', async () => {
@@ -241,13 +233,38 @@ describe.skipIf(!ACTORS)('canvas-actors', () => {
     expect(listed.frames.find((f) => f.id === frame.id)?.name).toBe('Hero, offline')
   }, 60_000)
 
+  it('files the design another person replaced on the actor while the server was down', async () => {
+    await json(ada.post(`/api/canvases/${canvas.id}/members`, { email: 'bob@example.com' }))
+    const history = (await versionsOf(frame.id)).length
+    const socket = await actorSocket(bob)
+    await reboot(async () => {
+      await socket.edit(frame.id, { html: '<article>Bob’s rewrite</article>' })
+    })
+    socket.close()
+    const versions = await versionsOf(frame.id)
+    expect(versions).toHaveLength(history + 1)
+    const filed = await json<{ html: string }>(ada.get(`/api/frames/${frame.id}/versions/${versions[0]!.id}`))
+    expect(filed.html).toBe('<p>typed while the server was away</p>')
+  }, 60_000)
+
   it('moves a canvas back to Postgres when it is opened after its owner’s flag went off', async () => {
     const history = (await versionsOf(frame.id)).length
-    await reboot(() => flags('disable', 'canvas-actors', 'ada@example.com'))
+    /* a last edit on the actor that the server never saw: the move must carry it */
+    const socket = await actorSocket(ada)
+    await reboot(async () => {
+      await socket.edit(frame.id, { html: '<p>typed while the server was away</p>', name: 'Hero, last edit' })
+      flags('disable', 'canvas-actors', 'ada@example.com')
+    })
     const read = await json<Canvas>(ada.get(`/api/canvases/${canvas.id}`))
     expect(read.frameStore).toBeUndefined()
-    expect(read.frames.find((f) => f.id === frame.id)?.html).toBe('<p>typed while the server was away</p>')
-    expect(await versionsOf(frame.id)).toHaveLength(history)
+    expect(read.frames.find((f) => f.id === frame.id)).toMatchObject({
+      name: 'Hero, last edit',
+      html: '<p>typed while the server was away</p>',
+    })
+    /* the actor stopped taking edits before it was read */
+    await socket.closed
+    expect((await versionsOf(frame.id)).length).toBeGreaterThanOrEqual(history)
+    const moved = (await versionsOf(frame.id)).length
     expect((await ada.get(`/api/canvases/${canvas.id}/actor`)).status).toBe(404)
     /* an edit lands in Postgres again, and what Ada makes now is an ordinary canvas */
     await json(ada.patch(`/api/frames/${frame.id}`, { html: '<p>back home</p>' }))
@@ -256,22 +273,18 @@ describe.skipIf(!ACTORS)('canvas-actors', () => {
     expect(after.frameStore).toBeNull()
     expect(after.htmlBytes).toBeGreaterThan(0)
     expect(after.versions).toBeGreaterThan(history)
-    expect(await versionsOf(frame.id)).toHaveLength(history + 1)
+    expect(await versionsOf(frame.id)).toHaveLength(moved + 1)
   }, 60_000)
 
   it('moves every canvas the owner still has on an actor back with `flags move-back`', async () => {
     /* never opened since the flag went off, so still on its actor */
     await reboot(async () => {
-      expect((await stored(earlier.id)).frameStore).toBe('actor')
+      expect((await stored(spare.id)).frameStore).toBe('actor')
       flags('move-back', 'ada@example.com')
     })
-    const read = await json<Canvas>(ada.get(`/api/canvases/${earlier.id}`))
+    const read = await json<Canvas>(ada.get(`/api/canvases/${spare.id}`))
     expect(read.frameStore).toBeUndefined()
-    expect(read.frames.find((f) => f.id === earlierFrame.id)).toMatchObject({
-      html: '<main>Rewritten from scratch</main>',
-      rotation: 30,
-    })
-    expect((await versionsOf(earlierFrame.id)).length).toBeGreaterThan(0)
+    expect(read.frames.find((f) => f.id === spareFrame.id)).toMatchObject({ html: '<p>spare</p>', rotation: 30 })
   }, 60_000)
 
   /** Stop the server, run `between` against its database, start it again on the same one. */

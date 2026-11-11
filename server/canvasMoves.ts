@@ -1,58 +1,41 @@
-import { and, asc, eq, gt, inArray, notInArray } from 'drizzle-orm'
+import { and, eq, inArray, notInArray } from 'drizzle-orm'
 import { actors } from '../generated/actors/index.js'
 import { db } from './db/index.ts'
 import * as t from './db/schema.ts'
 import type { ActorFrame, ActorFrameVersion } from '../src/actor.ts'
 
 /**
- * Moving one canvas between Postgres and its Terse canvas actor
- * (server/actorFrames.ts). The owner's canvas-actors flag decides where a
- * canvas belongs; store.load moves a canvas that is in the wrong place before
- * it reads it, so nothing else has the canvas in hand while it moves.
- * `bun run flags move-back` moves every canvas of an owner back at once.
+ * The way back from canvas actors (server/actorFrames.ts): copy a canvas's
+ * frames and their design history, as its actor holds them now, into Postgres
+ * and clear its `frame_store` mark, so the canvas is an ordinary one again.
+ * store.load does this for a canvas whose owner no longer has the
+ * canvas-actors flag, before it reads the canvas, so nothing else has it in
+ * hand while it moves; `bun run flags move-back` does it for every canvas of
+ * an owner at once. Nothing ever moves the other way: only canvases made
+ * while their owner has the flag live on actors.
  *
- * Both moves copy first and switch last, in one Postgres transaction that
- * also flips `canvases.frame_store`: a move that dies halfway leaves the
- * canvas where it was, whole, and the next one starts over.
+ * The move copies first and switches last, in one Postgres transaction that
+ * also clears the mark: one that dies halfway leaves the canvas on its actor,
+ * whole, and the next one starts over.
  */
 
-/** Onto its actor: every frame whole and every frame's design history. The
- *  frames rows stay, emptied of their html, as the index boot reads. */
-export async function moveCanvasToActor(canvasId: string): Promise<MoveCount> {
+/** Back into Postgres, as the actor holds the canvas now. The actor first
+ *  stops taking browsers' edits, so nothing lands there after it is read; it
+ *  keeps its copy, which the caller drops once nothing writes there any more.
+ *  Returns the frames as they were moved, for a caller holding older ones. */
+export async function moveCanvasToPostgres(canvasId: string): Promise<MoveCount & { held: ActorFrame[] }> {
   const actor = actors.CanvasActor.get(canvasId)
-  /* whatever an earlier move left there, in either direction */
-  await actor.destroy()
-  const rows = await db.select().from(t.frames).where(eq(t.frames.canvasId, canvasId))
-  for (const batch of batches(rows.map(actorFrame), (frame) => frame.html.length))
-    await actor.save(batch.map((frame) => ({ type: 'put', frame })))
-
-  let versions = 0
-  for (let after = ''; ;) {
-    const page = await db
-      .select()
-      .from(t.frameVersions)
-      .where(and(eq(t.frameVersions.canvasId, canvasId), gt(t.frameVersions.id, after)))
-      .orderBy(asc(t.frameVersions.id))
-      .limit(VERSION_PAGE_ROWS)
-    const last = page.at(-1)
-    if (!last) break
-    for (const batch of batches(page.map(actorVersion), (version) => version.html.length))
-      await actor.importVersions(batch)
-    versions += page.length
-    after = last.id
+  await actor.close()
+  try {
+    return await copyToPostgres(canvasId)
+  } catch (error) {
+    /* the canvas stays on its actor, so browsers may edit there again */
+    await actor.reopen().catch((failure: unknown) => console.error('[canvas actors] reopen failed', canvasId, failure))
+    throw error
   }
-
-  await db.transaction(async (tx) => {
-    await tx.update(t.canvases).set({ frameStore: 'actor' }).where(eq(t.canvases.id, canvasId))
-    await tx.update(t.frames).set({ html: '' }).where(eq(t.frames.canvasId, canvasId))
-    await tx.delete(t.frameVersions).where(eq(t.frameVersions.canvasId, canvasId))
-  })
-  return { frames: rows.length, versions }
 }
 
-/** Back into Postgres, as the actor holds the canvas now. The actor keeps its
- *  copy; the caller drops it once nothing writes there any more. */
-export async function moveCanvasToPostgres(canvasId: string): Promise<MoveCount> {
+async function copyToPostgres(canvasId: string): Promise<MoveCount & { held: ActorFrame[] }> {
   const actor = actors.CanvasActor.get(canvasId)
   const { frames } = await actor.snapshot()
   const ids = frames.map((frame) => frame.id)
@@ -86,7 +69,7 @@ export async function moveCanvasToPostgres(canvasId: string): Promise<MoveCount>
       )
     await tx.update(t.canvases).set({ frameStore: null }).where(eq(t.canvases.id, canvasId))
   })
-  return { frames: ids.length, versions }
+  return { frames: ids.length, versions, held: frames }
 }
 
 /** The canvases these owners have on actors. */
@@ -102,8 +85,6 @@ export type MoveCount = { frames: number; versions: number }
 
 /** a call to the actor carries at most about this much HTML */
 const BATCH_BYTES = 4_000_000
-/** history is read a few rows at a time: each may be a whole design */
-const VERSION_PAGE_ROWS = 20
 
 function frameRow(frame: ActorFrame): typeof t.frames.$inferInsert {
   return {
@@ -126,49 +107,4 @@ function frameRow(frame: ActorFrame): typeof t.frames.$inferInsert {
     rotation: frame.rotation || null,
     approval: frame.approval ?? null,
   }
-}
-
-function actorFrame({
-  pageId,
-  demo,
-  hidden,
-  locked,
-  z,
-  rotation,
-  approval,
-  ...row
-}: typeof t.frames.$inferSelect): ActorFrame {
-  return {
-    ...row,
-    ...(pageId === null ? {} : { pageId }),
-    ...(demo === null ? {} : { demo }),
-    ...(hidden ? { hidden: true } : {}),
-    ...(locked ? { locked: true } : {}),
-    ...(z === null ? {} : { z }),
-    ...(rotation ? { rotation } : {}),
-    ...(approval ? { approval } : {}),
-  }
-}
-
-function actorVersion({
-  canvasId: _canvasId,
-  savedByKind,
-  ...row
-}: typeof t.frameVersions.$inferSelect): ActorFrameVersion {
-  return { ...row, ...(savedByKind === 'user' || savedByKind === 'agent' ? { savedByKind } : {}) }
-}
-
-/** Calls small enough for the actor's request limit. */
-function batches<T>(items: readonly T[], bytes: (item: T) => number): T[][] {
-  const out: T[][] = []
-  let size = Infinity
-  for (const item of items) {
-    if (size + bytes(item) > BATCH_BYTES) {
-      out.push([])
-      size = 0
-    }
-    out.at(-1)!.push(item)
-    size += bytes(item)
-  }
-  return out
 }
