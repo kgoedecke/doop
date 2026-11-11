@@ -216,7 +216,8 @@ function prepareInstances(html: string, ctx: EngineContext) {
     const before = serializeOuter(found.el)
     const state = reconcileInstance(found.el, ctx)
     if (!state) continue
-    const rendered = renderInstance(def, def, state.overrides, state.instanceId, { ctx, stack: [] })
+    /* only a whole write gets here: nothing more is coming for the content it holds */
+    const rendered = renderInstance(def, def, state.overrides, state.instanceId, { ctx, stack: [], final: true })
     if (!rendered) continue
     const after = serializeOuter(rendered)
     if (after !== before) edits.push({ start: found.start, end: found.end, text: after })
@@ -247,7 +248,7 @@ export function prepareFrameHtml(
   }
   const ctx = contextFor(canvas.id)
   try {
-    const expanded = expandUses(incoming, ctx)
+    const expanded = expandUses(incoming, ctx, [], 0, { final: true })
     const mains = prepareMains(canvas, frameId, expanded, by, ctx)
     const instances = prepareInstances(mains.html, ctx)
     const html = syncComponentHead(instances, closureOf(usedComponentIds(instances), canvas.id))
@@ -286,7 +287,7 @@ function removedInstanceIssues(prior: string, next: string): ComponentIssue[] {
   ]
 }
 
-function dedupeIssues(issues: ComponentIssue[]): ComponentIssue[] {
+export function dedupeIssues(issues: ComponentIssue[]): ComponentIssue[] {
   const seen = new Set<string>()
   return issues.filter((issue) => {
     if (seen.has(issue.message)) return false
@@ -298,14 +299,15 @@ function dedupeIssues(issues: ComponentIssue[]): ComponentIssue[] {
 /** One chunk of a live stream: components render as they arrive, each stylesheet
  *  once and in place, since the head may already have gone by. The last chunk's
  *  full pass moves them where they belong. */
-export function prepareChunk(canvas: Canvas, chunk: string, soFar: string): string {
-  if (!chunk.toLowerCase().includes(`<${USE_TAG}`)) return chunk
+export function prepareChunk(canvas: Canvas, chunk: string, soFar: string): { html: string; issues: ComponentIssue[] } {
+  if (!chunk.toLowerCase().includes(`<${USE_TAG}`)) return { html: chunk, issues: [] }
   const ctx = contextFor(canvas.id)
   const expanded = expandUses(chunk, ctx)
   const styles = closureOf(usedComponentIds(expanded), canvas.id)
     .filter((def) => def.css.trim() && !soFar.includes(`${CSS_ATTR}="${def.id}"`))
     .map((def) => `<style ${CSS_ATTR}="${def.id}">\n${def.css}\n</style>`)
-  return `${styles.join('\n')}${expanded}`
+  /* a use expanded here is gone by the last chunk's pass: what it had to say is said now */
+  return { html: `${styles.join('\n')}${expanded}`, issues: ctx.issues }
 }
 
 /** A blank component, before its main has been written: the first prepare fills it in. */

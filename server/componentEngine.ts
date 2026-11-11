@@ -144,6 +144,8 @@ interface RenderOptions {
   shallow?: boolean
   /** the instance being rendered: what a nested instance's id is derived from */
   ownerId?: string
+  /** a whole write: nothing more is coming, so an unclosed <doop-use> in slot or override content is placed too */
+  final?: boolean
 }
 
 /** A nested instance has no place of its own to keep an id: the template owns its markup, and the
@@ -164,7 +166,7 @@ function applyBindings(el: Element, def: Revision, overrides: InstanceOverrides)
   const raw = attrOf(el, BIND_ATTR)
   if (raw === undefined) return
   setAttr(el, BIND_ATTR, null)
-  for (const { target, prop } of parseBindings(raw)) {
+  for (const { target, prop } of parseBindings(raw, el.tagName)) {
     const value = overrides.props?.[prop]
     if (value === undefined) continue
     if (target === null) setText(el, value)
@@ -241,7 +243,7 @@ function renderPart(
   setAttr(el, SLOT_SUGGEST_ATTR, null)
   if (part) applyPartOverride(el, part)
   const isSlot = attrOf(el, SLOT_ATTR) !== undefined
-  const content = (html: string) => expandUses(html, options.ctx, [], options.depth)
+  const content = (html: string) => expandUses(html, options.ctx, [], options.depth, { final: options.final })
   if (part?.html !== undefined) {
     setChildrenFromHtml(el, options.shallow ? part.html : content(part.html))
     return
@@ -324,7 +326,13 @@ export function renderInstance(
     return undefined
   }
   const root = parseTemplateRoot(revision.template)
-  if (!root) return undefined
+  if (!root) {
+    options.ctx.issues.push({
+      code: 'empty_template',
+      message: `component “${revision.name}” has no markup in its main, so its instance rendered nothing. Give it markup with update_component html.`,
+    })
+    return undefined
+  }
   const id = instanceId || newElementId()
   const inner: RenderOptions = { ...options, stack: [...options.stack, revision.id], depth: depth + 1, ownerId: id }
   const key = attrOf(root, PART_ATTR)
@@ -423,7 +431,7 @@ export function partsOf(template: string): Map<string, PartInfo> {
         isSlot: attrOf(el, SLOT_ATTR) !== undefined,
         isUse: el.tagName === USE_TAG,
       }
-      for (const { target, prop } of parseBindings(attrOf(el, BIND_ATTR) ?? '')) {
+      for (const { target, prop } of parseBindings(attrOf(el, BIND_ATTR) ?? '', el.tagName)) {
         if (target === null) info.textProp = prop
         else if (target.startsWith('style.')) info.styleProps.set(target.slice('style.'.length), prop)
         else if (target.startsWith('--')) info.styleProps.set(target, prop)
@@ -928,9 +936,13 @@ interface UseSpan {
   openEnd: number
   closeStart: number
   selfClosing: boolean
+  /** read leniently: an open tag whose end never came, taken as empty */
+  unclosed?: boolean
 }
 
-function nextUse(html: string, from: number, opaque: [number, number][]): UseSpan | undefined {
+/** The next complete `<doop-use>` from `from`. `lenient` (a whole write, nothing more to come)
+ *  takes an open tag whose end never came as empty, so the ones after it still expand. */
+function nextUse(html: string, from: number, opaque: [number, number][], lenient = false): UseSpan | undefined {
   const lower = html.toLowerCase()
   const open = `<${USE_TAG}`
   const close = `</${USE_TAG}`
@@ -952,7 +964,10 @@ function nextUse(html: string, from: number, opaque: [number, number][]): UseSpa
   while (depth > 0) {
     const nextOpen = lower.indexOf(open, cursor)
     const nextClose = lower.indexOf(close, cursor)
-    if (nextClose === -1) return undefined
+    if (nextClose === -1)
+      return lenient
+        ? { start, end: openEnd + 1, openEnd, closeStart: openEnd + 1, selfClosing: true, unclosed: true }
+        : undefined
     if (nextOpen !== -1 && nextOpen < nextClose) {
       const innerEnd = tagEnd(html, nextOpen)
       if (innerEnd === -1) return undefined
@@ -970,25 +985,49 @@ function nextUse(html: string, from: number, opaque: [number, number][]): UseSpa
 }
 
 /** Every complete `<doop-use>` in the HTML, written out in full. One still missing
- *  its end (mid-stream) stays as it is until a later pass. */
-export function expandUses(html: string, ctx: EngineContext, stack: string[] = [], depth = 0): string {
+ *  its end (mid-stream) stays as it is until a later pass; on a whole write (`final`)
+ *  nothing more is coming, so it is taken as empty and reported. */
+export function expandUses(
+  html: string,
+  ctx: EngineContext,
+  stack: string[] = [],
+  depth = 0,
+  { final = false }: { final?: boolean } = {},
+): string {
   if (!html.toLowerCase().includes(`<${USE_TAG}`)) return html
   const opaque = opaqueRanges(html)
   let out = ''
   let cursor = 0
-  for (let span = nextUse(html, 0, opaque); span; span = nextUse(html, cursor, opaque)) {
+  for (let span = nextUse(html, 0, opaque, final); span; span = nextUse(html, cursor, opaque, final)) {
     out += html.slice(cursor, span.start)
-    out += expandOne(html, span, ctx, stack, depth)
+    if (span.unclosed) {
+      const ref = /\bcomponent\s*=\s*["']([^"']*)["']/i.exec(html.slice(span.start, span.openEnd))?.[1] ?? ''
+      ctx.issues.push({
+        code: 'unclosed_use',
+        message: `<${USE_TAG} component="${ref}"> was never closed with </${USE_TAG}>, so it was placed with no slot content. Close every <${USE_TAG}>, or write it self-closing.`,
+      })
+    }
+    out += expandOne(html, span, ctx, stack, depth, final)
     cursor = span.end
   }
   return out + html.slice(cursor)
 }
 
-function expandOne(html: string, span: UseSpan, ctx: EngineContext, stack: string[], depth: number): string {
+function expandOne(
+  html: string,
+  span: UseSpan,
+  ctx: EngineContext,
+  stack: string[],
+  depth: number,
+  final: boolean,
+): string {
   const openTag = html.slice(span.start, span.openEnd + 1).replace(/\/>$/, '>')
   const inner = span.selfClosing ? '' : html.slice(span.openEnd + 1, span.closeStart)
   const use = elementKids(parseFragment(`${openTag}${inner}</${USE_TAG}>`))[0]
-  if (!use) return ''
+  if (!use) {
+    ctx.issues.push({ code: 'unknown_component', message: `a <${USE_TAG}> could not be read, so it was left out` })
+    return ''
+  }
   const ref = attrOf(use, 'component') ?? ''
   const def = ctx.find(ref)
   if (!def) {
@@ -996,7 +1035,7 @@ function expandOne(html: string, span: UseSpan, ctx: EngineContext, stack: strin
     return ''
   }
   const state = stateFromUseAttrs(use, def, ctx)
-  const root = renderInstance(def, def, state.overrides, state.instanceId, { ctx, stack, depth })
+  const root = renderInstance(def, def, state.overrides, state.instanceId, { ctx, stack, depth, final })
   if (!root) return ''
   /* a template read back by update_component keeps the nested instance's key, and its overrides with it */
   const part = attrOf(use, PART_ATTR)
@@ -1256,7 +1295,7 @@ export function derivePropsAndSlots(
     stack.push(...elementKids(el).reverse())
   }
   for (const el of order) {
-    for (const { target, prop } of parseBindings(attrOf(el, BIND_ATTR) ?? '')) {
+    for (const { target, prop } of parseBindings(attrOf(el, BIND_ATTR) ?? '', el.tagName)) {
       if (props.has(prop)) continue
       const known = declaredOf(declared, prop)
       const type = target === 'src' ? 'image' : target === 'href' ? 'link' : 'text'

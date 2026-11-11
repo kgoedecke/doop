@@ -101,7 +101,7 @@ export function templateValue(def: ComponentDef, prop: string): string {
     .parseFromString(`<template>${def.template}</template>`, 'text/html')
     .querySelector('template')
   for (const el of root?.content.querySelectorAll(`[${BIND_ATTR}]`) ?? []) {
-    for (const binding of parseBindings(el.getAttribute(BIND_ATTR) ?? '')) {
+    for (const binding of parseBindings(el.getAttribute(BIND_ATTR) ?? '', el.tagName)) {
       if (binding.prop !== prop) continue
       if (binding.target === null) return el.textContent?.trim() ?? ''
       if (!binding.target.startsWith('style.') && !binding.target.startsWith('--'))
