@@ -1,5 +1,57 @@
 # Changelog
 
+## [0.15.0](https://github.com/kgoedecke/doop/compare/v0.14.0...v0.15.0) (2026-11-11)
+
+
+### Features
+
+* **admin:** sign-in policy — email/password sign-up, SSO auto-redirect, default workspace ([#372](https://github.com/kgoedecke/doop/issues/372)) ([5ce1770](https://github.com/kgoedecke/doop/commit/5ce177037c9d28caa4a1302795fc6eeaf26d3d1a))
+* **agent:** connect DeepSeek and Kimi keys and a Kimi Code plan ([#453](https://github.com/kgoedecke/doop/issues/453)) ([f4278e2](https://github.com/kgoedecke/doop/commit/f4278e29d5a36a357dc9e8851a96297d30e12f23))
+* **agent:** custom providers for any OpenAI- or Anthropic-compatible API ([#498](https://github.com/kgoedecke/doop/issues/498)) ([436215d](https://github.com/kgoedecke/doop/commit/436215d0a5d297e9b85c2168d7e91e2678feee55))
+* **agent:** describe uploaded images for agents ([#392](https://github.com/kgoedecke/doop/issues/392)) ([b1b278a](https://github.com/kgoedecke/doop/commit/b1b278afcee8e65c986bca2fdbfc643c938f54b8))
+* **agents:** ask agents to style elements inline, with a stylesheet for the rest ([#487](https://github.com/kgoedecke/doop/issues/487)) ([7b98fb6](https://github.com/kgoedecke/doop/commit/7b98fb6d713b074520723f16650cf62dd92ab795))
+* **billing:** charge for an added seat right away ([#479](https://github.com/kgoedecke/doop/issues/479)) ([10c7fa6](https://github.com/kgoedecke/doop/commit/10c7fa6ce6738be3f15e98c8018832b82bec499a))
+* **canvas:** action registry with ⌘K palette, main menu and editor shortcuts ([#448](https://github.com/kgoedecke/doop/issues/448)) ([1970798](https://github.com/kgoedecke/doop/commit/1970798b4f13c65c90654116d1dcf0ae634856c0))
+* **canvas:** move the way back to the canvases into the main menu ([#479](https://github.com/kgoedecke/doop/issues/479)) ([a25d94c](https://github.com/kgoedecke/doop/commit/a25d94c4f0fcde4a4a628516acf9ec47c34ab7a4))
+* **comments:** comment on a frame from its name with the Comment tool ([#451](https://github.com/kgoedecke/doop/issues/451)) ([3b135d3](https://github.com/kgoedecke/doop/commit/3b135d3f763a1692ddf56e1132610789e8388628))
+* **components:** add reusable components for people and agents ([#423](https://github.com/kgoedecke/doop/issues/423)) ([d641f07](https://github.com/kgoedecke/doop/commit/d641f0718a95b1667e85916a23c3926b6f2e65a5))
+* **components:** rename a component from the editor ([#486](https://github.com/kgoedecke/doop/issues/486)) ([ba2691d](https://github.com/kgoedecke/doop/commit/ba2691d15c7d89e081d0b4defeef1c943fb083a5))
+* **desktop:** choose the Doop server from the sign-in screen ([#452](https://github.com/kgoedecke/doop/issues/452)) ([f98867a](https://github.com/kgoedecke/doop/commit/f98867a0917c36fcb2e1139b2f984a3ef9b4f0da))
+* **ios:** show agents at work on their frames ([#469](https://github.com/kgoedecke/doop/issues/469)) ([f0ceec6](https://github.com/kgoedecke/doop/commit/f0ceec64e08c6cc747a66ec10a4a2f0f467626b8))
+* **settings:** delete your account from Settings → Your account ([#497](https://github.com/kgoedecke/doop/issues/497)) ([df6a4ca](https://github.com/kgoedecke/doop/commit/df6a4ca4a86966848ac34e41e68d64918c9a8a9a))
+* **text:** start a list when - , * or 1.  is typed at the start of a line ([#496](https://github.com/kgoedecke/doop/issues/496)) ([bf646e4](https://github.com/kgoedecke/doop/commit/bf646e437626d47e488dba91b16bf60c16c70189))
+
+
+### Bug Fixes
+
+* **canvas:** ⌥⇧-drag duplicates the picked layer, not its frame ([#454](https://github.com/kgoedecke/doop/issues/454)) ([8bc1536](https://github.com/kgoedecke/doop/commit/8bc1536c6d8b818064a869423f66c97c2935e88b))
+* **canvas:** drag every picked layer together, not just the one pressed ([#471](https://github.com/kgoedecke/doop/issues/471)) ([29bd283](https://github.com/kgoedecke/doop/commit/29bd2839594ed06426d9c4848e7da0aed4178cc0))
+* **canvas:** draw the frame size badge above neighbouring frames ([#460](https://github.com/kgoedecke/doop/issues/460)) ([9e5b041](https://github.com/kgoedecke/doop/commit/9e5b04156808dfe13ce71ecac7a7de6bc00b0a62))
+* **canvas:** drop the light seam along a frame's edge ([#440](https://github.com/kgoedecke/doop/issues/440)) ([b05127f](https://github.com/kgoedecke/doop/commit/b05127f28510a6911c4ad8a0fafa95a61b24c45b))
+* **canvas:** keep comments and canvas UI above the pixel grid ([#466](https://github.com/kgoedecke/doop/issues/466)) ([6d03257](https://github.com/kgoedecke/doop/commit/6d0325772938eeb411a1b68bc7228d01e7c1a509))
+* **canvas:** keep the element panel through a frame drag and relay shortcuts from inside frames ([#411](https://github.com/kgoedecke/doop/issues/411)) ([4391435](https://github.com/kgoedecke/doop/commit/4391435f486dcbf3f0e58b70ba9632d5a8cebf91))
+* **canvas:** let a style edit win over a stylesheet rule marked !important ([#484](https://github.com/kgoedecke/doop/issues/484)) ([e78a96a](https://github.com/kgoedecke/doop/commit/e78a96acbbe1bc45e6d089971fbced06cf754ccf))
+* **canvas:** patch a dragged follower's style by its element ([8440e31](https://github.com/kgoedecke/doop/commit/8440e314c1b60bd044d286e02012f54cc06b9b7e))
+* **components:** fix four component review findings: inline fonts, detach, imports, main moves ([2b257e2](https://github.com/kgoedecke/doop/commit/2b257e2b8ff64eb37f4835930ee6118052872c45))
+* **editor:** copy and paste properties carry bold, italic and underline runs ([#495](https://github.com/kgoedecke/doop/issues/495)) ([4bcb548](https://github.com/kgoedecke/doop/commit/4bcb548092726ce547b725d83613989a3b7ad708))
+* **home:** drop the hero chips that do nothing, add integrations and templates ([#484](https://github.com/kgoedecke/doop/issues/484)) ([0ce1d30](https://github.com/kgoedecke/doop/commit/0ce1d30c79e0b4ab89d17c23765690f26b7e8548))
+* **ios:** draw text symbols like ★ from system symbol fonts ([#470](https://github.com/kgoedecke/doop/issues/470)) ([7f48ee8](https://github.com/kgoedecke/doop/commit/7f48ee8caf898c642579f3d277dfb491a8249f70))
+* **ios:** select a text layer whole when it is tapped ([#485](https://github.com/kgoedecke/doop/issues/485)) ([ba29032](https://github.com/kgoedecke/doop/commit/ba29032f44cee226a46635efcf72c9af70986f26))
+* **mcp:** report the running release as the MCP server version ([#446](https://github.com/kgoedecke/doop/issues/446)) ([3e67d48](https://github.com/kgoedecke/doop/commit/3e67d489158f9aa866086eefd8cef1d4d0c5ed15)), closes [#429](https://github.com/kgoedecke/doop/issues/429)
+* **pages:** commit a page rename when focus leaves the field ([#482](https://github.com/kgoedecke/doop/issues/482)) ([50a78d8](https://github.com/kgoedecke/doop/commit/50a78d8b18cae35f2a50eed56a45cf82f051d4ed))
+* **resident:** load a canvas only when its sweep has work ([#472](https://github.com/kgoedecke/doop/issues/472)) ([b7e3ad7](https://github.com/kgoedecke/doop/commit/b7e3ad7b351b40a2bb44478ff63a4acc676fab3a))
+* **rotation:** drop drawings along a turned frame's axes and end turns whose frame goes ([#467](https://github.com/kgoedecke/doop/issues/467)) ([c48946d](https://github.com/kgoedecke/doop/commit/c48946d7ddbf5f0bad5ef92818f87b8566eb428c))
+* **server:** load frame HTML per canvas instead of holding all of it ([#470](https://github.com/kgoedecke/doop/issues/470)) ([7dec214](https://github.com/kgoedecke/doop/commit/7dec2144bfb57f4f9dc5e5c1d4aeac242d8cb3bc))
+* **test:** give each drawing test its own page ([#477](https://github.com/kgoedecke/doop/issues/477)) ([8b08ca2](https://github.com/kgoedecke/doop/commit/8b08ca2cbe5c7510b2cfa9f01475227441580476))
+* **test:** paste only once the clipboard reads back the external text ([63c6411](https://github.com/kgoedecke/doop/commit/63c64110e0791c96a45ec5ce1fc89e2a52397a38))
+* **test:** wait for the pasted image's frame, and drop the drawing tests' CI retry ([#480](https://github.com/kgoedecke/doop/issues/480)) ([e432c55](https://github.com/kgoedecke/doop/commit/e432c551e844e4770ddbe8d278391bb8a3751ff3))
+* **test:** zoom with the platform's modifier in the frame key relay test ([fc8f238](https://github.com/kgoedecke/doop/commit/fc8f238b220c86a2800ddc9a0a9c82f85fcf4219))
+
+
+### Documentation
+
+* **mcp:** split longer briefs into atomic design decisions ([#473](https://github.com/kgoedecke/doop/issues/473)) ([ee8e40a](https://github.com/kgoedecke/doop/commit/ee8e40aa0984498cb7420dea828d6bdef90731ef))
+
 ## [0.14.0](https://github.com/kgoedecke/doop/compare/v0.13.0...v0.14.0) (2026-11-08)
 
 
