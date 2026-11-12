@@ -872,6 +872,17 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   `get_canvas` and the resident kickoff say a canvas has no tokens yet (`NO_TOKENS_BRIEF`).
   `upload_asset` states its per-minute limit and its refusal says when to retry. Tests:
   `reuseNotes.test.ts`.
+- Adding to an established canvas (`server/existingStyle.ts`): on a canvas with two or more of the
+  user's frames (demo frames and the Components page left out), `get_canvas` carries `existingStyle`
+  and the resident kickoff an "Existing style" block: with no tokens, the colours and fonts the
+  frames share (by how many frames name each), and the blocks already written out on two or more
+  frames (`findComponentCandidates`, skipped past 2 MB of frame HTML or past the operation's work
+  budget, where the agent is pointed at the tool instead; repeats count only when they sit on two or
+  more frames, before a single-page repeat can hide them). The brief (`existingStyleBrief`,
+  replacing `NO_TOKENS_BRIEF` there) asks for tokens from those values before the first new frame
+  and a component made from one existing copy for a repeated block, and says to leave the existing
+  frames alone (no `replace_matching`) unless asked, offering the clean-up at the end;
+  `DESIGN_BRIEF` and `COMPONENTS` say the same. Tests: `existingStyle.test.ts`.
 - Workspace component libraries (`.context/specs/workspace-component-library.md`,
   `server/componentLibrary.ts`): a workspace canvas publishes snapshots of its components
   (`library_components`, migration `0053_library_components`, mirrored in memory) and every other

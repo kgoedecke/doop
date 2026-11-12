@@ -1272,8 +1272,9 @@ function suggestedName(el: Element): string {
 
 /** Repeated structures on a canvas, largest payoff first: what an agent or a person
  *  should turn into components, typically in a canvas that grew without any. Groups
- *  under `minOccurrences` never hide the repeats inside them. */
-export function findComponentCandidates(canvas: Canvas, limit = 12, minOccurrences = 2) {
+ *  under `minOccurrences`, or spread over fewer than `minFrames` frames, never hide the
+ *  repeats inside them. */
+export function findComponentCandidates(canvas: Canvas, limit = 12, minOccurrences = 2, minFrames = 1) {
   const { shapes, sizes } = collectShapes(canvas)
   const groups = [...shapes]
     .filter(([, occurrences]) => occurrences.length >= minOccurrences)
@@ -1284,6 +1285,7 @@ export function findComponentCandidates(canvas: Canvas, limit = 12, minOccurrenc
   for (const group of groups) {
     const fresh = group.occurrences.filter((occurrence) => !covered.has(occurrence.el))
     if (fresh.length < minOccurrences) continue
+    if (new Set(fresh.map((occurrence) => occurrence.frame.id)).size < minFrames) continue
     /* everything inside a repeated block is repeated as well: the block is the finding */
     for (const occurrence of fresh) markCovered(occurrence.el, covered)
     candidates.push(describeCandidate(group.shape, fresh, group.size))

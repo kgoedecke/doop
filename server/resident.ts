@@ -43,6 +43,7 @@ import { activeComponents } from '../shared/components.ts'
 import { settleForRead } from './propagation.ts'
 import { runOperation } from './workBudget.ts'
 import { detached, savepoint } from './journal.ts'
+import { existingStyle, existingStyleBrief } from './existingStyle.ts'
 import {
   COMPONENT_TOOLS,
   COMPONENT_TOOL_NAMES,
@@ -727,11 +728,30 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
       /* the canvas's design tokens: which exist, and that var(--name) is how
          a frame uses one (the server writes the values into the frame) */
       const tokens = store.getTokens(canvasId)
+      const established = canvas ? existingStyle(canvas) : null
       const tokensBlock = [
         {
-          text: `# Design tokens\n${tokens.length ? tokensBrief(tokens, store.getTokenThemes(canvasId)) : NO_TOKENS_BRIEF}`,
+          text: `# Design tokens\n${tokens.length ? tokensBrief(tokens, store.getTokenThemes(canvasId)) : established ? 'None yet: see Existing style.' : NO_TOKENS_BRIEF}`,
         },
       ]
+      /* a canvas that already has a look: what its frames share, so the run reuses it */
+      const existingStyleBlock = established
+        ? [
+            {
+              text:
+                `# Existing style\n${existingStyleBrief(established, { tokens: tokens.length > 0 })}` +
+                (established.repeated?.length
+                  ? '\n\n' +
+                    established.repeated
+                      .map(
+                        (block) =>
+                          `- “${block.name}” ×${block.occurrences} on ${block.frames} frames: frame_id ${block.example.frame_id}, element ${block.example.element}`,
+                      )
+                      .join('\n')
+                  : ''),
+            },
+          ]
+        : []
       /* a text-only model would otherwise chase tools whose whole value is
          pixels; steer its verification to the textual surfaces instead */
       /* the same catalog get_canvas gives a connected agent, so reuse is the first thing a run sees */
@@ -789,6 +809,7 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
             ...guidelinesBlock.map((b) => b.text),
             ...fontsBlock.map((b) => b.text),
             ...tokensBlock.map((b) => b.text),
+            ...existingStyleBlock.map((b) => b.text),
             ...componentsBlock.map((b) => b.text),
             ...librariesBlock.map((b) => b.text),
           ].join('\n\n'),
@@ -837,6 +858,7 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
                   ...guidelinesBlock,
                   ...fontsBlock,
                   ...tokensBlock,
+                  ...existingStyleBlock,
                   ...componentsBlock,
                   ...librariesBlock,
                   ...noVisionBlock,

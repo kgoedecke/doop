@@ -78,7 +78,11 @@ brief. It is part of the deliverable, not private scratch work:
 Skip the brief only when the canvas already dictates the style — tokens (get_tokens),
 established frames, style guides or pinned references — or when the human handed you a
 complete design system. Then those are the brief; follow them, and if a value you need
-has no token yet, add one with create_tokens rather than writing it into a frame.`
+has no token yet, add one with create_tokens rather than writing it into a frame. Frames
+with no tokens behind them are a brief too: get_canvas's existingStyle lists the colours
+and fonts they share, so create those as tokens before your first new frame instead of
+copying hex values from page to page. Leave the existing frames as they are unless asked,
+and offer to move them onto the tokens when you finish.`
 
 /** How to wire a clickable prototype — shared by the MCP guide and the resident agents' system prompt. */
 export const PROTOTYPES = `When a human asks for a clickable prototype or a flow, wire the screens with data attributes on
@@ -172,9 +176,12 @@ get_canvas and list_components show a canvas's components with their props.
   lines. Keep the id="…" when you write one back: comments and links point at it. Pass
   expand_components=true only if you must read the full markup. edit_frame_html matches either
   form.
-- Before you write the same block a third time, make it a component and use that. On a canvas
-  that already repeated itself: find_component_candidates, then create_component with
-  replace_matching=true.
+- Before you write the same block a third time, make it a component and use that. Adding to a
+  canvas whose pages already repeat a block (get_canvas → existingStyle.repeated, or
+  find_component_candidates): make the block a component from one existing copy and use it in
+  what you add, rather than writing it out again. replace_matching=true turns every other copy
+  into an instance too; that rewrites the existing pages, so use it when the human asked for that
+  clean-up, and otherwise offer it when you finish.
 - Components nest, and every rule here applies inside a main too. A main's markup can hold
   <doop-use>, and a change to the inner component reaches every main that uses it and every
   instance of those. A NavItem written out by hand nine times inside a Sidebar is the same mistake

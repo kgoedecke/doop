@@ -35,7 +35,7 @@ const DOOP_STYLE = new RegExp(
 )
 
 /** The CSS the author wrote: their <style> blocks and style attributes, without the blocks Doop writes. */
-function authoredCss(html: string): { sheets: string[]; inline: string[] } {
+export function authoredCss(html: string): { sheets: string[]; inline: string[] } {
   const own = html.replace(DOOP_STYLE, '')
   const sheets = [...own.matchAll(/<style\b[^>]*>([\s\S]*?)<\/style>/gi)].map((match) => match[1] ?? '')
   const inline = [...own.matchAll(/\sstyle\s*=\s*(?:"([^"]*)"|'([^']*)')/gi)].map((match) => match[1] ?? match[2] ?? '')
@@ -58,7 +58,7 @@ function declarationsOnly(css: string): string {
 }
 
 /** Hex colours in declaration values: a sheet's rule bodies (never its selectors), or a style attribute. */
-function hexesIn(css: string, { sheet }: { sheet: boolean }): Set<string> {
+export function hexesIn(css: string, { sheet }: { sheet: boolean }): Set<string> {
   const clean = declarationsOnly(css)
   const bodies = sheet ? [...clean.matchAll(/\{([^{}]*)\}/g)].map((match) => match[1] ?? '') : [clean]
   const found = new Set<string>()
