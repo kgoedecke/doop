@@ -25,7 +25,7 @@ import {
   type LibraryComponent,
   type PartOverride,
 } from '../shared/components.ts'
-import { ELEMENT_ID_ATTR, elementIdSelector } from '../shared/elementId.ts'
+import { ELEMENT_ID_ATTR } from '../shared/elementId.ts'
 import type { Actor, Canvas, Frame } from '../shared/types.ts'
 import { decodeQuotes, familyKey, fontFaceRule, usesFamily, type CustomFont } from '../shared/fonts.ts'
 import { fontsForCanvas } from './fonts.ts'
@@ -398,7 +398,7 @@ export interface CreateFromElement {
   props?: ComponentProp[]
   code?: ComponentCode
   frameId: string
-  /** a data-doop-id, or a selector from find_component_candidates */
+  /** a data-doop-id, or an element path */
   element: string
   autoProps?: boolean
   /** also turn every other element of the same shape on the canvas into an instance */
@@ -420,8 +420,17 @@ function checkCapacity(canvasId: string) {
     fail(`a canvas holds at most ${MAX_COMPONENTS} components`)
 }
 
-function selectorFor(element: string): string {
-  return /^[a-z0-9]{6}$/.test(element) ? elementIdSelector(element) : element
+/** An element named by its data-doop-id, whatever wrote it (Doop stamps six characters, an
+ *  agent may write "me3-tabbar"), else by an element path (`body > main > section:nth-of-type(2)`).
+ *  Only the six-character form was tried as an id, so an agent's own ids found nothing. */
+function findElement(doc: Tree.Document, element: string): Element | undefined {
+  const stack: Tree.ChildNode[] = [...doc.childNodes]
+  for (let node = stack.pop(); node; node = stack.pop()) {
+    if (!isElement(node)) continue
+    if (attrOf(node, ELEMENT_ID_ATTR) === element) return node
+    stack.push(...node.childNodes)
+  }
+  return resolveElement(doc, element)
 }
 
 function withinInstance(el: Element): boolean {
@@ -488,7 +497,7 @@ function hasBindings(el: Element): boolean {
 
 function locate(html: string, element: string) {
   const doc = parse(html, { sourceCodeLocationInfo: true })
-  const el = resolveElement(doc, selectorFor(element))
+  const el = findElement(doc, element)
   const location = el?.sourceCodeLocation
   return el && location ? { el, start: location.startOffset, end: location.endOffset } : undefined
 }
@@ -899,7 +908,7 @@ function instanceIds(html: string): string[] {
 function insertAt(html: string, markup: string, target: string | undefined, position: InstancePosition): string {
   if (target) {
     const doc = parse(html, { sourceCodeLocationInfo: true })
-    const el = resolveElement(doc, selectorFor(target))
+    const el = findElement(doc, target)
     const location = el?.sourceCodeLocation
     if (!location) fail(`no element “${target}” in this frame — use a data-doop-id from get_frame`)
     if (position === 'before')

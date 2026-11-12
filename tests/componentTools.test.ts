@@ -253,24 +253,17 @@ describe('an agent working with components', () => {
 
   it('turns repeated markup into linked instances, differences becoming props', async () => {
     const canvas = newCanvas()
-    const card = (title: string) =>
-      `<article class="card"><h3 class="title">${title}</h3><p class="body">Copy for ${title}</p></article>`
-    const a = await framed(canvas.id, `${card('One')}${card('Two')}`, 'A')
+    const card = (title: string, id = '') =>
+      `<article class="card"${id ? ` data-doop-id="${id}"` : ''}><h3 class="title">${title}</h3><p class="body">Copy for ${title}</p></article>`
+    /* an id an agent wrote itself, not one Doop stamped */
+    const a = await framed(canvas.id, `${card('One', 'card-one')}${card('Two')}`, 'A')
     const b = await framed(canvas.id, card('Three'), 'B')
-
-    const found = await call('find_component_candidates', { canvas_id: canvas.id })
-    const top = found.data.candidates[0]
-    expect(top.occurrences).toBe(3)
-    expect(top.frames).toBe(2)
-    expect(top.suggested_name).toBe('Card')
-    /* the block is the finding, not each thing inside it */
-    expect(found.data.candidates).toHaveLength(1)
 
     const made = await call('create_component', {
       canvas_id: canvas.id,
-      name: top.suggested_name,
-      frame_id: top.example.frame_id,
-      element: top.example.element,
+      name: 'Card',
+      frame_id: a,
+      element: 'card-one',
       replace_matching: true,
     })
     expect(made.isError).toBe(false)
@@ -293,7 +286,6 @@ describe('an agent working with components', () => {
     expect(store.getFrame(a)!.html.match(/card v2/g)!.length).toBeGreaterThanOrEqual(2)
     expect(store.getFrame(b)!.html).toContain('card v2')
     expect(store.getFrame(b)!.html).toContain('Three')
-    expect((await call('find_component_candidates', { canvas_id: canvas.id })).data.candidates).toEqual([])
   })
 
   it('places instances and changes several in one write', async () => {

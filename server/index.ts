@@ -8,7 +8,6 @@ import {
   deleteComponent,
   detachAllInstances,
   findComponent,
-  findComponentCandidates,
   importableEntry,
   importComponent,
   insertInstance,
@@ -2634,13 +2633,6 @@ app.get('/api/workspaces/:id/libraries', (req, res) => {
       behind: workspaceLibraryConsumers(library.canvasId).filter((consumer) => consumer.update_waiting).length,
     })),
   )
-})
-
-/* parses every frame on the canvas: for the editors who can act on it */
-app.get('/api/canvases/:id/component-candidates', (req, res) => {
-  const canvas = requireCanvas(req, res, req.params.id, 'edit')
-  if (!canvas) return
-  res.json(findComponentCandidates(canvas))
 })
 
 app.post('/api/canvases/:id/components', (req, res) => {

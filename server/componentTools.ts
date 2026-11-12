@@ -13,7 +13,6 @@ import {
   detachAllInstances,
   findComponent,
   findDeletedComponent,
-  findComponentCandidates,
   importableEntry,
   importComponent,
   insertInstance,
@@ -182,7 +181,7 @@ export const COMPONENT_TOOLS: ComponentTool[] = [
           ...(components.length || shared.length
             ? {}
             : {
-                note: 'No components match. If a block repeats, find_component_candidates shows what is worth making one.',
+                note: 'No components match. If a block repeats, make it one with create_component.',
               }),
         },
       }
@@ -205,13 +204,13 @@ export const COMPONENT_TOOLS: ComponentTool[] = [
     name: 'create_component',
     title: 'Create a component',
     description:
-      'Make a reusable component from new markup (html + css) or from an element already in a frame (frame_id + element). From markup, the main lands on the canvas\'s Components page and no instance is placed anywhere: to use it, write <doop-use component="…"> in a frame\'s HTML or call insert_instance. From an element (a data-doop-id, or the element of a find_component_candidates result), that element stays where it is and becomes the main; pass replace_matching=true to turn every other element of the same shape on the canvas into a linked instance in one go, differing text and links becoming props. Unless the markup already says otherwise, leaf text, image sources and link targets become props, named after what each element is (title, label, image, link, text) or its class; the result lists them. Name your own with data-doop-prop="label" (text), data-doop-prop="src:photo" (an image; on an <img> a bare name binds its src too), data-doop-prop="href:link,--accent:accent" (attributes, custom properties), data-doop-if="tone=ghost" or "show-icon" (conditional elements), data-doop-slot="actions" (content each instance supplies, add data-doop-slot-suggest="Button"). An enum prop in props sets data-<name> on the root, so variants are plain CSS: .btn[data-tone="ghost"] { … }. Give it a description saying when to use it: it is how the next agent knows.',
+      'Make a reusable component from new markup (html + css) or from an element already in a frame (frame_id + element). From markup, the main lands on the canvas\'s Components page and no instance is placed anywhere: to use it, write <doop-use component="…"> in a frame\'s HTML or call insert_instance. From an element (its data-doop-id from get_frame), that element stays where it is and becomes the main; pass replace_matching=true to turn every other element of the same shape on the canvas into a linked instance in one go, differing text and links becoming props. Unless the markup already says otherwise, leaf text, image sources and link targets become props, named after what each element is (title, label, image, link, text) or its class; the result lists them. Name your own with data-doop-prop="label" (text), data-doop-prop="src:photo" (an image; on an <img> a bare name binds its src too), data-doop-prop="href:link,--accent:accent" (attributes, custom properties), data-doop-if="tone=ghost" or "show-icon" (conditional elements), data-doop-slot="actions" (content each instance supplies, add data-doop-slot-suggest="Button"). An enum prop in props sets data-<name> on the root, so variants are plain CSS: .btn[data-tone="ghost"] { … }. Give it a description saying when to use it: it is how the next agent knows.',
     readOnly: false,
     shape: {
       name: z.string().describe('Short and unique, e.g. "Button", "Pricing Card"'),
       description: z.string().optional().describe('When to use this. Later agents choose by it'),
       frame_id: z.string().optional().describe('With element: make this existing element the main'),
-      element: z.string().optional().describe('A data-doop-id, or the element from find_component_candidates'),
+      element: z.string().optional().describe("The element's data-doop-id from get_frame"),
       replace_matching: z
         .boolean()
         .optional()
@@ -283,7 +282,7 @@ export const COMPONENT_TOOLS: ComponentTool[] = [
           `Use it with ${usageExample(component)}.${inferredNote(inferred)}`,
           ...(matching_stopped
             ? [
-                'replace_matching stopped part of the way (the work budget for one call): the frames in `converted` are linked, later frames were not looked at. find_component_candidates shows what still matches.',
+                'replace_matching stopped part of the way (the work budget for one call): the frames in `converted` are linked, later frames were not looked at and their copies stay plain markup.',
               ]
             : []),
           ...(optional(() => componentReuseNotes(canvas, component, shared.autoProps)) ?? []),
@@ -448,18 +447,6 @@ export const COMPONENT_TOOLS: ComponentTool[] = [
         ...(instances ? {} : { note: 'The change was applied. Call get_frame to read the instances back.' }),
         frames: [frame],
       }
-    },
-  },
-  {
-    name: 'find_component_candidates',
-    title: 'Find what should be a component',
-    description:
-      "Scan a canvas for repeated structures that are not components yet, biggest payoff first: how often each appears, in how many frames, and an example element. On a canvas that grew without components, this is step one. Then call create_component with the example's frame_id and element and replace_matching=true.",
-    readOnly: true,
-    shape: { limit: z.number().min(1).max(30).optional() },
-    run({ limit }, { canvas }) {
-      const candidates = findComponentCandidates(canvas, typeof limit === 'number' ? limit : 12)
-      return { data: { candidates, ...(candidates.length ? {} : { note: 'Nothing repeats on this canvas.' }) } }
     },
   },
   {

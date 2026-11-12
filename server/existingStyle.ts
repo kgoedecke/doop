@@ -1,12 +1,10 @@
 import { canvasPages, COMPONENTS_PAGE, framePageId } from '../shared/pages.ts'
-import type { Canvas, Frame } from '../shared/types.ts'
-import { findComponentCandidates } from './componentActions.ts'
+import type { Canvas } from '../shared/types.ts'
 import { authoredCss, hexesIn } from './reuseNotes.ts'
-import { optional } from './workBudget.ts'
 
 /**
  * What an agent should know before adding to a canvas that already has a look: the colours
- * and fonts its frames share, and the blocks they already repeat. Without it an agent asked
+ * and fonts its frames share. Without it an agent asked
  * for "one more page" copies hex values and redraws the nav by hand, and the canvas ends up
  * with seven copies of a header instead of a component and a set of tokens.
  */
@@ -15,17 +13,12 @@ import { optional } from './workBudget.ts'
 const MIN_FRAMES = 2
 const MAX_COLOURS = 8
 const MAX_FONTS = 4
-const MAX_REPEATS = 4
-/** Finding repeats parses every frame: past this much HTML the agent is pointed at the tool instead. */
-const MAX_SCAN_BYTES = 2_000_000
 
 export interface ExistingStyle {
   frames: number
   /** most shared first; only filled when the canvas has no tokens */
   colours: { value: string; frames: number }[]
   fonts: { family: string; frames: number }[]
-  /** blocks already written out on two or more frames; undefined when the canvas was too big to scan */
-  repeated?: { name: string; occurrences: number; frames: number; example: { frame_id: string; element: string } }[]
 }
 
 const GENERIC_FONTS = new Set([
@@ -69,23 +62,6 @@ function tally(perFrame: Set<string>[], limit: number): { value: string; frames:
     .slice(0, limit)
 }
 
-function repeatsAcross(canvas: Canvas, frames: Frame[]): ExistingStyle['repeated'] {
-  const bytes = frames.reduce((sum, frame) => sum + frame.html.length, 0)
-  if (bytes > MAX_SCAN_BYTES) return undefined
-  /* the frame threshold goes in first: two cards on one page must not hide the buttons other pages share.
-     A hint, never the reason get_canvas or a run fails: out of work budget, the agent gets the tool instead */
-  const candidates = optional(() => findComponentCandidates({ ...canvas, frames }, 30, 2, 2))
-  return candidates
-    ?.filter((candidate) => candidate.elements_each >= 2)
-    .slice(0, MAX_REPEATS)
-    .map((candidate) => ({
-      name: candidate.suggested_name,
-      occurrences: candidate.occurrences,
-      frames: candidate.frames,
-      example: { frame_id: candidate.example.frame_id, element: candidate.example.element },
-    }))
-}
-
 /** The established style of a canvas, or null when it has fewer than two of the user's frames. */
 export function existingStyle(canvas: Canvas): ExistingStyle | null {
   /* the Components page holds the library's mains, not screens in the canvas's style */
@@ -96,9 +72,8 @@ export function existingStyle(canvas: Canvas): ExistingStyle | null {
   )
   const frames = canvas.frames.filter((frame) => !frame.demo && !library.has(framePageId(canvas, frame)))
   if (frames.length < MIN_FRAMES) return null
-  const repeated = repeatsAcross(canvas, frames)
   /* with tokens the palette is already named: nothing to read off the frames */
-  if ((canvas.tokens ?? []).length) return { frames: frames.length, colours: [], fonts: [], repeated }
+  if ((canvas.tokens ?? []).length) return { frames: frames.length, colours: [], fonts: [] }
   const css = frames.map((frame) => authoredCss(frame.html))
   const colours = tally(
     css.map(
@@ -114,7 +89,7 @@ export function existingStyle(canvas: Canvas): ExistingStyle | null {
     css.map(({ sheets, inline }) => new Set([...sheets, ...inline].flatMap((block) => [...fontsIn(block)]))),
     MAX_FONTS,
   ).map(({ value, frames }) => ({ family: value, frames }))
-  return { frames: frames.length, colours, fonts, repeated }
+  return { frames: frames.length, colours, fonts }
 }
 
 /** What to do with it, in the words both get_canvas and the resident kickoff use. */
@@ -134,20 +109,6 @@ export function existingStyleBrief(style: ExistingStyle, { tokens }: { tokens: b
             : '') +
         ' and get_frame on a page or two for type sizes, radii and spacing, then create them with create_tokens by role ' +
         'and write var(--name) in what you add.',
-    )
-  }
-  if (style.repeated === undefined) {
-    lines.push(
-      'Before adding a page, call find_component_candidates: blocks the existing pages repeat belong in components.',
-    )
-  } else if (style.repeated.length) {
-    const blocks = style.repeated
-      .map((block) => `“${block.name}” ×${block.occurrences} on ${block.frames} frames`)
-      .join(', ')
-    lines.push(
-      `The existing frames already repeat ${blocks}. When your work needs one of these, make it a component from an ` +
-        'existing copy (create_component with the frame_id and element from existingStyle.repeated) and use it through ' +
-        '<doop-use>, rather than writing it out again.',
     )
   }
   lines.push(

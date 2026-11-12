@@ -17,7 +17,7 @@ through tools, and read them back in a short form.
 | Edits break the link, or get thrown away            | Any edit becomes the narrowest override that holds it; no detach needed             |
 | Sweeping edits have unknown blast radius            | `update_component` reports impact, with `dry_run`                                   |
 | Variant explosion                                   | An enum prop is `data-<name>` on the root, and variants are CSS                     |
-| Canvases that grew without components               | `find_component_candidates` + `replace_matching` retrofit them                      |
+| Canvases that grew without components               | `create_component` + `replace_matching` retrofit them                               |
 | Components disconnected from code                   | Optional `code` mapping; compact form reads like JSX                                |
 | Libraries silently change consumers, or are one-way | Linked copies; updates shown, pulled on request                                     |
 
@@ -181,7 +181,7 @@ drops), within a quarter of the operation's parse budget; frames it had to leave
 
 `server/componentTools.ts` holds each tool's schema and handler once, for MCP and the resident agent:
 `list_components`, `get_component`, `create_component`, `update_component`, `insert_instance`,
-`update_instances`, `find_component_candidates`, `delete_component`, `restore_component`, `restore_component_version`,
+`update_instances`, `delete_component`, `restore_component`, `restore_component_version`,
 `import_component`, `sync_component`. Previews are `get_component_preview` (MCP) and
 `screenshot_component` (resident). `get_canvas` carries the catalog; `get_frame` and `edit_frame_html` speak
 the compact form. Instructions are `COMPONENTS` in `server/guide.ts`.
