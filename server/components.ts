@@ -21,6 +21,7 @@ import {
   derivePropsAndSlots,
   expandUses,
   findMarked,
+  holdsHollow,
   renderInstance,
   reconcileInstance,
   setAttr,
@@ -198,7 +199,15 @@ export function withinRevision<T>(canvasId: string, id: string, write: () => T):
   }
 }
 
-function prepareMains(canvas: Canvas, frameId: string, html: string, by: string, ctx: EngineContext) {
+/** `only`: the mains to look at, every other one left as it is (a repair of those definitions). */
+function prepareMains(
+  canvas: Canvas,
+  frameId: string,
+  html: string,
+  by: string,
+  ctx: EngineContext,
+  only?: ReadonlySet<string>,
+) {
   const changed: ComponentDef[] = []
   const moved: ComponentDef[] = []
   const claimed = new Set<string>()
@@ -211,6 +220,7 @@ function prepareMains(canvas: Canvas, frameId: string, html: string, by: string,
   const headTags = () => [...(headCache ??= frameHeadTags(html))]
   for (const found of findMarked(html, COMPONENT_ATTR)) {
     const id = attrOf(found.el, COMPONENT_ATTR) ?? ''
+    if (only && !only.has(id)) continue
     const def = store.getComponents(canvas.id).find((candidate) => candidate.id === id)
     if (!def) {
       /* pasted from a canvas that does not have this component: plain markup here */
@@ -270,7 +280,7 @@ function prepareMains(canvas: Canvas, frameId: string, html: string, by: string,
     else moved.push(saved)
   }
   /* a main this frame held and no longer does: the component lives on without one */
-  for (const def of store.getComponents(canvas.id)) {
+  for (const def of only ? [] : store.getComponents(canvas.id)) {
     if (def.mainFrameId !== frameId || !frameId || claimed.has(def.id) || isDeleted(def)) continue
     if (html.includes(`${COMPONENT_ATTR}="${def.id}"`)) continue
     const saved = { ...def, mainFrameId: null, updatedAt: Date.now(), updatedBy: by }
@@ -278,6 +288,23 @@ function prepareMains(canvas: Canvas, frameId: string, html: string, by: string,
     moved.push(saved)
   }
   return { html: edits.length ? splice(html, edits) : html, changed, moved }
+}
+
+/**
+ * Re-derive these definitions from their mains in this frame, as a write of the frame would,
+ * and nothing else: no other main is looked at and no instance is rendered again. `html` is
+ * the frame as the pass would leave it; it differs only where a main needed part keys.
+ */
+export function rederiveFromMains(
+  canvas: Canvas,
+  frameId: string,
+  ids: ReadonlySet<string>,
+  by: string,
+): { html: string; saved: ComponentDef[] } {
+  const frame = store.getFrame(frameId)
+  if (!frame) return { html: '', saved: [] }
+  const mains = prepareMains(canvas, frameId, frame.html, by, contextFor(canvas.id), ids)
+  return { html: mains.html, saved: [...mains.changed, ...mains.moved] }
 }
 
 function prepareInstances(html: string, ctx: EngineContext) {
@@ -291,8 +318,9 @@ function prepareInstances(html: string, ctx: EngineContext) {
       edits.push({ start: found.start, end: found.end, text: serializeOuter(found.el) })
       continue
     }
-    /* its component was deleted: the instance keeps the markup it has, untouched */
-    if (isDeleted(def)) continue
+    /* its component was deleted: the instance keeps the markup it has, untouched. So does one
+       holding an instance of a hollow component: rendered again, that instance would be lost */
+    if (isDeleted(def) || holdsHollow(found.el, ctx)) continue
     const before = serializeOuter(found.el)
     const state = reconcileInstance(found.el, ctx)
     if (!state) continue
