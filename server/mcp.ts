@@ -104,6 +104,7 @@ import {
   instancesIn,
   libraryCatalog,
 } from './componentActions.ts'
+import { existingStyle, existingStyleBrief } from './existingStyle.ts'
 import { COMPONENT_TOOLS, componentWriteNotes, libraryFeatureEvent, runComponentTool } from './componentTools.ts'
 import { previewFrame } from './componentPreview.ts'
 import { activeComponents, INSTANCE_ATTR } from '../shared/components.ts'
@@ -622,6 +623,8 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
       const deletedInUse = deletedComponentsInUse(c, componentUsage)
       const tokens = store.getTokens(canvas_id)
       const tokenThemes = store.getTokenThemes(canvas_id)
+      /* a canvas that already has a look: what its frames share, so new work reuses it */
+      const established = existingStyle(c)
       /* design-synced canvases carry a flow map: real user navigation between
          the synced screens — context a redesign must respect */
       const flow = describeSyncFlow(await getSyncFlow(c), c.frames)
@@ -640,7 +643,8 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
           : []),
         ...(library.length ? [libraryBrief(library)] : []),
         webFontsBrief(),
-        tokens.length ? tokensBrief(tokens, tokenThemes) : NO_TOKENS_BRIEF,
+        ...(tokens.length ? [tokensBrief(tokens, tokenThemes)] : established ? [] : [NO_TOKENS_BRIEF]),
+        ...(established ? [existingStyleBrief(established, { tokens: tokens.length > 0 })] : []),
         ...(refs.length
           ? [
               'This canvas has pinned style references — exemplar designs humans marked as "more like this". Call get_reference on the relevant one and match its look (palette, type, spacing) in what you design.',
@@ -696,6 +700,7 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
             webFonts: webFontFamilies(),
             ...(tokens.length ? { tokens: describeTokens(tokens) } : {}),
             ...(tokenThemes.length ? { tokenThemes } : {}),
+            ...(established ? { existingStyle: established } : {}),
             ...(flow.length ? { flow } : {}),
             ...(notes.length ? { note: notes.join(' ') } : {}),
           }),
