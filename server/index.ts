@@ -3517,6 +3517,18 @@ server.listen(PORT, () => {
     },
     Math.min(60_000, Math.max(1_000, env.CANVAS_IDLE_MS / 2)),
   ).unref()
+  /* definitions that lost their markup to an out-of-order write: given it back from their
+     mains, while serving, one canvas at a time */
+  outsideOperation('boot repair: each hollow definition is re-derived from its main by itself', () =>
+    actions.healHollowComponents(),
+  )
+    .then(({ healed, noMain, failed }) => {
+      if (healed + noMain + failed)
+        console.log(
+          `[components] hollow definitions: ${healed} healed from their mains, ${noMain} with no main, ${failed} still hollow`,
+        )
+    })
+    .catch((err) => console.error('[components] healing hollow definitions failed:', err))
   /* comments anchored before element ids: stamped now, while serving, so a
      slow or failing row can never keep the server from coming up */
   if (data.legacyCommentSelectors.size > 0) {

@@ -154,7 +154,6 @@ export function deleteMember(canvasId: string, userId: string) {
   )
 }
 
-/* Single-shot writes (one save per explicit edit) — no debounce needed. */
 function componentRow(canvasId: string, def: ComponentDef) {
   return {
     canvasId,
@@ -181,10 +180,96 @@ function componentRow(canvasId: string, def: ComponentDef) {
   }
 }
 
+/*
+ * Writes to one component row go one at a time, and only the latest state waits: a create
+ * saves a blank definition and then the filled one, and on a pooled connection two
+ * fire-and-forget upserts land in either order. The blank one landing last left a hollow
+ * row that the next boot loaded as the component (2026-11-11: 236 definitions, 7%). A write
+ * that fails is retried while nothing newer waits, and logged when it gives up.
+ */
+interface RowQueue {
+  next: (() => Promise<unknown>) | undefined
+  drained: Promise<void>
+}
+
+const componentWrites = new Map<string, RowQueue>()
+
+/** How long to wait before each retry of a failed component write. */
+export const COMPONENT_WRITE_RETRIES_MS = [500, 5_000, 30_000]
+
+/* a retry waiting out its delay: shutdown cuts the wait short, so the write gets its last try */
+const retryWaits = new Set<() => void>()
+let draining = false
+
+const pause = (ms: number) =>
+  draining
+    ? Promise.resolve()
+    : new Promise<void>((resolve) => {
+        const wake = () => {
+          clearTimeout(timer)
+          retryWaits.delete(wake)
+          resolve()
+        }
+        const timer = setTimeout(wake, ms)
+        retryWaits.add(wake)
+      })
+
+function queueComponentWrite(canvasId: string, id: string, write: () => Promise<unknown>) {
+  const key = `${canvasId}\0${id}`
+  const queued = componentWrites.get(key)
+  if (queued) {
+    queued.next = write
+    return
+  }
+  const queue: RowQueue = { next: write, drained: Promise.resolve() }
+  componentWrites.set(key, queue)
+  queue.drained = drainComponentWrites(key, queue)
+}
+
+async function drainComponentWrites(key: string, queue: RowQueue) {
+  try {
+    for (let write = queue.next; write; write = queue.next) {
+      queue.next = undefined
+      await writeWithRetries(key, write, queue)
+    }
+  } finally {
+    componentWrites.delete(key)
+  }
+}
+
+async function writeWithRetries(key: string, write: () => Promise<unknown>, queue: RowQueue) {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      await write()
+      return
+    } catch (error) {
+      /* a newer state is waiting: it replaces this one, so this one need not land */
+      if (queue.next) return
+      const wait = COMPONENT_WRITE_RETRIES_MS[attempt]
+      if (wait === undefined) {
+        console.error(`[db] component write failed for good: ${key.replace('\0', '/')}`, error)
+        return
+      }
+      console.error(`[db] component write failed, retrying in ${wait}ms: ${key.replace('\0', '/')}`, error)
+      await pause(wait)
+      if (queue.next) return
+    }
+  }
+}
+
+/** Every queued component write, settled: what a canvas delete waits for (so a queued save
+ *  cannot put a row back afterwards), and what a test awaits. */
+export function pendingComponentWrites(canvasId?: string): Promise<unknown> {
+  const prefix = canvasId === undefined ? '' : `${canvasId}\0`
+  return Promise.allSettled(
+    [...componentWrites].filter(([key]) => key.startsWith(prefix)).map(([, queue]) => queue.drained),
+  )
+}
+
 export function saveComponent(canvasId: string, def: ComponentDef) {
   const row = componentRow(canvasId, def)
   const { canvasId: _canvasId, id: _id, createdAt: _createdAt, ...set } = row
-  swallow(
+  queueComponentWrite(canvasId, def.id, () =>
     db
       .insert(t.components)
       .values(row)
@@ -193,7 +278,9 @@ export function saveComponent(canvasId: string, def: ComponentDef) {
 }
 
 export function deleteComponent(canvasId: string, id: string) {
-  swallow(db.delete(t.components).where(and(eq(t.components.canvasId, canvasId), eq(t.components.id, id))))
+  queueComponentWrite(canvasId, id, () =>
+    db.delete(t.components).where(and(eq(t.components.canvasId, canvasId), eq(t.components.id, id))),
+  )
 }
 
 export function saveLibraryComponent(snapshot: LibraryComponent) {
@@ -761,7 +848,9 @@ export function deleteCanvas(canvasId: string) {
   swallow(db.delete(t.comments).where(eq(t.comments.canvasId, canvasId)))
   swallow(db.delete(t.activity).where(eq(t.activity.canvasId, canvasId)))
   swallow(db.delete(t.guidelines).where(eq(t.guidelines.canvasId, canvasId)))
-  swallow(db.delete(t.components).where(eq(t.components.canvasId, canvasId)))
+  swallow(
+    pendingComponentWrites(canvasId).then(() => db.delete(t.components).where(eq(t.components.canvasId, canvasId))),
+  )
   swallow(db.delete(t.libraryComponents).where(eq(t.libraryComponents.canvasId, canvasId)))
   swallow(db.delete(t.guidelineVersions).where(eq(t.guidelineVersions.canvasId, canvasId)))
   swallow(
@@ -1037,6 +1126,9 @@ export async function flush(getFrame: (id: string) => Frame | undefined): Promis
     }),
   )
   await pendingVersionWrites(() => true)
+  draining = true
+  for (const wake of [...retryWaits]) wake()
+  await pendingComponentWrites()
 }
 
 /* ------------------------------------------------------------------ */

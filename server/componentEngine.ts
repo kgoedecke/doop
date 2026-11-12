@@ -21,6 +21,7 @@ import {
   USE_TAG,
   conditionHolds,
   isDeleted,
+  isHollow,
   isPropName,
   parseBindings,
   parseCondition,
@@ -1161,12 +1162,14 @@ export function splice(html: string, edits: { start: number; end: number; text: 
 export function compactDocument(html: string, ctx: EngineContext): string {
   if (!html.includes(INSTANCE_ATTR) && !html.includes(CSS_ATTR)) return html
   /* an instance of a deleted component stays written out: as <doop-use> it would be a new
-     use of it when the frame is written back, and those are refused */
+     use of it when the frame is written back, and those are refused. One of a hollow
+     component too, with its stylesheet: written back as <doop-use> it would render nothing */
+  const hollow = hollowIds(html, ctx)
   const instances = findInstancesEverywhere(html).filter(
-    (found) => !isDeleted(ctx.find(attrOf(found.el, INSTANCE_ATTR) ?? '')),
+    (found) => !isDeleted(ctx.find(attrOf(found.el, INSTANCE_ATTR) ?? '')) && !holdsHollow(found.el, ctx),
   )
   const edits = instances.map((found) => ({ start: found.start, end: found.end, text: useTagFor(found.el, ctx) }))
-  return stripComponentHead(splice(html, edits))
+  return stripComponentHead(splice(html, edits), hollow)
 }
 
 /** Outermost instances, also those below a main: the main itself is not an instance. */
@@ -1174,10 +1177,31 @@ export function findInstancesEverywhere(html: string): Located[] {
   return findMarked(html, INSTANCE_ATTR)
 }
 
-/** Everything a component put in the head: its stylesheet, and the links and scripts it brought. */
-export function stripComponentHead(html: string): string {
+/** Is this instance, or one nested anywhere inside it, of a hollow component? Rendered again
+ *  (or read back as <doop-use>) it would lose that instance, so it is left as written. */
+export function holdsHollow(el: Element, ctx: EngineContext): boolean {
+  const stack: Element[] = [el]
+  for (let node = stack.pop(); node; node = stack.pop()) {
+    const id = attrOf(node, INSTANCE_ATTR)
+    if (id !== undefined && isHollow(ctx.find(id))) return true
+    stack.push(...elementKids(node))
+  }
+  return false
+}
+
+/** The hollow components this document has instances of. */
+function hollowIds(html: string, ctx: EngineContext): Set<string> {
+  return new Set([...usedComponentIds(html)].filter((id) => isHollow(ctx.find(id))))
+}
+
+/** Everything a component put in the head: its stylesheet, and the links and scripts it brought.
+ *  The stylesheets of the components in `keep` stay. */
+export function stripComponentHead(html: string, keep: ReadonlySet<string> = new Set()): string {
   return html
-    .replace(new RegExp(`<style[^>]*\\b${CSS_ATTR}="[^"]*"[^>]*>[\\s\\S]*?</style>\\n?`, 'gi'), '')
+    .replace(
+      new RegExp(`<style[^>]*\\b${CSS_ATTR}="([^"]*)"[^>]*>[\\s\\S]*?</style>\\n?`, 'gi'),
+      (block, id: string) => (keep.has(id) ? block : ''),
+    )
     .replace(new RegExp(`<script[^>]*\\s${HEAD_ATTR}(?:="[^"]*")?[\\s>][^>]*>[\\s\\S]*?</script>\\n?`, 'gi'), '')
     .replace(new RegExp(`<link[^>]*\\s${HEAD_ATTR}(?:="[^"]*")?[\\s>/][^>]*>\\n?`, 'gi'), '')
 }
@@ -1198,7 +1222,8 @@ export function usedComponentIds(html: string): Set<string> {
 
 /** Put exactly the component stylesheets this document needs into its head. */
 export function syncComponentHead(html: string, defs: ComponentDef[]): string {
-  const stripped = stripComponentHead(html)
+  /* a hollow component has no stylesheet to put back: its instances keep the one they have */
+  const stripped = stripComponentHead(html, new Set(defs.filter(isHollow).map((def) => def.id)))
   const blocks: string[] = []
   for (const def of defs) {
     /* a tag the frame has of its own, or one another component already brought, is not repeated */

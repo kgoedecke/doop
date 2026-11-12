@@ -3,9 +3,18 @@ import { MAX_DECISION_CHARS } from '../shared/designDecisions.ts'
 import { env } from './env.ts'
 import * as propagation from './propagation.ts'
 import { runOperation, WorkBudgetError } from './workBudget.ts'
-import { afterCommit, atomic, checkpoint, detached, inTransaction, postCommit, recordUndo } from './journal.ts'
-import { dedupeIssues, prepareChunk, prepareFrameHtml, referencesComponent } from './components.ts'
-import { COMPONENT_ATTR, isDeleted, type ComponentDef, type ComponentIssue } from '../shared/components.ts'
+import {
+  afterCommit,
+  atomic,
+  checkpoint,
+  detached,
+  inTransaction,
+  postCommit,
+  recordUndo,
+  transaction,
+} from './journal.ts'
+import { dedupeIssues, prepareChunk, prepareFrameHtml, referencesComponent, rederiveFromMains } from './components.ts'
+import { COMPONENT_ATTR, isDeleted, isHollow, type ComponentDef, type ComponentIssue } from '../shared/components.ts'
 import { MAX_PAGES, PageLimitError, store } from './store.ts'
 import * as persist from './db/persist.ts'
 import * as thumbs from './thumbs.ts'
@@ -2236,6 +2245,73 @@ function propagationDrained(canvasId: string, report: PropagationReport, actor: 
 }
 
 propagation.registerFrameTask('propagate', { frame: propagateIntoFrame, drained: propagationDrained })
+
+/**
+ * Give hollow definitions their markup back from their mains, as the next write of each main
+ * would: rows that lost it when an older write landed last, before writes to a component row
+ * were queued (2026-11-11). One canvas at a time, after boot; nothing to do once every
+ * definition is whole. Instances need no update (they were rendered from what the main
+ * holds), and the main's frame is written only when the pass marked it up (part keys), as an
+ * annotation that leaves sign-off standing.
+ */
+export async function healHollowComponents(): Promise<{
+  healed: number
+  noMain: number
+  failed: number
+}> {
+  const counts = { healed: 0, noMain: 0, failed: 0 }
+  const hollowOn = (canvas: Canvas) =>
+    (canvas.components ?? []).filter((def) => isHollow(def) && !isDeleted(def) && !def.source?.library)
+  for (const listed of store.allCanvases()) {
+    const waiting = hollowOn(listed).length
+    if (!waiting) continue
+    try {
+      await store.withCanvas(listed.id, async (canvas) => {
+        if (canvas) healCanvas(canvas, counts)
+      })
+    } catch (err) {
+      /* this canvas could not be read: the rest still get theirs, and the next boot tries again */
+      counts.failed += waiting
+      console.error(`[components] healing hollow definitions on ${listed.id}: the canvas did not load`, err)
+    }
+  }
+  return counts
+}
+
+function healCanvas(canvas: Canvas, counts: { healed: number; noMain: number; failed: number }) {
+  const byFrame = new Map<Frame, Set<string>>()
+  for (const def of canvas.components ?? []) {
+    if (!isHollow(def) || isDeleted(def) || def.source?.library) continue
+    const main = canvas.frames.find((frame) => frame.html.includes(`${COMPONENT_ATTR}="${def.id}"`))
+    if (!main) {
+      counts.noMain++
+      continue
+    }
+    byFrame.set(main, (byFrame.get(main) ?? new Set()).add(def.id))
+  }
+  for (const [frame, ids] of byFrame) {
+    try {
+      transaction(() => healFromMain(canvas, frame, ids))
+    } catch (err) {
+      console.error(`[components] healing ${[...ids].join(', ')} from frame ${frame.id} failed:`, err)
+    }
+    for (const id of ids) {
+      if (isHollow(store.getComponents(canvas.id).find((def) => def.id === id))) counts.failed++
+      else counts.healed++
+    }
+  }
+}
+
+/** The definitions only: the frame is written just where a main needed part keys, as an
+ *  annotation, since nothing in it looks different. */
+function healFromMain(canvas: Canvas, frame: Frame, ids: ReadonlySet<string>) {
+  const actor = resolveActor({ name: frame.updatedBy, kind: 'user' })
+  const { html, saved } = rederiveFromMains(canvas, frame.id, ids, actor.name)
+  for (const def of saved) broadcastComponent(canvas.id, def, actor)
+  if (html === frame.html) return
+  const next = store.updateFrame(frame.id, { html }, frame.updatedBy, { annotation: true })
+  if (next) broadcast(canvas.id, { type: 'frame:updated', frame: next, actor })
+}
 
 export const appendFrameHtml = atomic(function appendFrameHtml(
   frameId: string,

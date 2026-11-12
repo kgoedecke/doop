@@ -121,6 +121,13 @@ export function isDeleted(def: Pick<ComponentDef, 'status'> | undefined): boolea
   return def?.status === 'deleted'
 }
 
+/** A definition with no markup: a row that lost its content (an older write landing last,
+ *  2026-11-11). Nothing can be rendered from it, so its instances are left exactly as they
+ *  are, stylesheet included, until its main is written again and gives it back its markup. */
+export function isHollow(def: Pick<ComponentDef, 'template'> | undefined): boolean {
+  return def !== undefined && !def.template.trim()
+}
+
 /** The components of a canvas that are in use: everything but the soft-deleted. */
 export function activeComponents<T extends Pick<ComponentDef, 'status'>>(defs: readonly T[] | undefined): T[] {
   return (defs ?? []).filter((def) => !isDeleted(def))
