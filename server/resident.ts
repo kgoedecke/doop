@@ -87,9 +87,15 @@ import { AGENT_IDEA_CATEGORIES, AGENT_ISSUE_CATEGORIES, type AgentFeedbackCatego
  * did — the work waits for the next agent to connect over MCP.
  */
 
-const MAX_TURNS = 24
+/* A backstop against a run that loops, not a budget: each turn's output is
+   already capped, and a model that calls one tool per turn (ChatGPT's) spends
+   a dozen turns reading the canvas and searching before it writes anything.
+   At 24, ordinary runs finished at 20-23 and verified work was failed. */
+const MAX_TURNS = 60
 /* a redesign card delivers an audit doc plus TWO draft frames in one run */
-const MAX_REDESIGN_TURNS = 40
+const MAX_REDESIGN_TURNS = 80
+/* the agent's closing words when the cap stopped a run whose work was done */
+const CAPPED_SUMMARY = 'Done. The step limit came before my write-up, so look at the canvas for what changed.'
 /* a sweep hands a card down its pipeline in place; the cap is a backstop
    against a card that somehow keeps requeueing itself */
 const MAX_SWEEP_RUNS = 24
@@ -225,6 +231,10 @@ interface RunState {
   sourceFrames: Set<string>
   verificationFrames: Set<string>
   verifiedFrames: Set<string>
+  /* the verified frames whose screenshots the model has had back in a
+     turn, and that nothing has changed since: a screenshot taken on the
+     last allowed turn was never looked at */
+  seenVerified: Set<string>
   rewriteDrafts: Map<string, string>
   blockedWebsiteAccess?: string
   /** false = the model cannot see images: screenshots are skipped and the
@@ -332,6 +342,12 @@ export function deliveredWork(
 /** How many of a token call's results took. Exported for tests. */
 export function tokenWritesIn(results: readonly TokenResult[]): number {
   return results.filter((r) => r.result !== 'error').length
+}
+
+/** A change to a frame undoes every check of it, seen or not. */
+function unverify(runState: Pick<RunState, 'verifiedFrames' | 'seenVerified'>, frameId: string) {
+  runState.verifiedFrames.delete(frameId)
+  runState.seenVerified.delete(frameId)
 }
 
 function verificationFrameIds(runState: RunState): string[] {
@@ -651,6 +667,7 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
       sourceFrames: new Set(),
       verificationFrames: new Set(),
       verifiedFrames: new Set(),
+      seenVerified: new Set(),
       rewriteDrafts: new Map(),
       vision: model.vision !== false,
       ...(model.userId ? { payerId: model.userId } : {}),
@@ -799,6 +816,7 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
           /* the status showing when the connection dropped, so a recovered
              run picks its narration back up instead of staying "reconnecting" */
           let interruptedStatus: string | undefined
+          runState.seenVerified = new Set(runState.verifiedFrames)
           const res = await retryModelTurn(
             () =>
               model.run({
@@ -962,6 +980,23 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
        or out-of-turns runs pause so nothing gets a false Done or auto-retry */
     const deliverableFrames = deliverableFrameIds(runState)
     const blockedWebsiteAccess = runState.blockedWebsiteAccess
+    /* the cap stopping a run whose work is delivered and checked (often on
+       a re-check after the last fix) is a finished run without its closing
+       words, not a failure. Only for a run about one piece of work, since
+       delivered work cannot say which of several cards it answers; with no
+       rewrite left half-written; and a frame counts as checked only once the
+       model has seen its screenshot and nothing has changed it since. */
+    const capped = !finished && !refused && !crashed
+    const cappedDone =
+      capped &&
+      cards.length + claimed.length + comments.length === 1 &&
+      runState.rewriteDrafts.size === 0 &&
+      deliveredWork(runState) &&
+      !blockedWebsiteAccess &&
+      !(runState.vision && verificationFrameIds(runState).some((id) => !runState.seenVerified.has(id)))
+    if (cappedDone) finished = true
+    const exhausted = capped && !cappedDone
+    if (exhausted) actions.setAgentStatus(canvasId, actor, 'Hit its step limit — waiting for a retry')
     const noMutation = finished && requireMutation && !deliveredWork(runState) && !blockedWebsiteAccess
     const unverifiedMutation =
       finished &&
@@ -969,26 +1004,27 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
       !blockedWebsiteAccess &&
       cards.length > 0 &&
       verificationFrameIds(runState).some((id) => !runState.verifiedFrames.has(id))
-    const exhausted = !finished && !refused && !crashed
-    if (exhausted) actions.setAgentStatus(canvasId, actor, 'Ran out of turns — waiting for a retry')
     if (blockedWebsiteAccess && !staleAccount) {
       actions.setAgentStatus(canvasId, actor, 'Website blocked — needs screenshots')
     }
     if (noMutation) actions.setAgentStatus(canvasId, actor, 'Nothing changed — waiting for a retry')
     if (unverifiedMutation) actions.setAgentStatus(canvasId, actor, 'Change not verified — waiting for a retry')
     console.log(
-      `[resident] run end canvas=${canvasId} agent=${role.name} turns=${turnsUsed} finished=${finished} refused=${refused} crashed=${crashed} mutations=${runState.mutatedFrames.size} sources=${runState.sourceFrames.size} deliverables=${deliverableFrames.length} tokenWrites=${runState.tokenWrites} arrangeWrites=${runState.arrangeWrites} verified=${runState.verifiedFrames.size}`,
+      `[resident] run end canvas=${canvasId} agent=${role.name} turns=${turnsUsed} finished=${finished} capped=${capped} refused=${refused} crashed=${crashed} mutations=${runState.mutatedFrames.size} sources=${runState.sourceFrames.size} deliverables=${deliverableFrames.length} tokenWrites=${runState.tokenWrites} arrangeWrites=${runState.arrangeWrites} verified=${runState.verifiedFrames.size}`,
     )
     let summary = ''
     if (finished) {
       /* The closing summary remains useful when a no-op card is returned to
          the queue: it tells the human why no deliverable was accepted. */
       const last = messages[messages.length - 1]
-      if (last?.role === 'assistant' && Array.isArray(last.content)) {
-        summary = last.content
-          .filter((b): b is Anthropic.TextBlock => b.type === 'text')
-          .map((b) => b.text)
-          .join(' ')
+      if (cappedDone || (last?.role === 'assistant' && Array.isArray(last.content))) {
+        summary =
+          !cappedDone && last && Array.isArray(last.content)
+            ? last.content
+                .filter((b): b is Anthropic.TextBlock => b.type === 'text')
+                .map((b) => b.text)
+                .join(' ')
+            : CAPPED_SUMMARY
         console.log(`[resident] summary canvas=${canvasId} ${summary.replace(/\s+/g, ' ').trim().slice(0, 500)}`)
         actions.agentSummary(canvasId, actor, summary)
         /* the agent's answer in the Agents tab's chat, beside the prompt */
@@ -1020,7 +1056,7 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
       } else if (crashed) {
         reason = `${role.name} hit a snag before finishing. Retry when you are ready.`
       } else if (exhausted) {
-        reason = `${role.name} ran out of turns before finishing. Retry when you are ready.`
+        reason = `${role.name} hit its step limit before the work was done. Anything it made is still on the canvas; retry to have it continue.`
       } else if (noMutation) {
         reason = `${role.name} finished without changing a frame or a token. Retry when you are ready.`
       } else {
@@ -1805,7 +1841,7 @@ export async function execTool(
         )
         if (!f) return fail('canvas not found')
         runState.mutatedFrames.add(f.id)
-        runState.verifiedFrames.delete(f.id)
+        unverify(runState, f.id)
         return ok(
           [
             `created frame ${f.id} ("${f.name}", ${Math.round(f.width)}x${Math.round(f.height)}) — it is revealing to viewers now`,
@@ -1879,7 +1915,7 @@ export async function execTool(
         const replace = input.replace
         actions.updateFrame(input.frame_id, { html: source.replace(input.find, () => replace) }, actor)
         runState.mutatedFrames.add(input.frame_id)
-        runState.verifiedFrames.delete(input.frame_id)
+        unverify(runState, input.frame_id)
         const notes = componentWriteNotes(store.getFrame(input.frame_id)!)
         return ok(notes.length ? `applied\n${notes.join('\n')}` : 'applied')
       }
@@ -1899,7 +1935,7 @@ export async function execTool(
         }
         actions.updateFrame(input.frame_id, { html }, actor)
         runState.mutatedFrames.add(input.frame_id)
-        runState.verifiedFrames.delete(input.frame_id)
+        unverify(runState, input.frame_id)
         return ok(
           [
             'applied — the new design is revealing to viewers now',
@@ -1942,7 +1978,7 @@ export async function execTool(
         actions.updateFrame(input.frame_id, { html }, actor)
         runState.rewriteDrafts.delete(input.frame_id)
         runState.mutatedFrames.add(input.frame_id)
-        runState.verifiedFrames.delete(input.frame_id)
+        unverify(runState, input.frame_id)
         return ok(
           [
             `committed ${html.length} characters — the new design is revealing to viewers now`,
@@ -2147,7 +2183,7 @@ export async function execTool(
         if (existing) {
           runState.sourceFrames.add(existing.id)
           runState.verificationFrames.add(existing.id)
-          runState.verifiedFrames.delete(existing.id)
+          unverify(runState, existing.id)
           return ok(
             `Reusing the existing editable source snapshot ${existing.id} ("${existing.name}") for ${requestedUrl}; no duplicate frame was added. Call screenshot_frame with frame_id=${existing.id}. Leave this source frame unchanged and deliver the new design separately.`,
           )
@@ -2158,7 +2194,7 @@ export async function execTool(
         runState.mutatedFrames.add(f.id)
         if (raw.as_reference) runState.sourceFrames.add(f.id)
         else runState.sourceFrames.delete(f.id)
-        runState.verifiedFrames.delete(f.id)
+        unverify(runState, f.id)
         return ok(
           `Imported ${requestedUrl} as editable frame ${f.id} ("${f.name}", ${Math.round(f.width)}x${Math.round(f.height)}, ${f.html.length} HTML characters). Call screenshot_frame with frame_id=${f.id}.${
             raw.as_reference
@@ -2388,7 +2424,7 @@ export async function execTool(
         /* a new size changes what renders, so it is a design change to verify */
         if (frame.width !== before.width || frame.height !== before.height) {
           runState.mutatedFrames.add(frame.id)
-          runState.verifiedFrames.delete(frame.id)
+          unverify(runState, frame.id)
         }
         /* a save that changed nothing has not delivered anything */
         if (arrangement(frame) !== before.arrangement) runState.arrangeWrites += 1
@@ -2508,7 +2544,7 @@ export async function execTool(
         if (libraryEvent) captureFeature(runState.requesterId, libraryEvent, 'resident', { canvas_id: canvasId })
         const notes = (frames ?? []).flatMap((frame) => {
           runState.mutatedFrames.add(frame.id)
-          runState.verifiedFrames.delete(frame.id)
+          unverify(runState, frame.id)
           return componentWriteNotes(frame)
         })
         return ok([JSON.stringify(data), ...(note ? [note] : []), ...notes].join('\n'))

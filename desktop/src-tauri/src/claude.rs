@@ -765,7 +765,7 @@ fn run_cli(app: &AppHandle, job: &Value, cancel: Arc<AtomicBool>) -> Result<Valu
     if prompt.len() + system.len() > 1_000_000 {
         return Err("Task is too large".into());
     }
-    let turns = job["maxTurns"].as_u64().unwrap_or(24).clamp(1, 40);
+    let turns = job["maxTurns"].as_u64().unwrap_or(60).clamp(1, 80);
     let dir = directory(app)?.join(id);
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     let config = dir.join("mcp.json");
