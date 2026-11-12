@@ -97,7 +97,7 @@ const FRAME_ID = z.string().describe('Frame id from get_canvas')
 const LIBRARY_NOTE =
   'This canvas is a workspace library: other canvases keep the last published version until you publish_library here (when the human wants the change shared) and each pulls it with sync_component (or, when the human asks for it everywhere, update_library_everywhere here).'
 const IMPACT_NOTE =
-  'Check one affected frame with get_frame_screenshot. Sign-off on approved frames that changed is withdrawn, as with any edit.'
+  'Check one affected frame with get_frame_screenshot. Approved frames keep their sign-off: following a component is not an edit of the frame.'
 
 /** Whether the instances have the change yet: said, because the call returns before they do. */
 function propagationNote(result: { propagation?: { status: string; frames: number } }): string[] {
@@ -299,7 +299,7 @@ export const COMPONENT_TOOLS: ComponentTool[] = [
     name: 'update_component',
     title: 'Update a component',
     description:
-      "Change a component's main; every instance on the canvas follows in the background within moments, keeping its props and overrides, so this is how a sweeping design change is one call rather than one edit per screen. Small changes to the markup: find + replace on the template (from get_component). CSS is not searched: to change a style, pass the whole stylesheet as css. Rewrites: html, keeping data-doop-part attributes where you can so overrides stay attached. The result reports the impact: which frames hold instances and are queued to follow (propagation), which approved frames lose sign-off, which overrides no longer have an element to apply to. Pass dry_run=true to read that report first, which you should for a component with many instances. A changed main is one undo-able revision: restore_component_version goes back.",
+      "Change a component's main; every instance on the canvas follows in the background within moments, keeping its props and overrides, so this is how a sweeping design change is one call rather than one edit per screen. Small changes to the markup: find + replace on the template (from get_component). CSS is not searched: to change a style, pass the whole stylesheet as css. Rewrites: html, keeping data-doop-part attributes where you can so overrides stay attached. The result reports the impact: which frames hold instances and are queued to follow (propagation), how many of them are approved (they keep their sign-off), which overrides no longer have an element to apply to. Pass dry_run=true to read that report first, which you should for a component with many instances. A changed main is one undo-able revision: restore_component_version goes back.",
     readOnly: false,
     destructive: true,
     shape: {
@@ -544,7 +544,7 @@ export const COMPONENT_TOOLS: ComponentTool[] = [
     name: 'sync_component',
     title: 'Pull a library update',
     description:
-      "Bring an imported component up to what its library last published (or, for a copy from another canvas, that canvas's current revision), carrying it to every instance here. Without component, pulls every workspace-library update waiting on this canvas in one call. Instance overrides are kept; edits made to a copied main are replaced. Approved frames that change lose sign-off, as with any edit. It works on one canvas: after publish_library, call it on each canvas listed in that result's used_by, or use update_library_everywhere on the library canvas when the human wants every canvas updated at once.",
+      "Bring an imported component up to what its library last published (or, for a copy from another canvas, that canvas's current revision), carrying it to every instance here. Without component, pulls every workspace-library update waiting on this canvas in one call. Instance overrides are kept; edits made to a copied main are replaced. Approved frames keep their sign-off. It works on one canvas: after publish_library, call it on each canvas listed in that result's used_by, or use update_library_everywhere on the library canvas when the human wants every canvas updated at once.",
     readOnly: false,
     destructive: true,
     shape: {
@@ -616,7 +616,7 @@ export const COMPONENT_TOOLS: ComponentTool[] = [
     name: 'update_library_everywhere',
     title: 'Update every canvas using this library',
     description:
-      "Pull this library canvas's latest publication into every canvas of the workspace that uses it, in one call: what sync_component does on one canvas, done on all of them. Use it ONLY when the human asks for the change everywhere / across all canvases, never as a follow-up to publish_library on your own initiative: it changes other people's canvases, and approved frames that change lose sign-off and go back to review. Run it with dry_run=true first and tell the human what it would touch. It applies what is published, so publish_library comes first (its used_by shows which canvases are waiting). The result reports per canvas which components were updated, how many frames changed and how many approvals were withdrawn; skipped lists canvases this account may not edit, or where the pull was refused, and each of those still needs sync_component by someone who can. Relay the report to the human.",
+      "Pull this library canvas's latest publication into every canvas of the workspace that uses it, in one call: what sync_component does on one canvas, done on all of them. Use it ONLY when the human asks for the change everywhere / across all canvases, never as a follow-up to publish_library on your own initiative: it changes other people's canvases (approved frames keep their sign-off). Run it with dry_run=true first and tell the human what it would touch. It applies what is published, so publish_library comes first (its used_by shows which canvases are waiting). The result reports per canvas which components were updated, how many frames changed (approvals_withdrawn is always 0: approved frames keep their sign-off); skipped lists canvases this account may not edit, or where the pull was refused, and each of those still needs sync_component by someone who can. Relay the report to the human.",
     readOnly: false,
     destructive: true,
     shape: {
@@ -636,8 +636,8 @@ export const COMPONENT_TOOLS: ComponentTool[] = [
           count + report.skipped.length === 0
             ? 'Every canvas using this library already has its latest publication. Changes made here since then reach nobody until publish_library.'
             : report.dry_run
-              ? 'Dry run: nothing was changed. frames_changed counts the frames holding an instance of what would update, approvals_withdrawn the approved ones among them. Tell the human before running it for real.'
-              : `Updated ${count} canvas${count === 1 ? '' : 'es'}. Tell the human which canvases changed and how many approved frames went back to review${report.skipped.length ? ', and which were skipped and why' : ''}.`,
+              ? 'Dry run: nothing was changed. frames_changed counts the frames holding an instance of what would update; approved frames keep their sign-off. Tell the human before running it for real.'
+              : `Updated ${count} canvas${count === 1 ? '' : 'es'}. Tell the human which canvases changed${report.skipped.length ? ', and which were skipped and why' : ''}.`,
       }
     },
   },

@@ -214,7 +214,8 @@ describe('an agent working with components', () => {
     for (const id of [a, b, created.main_frame_id]) expect(store.getFrame(id)!.html).toContain('btn big')
     expect(store.getFrame(a)!.html).toContain('Keep A')
     expect(store.getFrame(b)!.html).toContain('Keep B')
-    expect(store.getFrame(a)!.approval?.status).toBe('needs_review')
+    /* the frame follows the component and keeps its sign-off */
+    expect(store.getFrame(a)!.approval?.status).toBe('ready_for_dev')
 
     const back = await call('restore_component_version', { canvas_id: canvas.id, component: 'Button', rev: 1 })
     expect(back.isError).toBe(false)

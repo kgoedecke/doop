@@ -191,13 +191,14 @@ describe('propagation', () => {
     expect(html).toContain('data-doop-rev="2"')
   })
 
-  it('withdraws sign-off on a frame that changed', async () => {
+  it('keeps sign-off on a frame that follows a component change', async () => {
     const { mainFrame, page } = setup()
     actions.updateFrame(page.id, { html: doc(`<doop-use component="Button"></doop-use>`) }, actor)
     actions.setFrameApproval(page.id, true, { id: 'u', name: 'Reviewer' })
     actions.updateFrame(mainFrame.id, { html: framed(mainFrame.id).replace('Buy now', 'Buy today') }, actor)
     await propagation.whenIdle()
-    expect(store.getFrame(page.id)!.approval?.status).toBe('needs_review')
+    expect(framed(page.id)).toContain('Buy today')
+    expect(store.getFrame(page.id)!.approval?.status).toBe('ready_for_dev')
   })
 
   it('does not treat a stale save as overrides: it merges', () => {

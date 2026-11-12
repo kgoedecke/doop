@@ -55,7 +55,7 @@ export const components = {
     other: 'Update {count} canvases to the latest version?',
   },
   libraryEverywhereBody:
-    'Every canvas using this library gets what it last published. Approved frames that change go back to review. Canvases you can’t edit are skipped.',
+    'Every canvas using this library gets what it last published. Approved frames stay approved. Canvases you can’t edit are skipped.',
   libraryEverywhereDone: { one: '{count} canvas updated', other: '{count} canvases updated' },
   libraryEverywhereReview: {
     one: '{count} approved frame is back in review',
