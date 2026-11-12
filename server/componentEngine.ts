@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto'
+import { indexOfAscii } from '../shared/asciiSearch.ts'
 import { serialize, serializeOuter, type DefaultTreeAdapterTypes as Tree } from 'parse5'
 import { parse, parseFragment } from './workBudget.ts'
 import {
@@ -965,15 +966,14 @@ interface UseSpan {
 /** The next complete `<doop-use>` from `from`. `lenient` (a whole write, nothing more to come)
  *  takes an open tag whose end never came as empty, so the ones after it still expand. */
 function nextUse(html: string, from: number, opaque: [number, number][], lenient = false): UseSpan | undefined {
-  const lower = html.toLowerCase()
   const open = `<${USE_TAG}`
   const close = `</${USE_TAG}`
-  let start = lower.indexOf(open, from)
+  let start = indexOfAscii(html, open, from)
   while (start !== -1) {
     const at = start
     const following = html[at + open.length]
     if (following && /[\s/>]/.test(following) && !opaque.some(([a, b]) => at >= a && at < b)) break
-    start = lower.indexOf(open, at + 1)
+    start = indexOfAscii(html, open, at + 1)
   }
   if (start === -1) return undefined
   const openEnd = tagEnd(html, start)
@@ -984,8 +984,8 @@ function nextUse(html: string, from: number, opaque: [number, number][], lenient
   let depth = 1
   let cursor = openEnd + 1
   while (depth > 0) {
-    const nextOpen = lower.indexOf(open, cursor)
-    const nextClose = lower.indexOf(close, cursor)
+    const nextOpen = indexOfAscii(html, open, cursor)
+    const nextClose = indexOfAscii(html, close, cursor)
     if (nextClose === -1)
       return lenient
         ? { start, end: openEnd + 1, openEnd, closeStart: openEnd + 1, selfClosing: true, unclosed: true }
@@ -1016,7 +1016,7 @@ export function expandUses(
   depth = 0,
   { final = false }: { final?: boolean } = {},
 ): string {
-  if (!html.toLowerCase().includes(`<${USE_TAG}`)) return html
+  if (indexOfAscii(html, `<${USE_TAG}`) === -1) return html
   const opaque = opaqueRanges(html)
   let out = ''
   let cursor = 0
