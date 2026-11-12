@@ -776,6 +776,7 @@ export function useTagFor(
   inTemplate = false,
   byId = false,
   reconcile = false,
+  withId = false,
 ): string {
   const marker = readMarker(el)
   if (!marker) return serializeOuter(el)
@@ -783,7 +784,7 @@ export function useTagFor(
   const revision = ctx.atRev(marker.componentId, marker.rev) ?? def
   const state = (reconcile ? reconcileInstance(el, ctx) : undefined) ?? readInstance(el, revision, ctx) ?? marker
   const ref = byId ? marker.componentId : (def?.name ?? marker.componentId)
-  return useMarkup(ref, state, revision, inTemplate ? attrOf(el, PART_ATTR) : undefined)
+  return useMarkup(ref, state, revision, inTemplate ? attrOf(el, PART_ATTR) : undefined, withId)
 }
 
 export function useMarkup(
@@ -791,6 +792,8 @@ export function useMarkup(
   state: InstanceState,
   def: Revision | undefined,
   part: string | undefined,
+  /** with a part: the element id too. A frame's copy of a main keeps both; a stored template never an id */
+  withId = false,
 ): string {
   const rest: Record<string, PartOverride> = {}
   const slotChildren: string[] = []
@@ -805,7 +808,7 @@ export function useMarkup(
   }
   let tag = `<${USE_TAG}${attrText('component', name)}`
   if (part) tag += attrText(PART_ATTR, part)
-  else if (isElementId(state.instanceId)) tag += attrText('id', state.instanceId)
+  if ((!part || withId) && isElementId(state.instanceId)) tag += attrText('id', state.instanceId)
   for (const [prop, value] of Object.entries(state.overrides.props ?? {}).sort(([a], [b]) => a.localeCompare(b)))
     tag += attrText(prop, value)
   if (Object.keys(rest).length) tag += attrText('overrides', stableJson(rest))
@@ -1068,9 +1071,11 @@ function expandOne(
   const state = stateFromUseAttrs(use, def, ctx)
   const root = renderInstance(def, def, state.overrides, state.instanceId, { ctx, stack, depth, final })
   if (!root) return ''
-  /* a template read back by update_component keeps the nested instance's key, and its overrides with it */
-  const part = attrOf(use, PART_ATTR)
-  if (part) setAttr(root, PART_ATTR, part)
+  /* a template read back by update_component keeps the nested instance's key, and its overrides
+     with it. One that names none gets no key from the component it renders: that is the
+     component's own root key, the same for every use of it, so a second keyless use in a main
+     took the key of the first (agent reports, 2026-11-11). The main gives it one of its own */
+  setAttr(root, PART_ATTR, attrOf(use, PART_ATTR) ?? null)
   return serializeOuter(root)
 }
 
@@ -1168,13 +1173,26 @@ export function compactDocument(html: string, ctx: EngineContext): string {
   const instances = findInstancesEverywhere(html).filter(
     (found) => !isDeleted(ctx.find(attrOf(found.el, INSTANCE_ATTR) ?? '')) && !holdsHollow(found.el, ctx),
   )
-  const edits = instances.map((found) => ({ start: found.start, end: found.end, text: useTagFor(found.el, ctx) }))
+  /* one inside a main keeps the key the main gave it (its place there, which the main's
+     instances' overrides name) and its element id (what comments and links name): saved back
+     without them, it would get new ones */
+  const edits = instances.map((found) => ({
+    start: found.start,
+    end: found.end,
+    text: insideMain(found.el) ? useTagFor(found.el, ctx, true, false, false, true) : useTagFor(found.el, ctx),
+  }))
   return stripComponentHead(splice(html, edits), hollow)
 }
 
 /** Outermost instances, also those below a main: the main itself is not an instance. */
 export function findInstancesEverywhere(html: string): Located[] {
   return findMarked(html, INSTANCE_ATTR)
+}
+
+function insideMain(el: Element): boolean {
+  for (let node = el.parentNode; node && isElement(node); node = node.parentNode)
+    if (attrOf(node, COMPONENT_ATTR) !== undefined) return true
+  return false
 }
 
 /** Is this instance, or one nested anywhere inside it, of a hollow component? Rendered again
@@ -1316,17 +1334,52 @@ function compactKeepingParts(node: Element, ctx: EngineContext) {
 /** Carry the old keys onto a rewritten template, element by element where tag and
  *  place line up, so an agent resending a main does not orphan every override. */
 export function alignParts(next: Element, previous: Element | undefined) {
+  const written = new Set<string>()
+  const stack: Element[] = [next]
+  for (let el = stack.pop(); el; el = stack.pop()) {
+    const key = attrOf(el, PART_ATTR)
+    if (key) written.add(key)
+    stack.push(...elementKids(el))
+  }
+  alignWith(next, previous, written)
+}
+
+/**
+ * A child that names a key is matched to the old child with that key, never by place. One
+ * that names none takes the place of an old child that nothing claimed: inserting a keyless
+ * element before a keyed one used to hand it that one's key (overrides and all) and re-key
+ * the owner as a duplicate (agent reports, 2026-11-11). `written` holds every key the new
+ * markup names, and the keys handed out so far: none of them is handed out again.
+ */
+function alignWith(next: Element, previous: Element | undefined, written: Set<string>) {
   if (!previous || next.tagName !== previous.tagName) return
   if (!attrOf(next, PART_ATTR)) {
     const key = attrOf(previous, PART_ATTR)
-    if (key) setAttr(next, PART_ATTR, key)
+    if (key && !written.has(key)) {
+      setAttr(next, PART_ATTR, key)
+      written.add(key)
+    }
   }
   const oldKids = elementKids(previous)
+  const oldByKey = new Map<string, Element>()
+  for (const kid of oldKids) {
+    const key = attrOf(kid, PART_ATTR)
+    if (key) oldByKey.set(key, kid)
+  }
+  const free = oldKids.filter((kid) => {
+    const key = attrOf(kid, PART_ATTR)
+    return !key || !written.has(key)
+  })
   const seenOfTag = new Map<string, number>()
   for (const kid of elementKids(next)) {
+    const key = attrOf(kid, PART_ATTR)
+    if (key) {
+      alignWith(kid, oldByKey.get(key), written)
+      continue
+    }
     const index = seenOfTag.get(kid.tagName) ?? 0
     seenOfTag.set(kid.tagName, index + 1)
-    alignParts(kid, oldKids.filter((candidate) => candidate.tagName === kid.tagName)[index])
+    alignWith(kid, free.filter((candidate) => candidate.tagName === kid.tagName)[index], written)
   }
 }
 
