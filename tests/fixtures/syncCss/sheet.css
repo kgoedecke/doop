@@ -16,3 +16,21 @@ body {
 .probe-string::before {
   content: 'url(icon.svg)';
 }
+/* A custom property keeps its value as written, quotes or none. */
+:root {
+  --probe-bare: url(../raster/bare.svg);
+  --probe-single: url('../raster/single.svg');
+}
+/* Left as they are: an empty url(), a data: url and an in-document
+   reference. Rewritten: a custom property's URL( in capitals, and a url
+   whose query keeps a backslash, which must stay escaped. */
+:root {
+  --probe-upper: URL(../raster/upper.svg);
+}
+.probe-kept {
+  background-image: url(''), url('data:image/svg+xml,%3Csvg%2F%3E');
+  mask-image: url('#probe-mask');
+}
+.probe-escape {
+  background-image: url('../raster/q.svg?a\\b');
+}

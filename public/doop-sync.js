@@ -90,13 +90,18 @@
   /* A sheet's url()s are relative to the sheet, not the page: a bundler's
      /_next/static/css/a.css points at ../media/font.woff2. Resolve them while
      the sheet is still known; once its rules join the snapshot's <style>,
-     only the page's base is left. The text is CSSOM cssText, which always
-     writes url("…") with " and \ escaped, so a quoted url() may hold a ")"
-     and a string that reads url(…) never matches. */
+     only the page's base is left. cssText writes most url()s as url("…"),
+     but a custom property keeps its value as authored, so all three forms
+     are read. Strings are matched first and returned whole, so text that
+     only reads like url(…) is never rewritten. */
+  var CSS_URL_RE =
+    /"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|url\(\s*(?:"((?:[^"\\]|\\.)*)"|'((?:[^'\\]|\\.)*)'|((?:[^"'()\s\\]|\\.)+))\s*\)/gi
   function absolutizeCssUrls(css, base) {
-    return css.replace(/url\("((?:[^"\\]|\\.)*)"\)/g, function (all, raw) {
+    return css.replace(CSS_URL_RE, function (all, dq, sq, bare) {
+      var raw = dq != null ? dq : sq != null ? sq : bare
+      if (raw == null) return all
       var u = raw.replace(/\\(.)/g, '$1')
-      if (/^(data:|blob:|#)/i.test(u)) return all
+      if (!u || /^(data:|blob:|#)/i.test(u)) return all
       try {
         return 'url("' + new URL(u, base).href.replace(/["\\]/g, '\\$&') + '")'
       } catch (e) {

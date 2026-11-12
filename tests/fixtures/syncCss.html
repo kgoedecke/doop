@@ -8,8 +8,12 @@
     <p>Synced text</p>
     <script>
       /* added at run time so the fixture build leaves both untouched: the
-         stylesheet keeps its sheet-relative url()s, and the snippet loads
+         stylesheet keeps its sheet-relative url()s, an inline <style> keeps its
+         page-relative one, and the snippet loads
          as an app embeds it, posting to this origin */
+      var inline = document.createElement('style')
+      inline.textContent = '.probe-inline { background-image: url(../inline.svg) }'
+      document.head.appendChild(inline)
       var sheet = document.createElement('link')
       sheet.rel = 'stylesheet'
       sheet.href = 'syncCss/sheet.css'
