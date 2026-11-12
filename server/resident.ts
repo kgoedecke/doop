@@ -42,6 +42,7 @@ import { catalog, compactFrameHtml, findComponent, libraryCatalog } from './comp
 import { activeComponents } from '../shared/components.ts'
 import { settleForRead } from './propagation.ts'
 import { runOperation } from './workBudget.ts'
+import { detached, savepoint } from './journal.ts'
 import {
   COMPONENT_TOOLS,
   COMPONENT_TOOL_NAMES,
@@ -127,7 +128,11 @@ export function onFeedback(canvasId: string) {
     queued.add(canvasId)
     return
   }
-  sweep(canvasId).catch((err) => console.error('[resident] sweep failed', err))
+  /* detached: a sweep outlives whatever asked for it (a request, a tool call) and is never
+     part of that one's write boundary (server/journal.ts) */
+  detached(() => {
+    sweep(canvasId).catch((err) => console.error('[resident] sweep failed', err))
+  })
 }
 
 /** Work every agent that has something waiting, one at a time. Re-checking the
@@ -1857,6 +1862,9 @@ async function runResidentTool(
   ok: (content: Anthropic.ToolResultBlockParam['content']) => Anthropic.ToolResultBlockParam,
   fail: (msg: string) => Anthropic.ToolResultBlockParam,
 ): Promise<Anthropic.ToolResultBlockParam> {
+  /* a tool that throws answers with its error instead of failing the operation, so what it
+     had changed by then is undone here (server/journal.ts) */
+  const before = savepoint()
   try {
     /* a check right after a component change sees it, not the frame as it was queued */
     await settleForRead(block.name, [canvasId])
@@ -2626,6 +2634,7 @@ async function runResidentTool(
       }
     }
   } catch (e) {
+    before.undo()
     const blocked = websiteAccessErrorMessage(e, 'resident')
     if (blocked) runState.blockedWebsiteAccess = blocked
     return fail(blocked ?? (e instanceof Error ? e.message : 'tool failed'))

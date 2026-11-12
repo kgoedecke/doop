@@ -96,6 +96,9 @@ async function boot(env: Record<string, string>, reuseDir: string | undefined, t
              and the lifecycle-email workflows act on those */
           POSTHOG_KEY: '',
           VITE_POSTHOG_KEY: '',
+          /* a store write outside any write boundary is an error here (server/journal.ts),
+             so a path that escapes the all-or-nothing guarantee fails the test that takes it */
+          DOOP_WRITE_BOUNDARY: 'throw',
           ...env,
         },
         stdio: ['ignore', 'pipe', 'ignore'],

@@ -1,5 +1,6 @@
 import type { Actor } from '../shared/types.ts'
 import { store } from './store.ts'
+import { detached } from './journal.ts'
 import { runOperation, WorkBudgetError } from './workBudget.ts'
 
 /**
@@ -171,7 +172,9 @@ export function enqueue(
 function schedule() {
   if (scheduled || !ring.length) return
   scheduled = true
-  setImmediate(tick)
+  /* detached: a tick is scheduled from inside whatever asked for work, and must never
+     join that request's write boundary (server/journal.ts) */
+  setImmediate(() => detached(tick))
 }
 
 /** One turn: the next canvas that can work does one frame. */
@@ -224,7 +227,8 @@ function step(job: Job) {
 }
 
 function visit(job: Job, task: FrameTask, state: TaskState, frameId: string, componentIds: string[]) {
-  /* its own operation: one frame's worth of budget, and a name the stall watchdog can report */
+  /* its own operation: one frame's worth of budget, a name the stall watchdog can report,
+     and one write boundary, so a frame is brought up to date whole or left as it was */
   const outcome = guarded(`${task} of frame ${frameId}`, job.canvasId, () =>
     runOperation(`queue ${task} frame ${frameId}`, job.canvasId, () =>
       handlers.get(task)?.frame(job.canvasId, frameId, componentIds, state.actor),

@@ -10,6 +10,7 @@ import {
 import type { Canvas } from '../shared/types.ts'
 import { libraryLandingPageId } from '../shared/pages.ts'
 import * as persist from './db/persist.ts'
+import { afterCommit, recordUndo } from './journal.ts'
 import { store } from './store.ts'
 import { getWorkspace, isActive } from './workspaces.ts'
 
@@ -22,6 +23,19 @@ import { getWorkspace, isActive } from './workspaces.ts'
  */
 
 const published = new Map<string, LibraryComponent[]>()
+
+/** Replace a canvas's publication (none = it publishes nothing). Journaled like every store
+ *  write (server/journal.ts): undone with the operation, its rows written at the commit. */
+function setPublished(canvasId: string, next: LibraryComponent[]) {
+  const before = published.get(canvasId)
+  if (next.length) published.set(canvasId, next)
+  else published.delete(canvasId)
+  recordUndo(() => {
+    if (published.get(canvasId) !== (next.length ? next : undefined)) return
+    if (before) published.set(canvasId, before)
+    else published.delete(canvasId)
+  })
+}
 
 export async function hydrateLibraries(): Promise<void> {
   published.clear()
@@ -277,12 +291,11 @@ export function publishLibrary(
     const snapshot = snapshotOf(canvas.id, def, by, at, next[index])
     if (index === -1) next.push(snapshot)
     else next[index] = snapshot
-    persist.saveLibraryComponent(snapshot)
+    afterCommit(() => persist.saveLibraryComponent(snapshot))
   }
-  for (const gone of result.removed) persist.deleteLibraryComponent(canvas.id, gone.id)
+  for (const gone of result.removed) afterCommit(() => persist.deleteLibraryComponent(canvas.id, gone.id))
   next.sort((a, b) => a.name.localeCompare(b.name))
-  if (next.length) published.set(canvas.id, next)
-  else published.delete(canvas.id)
+  setPublished(canvas.id, next)
   return result
 }
 
@@ -291,17 +304,16 @@ export function publishLibrary(
 export function unpublishLibrary(canvasId: string, ids?: readonly string[]): LibraryComponent[] {
   const before = publishedOn(canvasId)
   const gone = ids ? before.filter((entry) => ids.includes(entry.id)) : before
-  for (const entry of gone) persist.deleteLibraryComponent(canvasId, entry.id)
+  for (const entry of gone) afterCommit(() => persist.deleteLibraryComponent(canvasId, entry.id))
   const kept = before.filter((entry) => !gone.includes(entry))
-  if (kept.length) published.set(canvasId, kept)
-  else published.delete(canvasId)
+  setPublished(canvasId, kept)
   return gone
 }
 
 /** The canvas is gone: so is what it published, here as in the database (where
  *  the rows go with the canvas's own). Not a withdrawal anyone is told about. */
 export function forgetLibrary(canvasId: string) {
-  published.delete(canvasId)
+  setPublished(canvasId, [])
 }
 
 /* ------------------------------------------------------------------ */

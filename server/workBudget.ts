@@ -1,6 +1,7 @@
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { parse as parseDocument, parseFragment as parseDocumentFragment } from 'parse5'
 import { env } from './env.ts'
+import { transaction } from './journal.ts'
 
 /**
  * How much one operation may make the component engine do. The engine is
@@ -101,12 +102,14 @@ export function withinOperation<T>(operation: Operation, work: () => T): T {
 }
 
 /** Run `work` as one operation with a budget of its own; it ends when the work does,
- *  which for a promise is when it settles. */
+ *  which for a promise is when it settles. An operation is one write boundary
+ *  (server/journal.ts): what it changed is committed when it ends, and undone when it
+ *  throws, a refusal for its budget included. */
 export function runOperation<T>(name: string, canvasId: string | undefined, work: () => T): T {
   const operation = beginOperation(name, canvasId)
   let result: T
   try {
-    result = context.run(operation, work)
+    result = context.run(operation, () => transaction(work))
   } catch (error) {
     endOperation(operation)
     throw error
@@ -162,8 +165,8 @@ function enforce(operation: Operation, scoped: boolean) {
 /** One parse, charged. The budget is checked on both sides of it: before, so bytes that do
  *  not fit are never parsed, and after, so the parse that took the operation over its time
  *  is itself refused instead of the one after it (an operation's last parse has none after).
- *  A running parse cannot be interrupted; its result is thrown away. Callers parse before
- *  they commit anything, so a refusal here leaves nothing behind. */
+ *  A running parse cannot be interrupted; its result is thrown away. The operation's write
+ *  boundary undoes whatever it had changed by then, so a refusal leaves nothing behind. */
 function timed<T>(bytes: number, run: () => T): T {
   const scoped = context.getStore()
   const operation = scoped ?? unscopedWork()

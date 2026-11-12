@@ -417,6 +417,29 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   `server/db/migrations`, applied at boot by `server/db/index.ts` (never by drizzle-kit itself).
 - `@electric-sql/pglite` 0.5.4 - embedded Postgres so `bun run dev` works with zero external
   services.
+- Write boundary (`server/journal.ts`): every operation is one transaction over the in-memory
+  state. `runOperation` opens it (an MCP tool call, detached from its HTTP request; a resident tool
+  call; one frame of the propagation queue; an idle stream's settling), and the HTTP middleware
+  opens one per request, committed as the response starts and undone by `undoRequest` when the
+  handler threw. A write changes memory at once and records its undo (`recordUndo`); everything that
+  leaves the process waits for the commit in order (`afterCommit`: `persist.*` rows, room
+  broadcasts, activity, frame versions, canvas events, thumbnail purges, `propagation.enqueue` /
+  `resumeFrame`, kicks to the resident agents), and `postCommit` runs follow-up work as a
+  transaction of its own. A throw, a `WorkBudgetError` above all, undoes in reverse and drops the
+  queue. Inside an open transaction `transaction` / `atomic` is a savepoint; the frame, token and
+  component actions are `atomic`, so one called outside any operation (a job, a timer) is still
+  all-or-nothing. `checkpoint()` is a sub-commit, for partial progress that is meant to stay
+  (`replace_matching` per frame, a pulled component of an import, each canvas of
+  `update_library_everywhere`) and before an await that depends on committed work (the element-id
+  stamp's durable write). No isolation: an undo restores only what is still its own write (a
+  frame's `updatedAt`, a definition's identity). Presence touches are never queued.
+  `store.duplicateCanvas` / `duplicatePage` are durable first and not undone. Every store write
+  calls `requireBoundary`: outside a transaction and not marked with `outsideOperation(reason, …)`
+  it does what `DOOP_WRITE_BOUNDARY` says (`warn` in development, `throw` in the integration
+  harness, `off` in production). Tests: `journal.test.ts`, `storeJournal.test.ts`, the
+  fault-injection sweep `workBudgetCommit.test.ts` (memory, a modelled database and a viewer's
+  replayed copy, for every write operation) and `writeBoundaryHttp.test.ts` (the real server,
+  rebooted on its database).
 - `pg` 8.22.0 - Postgres driver for the real-database path.
 - Frame HTML in memory (`server/store.ts`, `server/frameHtml.ts`): the store keeps every canvas
   and frame, but frame HTML (most of the data) loads per canvas. Boot reads `frames` without `html`;

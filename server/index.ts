@@ -100,6 +100,7 @@ import { extensions } from './extensions.ts'
 import * as workspaces from './workspaces.ts'
 import { startStallWatchdog } from './stallWatchdog.ts'
 import { beginOperation, endOperation, withinOperation, WorkBudgetError } from './workBudget.ts'
+import { openTransaction, outsideOperation, transaction, type OpenTransaction } from './journal.ts'
 import * as billing from './billing.ts'
 import * as demo from './demo.ts'
 import { db, initDb } from './db/index.ts'
@@ -438,15 +439,28 @@ app.get('/healthz/store', (_req, res) => {
 })
 
 /* every request is one operation: the component engine's work budget is counted against
-   it, and the stall watchdog can name it while it runs (server/workBudget.ts) */
+   it, and the stall watchdog can name it while it runs (server/workBudget.ts). It is one
+   write boundary too (server/journal.ts): what its handler changed is committed as the
+   response starts (so the room hears of a write just before its author is answered, as
+   it always did), and undone when the handler threw instead (`undoRequest`, below). A
+   handler still at work when its client goes away commits what it has done by then, and
+   whatever it does afterwards commits as it goes. */
 app.use((req, res, next) => {
   const operation = beginOperation(`${req.method} ${req.path}`, canvasOfPath(req.path))
+  const writes = openTransaction()
+  res.locals.writes = writes
+  const writeHead = res.writeHead.bind(res)
+  res.writeHead = ((...args: Parameters<typeof writeHead>) => {
+    writes.commit()
+    return writeHead(...args)
+  }) as typeof res.writeHead
   res.once('close', () => {
+    writes.commit()
     /* an event stream is open for as long as its reader is there: not a slow operation */
     operation.quiet = String(res.getHeader('content-type') ?? '').includes('text/event-stream')
     endOperation(operation)
   })
-  withinOperation(operation, next)
+  withinOperation(operation, () => writes.run(next))
 })
 
 /* The headless renderer's counters, for an uptime check that alerts when
@@ -2433,7 +2447,8 @@ function canvasOfPath(path: string): string | undefined {
 
 function componentRoute(res: express.Response, run: () => unknown) {
   try {
-    res.json(run())
+    /* one unit: a refusal answered below (a 400, a 402) leaves nothing of the call behind */
+    res.json(transaction(run))
   } catch (error) {
     /* the 402 every client turns into the upgrade prompt: for the workspace
        that needs a plan, or for making one when the canvas is personal */
@@ -2448,6 +2463,12 @@ function componentRoute(res: express.Response, run: () => unknown) {
     if (error instanceof ComponentError) return res.status(400).json({ error: error.message })
     throw error
   }
+}
+
+/** A handler threw: what the request had changed is undone before anything answers it. */
+const undoRequest: express.ErrorRequestHandler = (error, _req, res, next) => {
+  ;(res.locals.writes as OpenTransaction | undefined)?.rollback()
+  next(error)
 }
 
 /** A request the component engine refused for costing too much: nothing was written. */
@@ -3282,7 +3303,9 @@ if (env.isProduction) {
 
 /* ------------------------------------------------- websocket */
 
-/* after every route: a synchronous handler that ran out of work budget answers 422 */
+/* after every route: a handler that threw is undone, and one that ran out of work budget
+   answers 422 */
+app.use(undoRequest)
 app.use(workBudgetRefusal)
 
 const server = http.createServer(app)
@@ -3497,8 +3520,9 @@ server.listen(PORT, () => {
   /* comments anchored before element ids: stamped now, while serving, so a
      slow or failing row can never keep the server from coming up */
   if (data.legacyCommentSelectors.size > 0) {
-    actions
-      .backfillElementIds(data.legacyCommentSelectors)
+    outsideOperation('boot backfill: each frame is stamped and stored before its comments name the ids', () =>
+      actions.backfillElementIds(data.legacyCommentSelectors),
+    )
       .then(({ stamped, lost, failed }) =>
         console.log(
           `[comments] element ids: ${stamped} comment(s) re-anchored, ${lost} lost their element, ${failed} left for the next boot`,

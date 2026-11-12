@@ -76,6 +76,7 @@ import { env } from './env.ts'
 import { resolveElement } from './elementIds.ts'
 import * as propagation from './propagation.ts'
 import { optional, parse, parseFragment, usage as workUsage, WorkBudgetError } from './workBudget.ts'
+import { afterCommit, atomic, checkpoint, transaction } from './journal.ts'
 import { usageByComponent, usageOf, type ComponentUsage } from './componentUsage.ts'
 import { store } from './store.ts'
 import { mayPublishLibrary } from './workspaces.ts'
@@ -434,7 +435,11 @@ function withinInstance(el: Element): boolean {
   return false
 }
 
-export function createComponentFromElement(canvasId: string, input: CreateFromElement, actor: Actor): CreateResult {
+export const createComponentFromElement = atomic(function createComponentFromElement(
+  canvasId: string,
+  input: CreateFromElement,
+  actor: Actor,
+): CreateResult {
   checkCapacity(canvasId)
   const name = validName(input.name, canvasId)
   const props = validProps(input.props)
@@ -449,31 +454,28 @@ export function createComponentFromElement(canvasId: string, input: CreateFromEl
 
   const shape = shapeOf(el)
   const def = blankComponent({ name, description: clip(input.description), props, code: input.code, by: actor.name })
-  store.saveComponent(canvasId, def)
-  let inferred: string[] = []
-  try {
+  /* one unit: a write that fails leaves no main-less component holding the name */
+  const inferred = transaction(() => {
+    store.saveComponent(canvasId, def)
     setAttr(el, COMPONENT_ATTR, def.id)
     stampParts(el)
-    if (input.autoProps !== false && !hasBindings(el)) inferred = inferBindings(el)
+    const bound = input.autoProps !== false && !hasBindings(el) ? inferBindings(el) : []
     const html = splice(frame.html, [{ start: located.start, end: located.end, text: serializeOuter(el) }])
     actions.updateFrame(frame.id, { html }, actor)
-  } catch (error) {
-    /* a write that failed leaves no main-less component holding the name */
-    store.deleteComponent(canvasId, def.id)
-    throw error
-  }
+    actions.logComponent(canvasId, actor, `made “${requireComponent(canvasId, def.id).name}” a component`)
+    return bound
+  })
   const saved = requireComponent(canvasId, def.id)
   const matching = input.replaceMatching
     ? convertMatching(canvasId, shape, saved, actor)
     : { converted: [], stopped: false }
-  actions.logComponent(canvasId, actor, `made “${saved.name}” a component`)
   return {
     component: requireComponent(canvasId, def.id),
     converted: matching.converted,
     inferred,
     ...(matching.stopped ? { matching_stopped: true as const } : {}),
   }
-}
+})
 
 const clip = (text: string | undefined) => text?.slice(0, MAX_COMPONENT_DESCRIPTION)
 
@@ -538,7 +540,11 @@ export interface CreateFromHtml {
 }
 
 /** A new design with nowhere to live yet: its main goes on the Components page, as a frame of its own. */
-export function createComponentFromHtml(canvasId: string, input: CreateFromHtml, actor: Actor): CreateResult {
+export const createComponentFromHtml = atomic(function createComponentFromHtml(
+  canvasId: string,
+  input: CreateFromHtml,
+  actor: Actor,
+): CreateResult {
   checkCapacity(canvasId)
   const name = validName(input.name, canvasId)
   const def = blankComponent({
@@ -548,23 +554,19 @@ export function createComponentFromHtml(canvasId: string, input: CreateFromHtml,
     code: input.code,
     by: actor.name,
   })
+  /* nothing of a create that fails stays: the definition, the Components page it may have
+     made and the main's frame are undone together (the unit this function is) */
   store.saveComponent(canvasId, def)
-  let inferred: string[] = []
-  try {
-    const root = singleRoot(input.html)
-    if (input.autoProps !== false && !hasBindings(root)) inferred = inferBindings(root)
-    setAttr(root, COMPONENT_ATTR, def.id)
-    writeNewMain(canvasId, def, serializeOuter(root), input.css ?? '', actor, input.width, input.height)
-  } catch (error) {
-    store.deleteComponent(canvasId, def.id)
-    throw error
-  }
+  const root = singleRoot(input.html)
+  const inferred = input.autoProps !== false && !hasBindings(root) ? inferBindings(root) : []
+  setAttr(root, COMPONENT_ATTR, def.id)
+  writeNewMain(canvasId, def, serializeOuter(root), input.css ?? '', actor, input.width, input.height)
   const component = requireComponent(canvasId, def.id)
   /* the component is made: a note that cannot be worked out within budget is left out */
   if (input.css) optional(() => reportCssNotKept(component, input.css!))
   actions.logComponent(canvasId, actor, `created component “${name}”`)
   return { component, converted: [], inferred }
-}
+})
 
 const MAX_SELECTORS_NAMED = 8
 
@@ -596,17 +598,15 @@ function writeNewMain(
   width = 480,
   height = 240,
 ): Frame {
-  const pageId = componentsPageId(canvasId, actor)
-  const frame = actions.createFrame(canvasId, { name: def.name, pageId, width, height, html: '' }, actor)
-  if (!frame) fail('canvas not found')
-  try {
+  /* one unit: when the main cannot be written, its empty frame (and a Components page made
+     for it) does not stay behind */
+  return transaction(() => {
+    const pageId = componentsPageId(canvasId, actor)
+    const frame = actions.createFrame(canvasId, { name: def.name, pageId, width, height, html: '' }, actor)
+    if (!frame) fail('canvas not found')
     actions.updateFrame(frame.id, { html: mainFrameDoc(def, root, rawCss) }, actor)
-  } catch (error) {
-    /* the main was not written (the work budget): its empty frame does not stay behind */
-    if (error instanceof WorkBudgetError) actions.deleteFrame(frame.id, actor)
-    throw error
-  }
-  return store.getFrame(frame.id) ?? frame
+    return store.getFrame(frame.id) ?? frame
+  })
 }
 
 /* ------------------------------------------------------------------ */
@@ -651,7 +651,7 @@ export interface UpdateResult {
 function propagationOf(canvasId: string, before: ComponentDef, impact: UpdateResult['impact']) {
   const after = requireComponent(canvasId, before.id)
   const frames = impact.frames.filter((frame) => frame.id !== after.mainFrameId).length
-  if (propagation.isPending(canvasId, 'propagate', before.id)) return { status: 'queued' as const, frames }
+  if (actions.propagationPending(canvasId, before.id)) return { status: 'queued' as const, frames }
   const moved = after.rev !== before.rev && env.DOOP_DEFER_COMPONENT_PROPAGATION
   return moved ? { status: 'deferred' as const, frames } : { status: 'none' as const, frames: 0 }
 }
@@ -716,7 +716,12 @@ function nextHtml(def: ComponentDef, input: UpdateInput): string | undefined {
   return input.html
 }
 
-export function updateComponent(canvasId: string, ref: string, input: UpdateInput, actor: Actor): UpdateResult {
+export const updateComponent = atomic(function updateComponent(
+  canvasId: string,
+  ref: string,
+  input: UpdateInput,
+  actor: Actor,
+): UpdateResult {
   const canvas = store.getCanvas(canvasId)
   if (!canvas) fail('canvas not found')
   const def = requireComponent(canvasId, ref)
@@ -745,8 +750,8 @@ export function updateComponent(canvasId: string, ref: string, input: UpdateInpu
 
   const nextProps = input.props !== undefined ? validProps(input.props) : undefined
   const propsChanged = nextProps !== undefined && JSON.stringify(nextProps) !== JSON.stringify(def.props)
-  /* everything that parses is done before anything is saved: a refusal up to here (the work
-     budget) has changed nothing. What follows the save is undone if the main cannot be written. */
+  /* this function is one unit (server/journal.ts): a refusal anywhere in it, the work budget
+     included, undoes the name, props and revision saved below along with the main's write */
   const writesMain = nextRoot !== undefined || input.css !== undefined || input.props !== undefined
   const root = writesMain ? (nextRoot ?? alignedRoot(def.template, def)) : undefined
   const meta: ComponentDef = {
@@ -764,15 +769,9 @@ export function updateComponent(canvasId: string, ref: string, input: UpdateInpu
 
   if (root) {
     const write = () => writeMain(canvasId, meta, root, input.css, actor, input.head ? def.head : undefined)
-    try {
-      /* the props above opened a revision: the main's write is the rest of it, not another */
-      if (propsChanged) withinRevision(canvasId, def.id, write)
-      else write()
-    } catch (error) {
-      /* the main was not written, so the name, props and revision saved above go back too */
-      if (error instanceof WorkBudgetError) store.saveComponent(canvasId, def)
-      throw error
-    }
+    /* the props above opened a revision: the main's write is the rest of it, not another */
+    if (propsChanged) withinRevision(canvasId, def.id, write)
+    else write()
   } else actions.broadcastComponent(canvasId, requireComponent(canvasId, def.id), actor)
   /* new defaults change what instances render even when the main's markup did not move */
   if (propsChanged) actions.queuePropagation(canvasId, [requireComponent(canvasId, def.id)], actor)
@@ -789,7 +788,7 @@ export function updateComponent(canvasId: string, ref: string, input: UpdateInpu
     impact,
     propagation: propagationOf(canvasId, def, impact),
   }
-}
+})
 
 function stampedTemplate(root: Element): string {
   const clone = kidsOf(parseFragment(serializeOuter(root)))[0]!
@@ -875,7 +874,7 @@ function useFor(def: ComponentDef, props: Record<string, string> | undefined, in
   return useMarkup(def.name, state, def, undefined)
 }
 
-export function insertInstance(
+export const insertInstance = atomic(function insertInstance(
   canvasId: string,
   input: InsertInput,
   actor: Actor,
@@ -891,7 +890,7 @@ export function insertInstance(
   /* the instance is placed: if its id cannot be read back within budget, get_frame has it */
   const instanceId = optional(() => instanceIds(next.html).find((id) => !before.has(id))) ?? ''
   return { frame: next, instanceId }
-}
+})
 
 function instanceIds(html: string): string[] {
   return findMarked(html, INSTANCE_ATTR).flatMap((found) => attrOf(found.el, ELEMENT_ID_ATTR) ?? [])
@@ -955,7 +954,7 @@ function applyChange(state: InstanceOverrides, change: InstanceChange): Instance
 }
 
 /** One frame write however many instances change, so the whole batch is one undo step. */
-export function changeInstances(
+export const changeInstances = atomic(function changeInstances(
   canvasId: string,
   frameId: string,
   changes: InstanceChange[],
@@ -1003,7 +1002,7 @@ export function changeInstances(
   const next = html !== frame.html ? actions.updateFrame(frame.id, { html }, actor) : frame
   if (!next) fail('frame not found')
   return { frame: next, missing: changes.map((change) => change.instanceId).filter((id) => !seen.has(id)) }
-}
+})
 
 /** Every instance of one component in this markup, cut loose with its look. */
 function detachAll(html: string, def: ComponentDef): { html: string; count: number } {
@@ -1045,7 +1044,7 @@ export interface DetachQueued {
  * main's markup stays where it is, frozen (an edit to it is an edit to that frame only).
  * restoreComponent undoes it. Cutting the instances loose is its own act: detachAllInstances.
  */
-export function deleteComponent(canvasId: string, ref: string, actor: Actor) {
+export const deleteComponent = atomic(function deleteComponent(canvasId: string, ref: string, actor: Actor) {
   const canvas = store.getCanvas(canvasId)
   if (!canvas) fail('canvas not found')
   const already = findDeletedComponent(canvasId, ref)
@@ -1062,7 +1061,7 @@ export function deleteComponent(canvasId: string, ref: string, actor: Actor) {
     `deleted component “${def.name}”${kept ? `; ${kept} instance${kept === 1 ? ' keeps its' : 's keep their'} look` : ''}`,
   )
   return { deleted: def.name, component_id: def.id, instances_kept: kept, frames: usage.frames.length }
-}
+})
 
 export interface RestoreResult {
   component: ComponentDef
@@ -1075,7 +1074,11 @@ export interface RestoreResult {
  *  as they are. The main is the markup that still carries its marker if any does (edits made
  *  to it while the component was deleted become a new revision, like any edit of a main);
  *  otherwise a main is written from the kept definition. */
-export function restoreComponent(canvasId: string, ref: string, actor: Actor): RestoreResult {
+export const restoreComponent = atomic(function restoreComponent(
+  canvasId: string,
+  ref: string,
+  actor: Actor,
+): RestoreResult {
   const canvas = store.getCanvas(canvasId)
   if (!canvas) fail('canvas not found')
   const def = findDeletedComponent(canvasId, ref)
@@ -1100,29 +1103,24 @@ export function restoreComponent(canvasId: string, ref: string, actor: Actor): R
     updatedAt: Date.now(),
     updatedBy: actor.name,
   }
+  /* one unit: when no main can be written (the work budget) it stays deleted, not half back */
   store.saveComponent(canvasId, active)
   let main: RestoreResult['main'] = 'none'
-  try {
-    if (active.source?.library) main = 'none'
-    else if (home) {
-      /* an ordinary write of the frame as it is: the main is read again, so what it holds
-         now and the definition agree, and a difference reaches the instances */
-      actions.updateFrame(home.id, { html: home.html }, actor)
-      main = 'kept'
-    } else {
-      writeMain(canvasId, active, alignedRoot(active.template, active), undefined, actor)
-      main = 'written'
-    }
-  } catch (error) {
-    /* no main could be written (the work budget): it stays deleted rather than half back */
-    if (error instanceof WorkBudgetError) store.saveComponent(canvasId, def)
-    throw error
+  if (active.source?.library) main = 'none'
+  else if (home) {
+    /* an ordinary write of the frame as it is: the main is read again, so what it holds
+       now and the definition agree, and a difference reaches the instances */
+    actions.updateFrame(home.id, { html: home.html }, actor)
+    main = 'kept'
+  } else {
+    writeMain(canvasId, active, alignedRoot(active.template, active), undefined, actor)
+    main = 'written'
   }
   const component = requireComponent(canvasId, def.id)
   actions.broadcastComponent(canvasId, component, actor)
   actions.logComponent(canvasId, actor, `restored component “${component.name}”`)
   return { component, main }
-}
+})
 
 /** Cut every instance of a component loose, keeping its look: plain markup, no longer linked.
  *  Runs in the background queue, a frame per tick (server/propagation.ts), so it returns
@@ -1133,7 +1131,8 @@ export function detachAllInstances(canvasId: string, ref: string, actor: Actor):
   if (!canvas) fail('canvas not found')
   const def = findDeletedComponent(canvasId, ref) ?? requireComponent(canvasId, ref)
   const usage = usageOf(canvas, def.id)
-  if (usage.instances) propagation.enqueue('detach', canvasId, [def.id], actor)
+  /* queued with the commit of the operation that asked */
+  if (usage.instances) afterCommit(() => propagation.enqueue('detach', canvasId, [def.id], actor))
   return { queued: usage.instances > 0, instances: usage.instances, frames: usage.frames.length }
 }
 
@@ -1318,13 +1317,16 @@ function convertMatching(canvasId: string, shape: string | undefined, def: Compo
   const canvas = store.getCanvas(canvasId)
   const converted: CreateResult['converted'] = []
   if (!canvas || !shape) return { converted, stopped: false }
+  /* a sub-commit: the component is made and stays, whatever becomes of the matching */
+  checkpoint()
   try {
     const template = parseTemplateRoot(def.template)
     if (!template) return { converted, stopped: false }
     convertFrames(canvas, shape, template, def, actor, converted)
   } catch (error) {
-    /* the component exists and the frames so far are linked: out of budget, the rest is
-       left for another call rather than reported as a change that never happened */
+    /* the component exists and the frames so far are linked (each was sub-committed as it
+       was done): out of budget, the rest is left for another call rather than reported as
+       a change that never happened */
     if (!(error instanceof WorkBudgetError)) throw error
     return { converted, stopped: true }
   }
@@ -1364,6 +1366,8 @@ function convertFrames(
     /* the next prepare diffs each against the template: differing words become props */
     actions.updateFrame(frame.id, { html: splice(frame.html, edits) }, actor)
     converted.push({ frameId: frame.id, instances: edits.length })
+    /* a sub-commit per frame: one that is linked stays linked if a later one is refused */
+    checkpoint()
   }
 }
 
@@ -1438,38 +1442,41 @@ export function importComponent(
   const origin = findComponent(sourceCanvasId, ref)
   if (!origin) fail(`no component “${ref}” on canvas ${sourceCanvasId}`)
   refuseSiblings(targetCanvasId, sourceCanvasId, origin)
-  const progress: ImportProgress = { seen: new Set(), created: [], pulled: [] }
+  const progress: ImportProgress = { seen: new Set(), pending: [], kept: [] }
   try {
-    importDependencies(targetCanvasId, sourceCanvasId, origin, actor, progress)
+    /* one unit: what is not sub-committed below is undone when the import is refused */
+    transaction(() => importDependencies(targetCanvasId, sourceCanvasId, origin, actor, progress))
   } catch (error) {
-    throw afterImportRefusal(targetCanvasId, progress, actor, error)
+    throw afterImportRefusal(progress, error)
   }
   return requireComponent(targetCanvasId, origin.id)
 }
 
-/** What an import has done so far, so a refusal part of the way can be undone or told truly. */
+/** What an import has done so far, so a refusal part of the way can be told truly. */
 interface ImportProgress {
   seen: Set<string>
-  /** components this import made here, each with a main of its own */
-  created: ComponentDef[]
-  /** components already here that it brought up to date */
-  pulled: string[]
+  /** what it has done since its last sub-commit: undone if it is refused now */
+  pending: string[]
+  /** what its sub-commits have made permanent */
+  kept: string[]
 }
 
-/** An import of several components ran out of work budget. The ones it made are taken back
- *  (definition and main), so a fresh import lands whole or not at all; ones it only brought
- *  up to date were complete updates and stay, and the error says so. */
-function afterImportRefusal(canvasId: string, progress: ImportProgress, actor: Actor, error: unknown): unknown {
-  if (!(error instanceof WorkBudgetError)) return error
-  for (const def of progress.created.reverse()) {
-    const saved = store.getComponents(canvasId).find((candidate) => candidate.id === def.id)
-    if (saved?.mainFrameId) actions.deleteFrame(saved.mainFrameId, actor)
-    store.deleteComponent(canvasId, def.id)
-    actions.broadcastComponentGone(canvasId, def.id, actor)
-  }
-  return progress.pulled.length
-    ? error.afterPartialWork(`${progress.pulled.map((name) => `“${name}”`).join(', ')} updated`)
-    : error
+/** A component already here was brought up to date: a complete update, which stays whatever
+ *  happens next. The sub-commit keeps everything done before it too (the components this
+ *  import made on the way are what the update is built from), so a refusal later leaves a
+ *  consistent prefix, and running the import again continues from it. */
+function keepImportProgress(progress: ImportProgress) {
+  progress.kept.push(...progress.pending)
+  progress.pending = []
+  checkpoint()
+}
+
+/** An import of several components ran out of work budget. What it had sub-committed stays,
+ *  and the error says so; everything after that was undone by its write boundary, so an
+ *  import that only makes new components lands whole or not at all. */
+function afterImportRefusal(progress: ImportProgress, error: unknown): unknown {
+  if (!(error instanceof WorkBudgetError) || !progress.kept.length) return error
+  return error.afterPartialWork(progress.kept.join(', '))
 }
 
 /** A canvas and its copies share component ids. The same id here, not pulled from this library,
@@ -1525,7 +1532,7 @@ function importDependencies(
       updatedBy: actor.name,
     }
     store.saveComponent(targetCanvasId, frozen)
-    progress.created.push(frozen)
+    progress.pending.push(`“${frozen.name}” imported`)
     actions.broadcastComponent(targetCanvasId, frozen, actor)
     return true
   }
@@ -1534,7 +1541,8 @@ function importDependencies(
     if (isDeleted(existing)) return changed
     if (existing.source?.canvasId === sourceCanvasId && existing.source.rev === origin.rev) return changed
     pullFrom(targetCanvasId, existing, origin, sourceCanvasId, actor)
-    progress.pulled.push(existing.name)
+    progress.pending.push(`“${existing.name}” updated`)
+    keepImportProgress(progress)
     return true
   }
   checkCapacity(targetCanvasId)
@@ -1547,11 +1555,10 @@ function importDependencies(
     source: { canvasId: sourceCanvasId, componentId: origin.id, rev: origin.rev },
     by: actor.name,
   })
-  /* parsed before the definition is saved: a refusal here has made nothing */
   const root = parseTemplateRoot(origin.template)
   if (!root) fail(`component “${origin.name}” has no markup`)
   store.saveComponent(targetCanvasId, { ...def, head: origin.head })
-  progress.created.push(def)
+  progress.pending.push(`“${def.name}” imported`)
   setAttr(root, COMPONENT_ATTR, def.id)
   writeNewMain(
     targetCanvasId,
@@ -1602,12 +1609,13 @@ export function syncComponent(canvasId: string, ref: string, actor: Actor, canRe
   const origin = findComponent(def.source.canvasId, def.source.componentId)
   if (!origin) fail('its library no longer has this component')
   /* the whole tree: a nested component can move without this one moving, and this one can start using new ones */
-  const progress: ImportProgress = { seen: new Set(), created: [], pulled: [] }
+  const progress: ImportProgress = { seen: new Set(), pending: [], kept: [] }
+  const source = def.source.canvasId
   let updated: boolean
   try {
-    updated = importDependencies(canvasId, def.source.canvasId, origin, actor, progress)
+    updated = transaction(() => importDependencies(canvasId, source, origin, actor, progress))
   } catch (error) {
-    throw afterImportRefusal(canvasId, progress, actor, error)
+    throw afterImportRefusal(progress, error)
   }
   return { component: requireComponent(canvasId, def.id), updated }
 }
@@ -1673,7 +1681,12 @@ export function libraryCatalog(canvas: Canvas) {
 }
 
 /** Take a published component up on this canvas (a no-op when it already is). */
-export function useLibraryComponent(canvas: Canvas, libraryCanvasId: string, ref: string, actor: Actor): ComponentDef {
+export const useLibraryComponent = atomic(function useLibraryComponent(
+  canvas: Canvas,
+  libraryCanvasId: string,
+  ref: string,
+  actor: Actor,
+): ComponentDef {
   requireLibraryPlan(canvas, 'Using a library component')
   const snapshot = findInLibraries(canvas, ref).find((entry) => entry.canvasId === libraryCanvasId)
   if (!snapshot) {
@@ -1689,7 +1702,7 @@ export function useLibraryComponent(canvas: Canvas, libraryCanvasId: string, ref
     throw error
   }
   return requireComponent(canvas.id, snapshot.id)
-}
+})
 
 /** A linked definition takes its library's published state: a new revision here,
  *  carried to every instance like any change to a main. */
@@ -1717,7 +1730,12 @@ function relink(canvasId: string, def: ComponentDef, snapshot: LibraryComponent,
 }
 
 /** `quiet` leaves the activity line to the caller (updateLibraryConsumers writes one per canvas). */
-function pullFromLibrary(canvasId: string, def: ComponentDef, actor: Actor, quiet = false) {
+const pullFromLibrary = atomic(function pullFromLibrary(
+  canvasId: string,
+  def: ComponentDef,
+  actor: Actor,
+  quiet: boolean = false,
+) {
   const canvas = store.getCanvas(canvasId)
   if (!canvas) fail('canvas not found')
   const origin = originOf(canvas, def)
@@ -1786,7 +1804,7 @@ function pullFromLibrary(canvasId: string, def: ComponentDef, actor: Actor, quie
     /* the frames queued to follow: they are rewritten in the background, one per tick */
     frames,
   }
-}
+})
 
 /** The frames holding an instance of any of these components: what a change to them is
  *  queued for. `approvalLost` is whether the frame is signed off now, and so will not be. */
@@ -1858,12 +1876,12 @@ export function waitingLibraryUpdates(canvas: Canvas): ComponentDef[] {
  *  (each with what it is built from). Other canvases see an update and pull it when they choose.
  *  `publisherId` is the account acting (the agent's person, for an agent), checked against the
  *  workspace's publish setting; a dry run is checked too, so an agent hears the refusal first. */
-export function publishToLibrary(
+export const publishToLibrary = atomic(function publishToLibrary(
   canvasId: string,
   refs: readonly string[] | undefined,
   actor: Actor,
   publisherId: string | undefined,
-  dryRun = false,
+  dryRun: boolean = false,
 ) {
   const canvas = store.getCanvas(canvasId)
   if (!canvas) fail('canvas not found')
@@ -1891,10 +1909,10 @@ export function publishToLibrary(
     actions.broadcastLibrary(canvas, actor)
   }
   return { dry_run: dryRun, ...result, library: libraryStatus(canvas) }
-}
+})
 
 /** Stop offering this canvas's components to the workspace. Nothing changes on canvases using them. */
-export function unpublishFromLibrary(
+export const unpublishFromLibrary = atomic(function unpublishFromLibrary(
   canvasId: string,
   refs: readonly string[] | undefined,
   actor: Actor,
@@ -1916,7 +1934,7 @@ export function unpublishFromLibrary(
     actions.broadcastLibrary(canvas, actor)
   }
   return { unpublished: gone.map((entry) => ({ id: entry.id, name: entry.name })), library: libraryStatus(canvas) }
-}
+})
 
 /* ---- update everywhere: the one way a publication is pushed ---- */
 
@@ -2079,6 +2097,10 @@ export async function updateLibraryConsumers(
         continue
       }
       const { update, refusal } = pullIntoConsumer(canvas, library, actor)
+      /* a sub-commit per canvas: its pull is sent and its frames enter the queue now, before
+         the wait below (which would otherwise wait on a queue nothing has reached yet), and
+         a canvas that is done stays done if a later one is refused */
+      checkpoint()
       if (update) {
         /* the pull only queued its frames: wait here, canvas held, for what it really changed.
            The wait blocks nothing (the queue works a frame per tick), and keeps the canvases
