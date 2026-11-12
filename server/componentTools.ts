@@ -38,6 +38,7 @@ import { componentReuseNotes, frameReuseNotes } from './reuseNotes.ts'
 import { store } from './store.ts'
 import { inlineDataRefusal, type Surface } from './inlineData.ts'
 import { optional, WorkBudgetError } from './workBudget.ts'
+import { transaction } from './journal.ts'
 
 /**
  * The component tools every agent gets, over MCP (server/mcp.ts) or in the server
@@ -700,8 +701,10 @@ export async function runComponentTool(
   const inline = inlineDataRefusal(submittedText(input), currentMarkup(input, context), context.surface)
   if (inline) return { ok: false, error: inline }
   try {
-    /* awaited here, so an async tool's ComponentError is caught like any other */
-    return { ok: true, result: await tool.run(input, context) }
+    /* one unit (server/journal.ts): a refusal comes back as this call's error, not as a
+       throw out of the operation, so what the tool had changed is undone here. Awaited
+       inside, so an async tool's ComponentError is caught like any other */
+    return { ok: true, result: await transaction(() => tool.run(input, context)) }
   } catch (error) {
     if (error instanceof ComponentError || error instanceof WorkBudgetError) return { ok: false, error: error.message }
     throw error

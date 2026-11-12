@@ -33,7 +33,7 @@ import {
 } from './componentEngine.ts'
 import { adoptFromLibrary, findInLibraries, LibraryAdoptError } from './componentLibrary.ts'
 import { store } from './store.ts'
-import { noteCanvas, WorkBudgetError } from './workBudget.ts'
+import { noteCanvas } from './workBudget.ts'
 import type { Canvas } from '../shared/types.ts'
 
 /**
@@ -331,8 +331,6 @@ export function prepareFrameHtml(
   const adoption: LibraryAdoption = { by, added: [] }
   const ctx = contextFor(canvas.id, adoption)
   noteCanvas(canvas.id)
-  /* definitions are replaced, never changed in place: this list is the state to go back to */
-  const definitions = [...store.getComponents(canvas.id)]
   try {
     const expanded = expandUses(incoming, ctx, [], 0, { final: true })
     const mains = prepareMains(canvas, frameId, expanded, by, ctx)
@@ -346,10 +344,10 @@ export function prepareFrameHtml(
       adopted: adoption.added,
     }
   } catch (error) {
-    /* out of budget part of the way: a main folded into its definition, or a component
-       taken up from the library, would outlive the frame write that is now not happening */
-    if (error instanceof WorkBudgetError) restoreDefinitions(canvas.id, definitions)
-    /* markup nested past the call stack: the write itself still has to land */
+    /* out of budget part of the way: the operation's write boundary (server/journal.ts)
+       undoes a main folded into its definition and a component taken up from the library,
+       so neither outlives the frame write that is now not happening.
+       Markup nested past the call stack: the write itself still has to land */
     if (!(error instanceof RangeError)) throw error
     return {
       html: incoming,
@@ -358,15 +356,6 @@ export function prepareFrameHtml(
       moved: [],
       adopted: adoption.added,
     }
-  }
-}
-
-export function restoreDefinitions(canvasId: string, before: ComponentDef[]) {
-  const kept = new Map(before.map((def) => [def.id, def]))
-  for (const def of [...store.getComponents(canvasId)]) {
-    const earlier = kept.get(def.id)
-    if (!earlier) store.deleteComponent(canvasId, def.id)
-    else if (earlier !== def) store.saveComponent(canvasId, earlier)
   }
 }
 
@@ -408,15 +397,7 @@ export function prepareChunk(
   if (!chunk.toLowerCase().includes(`<${USE_TAG}`)) return { html: chunk, issues: [], adopted: [] }
   const adoption: LibraryAdoption = { by, added: [] }
   const ctx = contextFor(canvas.id, adoption)
-  const definitions = [...store.getComponents(canvas.id)]
-  let expanded: string
-  try {
-    expanded = expandUses(chunk, ctx)
-  } catch (error) {
-    /* a component the chunk took up from the library before it ran out of budget */
-    if (error instanceof WorkBudgetError) restoreDefinitions(canvas.id, definitions)
-    throw error
-  }
+  const expanded = expandUses(chunk, ctx)
   const styles = closureOf(usedComponentIds(expanded), canvas.id)
     .filter((def) => def.css.trim() && !soFar.includes(`${CSS_ATTR}="${def.id}"`))
     .map((def) => `<style ${CSS_ATTR}="${def.id}">\n${def.css}\n</style>`)

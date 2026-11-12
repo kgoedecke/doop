@@ -168,6 +168,10 @@ const schema = {
      (server/workBudget.ts); 0 lifts a limit */
   DOOP_WORK_BUDGET_PARSE_MB: nonNegativeInt({ default: 96 }),
   DOOP_WORK_BUDGET_MS: nonNegativeInt({ default: 2000 }),
+  /* what a store write outside any write boundary does (server/journal.ts): nothing, a
+     logged line per kind of write, or a thrown error. Unset: 'warn' in development, 'off'
+     in production and under test (the integration harness sets 'throw'). */
+  DOOP_WRITE_BOUNDARY: str({ choices: ['', 'off', 'warn', 'throw'], default: '' }),
   /* the stall watchdog (server/stallWatchdog.ts): a watcher thread logs the operations in
      flight once the event loop has not answered for STALL_LOG_MS, and ends the process
      (for the supervisor to restart it) after STALL_EXIT_MS; an operation that took
