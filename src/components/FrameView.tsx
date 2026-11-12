@@ -17,6 +17,11 @@ import { sendWs } from '../lib/ws'
 import { throttle } from '../lib/throttle'
 import { getIdentity } from '../lib/identity'
 import { FRAME_BOOTSTRAP } from '../lib/frameRuntime'
+
+/** `<script>`, inline event handlers or `javascript:` URLs: anything that runs inside the frame. */
+export function hasExecutableContent(html: string): boolean {
+  return /<script[\s>]|\son[a-z]+\s*=|javascript:/i.test(html)
+}
 import { FRAME_DOCUMENTS_TAKE_ZOOM_AS_DENSITY, counterZoom } from '../lib/layoutZoom'
 import { dropEntry, recordCreate, recordUpdate, recordUpdates, trackSave, type HistoryEntry } from '../lib/history'
 import { snapFrame } from '../lib/snap'
@@ -1488,6 +1493,16 @@ export const FrameView = memo(function FrameView({
     function onMsg(ev: MessageEvent) {
       if (ev.source !== iframeRef.current?.contentWindow) return
       if (ev.data?.type === 'doop:edited' && typeof ev.data.html === 'string') {
+        /* A script inside the frame can post this message too (the runtime's
+           own guard only filters messages going INTO the frame), and the save
+           below would then store frame-authored HTML under the viewer's name.
+           Only a document without executable content can be an edit session
+           this panel started, so a frame that carries script, inline handlers
+           or javascript: URLs, before or after the edit, is never saved from
+           here; it is still rendered. Matches canEdit, which already refuses
+           inline editing of script frames. */
+        const stored = useStore.getState().canvas?.frames.find((f) => f.id === frame.id)?.html ?? ''
+        if (hasExecutableContent(stored) || hasExecutableContent(ev.data.html)) return
         // The runtime already has this document. Echoing it through the HTML
         // throttle can overwrite a newer style edit still waiting to save.
         localHtml.current = ev.data.html

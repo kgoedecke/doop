@@ -10,8 +10,31 @@ import { CANVAS_MOD_CHORDS } from './keys'
  * elements are touched, so updates render in place with no white reload flash.
  * Works inside sandbox="allow-scripts" (no same-origin access needed).
  */
-export const FRAME_BOOTSTRAP = `<!doctype html>
-<html><head></head><body><script data-v-boot>
+/**
+ * Content Security Policy every frame document carries. The sandbox gives a
+ * frame an opaque origin, so it cannot reach the editor's session; without a
+ * CSP it could still beacon to any host, load remote code at view time (so
+ * the reviewed HTML is not what runs) or open fetches and sockets. Scripts
+ * and styles stay inline; fonts and images may load (designs embed them);
+ * connections are limited to blob: and data: (the runtime's own image
+ * cloning); no nested frames, no form submission.
+ */
+export function frameCsp(appOrigin: string): string {
+  const own = appOrigin ? ` ${appOrigin}` : ''
+  return (
+    `default-src 'none'; script-src 'unsafe-inline'${own}; style-src 'unsafe-inline'${own} https:; ` +
+    `font-src${own} https: data:; img-src${own} https: data: blob:; media-src${own} https: data: blob:; ` +
+    `connect-src${own} blob: data:; frame-src 'none'; form-action 'none'; base-uri 'none'`
+  )
+}
+
+/** The bootstrap document for one app origin: the origin may serve the frame scripts, styles and assets. */
+export function frameBootstrap(appOrigin: string): string {
+  return FRAME_BOOTSTRAP_TEMPLATE.replace('__FRAME_CSP__', frameCsp(appOrigin))
+}
+
+const FRAME_BOOTSTRAP_TEMPLATE = `<!doctype html>
+<html><head><meta http-equiv="Content-Security-Policy" content="__FRAME_CSP__" data-v-boot></head><body><script data-v-boot>
 (function () {
   ${FRAME_REPLAY_RUNTIME}
   ${FRAME_DROP_RUNTIME}
@@ -277,6 +300,8 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
     }
     var boot = root.querySelector('script[data-v-boot]')
     if (boot && boot.parentNode) boot.parentNode.removeChild(boot)
+    var csp = root.querySelector('meta[data-v-boot]')
+    if (csp && csp.parentNode) csp.parentNode.removeChild(csp) // the policy is ours, not the design's
     var es = root.querySelector('style[data-v-edit]')
     if (es && es.parentNode) es.parentNode.removeChild(es)
     var ran = root.querySelectorAll('[data-v-ran]')
@@ -1667,3 +1692,6 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
   parent.postMessage({ type: 'doop:frame-ready' }, '*')
 })()
 </script></body></html>`
+
+/** The bootstrap for this app's origin (the module is only ever loaded in the browser). */
+export const FRAME_BOOTSTRAP = frameBootstrap(typeof location !== 'undefined' ? location.origin : '')
