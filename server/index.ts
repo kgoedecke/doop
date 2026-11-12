@@ -73,6 +73,8 @@ import { fontsRouter } from './fontRoutes.ts'
 import { AvatarInputError, clearAvatar, setAvatar } from './avatars.ts'
 import { MAX_AVATAR_BYTES, avatarUrl } from '../shared/avatar.ts'
 import { fontsForCanvas, hydrateFonts } from './fonts.ts'
+import { addCanvasFont, uploadedFontResult } from './canvasFontUpload.ts'
+import { MAX_FONT_BYTES } from '../shared/fonts.ts'
 import { tokensCss, tokensMarkdown, tokensTailwind } from '../shared/designTokens.ts'
 import {
   canEditCanvas,
@@ -625,8 +627,10 @@ app.get('/photos/pexels/:file', (req, res) => void servePhoto(req, res))
 /* capability: unguessable, single-use, 15-minute TTL.                  */
 /* ------------------------------------------------------------------ */
 
-app.put('/u/:token', async (req, res) => {
-  const { token } = req.params
+/* A font ticket's command ends the URL with a slash, so curl appends the
+   local file name (/u/<token>/Oxanium-Light.ttf) and the library keeps it. */
+app.put(['/u/:token', '/u/:token/:name'], async (req, res) => {
+  const token = req.params.token ?? ''
   const ticket = beginTicketUpload(token)
   if (!ticket)
     return res
@@ -636,8 +640,11 @@ app.put('/u/:token', async (req, res) => {
   try {
     /* on any early rejection, destroy the request stream — otherwise curl
        keeps sending a body nobody reads and the connection deadlocks */
-    if (Number(req.headers['content-length'] || 0) > MAX_ASSET_BYTES) {
-      res.status(413).json({ error: 'file exceeds the 5 MB limit' })
+    const font = ticket.kind === 'font'
+    const cap = font ? MAX_FONT_BYTES : MAX_ASSET_BYTES
+    const tooBig = `file exceeds the ${cap / 1024 / 1024} MB limit`
+    if (Number(req.headers['content-length'] || 0) > cap) {
+      res.status(413).json({ error: tooBig })
       req.destroy()
       return
     }
@@ -645,12 +652,23 @@ app.put('/u/:token', async (req, res) => {
     let total = 0
     for await (const chunk of req) {
       total += (chunk as Buffer).length
-      if (total > MAX_ASSET_BYTES) {
-        res.status(413).json({ error: 'file exceeds the 5 MB limit' })
+      if (total > cap) {
+        res.status(413).json({ error: tooBig })
         req.destroy()
         return
       }
       chunks.push(chunk as Buffer)
+    }
+    if (font) {
+      if (!ticket.ownerId) return res.status(400).json({ error: 'fonts are added by a signed-in account' })
+      const added = await addCanvasFont(
+        ticket.canvasId,
+        { id: ticket.ownerId, name: ticket.uploadedBy },
+        Buffer.concat(chunks),
+        req.params.name ?? 'font',
+      )
+      success = true
+      return res.json(uploadedFontResult(added))
     }
     const asset = await createAsset(Buffer.concat(chunks), {
       canvasId: ticket.canvasId,

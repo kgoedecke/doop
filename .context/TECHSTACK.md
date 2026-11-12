@@ -264,6 +264,20 @@
   never load it from Google Fonts. Tests: `fonts.test.ts` (a real WOFF2 in `tests/fixtures/fonts`), `fontLibrary.test.ts`,
   `fontLibraryRace.test.ts`, `fontFrameWrites.test.ts` (faces on create, stream end and idle; an idle close sends viewers the
   healed document, so a cut-off script never runs).
+- No files inside frames (`server/inlineData.ts`, `LEAN_FRAMES` in `server/guide.ts`): an agent
+  write that adds a base64 `data:` URI of any kind is refused and nothing is written, with what to
+  do per kind (font, picture, SVG, media). Checked on what the call submits: MCP `create_frame`,
+  `set_frame_html`, `append_frame_html` chunks, `edit_frame_html`'s `new_str`, every component
+  tool's strings, and the resident's create / set / edit / rewrite chunks. A URI the frame already
+  holds may be carried over (a PDF import embeds its fonts), so such a frame stays editable.
+  Human saves, imports and ingest are not checked. `LEAN_FRAMES` (MCP guide and resident prompt)
+  covers the rest: big traced SVGs as uploaded `<img>`, libraries from a CDN, sample data, no icon
+  sprite sheets, a poster instead of video. Fonts go in with `upload_font` (MCP: `source_url`,
+  `local_file` ticket or `data`; resident: `source_url`; `server/canvasFontUpload.ts`): the file
+  joins the library the canvas designs with (its workspace's for members, the owner's own on a
+  personal canvas, refused for anyone else) through `addFont`, and the agent names the family.
+  A font ticket's URL ends in `/` so curl appends the file name (`PUT /u/:token/:name`, 10 MB cap).
+  Tests: `inlineData.test.ts`.
 - Design tokens (`shared/designTokens.ts`, spec `.context/specs/design-tokens.md`): a canvas's
   typed design values (Paper's eleven types: colour, opacity, radius, spacing, container,
   breakpoint, font family / weight / size, line height, letter spacing), each a CSS custom

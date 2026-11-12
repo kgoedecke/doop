@@ -5,7 +5,9 @@ import { store } from './store.ts'
 import { layerExport } from './layerExport.ts'
 import { MAX_EXPORT_SCALE, MIN_EXPORT_SCALE } from '../shared/exportScale.ts'
 import { fontsForCanvas } from './fonts.ts'
-import { libraryBrief } from '../shared/fonts.ts'
+import { libraryBrief, MAX_FONT_BYTES } from '../shared/fonts.ts'
+import { addCanvasFont, uploadedFontResult } from './canvasFontUpload.ts'
+import { inlineDataRefusal } from './inlineData.ts'
 import { webFontsBrief } from '../shared/webFonts.ts'
 import {
   TOKEN_TYPES,
@@ -33,7 +35,7 @@ import * as backgrounds from './backgrounds.ts'
 import * as ingest from './ingest.ts'
 import { viewWebsite, referencedUrls } from './website.ts'
 import { createImportedWebpageFrame, findImportedWebpageFrame } from './webpageImport.ts'
-import { COMPONENTS, DESIGN_BRIEF, DESIGN_QUALITY, FRAME_STYLES, PROTOTYPES } from './guide.ts'
+import { COMPONENTS, DESIGN_BRIEF, DESIGN_QUALITY, FRAME_STYLES, LEAN_FRAMES, PROTOTYPES } from './guide.ts'
 import { zodToJsonSchema } from 'zod-to-json-schema'
 import { z } from 'zod'
 import { catalogEntry, compactFrameHtml, findComponent, libraryCatalog } from './componentActions.ts'
@@ -178,6 +180,7 @@ Rules:
 - Canvas comments are pinned to a point on the page, not to an element (you get the point and the frames nearest to it). The request is about what sits around that point: edit those frames in place, or add a new frame near the point when the comment asks for something new — never rework the whole page because of a canvas comment.
 - Frames are complete, self-contained HTML documents. Keep each frame's existing style and structure; change what the feedback requires.
 ${FRAME_STYLES}
+${LEAN_FRAMES}
 - Prefer edit_frame_html (exact find/replace) for small changes; use set_frame_html only when the change is structural.
 - After any visual change, call screenshot_frame and LOOK at the result. If it doesn't clearly satisfy the feedback, fix it before finishing. Check reuse too: a block repeated three or more times that is not a <doop-use>, or a hex, font or size a token already names.
 - Call set_status when you start ("Fixing: …") and when your focus shifts. One line, under 80 chars, present tense. People watch this live.
@@ -1268,6 +1271,19 @@ const TOOLS: Anthropic.Tool[] = [
     },
   },
   {
+    name: 'upload_font',
+    description:
+      'Add a font file (ttf/otf/woff/woff2, one face per file, max 10 MB) to the font library this canvas designs with, from a public URL of the file itself (not a CSS file). Then name the family in CSS (font-family: "Family", sans-serif) and Doop writes the @font-face. This is how a font that is not in the canvas library or the hosted fonts gets into a design: never inline a font file as a base64 data: URI. Upload each weight and style you use as its own file.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        source_url: { type: 'string', description: 'Public http(s) URL of the font file' },
+        file_name: { type: 'string', description: 'The file name the library shows, e.g. "Oxanium-Light.ttf"' },
+      },
+      required: ['source_url'],
+    },
+  },
+  {
     name: 'search_images',
     description:
       'Search free stock photography and get candidate photos WITH visual thumbnails — look at them and pick the one that fits the frame. Use concrete, scene-level queries ("team collaborating loft office", not "business"). Embed the chosen image_url directly in frame HTML with object-fit: cover and a real alt text.',
@@ -1794,6 +1810,15 @@ async function frameImageBlocks(
   return blocks
 }
 
+/** A frame's HTML for comparing a write against, or nothing while it is not loaded. */
+function existingHtml(f: { html: string }): string {
+  try {
+    return typeof f.html === 'string' ? f.html : ''
+  } catch {
+    return ''
+  }
+}
+
 /** Runs one tool call of the resident's loop. Exported for tests. */
 export async function execTool(
   block: Anthropic.ToolUseBlockParam,
@@ -1831,6 +1856,8 @@ export async function execTool(
         }
         const html = completeHtml(raw.html)
         if (!html) return fail('create_frame requires a complete non-empty HTML document ending in </html>')
+        const inline = inlineDataRefusal(html, '', 'resident')
+        if (inline) return fail(inline)
         if (html.length > MAX_REWRITE_CHUNK_CHARS) {
           return fail(`create_frame HTML must be compact (at most ${MAX_REWRITE_CHUNK_CHARS} characters)`)
         }
@@ -1913,7 +1940,11 @@ export async function execTool(
         if (count > 1)
           return fail(`"find" text occurs ${count} times — include more surrounding context to make it unique`)
         const replace = input.replace
-        actions.updateFrame(input.frame_id, { html: source.replace(input.find, () => replace) }, actor)
+        const edited = source.replace(input.find, () => replace)
+        /* the edited document, so a URI completed across the replacement's edges is caught too */
+        const inline = inlineDataRefusal(edited, `${f.html}\n${compact}`, 'resident')
+        if (inline) return fail(inline)
+        actions.updateFrame(input.frame_id, { html: edited }, actor)
         runState.mutatedFrames.add(input.frame_id)
         unverify(runState, input.frame_id)
         const notes = componentWriteNotes(store.getFrame(input.frame_id)!)
@@ -1933,6 +1964,8 @@ export async function execTool(
             `set_frame_html is limited to ${MAX_REWRITE_CHUNK_CHARS} characters. Use begin_frame_rewrite, append_frame_rewrite chunks, and commit_frame_rewrite.`,
           )
         }
+        const inline = inlineDataRefusal(html, existingHtml(f), 'resident')
+        if (inline) return fail(inline)
         actions.updateFrame(input.frame_id, { html }, actor)
         runState.mutatedFrames.add(input.frame_id)
         unverify(runState, input.frame_id)
@@ -1961,6 +1994,10 @@ export async function execTool(
           return fail(`chunk is ${raw.chunk.length} characters; maximum is ${MAX_REWRITE_CHUNK_CHARS}`)
         }
         const draft = (runState.rewriteDrafts.get(input.frame_id) ?? '') + raw.chunk
+        /* refused at the chunk, before the draft grows, on the draft as it would stand (a URI
+           split across chunks included); the frame being rewritten may carry its own over */
+        const inline = inlineDataRefusal(draft, existingHtml(f), 'resident')
+        if (inline) return fail(inline)
         if (draft.length > MAX_REWRITE_CHARS) {
           return fail(`rewrite draft exceeds the ${MAX_REWRITE_CHARS}-character safety limit`)
         }
@@ -1975,6 +2012,9 @@ export async function execTool(
         const html = completeHtml(draft)
         if (!html)
           return fail('rewrite draft is not a complete HTML document ending in </html>; append the missing content')
+        /* again at the commit: the frame may have changed since the chunks were checked */
+        const inline = inlineDataRefusal(html, existingHtml(f), 'resident')
+        if (inline) return fail(inline)
         actions.updateFrame(input.frame_id, { html }, actor)
         runState.rewriteDrafts.delete(input.frame_id)
         runState.mutatedFrames.add(input.frame_id)
@@ -1985,6 +2025,20 @@ export async function execTool(
             ...componentWriteNotes(store.getFrame(input.frame_id)!, { review: true }),
           ].join('\n'),
         )
+      }
+      case 'upload_font': {
+        const raw = block.input as { source_url?: unknown; file_name?: unknown }
+        if (typeof raw.source_url !== 'string' || !raw.source_url)
+          return fail('source_url must be the public URL of a font file')
+        /* the library the font joins is the asker's to change: a run nobody asked for adds none */
+        if (!runState.requesterId) return fail('fonts are added for the person who asked; this run has none')
+        const buf = await assets.fetchRemote(raw.source_url, MAX_FONT_BYTES)
+        const name =
+          typeof raw.file_name === 'string' && raw.file_name
+            ? raw.file_name
+            : decodeURIComponent(new URL(raw.source_url).pathname.split('/').pop() ?? '') || 'font'
+        const font = await addCanvasFont(canvasId, { id: runState.requesterId, name: actor.name }, buf, name)
+        return ok(JSON.stringify(uploadedFontResult(font)))
       }
       case 'search_images': {
         if (!imageSearch.photoSearchEnabled())
@@ -2537,6 +2591,7 @@ export async function execTool(
             reader ? canvasesFor(reader).flatMap((meta) => store.getCanvas(meta.id) ?? []) : [canvas],
           /* publishing is the requester's to do; a run nobody asked for publishes only where everyone may */
           userId: runState.requesterId,
+          surface: 'resident',
         })
         if (!outcome.ok) return fail(outcome.error)
         const { data, note, frames } = outcome.result

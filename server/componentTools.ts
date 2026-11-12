@@ -32,6 +32,7 @@ import { isLibrary, librariesForCanvas } from './componentLibrary.ts'
 import * as actions from './actions.ts'
 import { componentReuseNotes, frameReuseNotes } from './reuseNotes.ts'
 import { store } from './store.ts'
+import { inlineDataRefusal, type Surface } from './inlineData.ts'
 
 /**
  * The component tools every agent gets, over MCP (server/mcp.ts) or in the server
@@ -69,6 +70,8 @@ export interface ToolContext {
   readableCanvases: () => Canvas[]
   /** the account acting: the person an agent works for. Publishing is checked against it */
   userId: string | undefined
+  /** which agent is calling, for the tools a refusal may point it at */
+  surface?: Surface
 }
 
 export type ToolResult = { data: unknown; note?: string; frames?: Frame[] }
@@ -584,6 +587,38 @@ export const COMPONENT_TOOLS: ComponentTool[] = [
 
 export const COMPONENT_TOOL_NAMES = COMPONENT_TOOLS.map((tool) => tool.name)
 
+/** Every string a call submits (markup, css, find/replace, prop values), for the base64 check. */
+function submittedText(value: unknown): string {
+  if (typeof value === 'string') return value
+  if (Array.isArray(value)) return value.map(submittedText).join('\n')
+  if (value && typeof value === 'object') return Object.values(value).map(submittedText).join('\n')
+  return ''
+}
+
+/** What the call's targets already hold: the component (its stored template, styles and head, and
+ *  its main frame) and the frame it writes to. Carrying those over is not a new upload. */
+function currentMarkup(input: Record<string, unknown>, context: ToolContext): string {
+  const parts: string[] = []
+  const html = (frameId: unknown) => {
+    if (typeof frameId !== 'string') return
+    try {
+      const frame = store.getFrame(frameId)
+      if (frame?.canvasId === context.canvas.id) parts.push(frame.html)
+    } catch {
+      /* not loaded: nothing to compare against */
+    }
+  }
+  if (typeof input.component === 'string') {
+    const def = findComponent(context.canvas.id, input.component)
+    if (def) {
+      parts.push(def.template, def.css, def.rawCss, ...def.head)
+      html(def.mainFrameId)
+    }
+  }
+  html(input.frame_id)
+  return parts.join('\n')
+}
+
 /** Run a tool's handler, turning a ComponentError into a message the agent can act on. */
 export async function runComponentTool(
   name: string,
@@ -592,6 +627,8 @@ export async function runComponentTool(
 ): Promise<{ ok: true; result: ToolResult } | { ok: false; error: string }> {
   const tool = COMPONENT_TOOLS.find((candidate) => candidate.name === name)
   if (!tool) return { ok: false, error: `unknown tool ${name}` }
+  const inline = inlineDataRefusal(submittedText(input), currentMarkup(input, context), context.surface)
+  if (inline) return { ok: false, error: inline }
   try {
     /* awaited here, so an async tool's ComponentError is caught like any other */
     return { ok: true, result: await tool.run(input, context) }

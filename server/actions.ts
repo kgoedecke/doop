@@ -1666,9 +1666,27 @@ interface StreamState {
   /** the opening chunk was HTML-escaped: decode every chunk of this stream */
   escaped: boolean
   lastActivity: number
+  /** the frame's HTML before the opening chunk replaced it: what a later chunk
+   *  may carry over (server/inlineData.ts compares against it) */
+  base: string
+  /** the end of the agent's last chunk as it sent it, before components expanded:
+   *  enough to catch a data: URI prefix split across two chunks */
+  tail: string
 }
 
+const STREAM_TAIL_CHARS = 256
+
 const streams = new Map<string, StreamState>() // frameId -> state
+
+/** The HTML a frame had before its live stream began, or undefined when none is open. */
+export function streamBase(frameId: string): string | undefined {
+  return streams.get(frameId)?.base
+}
+
+/** The end of the last chunk an open stream received, as the agent wrote it. */
+export function streamTail(frameId: string): string | undefined {
+  return streams.get(frameId)?.tail
+}
 
 interface RevealState {
   actor: Actor
@@ -2063,6 +2081,8 @@ export function appendFrameHtml(
   if (!before) return undefined
 
   const starting = opts.start || !streams.has(frameId)
+  /* read now: the store updates `before` in place below */
+  const base = before.html
   /* an agent that escapes its opening chunk escapes the whole stream, so latch
      the verdict there: a chunk mid-design can hold a legitimate `&lt;` (a code
      sample) and must never be sniffed on its own */
@@ -2098,7 +2118,7 @@ export function appendFrameHtml(
 
   if (starting) {
     finishReveal(frameId) /* a live stream overrides any one-shot playback in flight */
-    streams.set(frameId, { actor, escaped, lastActivity: Date.now() })
+    streams.set(frameId, { actor, escaped, lastActivity: Date.now(), base, tail: '' })
     broadcast(frame.canvasId, { type: 'frame:streaming', frameId, active: true, actor })
     logActivity(frame.canvasId, actor, `is designing “${frame.name}” live…`, frameId)
     autoTask(frame.canvasId, actor, `Designing “${frame.name}”`, frameId)
@@ -2106,6 +2126,7 @@ export function appendFrameHtml(
   const s = streams.get(frameId)!
   s.lastActivity = Date.now()
   s.escaped = escaped
+  s.tail = (s.tail + piece).slice(-STREAM_TAIL_CHARS)
 
   /* the chunk renders the moment it arrives — viewers see the agent's real progress */
   broadcast(frame.canvasId, {

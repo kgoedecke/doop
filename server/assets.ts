@@ -60,12 +60,19 @@ interface UploadTicket {
   canvasId: string
   ownerId?: string
   uploadedBy: string
+  /** what the curl brings: an image for upload_asset (the default), a font file for upload_font */
+  kind?: 'asset' | 'font'
   expiresAt: number
   inFlight: boolean
 }
 const tickets = new Map<string, UploadTicket>()
 
-export function createUploadTicket(meta: { canvasId: string; ownerId?: string; uploadedBy: string }): {
+export function createUploadTicket(meta: {
+  canvasId: string
+  ownerId?: string
+  uploadedBy: string
+  kind?: 'asset' | 'font'
+}): {
   token: string
   expiresAt: number
 } {
