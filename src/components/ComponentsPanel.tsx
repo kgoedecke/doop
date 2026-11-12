@@ -1,14 +1,7 @@
 import { useMemo, useRef, useState } from 'react'
 import { activeComponents, type ComponentDef } from '../../shared/components'
-import { api, type ComponentCandidate, type ComponentLibrary } from '../lib/api'
-import {
-  COMPONENT_DRAG_TYPE,
-  goToMain,
-  makeComponent,
-  placeComponent,
-  removeComponent,
-  renameComponent,
-} from '../lib/components'
+import { api, type ComponentLibrary } from '../lib/api'
+import { COMPONENT_DRAG_TYPE, goToMain, placeComponent, removeComponent, renameComponent } from '../lib/components'
 import { useT } from '../lib/i18n'
 import { useCanvasLibrary } from '../lib/library'
 import { useLibraryResume } from '../lib/libraryResume'
@@ -82,7 +75,6 @@ export function ComponentsPanel() {
     onPublish: (only) => setPublishing(only ? { only } : {}),
   })
   const [query, setQuery] = useState('')
-  const [candidates, setCandidates] = useState<ComponentCandidate[] | null>(null)
   const [libraries, setLibraries] = useState<ComponentLibrary[] | null>(null)
   const [confirmDelete, setConfirmDelete] = useState<ComponentDef | null>(null)
   const [renaming, setRenaming] = useState<string | null>(null)
@@ -111,18 +103,11 @@ export function ComponentsPanel() {
       ...(def ? { only: def.id } : {}),
     })
   }
-  const scan = () => api.componentCandidates(canvasId).then(setCandidates).catch(console.error)
   const browse = () =>
     api
       .componentLibraries(canvasId)
       .then((all) => setLibraries(all.filter((library) => !library.library)))
       .catch(console.error)
-  const convert = async (candidate: ComponentCandidate) => {
-    const frame = useStore.getState().canvas?.frames.find((f) => f.id === candidate.example.frame_id)
-    if (!frame) return
-    await makeComponent(frame, candidate.example.element, candidate.suggested_name, true)
-    await scan()
-  }
 
   return (
     <>
@@ -134,26 +119,10 @@ export function ComponentsPanel() {
         {canEdit && (
           <div className="flex flex-col gap-1.5 border-b border-line-soft pb-2.5">
             <div className="flex flex-col gap-1.5">
-              <Button size="sm" onClick={() => void scan()}>
-                {t('components.findRepeated')}
-              </Button>
               <Button size="sm" onClick={() => void browse()}>
                 {t('components.importFromCanvas')}
               </Button>
             </div>
-            {candidates?.length === 0 && <p className="text-caption text-ink-soft">{t('components.nothingRepeats')}</p>}
-            {candidates?.map((candidate) => (
-              <div key={`${candidate.example.frame_id}:${candidate.example.element}`} className="flex flex-col gap-0.5">
-                <span className="text-body text-ink">{candidate.suggested_name}</span>
-                <span className="text-caption text-ink-soft">
-                  {t('components.copiesInFrames', { copies: candidate.occurrences, count: candidate.frames })}
-                  {candidate.sample_text ? `, “${candidate.sample_text}”` : ''}
-                </span>
-                <Button size="inline" variant="link" onClick={() => void convert(candidate)}>
-                  {t('components.makeAndLink')}
-                </Button>
-              </div>
-            ))}
             {libraries?.length === 0 && <p className="text-caption text-ink-soft">{t('components.noLibraries')}</p>}
             {libraries?.map((library) => (
               <div key={library.id} className="flex flex-col gap-0.5">

@@ -177,8 +177,8 @@ get_canvas and list_components show a canvas's components with their props.
   expand_components=true only if you must read the full markup. edit_frame_html matches either
   form.
 - Before you write the same block a third time, make it a component and use that. Adding to a
-  canvas whose pages already repeat a block (get_canvas → existingStyle.repeated, or
-  find_component_candidates): make the block a component from one existing copy and use it in
+  canvas whose pages already repeat a block: make the block a component from one existing copy
+  (create_component with its frame_id and element) and use it in
   what you add, rather than writing it out again. replace_matching=true turns every other copy
   into an instance too; that rewrites the existing pages, so use it when the human asked for that
   clean-up, and otherwise offer it when you finish.

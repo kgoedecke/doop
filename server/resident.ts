@@ -738,17 +738,7 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
       const existingStyleBlock = established
         ? [
             {
-              text:
-                `# Existing style\n${existingStyleBrief(established, { tokens: tokens.length > 0 })}` +
-                (established.repeated?.length
-                  ? '\n\n' +
-                    established.repeated
-                      .map(
-                        (block) =>
-                          `- “${block.name}” ×${block.occurrences} on ${block.frames} frames: frame_id ${block.example.frame_id}, element ${block.example.element}`,
-                      )
-                      .join('\n')
-                  : ''),
+              text: `# Existing style\n${existingStyleBrief(established, { tokens: tokens.length > 0 })}`,
             },
           ]
         : []

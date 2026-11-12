@@ -22,8 +22,6 @@ const actions = await import('../server/actions.ts')
 const { store } = await import('../server/store.ts')
 const { existingStyle, existingStyleBrief } = await import('../server/existingStyle.ts')
 const { COMPONENTS, DESIGN_BRIEF } = await import('../server/guide.ts')
-const { runOperation } = await import('../server/workBudget.ts')
-const { stubEnv, unstubAllEnvs } = await import('./envStub.ts')
 
 /**
  * An agent asked for one more page on a canvas that already has a look should reuse that look:
@@ -62,46 +60,14 @@ describe('the existing style of a canvas', () => {
       ]),
     )
     expect(style.fonts).toEqual([{ family: 'Inter', frames: 3 }])
-    expect(style.repeated?.[0]).toMatchObject({ name: 'Site Nav', occurrences: 3, frames: 3 })
-    expect(style.repeated?.[0]?.example.element).toContain('nav')
   })
 
-  it('reads no palette once the canvas has tokens, and still names the repeats', () => {
+  it('reads no palette once the canvas has tokens', () => {
     const canvasId = canvasWithPages(2)
     actions.createTokens(canvasId, [{ name: '--color-ink', type: 'color', value: '#1a1a1a' }], human)
     const style = existingStyle(store.getCanvas(canvasId)!)!
     expect(style.colours).toEqual([])
     expect(style.fonts).toEqual([])
-    expect(style.repeated?.length).toBe(1)
-  })
-
-  it('finds a block two pages share even when one page repeats it inside a bigger one', () => {
-    const canvasId = store.createCanvas('nested repeats', 'kevin').id
-    const button = `<a class="cta" href="#"><span>Start</span><span>→</span></a>`
-    const card = (title: string) => `<div class="card"><h3>${title}</h3><p>Copy</p>${button}</div>`
-    const doc = (body: string) => `<!doctype html><html><head></head><body>${body}</body></html>`
-    actions.createFrame(canvasId, { name: 'Plans', html: doc(card('Basic') + card('Pro')) }, human)
-    actions.createFrame(canvasId, { name: 'Home', html: doc(`<h1>Hi</h1>${button}`) }, human)
-    const repeated = existingStyle(store.getCanvas(canvasId)!)!.repeated!
-    /* the cards sit on one page only: they are not a shared block, and must not hide the button */
-    expect(repeated.map((block) => block.name)).toEqual(['Cta'])
-    expect(repeated[0]).toMatchObject({ occurrences: 3, frames: 2 })
-  })
-
-  it('falls back to the tool, never fails the read, when the scan is out of work budget', () => {
-    const canvasId = store.createCanvas('big pages', 'kevin').id
-    const filler = '<p class="copy">' + 'word '.repeat(140_000) + '</p>'
-    for (const name of ['One', 'Two'])
-      actions.createFrame(canvasId, { name, html: screen(name).replace('</body>', `${filler}</body>`) }, human)
-    stubEnv('DOOP_WORK_BUDGET_PARSE_MB', '1')
-    try {
-      const style = runOperation('mcp get_canvas', canvasId, () => existingStyle(store.getCanvas(canvasId)!))!
-      expect(style.repeated).toBeUndefined()
-      expect(style.colours.length).toBeGreaterThan(0)
-      expect(existingStyleBrief(style, { tokens: false })).toContain('find_component_candidates')
-    } finally {
-      unstubAllEnvs()
-    }
   })
 
   it('leaves out demo frames', () => {
@@ -117,14 +83,8 @@ describe('the existing style of a canvas', () => {
     expect(brief).toContain('#e5533c (3 frames)')
     expect(brief).toContain('Inter (3 frames)')
     expect(brief).toContain('create_tokens')
-    expect(brief).toContain('“Site Nav” ×3 on 3 frames')
     expect(brief).toContain('no replace_matching')
     expect(existingStyleBrief(style, { tokens: true })).not.toContain('create_tokens')
-  })
-
-  it('points at find_component_candidates when the canvas is too big to scan', () => {
-    const brief = existingStyleBrief({ frames: 40, colours: [], fonts: [] }, { tokens: true })
-    expect(brief).toContain('find_component_candidates')
   })
 })
 

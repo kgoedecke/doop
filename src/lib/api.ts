@@ -48,15 +48,6 @@ export interface ComponentInfo {
   usage_by_frame: { id: string; name: string; instances: number; approved: boolean }[]
 }
 
-export interface ComponentCandidate {
-  suggested_name: string
-  occurrences: number
-  frames: number
-  elements_each: number
-  sample_text: string
-  example: { frame_id: string; frame_name: string; element: string }
-}
-
 export interface ComponentLibrary {
   id: string
   name: string
@@ -690,8 +681,6 @@ export const api = {
     req<{ html: string; width: number; height: number; variants: number }>(
       `/api/canvases/${canvasId}/components/${componentId}/preview`,
     ),
-  componentCandidates: (canvasId: string) =>
-    req<ComponentCandidate[]>(`/api/canvases/${canvasId}/component-candidates`),
   componentLibraries: (canvasId: string) => req<ComponentLibrary[]>(`/api/canvases/${canvasId}/component-libraries`),
   canvasLibrary: (canvasId: string) => req<CanvasLibrary>(`/api/canvases/${canvasId}/library`),
   publishLibrary: (canvasId: string, components?: string[]) =>
