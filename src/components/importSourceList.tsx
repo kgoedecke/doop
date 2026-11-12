@@ -1,3 +1,4 @@
+import { BlocksIcon } from './ui/icons'
 import { clientIntegrations } from '@/integrations'
 import { AppIcon } from './ui/brand-mark'
 import type { ImportSource } from './ImportSources'
@@ -12,6 +13,12 @@ export function importSources(t: Translate = translate): ImportSource[] {
       title: t('panels.importWebsite'),
       blurb: t('panels.importWebsiteBlurb'),
       icon: <AppIcon brand="website" />,
+    },
+    {
+      id: 'shadcn',
+      title: t('panels.importShadcn'),
+      blurb: t('panels.importShadcnBlurb'),
+      icon: <BlocksIcon className="size-8" />,
     },
     ...clientIntegrations
       .filter((i) => i.ImportSection && i.importSource)

@@ -1,6 +1,15 @@
 import type { Catalog } from '..'
 
 export const canvas: Catalog['canvas'] = {
+  registryLede: 'Cole a URL pública de um registry.json ou item de registro e escolha o que trazer para este design.',
+  registryItems: 'Itens do registro para importar',
+  registryUrl: 'URL do JSON do registro',
+  registryNote:
+    'Renderiza React como HTML editável e adiciona à lista de componentes. Não requer conta de modelo. Selecione até 20 itens.',
+  registryImport: { one: 'Importar {count} item', other: 'Importar {count} itens' },
+  registryReview: 'Revisar registro',
+  registryFailed: 'Falha ao importar o registro',
+
   toolSelect: 'Selecionar',
   toolHand: 'Mão',
   toolFrame: 'Frame',

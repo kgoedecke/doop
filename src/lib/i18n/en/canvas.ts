@@ -1,5 +1,14 @@
 /** The open canvas: its top bar, side islands, tab strip, zoom pill, presence, onboarding and import flow. */
 export const canvas = {
+  registryLede: 'Paste a public registry.json or registry item URL, then choose what to bring into this design.',
+  registryItems: 'Registry items to import',
+  registryUrl: 'Registry JSON URL',
+  registryNote:
+    'Renders React to editable HTML and adds it to Components. No model account needed. Select up to 20 items.',
+  registryImport: { one: 'Import {count} item', other: 'Import {count} items' },
+  registryReview: 'Review registry',
+  registryFailed: 'Registry import failed',
+
   /* tools (src/lib/tools.ts) */
   toolSelect: 'Select',
   toolHand: 'Hand',

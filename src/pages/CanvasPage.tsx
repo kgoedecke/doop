@@ -1,3 +1,4 @@
+import { RegistryImportSection } from '../components/RegistryImportSection'
 import { CAPTURE_PREFIX, pasteWebCapture } from '../lib/webCapture'
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { canEditOpenCanvas, pickedSelectors, roleOf, useStore } from '../lib/store'
@@ -1765,6 +1766,14 @@ function ImportModal({
                   </Button>
                 </ImportStepFooter>
               </>
+            ) : source === 'shadcn' ? (
+              <RegistryImportSection
+                canvasId={canvasId}
+                busy={busy}
+                onBusy={setBusy}
+                onBack={() => setSource(null)}
+                onDone={onDone}
+              />
             ) : source === 'liveapp' ? (
               <SyncKeysSection canvasId={canvasId} onBack={() => setSource(null)} />
             ) : source === 'github' ? (
