@@ -7,6 +7,7 @@ import {
   INSTANCE_ATTR,
   MAX_COMPONENT_HISTORY,
   OVERRIDES_ATTR,
+  PART_ATTR,
   PROPS_ATTR,
   REV_ATTR,
   USE_TAG,
@@ -327,6 +328,8 @@ function prepareInstances(html: string, ctx: EngineContext) {
     /* only a whole write gets here: nothing more is coming for the content it holds */
     const rendered = renderInstance(def, def, state.overrides, state.instanceId, { ctx, stack: [], final: true })
     if (!rendered) continue
+    /* the key it has is its place in what holds it (a main), not the component's own root key */
+    setAttr(rendered, PART_ATTR, attrOf(found.el, PART_ATTR) ?? null)
     const after = serializeOuter(rendered)
     if (after !== before) edits.push({ start: found.start, end: found.end, text: after })
   }
