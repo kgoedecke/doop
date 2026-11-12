@@ -298,6 +298,7 @@ describe('the resident agent', () => {
     sourceFrames: new Set<string>(),
     verificationFrames: new Set<string>(),
     verifiedFrames: new Set<string>(),
+    seenVerified: new Set<string>(),
     rewriteDrafts: new Map<string, string>(),
     vision: false,
     imagesGenerated: 0,
