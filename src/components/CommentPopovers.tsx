@@ -186,7 +186,8 @@ export function CommentComposer({
         }}
       />
       {!mentioned && (
-        <div className="mb-2 flex max-h-[124px] flex-wrap gap-1 overflow-y-auto">
+        /* Leave room inside the scrollport for the pills' shadow outlines and focus rings. */
+        <div className="-mx-1 mb-2 flex max-h-[124px] flex-wrap gap-1 overflow-y-auto p-1">
           {roster.map((role) => (
             <Button
               key={role.id}
