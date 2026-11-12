@@ -10,6 +10,7 @@ import {
   PROPS_ATTR,
   REV_ATTR,
   USE_TAG,
+  isDeleted,
   type ComponentDef,
   type ComponentIssue,
   type ComponentProp,
@@ -32,6 +33,7 @@ import {
 } from './componentEngine.ts'
 import { adoptFromLibrary, findInLibraries, LibraryAdoptError } from './componentLibrary.ts'
 import { store } from './store.ts'
+import { noteCanvas, WorkBudgetError } from './workBudget.ts'
 import type { Canvas } from '../shared/types.ts'
 
 /**
@@ -58,9 +60,13 @@ export interface LibraryAdoption {
 export function contextFor(canvasId: string, adoption?: LibraryAdoption): EngineContext {
   const defs = () => store.getComponents(canvasId)
   const issues: ComponentIssue[] = []
+  /* an id is exact, deleted or not: markup already on the canvas points at it. A name means
+     the component in use; a deleted one answers to its name only when nothing else has it,
+     so that asking for it says "deleted" rather than "unknown" */
   const local = (ref: string) => {
     const wanted = ref.trim().toLowerCase()
-    return defs().find((def) => def.id === ref) ?? defs().find((def) => def.name.toLowerCase() === wanted)
+    const named = defs().filter((def) => def.name.toLowerCase() === wanted)
+    return defs().find((def) => def.id === ref) ?? named.find((def) => !isDeleted(def)) ?? named[0]
   }
   const find = (ref: string) =>
     local(ref) ?? (adoption && ref ? fromLibrary(canvasId, ref, adoption, issues) : undefined)
@@ -216,6 +222,9 @@ function prepareMains(canvas: Canvas, frameId: string, html: string, by: string,
       })
       continue
     }
+    /* frozen: the main of a deleted component is markup of this frame alone. An edit to it
+       (an old client's save, a paste) changes neither the definition nor its status */
+    if (isDeleted(def)) continue
     const mainElsewhere =
       def.mainFrameId !== null &&
       def.mainFrameId !== frameId &&
@@ -262,7 +271,7 @@ function prepareMains(canvas: Canvas, frameId: string, html: string, by: string,
   }
   /* a main this frame held and no longer does: the component lives on without one */
   for (const def of store.getComponents(canvas.id)) {
-    if (def.mainFrameId !== frameId || !frameId || claimed.has(def.id)) continue
+    if (def.mainFrameId !== frameId || !frameId || claimed.has(def.id) || isDeleted(def)) continue
     if (html.includes(`${COMPONENT_ATTR}="${def.id}"`)) continue
     const saved = { ...def, mainFrameId: null, updatedAt: Date.now(), updatedBy: by }
     store.saveComponent(canvas.id, saved)
@@ -282,6 +291,8 @@ function prepareInstances(html: string, ctx: EngineContext) {
       edits.push({ start: found.start, end: found.end, text: serializeOuter(found.el) })
       continue
     }
+    /* its component was deleted: the instance keeps the markup it has, untouched */
+    if (isDeleted(def)) continue
     const before = serializeOuter(found.el)
     const state = reconcileInstance(found.el, ctx)
     if (!state) continue
@@ -319,6 +330,9 @@ export function prepareFrameHtml(
   }
   const adoption: LibraryAdoption = { by, added: [] }
   const ctx = contextFor(canvas.id, adoption)
+  noteCanvas(canvas.id)
+  /* definitions are replaced, never changed in place: this list is the state to go back to */
+  const definitions = [...store.getComponents(canvas.id)]
   try {
     const expanded = expandUses(incoming, ctx, [], 0, { final: true })
     const mains = prepareMains(canvas, frameId, expanded, by, ctx)
@@ -332,6 +346,9 @@ export function prepareFrameHtml(
       adopted: adoption.added,
     }
   } catch (error) {
+    /* out of budget part of the way: a main folded into its definition, or a component
+       taken up from the library, would outlive the frame write that is now not happening */
+    if (error instanceof WorkBudgetError) restoreDefinitions(canvas.id, definitions)
     /* markup nested past the call stack: the write itself still has to land */
     if (!(error instanceof RangeError)) throw error
     return {
@@ -341,6 +358,15 @@ export function prepareFrameHtml(
       moved: [],
       adopted: adoption.added,
     }
+  }
+}
+
+export function restoreDefinitions(canvasId: string, before: ComponentDef[]) {
+  const kept = new Map(before.map((def) => [def.id, def]))
+  for (const def of [...store.getComponents(canvasId)]) {
+    const earlier = kept.get(def.id)
+    if (!earlier) store.deleteComponent(canvasId, def.id)
+    else if (earlier !== def) store.saveComponent(canvasId, earlier)
   }
 }
 
@@ -382,7 +408,15 @@ export function prepareChunk(
   if (!chunk.toLowerCase().includes(`<${USE_TAG}`)) return { html: chunk, issues: [], adopted: [] }
   const adoption: LibraryAdoption = { by, added: [] }
   const ctx = contextFor(canvas.id, adoption)
-  const expanded = expandUses(chunk, ctx)
+  const definitions = [...store.getComponents(canvas.id)]
+  let expanded: string
+  try {
+    expanded = expandUses(chunk, ctx)
+  } catch (error) {
+    /* a component the chunk took up from the library before it ran out of budget */
+    if (error instanceof WorkBudgetError) restoreDefinitions(canvas.id, definitions)
+    throw error
+  }
   const styles = closureOf(usedComponentIds(expanded), canvas.id)
     .filter((def) => def.css.trim() && !soFar.includes(`${CSS_ATTR}="${def.id}"`))
     .map((def) => `<style ${CSS_ATTR}="${def.id}">\n${def.css}\n</style>`)

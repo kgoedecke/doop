@@ -38,7 +38,10 @@ import { createImportedWebpageFrame, findImportedWebpageFrame } from './webpageI
 import { COMPONENTS, DESIGN_BRIEF, DESIGN_QUALITY, FRAME_STYLES, LEAN_FRAMES, PROTOTYPES } from './guide.ts'
 import { zodToJsonSchema } from 'zod-to-json-schema'
 import { z } from 'zod'
-import { catalogEntry, compactFrameHtml, findComponent, libraryCatalog } from './componentActions.ts'
+import { catalog, compactFrameHtml, findComponent, libraryCatalog } from './componentActions.ts'
+import { activeComponents } from '../shared/components.ts'
+import { settleForRead } from './propagation.ts'
+import { runOperation } from './workBudget.ts'
 import {
   COMPONENT_TOOLS,
   COMPONENT_TOOL_NAMES,
@@ -727,18 +730,18 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
       /* a text-only model would otherwise chase tools whose whole value is
          pixels; steer its verification to the textual surfaces instead */
       /* the same catalog get_canvas gives a connected agent, so reuse is the first thing a run sees */
-      const componentDocs = store.getComponents(canvasId)
+      const componentDocs = activeComponents(store.getComponents(canvasId))
       const componentsBlock =
         componentDocs.length && canvas
           ? [
               {
                 text:
                   `# Components on this canvas\nAnything these cover goes in through <doop-use>, never redrawn:\n\n` +
-                  componentDocs
-                    .map((def) => {
-                      const entry = catalogEntry(canvas, def)
-                      return `- ${entry.signature}${def.description ? ` — ${def.description}` : ''}\n  ${entry.usage}`
-                    })
+                  catalog(canvas, componentDocs)
+                    .map(
+                      (entry) =>
+                        `- ${entry.signature}${entry.description ? ` — ${entry.description}` : ''}\n  ${entry.usage}`,
+                    )
                     .join('\n'),
               },
             ]
@@ -1839,7 +1842,24 @@ export async function execTool(
     content,
   })
 
+  /* one tool call is one operation, as over MCP: a work budget of its own (server/workBudget.ts) */
+  return runOperation(`resident ${block.name}`, canvasId, () =>
+    runResidentTool(canvasId, block, actor, runState, input, ok, fail),
+  )
+}
+
+async function runResidentTool(
+  canvasId: string,
+  block: Anthropic.ToolUseBlockParam,
+  actor: ReturnType<typeof actions.resolveActor>,
+  runState: RunState,
+  input: { frame_id: string } & Record<string, string>,
+  ok: (content: Anthropic.ToolResultBlockParam['content']) => Anthropic.ToolResultBlockParam,
+  fail: (msg: string) => Anthropic.ToolResultBlockParam,
+): Promise<Anthropic.ToolResultBlockParam> {
   try {
+    /* a check right after a component change sees it, not the frame as it was queued */
+    await settleForRead(block.name, [canvasId])
     switch (block.name) {
       case 'set_status': {
         actions.setAgentStatus(canvasId, actor, String(input.status ?? ''))

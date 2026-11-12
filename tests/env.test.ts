@@ -44,6 +44,18 @@ describe('server/env.ts', () => {
     expect(() => stubEnv('DOOP_AGENT_PROVIDER', 'openai')).toThrow(/DOOP_AGENT_PROVIDER/)
   })
 
+  it('refuses a stall log threshold that comes after the exit threshold', () => {
+    vi.stubEnv('STALL_LOG_MS', '90000')
+    vi.stubEnv('STALL_EXIT_MS', '60000')
+    expect(() => reloadEnv()).toThrow(/STALL_LOG_MS: 90000 is greater than STALL_EXIT_MS \(60000\)/)
+    /* either one off, or in order, is fine */
+    vi.stubEnv('STALL_EXIT_MS', '0')
+    expect(() => reloadEnv()).not.toThrow()
+    vi.stubEnv('STALL_LOG_MS', '5000')
+    vi.stubEnv('STALL_EXIT_MS', '60000')
+    expect(() => reloadEnv()).not.toThrow()
+  })
+
   it('reports every bad variable in one error', () => {
     vi.stubEnv('PORT', 'eighty')
     vi.stubEnv('CHROME_NO_SANDBOX', 'yes please')

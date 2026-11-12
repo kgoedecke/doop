@@ -16,11 +16,15 @@ export const components = {
   deleteComponent: 'Delete component',
   deleteConfirmTitle: 'Delete “{name}”?',
   deleteConfirmDescription:
-    'Nothing disappears from your designs: instances stay as plain markup, no longer linked, and the main stays as an element. This cannot be undone.',
+    'Nothing changes in your designs: its instances keep their look and stop following it, and the main stays as an element. You can restore it from any of its instances.',
   deleted: {
-    one: '“{name}” deleted, {count} instance kept as plain markup',
-    other: '“{name}” deleted, {count} instances kept as plain markup',
+    one: '“{name}” deleted. {count} instance keeps its look; restore it from there.',
+    other: '“{name}” deleted. {count} instances keep their look; restore it from any of them.',
   },
+  deletedUnused: '“{name}” deleted',
+  restoreComponent: 'Restore component',
+  restored: '“{name}” restored',
+  restoreFailed: 'Couldn’t restore the component. Please try again.',
   deleteFailed: 'Couldn’t delete the component.',
   goToMain: 'Go to main',
   pullUpdate: 'Pull library update',
@@ -104,6 +108,9 @@ export const components = {
   resetAll: 'Reset all',
   resetAllCount: 'Reset all ({count})',
   detach: 'Detach',
+  mainDeleted: 'Main component deleted',
+  mainDeletedHint:
+    'This instance keeps its look but no longer follows anything. Restore the component to link its instances again, or detach this one.',
   noInstances: 'No instances yet. Copy this element, or place it from Components.',
   reachesInstances: { one: 'Changes here reach {count} instance.', other: 'Changes here reach {count} instances.' },
   descriptionPlaceholder: 'When should this be used? Agents choose by this.',

@@ -1,4 +1,5 @@
-import { parse, serializeOuter, type DefaultTreeAdapterTypes as Tree } from 'parse5'
+import { serializeOuter, type DefaultTreeAdapterTypes as Tree } from 'parse5'
+import { parse } from './workBudget.ts'
 import { CSS_ATTR, DETACHED_CSS_ATTR, HEAD_ATTR, INSTANCE_ATTR } from '../shared/components.ts'
 import { TOKEN_BLOCK_ATTR } from '../shared/designTokens.ts'
 import { FONT_BLOCK_ATTR } from '../shared/fonts.ts'

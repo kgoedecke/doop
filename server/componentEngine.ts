@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto'
-import { parse, parseFragment, serialize, serializeOuter, type DefaultTreeAdapterTypes as Tree } from 'parse5'
+import { serialize, serializeOuter, type DefaultTreeAdapterTypes as Tree } from 'parse5'
+import { parse, parseFragment } from './workBudget.ts'
 import {
   BIND_ATTR,
   COMPONENT_ATTR,
@@ -19,6 +20,7 @@ import {
   SLOT_SUGGEST_ATTR,
   USE_TAG,
   conditionHolds,
+  isDeleted,
   isPropName,
   parseBindings,
   parseCondition,
@@ -1053,6 +1055,15 @@ function expandOne(
     ctx.issues.push({ code: 'unknown_component', message: `no component “${ref}” on this canvas` })
     return ''
   }
+  /* a deleted component takes no new use. One a template already holds (it wears its part
+     key) is not new: a component built from a deleted one keeps rendering as it did */
+  if (isDeleted(def) && attrOf(use, PART_ATTR) === undefined) {
+    ctx.issues.push({
+      code: 'deleted_component',
+      message: `“${def.name}” was deleted from this canvas, so it was not placed. Restore it (restore_component) to use it again, or use another component.`,
+    })
+    return ''
+  }
   const state = stateFromUseAttrs(use, def, ctx)
   const root = renderInstance(def, def, state.overrides, state.instanceId, { ctx, stack, depth, final })
   if (!root) return ''
@@ -1149,7 +1160,11 @@ export function splice(html: string, edits: { start: number; end: number; text: 
  *  What agents read: a screen of 40 buttons costs 40 lines rather than 40 subtrees. */
 export function compactDocument(html: string, ctx: EngineContext): string {
   if (!html.includes(INSTANCE_ATTR) && !html.includes(CSS_ATTR)) return html
-  const instances = findInstancesEverywhere(html)
+  /* an instance of a deleted component stays written out: as <doop-use> it would be a new
+     use of it when the frame is written back, and those are refused */
+  const instances = findInstancesEverywhere(html).filter(
+    (found) => !isDeleted(ctx.find(attrOf(found.el, INSTANCE_ATTR) ?? '')),
+  )
   const edits = instances.map((found) => ({ start: found.start, end: found.end, text: useTagFor(found.el, ctx) }))
   return stripComponentHead(splice(html, edits))
 }

@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState } from 'react'
-import type { ComponentDef } from '../../shared/components'
+import { activeComponents, type ComponentDef } from '../../shared/components'
 import { api, type ComponentCandidate, type ComponentLibrary } from '../lib/api'
 import {
   COMPONENT_DRAG_TYPE,
@@ -93,7 +93,7 @@ export function ComponentsPanel() {
 
   const shown = useMemo(() => {
     const wanted = query.trim().toLowerCase()
-    return [...(components ?? [])]
+    return activeComponents(components)
       .filter((def) => !wanted || `${def.name} ${def.description}`.toLowerCase().includes(wanted))
       .sort((a, b) => a.name.localeCompare(b.name))
   }, [components, query])

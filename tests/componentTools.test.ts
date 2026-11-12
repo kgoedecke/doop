@@ -14,6 +14,7 @@ vi.mock('../server/db/persist.ts', () => ({
 
 import { buildMcpServer } from '../server/mcp.ts'
 import { store } from '../server/store.ts'
+import * as propagation from '../server/propagation.ts'
 import { takeComponentIssues } from '../server/actions.ts'
 import { findComponent } from '../server/componentActions.ts'
 import { previewDocument } from '../server/componentPreview.ts'
@@ -35,6 +36,8 @@ async function call(
   // eslint-disable-next-line typescript/no-explicit-any
 ): Promise<{ data: any; text: string; isError: boolean }> {
   const response = (await client.callTool({ name, arguments: { ...AGENT, ...args } })) as ToolResponse
+  /* instances follow a changed main in the background: tests read the settled canvas */
+  await propagation.whenIdle()
   const texts = response.content.flatMap((block) => (block.type === 'text' ? [block.text ?? ''] : []))
   let data: unknown
   try {
@@ -365,12 +368,24 @@ describe('an agent working with components', () => {
     const canvas = newCanvas()
     await button(canvas.id)
     const frameId = await framed(canvas.id, '<doop-use component="Button" label="Stays"></doop-use>')
+    const before = store.getFrame(frameId)!.html
     const result = await call('delete_component', { canvas_id: canvas.id, component: 'Button' })
-    expect(result.data.instances_detached).toBe(1)
+    expect(result.data.instances_kept).toBe(1)
+    /* a soft delete: no frame is written, the instance is as it was, the definition is kept */
+    expect(store.getFrame(frameId)!.html).toBe(before)
+    expect(store.getComponents(canvas.id).map((def) => def.status)).toEqual(['deleted'])
+    expect((await call('list_components', { canvas_id: canvas.id })).data.components).toEqual([])
+
+    /* cutting the instances loose is asked for, and happens in the background */
+    const detached = await call('delete_component', {
+      canvas_id: canvas.id,
+      component: 'Button',
+      detach_instances: true,
+    })
+    expect(detached.data.detach).toMatchObject({ queued: true, instances: 1 })
     const html = store.getFrame(frameId)!.html
     expect(html).toContain('Stays')
     expect(html).not.toContain('data-doop-instance')
-    expect(store.getComponents(canvas.id)).toEqual([])
   })
 
   it('imports from a library and pulls updates only on request', async () => {

@@ -96,10 +96,18 @@ import {
   type AgentFeedbackCategory,
   type AgentFeedbackKind,
 } from '../shared/agentFeedback.ts'
-import { catalogEntry, compactFrameHtml, findComponent, instancesIn, libraryCatalog } from './componentActions.ts'
+import {
+  catalog,
+  compactFrameHtml,
+  deletedComponentsInUse,
+  findComponent,
+  instancesIn,
+  libraryCatalog,
+} from './componentActions.ts'
 import { COMPONENT_TOOLS, componentWriteNotes, libraryFeatureEvent, runComponentTool } from './componentTools.ts'
 import { previewFrame } from './componentPreview.ts'
-import { INSTANCE_ATTR } from '../shared/components.ts'
+import { activeComponents, INSTANCE_ATTR } from '../shared/components.ts'
+import { usageByComponent } from './componentUsage.ts'
 
 const INSTRUCTIONS = `Doop is a shared multiplayer design canvas: humans and AI agents design together in real time. Canvases contain frames — artboards that render complete HTML documents live for everyone viewing.
 
@@ -609,6 +617,9 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
       const library = fontsForCanvas(c)
       const customAgents = customAgentsForCanvas(c)
       const sharedLibraries = libraryCatalog(c)
+      /* one pass over the canvas's frames answers for the catalog and for what was deleted */
+      const componentUsage = usageByComponent(c)
+      const deletedInUse = deletedComponentsInUse(c, componentUsage)
       const tokens = store.getTokens(canvas_id)
       const tokenThemes = store.getTokenThemes(canvas_id)
       /* design-synced canvases carry a flow map: real user navigation between
@@ -635,9 +646,14 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
               'This canvas has pinned style references — exemplar designs humans marked as "more like this". Call get_reference on the relevant one and match its look (palette, type, spacing) in what you design.',
             ]
           : []),
-        ...(c.components?.length
+        ...(activeComponents(c.components).length
           ? [
               'This canvas has components. Anything they cover goes in through <doop-use> as shown in each entry’s usage, never redrawn by hand.',
+            ]
+          : []),
+        ...(deletedInUse.length
+          ? [
+              'deletedComponents lists components that were deleted while instances of them remain: those instances keep their look, follow nothing and read back as full markup. Leave them as they are unless asked; restore_component brings one back.',
             ]
           : []),
       ]
@@ -661,7 +677,10 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
               htmlBytes: r.html.length,
               pinnedBy: r.pinnedBy,
             })),
-            ...(c.components?.length ? { components: c.components.map((def) => catalogEntry(c, def)) } : {}),
+            ...(activeComponents(c.components).length
+              ? { components: catalog(c, activeComponents(c.components), componentUsage) }
+              : {}),
+            ...(deletedInUse.length ? { deletedComponents: deletedInUse } : {}),
             ...(sharedLibraries.length ? { workspaceLibraries: sharedLibraries } : {}),
             ...(library.length ? { fonts: describeLibrary(library) } : {}),
             ...(customAgents.length
