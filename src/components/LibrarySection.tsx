@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import type { ComponentDef } from '../../shared/components'
+import { activeComponents, type ComponentDef } from '../../shared/components'
 import type { WorkspaceSummary } from '../../shared/types'
 import { api, errorMessage, type CanvasLibrary, type ComponentLibrary, type LibraryChangeEntry } from '../lib/api'
 import { LIBRARY_COMPONENT_DRAG_TYPE, libraryDragData, placeComponent } from '../lib/components'
@@ -447,7 +447,7 @@ export function LibrarySection({
 }) {
   const t = useT()
   const components = useStore((s) => s.canvas?.components)
-  const count = components?.length ?? 0
+  const count = activeComponents(components).length
   /* read each render, not once: the card returns when the canvas reaches its
      fifth component, which can happen with the panel open. Dismissing writes the
      browser's memory, so this state only asks for the render that reads it back */

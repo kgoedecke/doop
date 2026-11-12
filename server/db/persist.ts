@@ -172,6 +172,9 @@ function componentRow(canvasId: string, def: ComponentDef) {
     code: def.code ?? null,
     source: def.source ?? null,
     history: def.history,
+    status: def.status ?? ('active' as const),
+    deletedAt: def.deletedAt ?? null,
+    deletedBy: def.deletedBy ?? null,
     createdAt: def.createdAt,
     updatedAt: def.updatedAt,
     updatedBy: def.updatedBy,
@@ -1142,8 +1145,13 @@ export async function hydrate(): Promise<Hydrated> {
   for (const row of componentRows) {
     const c = byId.get(row.canvasId)
     if (!c) continue
-    const { canvasId: _canvasId, code, source, ...def } = row
-    ;(c.components ??= []).push({ ...def, ...(code ? { code } : {}), ...(source ? { source } : {}) })
+    const { canvasId: _canvasId, code, source, status, deletedAt, deletedBy, ...def } = row
+    ;(c.components ??= []).push({
+      ...def,
+      ...(code ? { code } : {}),
+      ...(source ? { source } : {}),
+      ...(status === 'deleted' ? { status, deletedAt: deletedAt ?? def.updatedAt, deletedBy: deletedBy ?? '' } : {}),
+    })
   }
   for (const g of guidelineRows) {
     const c = byId.get(g.canvasId)

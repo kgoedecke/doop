@@ -1,17 +1,18 @@
 import { useMemo, useState } from 'react'
-import { BIND_ATTR, SLOT_ATTR, type ComponentProp } from '../../shared/components'
+import { BIND_ATTR, SLOT_ATTR, isDeleted, type ComponentProp } from '../../shared/components'
 import type { Frame } from '../../shared/types'
 import { api } from '../lib/api'
 import {
   changeInstance,
   componentContextOf,
   exposeOnMain,
+  restoreDeletedComponent,
   templateValue,
   type ComponentContext,
 } from '../lib/components'
 import { useT } from '../lib/i18n'
 import { isLayerLocked } from '../lib/layerEdits'
-import { useStore } from '../lib/store'
+import { canEditOpenCanvas, useStore } from '../lib/store'
 import { Button } from './ui/button'
 import { ComponentIcon } from './ui/icons'
 import { ImagePicker } from './ImageFill'
@@ -36,10 +37,50 @@ export function ComponentSection({ frame, selector }: { frame: Frame; selector: 
       </header>
       {context.kind === 'main' ? (
         <MainControls key={context.def.id} frame={frame} context={context} />
+      ) : isDeleted(context.def) ? (
+        <DeletedInstanceControls frame={frame} context={context} />
       ) : (
         <InstanceControls frame={frame} context={context} />
       )}
     </section>
+  )
+}
+
+/** An instance whose component was deleted: it keeps its look and follows nothing, until the
+ *  component is restored (every instance is linked again) or this one is detached. */
+function DeletedInstanceControls({
+  frame,
+  context,
+}: {
+  frame: Frame
+  context: Extract<ComponentContext, { kind: 'instance' }>
+}) {
+  const { def, instanceId, rootSelector } = context
+  const t = useT()
+  const canEdit = useStore(canEditOpenCanvas)
+  const locked = isLayerLocked(frame, rootSelector)
+  return (
+    <div data-slot="deleted-component" className="flex flex-col gap-2">
+      <p className="text-caption font-medium text-ink">{t('components.mainDeleted')}</p>
+      <p className="text-caption text-ink-soft">{t('components.mainDeletedHint')}</p>
+      {canEdit && (
+        <div className="flex flex-wrap gap-1.5">
+          <Button size="sm" onClick={() => void restoreDeletedComponent(def)}>
+            {t('components.restoreComponent')}
+          </Button>
+          <Button
+            size="sm"
+            disabled={locked}
+            onClick={() => {
+              const current = useStore.getState().canvas?.frames.find((f) => f.id === frame.id)
+              if (current) void changeInstance(current, { instanceId, detach: true })
+            }}
+          >
+            {t('components.detach')}
+          </Button>
+        </div>
+      )}
+    </div>
   )
 }
 

@@ -213,8 +213,15 @@ get_canvas and list_components show a canvas's components with their props.
 - get_component_preview shows you every variant at once. Look at it after changing a component.
 - Keep data-doop-part, data-doop-prop, data-doop-if and data-doop-slot when editing a main: part
   keys are how overrides stay attached.
-- A deleted component leaves its instances looking the same, as plain markup. To reuse components
-  from another canvas: list_components with libraries=true, import_component, and sync_component
+- update_component returns before the instances have followed: they are rewritten in the
+  background, and its result says how many frames are queued. get_frame and get_frame_screenshot
+  wait a moment for that.
+- delete_component changes no frame: instances keep their exact markup, stop following the
+  component and read back in full (not as <doop-use>); get_canvas lists it under
+  deletedComponents while any remain. Leave those instances alone unless asked. A new
+  <doop-use> of a deleted component is refused: restore_component brings it back, instances
+  linked again. delete_component with detach_instances=true turns them into plain markup for good.
+- To reuse components from another canvas: list_components with libraries=true, import_component, and sync_component
   when list_components says library_update_available.
 - Workspace libraries: get_canvas lists workspaceLibraries, the components the canvas's workspace
   has published. Use one by writing <doop-use> with its name, exactly like a local component; it is

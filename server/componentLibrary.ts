@@ -2,6 +2,7 @@ import {
   MAX_COMPONENTS,
   MAX_COMPONENT_NAME,
   stableJson,
+  isDeleted,
   type ComponentDef,
   type LibraryChange,
   type LibraryComponent,
@@ -78,7 +79,10 @@ export function librariesForCanvas(canvas: Pick<Canvas, 'id' | 'workspaceId'>): 
     if (canvasId === canvas.id || !components.length) continue
     const source = store.getCanvas(canvasId)
     if (!source || source.workspaceId !== canvas.workspaceId) continue
-    libraries.push({ canvasId, name: source.name, components })
+    /* a component its library has deleted is published only as what others are built from
+       (see `publication`): it comes along with them, and is not offered on its own */
+    const offered = components.filter((entry) => !isDeleted(source.components?.find((def) => def.id === entry.id)))
+    if (offered.length) libraries.push({ canvasId, name: source.name, components: offered })
   }
   return libraries.sort((a, b) => a.name.localeCompare(b.name))
 }
@@ -142,9 +146,29 @@ function sameAsPublished(canvasId: string, def: ComponentDef, snapshot: LibraryC
   )
 }
 
-/** A component a library canvas can publish: its own, with a design to show. */
-export function publishable(def: ComponentDef): boolean {
+/** The canvas's own component, with a design to show. */
+function ownDesign(def: ComponentDef): boolean {
   return !def.source?.library && def.rev > 0 && !!def.template
+}
+
+/** A component a library canvas can publish: its own, with a design to show, and in use. */
+export function publishable(def: ComponentDef): boolean {
+  return ownDesign(def) && !isDeleted(def)
+}
+
+/** Everything a publication of this canvas holds: the components it can publish, and the
+ *  deleted ones those are built from. A deleted component is frozen, not gone: a published
+ *  Card that nests a deleted Button still renders that Button, so a canvas using the Card
+ *  needs the Button's snapshot too. It rides along as a dependency only (never offered on
+ *  its own, see `librariesForCanvas`), and leaves the publication when nothing in use is
+ *  built from it any more. */
+function publication(canvas: Canvas): ComponentDef[] {
+  const inUse = (canvas.components ?? []).filter(publishable)
+  const frozen = withDependencies(
+    canvas,
+    inUse.map((def) => def.id),
+  ).filter((def) => isDeleted(def) && ownDesign(def))
+  return [...inUse, ...frozen]
 }
 
 export interface LibraryChangeEntry {
@@ -156,7 +180,7 @@ export interface LibraryChangeEntry {
 /** What publishing this canvas now would do, component by component. */
 export function libraryChanges(canvas: Canvas): LibraryChangeEntry[] {
   const snapshots = publishedOn(canvas.id)
-  const local = (canvas.components ?? []).filter(publishable)
+  const local = publication(canvas)
   const entries: LibraryChangeEntry[] = local.map((def) => {
     const snapshot = snapshots.find((entry) => entry.id === def.id)
     const change: LibraryChange = !snapshot
@@ -231,8 +255,9 @@ export function publishLibrary(
   by: string,
   dryRun = false,
 ): PublishResult {
-  const all = (canvas.components ?? []).filter(publishable)
-  const chosen = withDependencies(canvas, ids ?? all.map((def) => def.id)).filter(publishable)
+  const all = publication(canvas)
+  /* the chosen ones and what they are built from, deleted dependencies included */
+  const chosen = withDependencies(canvas, ids ?? all.map((def) => def.id)).filter((def) => all.includes(def))
   const before = publishedOn(canvas.id)
   const changes = libraryChanges(canvas)
   const changeOf = (id: string) => changes.find((entry) => entry.id === id)
@@ -375,8 +400,14 @@ export function adoptFromLibrary(canvasId: string, snapshot: LibraryComponent, b
   const taken = new Set(local.map((def) => def.name.toLowerCase()))
   const added: ComponentDef[] = []
   for (const entry of missing) {
-    const def = linkedDef(entry, freeLibraryName(entry.name, taken), by)
-    taken.add(def.name.toLowerCase())
+    const linked = linkedDef(entry, freeLibraryName(entry.name, taken), by)
+    /* one its library has deleted comes only as what another is built from: it is deleted
+       here too, so it renders inside that component and is not there to be used by itself */
+    const origin = store.getComponents(entry.canvasId).find((candidate) => candidate.id === entry.id)
+    const def: ComponentDef = isDeleted(origin)
+      ? { ...linked, status: 'deleted', deletedAt: origin?.deletedAt ?? Date.now(), deletedBy: origin?.deletedBy ?? by }
+      : linked
+    if (!isDeleted(def)) taken.add(def.name.toLowerCase())
     store.saveComponent(canvasId, def)
     added.push(def)
   }

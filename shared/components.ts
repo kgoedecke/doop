@@ -106,9 +106,24 @@ export interface ComponentDef {
   source?: { canvasId: string; componentId: string; rev: number; library?: true }
   /** recent earlier states, newest last: rollback and three-way merge of stale saves */
   history: ComponentSnapshot[]
+  /** `deleted` is a soft delete: the definition is kept and frozen, its instances keep
+   *  their markup and stop following it, new uses are refused, and it can be restored.
+   *  Absent means active. */
+  status?: 'active' | 'deleted'
+  deletedAt?: number
+  deletedBy?: string
   createdAt: number
   updatedAt: number
   updatedBy: string
+}
+
+export function isDeleted(def: Pick<ComponentDef, 'status'> | undefined): boolean {
+  return def?.status === 'deleted'
+}
+
+/** The components of a canvas that are in use: everything but the soft-deleted. */
+export function activeComponents<T extends Pick<ComponentDef, 'status'>>(defs: readonly T[] | undefined): T[] {
+  return (defs ?? []).filter((def) => !isDeleted(def))
 }
 
 /** A component as its workspace library last published it. Canvases in the
@@ -165,6 +180,7 @@ export interface InstanceOverrides {
 
 export type ComponentIssueCode =
   | 'unknown_component'
+  | 'deleted_component'
   | 'unknown_prop'
   | 'invalid_prop_value'
   | 'nesting_cycle'

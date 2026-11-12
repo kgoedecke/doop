@@ -18,11 +18,15 @@ export const components: Catalog['components'] = {
   deleteComponent: 'Excluir componente',
   deleteConfirmTitle: 'Excluir “{name}”?',
   deleteConfirmDescription:
-    'Nada some dos seus designs: as instâncias ficam como marcação comum, sem vínculo, e o principal fica como um elemento. Isso não pode ser desfeito.',
+    'Nada muda nos seus designs: as instâncias mantêm a aparência e deixam de seguir o componente, e o principal fica como um elemento. Você pode restaurá-lo a partir de qualquer instância.',
   deleted: {
-    one: '“{name}” excluído, {count} instância mantida como marcação comum',
-    other: '“{name}” excluído, {count} instâncias mantidas como marcação comum',
+    one: '“{name}” excluído. {count} instância mantém a aparência; restaure-o a partir dela.',
+    other: '“{name}” excluído. {count} instâncias mantêm a aparência; restaure-o a partir de qualquer uma.',
   },
+  deletedUnused: '“{name}” excluído',
+  restoreComponent: 'Restaurar componente',
+  restored: '“{name}” restaurado',
+  restoreFailed: 'Não foi possível restaurar o componente. Tente novamente.',
   deleteFailed: 'Não foi possível excluir o componente.',
   goToMain: 'Ir para o principal',
   pullUpdate: 'Puxar atualização da biblioteca',
@@ -110,6 +114,9 @@ export const components: Catalog['components'] = {
   resetAll: 'Redefinir tudo',
   resetAllCount: 'Redefinir tudo ({count})',
   detach: 'Desvincular',
+  mainDeleted: 'Componente principal excluído',
+  mainDeletedHint:
+    'Esta instância mantém a aparência, mas não segue mais nada. Restaure o componente para vincular as instâncias de novo, ou desvincule esta.',
   noInstances: 'Ainda não há instâncias. Copie este elemento ou insira-o a partir de Componentes.',
   reachesInstances: {
     one: 'As alterações aqui chegam a {count} instância.',

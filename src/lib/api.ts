@@ -742,10 +742,18 @@ export const api = {
       method: 'PATCH',
       body: JSON.stringify(body),
     }),
+  /** a soft delete: no frame changes, instances keep their markup, and it can be restored */
   deleteComponent: (canvasId: string, componentId: string) =>
-    req<{ deleted: string; instances_detached: number }>(`/api/canvases/${canvasId}/components/${componentId}`, {
-      method: 'DELETE',
-    }),
+    req<{ deleted: string; instances_kept: number; frames: number }>(
+      `/api/canvases/${canvasId}/components/${componentId}`,
+      { method: 'DELETE' },
+    ),
+  /** bring a deleted component back (`restoreComponent` below puts one back to an earlier revision) */
+  undeleteComponent: (canvasId: string, componentId: string) =>
+    req<{ component: ComponentDef; main: 'kept' | 'written' | 'none' }>(
+      `/api/canvases/${canvasId}/components/${componentId}/undelete`,
+      { method: 'POST' },
+    ),
   restoreComponent: (canvasId: string, componentId: string, rev: number) =>
     req<ComponentImpact>(`/api/canvases/${canvasId}/components/${componentId}/restore`, {
       method: 'POST',

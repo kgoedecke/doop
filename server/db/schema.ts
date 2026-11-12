@@ -590,6 +590,11 @@ export const components = pgTable(
     code: jsonb('code').$type<ComponentCode>(),
     source: jsonb('source').$type<NonNullable<ComponentDef['source']>>(),
     history: jsonb('history').$type<ComponentSnapshot[]>().notNull(),
+    /** 'deleted' is a soft delete: the row stays, so instances keep what they were
+     *  rendered from and the component can be restored */
+    status: text('status').$type<'active' | 'deleted'>().notNull().default('active'),
+    deletedAt: bigint('deleted_at', { mode: 'number' }),
+    deletedBy: text('deleted_by'),
     createdAt: bigint('created_at', { mode: 'number' }).notNull(),
     updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
     updatedBy: text('updated_by').notNull(),

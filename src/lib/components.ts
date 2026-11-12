@@ -7,6 +7,8 @@ import {
   PROPS_ATTR,
   SLOT_ATTR,
   parseBindings,
+  activeComponents,
+  isDeleted,
   toPropName,
   type ComponentDef,
 } from '../../shared/components'
@@ -92,7 +94,8 @@ export function componentContextOf(html: string, selector: string, defs: Compone
   }
   const main = el.closest(`[${COMPONENT_ATTR}]`)
   const def = main && defs.find((candidate) => candidate.id === main.getAttribute(COMPONENT_ATTR))
-  if (!main || !def) return null
+  /* the main of a deleted component is ordinary markup: editing it edits this frame only */
+  if (!main || !def || isDeleted(def)) return null
   return { kind: 'main', def, isRoot: main === el, selector, rootSelector: elementPath(main) }
 }
 
@@ -175,7 +178,7 @@ function suggestedName(frame: Frame, selector: string): string {
     .filter(Boolean)
     .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
     .join(' ')
-  const taken = new Set((useStore.getState().canvas?.components ?? []).map((def) => def.name.toLowerCase()))
+  const taken = new Set(activeComponents(useStore.getState().canvas?.components).map((def) => def.name.toLowerCase()))
   let name = base
   for (let n = 2; taken.has(name.toLowerCase()); n++) name = `${base} ${n}`
   return name
@@ -323,15 +326,35 @@ export async function dropComponent(componentId: string, client: ClientPoint) {
   }
 }
 
-/** Delete a component: its instances stay as plain markup, its main as an element. Not undoable. */
+/** Delete a component. Nothing on the canvas changes: its instances keep their markup and
+ *  stop following it, and it can be restored from any of them (restoreDeletedComponent). */
 export async function removeComponent(def: ComponentDef) {
   const s = useStore.getState()
   if (!s.canvas) return
   try {
-    const { instances_detached } = await api.deleteComponent(s.canvas.id, def.id)
-    useStore.getState().pushNotice(t('components.deleted', { name: def.name, count: instances_detached }))
+    const { instances_kept } = await api.deleteComponent(s.canvas.id, def.id)
+    useStore
+      .getState()
+      .pushNotice(
+        instances_kept
+          ? t('components.deleted', { name: def.name, count: instances_kept })
+          : t('components.deletedUnused', { name: def.name }),
+      )
   } catch (error) {
     notifyFailure(error, t('components.deleteFailed'))
+  }
+}
+
+/** Bring a deleted component back: its instances, never changed, follow it again. */
+export async function restoreDeletedComponent(def: ComponentDef) {
+  const s = useStore.getState()
+  if (!s.canvas) return
+  try {
+    const { component } = await api.undeleteComponent(s.canvas.id, def.id)
+    if (useStore.getState().canvas?.id === s.canvas.id) useStore.getState().setComponentLocal(component.id, component)
+    useStore.getState().pushNotice(t('components.restored', { name: component.name }))
+  } catch (error) {
+    notifyFailure(error, t('components.restoreFailed'))
   }
 }
 

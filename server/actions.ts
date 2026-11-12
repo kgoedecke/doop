@@ -1,8 +1,10 @@
 import { nanoid } from 'nanoid'
 import { MAX_DECISION_CHARS } from '../shared/designDecisions.ts'
 import { env } from './env.ts'
-import { dedupeIssues, prepareChunk, prepareFrameHtml, referencesComponent } from './components.ts'
-import { COMPONENT_ATTR, type ComponentDef, type ComponentIssue } from '../shared/components.ts'
+import * as propagation from './propagation.ts'
+import { runOperation, WorkBudgetError } from './workBudget.ts'
+import { dedupeIssues, prepareChunk, prepareFrameHtml, referencesComponent, restoreDefinitions } from './components.ts'
+import { COMPONENT_ATTR, isDeleted, type ComponentDef, type ComponentIssue } from '../shared/components.ts'
 import { MAX_PAGES, PageLimitError, store } from './store.ts'
 import * as persist from './db/persist.ts'
 import * as thumbs from './thumbs.ts'
@@ -1631,11 +1633,12 @@ export async function restoreFrameVersion(
   const replaced = { html: before.html, width: before.width, height: before.height }
   if (before.html === version.html && before.width === version.width && before.height === version.height)
     return { frame: before, replaced }
+  /* prepared first: a refusal (the work budget) must find the frame's stream as it was */
+  const prepared = prepareWrite(before.canvasId, frameId, version.html, before.html, actor.name)
   /* whoever restores takes over: any live stream or playback ends */
   finishStream(frameId, false)
   finishReveal(frameId)
   const prior = priorState(before)
-  const prepared = prepareWrite(before.canvasId, frameId, version.html, before.html, actor.name)
   const patch = { html: prepared.html, width: version.width, height: version.height }
   const frame = store.updateFrame(frameId, patch, actor.name)
   if (!frame) return undefined
@@ -1762,6 +1765,8 @@ function finishStream(frameId: string, logDone: boolean) {
   if (!s) return
   streams.delete(frameId)
   streamIssues.delete(frameId)
+  /* background work that waited for this stream (a detach-all) takes its turn now */
+  propagation.resumeFrame(frameId)
   const current = store.getFrame(frameId)
   if (!current) return
   /* a stream that ends without its done chunk (the agent went idle, or a
@@ -1820,7 +1825,7 @@ export function expireIdleStreams(now = Date.now()) {
   for (const [frameId, s] of streams) {
     if (now - s.lastActivity <= STREAM_IDLE_MS) continue
     const before = store.getFrame(frameId)
-    const prepared = before ? prepareWrite(before.canvasId, frameId, before.html, before.html, s.actor.name) : undefined
+    const prepared = before ? settleIdleStream(before, s.actor) : undefined
     if (before && prepared && prepared.html !== before.html) {
       const prior = priorState(before)
       const frame = store.updateFrame(frameId, { html: prepared.html }, s.actor.name)!
@@ -1834,6 +1839,21 @@ export function expireIdleStreams(now = Date.now()) {
     }
     finishStream(frameId, false)
     if (before && prepared?.changed.length) propagateFromFrameWrite(before.canvasId, prepared.changed, s.actor, frameId)
+  }
+}
+
+/** The settling pass of a stream nobody closed, as an operation of its own. It runs on a
+ *  timer, where nothing would catch a refusal: a frame over the work budget stays as its
+ *  stream left it, and its next write settles it. */
+function settleIdleStream(frame: Frame, actor: Actor) {
+  try {
+    return runOperation(`settle stream of frame ${frame.id}`, frame.canvasId, () =>
+      prepareWrite(frame.canvasId, frame.id, frame.html, frame.html, actor.name),
+    )
+  } catch (error) {
+    if (!(error instanceof WorkBudgetError)) throw error
+    console.error(`[streams] ${error.message}`)
+    return undefined
   }
 }
 
@@ -1951,6 +1971,11 @@ function aliasesLast(tokens: DesignToken[]): DesignToken[] {
 }
 
 /** A component's own line in the activity feed. */
+/** A component that is no longer on the canvas at all (an import taken back): not a soft delete. */
+export function broadcastComponentGone(canvasId: string, id: string, actor: Actor) {
+  broadcast(canvasId, { type: 'component', id, component: null, actor })
+}
+
 export function logComponent(canvasId: string, actor: Actor, line: string) {
   logActivity(canvasId, actor, line)
   touch(canvasId, actor)
@@ -1989,87 +2014,89 @@ export function broadcastCustomAgents(scope: { workspaceId: string } | { ownerId
   }
 }
 
-export function broadcastComponentDeleted(canvasId: string, id: string, actor: Actor) {
-  broadcast(canvasId, { type: 'component', id, component: null, actor })
-}
+export type PropagationReport = propagation.DrainReport
 
-export interface PropagationReport {
-  components: string[]
-  frames: { id: string; name: string; approvalLost: boolean }[]
-}
-
-/** A frame write that changed a main. Normally every other frame using it is brought up
- *  to date at once; with DOOP_DEFER_COMPONENT_PROPAGATION each catches up on its own next
- *  write instead (prepareFrameHtml upgrades instances), because the synchronous sweep is
- *  unbounded on large component libraries and blocked the event loop for minutes. */
+/** A frame write that changed a main. Every other frame using it is brought up to date in
+ *  the background (server/propagation.ts); with DOOP_DEFER_COMPONENT_PROPAGATION each
+ *  catches up on its own next write instead (prepareFrameHtml upgrades instances). */
 function propagateFromFrameWrite(canvasId: string, changed: ComponentDef[], actor: Actor, originFrameId: string) {
   if (env.DOOP_DEFER_COMPONENT_PROPAGATION) {
     for (const def of changed) broadcast(canvasId, { type: 'component', id: def.id, component: def, actor })
     return
   }
-  propagateComponents(canvasId, changed, actor, originFrameId)
+  queuePropagation(canvasId, changed, actor, originFrameId)
 }
 
-/** A main changed: bring every frame using it up to date, and tell the room. Frames
- *  mid-stream catch up when their stream ends, since prepareFrameHtml upgrades instances. */
-export function propagateComponents(
-  canvasId: string,
-  changed: ComponentDef[],
-  actor: Actor,
-  originFrameId?: string,
-): PropagationReport {
-  const report: PropagationReport = { components: [], frames: [] }
-  const queue = [...changed]
-  const seen = new Set<string>()
-  const touched = new Map<string, PropagationReport['frames'][number]>()
-  for (let def = queue.shift(); def; def = queue.shift()) {
-    if (seen.has(def.id)) continue
-    seen.add(def.id)
-    report.components.push(def.name)
-    broadcast(canvasId, { type: 'component', id: def.id, component: def, actor })
-    const canvas = store.getCanvas(canvasId)
-    if (!canvas) break
-    for (const frame of [...canvas.frames]) {
-      if (frame.id === originFrameId && !seen.has(`origin:${frame.id}`)) {
-        seen.add(`origin:${frame.id}`)
-        continue
-      }
-      /* a one-shot reveal is only playback of what is already stored, so it updates like any frame */
-      if (streams.has(frame.id) || !referencesComponent(frame.html, def.id)) continue
-      const prepared = prepareFrameHtml(canvas, frame.id, frame.html, actor.name, frame.html)
-      queue.push(...prepared.changed)
-      /* the ordinary write's font pass too: a main that took up a library family
-         brings its face along to every frame it reaches */
-      const html = withCanvasFaces(canvasId, prepared.html)
-      if (html === frame.html) continue
-      const prior = priorState(frame)
-      const wasApproved = frame.approval?.status === 'ready_for_dev'
-      const updated = store.updateFrame(frame.id, { html }, actor.name)
-      if (!updated) continue
-      noteHtmlChange(prior, actor, true)
-      broadcast(canvasId, { type: 'frame:updated', frame: updated, actor })
-      touched.set(frame.id, {
-        id: frame.id,
-        name: frame.name,
-        approvalLost: wasApproved || !!touched.get(frame.id)?.approvalLost,
-      })
-    }
-  }
-  report.frames = [...touched.values()]
-  if (report.frames.length) {
-    const lost = report.frames.filter((frame) => frame.approvalLost).length
-    const count = report.frames.length
-    logActivity(
-      canvasId,
-      actor,
-      `updated ${report.components.map((name) => `“${name}”`).join(', ')} in ${count} frame${count === 1 ? '' : 's'}${
-        lost ? `; ${lost} approved frame${lost === 1 ? '' : 's'} now need${lost === 1 ? 's' : ''} review` : ''
-      }`,
-    )
-    touch(canvasId, actor)
-  }
-  return report
+/** A main changed: tell the room now, and queue every frame using it to be brought up to
+ *  date, one per tick. Returns at once; nothing is read or rewritten here. `originFrameId`
+ *  is the frame whose write this came from, which already has the change. */
+export function queuePropagation(canvasId: string, changed: ComponentDef[], actor: Actor, originFrameId?: string) {
+  for (const def of changed) broadcast(canvasId, { type: 'component', id: def.id, component: def, actor })
+  propagation.enqueue(
+    'propagate',
+    canvasId,
+    /* nothing follows a deleted component: its instances keep the markup they have */
+    changed.filter((def) => !isDeleted(def)).map((def) => def.id),
+    actor,
+    { exceptFrameId: originFrameId },
+  )
 }
+
+/** One frame's turn in the queue: what the synchronous sweep did per frame. An ordinary
+ *  write, so history is filed, sign-off on an approved frame moves to needs_review and the
+ *  room sees frame:updated. A frame mid-stream catches up when its stream ends. */
+function propagateIntoFrame(
+  canvasId: string,
+  frameId: string,
+  componentIds: string[],
+  actor: Actor,
+): propagation.FrameOutcome {
+  const canvas = store.getCanvas(canvasId)
+  const frame = store.getFrame(frameId)
+  if (!canvas || !frame || frame.canvasId !== canvasId) return {}
+  /* a one-shot reveal is only playback of what is already stored, so it updates like any frame */
+  const followed = componentIds.filter((id) => !isDeleted(canvas.components?.find((def) => def.id === id)))
+  if (streams.has(frame.id) || !followed.some((id) => referencesComponent(frame.html, id))) return {}
+  const stamp = frame.updatedAt
+  const prepared = prepareFrameHtml(canvas, frame.id, frame.html, actor.name, frame.html)
+  /* a main in this frame that is built from what changed: its own instances are next */
+  if (prepared.changed.length) queuePropagation(canvasId, prepared.changed, actor)
+  /* the ordinary write's font pass too: a main that took up a library family
+     brings its face along to every frame it reaches */
+  const html = withCanvasFaces(canvasId, prepared.html)
+  const latest = store.getFrame(frameId)
+  if (!latest) return {}
+  /* written underneath the preparation: what was prepared is of an older frame */
+  if (latest.updatedAt !== stamp) return { requeue: true }
+  if (html === latest.html) return {}
+  const prior = priorState(latest)
+  const wasApproved = latest.approval?.status === 'ready_for_dev'
+  const updated = store.updateFrame(latest.id, { html }, actor.name)
+  if (!updated) return {}
+  noteHtmlChange(prior, actor, true)
+  broadcast(canvasId, { type: 'frame:updated', frame: updated, actor })
+  return { touched: { id: updated.id, name: updated.name, approvalLost: wasApproved } }
+}
+
+function propagationDrained(canvasId: string, report: PropagationReport, actor: Actor) {
+  if (!report.frames.length) return
+  const names = report.components.flatMap((id) => {
+    const def = store.getComponents(canvasId).find((candidate) => candidate.id === id)
+    return def ? [`“${def.name}”`] : []
+  })
+  const lost = report.frames.filter((frame) => frame.approvalLost).length
+  const count = report.frames.length
+  logActivity(
+    canvasId,
+    actor,
+    `updated ${names.join(', ')} in ${count} frame${count === 1 ? '' : 's'}${
+      lost ? `; ${lost} approved frame${lost === 1 ? '' : 's'} now need${lost === 1 ? 's' : ''} review` : ''
+    }`,
+  )
+  touch(canvasId, actor)
+}
+
+propagation.registerFrameTask('propagate', { frame: propagateIntoFrame, drained: propagationDrained })
 
 export function appendFrameHtml(
   frameId: string,
@@ -2089,14 +2116,14 @@ export function appendFrameHtml(
   const escaped = starting ? looksEscapedHtml(chunk) : (streams.get(frameId)?.escaped ?? false)
   const piece = escaped ? decodeEscapedHtml(chunk) : chunk
   const canvas = store.getCanvas(before.canvasId)
+  /* the chunk's own pass can take up a library component, and the last chunk's whole-frame
+     pass below can still be refused (the work budget): what the first saved goes back then */
+  const definitions = [...store.getComponents(before.canvasId)]
   const chunked = canvas
     ? prepareChunk(canvas, piece, opts.start ? '' : before.html, actor.name)
     : { html: piece, issues: [], adopted: [] }
-  announceAdopted(before.canvasId, chunked.adopted, actor, true)
   const expanded = chunked.html
   const carried = [...(starting ? [] : (streamIssues.get(frameId) ?? [])), ...chunked.issues]
-  if (opts.done) streamIssues.delete(frameId)
-  else streamIssues.set(frameId, carried)
   /* the last chunk settles the whole document: a <doop-use> split across
      chunks, the component stylesheets, a main written in the stream, the
      faces of the library fonts it names. Until then each chunk gets the
@@ -2105,16 +2132,21 @@ export function appendFrameHtml(
      until then the block stays as written, under the names the frame uses. */
   const joined = opts.start ? expanded : before.html + expanded
   const prepared = opts.done
-    ? prepareWrite(before.canvasId, frameId, joined, before.html, actor.name, carried)
+    ? finalChunkPass(before, joined, actor, carried, definitions)
     : {
         html: pendingRenames.has(frameId) ? joined : withCanvasFacesMidStream(before.canvasId, joined),
         changed: [] as ComponentDef[],
       }
   const html = prepared.html
+  /* only now, with the last chunk's pass done: a refused chunk leaves what the stream had to say */
+  if (opts.done) streamIssues.delete(frameId)
+  else streamIssues.set(frameId, carried)
   const prior = priorState(before)
   const frame = store.updateFrame(frameId, { html }, actor.name)!
   /* the opening chunk replaces the design; every later one extends this burst */
   noteHtmlChange(prior, actor, !starting)
+  /* said once the chunk is in the frame: a refused chunk has told the room nothing */
+  announceAdopted(before.canvasId, chunked.adopted, actor, true)
 
   if (starting) {
     finishReveal(frameId) /* a live stream overrides any one-shot playback in flight */
@@ -2141,6 +2173,23 @@ export function appendFrameHtml(
 
   touch(frame.canvasId, actor, frameId)
   return frame
+}
+
+/** The whole-frame pass of a stream's last chunk. Refused, the components its chunk had
+ *  already taken up from the library go back too: nothing of the chunk is kept. */
+function finalChunkPass(
+  before: Frame,
+  joined: string,
+  actor: Actor,
+  carried: ComponentIssue[],
+  definitions: ComponentDef[],
+) {
+  try {
+    return prepareWrite(before.canvasId, before.id, joined, before.html, actor.name, carried)
+  } catch (error) {
+    if (error instanceof WorkBudgetError) restoreDefinitions(before.canvasId, definitions)
+    throw error
+  }
 }
 
 /* ------------------------------------------------------------------ */
@@ -2366,6 +2415,12 @@ export function setFrameApproval(
     frameId,
   )
   return frame
+}
+
+/** An agent is appending to this frame right now. A one-shot reveal does not count: it is
+ *  only playback of what is already stored, so background work may rewrite the frame. */
+export function isFrameMidStream(frameId: string): boolean {
+  return streams.has(frameId)
 }
 
 export function isFrameStreaming(frameId: string): boolean {

@@ -6,6 +6,7 @@ import {
   createComponentFromElement,
   createComponentFromHtml,
   deleteComponent,
+  detachAllInstances,
   findComponent,
   findComponentCandidates,
   importableEntry,
@@ -18,6 +19,7 @@ import {
   libraryStatus,
   mayPublishFrom,
   publishToLibrary,
+  restoreComponent,
   restoreComponentVersion,
   syncComponent,
   unpublishFromLibrary,
@@ -37,6 +39,7 @@ import {
 import { z } from 'zod'
 import { previewDocument } from './componentPreview.ts'
 import { codeSchema, propSchema } from './componentTools.ts'
+import { activeComponents } from '../shared/components.ts'
 import { canvasPages, framePageId, samePages } from '../shared/pages.ts'
 import { normalizePageBackground } from '../shared/pageBackground.ts'
 import { MAX_STACK_WRITES, type StackWrite } from '../shared/frameStack.ts'
@@ -95,6 +98,8 @@ import { startMcpTokenPrune } from './mcpTokens.ts'
 import { integrationsRouter, relayDesktopCallback } from './integrations.ts'
 import { extensions } from './extensions.ts'
 import * as workspaces from './workspaces.ts'
+import { startStallWatchdog } from './stallWatchdog.ts'
+import { beginOperation, endOperation, withinOperation, WorkBudgetError } from './workBudget.ts'
 import * as billing from './billing.ts'
 import * as demo from './demo.ts'
 import { db, initDb } from './db/index.ts'
@@ -430,6 +435,18 @@ app.get('/healthz', (_req, res) => res.json({ ok: true }))
 /* how many canvases have their frame HTML in memory (store.load / evictIdle) */
 app.get('/healthz/store', (_req, res) => {
   res.json(store.stats())
+})
+
+/* every request is one operation: the component engine's work budget is counted against
+   it, and the stall watchdog can name it while it runs (server/workBudget.ts) */
+app.use((req, res, next) => {
+  const operation = beginOperation(`${req.method} ${req.path}`, canvasOfPath(req.path))
+  res.once('close', () => {
+    /* an event stream is open for as long as its reader is there: not a slow operation */
+    operation.quiet = String(res.getHeader('content-type') ?? '').includes('text/event-stream')
+    endOperation(operation)
+  })
+  withinOperation(operation, next)
 })
 
 /* The headless renderer's counters, for an uptime check that alerts when
@@ -2408,6 +2425,12 @@ function componentBody<T>(res: express.Response, schema: z.ZodType<T>, body: unk
   return undefined
 }
 
+function canvasOfPath(path: string): string | undefined {
+  const [, kind, id] = /^\/api\/(canvases|frames)\/([^/]+)/.exec(path) ?? []
+  if (!id) return undefined
+  return kind === 'canvases' ? id : store.getFrame(id)?.canvasId
+}
+
 function componentRoute(res: express.Response, run: () => unknown) {
   try {
     res.json(run())
@@ -2427,10 +2450,17 @@ function componentRoute(res: express.Response, run: () => unknown) {
   }
 }
 
+/** A request the component engine refused for costing too much: nothing was written. */
+const workBudgetRefusal: express.ErrorRequestHandler = (error, _req, res, next) => {
+  if (!(error instanceof WorkBudgetError) || res.headersSent) return next(error)
+  res.status(422).json({ error: error.message, code: 'work_budget_exceeded' })
+}
+
 app.get('/api/canvases/:id/components', (req, res) => {
   const canvas = requireCanvas(req, res, req.params.id, 'view')
   if (!canvas) return
-  res.json((canvas.components ?? []).map((def) => componentDetail(canvas, def)))
+  /* the components in use; the soft-deleted ride along in the canvas itself (canvas.components) */
+  res.json(activeComponents(canvas.components).map((def) => componentDetail(canvas, def)))
 })
 
 /* what this canvas can take components from: its workspace's published libraries
@@ -2478,7 +2508,7 @@ app.get('/api/canvases/:id/library', (req, res) => {
     /* the workspace's publish setting, for this viewer; editing the canvas is a separate question */
     canPublish: mayPublishFrom(canvas, req.user?.id),
     ...libraryStatus(canvas),
-    updates: (canvas.components ?? []).flatMap((def) => {
+    updates: activeComponents(canvas.components).flatMap((def) => {
       const origin = originOf(canvas, def)
       return origin && def.source && origin.rev > def.source.rev
         ? [{ id: def.id, name: def.name, instances: usageOf(canvas, def.id).instances }]
@@ -2659,6 +2689,20 @@ app.delete('/api/canvases/:id/components/:componentId', (req, res) => {
   const canvas = requireCanvas(req, res, req.params.id, 'edit')
   if (!canvas) return
   componentRoute(res, () => deleteComponent(canvas.id, req.params.componentId, userActor(req)))
+})
+
+/* a deleted component back in use (the `/restore` beside it puts a component back to an earlier revision) */
+app.post('/api/canvases/:id/components/:componentId/undelete', (req, res) => {
+  const canvas = requireCanvas(req, res, req.params.id, 'edit')
+  if (!canvas) return
+  componentRoute(res, () => restoreComponent(canvas.id, req.params.componentId, userActor(req)))
+})
+
+/* every instance of a component turned into plain markup, in the background queue */
+app.post('/api/canvases/:id/components/:componentId/detach-instances', (req, res) => {
+  const canvas = requireCanvas(req, res, req.params.id, 'edit')
+  if (!canvas) return
+  componentRoute(res, () => detachAllInstances(canvas.id, req.params.componentId, userActor(req)))
 })
 
 app.post('/api/canvases/:id/components/:componentId/restore', (req, res) => {
@@ -3238,6 +3282,9 @@ if (env.isProduction) {
 
 /* ------------------------------------------------- websocket */
 
+/* after every route: a synchronous handler that ran out of work budget answers 422 */
+app.use(workBudgetRefusal)
+
 const server = http.createServer(app)
 const wss = new WebSocketServer({ server, path: '/ws' })
 
@@ -3487,6 +3534,8 @@ server.listen(PORT, () => {
       ? '⟡ image generation  on — each user’s connected ChatGPT/OpenAI account, else this server’s OPENAI_API_KEY'
       : '⟡ image generation  on for users with a connected ChatGPT/OpenAI account only (set OPENAI_API_KEY to cover everyone else)',
   )
+  /* from here on a blocked event loop is noticed from outside it (server/stallWatchdog.ts) */
+  startStallWatchdog()
   /* automations fire from here: one tick a minute over the due rows */
   startScheduler()
   startMcpTokenPrune()

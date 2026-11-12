@@ -25,7 +25,7 @@ through tools, and read them back in a short form.
 
 Instances are **materialized**: the frame's HTML holds the full markup. Everything that reads frame HTML
 (iframes, thumbnails, PDF and image export, comments, Layers) works unchanged, and a deleted
-component loses nothing visually.
+component loses nothing visually: deleting writes no frame at all (see Deleting and restoring).
 
 - **Main**: an element with `data-doop-component="<id>"`. Editing it with any tool edits the component.
   A copy of a main elsewhere becomes an instance. If it disappears the component lives on with no main;
@@ -76,15 +76,112 @@ style properties to a part override; a deleted element to `hidden`; moved or add
 override on that one element, which stays linked above and beside. Setting something back to the
 template's value removes the override.
 
-`propagateComponents` then rewrites each referencing frame as an ordinary write: history is filed, sign-off
-on an approved frame moves to `needs_review`, the room sees `frame:updated` and a `component` message, and
-one activity line names the frames. A frame mid-stream catches up when its stream ends, including one whose agent went silent.
+A changed main is then carried to the frames using it **in the background** (`server/propagation.ts`): the
+write that changed it only queues the component (`actions.queuePropagation`) and returns. The queue is per
+canvas and per frame, visits ONE frame per event-loop tick (`setImmediate` between frames) and lets canvases
+take turns, so no request rewrites a canvas synchronously; a frame waits once however many components ask
+for it, and a canvas with work pending stays loaded and held. Each visit is an ordinary write: history is
+filed, sign-off on an approved frame moves to `needs_review`, the room sees `frame:updated` (the `component`
+message goes out when the change is queued), and one activity line names the frames when the canvas's queue
+drains. A frame written while it was being prepared is queued again rather than overwritten. A frame
+mid-stream catches up when its stream ends, including one whose agent went silent. `update_component`
+reports `propagation: { status: 'queued' | 'deferred' | 'none', frames }`; `update_library_everywhere` waits
+for each canvas's queue and reports what it changed. Queued work is in memory: after a restart, a frame not
+reached yet catches up on its own next write. `DOOP_DEFER_COMPONENT_PROPAGATION` still skips the queue for
+frame writes.
+
+## Deleting and restoring
+
+Delete is **soft** (`status: 'deleted'`, `deletedAt`, `deletedBy` on the definition; migration
+`0058_component_soft_delete`). `deleteComponent` marks the definition and writes **no frame**: it used to
+detach every instance on every frame in one synchronous request.
+
+- **Instances** of a deleted component keep their stored markup byte for byte and are left out of
+  everything that follows a main: `prepareInstances` skips them (no reconcile, no upgrade), the propagation
+  queue drops deleted ids, and their stylesheet stays in the head (`closureOf` still finds the definition).
+  They read back in full, not as `<doop-use>` (`compactDocument`), and take no props or overrides
+  (`changeInstances` refuses; detaching one still works).
+- **New uses** are refused: a `<doop-use>` naming a deleted component is left out with a
+  `deleted_component` issue, and `insert_instance` fails. A name resolves to the component in use first, so
+  a new component may take a deleted one's name.
+- **Its main** is frozen: markup carrying the marker stays where it is as ordinary markup of that frame. An
+  edit to it (an old client's save, a paste) changes only that frame, never the definition, and does not
+  bring the component back (`prepareMains` skips it).
+- **Nested use**: a component built from a deleted one keeps rendering as it did. A `<doop-use>` that
+  already wears a part key is a template's own, not a new use, so the outer component's main, its template
+  and new instances of it still expand the deleted definition, frozen at its last revision.
+- **Restore** (`restoreComponent`): active again under its name, or `<name> (restored)` if that was given
+  away. The main is the markup still carrying the marker, re-read through an ordinary write so that edits
+  made to it meanwhile become a new revision; if none is left, a main is written from the kept definition.
+- **Detach all** (`detachAllInstances`) is its own, explicit act: the `detach` task of the background queue
+  (`server/propagation.ts`), one frame per tick, each an ordinary write. A frame an agent is streaming into is not rewritten under it: its request is
+  kept outside the queue (`defer`) and resumed when the stream closes or is abandoned (`finishStream` →
+  `propagation.resumeFrame`). It is not undone by a restore.
+- Surfaces: `DELETE /api/canvases/:id/components/:componentId`, `POST …/undelete`,
+  `POST …/detach-instances`; MCP and the resident agent share `delete_component` (with
+  `detach_instances`) and `restore_component`; `get_canvas` lists `deletedComponents` that still have
+  instances; `GET …/components` and every catalog list the components in use only (`activeComponents`).
+  In the editor, Delete in the Components panel soft-deletes, and the Design tab on an instance of a
+  deleted component shows "Main component deleted" with Restore and Detach (`ComponentSection.tsx`).
+- **Libraries**: a library's publication holds the components it can publish and the deleted ones those
+  are built from (`publication` in `componentLibrary.ts`), so a published Card that nests a deleted Button
+  still brings its Button. Such a snapshot is a dependency only: `librariesForCanvas` does not offer it,
+  a canvas adopting it gets it already deleted, and it leaves the publication once nothing in use is built
+  from it. On the consuming side a locally deleted link is frozen: `pullFromLibrary` (sync_component and
+  update everywhere), its dry-run preview and a copy import's sync skip it, so its template, CSS and
+  revision stay as they were while the component built from it moves on. A copy import (`import_component`
+  from a canvas that is not a workspace library) brings the deleted components its target is built from
+  the same way: copied as they stand, still deleted, with no main. Tests:
+  `libraryDeletedComponents.test.ts`.
+- A deleted definition is never purged, and does not count towards `MAX_COMPONENTS`.
+
+Tests: `componentSoftDelete.test.ts`, `componentSoftDeleteRoutes.test.ts`,
+`componentSectionDeleted.test.tsx`.
+
+## Work budget
+
+The engine is synchronous, and what it costs is parsing. Every engine parse goes through `parse` /
+`parseFragment` in `server/workBudget.ts`, which charge the **operation** they run in: an
+`AsyncLocalStorage` context opened per HTTP request (middleware in `server/index.ts`), per MCP tool call
+(`withArgsCanvases`), per resident tool call (`execTool`), per frame of the propagation queue and for an
+idle stream's settling pass. An operation may hand the parser `DOOP_WORK_BUDGET_PARSE_MB` (96) of HTML and
+spend `DOOP_WORK_BUDGET_MS` (2000) inside it; the time is parser time, not wall time, so a tool call that
+awaits a render is not charged for the wait. Past either limit the parse throws `WorkBudgetError`, which
+names the operation and the canvas: REST answers 422 `work_budget_exceeded`, MCP and the resident agent
+return it as the tool's error, and the queue skips that frame and leaves it materialized as it was.
+`prepareFrameHtml` puts back any definition it had already saved (a main folded in, a library component
+taken up), and `updateComponent` its own, so a refused write leaves nothing behind. The budget is
+checked before a parse (bytes that do not fit are never parsed) and again after it, so the parse that took
+an operation over its time is refused itself, including an operation's last one. Every write therefore
+parses first and saves after: `updateComponent` reads the template before it saves props or a name, a new
+main's empty frame is removed if its write is refused, a stream chunk's library adoption is put back (also when the last chunk's whole-frame pass is the one
+refused, and the room hears of an adoption only after the chunk is in the frame), and an
+import of several components takes back the ones it had made. A check that runs after a write has landed
+(the css-not-kept note, lookalike and reuse notes, reading instances back, an inserted instance's id) goes
+through `optional()`: out of budget it is left out, never turned into a refusal of a finished write.
+`replace_matching` stops instead and reports `matching_stopped`; a sync that had already updated a
+dependency says what it updated (`WorkBudgetError.afterPartialWork`). `workBudgetCommit.test.ts` makes each
+parse of each writing operation the one that goes over, and requires the operation to land whole or leave
+the canvas exactly as it was.
+Work outside any operation (a timer, a socket message) is counted per event-loop turn and only logged.
+Tests: `workBudget.test.ts`, `workBudgetHttp.test.ts`.
+
+## Usage counts
+
+`server/componentUsage.ts` answers "where is each component used" for a whole canvas from one pass over
+its frames: a string scan for instance markers, never a parse, kept per frame until that frame is written
+again (its `updatedAt` moves). `catalog(canvas)` (the list in `get_canvas`, `list_components` and the
+resident prompt) takes every component's count from that one pass instead of splitting every frame once per
+component. `update_component`'s impact report reads the same index, and looks for orphaned overrides only
+in frames that can hold one (an overrides marker, or a slot / nested component at a part the new template
+drops), within a quarter of the operation's parse budget; frames it had to leave out are counted in
+`overrides_unchecked_frames`. Tests: `componentUsage.test.ts`.
 
 ## Agent surface
 
 `server/componentTools.ts` holds each tool's schema and handler once, for MCP and the resident agent:
 `list_components`, `get_component`, `create_component`, `update_component`, `insert_instance`,
-`update_instances`, `find_component_candidates`, `delete_component`, `restore_component_version`,
+`update_instances`, `find_component_candidates`, `delete_component`, `restore_component`, `restore_component_version`,
 `import_component`, `sync_component`. Previews are `get_component_preview` (MCP) and
 `screenshot_component` (resident). `get_canvas` carries the catalog; `get_frame` and `edit_frame_html` speak
 the compact form. Instructions are `COMPONENTS` in `server/guide.ts`.

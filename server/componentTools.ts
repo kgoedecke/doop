@@ -1,7 +1,8 @@
 import { z } from 'zod'
-import { PROP_TYPES, USE_TAG, type ComponentDef } from '../shared/components.ts'
+import { activeComponents, PROP_TYPES, USE_TAG, type ComponentDef } from '../shared/components.ts'
 import type { Actor, Canvas, Frame } from '../shared/types.ts'
 import {
+  catalog,
   catalogEntry,
   changeInstances,
   componentDetail,
@@ -9,7 +10,9 @@ import {
   createComponentFromElement,
   createComponentFromHtml,
   deleteComponent,
+  detachAllInstances,
   findComponent,
+  findDeletedComponent,
   findComponentCandidates,
   importableEntry,
   importComponent,
@@ -19,6 +22,7 @@ import {
   libraryConsumers,
   lookalikesIn,
   publishToLibrary,
+  restoreComponent,
   restoreComponentVersion,
   syncComponent,
   unpublishFromLibrary,
@@ -33,6 +37,7 @@ import * as actions from './actions.ts'
 import { componentReuseNotes, frameReuseNotes } from './reuseNotes.ts'
 import { store } from './store.ts'
 import { inlineDataRefusal, type Surface } from './inlineData.ts'
+import { optional, WorkBudgetError } from './workBudget.ts'
 
 /**
  * The component tools every agent gets, over MCP (server/mcp.ts) or in the server
@@ -94,6 +99,21 @@ const LIBRARY_NOTE =
 const IMPACT_NOTE =
   'Check one affected frame with get_frame_screenshot. Sign-off on approved frames that changed is withdrawn, as with any edit.'
 
+/** Whether the instances have the change yet: said, because the call returns before they do. */
+function propagationNote(result: { propagation?: { status: string; frames: number } }): string[] {
+  const { status, frames } = result.propagation ?? { status: 'none', frames: 0 }
+  const count = `${frames} frame${frames === 1 ? '' : 's'}`
+  if (status === 'queued')
+    return [
+      `Instances are updating in the background: queued for ${count} (impact.frames). get_frame and get_frame_screenshot wait a moment for it; on a large canvas the last frames can take longer.`,
+    ]
+  if (status === 'deferred')
+    return [
+      `This server has component propagation switched off for now: the ${count} in impact.frames keep the previous revision until each is next written.`,
+    ]
+  return []
+}
+
 function summary(canvas: Canvas, def: ComponentDef) {
   return catalogEntry(canvas, def)
 }
@@ -131,7 +151,7 @@ export const COMPONENT_TOOLS: ComponentTool[] = [
       const wanted = typeof query === 'string' ? query.toLowerCase() : ''
       const matches = (def: ComponentDef) =>
         !wanted || def.name.toLowerCase().includes(wanted) || def.description.toLowerCase().includes(wanted)
-      const components = (canvas.components ?? []).filter(matches).map((def) => summary(canvas, def))
+      const components = catalog(canvas, activeComponents(canvas.components).filter(matches))
       const shared = libraryCatalog(canvas)
         .map((library) => ({
           ...library,
@@ -150,11 +170,11 @@ export const COMPONENT_TOOLS: ComponentTool[] = [
           ...(libraries
             ? {
                 libraries: readableCanvases()
-                  .filter((other) => other.id !== canvas.id && other.components?.length)
+                  .filter((other) => other.id !== canvas.id && activeComponents(other.components).length)
                   .map((other) => ({
                     canvas_id: other.id,
                     canvas_name: other.name,
-                    components: (other.components ?? []).filter(matches).map(importableEntry),
+                    components: activeComponents(other.components).filter(matches).map(importableEntry),
                   })),
               }
             : {}),
@@ -232,14 +252,14 @@ export const COMPONENT_TOOLS: ComponentTool[] = [
           },
           note: [
             `The main is frame main_frame_id on the Components page. No instance was placed: to use it, write ${usageExample(def)} in a frame's HTML, or call insert_instance. Call get_frame_screenshot on main_frame_id, and resize that frame to fit with update_frame.${inferredNote(inferred)}`,
-            ...componentReuseNotes(canvas, def, shared.autoProps),
+            ...(optional(() => componentReuseNotes(canvas, def, shared.autoProps)) ?? []),
           ].join('\n'),
           frames: outcomeFrames({ canvas } as ToolContext, def),
         }
       }
       if (typeof input.frame_id !== 'string' || typeof input.element !== 'string')
         throw new ComponentError('pass html, or frame_id with element')
-      const { component, converted, inferred } = createComponentFromElement(
+      const { component, converted, inferred, matching_stopped } = createComponentFromElement(
         canvas.id,
         {
           ...shared,
@@ -255,11 +275,17 @@ export const COMPONENT_TOOLS: ComponentTool[] = [
           component: summary(canvas, component),
           main_frame_id: component.mainFrameId,
           converted,
+          ...(matching_stopped ? { matching_stopped } : {}),
           ...inferredProps(inferred),
         },
         note: [
           `Use it with ${usageExample(component)}.${inferredNote(inferred)}`,
-          ...componentReuseNotes(canvas, component, shared.autoProps),
+          ...(matching_stopped
+            ? [
+                'replace_matching stopped part of the way (the work budget for one call): the frames in `converted` are linked, later frames were not looked at. find_component_candidates shows what still matches.',
+              ]
+            : []),
+          ...(optional(() => componentReuseNotes(canvas, component, shared.autoProps)) ?? []),
         ].join('\n'),
         frames: outcomeFrames(
           { canvas } as ToolContext,
@@ -273,7 +299,7 @@ export const COMPONENT_TOOLS: ComponentTool[] = [
     name: 'update_component',
     title: 'Update a component',
     description:
-      "Change a component's main; every instance on the canvas follows at once, keeping its props and overrides, so this is how a sweeping design change is one call rather than one edit per screen. Small changes to the markup: find + replace on the template (from get_component). CSS is not searched: to change a style, pass the whole stylesheet as css. Rewrites: html, keeping data-doop-part attributes where you can so overrides stay attached. The result reports the impact: which frames changed, which approved frames lost sign-off, which overrides no longer have an element to apply to. Pass dry_run=true to read that report first, which you should for a component with many instances. A changed main is one undo-able revision: restore_component_version goes back.",
+      "Change a component's main; every instance on the canvas follows in the background within moments, keeping its props and overrides, so this is how a sweeping design change is one call rather than one edit per screen. Small changes to the markup: find + replace on the template (from get_component). CSS is not searched: to change a style, pass the whole stylesheet as css. Rewrites: html, keeping data-doop-part attributes where you can so overrides stay attached. The result reports the impact: which frames hold instances and are queued to follow (propagation), which approved frames lose sign-off, which overrides no longer have an element to apply to. Pass dry_run=true to read that report first, which you should for a component with many instances. A changed main is one undo-able revision: restore_component_version goes back.",
     readOnly: false,
     destructive: true,
     shape: {
@@ -329,8 +355,9 @@ export const COMPONENT_TOOLS: ComponentTool[] = [
             : {}
           : {
               note: [
+                ...propagationNote(result),
                 isLibrary(canvas.id) ? `${IMPACT_NOTE} ${LIBRARY_NOTE}` : IMPACT_NOTE,
-                ...componentReuseNotes(canvas, result.component),
+                ...(optional(() => componentReuseNotes(canvas, result.component)) ?? []),
               ].join('\n'),
               frames: outcomeFrames({ canvas } as ToolContext, result.component),
             }),
@@ -413,8 +440,11 @@ export const COMPONENT_TOOLS: ComponentTool[] = [
         })),
         actor,
       )
+      /* the change is in: reading the instances back is a courtesy the budget may not cover */
+      const instances = optional(() => instancesIn(frame))
       return {
-        data: { ok: true, instances: instancesIn(frame), ...(missing.length ? { not_found: missing } : {}) },
+        data: { ok: true, ...(instances ? { instances } : {}), ...(missing.length ? { not_found: missing } : {}) },
+        ...(instances ? {} : { note: 'The change was applied. Call get_frame to read the instances back.' }),
         frames: [frame],
       }
     },
@@ -435,30 +465,70 @@ export const COMPONENT_TOOLS: ComponentTool[] = [
     name: 'delete_component',
     title: 'Delete a component',
     description:
-      'Delete a component. Nothing disappears from any design: instances stay exactly as they look, as plain markup no longer linked, and the main stays in its frame. Refused while another component is built from it.',
+      'Delete a component. Nothing changes in any design and no frame is rewritten: its instances keep exactly the markup they have and simply stop following it, its main stays in its frame as ordinary markup, and a component built from it keeps rendering as it did. It leaves the catalog, <doop-use> of it is refused, and get_canvas lists it under deletedComponents while instances of it remain. restore_component brings it back with every instance linked again. Pass detach_instances=true only when the human wants the leftovers to be plain markup for good: that rewrites every frame using it, in the background, and cannot be restored (it also works on a component that is already deleted).',
     readOnly: false,
     destructive: true,
-    shape: { component: COMPONENT_REF },
+    shape: {
+      component: COMPONENT_REF,
+      detach_instances: z
+        .boolean()
+        .optional()
+        .describe('Also turn every instance into plain markup, in the background. Not undone by restore_component'),
+    },
+    run({ component, detach_instances }, { canvas, actor }) {
+      const ref = String(component)
+      const pending = findDeletedComponent(canvas.id, ref)
+      /* detaching what an earlier delete left behind is the same call again */
+      const result =
+        pending && detach_instances === true
+          ? { deleted: pending.name, component_id: pending.id, already_deleted: true }
+          : deleteComponent(canvas.id, ref, actor)
+      const detach = detach_instances === true ? detachAllInstances(canvas.id, result.component_id, actor) : undefined
+      const touched = detach?.queued ? usageOf(canvas, result.component_id).frames.map((frame) => frame.id) : []
+      return {
+        data: { ok: true, ...result, ...(detach ? { detach } : {}) },
+        note: detach
+          ? detach.queued
+            ? `Detaching ${detach.instances} instance${detach.instances === 1 ? '' : 's'} in ${detach.frames} frame${detach.frames === 1 ? '' : 's'} in the background, a frame at a time: they become plain markup that keeps its look. This is not undone by restore_component.`
+            : 'Nothing on the canvas uses it, so there was nothing to detach.'
+          : 'No frame was changed: its instances look the same and no longer follow it. restore_component brings it back; delete_component with detach_instances=true turns what is left into plain markup.',
+        frames: canvas.frames.filter((frame) => touched.includes(frame.id)),
+      }
+    },
+  },
+  {
+    name: 'restore_component',
+    title: 'Restore a deleted component',
+    description:
+      'Bring back a component that delete_component removed (get_canvas lists those still in use under deletedComponents). Its instances were never changed, so they are linked again as they are, and it is back in the catalog. Its main is the markup that still carries it; if that is gone, a new main is written on the Components page from the kept definition. If its name was given to another component meanwhile it comes back as “<name> (restored)”. Instances that were detached stay plain markup.',
+    readOnly: false,
+    shape: { component: COMPONENT_REF.describe('Name or id of the deleted component') },
     run({ component }, { canvas, actor }) {
-      /* read before the delete: afterwards nothing marks these frames */
-      const def = findComponent(canvas.id, String(component))
-      const touched = def ? outcomeFrames({ canvas } as ToolContext, def).map((frame) => frame.id) : []
-      const result = deleteComponent(canvas.id, String(component), actor)
-      return { data: { ok: true, ...result }, frames: canvas.frames.filter((frame) => touched.includes(frame.id)) }
+      const { component: def, main } = restoreComponent(canvas.id, String(component), actor)
+      return {
+        data: { ok: true, component: summary(canvas, def), main, main_frame_id: def.mainFrameId },
+        note:
+          main === 'written'
+            ? 'Its old main was gone, so a new one was written on the Components page (main_frame_id).'
+            : 'Its instances follow it again.',
+        frames: outcomeFrames({ canvas } as ToolContext, def),
+      }
     },
   },
   {
     name: 'restore_component_version',
     title: 'Restore a component revision',
     description:
-      'Put a component back to an earlier revision (listed by get_component) and carry that to every instance, keeping their props and overrides. It is a new revision, so this can be undone too.',
+      'Put a component back to an earlier revision (listed by get_component) and carry that to every instance in the background, keeping their props and overrides. It is a new revision, so this can be undone too.',
     readOnly: false,
     destructive: true,
     shape: { component: COMPONENT_REF, rev: z.number() },
     run({ component, rev }, { canvas, actor }) {
       const result = restoreComponentVersion(canvas.id, String(component), Number(rev), actor)
+      const note = propagationNote(result).join('\n')
       return {
         data: { ok: true, ...result, component: summary(canvas, result.component), rev: result.component.rev },
+        ...(note ? { note } : {}),
         frames: outcomeFrames({ canvas } as ToolContext, result.component),
       }
     },
@@ -633,7 +703,7 @@ export async function runComponentTool(
     /* awaited here, so an async tool's ComponentError is caught like any other */
     return { ok: true, result: await tool.run(input, context) }
   } catch (error) {
-    if (error instanceof ComponentError) return { ok: false, error: error.message }
+    if (error instanceof ComponentError || error instanceof WorkBudgetError) return { ok: false, error: error.message }
     throw error
   }
 }
@@ -657,8 +727,9 @@ export function libraryFeatureEvent(name: string, input: Record<string, unknown>
 export function componentWriteNotes(frame: Frame, { review = false }: { review?: boolean } = {}): string[] {
   const notes = actions.takeComponentIssues(frame.id).map((issue) => `COMPONENT: ${issue.message}`)
   const canvas = review ? store.getCanvas(frame.canvasId) : undefined
-  if (canvas) notes.push(...frameReuseNotes(canvas, frame))
-  for (const lookalike of lookalikesIn(frame)) {
+  if (canvas) notes.push(...(optional(() => frameReuseNotes(canvas, frame)) ?? []))
+  /* said after a write that has landed: when the budget is spent, the note is simply not made */
+  for (const lookalike of optional(() => lookalikesIn(frame)) ?? []) {
     notes.push(
       `COMPONENT: ${lookalike.occurrences} element${lookalike.occurrences === 1 ? '' : 's'} in this frame match${lookalike.occurrences === 1 ? 'es' : ''} “${lookalike.component}” but ${lookalike.occurrences === 1 ? 'is' : 'are'} not linked to it, so ${lookalike.occurrences === 1 ? 'it' : 'they'} will not follow changes. Use ${lookalike.usage} instead.`,
     )

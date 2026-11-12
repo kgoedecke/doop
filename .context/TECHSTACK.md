@@ -991,6 +991,19 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   `workers/gemini/Dockerfile` builds the worker. Setup and limitations: `docs/gemini-cloud-pilot.md`.
   `DOOP_GEMINI_CLOUD_WORKERS` enables operator-managed routing and BYO metering; unset by default.
 
+- Stall watchdog (`server/stallWatchdog.ts`, watcher thread `server/stallWatcher.mjs`): every
+  operation (`server/workBudget.ts` opens one per HTTP request, MCP or resident tool call and queued
+  frame) is written into a `SharedArrayBuffer` when it begins and cleared when it ends, and the main
+  thread stamps a heartbeat there every 500 ms. A `worker_threads` watcher logs one `[stall]` line
+  naming the operations in flight once the heartbeat is older than `STALL_LOG_MS` (5 s), and past
+  `STALL_EXIT_MS` (60 s in production, off elsewhere) logs them again and sends the process
+  `SIGKILL`, since a hung process is never restarted by Railway and a blocked one cannot exit by
+  itself (`process.exit` in a worker ends only the worker). It writes with `fs.writeSync(2)`: a
+  worker's console goes through the blocked main thread. Debounced frame writes cannot be flushed
+  in that exit. `[slow-op]` lines file any operation over `SLOW_OP_LOG_MS` (2 s) with the worst
+  event-loop delay (`monitorEventLoopDelay`) while it ran; event streams are left out. Tests:
+  `stallWatchdog.test.ts`.
+
 - Docker - `Dockerfile` + `docker-compose.yml`; `docker compose up` runs the app container
   (port 4400) and a `postgres:16-alpine` db container for self-hosting.
 

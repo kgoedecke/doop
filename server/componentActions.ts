@@ -1,9 +1,10 @@
-import { parse, parseFragment, serializeOuter, type DefaultTreeAdapterTypes as Tree } from 'parse5'
+import { serializeOuter, type DefaultTreeAdapterTypes as Tree } from 'parse5'
 import { canvasPages, COMPONENTS_PAGE } from '../shared/pages.ts'
 import {
   BIND_ATTR,
   COMPONENT_ATTR,
   INSTANCE_ATTR,
+  OVERRIDES_ATTR,
   MAX_COMPONENTS,
   MAX_COMPONENT_DESCRIPTION,
   MAX_COMPONENT_NAME,
@@ -13,7 +14,9 @@ import {
   SLOT_ATTR,
   SOURCE_CSS_ATTR,
   USE_TAG,
+  activeComponents,
   componentSignature,
+  isDeleted,
   isPropName,
   type ComponentCode,
   type ComponentDef,
@@ -69,7 +72,11 @@ import {
   unpublishLibrary as dropLibrary,
   type LibraryChangeEntry,
 } from './componentLibrary.ts'
+import { env } from './env.ts'
 import { resolveElement } from './elementIds.ts'
+import * as propagation from './propagation.ts'
+import { optional, parse, parseFragment, usage as workUsage, WorkBudgetError } from './workBudget.ts'
+import { usageByComponent, usageOf, type ComponentUsage } from './componentUsage.ts'
 import { store } from './store.ts'
 import { mayPublishLibrary } from './workspaces.ts'
 
@@ -104,14 +111,26 @@ function fail(message: string): never {
   throw new ComponentError(message)
 }
 
+/** A component in use, by id or name. A deleted one is not found here: see findDeletedComponent. */
 export function findComponent(canvasId: string, ref: string): ComponentDef | undefined {
-  return contextFor(canvasId).find(ref)
+  const def = contextFor(canvasId).find(ref)
+  return isDeleted(def) ? undefined : def
+}
+
+/** A soft-deleted component, by id or name (a name an active component has means that one). */
+export function findDeletedComponent(canvasId: string, ref: string): ComponentDef | undefined {
+  const def = contextFor(canvasId).find(ref)
+  return isDeleted(def) ? def : undefined
 }
 
 function requireComponent(canvasId: string, ref: string): ComponentDef {
-  const def = findComponent(canvasId, ref)
-  if (def) return def
-  const names = store.getComponents(canvasId).map((candidate) => candidate.name)
+  const def = contextFor(canvasId).find(ref)
+  if (def && !isDeleted(def)) return def
+  if (def)
+    fail(
+      `“${def.name}” was deleted from this canvas. Its instances keep their look but no longer follow it. Restore it first (restore_component) to use or change it.`,
+    )
+  const names = activeComponents(store.getComponents(canvasId)).map((candidate) => candidate.name)
   fail(`no component “${ref}” on this canvas${names.length ? ` — it has: ${names.join(', ')}` : ''}`)
 }
 
@@ -124,21 +143,22 @@ function requireFrame(canvasId: string, frameId: string): Frame {
 function validName(name: string, canvasId: string, except?: string): string {
   const clean = name.replace(/["<>]/g, '').trim().slice(0, MAX_COMPONENT_NAME)
   if (!clean) fail('a component needs a name')
-  const taken = store
-    .getComponents(canvasId)
-    .some((def) => def.id !== except && def.name.toLowerCase() === clean.toLowerCase())
+  /* a deleted component does not hold its name: restoring it finds another if it must */
+  const taken = activeComponents(store.getComponents(canvasId)).some(
+    (def) => def.id !== except && def.name.toLowerCase() === clean.toLowerCase(),
+  )
   if (taken) fail(`this canvas already has a component named “${clean}” — update it, or pick another name`)
   return clean
 }
 
 /** The name itself when no component here has it, else "<name> (library)",
  *  "<name> (library 2)", … so two imports of a shared name stay apart. */
-export function freeName(canvasId: string, name: string): string {
-  const names = new Set(store.getComponents(canvasId).map((def) => def.name.toLowerCase()))
+export function freeName(canvasId: string, name: string, label = 'library'): string {
+  const names = new Set(activeComponents(store.getComponents(canvasId)).map((def) => def.name.toLowerCase()))
   if (!names.has(name.toLowerCase())) return name
   for (let n = 1; ; n++) {
     /* the suffix always fits: a name at the limit is shortened to make room, then checked */
-    const suffix = n === 1 ? ' (library)' : ` (library ${n})`
+    const suffix = n === 1 ? ` (${label})` : ` (${label} ${n})`
     const candidate = `${name.slice(0, MAX_COMPONENT_NAME - suffix.length).trimEnd()}${suffix}`
     if (!names.has(candidate.toLowerCase())) return candidate
   }
@@ -218,21 +238,7 @@ export function validProps(props: unknown): ComponentProp[] {
 /* Reading                                                             */
 /* ------------------------------------------------------------------ */
 
-export interface ComponentUsage {
-  instances: number
-  frames: { id: string; name: string; instances: number; approved: boolean }[]
-}
-
-export function usageOf(canvas: Canvas, id: string): ComponentUsage {
-  const marker = ` ${INSTANCE_ATTR}="${id}"`
-  const frames = canvas.frames.flatMap((frame) => {
-    const instances = frame.html.split(marker).length - 1
-    return instances
-      ? [{ id: frame.id, name: frame.name, instances, approved: frame.approval?.status === 'ready_for_dev' }]
-      : []
-  })
-  return { instances: frames.reduce((total, frame) => total + frame.instances, 0), frames }
-}
+export { usageOf, type ComponentUsage }
 
 export function usageExample(def: Pick<ComponentDef, 'name' | 'props' | 'slots'>): string {
   const props = def.props
@@ -244,15 +250,45 @@ export function usageExample(def: Pick<ComponentDef, 'name' | 'props' | 'slots'>
   return `<${USE_TAG} component="${def.name}"${props}>${slots}</${USE_TAG}>`
 }
 
+/** The catalog of a canvas (or of some of its components): usage for all of them comes from
+ *  one pass over the canvas's frames, not one per component (server/componentUsage.ts). */
+export function catalog(
+  canvas: Canvas,
+  defs: ComponentDef[] = activeComponents(canvas.components),
+  usage = usageByComponent(canvas),
+) {
+  return defs.map((def) => catalogEntry(canvas, def, usage.get(def.id) ?? { instances: 0, frames: [] }))
+}
+
+/** Deleted components something on the canvas still shows: their instances keep their look
+ *  and follow nothing, until the component is restored or they are detached. */
+export function deletedComponentsInUse(canvas: Canvas, usage = usageByComponent(canvas)) {
+  return (canvas.components ?? []).flatMap((def) => {
+    const used = isDeleted(def) ? usage.get(def.id) : undefined
+    return used?.instances
+      ? [
+          {
+            id: def.id,
+            name: def.name,
+            instances: used.instances,
+            frames: used.frames.length,
+            deleted_by: def.deletedBy ?? '',
+            deleted_at: new Date(def.deletedAt ?? def.updatedAt).toISOString(),
+          },
+        ]
+      : []
+  })
+}
+
 /** The one-line catalog entry: little to read, enough to use the component without another call. */
-export function catalogEntry(canvas: Canvas, def: ComponentDef) {
+export function catalogEntry(canvas: Canvas, def: ComponentDef, usage = usageOf(canvas, def.id)) {
   return {
     id: def.id,
     name: def.name,
     signature: componentSignature(def),
     ...(def.description ? { description: def.description } : {}),
     usage: usageExample(def),
-    instances: usageOf(canvas, def.id).instances,
+    instances: usage.instances,
     ...(def.source?.library ? libraryLink(def) : def.mainFrameId ? {} : { main_missing: true }),
     ...(def.code ? { code: def.code } : {}),
     ...updateAvailable(canvas, def),
@@ -305,8 +341,9 @@ export function componentDetail(canvas: Canvas, def: ComponentDef) {
     ...(info.isSlot ? { slot: attrOf(info.el, SLOT_ATTR) } : {}),
     ...(info.isUse ? { component: attrOf(info.el, 'component') } : {}),
   }))
+  const usage = usageOf(canvas, def.id)
   return {
-    ...catalogEntry(canvas, def),
+    ...catalogEntry(canvas, def, usage),
     rev: def.rev,
     props: def.props,
     slots: def.slots,
@@ -316,7 +353,7 @@ export function componentDetail(canvas: Canvas, def: ComponentDef) {
     parts,
     main_frame_id: def.mainFrameId,
     main_image_url: def.mainFrameId ? `/i/${def.mainFrameId}.png?scale=2` : null,
-    usage_by_frame: usageOf(canvas, def.id).frames,
+    usage_by_frame: usage.frames,
     versions: def.history.map((entry) => ({ rev: entry.rev, saved_at: entry.savedAt, saved_by: entry.savedBy })),
     updated_by: def.updatedBy,
     updated_at: new Date(def.updatedAt).toISOString(),
@@ -340,6 +377,8 @@ export function instancesIn(frame: Frame) {
       {
         instance_id: state.instanceId,
         component: def?.name ?? id,
+        /* its component was deleted: it keeps its look, follows nothing and takes no props */
+        ...(isDeleted(def) ? { component_deleted: true } : {}),
         component_id: id,
         props: state.overrides.props ?? {},
         overridden_parts: Object.keys(state.overrides.parts ?? {}),
@@ -370,10 +409,13 @@ export interface CreateResult {
   converted: { frameId: string; instances: number }[]
   /** props named for the author, from what each element is: worth a look, and a rename */
   inferred: string[]
+  /** replace_matching ran out of work budget part of the way: the component is made and
+   *  `converted` lists what was linked, but frames after those were not looked at */
+  matching_stopped?: true
 }
 
 function checkCapacity(canvasId: string) {
-  if (store.getComponents(canvasId).length >= MAX_COMPONENTS)
+  if (activeComponents(store.getComponents(canvasId)).length >= MAX_COMPONENTS)
     fail(`a canvas holds at most ${MAX_COMPONENTS} components`)
 }
 
@@ -421,9 +463,16 @@ export function createComponentFromElement(canvasId: string, input: CreateFromEl
     throw error
   }
   const saved = requireComponent(canvasId, def.id)
-  const converted = input.replaceMatching ? convertMatching(canvasId, shape, saved, actor) : []
+  const matching = input.replaceMatching
+    ? convertMatching(canvasId, shape, saved, actor)
+    : { converted: [], stopped: false }
   actions.logComponent(canvasId, actor, `made “${saved.name}” a component`)
-  return { component: requireComponent(canvasId, def.id), converted, inferred }
+  return {
+    component: requireComponent(canvasId, def.id),
+    converted: matching.converted,
+    inferred,
+    ...(matching.stopped ? { matching_stopped: true as const } : {}),
+  }
 }
 
 const clip = (text: string | undefined) => text?.slice(0, MAX_COMPONENT_DESCRIPTION)
@@ -511,7 +560,8 @@ export function createComponentFromHtml(canvasId: string, input: CreateFromHtml,
     throw error
   }
   const component = requireComponent(canvasId, def.id)
-  if (input.css) reportCssNotKept(component, input.css)
+  /* the component is made: a note that cannot be worked out within budget is left out */
+  if (input.css) optional(() => reportCssNotKept(component, input.css!))
   actions.logComponent(canvasId, actor, `created component “${name}”`)
   return { component, converted: [], inferred }
 }
@@ -549,7 +599,13 @@ function writeNewMain(
   const pageId = componentsPageId(canvasId, actor)
   const frame = actions.createFrame(canvasId, { name: def.name, pageId, width, height, html: '' }, actor)
   if (!frame) fail('canvas not found')
-  actions.updateFrame(frame.id, { html: mainFrameDoc(def, root, rawCss) }, actor)
+  try {
+    actions.updateFrame(frame.id, { html: mainFrameDoc(def, root, rawCss) }, actor)
+  } catch (error) {
+    /* the main was not written (the work budget): its empty frame does not stay behind */
+    if (error instanceof WorkBudgetError) actions.deleteFrame(frame.id, actor)
+    throw error
+  }
   return store.getFrame(frame.id) ?? frame
 }
 
@@ -581,15 +637,51 @@ export interface UpdateResult {
     frames: { id: string; name: string; instances: number; approved: boolean }[]
     approvals_affected: number
     overrides_orphaned: { frame_id: string; instance_id: string; parts: string[] }[]
+    /** frames with overridden instances that were not examined, because reading them all
+     *  would have used up the operation's work budget: overrides_orphaned may be missing some */
+    overrides_unchecked_frames?: number
   }
+  /** How the change reaches the instances in `impact.frames` (absent in a dry run):
+   *  `queued` rewrites them in the background, a frame per tick; `deferred` means the
+   *  server has propagation switched off and each frame follows on its own next write;
+   *  `none` means nothing instances render from changed. */
+  propagation?: { status: 'queued' | 'deferred' | 'none'; frames: number }
 }
 
-function orphanedOverrides(canvas: Canvas, def: ComponentDef, template: string) {
+function propagationOf(canvasId: string, before: ComponentDef, impact: UpdateResult['impact']) {
+  const after = requireComponent(canvasId, before.id)
+  const frames = impact.frames.filter((frame) => frame.id !== after.mainFrameId).length
+  if (propagation.isPending(canvasId, 'propagate', before.id)) return { status: 'queued' as const, frames }
+  const moved = after.rev !== before.rev && env.DOOP_DEFER_COMPONENT_PROPAGATION
+  return moved ? { status: 'deferred' as const, frames } : { status: 'none' as const, frames: 0 }
+}
+
+/** The share of an operation's parse budget the impact report may use: the write it
+ *  precedes needs the rest. */
+const IMPACT_BUDGET_SHARE = 0.25
+
+/** Instances whose overrides name a part the new template no longer has. Only frames that
+ *  can hold one are parsed: frames using the component (from the usage index, no scan) whose
+ *  instances either carry an overrides marker or fill a slot / nest a component at a part the
+ *  new template drops. A plain restyle of a component with no overridden instance parses nothing. */
+function orphanedOverrides(canvas: Canvas, def: ComponentDef, template: string, frames: ComponentUsage['frames']) {
   const keys = new Set(partsOf(template).keys())
+  /* content read from the DOM rather than the marker (readInstance): held by every instance */
+  const structuralGone = [...partsOf(def.template).entries()].some(
+    ([key, info]) => (info.isSlot || info.isUse) && !keys.has(key),
+  )
   const ctx = contextFor(canvas.id)
   const orphaned: UpdateResult['impact']['overrides_orphaned'] = []
-  for (const frame of canvas.frames) {
-    if (!referencesComponent(frame.html, def.id)) continue
+  const limit = env.DOOP_WORK_BUDGET_PARSE_MB * 1024 * 1024 * IMPACT_BUDGET_SHARE
+  const spentBefore = workUsage().parsedBytes
+  let unchecked = 0
+  for (const used of frames) {
+    const frame = store.getFrame(used.id)
+    if (!frame || (!structuralGone && !frame.html.includes(OVERRIDES_ATTR))) continue
+    if (limit && workUsage().parsedBytes - spentBefore + frame.html.length > limit) {
+      unchecked += 1
+      continue
+    }
     for (const found of findMarked(frame.html, INSTANCE_ATTR)) {
       if (attrOf(found.el, INSTANCE_ATTR) !== def.id) continue
       const state = readInstance(found.el, def, ctx)
@@ -597,7 +689,7 @@ function orphanedOverrides(canvas: Canvas, def: ComponentDef, template: string) 
       if (state && parts.length) orphaned.push({ frame_id: frame.id, instance_id: state.instanceId, parts })
     }
   }
-  return orphaned
+  return { orphaned, unchecked }
 }
 
 /** A rewrite of the main: old element keys carried over wherever tag and place line up,
@@ -639,16 +731,24 @@ export function updateComponent(canvasId: string, ref: string, input: UpdateInpu
   const html = nextHtml(def, input)
   const nextRoot = html !== undefined ? alignedRoot(html, def) : undefined
   const usage = usageOf(canvas, def.id)
+  const overrides = nextRoot
+    ? orphanedOverrides(canvas, def, stampedTemplate(nextRoot), usage.frames)
+    : { orphaned: [], unchecked: 0 }
   const impact: UpdateResult['impact'] = {
     instances: usage.instances,
     frames: usage.frames,
     approvals_affected: usage.frames.filter((frame) => frame.approved).length,
-    overrides_orphaned: nextRoot ? orphanedOverrides(canvas, def, stampedTemplate(nextRoot)) : [],
+    overrides_orphaned: overrides.orphaned,
+    ...(overrides.unchecked ? { overrides_unchecked_frames: overrides.unchecked } : {}),
   }
   if (input.dryRun) return { component: def, dry_run: true, impact }
 
   const nextProps = input.props !== undefined ? validProps(input.props) : undefined
   const propsChanged = nextProps !== undefined && JSON.stringify(nextProps) !== JSON.stringify(def.props)
+  /* everything that parses is done before anything is saved: a refusal up to here (the work
+     budget) has changed nothing. What follows the save is undone if the main cannot be written. */
+  const writesMain = nextRoot !== undefined || input.css !== undefined || input.props !== undefined
+  const root = writesMain ? (nextRoot ?? alignedRoot(def.template, def)) : undefined
   const meta: ComponentDef = {
     ...(propsChanged ? bumpRevision(def, actor.name) : def),
     ...(input.name !== undefined ? { name: validName(input.name, canvasId, def.id) } : {}),
@@ -662,21 +762,33 @@ export function updateComponent(canvasId: string, ref: string, input: UpdateInpu
   else if (input.code !== undefined) meta.code = input.code
   store.saveComponent(canvasId, meta)
 
-  if (nextRoot || input.css !== undefined || input.props !== undefined) {
-    const root = nextRoot ?? alignedRoot(def.template, def)
+  if (root) {
     const write = () => writeMain(canvasId, meta, root, input.css, actor, input.head ? def.head : undefined)
-    /* the props above opened a revision: the main's write is the rest of it, not another */
-    if (propsChanged) withinRevision(canvasId, def.id, write)
-    else write()
+    try {
+      /* the props above opened a revision: the main's write is the rest of it, not another */
+      if (propsChanged) withinRevision(canvasId, def.id, write)
+      else write()
+    } catch (error) {
+      /* the main was not written, so the name, props and revision saved above go back too */
+      if (error instanceof WorkBudgetError) store.saveComponent(canvasId, def)
+      throw error
+    }
   } else actions.broadcastComponent(canvasId, requireComponent(canvasId, def.id), actor)
   /* new defaults change what instances render even when the main's markup did not move */
-  if (propsChanged) actions.propagateComponents(canvasId, [requireComponent(canvasId, def.id)], actor)
+  if (propsChanged) actions.queuePropagation(canvasId, [requireComponent(canvasId, def.id)], actor)
   if (input.name !== undefined && def.mainFrameId && store.getFrame(def.mainFrameId)?.name === def.name) {
     actions.updateFrame(def.mainFrameId, { name: meta.name }, actor)
   }
-  if (input.css) reportCssNotKept(requireComponent(canvasId, def.id), input.css)
+  /* the update has landed: a note that cannot be worked out within budget is left out,
+     never turned into a refusal of what is already done */
+  if (input.css) optional(() => reportCssNotKept(requireComponent(canvasId, def.id), input.css!))
   actions.logComponent(canvasId, actor, `updated component “${meta.name}”`)
-  return { component: requireComponent(canvasId, def.id), dry_run: false, impact }
+  return {
+    component: requireComponent(canvasId, def.id),
+    dry_run: false,
+    impact,
+    propagation: propagationOf(canvasId, def, impact),
+  }
 }
 
 function stampedTemplate(root: Element): string {
@@ -776,7 +888,8 @@ export function insertInstance(
   const before = new Set(instanceIds(frame.html))
   const next = actions.updateFrame(frame.id, { html }, actor)
   if (!next) fail('frame not found')
-  const instanceId = instanceIds(next.html).find((id) => !before.has(id)) ?? ''
+  /* the instance is placed: if its id cannot be read back within budget, get_frame has it */
+  const instanceId = optional(() => instanceIds(next.html).find((id) => !before.has(id))) ?? ''
   return { frame: next, instanceId }
 }
 
@@ -871,6 +984,10 @@ export function changeInstances(
         continue
       }
       if (!def) continue
+      if (isDeleted(def))
+        fail(
+          `“${def.name}” was deleted, so this instance no longer follows anything and cannot take props or overrides. Restore the component (restore_component), or detach the instance and edit it as plain markup.`,
+        )
       const state = readInstance(located.el, ctx.atRev(def.id, Number(attrOf(located.el, REV_ATTR))) ?? def, ctx)
       if (!state) continue
       validateProps(def, change.props)
@@ -914,38 +1031,156 @@ function validateProps(def: ComponentDef, props: Record<string, string> | undefi
   }
 }
 
-/** Remove a component; every instance keeps its look as plain markup, and its main stays too. */
+export interface DetachQueued {
+  /** false when nothing on the canvas uses the component */
+  queued: boolean
+  instances: number
+  frames: number
+}
+
+/**
+ * Delete a component, softly: the definition is kept and marked deleted, and NO frame is
+ * written. Its instances keep the markup they have, byte for byte, and stop following
+ * anything; new uses are refused; a component built from it keeps rendering as it did. The
+ * main's markup stays where it is, frozen (an edit to it is an edit to that frame only).
+ * restoreComponent undoes it. Cutting the instances loose is its own act: detachAllInstances.
+ */
 export function deleteComponent(canvasId: string, ref: string, actor: Actor) {
   const canvas = store.getCanvas(canvasId)
   if (!canvas) fail('canvas not found')
+  const already = findDeletedComponent(canvasId, ref)
+  if (already) fail(`“${already.name}” is already deleted — restore_component brings it back`)
   const def = requireComponent(canvasId, ref)
-  const dependents = store
-    .getComponents(canvasId)
-    .filter((other) => other.id !== def.id && /component="([^"]+)"/.test(other.template))
-    .filter((other) =>
-      [...other.template.matchAll(/component="([^"]+)"/g)].some((m) => m[1] === def.id || m[1] === def.name),
-    )
-  if (dependents.length)
-    fail(
-      `“${def.name}” is used inside ${dependents.map((other) => `“${other.name}”`).join(', ')} — remove it there first`,
-    )
-  /* gone from the store first, so these writes treat its main as plain markup */
-  store.deleteComponent(canvasId, def.id)
-  let detached = 0
-  for (const frame of [...canvas.frames]) {
-    if (!referencesComponent(frame.html, def.id)) continue
-    const cut = detachAll(frame.html, def)
-    detached += cut.count
-    actions.updateFrame(frame.id, { html: cut.html }, actor)
-  }
-  actions.broadcastComponentDeleted(canvasId, def.id, actor)
+  const usage = usageOf(canvas, def.id)
+  const deleted: ComponentDef = { ...def, status: 'deleted', deletedAt: Date.now(), deletedBy: actor.name }
+  store.saveComponent(canvasId, deleted)
+  actions.broadcastComponent(canvasId, deleted, actor)
+  const kept = usage.instances
   actions.logComponent(
     canvasId,
     actor,
-    `deleted component “${def.name}”; ${detached} instance${detached === 1 ? '' : 's'} kept as plain markup`,
+    `deleted component “${def.name}”${kept ? `; ${kept} instance${kept === 1 ? ' keeps its' : 's keep their'} look` : ''}`,
   )
-  return { deleted: def.name, instances_detached: detached }
+  return { deleted: def.name, component_id: def.id, instances_kept: kept, frames: usage.frames.length }
 }
+
+export interface RestoreResult {
+  component: ComponentDef
+  /** `kept`: its main was still on the canvas; `written`: a new main was made from the
+   *  definition; `none`: it comes from a workspace library and has no main here */
+  main: 'kept' | 'written' | 'none'
+}
+
+/** Bring a deleted component back. Its instances were never changed, so they follow it again
+ *  as they are. The main is the markup that still carries its marker if any does (edits made
+ *  to it while the component was deleted become a new revision, like any edit of a main);
+ *  otherwise a main is written from the kept definition. */
+export function restoreComponent(canvasId: string, ref: string, actor: Actor): RestoreResult {
+  const canvas = store.getCanvas(canvasId)
+  if (!canvas) fail('canvas not found')
+  const def = findDeletedComponent(canvasId, ref)
+  if (!def) {
+    const active = findComponent(canvasId, ref)
+    fail(
+      active
+        ? `“${active.name}” is not deleted, so there is nothing to restore`
+        : `no deleted component “${ref}” on this canvas`,
+    )
+  }
+  checkCapacity(canvasId)
+  const marker = `${COMPONENT_ATTR}="${def.id}"`
+  const remembered = def.mainFrameId ? store.getFrame(def.mainFrameId) : undefined
+  const home = [remembered, ...canvas.frames].find((frame) => frame?.html.includes(marker))
+  const { status: _status, deletedAt: _deletedAt, deletedBy: _deletedBy, ...kept } = def
+  const active: ComponentDef = {
+    ...kept,
+    /* its name may have been given to another component since */
+    name: freeName(canvasId, def.name, 'restored'),
+    mainFrameId: home?.id ?? null,
+    updatedAt: Date.now(),
+    updatedBy: actor.name,
+  }
+  store.saveComponent(canvasId, active)
+  let main: RestoreResult['main'] = 'none'
+  try {
+    if (active.source?.library) main = 'none'
+    else if (home) {
+      /* an ordinary write of the frame as it is: the main is read again, so what it holds
+         now and the definition agree, and a difference reaches the instances */
+      actions.updateFrame(home.id, { html: home.html }, actor)
+      main = 'kept'
+    } else {
+      writeMain(canvasId, active, alignedRoot(active.template, active), undefined, actor)
+      main = 'written'
+    }
+  } catch (error) {
+    /* no main could be written (the work budget): it stays deleted rather than half back */
+    if (error instanceof WorkBudgetError) store.saveComponent(canvasId, def)
+    throw error
+  }
+  const component = requireComponent(canvasId, def.id)
+  actions.broadcastComponent(canvasId, component, actor)
+  actions.logComponent(canvasId, actor, `restored component “${component.name}”`)
+  return { component, main }
+}
+
+/** Cut every instance of a component loose, keeping its look: plain markup, no longer linked.
+ *  Runs in the background queue, a frame per tick (server/propagation.ts), so it returns
+ *  what it queued, not what it did. For a deleted component this is how its leftovers stop
+ *  being instances; for one in use it leaves the component with none. */
+export function detachAllInstances(canvasId: string, ref: string, actor: Actor): DetachQueued {
+  const canvas = store.getCanvas(canvasId)
+  if (!canvas) fail('canvas not found')
+  const def = findDeletedComponent(canvasId, ref) ?? requireComponent(canvasId, ref)
+  const usage = usageOf(canvas, def.id)
+  if (usage.instances) propagation.enqueue('detach', canvasId, [def.id], actor)
+  return { queued: usage.instances > 0, instances: usage.instances, frames: usage.frames.length }
+}
+
+/** One frame's turn in the detach queue: an ordinary write, so history is filed, sign-off on
+ *  an approved frame goes back to review and the room sees it. */
+function detachInFrame(
+  canvasId: string,
+  frameId: string,
+  componentIds: string[],
+  actor: Actor,
+): propagation.FrameOutcome {
+  const frame = store.getFrame(frameId)
+  if (!frame || frame.canvasId !== canvasId) return {}
+  /* a frame an agent is streaming into is not rewritten under it. The request is kept until
+     the stream closes (actions.finishStream resumes it), not dropped and not retried meanwhile */
+  if (actions.isFrameMidStream(frameId)) return { defer: true }
+  let html = frame.html
+  let count = 0
+  for (const id of componentIds) {
+    const def = store.getComponents(canvasId).find((candidate) => candidate.id === id)
+    if (!def || !referencesComponent(html, id)) continue
+    const cut = detachAll(html, def)
+    html = cut.html
+    count += cut.count
+  }
+  if (!count) return {}
+  const wasApproved = frame.approval?.status === 'ready_for_dev'
+  const updated = actions.updateFrame(frame.id, { html }, actor)
+  if (!updated) return {}
+  return { count, touched: { id: updated.id, name: updated.name, approvalLost: wasApproved } }
+}
+
+function detachDrained(canvasId: string, report: propagation.DrainReport, actor: Actor) {
+  if (!report.count) return
+  const names = report.components.flatMap((id) => {
+    const def = store.getComponents(canvasId).find((candidate) => candidate.id === id)
+    return def ? [`“${def.name}”`] : []
+  })
+  const frames = report.frames.length
+  actions.logComponent(
+    canvasId,
+    actor,
+    `detached ${report.count} instance${report.count === 1 ? '' : 's'} of ${names.join(', ')} in ${frames} frame${frames === 1 ? '' : 's'}; ${report.count === 1 ? 'it keeps its' : 'they keep their'} look as plain markup`,
+  )
+}
+
+propagation.registerFrameTask('detach', { frame: detachInFrame, drained: detachDrained })
 
 /* ------------------------------------------------------------------ */
 /* Finding what should be a component                                  */
@@ -1081,9 +1316,29 @@ function describeCandidate(shape: string, occurrences: Occurrence[], size: numbe
 
 function convertMatching(canvasId: string, shape: string | undefined, def: ComponentDef, actor: Actor) {
   const canvas = store.getCanvas(canvasId)
-  const template = parseTemplateRoot(def.template)
-  if (!canvas || !template || !shape) return []
   const converted: CreateResult['converted'] = []
+  if (!canvas || !shape) return { converted, stopped: false }
+  try {
+    const template = parseTemplateRoot(def.template)
+    if (!template) return { converted, stopped: false }
+    convertFrames(canvas, shape, template, def, actor, converted)
+  } catch (error) {
+    /* the component exists and the frames so far are linked: out of budget, the rest is
+       left for another call rather than reported as a change that never happened */
+    if (!(error instanceof WorkBudgetError)) throw error
+    return { converted, stopped: true }
+  }
+  return { converted, stopped: false }
+}
+
+function convertFrames(
+  canvas: Canvas,
+  shape: string,
+  template: Element,
+  def: ComponentDef,
+  actor: Actor,
+  converted: CreateResult['converted'],
+) {
   for (const frame of [...canvas.frames]) {
     /* a locked frame is not to be edited, however good the reason */
     if (frame.demo || frame.locked) continue
@@ -1110,7 +1365,6 @@ function convertMatching(canvasId: string, shape: string | undefined, def: Compo
     actions.updateFrame(frame.id, { html: splice(frame.html, edits) }, actor)
     converted.push({ frameId: frame.id, instances: edits.length })
   }
-  return converted
 }
 
 function keyLike(el: Element, template: Element) {
@@ -1135,7 +1389,7 @@ function newId(): string {
 
 /** Elements on a frame that look exactly like an existing component but are not instances of it. */
 export function lookalikesIn(frame: Frame): { component: string; occurrences: number; usage: string }[] {
-  const defs = store.getComponents(frame.canvasId).filter((def) => def.template)
+  const defs = activeComponents(store.getComponents(frame.canvasId)).filter((def) => def.template)
   if (!defs.length) return []
   const shapes = new Map(
     defs.flatMap((def) => {
@@ -1184,9 +1438,38 @@ export function importComponent(
   const origin = findComponent(sourceCanvasId, ref)
   if (!origin) fail(`no component “${ref}” on canvas ${sourceCanvasId}`)
   refuseSiblings(targetCanvasId, sourceCanvasId, origin)
-  const ctxIds = new Set<string>()
-  importDependencies(targetCanvasId, sourceCanvasId, origin, actor, ctxIds)
+  const progress: ImportProgress = { seen: new Set(), created: [], pulled: [] }
+  try {
+    importDependencies(targetCanvasId, sourceCanvasId, origin, actor, progress)
+  } catch (error) {
+    throw afterImportRefusal(targetCanvasId, progress, actor, error)
+  }
   return requireComponent(targetCanvasId, origin.id)
+}
+
+/** What an import has done so far, so a refusal part of the way can be undone or told truly. */
+interface ImportProgress {
+  seen: Set<string>
+  /** components this import made here, each with a main of its own */
+  created: ComponentDef[]
+  /** components already here that it brought up to date */
+  pulled: string[]
+}
+
+/** An import of several components ran out of work budget. The ones it made are taken back
+ *  (definition and main), so a fresh import lands whole or not at all; ones it only brought
+ *  up to date were complete updates and stay, and the error says so. */
+function afterImportRefusal(canvasId: string, progress: ImportProgress, actor: Actor, error: unknown): unknown {
+  if (!(error instanceof WorkBudgetError)) return error
+  for (const def of progress.created.reverse()) {
+    const saved = store.getComponents(canvasId).find((candidate) => candidate.id === def.id)
+    if (saved?.mainFrameId) actions.deleteFrame(saved.mainFrameId, actor)
+    store.deleteComponent(canvasId, def.id)
+    actions.broadcastComponentGone(canvasId, def.id, actor)
+  }
+  return progress.pulled.length
+    ? error.afterPartialWork(`${progress.pulled.map((name) => `“${name}”`).join(', ')} updated`)
+    : error
 }
 
 /** A canvas and its copies share component ids. The same id here, not pulled from this library,
@@ -1205,7 +1488,7 @@ function refuseSiblings(targetCanvasId: string, sourceCanvasId: string, origin: 
         `this canvas already has its own component “${existing.name}” (${existing.id}), shared with canvas ${sourceCanvasId} because one was copied from the other; importing would replace it, so edit it here instead`,
       )
     for (const match of def.template.matchAll(/component="([^"]+)"/g)) {
-      const dependency = findComponent(sourceCanvasId, match[1]!)
+      const dependency = contextFor(sourceCanvasId).find(match[1]!)
       if (dependency) stack.push(dependency)
     }
   }
@@ -1216,19 +1499,42 @@ function importDependencies(
   sourceCanvasId: string,
   origin: ComponentDef,
   actor: Actor,
-  seen: Set<string>,
+  progress: ImportProgress,
 ): boolean {
-  if (seen.has(origin.id)) return false
-  seen.add(origin.id)
+  if (progress.seen.has(origin.id)) return false
+  progress.seen.add(origin.id)
   let changed = false
   for (const match of origin.template.matchAll(/component="([^"]+)"/g)) {
-    const dependency = findComponent(sourceCanvasId, match[1]!)
-    if (dependency && importDependencies(targetCanvasId, sourceCanvasId, dependency, actor, seen)) changed = true
+    /* deleted ones too: a component built from a deleted one still renders it, frozen */
+    const dependency = contextFor(sourceCanvasId).find(match[1]!)
+    if (dependency && importDependencies(targetCanvasId, sourceCanvasId, dependency, actor, progress)) changed = true
   }
   const existing = store.getComponents(targetCanvasId).find((def) => def.id === origin.id)
+  if (!existing && isDeleted(origin)) {
+    /* deleted at its source: copied as it stands, still deleted and with no main, so it is
+       there for what is built from it to render and not to be used by itself */
+    const now = Date.now()
+    const frozen: ComponentDef = {
+      ...origin,
+      rawCss: importedCss(targetCanvasId, sourceCanvasId, origin),
+      mainFrameId: null,
+      history: [],
+      source: { canvasId: sourceCanvasId, componentId: origin.id, rev: origin.rev },
+      createdAt: now,
+      updatedAt: now,
+      updatedBy: actor.name,
+    }
+    store.saveComponent(targetCanvasId, frozen)
+    progress.created.push(frozen)
+    actions.broadcastComponent(targetCanvasId, frozen, actor)
+    return true
+  }
   if (existing) {
+    /* deleted here: frozen, whatever its origin has become */
+    if (isDeleted(existing)) return changed
     if (existing.source?.canvasId === sourceCanvasId && existing.source.rev === origin.rev) return changed
     pullFrom(targetCanvasId, existing, origin, sourceCanvasId, actor)
+    progress.pulled.push(existing.name)
     return true
   }
   checkCapacity(targetCanvasId)
@@ -1241,9 +1547,11 @@ function importDependencies(
     source: { canvasId: sourceCanvasId, componentId: origin.id, rev: origin.rev },
     by: actor.name,
   })
-  store.saveComponent(targetCanvasId, { ...def, head: origin.head })
+  /* parsed before the definition is saved: a refusal here has made nothing */
   const root = parseTemplateRoot(origin.template)
   if (!root) fail(`component “${origin.name}” has no markup`)
+  store.saveComponent(targetCanvasId, { ...def, head: origin.head })
+  progress.created.push(def)
   setAttr(root, COMPONENT_ATTR, def.id)
   writeNewMain(
     targetCanvasId,
@@ -1294,7 +1602,13 @@ export function syncComponent(canvasId: string, ref: string, actor: Actor, canRe
   const origin = findComponent(def.source.canvasId, def.source.componentId)
   if (!origin) fail('its library no longer has this component')
   /* the whole tree: a nested component can move without this one moving, and this one can start using new ones */
-  const updated = importDependencies(canvasId, def.source.canvasId, origin, actor, new Set())
+  const progress: ImportProgress = { seen: new Set(), created: [], pulled: [] }
+  let updated: boolean
+  try {
+    updated = importDependencies(canvasId, def.source.canvasId, origin, actor, progress)
+  } catch (error) {
+    throw afterImportRefusal(canvasId, progress, actor, error)
+  }
   return { component: requireComponent(canvasId, def.id), updated }
 }
 
@@ -1437,7 +1751,14 @@ function pullFromLibrary(canvasId: string, def: ComponentDef, actor: Actor, quie
         if (error instanceof LibraryAdoptError) fail(error.message)
         throw error
       }
-    } else if (local.source?.library && local.source.canvasId === snapshot.canvasId && local.source.rev < snapshot.rev)
+    } else if (
+      /* a component this canvas deleted is frozen at the design it had: a pull of what is
+         built from it (or of anything else) leaves its template, CSS and revision alone */
+      !isDeleted(local) &&
+      local.source?.library &&
+      local.source.canvasId === snapshot.canvasId &&
+      local.source.rev < snapshot.rev
+    )
       changed.push(relink(canvasId, local, snapshot, actor))
   }
   actions.announceAdopted(canvasId, added, actor)
@@ -1445,7 +1766,11 @@ function pullFromLibrary(canvasId: string, def: ComponentDef, actor: Actor, quie
   if (changed.length) {
     /* before the instances are rewritten, so each frame's token block has what the new CSS names */
     actions.carryLibraryTokens(canvasId, changed, actor)
-    frames = actions.propagateComponents(canvasId, changed, actor).frames
+    frames = framesUsing(
+      canvas,
+      changed.map((entry) => entry.id),
+    )
+    actions.queuePropagation(canvasId, changed, actor)
     if (!quiet)
       actions.logComponent(
         canvasId,
@@ -1458,8 +1783,19 @@ function pullFromLibrary(canvasId: string, def: ComponentDef, actor: Actor, quie
     updated: changed.length > 0 || added.length > 0,
     /* what moved, for a caller reporting on it */
     changed: changed.map((entry) => entry.name),
+    /* the frames queued to follow: they are rewritten in the background, one per tick */
     frames,
   }
+}
+
+/** The frames holding an instance of any of these components: what a change to them is
+ *  queued for. `approvalLost` is whether the frame is signed off now, and so will not be. */
+function framesUsing(canvas: Canvas, componentIds: string[]): actions.PropagationReport['frames'] {
+  const frames = new Map<string, actions.PropagationReport['frames'][number]>()
+  for (const id of componentIds)
+    for (const frame of usageOf(canvas, id).frames)
+      frames.set(frame.id, { id: frame.id, name: frame.name, approvalLost: frame.approved })
+  return [...frames.values()]
 }
 
 export interface LibraryStatus {
@@ -1491,7 +1827,9 @@ export function libraryConsumers(canvas: Canvas) {
   const snapshots = publishedOn(canvas.id)
   return store.allCanvases().flatMap((other) => {
     if (other.id === canvas.id || other.workspaceId !== canvas.workspaceId) return []
-    const linked = (other.components ?? []).filter((def) => def.source?.library && def.source.canvasId === canvas.id)
+    const linked = activeComponents(other.components).filter(
+      (def) => def.source?.library && def.source.canvasId === canvas.id,
+    )
     if (!linked.length) return []
     const behind = linked.filter((def) => {
       const snapshot = snapshots.find((entry) => entry.id === def.source?.componentId)
@@ -1510,7 +1848,7 @@ export function libraryConsumers(canvas: Canvas) {
 
 /** The linked components on a canvas whose library has published something newer. */
 export function waitingLibraryUpdates(canvas: Canvas): ComponentDef[] {
-  return (canvas.components ?? []).filter((def) => {
+  return activeComponents(canvas.components).filter((def) => {
     const origin = originOf(canvas, def)
     return !!origin && !!def.source && origin.rev > def.source.rev
   })
@@ -1629,7 +1967,13 @@ function staleLinks(canvas: Canvas, libraryCanvasId: string): ComponentDef[] {
     if (!origin) continue
     for (const snapshot of snapshotClosure(origin)) {
       const local = (canvas.components ?? []).find((candidate) => candidate.id === snapshot.id)
-      if (local?.source?.library && local.source.canvasId === snapshot.canvasId && local.source.rev < snapshot.rev)
+      if (
+        local &&
+        !isDeleted(local) &&
+        local.source?.library &&
+        local.source.canvasId === snapshot.canvasId &&
+        local.source.rev < snapshot.rev
+      )
         stale.set(local.id, local)
     }
   }
@@ -1735,7 +2079,17 @@ export async function updateLibraryConsumers(
         continue
       }
       const { update, refusal } = pullIntoConsumer(canvas, library, actor)
-      if (update) report.canvases.push(update)
+      if (update) {
+        /* the pull only queued its frames: wait here, canvas held, for what it really changed.
+           The wait blocks nothing (the queue works a frame per tick), and keeps the canvases
+           this walks through in memory one at a time. */
+        const drained = (await propagation.whenCanvasIdle(canvas.id)).propagate
+        report.canvases.push({
+          ...update,
+          frames_changed: drained?.frames.length ?? 0,
+          approvals_withdrawn: drained?.frames.filter((frame) => frame.approvalLost).length ?? 0,
+        })
+      }
       if (refusal) report.skipped.push({ ...named, reason: 'failed', message: refusal })
     } finally {
       release()
