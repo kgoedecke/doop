@@ -18,7 +18,9 @@ import { store } from './store.ts'
 import { addPage, savePages, updateFrameMeta } from './pageTools.ts'
 import { fontsForCanvas } from './fonts.ts'
 import { customAgentsForCanvas } from './customAgents.ts'
-import { describeLibrary, libraryBrief } from '../shared/fonts.ts'
+import { describeLibrary, libraryBrief, MAX_FONT_BYTES } from '../shared/fonts.ts'
+import { addCanvasFont, uploadedFontResult } from './canvasFontUpload.ts'
+import { inlineDataRefusal } from './inlineData.ts'
 import {
   MAX_TOKEN_DESCRIPTION,
   TOKEN_TYPES,
@@ -1448,6 +1450,8 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
     },
     async ({ canvas_id, pageId, name, html, x, y, width, height, agent_name }) => {
       if (!canvasFor(canvas_id, 'edit')) return noCanvas(canvas_id)
+      const inline = inlineDataRefusal(html)
+      if (inline) return err(inline)
       const frame = actions.createFrame(canvas_id, { name, pageId, html, x, y, width, height }, actorFrom(agent_name))
       if (!frame) return noCanvas(canvas_id)
       const result = withComponentNotes(
@@ -1513,7 +1517,10 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
       inputSchema: { frame_id: z.string(), html: z.string(), agent_name: agentName },
     },
     async ({ frame_id, html, agent_name }) => {
-      if (!frameFor(frame_id, 'edit')) return noFrame(frame_id)
+      const current = frameFor(frame_id, 'edit')
+      if (!current) return noFrame(frame_id)
+      const inline = inlineDataRefusal(html, current.html)
+      if (inline) return err(inline)
       const frame = actions.updateFrame(frame_id, { html }, actorFrom(agent_name), { replace: true })
       if (!frame) return noFrame(frame_id)
       return withPreview(
@@ -1654,17 +1661,8 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
           'provide exactly one of: source_url (remote file), local_file=true (local file — returns a curl command), or data (small base64)',
         )
       if (!canvasFor(canvas_id, 'edit')) return noCanvas(canvas_id)
-      const now = Date.now()
-      const limitKey = ownerId ?? agent_name
-      const hits = (uploadHits.get(limitKey) ?? []).filter((t) => now - t < 60_000)
-      if (hits.length >= UPLOADS_PER_MIN) {
-        const retryIn = Math.max(1, Math.ceil((hits[0]! + 60_000 - now) / 1000))
-        return err(
-          `upload rate limit: at most ${UPLOADS_PER_MIN} uploads a minute per account. Retry in ${retryIn}s, one upload at a time.`,
-        )
-      }
-      hits.push(now)
-      uploadHits.set(limitKey, hits)
+      const limited = takeUploadSlot(ownerId ?? agent_name)
+      if (limited) return err(limited)
       if (local_file) {
         const { token, expiresAt } = assets.createUploadTicket({
           canvasId: canvas_id,
@@ -1699,6 +1697,77 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
           note: 'Permanent public URL — safe to reference in any frame on any canvas.',
         })
         return withFeedback(result, canvas_id, actorFrom(agent_name))
+      } catch (e) {
+        return err(e instanceof Error ? e.message : 'upload failed')
+      }
+    },
+  )
+
+  /* one rate window with upload_asset: both write files to storage */
+  function takeUploadSlot(limitKey: string): string | null {
+    const now = Date.now()
+    const hits = (uploadHits.get(limitKey) ?? []).filter((t) => now - t < 60_000)
+    if (hits.length >= UPLOADS_PER_MIN) {
+      const retryIn = Math.max(1, Math.ceil((hits[0]! + 60_000 - now) / 1000))
+      return `upload rate limit: at most ${UPLOADS_PER_MIN} uploads a minute per account. Retry in ${retryIn}s, one upload at a time.`
+    }
+    hits.push(now)
+    uploadHits.set(limitKey, hits)
+    return null
+  }
+
+  server.registerTool(
+    'upload_font',
+    {
+      title: 'Add a font to the canvas’s library',
+      description: `Add a font file (ttf/otf/woff/woff2, one face per file, max 10 MB) to the font library this canvas designs with: its workspace's, or its owner's own on a personal canvas. Then name the family in CSS (font-family: "Family", sans-serif) and Doop writes the @font-face into every frame that uses it. This is how a font that is not in get_canvas's fonts or webFonts gets into a design: never inline the file as a base64 data: URI. Upload each weight and style you use as its own file; a file for a face the library already has replaces it. Pick ONE input: (1) source_url, a public URL of the font file itself (not a CSS file); (2) local_file=true for a file on your machine, which returns a one-time upload URL and a curl command to run; (3) data, base64, last resort for a small file when you cannot run shell commands. Shares upload_asset's limit of ${UPLOADS_PER_MIN} uploads a minute.`,
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+      inputSchema: {
+        canvas_id: z.string().describe('The canvas whose font library gets the font'),
+        source_url: z.string().optional().describe('Public http(s) URL of the font file'),
+        local_file: z
+          .boolean()
+          .optional()
+          .describe('true = the file is on YOUR machine: returns a one-time upload URL + curl command to run'),
+        data: z.string().optional().describe('The file as base64 (raw or a data: URL). Last resort, small files only.'),
+        file_name: z.string().optional().describe('The file name the library shows, e.g. "Oxanium-Light.ttf"'),
+        agent_name: agentName,
+      },
+    },
+    async ({ canvas_id, source_url, local_file, data, file_name, agent_name }) => {
+      if ([data, source_url, local_file].filter(Boolean).length !== 1)
+        return err(
+          'provide exactly one of: source_url (a public font file), local_file=true (a file on your machine — returns a curl command), or data (small base64)',
+        )
+      if (!canvasFor(canvas_id, 'edit')) return noCanvas(canvas_id)
+      if (!ownerId) return err('fonts are added by a signed-in account; connect with your Doop account')
+      const limited = takeUploadSlot(ownerId)
+      if (limited) return err(limited)
+      if (local_file) {
+        const { token, expiresAt } = assets.createUploadTicket({
+          canvasId: canvas_id,
+          ownerId,
+          uploadedBy: owner ?? agent_name,
+          kind: 'font',
+        })
+        /* the trailing slash makes curl append the local file name, which the library keeps */
+        const upload_url = `${env.BETTER_AUTH_URL}/u/${token}/`
+        return text({
+          ok: true,
+          upload_url,
+          command: `curl -sS -T "<path-to-your-font-file>" ${upload_url}`,
+          expires_at: new Date(expiresAt).toISOString(),
+          note: 'One-time upload URL (single use, 15 min). Run the curl command with your real file path; its JSON response names the family to use in CSS. Request a fresh ticket for each file.',
+        })
+      }
+      try {
+        const buf = data
+          ? Buffer.from(data.replace(/^data:[^,]*;base64,/, ''), 'base64')
+          : await assets.fetchRemote(source_url!, MAX_FONT_BYTES)
+        const name =
+          file_name ?? (source_url ? decodeURIComponent(new URL(source_url).pathname.split('/').pop() ?? '') : '')
+        const font = await addCanvasFont(canvas_id, { id: ownerId, name: owner ?? agent_name }, buf, name || 'font')
+        return withFeedback(text(uploadedFontResult(font)), canvas_id, actorFrom(agent_name))
       } catch (e) {
         return err(e instanceof Error ? e.message : 'upload failed')
       }
@@ -2272,7 +2341,20 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
       },
     },
     async ({ frame_id, html_chunk, start, done, agent_name }) => {
-      if (!frameFor(frame_id, 'edit')) return noFrame(frame_id)
+      const current = frameFor(frame_id, 'edit')
+      if (!current) return noFrame(frame_id)
+      /* the agent's own text: the end of its last chunk joined to this one, so a URI split
+         across chunks is caught (a split can only fall inside the short data:…;base64, prefix:
+         past it, the earlier chunk already held the prefix and was refused). Never the stored
+         HTML, where a component's image expanded mid-stream would read as an upload. Compared
+         with the design the stream replaced: a rework may carry over what the frame had. */
+      const inline = start
+        ? inlineDataRefusal(html_chunk, current.html)
+        : inlineDataRefusal(
+            (actions.streamTail(frame_id) ?? '') + html_chunk,
+            actions.streamBase(frame_id) ?? current.html,
+          )
+      if (inline) return err(inline)
       const frame = actions.appendFrameHtml(frame_id, html_chunk, actorFrom(agent_name), { start, done })
       if (!frame) return noFrame(frame_id)
       const result = done
@@ -2318,6 +2400,9 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
       if (!f) return noFrame(frame_id)
       const edited = editFrameSource(f, old_str, new_str)
       if ('error' in edited) return err(edited.error)
+      /* the edited document, so a URI completed across the replacement's edges is caught too */
+      const inline = inlineDataRefusal(edited.html, `${f.html}\n${compactFrameHtml(f)}`)
+      if (inline) return err(inline)
       const frame = actions.updateFrame(frame_id, { html: edited.html }, actorFrom(agent_name))!
       return withPreview(
         withStatusNudge(

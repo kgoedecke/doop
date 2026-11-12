@@ -132,6 +132,30 @@ export const FRAME_STYLES = `- Style an element on the element itself: style="�
 - This is how to write new markup. A frame that already styles itself with classes keeps them: edit
   it in its own idiom, and do not convert it.`
 
+/** What must not ride inside frame HTML. A frame is stored whole, sent whole to
+ *  every viewer on each edit and read whole by agents, so a file inlined into it
+ *  costs every one of those round-trips. Base64 data: URIs are refused by the
+ *  write tools (server/inlineData.ts); the rest is guidance. Shared by the MCP
+ *  guide and the resident agents' system prompt. */
+export const LEAN_FRAMES = `- Frames carry markup, never files. A frame is sent whole to every viewer and agent on each
+  edit, so anything pasted into it is paid for on every round-trip. A base64 data: URI of any
+  kind is refused and nothing is written. Put each heavy thing where it belongs:
+  - Fonts: a family the canvas library or the hosted fonts already have is used by name alone.
+    Any other font file goes into the library with upload_font, then is named in CSS: never an
+    @font-face with the file inlined.
+  - Pictures: a URL from search_images, search_icons, search_logos, generate_image or
+    upload_asset. A vector is an inline <svg> element, or a URL-encoded data:image/svg+xml,…
+    (no base64) for a small CSS background.
+  - Large vector art (a traced illustration, a map, a detailed logo, anything over ~20 KB of
+    path data): upload the .svg and use it as <img>. Keep inline <svg> for icons and shapes
+    someone may want to edit.
+  - Video and audio: frames are designs, so show a poster image instead of embedding a clip.
+  - Libraries and frameworks (charting, 3D, animation, a CSS framework): load them from a CDN with
+    <script src> or <link>, never pasted in. Better still, write only the CSS the design uses.
+  - Data: a chart or table needs a few representative rows, not the dataset. Keep inline JSON to a
+    few KB.
+  - Icon sets: hotlink each icon you use from search_icons, not a sprite sheet of the whole set.`
+
 export const COMPONENTS = `A component is one design used in many places: change its main and every instance follows.
 get_canvas and list_components show a canvas's components with their props.
 
@@ -343,6 +367,7 @@ ${FRAME_STYLES}
 - Custom fonts: when get_canvas lists \`fonts\`, the team uploaded them — prefer them. Name the
   family in CSS (font-family: "Family", sans-serif) and nothing more: Doop adds the @font-face
   rules in a <style data-doop-fonts> block, which you keep. Never fetch them from Google Fonts.
+  A font that is neither in the library nor on Google Fonts goes in with upload_font first.
 - Pictures on the canvas: a frame listed with \`images\` references raster images people
   uploaded or pasted, each with a \`description\` of what it shows, written by a vision model
   (null while pending). Read them before designing, and call get_frame_screenshot on the
@@ -464,8 +489,9 @@ any public image URL. Source images in this order:
   the frame. Never ship a gray "image goes here" box, and never guess an image URL
   from memory — unverified URLs are usually dead.
 
-Never inline images as data: URIs in frame HTML; they bloat every get_frame and
-edit round-trip.
+## Keep frames lean
+
+${LEAN_FRAMES}
 
 ## Style guides — read before designing
 
