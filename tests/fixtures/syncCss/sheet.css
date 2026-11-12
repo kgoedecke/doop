@@ -1,0 +1,10 @@
+/* Both url()s are relative to this file, as a bundler writes them
+   (Next.js: /_next/static/css/a.css pointing at ../media/font.woff2). */
+@font-face {
+  font-family: 'Sync Probe';
+  src: url('../fonts/nunito-sans-bold-italic.woff2') format('woff2');
+}
+body {
+  font-family: 'Sync Probe', serif;
+  background-image: url('../raster/blue.svg');
+}

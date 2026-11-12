@@ -87,6 +87,21 @@
     return page.length > 280 ? page.slice(0, 280) : page
   }
 
+  /* A sheet's url()s are relative to the sheet, not the page: a bundler's
+     /_next/static/css/a.css points at ../media/font.woff2. Resolve them while
+     the sheet is still known; once its rules join the snapshot's <style>,
+     only the page's base is left. */
+  function absolutizeCssUrls(css, base) {
+    return css.replace(/url\(\s*(['"]?)([^'")]+)\1\s*\)/g, function (all, q, u) {
+      if (/^(data:|blob:|#)/i.test(u)) return all
+      try {
+        return 'url(' + q + new URL(u, base).href + q + ')'
+      } catch (e) {
+        return all
+      }
+    })
+  }
+
   function absUrl(u) {
     try {
       return new URL(u, document.baseURI).href
@@ -121,7 +136,7 @@
         var rules = sheet.cssRules
         var text = ''
         for (var r = 0; r < rules.length; r++) text += rules[r].cssText + '\n'
-        css += text
+        css += sheet.href ? absolutizeCssUrls(text, sheet.href) : text
       } catch (e) {
         if (sheet.href) links.push(sheet.href)
       }
