@@ -1,5 +1,6 @@
 import { serializeOuter, type DefaultTreeAdapterTypes as Tree } from 'parse5'
 import { parse } from './workBudget.ts'
+import { elementIs } from './parse5Select.ts'
 import { CSS_ATTR, DETACHED_CSS_ATTR, HEAD_ATTR, INSTANCE_ATTR } from '../shared/components.ts'
 import { TOKEN_BLOCK_ATTR } from '../shared/designTokens.ts'
 import { FONT_BLOCK_ATTR } from '../shared/fonts.ts'
@@ -240,17 +241,26 @@ function compoundMatches(compound: string, tokens: Tokens): boolean {
   )
 }
 
-/** What a main is made of: its own elements, and apart from them the components nested in it. */
+/** What a main is made of: its own elements, and apart from them the components nested in it;
+ *  and the elements it sits in, nearest first. */
 interface SubtreeTokens {
   own: Tokens
   nested: Tokens
+  ancestors: Element[]
+}
+
+/** A selected subtree: the selector as far as it concerns it, and a condition on the document
+ *  it keeps (a theme), to be written before the scope. */
+interface Relevant {
+  selector: string
+  prefix: string
 }
 
 /** The selector as far as it concerns the subtree: compounds naming ancestors outside it are cut off.
  *  Null when its subject is not in the subtree at all. A subject inside a nested component counts
  *  only when the selector reaches it from one of the main's own elements (`.plan .btn`): that is
  *  this component restyling what it holds, where a bare `.btn` is the nested component's business. */
-function relevantSelector(selector: string, { own, nested }: SubtreeTokens): string | null {
+function relevantSelector(selector: string, { own, nested, ancestors }: SubtreeTokens): Relevant | null {
   const compounds = compoundsOf(selector)
   if (!compounds.length) return null
   const isOwn = (index: number) => compoundMatches(compounds[index]!.compound, own)
@@ -262,8 +272,13 @@ function relevantSelector(selector: string, { own, nested }: SubtreeTokens): str
     if (first === 0 || !isOwn(first - 1)) return null
   }
   while (first > 0 && isOwn(first - 1)) first--
-  return compounds
-    .slice(first)
+  const prefix = keptAncestors(compounds, first, ancestors)
+  if (prefix === null) return null
+  return { selector: joinCompounds(compounds.slice(first)), prefix }
+}
+
+function joinCompounds(pieces: { compound: string; combinator: string }[]): string {
+  return pieces
     .map((piece, index) => {
       if (index === 0) return piece.compound
       return piece.combinator === ' ' ? ` ${piece.compound}` : ` ${piece.combinator} ${piece.compound}`
@@ -271,11 +286,62 @@ function relevantSelector(selector: string, { own, nested }: SubtreeTokens): str
     .join('')
 }
 
+/**
+ * The compounds before `first` name what the main sits in: the rule is how the main looks
+ * there, and they are cut, when its ancestors meet them (matched by css-select, values and all;
+ * `>` asks it of the main's parent). When they do not (`.login__card h2` for a main outside any
+ * card) the rule is someone else's: null. A theme condition that does not hold now, wherever
+ * it sits (`html.dark .bar`, `.shell [data-doop-theme="dark"] .bar`), stays as the rule's
+ * condition when the rest holds; the rest is cut: the prefix returned. A sibling (`+`, `~`) is
+ * not checked, as it never was.
+ */
+function keptAncestors(
+  compounds: { compound: string; combinator: string }[],
+  first: number,
+  ancestors: Element[],
+): string | null {
+  if (first === 0) return ''
+  const joiner = compounds[first]!.combinator
+  if (joiner === '+' || joiner === '~') return ''
+  const candidates = joiner === '>' ? ancestors.slice(0, 1) : ancestors
+  const meets = (pieces: { compound: string; combinator: string }[]) =>
+    candidates.some((el) => elementIs(el, joinCompounds(pieces)))
+  const named = compounds.slice(0, first)
+  if (meets(named)) return ''
+  const themeless = named.map((piece) => ({ ...piece, compound: withoutTheme(piece.compound) }))
+  const themes = named.flatMap((piece, index) => (piece.compound !== themeless[index]!.compound ? [index] : []))
+  if (!themes.length || !meets(themeless)) return null
+  /* only the theme stays a condition: the wrappers around it are where the main sits, cut like
+     any. Two themes side by side keep how they were joined (`>` stays `>`) */
+  return themes
+    .map((at, index) => {
+      const compound = named[at]!.compound
+      if (index === 0) return compound
+      const joiner = themes[index - 1] === at - 1 ? named[at]!.combinator : ' '
+      return joiner === ' ' ? ` ${compound}` : ` ${joiner} ${compound}`
+    })
+    .join('')
+}
+
+/* a theme is a state the document or a part of it switches into: what the main shows now is
+   one of its themes, so a condition on another one is kept, not tested */
+const THEME_ATTRIBUTE = /\[\s*data-doop-theme\b(?:[^\]"']|"[^"]*"|'[^']*')*\]/gi
+const DOCUMENT_ROOT = /^(?::root|html|body)(?![\w-])/i
+
+function withoutTheme(compound: string): string {
+  const bare = compound.replace(THEME_ATTRIBUTE, '')
+  const root = DOCUMENT_ROOT.exec(bare)?.[0]
+  /* html.dark, :root[data-mode]: the document is always there, its classes are a theme too */
+  if (root) return root
+  return bare || '*'
+}
+
 /** A selector scoped to the instance root: at or below it, its pseudo-classes left in place. */
-export function scopeSelector(selector: string, scope: string): string {
+export function scopeSelector(selector: string, scope: string, prefix = ''): string {
   const where = `:where(${scope})`
   const lead = /^(\*|[a-zA-Z][\w-]*)?((?:[.#](?:[\w\u0080-\uffff-]|\\.)+|\[[^\]]*\])*)/.exec(selector)?.[0] ?? ''
-  return `${where} ${selector}, ${lead}${where}${selector.slice(lead.length)}`
+  const before = prefix ? `${prefix} ` : ''
+  return `${before}${where} ${selector}, ${before}${lead}${where}${selector.slice(lead.length)}`
 }
 
 function isDocumentSelector(selector: string): boolean {
@@ -302,17 +368,19 @@ function walkElements(node: Tree.ParentNode, visit: (el: Element) => void) {
 const noTokens = (): Tokens => ({ tags: new Set(), classes: new Set(), ids: new Set(), attrs: new Set() })
 
 /** `isNested` marks the root of a nested instance: it and everything below it are that component's. */
-function tokensOf(root: Element, isNested: (el: Element) => boolean): SubtreeTokens {
+function addTokens(el: Element, tokens: Tokens) {
+  tokens.tags.add(el.tagName.toLowerCase())
+  for (const attr of el.attrs) {
+    tokens.attrs.add(attr.name.toLowerCase())
+    if (attr.name === 'class') for (const name of attr.value.split(/\s+/)) if (name) tokens.classes.add(name)
+    if (attr.name === 'id') tokens.ids.add(attr.value)
+  }
+}
+
+function tokensOf(root: Element, isNested: (el: Element) => boolean): Omit<SubtreeTokens, 'ancestors'> {
   const own = noTokens()
   const nested = noTokens()
-  const add = (el: Element, tokens: Tokens) => {
-    tokens.tags.add(el.tagName.toLowerCase())
-    for (const attr of el.attrs) {
-      tokens.attrs.add(attr.name.toLowerCase())
-      if (attr.name === 'class') for (const name of attr.value.split(/\s+/)) if (name) tokens.classes.add(name)
-      if (attr.name === 'id') tokens.ids.add(attr.value)
-    }
-  }
+  const add = addTokens
   const stack: { el: Element; inside: boolean }[] = [{ el: root, inside: false }]
   for (let next = stack.pop(); next; next = stack.pop()) {
     const inside = next.inside || (next.el !== root && isNested(next.el))
@@ -327,7 +395,14 @@ const isInstanceRoot = (el: Element) => el.attrs.some((attr) => attr.name === IN
 function mainTokens(root: Element, variantAttrs: string[]): SubtreeTokens {
   const tokens = tokensOf(root, isInstanceRoot)
   for (const name of variantAttrs) tokens.own.attrs.add(name)
-  return tokens
+  return { ...tokens, ancestors: ancestorsOf(root) }
+}
+
+/** Each element the main sits in, nearest first: what an ancestor compound may name. */
+function ancestorsOf(root: Element): Element[] {
+  const chain: Element[] = []
+  for (let node = root.parentNode; node && 'tagName' in node; node = node.parentNode) chain.push(node)
+  return chain
 }
 
 /** The selectors in a stylesheet written for one component that name nothing in it, so that
@@ -423,7 +498,7 @@ export function extractComponentCss(
   }
   collectDocumentRules(nodes)
 
-  const keptRules = (list: CssNode[], write: (selector: string) => string): string[] =>
+  const keptRules = (list: CssNode[], write: (relevant: Relevant) => string): string[] =>
     list.flatMap((node) => {
       if (node.kind === 'group') {
         const inner = keptRules(node.nodes, write)
@@ -437,8 +512,8 @@ export function extractComponentCss(
       })
       return selectors.length ? [`${selectors.join(', ')} {${node.body}}`] : []
     })
-  const rules = keptRules(nodes, (selector) => scopeSelector(selector, scope))
-  const rawRules = keptRules(nodes, (selector) => selector)
+  const rules = keptRules(nodes, ({ selector, prefix }) => scopeSelector(selector, scope, prefix))
+  const rawRules = keptRules(nodes, ({ selector, prefix }) => (prefix ? `${prefix} ${selector}` : selector))
   const ruleText = rules.join('\n')
 
   /* inherited and custom properties land on the instance root, so its text
