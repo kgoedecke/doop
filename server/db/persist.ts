@@ -277,6 +277,23 @@ export function saveComponent(canvasId: string, def: ComponentDef) {
   )
 }
 
+/**
+ * The components with an instance stored at an older revision than the component: the
+ * frames a propagation never reached (the queue lives in memory, so a restart mid-drain
+ * drops it; the kill switch of 2026-11-11 deferred it). Read in the database, where matching
+ * every frame's HTML costs the server nothing.
+ */
+export async function componentsBehind(): Promise<{ canvasId: string; componentId: string }[]> {
+  const result = await db.execute(sql`
+    select distinct c.canvas_id as "canvasId", c.id as "componentId"
+    from components c
+    join frames f on f.canvas_id = c.canvas_id
+      and position('data-doop-instance="' || c.id || '"' in f.html) > 0
+    cross join lateral regexp_matches(f.html, 'data-doop-instance="' || c.id || '" data-doop-rev="(\\d+)"', 'g') as m
+    where coalesce(c.status, 'active') = 'active' and c.rev > 1 and m[1]::int < c.rev`)
+  return (result as unknown as { rows: { canvasId: string; componentId: string }[] }).rows
+}
+
 export function deleteComponent(canvasId: string, id: string) {
   queueComponentWrite(canvasId, id, () =>
     db.delete(t.components).where(and(eq(t.components.canvasId, canvasId), eq(t.components.id, id))),
