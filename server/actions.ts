@@ -2247,6 +2247,36 @@ function propagationDrained(canvasId: string, report: PropagationReport, actor: 
 propagation.registerFrameTask('propagate', { frame: propagateIntoFrame, drained: propagationDrained })
 
 /**
+ * Bring instances left on an older revision up to their component: the frames a propagation
+ * never reached, since the queue lives in memory and a restart mid-drain drops it. Queued as
+ * an ordinary propagation per canvas, in the name of whoever last changed the component.
+ */
+export async function catchUpComponentsBehind(): Promise<{ components: number; canvases: number }> {
+  /* propagation switched off: frames follow on their own next write, by choice */
+  if (env.DOOP_DEFER_COMPONENT_PROPAGATION) return { components: 0, canvases: 0 }
+  const behind = await persist.componentsBehind()
+  const byCanvas = new Map<string, Set<string>>()
+  for (const { canvasId, componentId } of behind)
+    byCanvas.set(canvasId, (byCanvas.get(canvasId) ?? new Set()).add(componentId))
+  let components = 0
+  let canvases = 0
+  for (const [canvasId, ids] of byCanvas) {
+    const defs = store.getComponents(canvasId).filter((def) => ids.has(def.id) && !isDeleted(def))
+    if (!defs.length) continue
+    components += defs.length
+    canvases += 1
+    for (const def of defs) {
+      const actor = resolveActor({ name: def.updatedBy, kind: 'user' })
+      transaction(() => queuePropagation(canvasId, [def], actor))
+    }
+    /* one canvas at a time: a queued canvas is loaded and held until it drains, so queueing
+       them all at once would hold every one of them in memory together */
+    await propagation.whenCanvasIdle(canvasId)
+  }
+  return { components, canvases }
+}
+
+/**
  * Give hollow definitions their markup back from their mains, as the next write of each main
  * would: rows that lost it when an older write landed last, before writes to a component row
  * were queued (2026-11-11). One canvas at a time, after boot; nothing to do once every

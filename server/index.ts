@@ -3521,6 +3521,15 @@ server.listen(PORT, () => {
         )
     })
     .catch((err) => console.error('[components] healing hollow definitions failed:', err))
+  /* instances a propagation never reached (a restart mid-drain): queued again, while serving */
+  outsideOperation('boot catch-up: each component is queued for propagation by itself', () =>
+    actions.catchUpComponentsBehind(),
+  )
+    .then(({ components, canvases }) => {
+      if (components)
+        console.log(`[components] ${components} component(s) on ${canvases} canvas(es) had instances behind: queued`)
+    })
+    .catch((err) => console.error('[components] catching up instances behind failed:', err))
   /* comments anchored before element ids: stamped now, while serving, so a
      slow or failing row can never keep the server from coming up */
   if (data.legacyCommentSelectors.size > 0) {
