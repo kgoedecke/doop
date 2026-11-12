@@ -8,3 +8,11 @@ body {
   font-family: 'Sync Probe', serif;
   background-image: url('../raster/blue.svg');
 }
+/* A quoted url() may hold a ")", and a string that only reads like a url()
+   is text, not a reference. */
+.probe-paren {
+  background-image: url('../raster/banner (1).svg');
+}
+.probe-string::before {
+  content: 'url(icon.svg)';
+}

@@ -90,12 +90,15 @@
   /* A sheet's url()s are relative to the sheet, not the page: a bundler's
      /_next/static/css/a.css points at ../media/font.woff2. Resolve them while
      the sheet is still known; once its rules join the snapshot's <style>,
-     only the page's base is left. */
+     only the page's base is left. The text is CSSOM cssText, which always
+     writes url("…") with " and \ escaped, so a quoted url() may hold a ")"
+     and a string that reads url(…) never matches. */
   function absolutizeCssUrls(css, base) {
-    return css.replace(/url\(\s*(['"]?)([^'")]+)\1\s*\)/g, function (all, q, u) {
+    return css.replace(/url\("((?:[^"\\]|\\.)*)"\)/g, function (all, raw) {
+      var u = raw.replace(/\\(.)/g, '$1')
       if (/^(data:|blob:|#)/i.test(u)) return all
       try {
-        return 'url(' + q + new URL(u, base).href + q + ')'
+        return 'url("' + new URL(u, base).href.replace(/["\\]/g, '\\$&') + '")'
       } catch (e) {
         return all
       }

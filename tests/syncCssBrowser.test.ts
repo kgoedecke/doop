@@ -19,5 +19,7 @@ describe.skipIf(!findBrowserPath())('design-sync stylesheet urls', () => {
     expect(html).toContain('url("data:font/woff2;base64,')
     expect(html).not.toContain('nunito-sans-bold-italic.woff2')
     expect(html).toContain(`url("${fixtureUrl('raster/blue.svg')}")`)
+    expect(html).toContain(`url("${fixtureUrl('raster/banner%20(1).svg')}")`)
+    expect(html).toContain('content: "url(icon.svg)"')
   })
 })
