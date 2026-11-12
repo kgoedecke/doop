@@ -1,6 +1,12 @@
 import { createHash } from 'node:crypto'
 import { indexOfAscii } from '../shared/asciiSearch.ts'
-import { serialize, serializeOuter, type DefaultTreeAdapterTypes as Tree } from 'parse5'
+import {
+  defaultTreeAdapter,
+  html as parse5Html,
+  serialize,
+  serializeOuter,
+  type DefaultTreeAdapterTypes as Tree,
+} from 'parse5'
 import { parse, parseFragment } from './workBudget.ts'
 import {
   BIND_ATTR,
@@ -98,14 +104,109 @@ function directText(el: Element): string {
     .trim()
 }
 
-function setChildrenFromHtml(el: Element, html: string) {
-  const fragment = parseFragment(html)
+function setChildrenFromHtml(el: Element, markup: string) {
+  const fragment = fragmentIn(markup, el.tagName)
   el.childNodes = fragment.childNodes
   for (const child of el.childNodes) child.parentNode = el
 }
 
 export function parseTemplateRoot(template: string): Element | undefined {
-  return elementKids(parseFragment(template))[0]
+  return elementKids(rootFragment(template))[0]
+}
+
+/* where a table part can stand: the HTML parser drops a <td> anywhere but in a row */
+const TABLE_PARENT: Record<string, string> = {
+  td: 'tr',
+  th: 'tr',
+  tr: 'tbody',
+  tbody: 'table',
+  thead: 'table',
+  tfoot: 'table',
+  caption: 'table',
+  colgroup: 'table',
+  col: 'colgroup',
+}
+
+const contextElements = new Map<string, Element>()
+
+function contextElement(tag: string): Element {
+  let el = contextElements.get(tag)
+  if (!el) {
+    el = defaultTreeAdapter.createElement(tag, parse5Html.NS.HTML, []) as Element
+    contextElements.set(tag, el)
+  }
+  return el
+}
+
+/** Markup parsed as the content of a `parentTag`: a row's cells stay cells. */
+export function fragmentIn(markup: string, parentTag: string | undefined) {
+  const parent = parentTag?.toLowerCase()
+  return parent && TABLE_CONTEXTS.has(parent) ? parseInContext(contextElement(parent), markup) : parseFragment(markup)
+}
+
+/* parse5's other form of parseFragment: the markup read as the content of `context` */
+const parseInContext = parseFragment as unknown as (context: Element, markup: string) => Tree.DocumentFragment
+
+const TABLE_CONTEXTS = new Set(['table', 'tbody', 'thead', 'tfoot', 'tr', 'colgroup'])
+
+/** The first element's tag, past any leading whitespace and comments. */
+function leadingTag(markup: string): string | undefined {
+  return /^(?:\s|<!--[\s\S]*?-->)*<([a-z][\w-]*)/i.exec(markup)?.[1]?.toLowerCase()
+}
+
+/** Can this markup's root stand where `parentTag` holds it? A table part only in its own table
+ *  context; anything else nowhere a table part must be (the parser moves it out of a row). */
+export function fitsIn(markup: string, parentTag: string): boolean {
+  const tag = leadingTag(markup)
+  const parent = parentTag.toLowerCase()
+  if (tag && TABLE_PARENT[tag]) return ALLOWED_PARENTS[tag]?.has(parent) ?? false
+  return !TABLE_CONTEXTS.has(parent)
+}
+
+/* every parent a table part may stand in: a row in any section of a table, or straight in one */
+const ALLOWED_PARENTS: Record<string, Set<string>> = {
+  td: new Set(['tr']),
+  th: new Set(['tr']),
+  tr: new Set(['tbody', 'thead', 'tfoot', 'table']),
+  tbody: new Set(['table']),
+  thead: new Set(['table']),
+  tfoot: new Set(['table']),
+  caption: new Set(['table']),
+  colgroup: new Set(['table']),
+  col: new Set(['colgroup', 'table']),
+}
+
+/** Is `tag` an element whose children the parser keeps to table parts? */
+export function isTableContext(tag: string): boolean {
+  return TABLE_CONTEXTS.has(tag.toLowerCase())
+}
+
+/** Is this markup's root a table part (a cell, a row, a section of a table)? */
+export function isTablePart(markup: string): boolean {
+  const tag = leadingTag(markup)
+  return !!tag && !!TABLE_PARENT[tag]
+}
+
+/** One element's markup parsed where it can stand: a table part inside what holds it. */
+export function rootFragment(markup: string) {
+  const tag = leadingTag(markup)
+  return fragmentIn(markup, tag ? TABLE_PARENT[tag] : undefined)
+}
+
+/** What a table part needs around it to be a page's markup at all, for a main of its own. */
+export function tableScaffold(markup: string): (inner: string) => string {
+  const tag = leadingTag(markup)
+  const chain: string[] = []
+  for (let parent = tag && TABLE_PARENT[tag]; parent; parent = TABLE_PARENT[parent]) chain.unshift(parent)
+  if (!tag || !TABLE_PARENT[tag]) return (inner) => inner
+  if (chain[0] !== 'table') chain.unshift('table')
+  return (inner) =>
+    chain.map((t) => `<${t}>`).join('') +
+    inner +
+    [...chain]
+      .reverse()
+      .map((t) => `</${t}>`)
+      .join('')
 }
 
 const JSON_OBJECT = (value: string | undefined): Record<string, unknown> => {
@@ -381,7 +482,7 @@ function clean(overrides: InstanceOverrides): InstanceOverrides {
 
 /** The compact markup of a node list: instances collapse to `<doop-use>`, the rest serializes as it stands. */
 function compactChildren(el: ParentNode, ctx: EngineContext): string {
-  const clone = parseFragment(serialize(el))
+  const clone = fragmentIn(serialize(el), isElement(el) ? el.tagName : undefined)
   compactInTree(clone, ctx)
   return serialize(clone)
 }
@@ -535,7 +636,7 @@ function diffAttrs(
 }
 
 function canonicalInner(el: Element): string {
-  const clone = parseFragment(serialize(el))
+  const clone = fragmentIn(serialize(el), el.tagName)
   const strip = (node: ParentNode) => {
     for (const child of node.childNodes) {
       if (!isElement(child)) continue
@@ -1312,7 +1413,7 @@ export function stampParts(root: Element): boolean {
 /** The main's markup as a template: no main marker, no element ids (each instance
  *  gets its own), nested instances compact. */
 export function templateFromMain(main: Element, ctx: EngineContext): string {
-  const clone = elementKids(parseFragment(serializeOuter(main)))[0]
+  const clone = elementKids(rootFragment(serializeOuter(main)))[0]
   if (!clone) return ''
   setAttr(clone, COMPONENT_ATTR, null)
   const walk = (node: Element) => {

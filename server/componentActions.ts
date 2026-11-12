@@ -46,6 +46,11 @@ import {
   kidsOf,
   measureTree,
   parseTemplateRoot,
+  fitsIn,
+  isTableContext,
+  isTablePart,
+  rootFragment,
+  tableScaffold,
   partsOf,
   readInstance,
   renderInstance,
@@ -512,7 +517,7 @@ ${rawCss}
 </style>
 </head>
 <body style="margin:0;padding:24px;background:transparent">
-${root}
+${tableScaffold(root)(root)}
 </body>
 </html>`
 }
@@ -529,7 +534,7 @@ function componentsPageId(canvasId: string, actor: Actor): string {
 }
 
 function singleRoot(html: string): Element {
-  const roots = kidsOf(parseFragment(html.trim())).filter((el) => el.tagName !== 'style' && el.tagName !== 'script')
+  const roots = kidsOf(rootFragment(html.trim())).filter((el) => el.tagName !== 'style' && el.tagName !== 'script')
   if (roots.length === 1) return roots[0]!
   const wrapper = kidsOf(parseFragment(`<div>${html.trim()}</div>`))[0]
   if (!wrapper) fail('html must hold an element')
@@ -800,12 +805,14 @@ export const updateComponent = atomic(function updateComponent(
 })
 
 function stampedTemplate(root: Element): string {
-  const clone = kidsOf(parseFragment(serializeOuter(root)))[0]!
+  const clone = kidsOf(rootFragment(serializeOuter(root)))[0]!
   stampParts(clone)
   return serializeOuter(clone)
 }
 
 /** Put new markup in the main's place, or give the component a new main if it lost it. */
+const leadingTagOf = (markup: string) => /<([a-z][\w-]*)/i.exec(markup)?.[1]?.toLowerCase() ?? 'element'
+
 function writeMain(
   canvasId: string,
   def: ComponentDef,
@@ -823,7 +830,19 @@ function writeMain(
     writeNewMain(canvasId, def, rendered, css ?? def.rawCss, actor)
     return
   }
-  let html = splice(frame.html, [{ start: located.start, end: located.end, text: rendered }])
+  /* a main that becomes a table part gets a table around it where it stands; one that stops being
+     one cannot stay in the row that holds it */
+  const parent = located.el.parentNode && 'tagName' in located.el.parentNode ? located.el.parentNode.tagName : 'body'
+  let text = rendered
+  if (!fitsIn(rendered, parent)) {
+    /* outside any table a new table can go where the main stood; inside one it would break it */
+    if (isTablePart(rendered) && !isTableContext(parent)) text = tableScaffold(rendered)(rendered)
+    else
+      fail(
+        `the main of “${def.name}” sits inside a <${parent}>, which cannot hold a <${leadingTagOf(rendered)}>: keep a root a <${parent}> can hold (it is a <${located.el.tagName}> now), or move the main out of the table first`,
+      )
+  }
+  let html = splice(frame.html, [{ start: located.start, end: located.end, text }])
   if (css !== undefined) html = withSourceCss(html, def.id, css)
   if (replacedHead) html = withHeadTags(html, replacedHead, def.head)
   actions.updateFrame(frame.id, { html }, actor)
