@@ -216,7 +216,17 @@ function registryCss(value: unknown): string {
 async function componentCss(items: RegistryItem[], candidates: string[]): Promise<string> {
   const theme = await readFile(new URL(import.meta.resolve('tailwindcss/theme.css')), 'utf8')
   const preflight = await readFile(new URL(import.meta.resolve('tailwindcss/preflight.css')), 'utf8')
-  const aliases = `@theme inline{${COLORS.map((name) => `--color-${name}:var(--${name});`).join('')}--radius-sm:calc(var(--radius) - 4px);--radius-md:calc(var(--radius) - 2px);--radius-lg:var(--radius);--radius-xl:calc(var(--radius) + 4px);}`
+  const modern = items.some((item) => item.files?.some((file) => /registry\/(?:radix|base|aria)-/.test(file.path)))
+  const nova = items.some((item) => item.files?.some((file) => /registry\/(?:radix|base|aria)-nova\//.test(file.path)))
+  // Nova's published preset uses Geist. Embed it so the saved HTML and its
+  // instances render identically without relying on the host app's fonts.
+  const font = nova
+    ? `@font-face{font-family:Geist;src:url(data:font/woff2;base64,${(await readFile(new URL('./assets/registry/geist.woff2', import.meta.url))).toString('base64')}) format('woff2');font-weight:100 900;font-style:normal;font-display:block;}`
+    : ''
+  const radii = modern
+    ? '--radius-sm:calc(var(--radius) * .6);--radius-md:calc(var(--radius) * .8);--radius-lg:var(--radius);--radius-xl:calc(var(--radius) * 1.4);--radius-2xl:calc(var(--radius) * 1.8);--radius-3xl:calc(var(--radius) * 2.2);--radius-4xl:calc(var(--radius) * 2.6);'
+    : '--radius-sm:calc(var(--radius) - 4px);--radius-md:calc(var(--radius) - 2px);--radius-lg:var(--radius);--radius-xl:calc(var(--radius) + 4px);'
+  const aliases = `@theme inline{${COLORS.map((name) => `--color-${name}:var(--${name});`).join('')}${radii}}`
   const variables = items
     .flatMap((item) => {
       const cssVars = item.cssVars as Record<string, Record<string, unknown>> | undefined
@@ -234,8 +244,22 @@ async function componentCss(items: RegistryItem[], candidates: string[]): Promis
     ])
     .join('\n')
     .replace(/@import\s+['"](?:tailwindcss|tw-animate-css)['"]\s*;?/g, '')
-  const compiler = await compile(`${theme}\n${aliases}\n@tailwind utilities;\n${extra}`)
-  return `${preflight}\n${DEFAULT_THEME}\n:root{${variables}}\n${compiler.build(candidates)}`
+  // Preflight contains Tailwind functions such as --theme(). It must go
+  // through the compiler too; copying it verbatim silently loses typography.
+  const compiler = await compile(`@layer theme, base, components, utilities;
+@layer theme {${theme}}
+${aliases}
+@layer base {${preflight}
+${DEFAULT_THEME}
+:root{${nova ? '--font-sans:Geist, sans-serif;--font-heading:var(--font-sans);' : ''}${variables}}
+*{border-color:var(--border);outline-color:var(--ring)}
+body{color:var(--foreground);background:var(--background)}
+.cn-font-heading{font-family:var(--font-heading,var(--font-sans))}
+}
+${font}
+@layer utilities {@tailwind utilities;}
+${extra}`)
+  return compiler.build(candidates)
 }
 
 /** React runs only in a disposable browser, with no app cookies, server APIs,
@@ -268,7 +292,7 @@ export async function renderRegistryComponent(
       ]),
     )
     const policy =
-      "default-src 'none'; script-src 'unsafe-inline' data: blob: https://esm.sh; style-src 'unsafe-inline'; img-src data:; connect-src 'none'; frame-src 'none'; worker-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'"
+      "default-src 'none'; script-src 'unsafe-inline' data: blob: https://esm.sh; style-src 'unsafe-inline'; font-src data:; img-src data:; connect-src 'none'; frame-src 'none'; worker-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'"
     await page.setContent(
       `<html><head><meta http-equiv="Content-Security-Policy" content="${policy}"></head><body><div id="registry-root"></div></body></html>`,
     )
@@ -287,6 +311,7 @@ export async function renderRegistryComponent(
     ])
     const css = await componentCss(items, candidates)
     await page.addStyleTag({ content: css })
+    await page.evaluate(() => document.fonts.ready)
     const snapshot = await page.evaluate(() => {
       const root = document.createElement('div')
       for (const element of document.body.children) {

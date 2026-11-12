@@ -22,6 +22,7 @@ import { store } from '../server/store.ts'
 import * as actions from '../server/actions.ts'
 import type { RegistryItem } from '../server/shadcnRegistry.ts'
 import type { Actor } from '../shared/types.ts'
+import novaCard from './fixtures/registry/nova-card.json'
 
 const actor: Actor = { name: 'Importer', kind: 'user', color: '#111' }
 const button: RegistryItem = {
@@ -98,11 +99,83 @@ describe.skipIf(!inject('browserRig'))('registry rendering and component registr
       await page.setContent(store.getFrame(frame.id)!.html)
       const style = await page.$eval('button', (element) => {
         const css = getComputedStyle(element)
-        return { background: css.backgroundColor, padding: css.paddingLeft, radius: css.borderRadius }
+        return {
+          background: css.backgroundColor,
+          padding: css.paddingLeft,
+          radius: css.borderRadius,
+          font: css.fontFamily,
+          color: css.color,
+        }
       })
       expect(style.background).toBe('rgb(80, 40, 160)')
       expect(style.padding).toBe('16px')
       expect(style.radius).not.toBe('0px')
+      expect(style.font).not.toContain('Times')
+      expect(style.color).toBe('oklch(0.985 0 0)')
+    } finally {
+      await page.close()
+    }
+  }, 30_000)
+
+  it('preserves the official Nova Card typography, compact spacing, ring and footer in mains and instances', async () => {
+    const rendered = await renderRegistryComponent(novaCard, [novaCard])
+    expect(rendered.width).toBe(432)
+    expect(rendered.css).not.toContain('--theme(')
+    const canvas = store.createCanvas('Nova fidelity')
+    const component = createComponentFromHtml(canvas.id, rendered, actor)
+    const frame = actions.createFrame(
+      canvas.id,
+      { name: 'Nova instance', html: '<html><body style="font-family:serif;color:red"></body></html>' },
+      actor,
+    )!
+    insertInstance(canvas.id, { component: component.id, frameId: frame.id }, actor)
+    const page = await browser.newPage()
+    try {
+      for (const id of [component.mainFrameId!, frame.id]) {
+        await page.setContent(store.getFrame(id)!.html)
+        await page.evaluate(() => document.fonts.ready)
+        const style = await page.evaluate(() => {
+          const card = document.querySelector('[data-slot="card"]')!
+          const title = document.querySelector('[data-slot="card-title"]')!
+          const header = document.querySelector('[data-slot="card-header"]')!
+          const footer = document.querySelector('[data-slot="card-footer"]')!
+          const css = getComputedStyle(card)
+          return {
+            font: css.fontFamily,
+            fontLoaded: [...document.fonts].some((face) => face.family === 'Geist' && face.status === 'loaded'),
+            size: css.fontSize,
+            gap: css.rowGap,
+            padding: css.paddingTop,
+            radius: css.borderRadius,
+            shadow: css.boxShadow,
+            width: card.getBoundingClientRect().width,
+            titleSize: getComputedStyle(title).fontSize,
+            titleWeight: getComputedStyle(title).fontWeight,
+            color: css.color,
+            descriptionColor: getComputedStyle(document.querySelector('[data-slot="card-description"]')!).color,
+            headerPadding: getComputedStyle(header).paddingLeft,
+            footerBorder: getComputedStyle(footer).borderTopWidth,
+            footerPadding: getComputedStyle(footer).paddingTop,
+          }
+        })
+        expect(style).toMatchObject({
+          font: 'Geist, sans-serif',
+          fontLoaded: true,
+          size: '14px',
+          gap: '16px',
+          padding: '16px',
+          radius: '14px',
+          width: 384,
+          titleSize: '16px',
+          titleWeight: '500',
+          color: 'oklch(0.145 0 0)',
+          descriptionColor: 'oklch(0.556 0 0)',
+          headerPadding: '16px',
+          footerBorder: '1px',
+          footerPadding: '16px',
+        })
+        expect(style.shadow).toContain('oklab(0.145 0 0 / 0.1) 0px 0px 0px 1px')
+      }
     } finally {
       await page.close()
     }

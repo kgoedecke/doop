@@ -42,7 +42,18 @@ export function registryMount(entry: Record<string, unknown>, preferred: string[
     )
     if (has('Provider')) node = part('Provider', {}, node)
   } else if (name === 'Card' && has('Header') && has('Title') && has('Content')) {
-    node = part('', {}, part('Header', {}, part('Title', {}, label)), part('Content', {}, 'Card content'))
+    node = part(
+      '',
+      { className: 'w-full max-w-sm' },
+      part(
+        'Header',
+        {},
+        part('Title', {}, label),
+        has('Description') ? part('Description', {}, 'A card with a header, content, and footer.') : null,
+      ),
+      part('Content', {}, 'Use this component to group related information and actions.'),
+      has('Footer') ? part('Footer', {}, 'Card footer') : null,
+    )
   } else {
     node = part('', {}, label)
   }

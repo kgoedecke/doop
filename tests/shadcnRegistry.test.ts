@@ -93,6 +93,17 @@ describe('shadcn registry imports', () => {
     ])
   })
 
+  it('keeps dependencies in the selected official style instead of mixing Nova and New York', async () => {
+    const nova = 'https://ui.shadcn.com/r/styles/radix-nova/'
+    respond({
+      [nova + 'demo.json']: { ...button, name: 'demo', registryDependencies: ['card'] },
+      [nova + 'card.json']: card,
+    })
+    const result = await prepareRegistryImport(nova + 'demo.json', ['demo'])
+    expect(result.items.map((item) => item.name)).toEqual(['demo', 'card'])
+    expect(String(network.fetch.mock.calls.at(-1)?.[0])).toBe(nova + 'card.json')
+  })
+
   it('rejects missing selections, invalid registries and unresolved namespaces', async () => {
     respond({ [root]: { name: 'Acme', items: [button] } })
     await expect(prepareRegistryImport(root, ['gone'])).rejects.toThrow('no longer available')

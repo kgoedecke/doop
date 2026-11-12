@@ -165,7 +165,16 @@ export async function prepareRegistryImport(raw: string, names: string[]) {
       } else if (/^https?:\/\//i.test(dependency)) {
         await visit(null, parsePublicHttpUrl(dependency).href)
       } else if (/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(dependency)) {
-        await visit(null, `https://ui.shadcn.com/r/styles/new-york-v4/${dependency}.json`)
+        // Official styles publish the same dependency names. Keep Nova (and
+        // other presets) in their own directory instead of mixing styles.
+        const origin = new URL(url)
+        const official = origin.origin === 'https://ui.shadcn.com' && /^\/r\/styles\/[^/]+\//.test(origin.pathname)
+        await visit(
+          null,
+          official
+            ? new URL(`${dependency}.json`, origin).href
+            : `https://ui.shadcn.com/r/styles/new-york-v4/${dependency}.json`,
+        )
       } else {
         throw new Error(
           `Cannot resolve registry dependency “${dependency}”; use a registry with public dependency URLs`,
