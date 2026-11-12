@@ -215,7 +215,7 @@ get_canvas and list_components show a canvas's components with their props.
   are captured as overrides on that element alone and survive every later change to the main. Do
   not detach to make a small change.
 - To change them all, call update_component with find + replace, and read the impact it reports.
-  Approved frames that change lose sign-off, and it says which. Use dry_run first on anything
+  Approved frames keep their sign-off: following a component is not an edit. Use dry_run first on anything
   widely used. Never edit each instance by hand.
 - get_component_preview shows you every variant at once. Look at it after changing a component.
 - Keep data-doop-part, data-doop-prop, data-doop-if and data-doop-slot when editing a main: part
@@ -238,7 +238,7 @@ get_canvas and list_components show a canvas's components with their props.
   Publish when the human asks, in any words ("make it available to the team"), not on your own
   initiative; it never changes another canvas until that canvas pulls. Only when the human asks
   for the change on every canvas: update_library_everywhere on the library canvas (dry_run first;
-  it changes other people's canvases and withdraws sign-off on approved frames that change).`
+  it changes other people's canvases; approved frames keep their sign-off).`
 
 export const DOOP_GUIDE = `# Doop Agent Guide
 

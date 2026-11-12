@@ -174,7 +174,7 @@ describe('the propagation queue', () => {
     const queued = { html: htmlOf(canvas), defs: defsOf(canvas) }
     expect(queued.html[frames[4]!.id]).toContain('title="mine"')
     expect(queued.html[frames[0]!.id]).toContain('btn fresh')
-    expect(store.getFrame(frames[1]!.id)!.approval?.status).toBe('needs_review')
+    expect(store.getFrame(frames[1]!.id)!.approval?.status).toBe('ready_for_dev')
 
     for (const frame of canvas.frames) store.updateFrame(frame.id, { html: start.html[frame.id]! }, actor.name)
     canvas.components = start.components

@@ -1818,12 +1818,12 @@ const pullFromLibrary = atomic(function pullFromLibrary(
 })
 
 /** The frames holding an instance of any of these components: what a change to them is
- *  queued for. `approvalLost` is whether the frame is signed off now, and so will not be. */
+ *  queued for. Following a component keeps a frame's sign-off. */
 function framesUsing(canvas: Canvas, componentIds: string[]): actions.PropagationReport['frames'] {
   const frames = new Map<string, actions.PropagationReport['frames'][number]>()
   for (const id of componentIds)
     for (const frame of usageOf(canvas, id).frames)
-      frames.set(frame.id, { id: frame.id, name: frame.name, approvalLost: frame.approved })
+      frames.set(frame.id, { id: frame.id, name: frame.name, approvalLost: false })
   return [...frames.values()]
 }
 
@@ -1968,7 +1968,8 @@ export interface LibraryConsumerUpdate {
   updated: string[]
   /** frames rewritten; in a dry run, the frames holding an instance of what would update */
   frames_changed: number
-  /** approved frames that went back to review; in a dry run, the approved ones among frames_changed */
+  /** always 0: a frame following its components keeps its sign-off (2026-11-12). Kept so
+   *  readers of the report do not break */
   approvals_withdrawn: number
 }
 
@@ -2013,7 +2014,7 @@ function previewConsumerUpdate(canvas: Canvas, libraryCanvasId: string): Library
   const stale = staleLinks(canvas, libraryCanvasId)
   if (!stale.length) return undefined
   const frames = new Map<string, boolean>()
-  for (const def of stale) for (const frame of usageOf(canvas, def.id).frames) frames.set(frame.id, frame.approved)
+  for (const def of stale) for (const frame of usageOf(canvas, def.id).frames) frames.set(frame.id, false)
   return {
     canvas_id: canvas.id,
     canvas_name: canvas.name,
@@ -2062,7 +2063,7 @@ function pullIntoConsumer(canvas: Canvas, library: Canvas, actor: Actor) {
  *  publication, in one step. Publishing never does this: it is its own act, by someone
  *  who may edit each canvas it changes, and it reports canvas by canvas what it did.
  *  Each pull is the ordinary one (pullFromLibrary): history is filed, approved frames
- *  that change go back to review and the canvas's room is told.
+ *  keep their sign-off and the canvas's room is told.
  *
  *  Frame HTML is loaded per canvas (store.load), and a pull reads and rewrites the
  *  consumer's frames, so each consumer is loaded and held while it is worked on: one

@@ -60,7 +60,7 @@ export const components: Catalog['components'] = {
     other: 'Atualizar {count} canvases para a versão mais recente?',
   },
   libraryEverywhereBody:
-    'Cada canvas que usa esta biblioteca recebe o que ela publicou por último. Frames aprovados que mudarem voltam para revisão. Canvases que você não pode editar são ignorados.',
+    'Cada canvas que usa esta biblioteca recebe o que ela publicou por último. Frames aprovados continuam aprovados. Canvases que você não pode editar são ignorados.',
   libraryEverywhereDone: { one: '{count} canvas atualizado', other: '{count} canvases atualizados' },
   libraryEverywhereReview: {
     one: '{count} frame aprovado voltou para revisão',

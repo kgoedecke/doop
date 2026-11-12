@@ -81,7 +81,7 @@ write that changed it only queues the component (`actions.queuePropagation`) and
 canvas and per frame, visits ONE frame per event-loop tick (`setImmediate` between frames) and lets canvases
 take turns, so no request rewrites a canvas synchronously; a frame waits once however many components ask
 for it, and a canvas with work pending stays loaded and held. Each visit is an ordinary write: history is
-filed, sign-off on an approved frame moves to `needs_review`, the room sees `frame:updated` (the `component`
+filed, sign-off stands (the frame itself was not edited; decided 2026-11-12), the room sees `frame:updated` (the `component`
 message goes out when the change is queued), and one activity line names the frames when the canvas's queue
 drains. A frame written while it was being prepared is queued again rather than overwritten. A frame
 mid-stream catches up when its stream ends, including one whose agent went silent. `update_component`

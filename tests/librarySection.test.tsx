@@ -293,7 +293,7 @@ it('offers a library with canvases on an older version to update them everywhere
   mocks.updateLibraryEverywhere.mockResolvedValue({
     dry_run: false,
     canvases: [
-      { canvas_id: 'k1', canvas_name: 'Landing', updated: ['Button'], frames_changed: 2, approvals_withdrawn: 1 },
+      { canvas_id: 'k1', canvas_name: 'Landing', updated: ['Button'], frames_changed: 2, approvals_withdrawn: 0 },
     ],
     skipped: [{ canvas_id: 'k2', canvas_name: 'Pricing', reason: 'no_edit_access', message: 'no' }],
   })
@@ -308,14 +308,14 @@ it('offers a library with canvases on an older version to update them everywhere
   expect(mocks.updateLibraryEverywhere).not.toHaveBeenCalled()
   const dialog = document.querySelector('[data-slot="confirm-dialog"]')!
   expect(dialog.textContent).toContain('Update 2 canvases to the latest version?')
-  expect(dialog.textContent).toContain('Approved frames that change go back to review')
+  expect(dialog.textContent).toContain('Approved frames stay approved')
   await act(async () =>
     Array.from(dialog.querySelectorAll('button'))
       .find((b) => b.textContent?.trim() === 'Update everywhere')!
       .click(),
   )
   expect(mocks.updateLibraryEverywhere).toHaveBeenCalledWith('canvas1')
-  expect(mocks.notices).toEqual(['1 canvas updated · 1 approved frame is back in review · 1 canvas skipped'])
+  expect(mocks.notices).toEqual(['1 canvas updated · 1 canvas skipped'])
 })
 
 it('keeps quiet about older versions while changes are unpublished, on other canvases, and with viewers', async () => {

@@ -148,7 +148,7 @@ describe('update everywhere', () => {
     for (const entry of report.canvases) {
       expect(entry.updated).toEqual(['Button'])
       expect(entry.frames_changed).toBe(1)
-      expect(entry.approvals_withdrawn).toBe(entry.canvas_name === 'Landing' ? 1 : 0)
+      expect(entry.approvals_withdrawn).toBe(0)
     }
     for (const consumer of consumers) {
       const frame = (await canvasOf(consumer.id)).frames[0]!
@@ -171,7 +171,7 @@ describe('update everywhere', () => {
     for (const entry of report.canvases) {
       expect(entry.updated).toEqual(['Button'])
       expect(entry.frames_changed).toBe(1)
-      expect(entry.approvals_withdrawn).toBe(entry.canvas_name === 'Landing' ? 1 : 0)
+      expect(entry.approvals_withdrawn).toBe(0)
     }
 
     for (const consumer of consumers) {
@@ -180,8 +180,8 @@ describe('update everywhere', () => {
       expect(frame.html).not.toContain('Start')
       expect((await libraryOf(consumer.id)).updates).toEqual([])
     }
-    /* an ordinary component update on each canvas: sign-off on a changed frame is withdrawn */
-    expect((await canvasOf(consumers[0]!.id)).frames[0]!.approval?.status).toBe('needs_review')
+    /* a frame following its components keeps its sign-off */
+    expect((await canvasOf(consumers[0]!.id)).frames[0]!.approval?.status).toBe('ready_for_dev')
     expect((await libraryOf(libraryId)).behind).toEqual([])
   }, 30_000)
 

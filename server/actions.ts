@@ -2190,9 +2190,9 @@ export function queuePropagation(canvasId: string, changed: ComponentDef[], acto
   })
 }
 
-/** One frame's turn in the queue: what the synchronous sweep did per frame. An ordinary
- *  write, so history is filed, sign-off on an approved frame moves to needs_review and the
- *  room sees frame:updated. A frame mid-stream catches up when its stream ends. */
+/** One frame's turn in the queue: what the synchronous sweep did per frame. History is filed
+ *  and the room sees frame:updated; sign-off stands, since the frame itself was not edited.
+ *  A frame mid-stream catches up when its stream ends. */
 function propagateIntoFrame(
   canvasId: string,
   frameId: string,
@@ -2218,12 +2218,12 @@ function propagateIntoFrame(
   if (latest.updatedAt !== stamp) return { requeue: true }
   if (html === latest.html) return {}
   const prior = priorState(latest)
-  const wasApproved = latest.approval?.status === 'ready_for_dev'
-  const updated = store.updateFrame(latest.id, { html }, actor.name)
+  /* a component it uses changed, not the frame: sign-off stands (decided 2026-11-12) */
+  const updated = store.updateFrame(latest.id, { html }, actor.name, { annotation: true })
   if (!updated) return {}
   noteHtmlChange(prior, actor, true)
   broadcast(canvasId, { type: 'frame:updated', frame: updated, actor })
-  return { touched: { id: updated.id, name: updated.name, approvalLost: wasApproved } }
+  return { touched: { id: updated.id, name: updated.name, approvalLost: false } }
 }
 
 function propagationDrained(canvasId: string, report: PropagationReport, actor: Actor) {

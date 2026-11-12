@@ -72,7 +72,7 @@ already know how to edit; there is no second editor.
   dependencies are adopted, older links get the snapshot as a new local revision (`relink`),
   tokens the update starts naming are carried, and
   `propagateComponents` carries it to every instance as an ordinary write, so history is filed and
-  approved frames move to `needs_review`. It is not plan-gated beyond the library still serving
+  approved frames keep their sign-off. It is not plan-gated beyond the library still serving
   the canvas.
 - A publish or a withdrawal sends `{ type: 'library' }` to every open room of the workspace
   (`actions.broadcastLibrary`); the panel reads its library again.
@@ -85,7 +85,7 @@ never a side effect of publishing, and it applies what is published, not work in
 
 - It walks `libraryConsumers(canvas)` and, for each canvas that is behind, runs the same
   `pullFromLibrary` as `sync_component`. So on each canvas it is an ordinary component update:
-  history is filed, approved frames that change move to `needs_review`, the room is told. It is
+  history is filed, approved frames keep their sign-off, the room is told. It is
   attributed to whoever asked, and each canvas gets one activity line naming the library.
 - Frame HTML is loaded per canvas, and a pull rewrites the consumer's frames, so each consumer is
   loaded (`store.load`) and held while it is worked on, one canvas at a time. The action is async
