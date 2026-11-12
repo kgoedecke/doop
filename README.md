@@ -202,11 +202,24 @@ Comment on any element or anywhere on the canvas. The **Comments** tab lists the
 comment get an email digest (opt out under Settings → Account), and canvases opened through a
 view-only or comment-only link show a badge and disable editing.
 
-The import source picker offers **Website** (one page, or discover a whole site and pick its pages),
+The import source picker offers **shadcn/ui** (paste a public registry index or item JSON URL, review
+its items, then render them directly into reusable HTML/CSS components), **Website** (one
+page, or discover a whole site and pick its pages),
 **Live app** (the [sync snippet](#design-sync-push-an-apps-live-screens-onto-a-canvas)), and
 **GitHub repo** (through the GitHub App or a fine-grained token: Doop reviews the repo's screens and
 components and queues cards for the Doop Agent to sketch them and extract the design system into a
 style guide).
+
+shadcn/ui imports appear immediately in the **Components** list, with their mains on the Components
+page. They use no agent task or model account. React is compiled and rendered in an isolated browser;
+the saved component contains passive HTML and CSS, including Tailwind styles, with its original source
+path for handoff. Components that need application data or providers should be imported through a
+self-contained demo or example export. Runtime interactions become a static design snapshot.
+Indexes may include file contents inline or refer to published item JSON files alongside the index
+(for example `/r/registry.json` and `/r/button.json`). URL dependencies and standard shadcn dependencies
+are resolved automatically. Private registries and `@namespace` dependencies are not supported; use
+public item URLs. Select up to 20 items per import.
+
 Right-click a frame and choose **Export…** to download PNG, JPG or a vector PDF (of the frame, or of
 every selected frame as one PDF). **Export** in the top bar binds any frames of the page into one PDF. A progress toast tracks the
 render; the desktop app opens its native save panel. Every frame also has a public live image at

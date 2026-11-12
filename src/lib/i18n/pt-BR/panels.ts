@@ -304,6 +304,8 @@ export const panels: Catalog['panels'] = {
   importWebsiteBlurb: 'Uma página, ou descubra um site inteiro.',
   importLiveApp: 'App ao vivo',
   importLiveAppBlurb: 'Atrás de um login, de uma VPN ou em localhost.',
+  importShadcn: 'shadcn/ui',
+  importShadcnBlurb: 'Componentes e temas de um registro.',
   importGithub: 'Repositório do GitHub',
   importGithubBlurb: 'Telas lidas a partir das rotas do repositório.',
 

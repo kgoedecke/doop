@@ -368,13 +368,26 @@ export function extractComponentCss(
   const nodes = parseCss(sheet)
   const customProps = new Map<string, string>()
   const inherited: string[] = []
+  const declarationLayers = new Map<string, string | undefined>()
 
-  const collectDocumentRules = (list: CssNode[]) => {
+  const collectDocumentRules = (list: CssNode[], layer?: string) => {
     for (const node of list) {
+      // Tailwind v4 puts its theme variables and inherited reset inside
+      // cascade layers. They still belong to the component's environment.
+      if (node.kind === 'group' && /^@layer\b/i.test(node.prelude)) {
+        const name = node.prelude.replace(/^@layer\s*/, '').trim()
+        collectDocumentRules(node.nodes, layer && name ? `${layer}.${name}` : name)
+      }
       if (node.kind !== 'rule' || !splitTopLevel(node.selector, ',').some(isDocumentSelector)) continue
       for (const { name, value } of declarationsOf(node.body)) {
-        if (name.startsWith('--')) customProps.set(name, value)
-        else if (INHERITED.has(name.toLowerCase())) inherited.push(`${name}: ${value}`)
+        if (name.startsWith('--')) {
+          customProps.set(name, value)
+          declarationLayers.set(name, layer)
+        } else if (INHERITED.has(name.toLowerCase())) {
+          const declaration = `${name}: ${value}`
+          inherited.push(declaration)
+          declarationLayers.set(declaration, layer)
+        }
       }
     }
   }
@@ -417,7 +430,16 @@ export function extractComponentCss(
   const rootDeclarations = [...vars, ...rootStyle]
 
   /* @keyframes and @font-face the kept rules name, wherever they were declared */
-  const fonts = usedFonts(`${ruleText} ${rootStyle.join(';')} ${inlineStyle}`)
+  let fontText = `${ruleText} ${rootStyle.join(';')} ${inlineStyle}`
+  for (let depth = 0; depth < 8; depth++) {
+    const resolved = fontText.replace(
+      /var\(\s*(--[\w-]+)\s*\)/g,
+      (match, name: string) => customProps.get(name) ?? match,
+    )
+    if (resolved === fontText) break
+    fontText = resolved
+  }
+  const fonts = usedFonts(fontText)
   const atomics: string[] = []
   const scopedAtomics: string[] = []
   const keyframes: string[] = []
@@ -433,6 +455,7 @@ export function extractComponentCss(
         atomics.unshift(node.text)
         scopedAtomics.unshift(node.text)
       }
+      if (node.name === 'layer') keep(node.text)
       if (node.name === 'keyframes') {
         const name = node.prelude.replace(/^@\S+\s*/, '').trim()
         const named = new RegExp(`(^|[\\s,:])${name.replace(/[^\w-]/g, '\\$&')}([\\s,;}]|$)`, 'm')
@@ -455,20 +478,35 @@ export function extractComponentCss(
         const family = /font-family\s*:\s*([^;]+)/i.exec(node.body)?.[1]?.replace(/["']/g, '').trim().toLowerCase()
         if (family && fonts.has(family)) keep(node.text)
       }
+      if (node.name === 'property' && wanted.has(node.prelude.replace(/^@property\s+/, '').trim())) keep(node.text)
     }
   }
   collectAtomics(nodes)
 
-  const declarations = rootDeclarations.join('; ')
+  // Keep inherited defaults in their original layer. Hoisting them out of
+  // @layer base would make them beat utility classes (e.g. white button text).
+  const defaults = (selector: string, layeredSelector = selector) => {
+    const layers = new Map<string | undefined, string[]>()
+    for (const declaration of rootDeclarations) {
+      const key = declaration.startsWith('--') ? declaration.slice(0, declaration.indexOf(':')) : declaration
+      const layer = declarationLayers.get(key)
+      const group = layers.get(layer) ?? []
+      group.push(declaration)
+      layers.set(layer, group)
+    }
+    return [...layers].map(([layer, declarations]) => {
+      // A root <button>'s base-layer `font: inherit` originally inherited
+      // from <html>. Its transplanted defaults must beat that reset, while
+      // remaining below utilities in the cascade.
+      const rule = `${layer === undefined ? selector : layeredSelector} {${declarations.join('; ')}}`
+      return layer === undefined ? rule : `@layer ${layer} {${rule}}`
+    })
+  }
   return {
-    css: [
-      ...scopedAtomics,
-      ...(declarations ? [`:where(${scope}) {${declarations}}`] : []),
-      withOwnAnimations(ruleText, keyframes, componentId),
-    ]
+    css: [...scopedAtomics, ...defaults(`:where(${scope})`, scope), withOwnAnimations(ruleText, keyframes, componentId)]
       .filter(Boolean)
       .join('\n'),
-    rawCss: [...atomics, ...(declarations ? [`:root {${declarations}}`] : []), ...rawRules].join('\n'),
+    rawCss: [...atomics, ...defaults(':root'), ...rawRules].join('\n'),
   }
 }
 

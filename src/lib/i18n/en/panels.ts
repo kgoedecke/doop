@@ -300,6 +300,8 @@ export const panels = {
   importWebsiteBlurb: 'One page, or discover a whole site.',
   importLiveApp: 'Live app',
   importLiveAppBlurb: 'Behind a login, a VPN or localhost.',
+  importShadcn: 'shadcn/ui',
+  importShadcnBlurb: 'Components and themes from a registry.',
   importGithub: 'GitHub repo',
   importGithubBlurb: 'Screens read from the repo’s routes.',
 

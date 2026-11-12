@@ -1,3 +1,4 @@
+import { MAX_COMPONENTS } from '../shared/components.ts'
 import { env } from './env.ts'
 import {
   catalogEntry,
@@ -9,6 +10,7 @@ import {
   deleteComponent,
   findComponent,
   findComponentCandidates,
+  freeName,
   importComponent,
   insertInstance,
   restoreComponentVersion,
@@ -2674,6 +2676,71 @@ function takeImportSlot(userId: string): boolean {
   importHits.set(userId, hits)
   return true
 }
+
+/* Registry React is rendered to passive HTML before writing components. */
+app.post('/api/canvases/:id/import/registry/preview', async (req, res) => {
+  if (!requireCanvas(req, res, req.params.id, 'edit')) return
+  try {
+    const { previewRegistry } = await import('./shadcnRegistry.ts')
+    const url = z.string().url().parse(req.body?.url)
+    if (!takeImportSlot(req.user!.id)) return res.status(429).json({ error: 'too many imports — wait a minute' })
+    res.json(await previewRegistry(url))
+  } catch (error) {
+    res.status(400).json({ error: error instanceof Error ? error.message : 'registry preview failed' })
+  }
+})
+
+app.post('/api/canvases/:id/import/registry', async (req, res) => {
+  if (!requireCanvas(req, res, req.params.id, 'edit')) return
+  try {
+    const { prepareRegistryImport, MAX_REGISTRY_SELECTION } = await import('./shadcnRegistry.ts')
+    const input = z
+      .object({
+        url: z.string().url(),
+        names: z.array(z.string().min(1).max(100)).min(1).max(MAX_REGISTRY_SELECTION),
+      })
+      .parse(req.body)
+    if (!takeImportSlot(req.user!.id)) return res.status(429).json({ error: 'too many imports — wait a minute' })
+    const prepared = await prepareRegistryImport(input.url, input.names)
+    const { renderRegistryComponent } = await import('./registryRenderer.ts')
+    const rendered = []
+    const failures: { name: string; error: string }[] = []
+    for (const item of prepared.selected) {
+      try {
+        rendered.push(await renderRegistryComponent(item, prepared.items))
+      } catch (error) {
+        failures.push({ name: item.name, error: error instanceof Error ? error.message : 'component rendering failed' })
+      }
+    }
+    if (!rendered.length)
+      return res.status(400).json({ error: failures[0]?.error ?? 'No renderable components selected', failures })
+    const canvas = requireCanvas(req, res, req.params.id, 'edit')
+    if (!canvas) return
+    if ((canvas.components?.length ?? 0) + rendered.length > MAX_COMPONENTS) {
+      return res.status(400).json({ error: `A design can hold at most ${MAX_COMPONENTS} components` })
+    }
+    const components = []
+    for (const component of rendered) {
+      try {
+        const name = freeName(
+          canvas.id,
+          component.name.replace(/["<>]/g, '').trim().slice(0, 80) || 'Registry component',
+        )
+        components.push(createComponentFromHtml(canvas.id, { ...component, name }, userActor(req)))
+      } catch (error) {
+        failures.push({
+          name: component.name,
+          error: error instanceof Error ? error.message : 'component creation failed',
+        })
+      }
+    }
+    if (!components.length)
+      return res.status(400).json({ error: failures[0]?.error ?? 'Component import failed', failures })
+    res.json({ components, failures })
+  } catch (error) {
+    res.status(400).json({ error: error instanceof Error ? error.message : 'registry import failed' })
+  }
+})
 
 app.post('/api/canvases/:id/import/discover', async (req, res) => {
   if (!requireCanvas(req, res, req.params.id, 'edit')) return
