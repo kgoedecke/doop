@@ -47,7 +47,6 @@ export const stage: Catalog['stage'] = {
   isOnIt: '{name} está cuidando disso',
   elementComment: 'Comentar',
   askAi: 'Pedir à IA',
-  code: 'Código',
   editText: 'Editar texto',
   textFormatting: 'Formatação de texto',
   textBold: 'Negrito',

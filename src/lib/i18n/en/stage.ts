@@ -47,7 +47,6 @@ export const stage = {
   isOnIt: '{name} is on it',
   elementComment: 'Comment',
   askAi: 'Ask AI',
-  code: 'Code',
   editText: 'Edit text',
   textFormatting: 'Text formatting',
   textBold: 'Bold',
