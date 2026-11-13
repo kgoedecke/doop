@@ -100,7 +100,8 @@ in `.github/actions/setup-desktop`:
   `src/lib/shell.ts`); only macOS gets the overlay title bar / traffic-light inset.
 - Tab shortcuts (`TAB_SHORTCUTS` / `tabShortcutTarget` in `src/lib/desktop.ts`), shell only: ⌘1
   (Ctrl+1 elsewhere) opens Home and ⌘2…⌘9 the open canvas tabs in strip order, as in Figma's
-  desktop app; read by physical key, from text fields too. Web-only, no desktop release needed.
+  desktop app; ⌘, (Ctrl+,) opens Settings (`SETTINGS_SHORTCUT`, `shellShortcutTarget`); read
+  by physical key, from text fields and frames too. Web-only, no desktop release needed.
   Tests: `desktopTabShortcuts.test.ts`.
 - Desktop app version is tracked separately from the root `package.json` and bumped by
   release-please (see above); after the release PR merges, tag as `desktop-vX.Y.Z`.
