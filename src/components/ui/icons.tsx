@@ -27,9 +27,7 @@ import {
   AlignEndHorizontal,
   FlipHorizontal2,
   FlipVertical2,
-  CircleDashed,
   Droplet,
-  Radius,
   AlignCenter,
   AlignJustify,
   AlignLeft,
@@ -56,6 +54,8 @@ import {
   Clipboard,
   CodeXml,
   Clock,
+  Hourglass,
+  Timer,
   Copy,
   CreditCard,
   Download,
@@ -111,6 +111,8 @@ import {
   SlidersHorizontal,
   AlignHorizontalSpaceAround,
   AlignVerticalSpaceAround,
+  GapHorizontal,
+  GapVertical,
   WrapText,
   SquareDashed,
   Shield,
@@ -131,7 +133,6 @@ import {
   SquareMousePointer,
   X,
   Braces,
-  ALargeSmall,
   Blend,
   Palette,
   Ruler,
@@ -188,6 +189,10 @@ export const XIcon = icon(X)
 export const ArrowDownIcon = icon(ArrowDown)
 export const HorizontalPaddingIcon = icon(AlignHorizontalSpaceAround)
 export const VerticalPaddingIcon = icon(AlignVerticalSpaceAround)
+/** the space between columns (`column-gap`) */
+export const ColumnGapIcon = icon(GapHorizontal)
+/** the space between rows (`row-gap`) */
+export const RowGapIcon = icon(GapVertical)
 export const WrapTextIcon = icon(WrapText)
 export const SquareDashedIcon = icon(SquareDashed)
 export const MoreHorizontalIcon = icon(Ellipsis)
@@ -206,15 +211,58 @@ export const AlignCenterHorizontalIcon = icon(AlignCenterHorizontal)
 export const AlignEndHorizontalIcon = icon(AlignEndHorizontal)
 export const FlipHorizontal2Icon = icon(FlipHorizontal2)
 export const FlipVertical2Icon = icon(FlipVertical2)
-export const CircleDashedIcon = icon(CircleDashed)
+/** Rotation as an angle: two rays from a corner and the arc between them. */
+export function RotationIcon(props: IconProps) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={ICON_STROKE}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+      {...sized(props)}
+    >
+      <path d="M20 19H4l11-14" />
+      <path d="M11 19a7 7 0 0 0-2.67-5.5" />
+    </svg>
+  )
+}
 export const DropletIcon = icon(Droplet)
+/** Stroke width as three rules, thin to thick. */
+export function StrokeWidthIcon(props: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeLinecap="round" aria-hidden {...sized(props)}>
+      <path d="M4 6h16" strokeWidth={ICON_STROKE} />
+      <path d="M4 12h16" strokeWidth={ICON_STROKE * 2} />
+      <path d="M4 18h16" strokeWidth={ICON_STROKE * 3} />
+    </svg>
+  )
+}
 export const BracesIcon = icon(Braces)
 export const PaletteIcon = icon(Palette)
 export const BlendIcon = icon(Blend)
 export const RulerIcon = icon(Ruler)
-export const TextSizeIcon = icon(ALargeSmall)
+export const TextSizeIcon = icon(Type)
 export const SpaceIcon = icon(Space)
-export const RadiusIcon = icon(Radius)
+/** Corner radius as one rounded corner, a stroke running up and turning right. */
+export function RadiusIcon(props: IconProps) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={ICON_STROKE}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+      {...sized(props)}
+    >
+      <path d="M5 19v-7a7 7 0 0 1 7-7h7" />
+    </svg>
+  )
+}
 export const AlignLeftIcon = icon(AlignLeft)
 export const AlignCenterIcon = icon(AlignCenter)
 export const AlignRightIcon = icon(AlignRight)
@@ -278,6 +326,10 @@ export const UserIcon = icon(User)
 export const UsersIcon = icon(Users)
 export const BotIcon = icon(Bot)
 export const ClockIcon = icon(Clock)
+/** a prototype interaction's delay */
+export const DelayIcon = icon(Hourglass)
+/** a prototype transition's duration */
+export const DurationIcon = icon(Timer)
 export const GearIcon = icon(Settings)
 export const ShieldIcon = icon(Shield)
 export const HelpIcon = icon(CircleHelp)

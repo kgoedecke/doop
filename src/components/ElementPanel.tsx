@@ -83,7 +83,11 @@ import {
   AlignEndHorizontalIcon,
   FlipHorizontal2Icon,
   FlipVertical2Icon,
-  CircleDashedIcon,
+  RotationIcon,
+  TextSizeIcon,
+  StrokeWidthIcon,
+  ColumnGapIcon,
+  RowGapIcon,
   DropletIcon,
   RadiusIcon,
   EyeIcon,
@@ -110,6 +114,8 @@ const TAB_KEY = 'doop:element-panel-tab'
    inspected immediately. */
 const INSPECT_DELAY_MS = 120
 const HTML_SAVE_DELAY_MS = 700
+/* the corner radius slider's span; a typed value may go past it */
+const RADIUS_SLIDE = [0, 100] as const
 
 type Tab = 'design' | 'html'
 
@@ -856,7 +862,7 @@ function DesignTab({
           <NumberField
             label={t('inspector.rotation')}
             min={-Infinity}
-            prefix={<CircleDashedIcon size="rail" />}
+            prefix={<RotationIcon size="rail" />}
             value={info.geometry.rotation}
             unit="°"
             disabled={!info.geometry.enabled}
@@ -978,12 +984,14 @@ function DesignTab({
               <PropertyRow label={t('inspector.rowGap')}>
                 <NumberField
                   label={t('inspector.rowGapLabel')}
+                  prefix={<RowGapIcon size="rail" />}
                   value={info.rowGap ?? 0}
                   unit="px"
                   onCommit={(v) => apply({ 'row-gap': `${Math.max(0, v)}px` })}
                 />
                 <NumberField
                   label={t('inspector.columnGap')}
+                  prefix={<ColumnGapIcon size="rail" />}
                   value={info.columnGap ?? 0}
                   unit="px"
                   onCommit={(v) => apply({ 'column-gap': `${Math.max(0, v)}px` })}
@@ -1015,6 +1023,7 @@ function DesignTab({
           <NumberField
             label={t('inspector.elementOpacity')}
             max={100}
+            slider={[0, 100]}
             prefix={<DropletIcon size="rail" />}
             value={info.opacity === null ? null : Math.round(info.opacity * 100)}
             unit="%"
@@ -1022,6 +1031,7 @@ function DesignTab({
           />
           <NumberField
             label={t('inspector.cornerRadius')}
+            slider={RADIUS_SLIDE}
             prefix={<RadiusIcon size="rail" />}
             value={info.borderRadius}
             unit="px"
@@ -1067,7 +1077,9 @@ function DesignTab({
           />
           <NumberField
             label={t('inspector.fillOpacity')}
+            prefix={<DropletIcon size="rail" />}
             max={100}
+            slider={[0, 100]}
             value={Math.round(fillAlpha * 100)}
             unit="%"
             onCommit={(v) => apply({ 'background-color': colorWithAlpha(fill ?? info.backgroundColor, v / 100) })}
@@ -1087,6 +1099,7 @@ function DesignTab({
           />
           <NumberField
             label={t('inspector.borderWidth')}
+            prefix={<StrokeWidthIcon size="rail" />}
             value={border.width}
             unit="px"
             onCommit={(v) =>
@@ -1145,6 +1158,7 @@ function DesignTab({
           <PropertyRow label={t('inspector.rowSize')}>
             <NumberField
               label={t('inspector.fontSize')}
+              prefix={<TextSizeIcon size="rail" />}
               value={mixed.fontSize ? null : info.fontSize}
               placeholder={t('inspector.mixed')}
               unit="px"

@@ -669,11 +669,15 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   1×1 (`MIN_FRAME_SIZE`, also the Inspector's floor). `tests/frameResize.test.ts` covers the
   geometry, `tests/frameResizeBrowser.test.ts` drags the grips in Chromium.
   The frame Inspector's X / Y / W / H are the same `NumberField` the element panel uses
-  (`src/components/ui/property-field.tsx`): the `px` unit is the drag handle (`useValueScrub`,
-  Shift ×10, Alt ×0.1, Esc cancels) and ↑/↓ nudge. A drag previews every step through
-  `patchFrameLocal` and, through `PropertyScrubContext`, commits once on release as one discrete
-  undo step and one PATCH; Esc puts the frame's box back and saves nothing. Tests:
-  `inspectorScrub.test.tsx`.
+  (`src/components/ui/property-field.tsx`): the field's icon is the drag handle, the unit when it
+  has none (`useValueScrub`, `data-scrub`; Shift ×10, Alt ×0.1, Esc cancels) and ↑/↓ nudge. A drag
+  previews every step through `patchFrameLocal` and, through `PropertyScrubContext`, commits once
+  on release as one discrete undo step and one PATCH; Esc puts the frame's box back and saves
+  nothing. A field given `slider={[min, max]}` (element and fill opacity, corner radius) is also a
+  slider (`useValueSlide`): hover shows the value as a fill and thumb across the field, and a drag
+  anywhere else on it moves the value by the share of the width travelled (never jumping to the
+  pointer); a click still types, mouse and pen only. Tests: `inspectorScrub.test.tsx`,
+  `valueSlide.test.tsx`.
 - Frame rotation (`shared/frameRotation.ts`, `src/lib/frameRotate.ts`): a selected frame wears a
   zone just outside each corner (`data-frame-rotate-handle`, 18 screen px, clear of the corner
   grip) that shows Figma's curved double-arrow cursor, turned to curve around its corner and with
