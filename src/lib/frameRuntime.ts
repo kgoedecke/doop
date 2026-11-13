@@ -744,8 +744,13 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
 
   function drawingHit(x, y, standalone, selected) {
     var top = elementAt(x, y)
-    var el = standalone ? document.body.firstElementChild : top && top.closest('[data-doop-drawing]')
+    // A press inside a group drags the group, as a click there picks it.
+    var el = standalone ? document.body.firstElementChild
+      : top && groupLevel(top.closest('[data-doop-drawing]:not([data-doop-drawing="group"])') || top, selected, false)
     if (!el || !el.matches('[data-doop-drawing]') || isLocked(el)) return null
+    // A drawing inside a box (a group) moves as a layer: its box may lay it
+    // out, and a drop reorders it there or places it where it lands.
+    if (!standalone && el.parentElement !== document.body) return null
     var picked = pickedAround(selected, el)
     if (!standalone && picked && elementGeometry(picked).enabled) return null
     // A drawing picked with other layers moves with them, through the layer
@@ -862,9 +867,36 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
     return null
   }
 
-  function probe(x, y) {
+  /* Groups pick as a whole, as in a design tool: a click lands on the
+     outermost group around the hit, unless something inside that group is
+     already picked, which puts the click at that level (the picked layer's
+     siblings). Deeper (a double-click) steps one level into a picked
+     group. Only groups made on the canvas (⌘G, ⇧A, an SVG import) count. */
+  function groupLevel(el, selected, deeper) {
+    var chain = [el]
+    for (var p = el.parentElement; p && p !== document.body; p = p.parentElement) {
+      if (p.matches('[data-doop-drawing="group"]') && !isLocked(p)) chain.unshift(p)
+    }
+    // a press sends the one picked layer as a string, several as a list
+    var picked = (Array.isArray(selected) ? selected : typeof selected === 'string' ? [selected] : [])
+      .map(styleTarget).filter(Boolean)
+    for (var i = 0; i < chain.length - 1; i++) {
+      var group = chain[i]
+      var within = picked.some(function (s) { return s !== group && group.contains(s) })
+      var entering = deeper && picked.indexOf(group) !== -1
+      if (!within && !entering) return group
+    }
+    return chain[chain.length - 1]
+  }
+
+  function probeTarget(x, y, grouped, selected, deeper) {
     var el = elementAt(x, y)
-    if (el) el = el.closest('[data-doop-drawing]') || el
+    if (el) el = el.closest('[data-doop-drawing]:not([data-doop-drawing="group"])') || el
+    return el && grouped ? groupLevel(el, selected, deeper) : el
+  }
+
+  function probe(x, y, grouped, selected) {
+    var el = probeTarget(x, y, grouped, selected, false)
     return el ? hitInfo(el) : null
   }
 
@@ -882,6 +914,7 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
     // A selected group moves as a whole even when the press hits a child.
     var picked = el && pickedAround(selected, el)
     if (picked) el = picked
+    else if (el) el = groupLevel(el, selected, false)
     while (el && el !== document.body && el !== document.documentElement) {
       if (elementGeometry(el).enabled) {
         var info = hitInfo(el)
@@ -906,9 +939,8 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
      so it skips the outerHTML/selector work and returns just tag + rect */
   /* outlines what a click there would pick: a drawing is hovered as a
      whole, the way probe() picks it, so the hover and the pick agree */
-  function hoverProbe(x, y) {
-    var el = elementAt(x, y)
-    if (el) el = el.closest('[data-doop-drawing]') || el
+  function hoverProbe(x, y, selected) {
+    var el = probeTarget(x, y, true, selected, false)
     return el ? { tag: el.tagName.toLowerCase(), selector: cssPath(el), rect: designRect(el) } : null
   }
 
@@ -1028,6 +1060,7 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
         editGeometry(follower.selector, { kind: 'nudge', dx: dx, dy: dy })
       })
     }
+    if (offsetAnchored(el, cs)) return moveByOffsets(el, selector, rect, dx, dy)
     // Probe the local translation basis. This handles scaled/rotated ancestors and
     // percentage translations without flattening the element's existing transform.
     // All temporary styles are restored synchronously, before painting or saving.
@@ -1068,6 +1101,63 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
       else el.setAttribute('style', settledStyle)
     }
     return finalTranslate !== null
+  }
+
+  function isAutoOffset(el, prop) {
+    // Typed OM keeps 'auto' where getComputedStyle reports the used px.
+    try { if (el.computedStyleMap) return String(el.computedStyleMap().get(prop)) === 'auto' } catch (e) {}
+    var v = el.style.getPropertyValue(prop)
+    return !v || v === 'auto'
+  }
+
+  /* An absolutely placed layer (a drawn shape, a group) is anchored by its
+     left and top, as a design tool writes it: a move rewrites those rather
+     than piling a translate on top. One stretched between opposite offsets
+     would resize instead, so it keeps the translate path. */
+  function offsetAnchored(el, cs) {
+    return (cs.position === 'absolute' || cs.position === 'fixed') && el !== document.body
+      && isAutoOffset(el, 'right') && isAutoOffset(el, 'bottom')
+  }
+
+  function moveByOffsets(el, selector, rect, dx, dy) {
+    // The same probe as the translate path: left/top through any scaled or
+    // turned ancestor, restored synchronously before painting or saving.
+    var original = el.getAttribute('style')
+    var next = null
+    try {
+      el.style.setProperty('transition', 'none', 'important')
+      var cs = getComputedStyle(el)
+      var left = parseFloat(cs.left) || 0
+      var top = parseFloat(cs.top) || 0
+      el.style.setProperty('left', left + 'px', 'important')
+      el.style.setProperty('top', top + 'px', 'important')
+      var zero = designRect(el)
+      el.style.setProperty('left', (left + 100) + 'px', 'important')
+      var right = designRect(el)
+      el.style.setProperty('left', left + 'px', 'important')
+      el.style.setProperty('top', (top + 100) + 'px', 'important')
+      var down = designRect(el)
+      var a = (right.x - zero.x) / 100, b = (right.y - zero.y) / 100
+      var c = (down.x - zero.x) / 100, d = (down.y - zero.y) / 100
+      var determinant = a * d - b * c
+      if (Math.abs(determinant) >= 0.000001) {
+        var x = rect.x + dx - zero.x, y = rect.y + dy - zero.y
+        next = {
+          left: Math.round((left + (d * x - c * y) / determinant) * 100) / 100 + 'px',
+          top: Math.round((top + (a * y - b * x) / determinant) * 100) / 100 + 'px',
+        }
+      }
+    } finally {
+      if (original === null) el.removeAttribute('style')
+      else el.setAttribute('style', original)
+      if (next !== null) applyStyle(selector, next)
+      var settledStyle = el.getAttribute('style')
+      el.style.setProperty('transition', 'none', 'important')
+      designRect(el)
+      if (settledStyle === null) el.removeAttribute('style')
+      else el.setAttribute('style', settledStyle)
+    }
+    return next !== null
   }
 
   function dimensionValue(el, axis, cs) {
@@ -1620,7 +1710,15 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
       parent.postMessage({ type: 'doop:lock-result', reqId: d.reqId, ok: !!lockEl }, '*')
     }
     if (d.type === 'doop:probe') {
-      parent.postMessage({ type: 'doop:probe-result', reqId: d.reqId, hit: probe(d.x, d.y) }, '*')
+      parent.postMessage({ type: 'doop:probe-result', reqId: d.reqId, hit: probe(d.x, d.y, d.grouped === true, d.selected) }, '*')
+    }
+    if (d.type === 'doop:enter-group') {
+      /* a double-click: the layer one level into a picked group, or null
+         when the point is on no picked group (the double-click edits instead) */
+      var shallow = probeTarget(d.x, d.y, true, d.selected, false)
+      var inner = probeTarget(d.x, d.y, true, d.selected, true)
+      parent.postMessage({ type: 'doop:enter-group-result', reqId: d.reqId,
+        hit: inner && inner !== shallow ? hitInfo(inner) : null }, '*')
     }
     if (d.type === 'doop:context-hit') {
       parent.postMessage({ type: 'doop:context-hit-result', reqId: d.reqId, hit: contextHit(d.x, d.y) }, '*')
@@ -1631,8 +1729,16 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
     if (d.type === 'doop:move-hit') {
       parent.postMessage({ type: 'doop:move-hit-result', reqId: d.reqId, hit: moveHit(d.x, d.y, d.selected) }, '*')
     }
+    if (d.type === 'doop:placement-origin') {
+      // where the body's absolute layers are placed from, for new drawings
+      var bodyOrigin = placementOrigin(document.body)
+      parent.postMessage({ type: 'doop:placement-origin-result', reqId: d.reqId, origin: bodyOrigin }, '*')
+    }
+    if (d.type === 'doop:layer-placement') {
+      parent.postMessage({ type: 'doop:layer-placement-result', reqId: d.reqId, styles: layerPlacement(d.selector, d.target) }, '*')
+    }
     if (d.type === 'doop:move-target') {
-      parent.postMessage({ type: 'doop:move-target-result', reqId: d.reqId, result: moveTarget(d.selector, d.x, d.y) }, '*')
+      parent.postMessage({ type: 'doop:move-target-result', reqId: d.reqId, result: moveTarget(d.selector, d.x, d.y, d.at) }, '*')
     }
     if (d.type === 'doop:path') {
       parent.postMessage({ type: 'doop:path-result', reqId: d.reqId, hit: pathInfo(d) }, '*')
@@ -1648,7 +1754,7 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
       parent.postMessage({ type: 'doop:drawing-moving-result', reqId: d.reqId }, '*')
     }
     if (d.type === 'doop:hover') {
-      parent.postMessage({ type: 'doop:hover-result', reqId: d.reqId, hit: hoverProbe(d.x, d.y) }, '*')
+      parent.postMessage({ type: 'doop:hover-result', reqId: d.reqId, hit: hoverProbe(d.x, d.y, d.selected) }, '*')
     }
     if (d.type === 'doop:select') {
       parent.postMessage({ type: 'doop:select-result', reqId: d.reqId, hit: describe(d.selector) }, '*')

@@ -587,6 +587,25 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   drag zooms onto the box it draws, filling the stage's open area. Z is the tool only while held:
   letting go returns to the previous tool, and the tool rail has no button for it.
   Tests: `zoomTool.test.ts`, the Zoom cases in `tools.test.ts`.
+- Layers placed by hand (`src/lib/groupLayout.ts`, Paper's model): a shape drawn into a frame is
+  `position:absolute; left; top; width; height`, and moving an absolute layer (drag, nudge, X/Y)
+  rewrites its `left`/`top` (`moveByOffsets` in the runtime) instead of adding a `translate`;
+  layers in flow still move by `translate`. ⌘G / ⌥⌘G / ⇧A on layers that all sit absolute make one
+  absolute group marked `data-doop-drawing="group"` where they were: a flex row or column
+  (`planGroup`: direction from the wider run, gap the mean space, `align-items` the shared edge,
+  children reordered to the flow and given `flex-shrink:0`) when they do not overlap along it, else
+  pinned (an absolute box of their bounds, children re-based). Layers in flow keep the
+  flow-carrying group. ⇧⌘G on an absolute group puts its layers back absolute where they show. A
+  click picks the outermost canvas group around the hit, a double-click on a picked group goes one
+  level in, and with a layer inside picked clicks pick its siblings (`groupLevel`); comments still
+  pin to the element under the pointer. Drops (`frameDropRuntime.ts`, canvas drags of layers and
+  of shapes on the frame, and Layers panel moves through `layerPlacement`): into a flex or grid box
+  an absolute layer becomes a flow item; into a box that places its layers by hand (`freeform`:
+  the body, a canvas group, or a box already holding absolute layers, with nothing else in flow)
+  it goes absolute where it was let go; a canvas group left empty is removed. A layer placed by its
+  own inline styles has them removed on a flow drop; only a stylesheet-placed one gets the
+  `position: relative !important` override. Tests: `groupLayout.test.ts`, `groupDrawnBrowser.test.ts`,
+  `layersMove.test.ts`.
 - `src/lib/drawing.ts` creates rectangles, circles, straight and cubic Bézier SVG paths, text and empty
   frames through the existing frame API. Drawing inside a frame appends a positioned HTML/SVG
   layer. Standalone elements use frame persistence with a `data-doop-canvas-element` body marker

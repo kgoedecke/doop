@@ -12,6 +12,7 @@ import {
 import type { Frame } from '../../shared/types'
 import type { ComponentDef } from '../../shared/components'
 import { canEditOpenCanvas, pickedSelectors, useStore } from '../lib/store'
+import { layerPlacement } from '../lib/frameBridge'
 import { currentPageCanvas, usePageCanvas } from '../lib/pages'
 import { PagesPanel, sectionHeading } from './PagesPanel'
 import { getIdentity } from '../lib/identity'
@@ -468,8 +469,14 @@ export function LayersPanel({
         return
       }
       if (!over || row.kind !== 'node') return
-      if (over.frame.id === row.frame.id) dropLayer(row.frame, row.node.selector, targetOf(over, target.place))
-      else transferLayer(row.frame, row.node.selector, over.frame, targetOf(over, target.place))
+      if (over.frame.id === row.frame.id) {
+        /* into a flex box it flows, out onto a hand-placed box it goes
+           absolute where it shows, as a canvas drag would place it */
+        const to = targetOf(over, target.place)
+        void layerPlacement(row.frame.id, row.node.selector, to).then((flow) =>
+          dropLayer(row.frame, row.node.selector, to, flow),
+        )
+      } else transferLayer(row.frame, row.node.selector, over.frame, targetOf(over, target.place))
     }
     const onCancel = () => finish()
     window.addEventListener('pointermove', onMove)

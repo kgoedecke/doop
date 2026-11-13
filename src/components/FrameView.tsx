@@ -400,7 +400,11 @@ export const FrameView = memo(function FrameView({
           if (released) drag?.up()
         },
         (selector) => {
-          void enterElementEdit({ selector })
+          /* a double-click on a picked group goes into it, else edits */
+          const at = designOffset(e, frame.rotation)
+          void enterGroup(at).then((entered) => {
+            if (!entered) void enterElementEdit({ selector })
+          })
         },
         (hit) => {
           clearHover()
@@ -962,7 +966,10 @@ export const FrameView = memo(function FrameView({
     if (!force && now - hoverLast.current < 40) return
     hoverLast.current = now
     hoverReq.current += 1
-    iframeRef.current?.contentWindow?.postMessage({ type: 'doop:hover', reqId: hoverReq.current, x, y }, '*')
+    iframeRef.current?.contentWindow?.postMessage(
+      { type: 'doop:hover', reqId: hoverReq.current, x, y, selected: pickedHere() },
+      '*',
+    )
   }
 
   function clearHover() {
@@ -1064,6 +1071,13 @@ export const FrameView = memo(function FrameView({
   /* delayed slightly so the second click of a double-click (→ edit mode)
      cancels it instead of flashing the toolbar; a comment click has no
      double-click to wait out, so it probes at once */
+  /* the layers picked in this frame, which tell the runtime how deep in its
+     groups a click lands */
+  function pickedHere(): string[] {
+    const s = useStore.getState()
+    return s.selectedElement?.frameId === frame.id ? pickedSelectors(s) : []
+  }
+
   function probeAt(x: number, y: number, intent: ProbeIntent = 'toolbar') {
     if (!frame.html || editing) return
     /* the current pick stays until the probe answers: clearing it here would
@@ -1076,7 +1090,11 @@ export const FrameView = memo(function FrameView({
       () => {
         probeTimer.current = null
         probeReq.current += 1
-        iframeRef.current?.contentWindow?.postMessage({ type: 'doop:probe', reqId: probeReq.current, x, y }, '*')
+        /* a click picks a group as a whole; the Comment tool pins to what is under it */
+        iframeRef.current?.contentWindow?.postMessage(
+          { type: 'doop:probe', reqId: probeReq.current, x, y, grouped: intent !== 'comment', selected: pickedHere() },
+          '*',
+        )
       },
       intent === 'toolbar' ? 250 : 0,
     )
@@ -1410,6 +1428,21 @@ export const FrameView = memo(function FrameView({
   /* ---- inline text editing ---- */
   const canEdit = !!frame.html && !stream && !frame.locked && !readOnly && !/<script/i.test(frame.html)
 
+  async function enterGroup(at: { x: number; y: number }): Promise<boolean> {
+    const selected = pickedHere()
+    if (!selected.length) return false
+    const reply = await requestFrame(frame.id, 'doop:enter-group', { ...at, selected })
+    const hit = reply?.hit as ProbeHit | null | undefined
+    if (!hit || typeof hit.selector !== 'string') return false
+    /* the pending single-click probe would put the group back */
+    if (probeTimer.current !== null) window.clearTimeout(probeTimer.current)
+    probeTimer.current = null
+    probeReq.current += 1
+    useStore.getState().pickElement({ frameId: frame.id, selector: hit.selector })
+    setProbe({ ...hit, point: at })
+    return true
+  }
+
   async function enterElementEdit(where: { x: number; y: number } | { selector: string }) {
     if (
       !frame.html ||
@@ -1422,6 +1455,8 @@ export const FrameView = memo(function FrameView({
     )
       return
     const request = ++editRequest.current
+    /* a double-click on a picked group goes into it, as in a design tool */
+    if ('x' in where && (await enterGroup(where))) return
     const canvasId = useStore.getState().canvas?.id
     const pageId = useStore.getState().activePageId
     const path = await loadPathEdit(frame, where)
@@ -1456,7 +1491,7 @@ export const FrameView = memo(function FrameView({
       probeIntent.current = 'toolbar'
       probeReq.current += 1
       iframeRef.current?.contentWindow?.postMessage(
-        { type: 'doop:probe', reqId: probeReq.current, x: at.x, y: at.y },
+        { type: 'doop:probe', reqId: probeReq.current, x: at.x, y: at.y, grouped: true, selected: pickedHere() },
         '*',
       )
     }
