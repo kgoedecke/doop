@@ -439,7 +439,13 @@ export const FrameView = memo(function FrameView({
     } else if (!useStore.getState().selectedIds.includes(frame.id)) {
       /* clicking a frame already in a group keeps the group — the drag
          moves all of them */
+      const panelShowing = useStore.getState().elementPanelOpen && !!useStore.getState().selectedElement
       select(frame.id)
+      /* a standalone shape is the whole of its shell: with the element panel
+         up, the press picks it at once, so the panel swaps to it in place
+         instead of closing until the click's probe answers a beat later */
+      const shape = panelShowing && mode === 'move' && probeOnClick ? standaloneSelector(frame) : null
+      if (shape) useStore.getState().pickElement({ frameId: frame.id, selector: shape })
     } else if (panelOnClick && useStore.getState().selectedElement?.frameId === frame.id) {
       /* grabbing the title bar while one of its elements is picked means
          "the whole frame now" — drop the element selection */
