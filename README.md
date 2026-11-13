@@ -264,7 +264,10 @@ Agents can read `approvalStatus` (`draft`, `ready_for_dev`, `needs_review`) and
 `approval` attribution in `get_canvas` and `get_frame`. Call
 `get_canvas({ canvas_id, approval_status: "ready_for_dev" })` to find approved
 screens, then re-read `get_frame` before implementing. Only `ready_for_dev` is
-current sign-off. Approval is set by people in the app. In **Automations**, choose
+current sign-off. Approval is set by people in the app, or by an agent when a person asks
+it to: `set_frame_approval({ frame_id, status: "ready_for_dev" | "draft" })` (MCP and the Doop
+Agent) records the approval in that person's name, with the agent shown as "via". An agent
+never approves unasked, and automation runs cannot approve. In **Automations**, choose
 **Designs are approved** to run a workflow when frames on a selected canvas become
 ready for dev. Without an enabled workflow, approval only records sign-off.
 
