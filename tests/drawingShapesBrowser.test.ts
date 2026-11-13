@@ -673,6 +673,23 @@ describe.skipIf(!findBrowserPath())('drawing on the canvas', { timeout: 30_000 }
     /* typing while editing stays in the text */
     await page.keyboard.press('r')
     expect(await page.evaluate(() => window.drawingHarness.state().tool)).toBe('select')
+    /* ⌘1…⌘9 still reach the page, for the desktop shell's tab switching */
+    await page.evaluate(() => {
+      document.addEventListener('keydown', (e) => {
+        if (e.code === 'Digit2') document.documentElement.dataset.tabKey = String(e.metaKey || e.ctrlKey)
+      })
+    })
+    /* and the text typed just before one is saved ahead of it, not 400ms
+       later on a canvas the shell has already left */
+    const typed = await iframe.$eval('#text', (el) => el.textContent)
+    await page.keyboard.press('q')
+    const tabMod = process.platform === 'darwin' ? 'Meta' : 'Control'
+    await page.keyboard.down(tabMod)
+    await page.keyboard.press('Digit2')
+    await page.keyboard.up(tabMod)
+    await page.waitForFunction(() => document.documentElement.dataset.tabKey === 'true')
+    await expect.poll(() => saved[0]?.html, { timeout: 250 }).toContain(`${typed}q<`)
+    expect(await iframe.$eval('#text', (el) => el.textContent)).toBe(`${typed}q`)
     await page.keyboard.press('Escape')
     await iframe.waitForFunction(() => !document.querySelector('style[data-v-edit]'))
     /* the Escape that ended editing is not also the canvas's Escape */

@@ -486,17 +486,32 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
   var KEY_FIELDS = ['key', 'code', 'ctrlKey', 'metaKey', 'shiftKey', 'altKey', 'repeat']
   for (var kf = 0; kf < KEY_FIELDS.length; kf++) keyGetters[KEY_FIELDS[kf]] = getter(KeyboardEvent.prototype, KEY_FIELDS[kf])
   function relayKey(ev) {
-    if (!keyPort || editing || protoOn) return
+    if (!keyPort) return
     /* isTrusted is the event's own, unforgeable property; it is read through
        the prototype getter only where an engine puts it there */
     if (!(readTrusted ? apply(readTrusted, ev, []) : ev.isTrusted)) return
-    var t = apply(readTarget, ev, [])
-    if (t && apply(readNodeType, t, []) === 1) {
-      if (apply(elementMatches, t, ['input, textarea, select'])) return
-      if (t instanceof HTMLElement && apply(readEditable, t, [])) return
-    }
     var k = {}
     for (var f = 0; f < KEY_FIELDS.length; f++) k[KEY_FIELDS[f]] = apply(keyGetters[KEY_FIELDS[f]], ev, [])
+    /* ⌘1…⌘9 switch the desktop shell's tabs (desktop.ts), so they travel
+       from text being edited, a field and a playing prototype too: nothing
+       in here types with them */
+    var tabChord =
+      (k.metaKey || k.ctrlKey) && !k.altKey && !k.shiftKey && /^Digit[1-9]$/.test(String(k.code))
+    /* the shell is about to leave this canvas: text typed in the last
+       400ms goes first, down the key's own port so it arrives ahead of it */
+    if (tabChord && editing && editTimer && apply(readType, ev, []) === 'keydown') {
+      clearTimeout(editTimer)
+      editTimer = null
+      apply(portSend, keyPort, [{ event: 'edited', html: serialize() }])
+    }
+    if (!tabChord) {
+      if (editing || protoOn) return
+      var t = apply(readTarget, ev, [])
+      if (t && apply(readNodeType, t, []) === 1) {
+        if (apply(elementMatches, t, ['input, textarea, select'])) return
+        if (t instanceof HTMLElement && apply(readEditable, t, [])) return
+      }
+    }
     var type = apply(readType, ev, [])
     var mod = (k.metaKey || k.ctrlKey) && !k.altKey
     var letter = String(k.key).toLowerCase()
