@@ -263,9 +263,6 @@ export const inspector = {
   durationN: 'Duration {n}',
 
   // element code view
-  codeCopied: 'Code copied',
-  copyCode: 'Copy code',
-  codeCopiedStatus: 'Code copied to clipboard',
 
   // property fields
   scrubHint: 'Drag to adjust · Shift: ×10 · Alt/Option: ×0.1 · Esc: cancel',

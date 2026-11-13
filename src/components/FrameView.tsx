@@ -26,7 +26,6 @@ import { resolvePointerAction } from '../lib/tools'
 import { FrameContextMenu } from './FrameContextMenu'
 import { FrameApprovalBadge } from './FrameApproval'
 import { ElementContextMenu, type LiveHit } from './ElementContextMenu'
-import { CodePanel } from './CodePanel'
 import { TextFormatToolbar } from './TextFormatToolbar'
 import type { TextFormatState } from '../lib/richText'
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from './ui/context-menu'
@@ -40,7 +39,7 @@ import { elementIdSelector } from '../../shared/elementId'
 import { cn } from '@/lib/utils'
 import { Button } from './ui/button'
 import { Tooltip } from './ui/tooltip'
-import { CodeIcon, CommentIcon, EditIcon, EyeClosedIcon, GithubIcon, LockIcon, SyncIcon, SparkIcon } from './ui/icons'
+import { CommentIcon, EditIcon, EyeClosedIcon, GithubIcon, LockIcon, SyncIcon, SparkIcon } from './ui/icons'
 import { isSyncedFrame } from '../lib/sync'
 import { isGithubFrame, isGithubPlaceholder } from '../lib/github'
 import { AgentIcon } from './AgentIcon'
@@ -1029,15 +1028,8 @@ export const FrameView = memo(function FrameView({
     if (!layerHover) setHover(null)
   }
 
-  /* source view + composer prefill for the element toolbar */
-  const [codeView, setCodeView] = useState<string | null>(null)
+  /* composer prefill for the element toolbar */
   const [composePrefill, setComposePrefill] = useState('')
-  const codeReq = useRef(0)
-
-  function requestCode(selector: string) {
-    codeReq.current += 1
-    iframeRef.current?.contentWindow?.postMessage({ type: 'doop:code', reqId: codeReq.current, selector }, '*')
-  }
 
   function cancelProbe() {
     probeReq.current += 1
@@ -1052,7 +1044,6 @@ export const FrameView = memo(function FrameView({
     cancelProbe()
     setComposing(false)
     setComposePrefill('')
-    setCodeView(null)
     setOpenThread(null)
   }
 
@@ -1364,9 +1355,6 @@ export const FrameView = memo(function FrameView({
            the same element (a save while editing) only updates its outline,
            so it can't take back a pick made in Layers meanwhile. */
         if (hit) setProbe((p) => (moved || p?.selector === hit.selector ? hit : p))
-      }
-      if (ev.data?.type === 'doop:code-result' && ev.data.reqId === codeReq.current) {
-        setCodeView(typeof ev.data.html === 'string' ? ev.data.html : null)
       }
       if (ev.data?.type === 'doop:located' && typeof ev.data.reqId === 'string') {
         if (ev.data.reqId === '__layer-hover__') {
@@ -2210,13 +2198,6 @@ export const FrameView = memo(function FrameView({
                             <Button
                               variant="inverse"
                               className={EL_TOOLBAR_BTN}
-                              onClick={() => (codeView === null ? requestCode(anchor.selector) : setCodeView(null))}
-                            >
-                              <CodeIcon size="button" /> {t('stage.code')}
-                            </Button>
-                            <Button
-                              variant="inverse"
-                              className={EL_TOOLBAR_BTN}
                               aria-label={t('stage.copyLinkToElement')}
                               onClick={() => void copyElementLink(frame, anchor)}
                             >
@@ -2234,7 +2215,6 @@ export const FrameView = memo(function FrameView({
                               </Button>
                             )}
                           </div>
-                          {codeView !== null && <CodePanel key={anchor.selector} code={codeView} />}
                         </>
                       ) : (
                         <CommentComposer

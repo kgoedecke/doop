@@ -263,9 +263,6 @@ export const inspector: Catalog['inspector'] = {
   durationN: 'Duração {n}',
 
   // element code view
-  codeCopied: 'Código copiado',
-  copyCode: 'Copiar código',
-  codeCopiedStatus: 'Código copiado para a área de transferência',
 
   // property fields
   scrubHint: 'Arraste para ajustar · Shift: ×10 · Alt/Option: ×0,1 · Esc: cancelar',

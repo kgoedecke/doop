@@ -951,24 +951,6 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
     return el ? { tag: el.tagName.toLowerCase(), selector: cssPath(el), rect: designRect(el) } : null
   }
 
-  /* full source of one element, with runtime markers stripped */
-  function elementCode(selector) {
-    var el = null
-    try { el = selector ? document.querySelector(selector) : null } catch (e) { /* bad selector */ }
-    if (!el) return null
-    var c = el.cloneNode(true)
-    var nodes = [c].concat(Array.prototype.slice.call(c.querySelectorAll('*')))
-    for (var i = 0; i < nodes.length; i++) {
-      nodes[i].removeAttribute('data-v-ran')
-      nodes[i].removeAttribute('data-v-hover')
-      nodes[i].removeAttribute('data-v-active')
-      nodes[i].removeAttribute('contenteditable')
-    }
-    var html = c.outerHTML
-    if (html.length > 20000) html = html.slice(0, 20000) + '\\n<!-- truncated -->'
-    return html
-  }
-
   /* ---- element properties (the Design panel) ----
      The panel cannot read computed styles across the sandbox, so it asks for
      a summary of one element and writes changes back as inline styles; the
@@ -1843,9 +1825,6 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
     }
     if (d.type === 'doop:select') {
       parent.postMessage({ type: 'doop:select-result', reqId: d.reqId, hit: describe(d.selector) }, '*')
-    }
-    if (d.type === 'doop:code') {
-      parent.postMessage({ type: 'doop:code-result', reqId: d.reqId, html: elementCode(d.selector) }, '*')
     }
     if (d.type === 'doop:snapshot') {
       /* the document as it stands, script-made elements included, for an
