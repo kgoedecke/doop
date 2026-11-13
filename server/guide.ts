@@ -374,7 +374,9 @@ Viewers watch designs assemble live. Stream with append_frame_html:
   needs_review) and approval attribution. Filter get_canvas with approval_status="ready_for_dev"
   to find approved screens, then re-read get_frame before implementing. HTML and size edits
   invalidate sign-off; needs_review requires another human approval. Approval alone does not
-  assign an implementation job — follow the human's request.
+  assign an implementation job — follow the human's request. When a human asks you to mark a
+  frame ready for dev (or move it back to draft), set_frame_approval does it in their name; never
+  approve your own work unasked.
 - A frame renders a complete HTML document in a sandboxed iframe. <style> and <script>
   work; Google Fonts via <link> work.
 ${FRAME_STYLES}

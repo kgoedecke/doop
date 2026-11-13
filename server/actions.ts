@@ -2620,16 +2620,19 @@ export const restackFrames = atomic(function restackFrames(
   return frames
 })
 
-/** Sign-off is a human action, separate from ordinary frame editing. */
+/** Sign-off is a human action, separate from ordinary frame editing. An agent may set it
+ *  for the person it works for: the approval stays theirs (`approvedBy`), with the agent
+ *  recorded as `approvedVia` and as the actor of the broadcast and activity line. */
 export const setFrameApproval = atomic(function setFrameApproval(
   frameId: string,
   ready: boolean,
   user: { id: string; name: string },
+  agent?: Actor,
 ): Frame | undefined {
   const current = store.getFrame(frameId)
   if (!current) return undefined
   if (ready && current.approval?.status === 'ready_for_dev') return current
-  const actor = resolveActor({ name: user.name, kind: 'user' })
+  const actor = agent ?? resolveActor({ name: user.name, kind: 'user' })
   const approval = ready
     ? {
         status: 'ready_for_dev' as const,
@@ -2637,18 +2640,36 @@ export const setFrameApproval = atomic(function setFrameApproval(
         approvedByUserId: user.id,
         approvedAt: Math.max(Date.now(), current.updatedAt + 1),
         approvedFrameUpdatedAt: current.updatedAt,
+        ...(agent ? { approvedVia: agent.name } : {}),
       }
     : null
-  const frame = store.updateFrame(frameId, { approval }, user.name)!
+  const frame = store.updateFrame(frameId, { approval }, actor.name)!
   broadcast(frame.canvasId, { type: 'frame:updated', frame, actor })
   logActivity(
     frame.canvasId,
     actor,
-    ready ? `marked “${frame.name}” ready for dev` : `moved “${frame.name}” back to draft`,
+    ready
+      ? `marked “${frame.name}” ready for dev${agent ? ` for ${user.name}` : ''}`
+      : `moved “${frame.name}” back to draft`,
     frameId,
   )
   return frame
 })
+
+/** An agent's approval request, shared by the MCP tool and the resident agent. */
+export function agentSetFrameApproval(
+  frameId: string,
+  status: 'ready_for_dev' | 'draft',
+  user: { id: string; name: string },
+  agent: Actor,
+): { ok: true; frame: Frame } | { ok: false; error: string } {
+  const current = store.getFrame(frameId)
+  if (!current) return { ok: false, error: `no frame with id ${frameId}` }
+  if (status === 'ready_for_dev' && isFrameStreaming(frameId))
+    return { ok: false, error: 'the design is still streaming — wait for it to finish before approving it' }
+  const frame = setFrameApproval(frameId, status === 'ready_for_dev', user, agent)
+  return frame ? { ok: true, frame } : { ok: false, error: `no frame with id ${frameId}` }
+}
 
 /** An agent is appending to this frame right now. A one-shot reveal does not count: it is
  *  only playback of what is already stored, so background work may rewrite the frame. */

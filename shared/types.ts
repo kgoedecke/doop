@@ -48,6 +48,8 @@ export interface FrameApproval {
   approvedAt: number
   /** The frame revision the person reviewed before approving. */
   approvedFrameUpdatedAt: number
+  /** The agent that set this approval on the person's behalf, when an agent did. */
+  approvedVia?: string
 }
 
 /** One entry of a frame's design history: the HTML (and size) the frame had

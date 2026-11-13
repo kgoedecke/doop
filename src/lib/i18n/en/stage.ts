@@ -97,6 +97,7 @@ export const stage = {
   needsReview: 'Needs review',
   approvedByOn: 'Approved by {name} on {date}',
   previouslyApprovedByOn: 'Previously approved by {name} on {date}',
+  approverVia: '{name} via {agent}',
   markAsApproved: 'Mark as approved',
   approvalReady: 'Agents can see this screen is approved for implementation.',
   approvalChanged: 'This design changed after approval. Review it before marking it ready again.',
