@@ -6,7 +6,7 @@ import { Field } from '@/components/ui/field'
 import { Checkbox, CheckboxCard } from '@/components/ui/checkbox'
 import { Progress } from '@/components/ui/progress'
 import { NumberField, ColorField } from '@/components/ui/property-field'
-import { CircleDashedIcon } from '@/components/ui/icons'
+import { RotationIcon } from '@/components/ui/icons'
 import { SearchField } from '@/components/ui/search-field'
 
 const meta = { title: 'Primitives/Fields' } satisfies Meta
@@ -108,17 +108,38 @@ export const InspectorFields: Story = {
   render: function InspectorFields() {
     const [x, setX] = useState(24)
     const [rotation, setRotation] = useState(0)
+    const [opacity, setOpacity] = useState(100)
+    const [radius, setRadius] = useState(0)
     const [color, setColor] = useState<string | null>('#0177d3')
     return (
       <div className="flex w-[220px] flex-col gap-2">
         <NumberField label="X position" prefix="X" value={x} unit="" onCommit={setX} />
         <NumberField
           label="Rotation"
-          prefix={<CircleDashedIcon size="rail" />}
+          prefix={<RotationIcon size="rail" />}
           value={rotation}
           unit="°"
           onCommit={setRotation}
         />
+        <div className="grid grid-cols-2 gap-1.5">
+          <NumberField
+            label="Opacity"
+            prefix="◐"
+            value={opacity}
+            max={100}
+            slider={[0, 100]}
+            unit="%"
+            onCommit={setOpacity}
+          />
+          <NumberField
+            label="Corner radius"
+            prefix="◜"
+            value={radius}
+            slider={[0, 100]}
+            unit="px"
+            onCommit={setRadius}
+          />
+        </div>
         <NumberField label="Disabled position" prefix="Y" value={0} unit="" disabled onCommit={() => {}} />
         <ColorField label="Fill color" value={color} onCommit={setColor} />
       </div>

@@ -1014,7 +1014,7 @@ describe.skipIf(!findBrowserPath())('element design controls', () => {
   }
 
   async function startScrub(label: string) {
-    const unit = (await page.$(`label:has(input[aria-label="${label}"]) > span[data-unit]`))!
+    const unit = (await page.$(`label:has(input[aria-label="${label}"]) [data-scrub]`))!
     await unit.scrollIntoView()
     expect(await unit.evaluate((el) => getComputedStyle(el).cursor)).toBe('ew-resize')
     const box = (await unit.boundingBox())!

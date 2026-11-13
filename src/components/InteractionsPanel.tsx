@@ -14,7 +14,7 @@ import { useStore } from '../lib/store'
 import { isLayerLocked } from '../lib/layerEdits'
 import { elementInteractions, saveInteractions, setFlowStart } from '../lib/prototype'
 import { IconButton } from './ui/icon-button'
-import { PlusIcon, TrashIcon } from './ui/icons'
+import { DelayIcon, DurationIcon, PlusIcon, TrashIcon } from './ui/icons'
 import { Switch } from './ui/switch'
 import { NumberField, PropertyRow, PropertySection, SelectField, TextField } from './ui/property-field'
 import { useT, type PlainMessageKey } from '../lib/i18n'
@@ -219,6 +219,7 @@ function InteractionRow({
         <PropertyRow label={t('inspector.rowAfter')}>
           <NumberField
             label={t('inspector.delayN', { n })}
+            prefix={<DelayIcon size="rail" />}
             value={i.delay ?? 0}
             unit="ms"
             max={MAX_PROTO_DELAY}
@@ -284,7 +285,8 @@ function InteractionRow({
           {i.transition !== 'instant' && (
             <NumberField
               label={t('inspector.durationN', { n })}
-              className="max-w-[72px]"
+              prefix={<DurationIcon size="rail" />}
+              className="max-w-[88px]"
               value={i.duration}
               unit="ms"
               max={MAX_PROTO_DURATION}
