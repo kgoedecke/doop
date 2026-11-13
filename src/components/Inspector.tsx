@@ -14,7 +14,7 @@ import { FrameApprovalControl } from './FrameApproval'
 import { cn } from '@/lib/utils'
 import { Panel, PanelClose, PanelHeader, type PanelSurface } from './ui/panel'
 import { Collapsible, CollapsibleContent } from './ui/collapsible'
-import { CopyIcon, DownloadIcon, FrameIcon, LockIcon } from './ui/icons'
+import { CopyIcon, DownloadIcon, FrameIcon, LockIcon, RotationIcon } from './ui/icons'
 import { Button } from './ui/button'
 import { Input } from './ui/input'
 import { Textarea } from './ui/textarea'
@@ -277,7 +277,7 @@ export function Inspector({
               />
               <NumberField
                 label={t('inspector.rotation')}
-                prefix="∠"
+                prefix={<RotationIcon size="rail" />}
                 unit="°"
                 min={-Infinity}
                 value={frame.rotation ?? 0}

@@ -12,6 +12,7 @@
 
 import type { ComponentType, SVGProps } from 'react'
 import {
+  Angle,
   Bold,
   Italic,
   Underline,
@@ -211,24 +212,7 @@ export const AlignCenterHorizontalIcon = icon(AlignCenterHorizontal)
 export const AlignEndHorizontalIcon = icon(AlignEndHorizontal)
 export const FlipHorizontal2Icon = icon(FlipHorizontal2)
 export const FlipVertical2Icon = icon(FlipVertical2)
-/** Rotation as an angle: two rays from a corner and the arc between them. */
-export function RotationIcon(props: IconProps) {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={ICON_STROKE}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden
-      {...sized(props)}
-    >
-      <path d="M20 19H4l11-14" />
-      <path d="M11 19a7 7 0 0 0-2.67-5.5" />
-    </svg>
-  )
-}
+export const RotationIcon = icon(Angle)
 export const DropletIcon = icon(Droplet)
 /** Stroke width as three rules, thin to thick. */
 export function StrokeWidthIcon(props: IconProps) {
