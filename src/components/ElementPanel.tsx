@@ -502,6 +502,12 @@ function parentLayout(info: ElementInfo): string {
 }
 
 /** The token a property is bound to inline, if any. */
+/** The properties the Fill and Stroke sections write: SVG paint on a vector,
+ *  the box's background and border elsewhere. */
+function paintProperties(info: ElementInfo) {
+  return info.vector ? { fill: 'fill', stroke: 'stroke' } : { fill: 'background-color', stroke: 'border-color' }
+}
+
 function boundToken(info: ElementInfo, property: string, tokens: readonly DesignToken[]): DesignToken | undefined {
   const name = aliasOf(info.inline[property] ?? '')
   return name ? tokens.find((token) => token.name === name) : undefined
@@ -735,7 +741,9 @@ function DesignTab({
   const tokens = useStore((state) => state.canvas?.tokens ?? [])
   const customFamilies = libraryFamilies(library)
   /* a field bound to a token shows its name; the menu beside it binds one */
-  const bound = (property: string) => boundToken(info, property, tokens)
+  /* a vector's paint lives on its shapes, so its token bindings do too */
+  const paintInfo = info.vector ? { ...info, inline: { ...info.inline, ...info.vector.inline } } : info
+  const bound = (property: string) => boundToken(paintInfo, property, tokens)
   /* the frame's theme, so swatches and values read as this frame resolves them */
   const theme = frameTheme(frame.html) ?? undefined
   const chip = (property: string, literal: string | null) =>
@@ -769,14 +777,32 @@ function DesignTab({
   const ratio = aspectRatio(info.aspectRatio, info.naturalAspectRatio)
   const canLink = (info.width ?? 0) > 0 && (info.height ?? 0) > 0
   const visible = info.visibility !== 'hidden'
-  const fill = rgbToHex(info.backgroundColor, true)
-  const fillAlpha = colorAlpha(info.backgroundColor)
-  const borderColor = rgbToHex(info.borderColor)
+  /* A vector layer (a drawn or imported path, an inline icon) paints with
+     SVG's fill and stroke, as Figma's vectors do; any other layer with its
+     box's background and border. */
+  const paint = paintProperties(info)
+  const fillColor = info.vector ? info.vector.fill : info.backgroundColor
+  const fill = rgbToHex(fillColor, true)
+  /* a vector's fill-opacity counts into its fill's alpha, as Figma shows one opacity */
+  const fillAlpha = info.vector
+    ? fillColor === 'none'
+      ? 0
+      : colorAlpha(fillColor) * (info.vector.fillOpacity ?? 1)
+    : colorAlpha(fillColor)
+  /* a fill at an alpha: on a vector the colour goes opaque and the alpha into
+     fill-opacity, so an imported fill-opacity never multiplies with it */
+  function fillPatch(color: string | null, alpha: number): StylePatch {
+    if (!info.vector) return { 'background-color': color ? colorWithAlpha(color, alpha) : 'transparent' }
+    if (!color) return { fill: 'none' }
+    return { fill: rgbToHex(color) ?? color, 'fill-opacity': String(Math.min(1, Math.max(0, alpha))) }
+  }
+  const strokeColor = info.vector ? info.vector.stroke : info.borderColor
+  const borderColor = rgbToHex(strokeColor)
   /* the fill as the document has it: a translucent one keeps its alpha */
-  const fillLiteral = fill && fillAlpha < 1 ? info.backgroundColor : fill
-  const strokeOn: StylePatch = info.borderStyle === 'none' ? { 'border-style': 'solid' } : {}
+  const fillLiteral = fill && fillAlpha < 1 ? fillColor : fill
+  const strokeOn: StylePatch = !info.vector && info.borderStyle === 'none' ? { 'border-style': 'solid' } : {}
   /* the stroke and text colours as the document has them: a translucent one keeps its alpha */
-  const strokeLiteral = borderColor && colorAlpha(info.borderColor) < 1 ? info.borderColor : borderColor
+  const strokeLiteral = borderColor && colorAlpha(strokeColor) < 1 ? strokeColor : borderColor
   const textLiteral = colorAlpha(info.color) < 1 ? info.color : rgbToHex(info.color)
   const isFlex = info.display === 'flex' || info.display === 'inline-flex'
   const border = borderSummary(info.borderWidths)
@@ -1098,15 +1124,16 @@ function DesignTab({
           <ColorField
             label={t('inspector.fillColor')}
             value={fillAlpha === 0 && fill === '#000000' ? null : fill}
-            token={chip('background-color', fillLiteral)}
-            trailing={menu('background-color', ['color'], fillLiteral)}
-            onCommit={(v) =>
-              apply({
-                'background-color': v
-                  ? colorWithAlpha(v, fillAlpha === 0 && (!fill || fill === '#000000') ? 1 : fillAlpha)
-                  : 'transparent',
-              })
-            }
+            token={chip(paint.fill, fillLiteral)}
+            trailing={menu(
+              paint.fill,
+              ['color'],
+              fillLiteral,
+              'inline',
+              /* a token carries its own alpha: a vector's earlier fill-opacity goes */
+              info.vector ? { 'fill-opacity': '1' } : {},
+            )}
+            onCommit={(v) => apply(fillPatch(v, fillAlpha === 0 && (!fill || fill === '#000000') ? 1 : fillAlpha))}
           />
           <NumberField
             label={t('inspector.fillOpacity')}
@@ -1115,7 +1142,9 @@ function DesignTab({
             slider={[0, 100]}
             value={Math.round(fillAlpha * 100)}
             unit="%"
-            onCommit={(v) => apply({ 'background-color': colorWithAlpha(fill ?? info.backgroundColor, v / 100) })}
+            onCommit={(v) =>
+              apply(info.vector && !fill ? { 'fill-opacity': String(v / 100) } : fillPatch(fill ?? fillColor, v / 100))
+            }
           />
         </div>
       </PropertySection>
@@ -1124,26 +1153,34 @@ function DesignTab({
           <ColorField
             label={t('inspector.borderColor')}
             value={borderColor}
-            token={chip('border-color', strokeLiteral)}
-            trailing={menu('border-color', ['color'], strokeLiteral, 'inline', strokeOn)}
+            token={chip(paint.stroke, strokeLiteral)}
+            trailing={menu(paint.stroke, ['color'], strokeLiteral, 'inline', strokeOn)}
             onCommit={(v) =>
-              apply({ 'border-color': v, ...(v && info.borderStyle === 'none' ? { 'border-style': 'solid' } : {}) })
+              apply(
+                info.vector
+                  ? { stroke: v ?? 'none' }
+                  : { 'border-color': v, ...(v && info.borderStyle === 'none' ? { 'border-style': 'solid' } : {}) },
+              )
             }
           />
           <NumberField
             label={t('inspector.borderWidth')}
             prefix={<StrokeWidthIcon size="rail" />}
-            value={border.width}
+            value={info.vector ? info.vector.strokeWidth : border.width}
             unit="px"
             onCommit={(v) =>
-              apply({
-                'border-width': `${Math.max(0, v)}px`,
-                ...(v > 0 && info.borderStyle === 'none' ? { 'border-style': 'solid' } : {}),
-              })
+              apply(
+                info.vector
+                  ? { 'stroke-width': `${Math.max(0, v)}px` }
+                  : {
+                      'border-width': `${Math.max(0, v)}px`,
+                      ...(v > 0 && info.borderStyle === 'none' ? { 'border-style': 'solid' } : {}),
+                    },
+              )
             }
           />
         </div>
-        {border.sides && (
+        {!info.vector && border.sides && (
           <p className="mt-1 text-[10.5px] text-ink-faint">
             {t('inspector.sides', {
               sides: border.sides
