@@ -706,7 +706,7 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   discrete undo step. `Frame.rotation` is degrees clockwise about the centre, stored in
   `frames.rotation` (migration `0048_frame_rotation`) normalised to (-180, 180] with 0 unset;
   `x`/`y`/`width`/`height` stay the unrotated box and the wrapper carries `rotate()`, so the
-  frame's name, grips and pins turn with it. The Inspector's Layout group has the `∠` field, the
+  frame's name, grips and pins turn with it. The Inspector's Layout group has the rotation field (Lucide's `Angle` icon), the
   size badge sits under the turned bounds, and a press inside a turned frame
   is turned back into design px (`unrotatePoint`, `frameDesignPoint` for the element move hook and the
   path editor's `frameTurnMatrix`) before the runtime is probed; the frame's own grips pull along
