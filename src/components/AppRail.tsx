@@ -1,6 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useState, type ReactNode } from 'react'
 import type { CanvasMeta, WorkspaceSummary } from '../../shared/types'
-import { colorFor } from '../../shared/types'
 import { api } from '../lib/api'
 import { authClient } from '../lib/auth'
 import { navigate } from '../lib/navigate'
@@ -9,7 +8,7 @@ import { timeAgo } from '../lib/time'
 import { openCanvasTab } from '../lib/desktop'
 import { useT } from '../lib/i18n'
 import { cn } from '@/lib/utils'
-import { AgentIcon } from './AgentIcon'
+import { AgentTile } from './AgentIcon'
 import { AccountMenu } from './DashShell'
 import { CanvasSearchModal } from './CanvasSearchModal'
 import { ConnectModal } from './ConnectModal'
@@ -347,7 +346,7 @@ export function AppRail({
       <Rule />
       {agents.map((a) => (
         <span key={a.name} className="grid size-8 place-items-center" title={a.name}>
-          <AgentIcon name={a.name} size={14} color={colorFor(a.name)} />
+          <AgentTile name={a.name} />
         </span>
       ))}
       <IconButton aria-label={t('rail.connectAgent')} onClick={connect}>
@@ -522,7 +521,7 @@ export function AppRail({
             as="div"
             density="rail"
             title={t('rail.agentCanvases', { count: a.canvases })}
-            icon={<AgentIcon name={a.name} size={14} color={colorFor(a.name)} />}
+            icon={<AgentTile name={a.name} />}
             trailing={
               a.lastAt > 0 && now - a.lastAt < LIVE_WINDOW ? (
                 <Dot size="sm" className="bg-success" title={t('rail.workingNow')} />
@@ -534,7 +533,15 @@ export function AppRail({
             {a.name}
           </DashNavItem>
         ))}
-        <DashNavItem density="rail" icon={<CirclePlusIcon size="rail" />} onClick={connect}>
+        <DashNavItem
+          density="rail"
+          icon={
+            <span className="grid size-[18px] flex-none place-items-center">
+              <CirclePlusIcon size="rail" />
+            </span>
+          }
+          onClick={connect}
+        >
           {t('rail.connectAgent')}
         </DashNavItem>
       </div>
