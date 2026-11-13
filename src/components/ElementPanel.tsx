@@ -113,6 +113,11 @@ const TAB_KEY = 'doop:element-panel-tab'
 /* Only refreshes wait for streaming chunks to settle; a new selection is
    inspected immediately. */
 const INSPECT_DELAY_MS = 120
+/* how long the previous element's values may stand in (inert) for the next
+   one's before the panel admits it is still reading: most reads land within
+   a frame or two, and a skeleton flashed in between reads as the panel
+   closing and reopening */
+const STALE_GRACE_MS = 400
 const HTML_SAVE_DELAY_MS = 700
 /* the corner radius slider's span; a typed value may go past it */
 const RADIUS_SLIDE = [0, 100] as const
@@ -149,10 +154,23 @@ export function ElementPanel({
   const t = useT()
   const [tab, setTab] = useState<Tab>(readTab)
   const prototypeMode = useStore((s) => s.prototypeMode)
-  /* Values belong to their selector. A newly selected element shows loading
-     placeholders until its own read lands, so old values cannot be edited. */
-  const [read, setRead] = useState<{ selector: string; info: ElementInfo } | null>(null)
-  const info = read?.selector === selector ? read.info : null
+  /* Values belong to their element. A newly selected one keeps the previous
+     values on screen, inert, until its own read lands (loading placeholders
+     only once that takes a while), so old values are never edited and the
+     panel does not blink between two layers. */
+  const [read, setRead] = useState<{ frameId: string; selector: string; info: ElementInfo } | null>(null)
+  const info = read?.frameId === frame.id && read.selector === selector ? read.info : null
+  const [slowFor, setSlowFor] = useState<string | null>(null)
+  const target = `${frame.id}:${selector}`
+  /* the grace belongs to one visit: once the read lands, a later return to
+     this layer gets its grace again */
+  if (info && slowFor !== null) setSlowFor(null)
+  const standIn = !info && read && slowFor !== target ? read : null
+  useEffect(() => {
+    if (info) return
+    const timer = window.setTimeout(() => setSlowFor(target), STALE_GRACE_MS)
+    return () => window.clearTimeout(timer)
+  }, [info, target])
   const inspected = useRef<{ frameId: string; selector: string; ready: boolean } | null>(null)
 
   const tree = useMemo(() => buildLayerTree(frame.html), [frame.html])
@@ -186,7 +204,7 @@ export function ElementPanel({
         .then((next) => {
           if (!live || currentRequest !== request || !next) return
           inspected.current = { frameId: frame.id, selector, ready: true }
-          setRead({ selector, info: next })
+          setRead({ frameId: frame.id, selector, info: next })
         })
         .catch(console.error)
     }
@@ -210,7 +228,10 @@ export function ElementPanel({
   function updateRead(request: Promise<ElementInfo | null>) {
     request
       .then((next) => {
-        if (next) setRead((r) => (r && r.selector !== selector ? r : { selector, info: next }))
+        if (next)
+          setRead((r) =>
+            r && (r.frameId !== frame.id || r.selector !== selector) ? r : { frameId: frame.id, selector, info: next },
+          )
       })
       .catch(console.error)
   }
@@ -314,6 +335,18 @@ export function ElementPanel({
                   editGeometry={editGeometry}
                 />
               </PropertyScrubContext.Provider>
+            ) : standIn ? (
+              /* React 18 does not know `inert`, so it goes on by hand */
+              <div aria-busy="true" ref={(el) => el?.setAttribute('inert', '')}>
+                <DesignTab
+                  key={`${standIn.frameId}:${standIn.selector}`}
+                  frame={frame}
+                  selector={standIn.selector}
+                  info={standIn.info}
+                  apply={() => {}}
+                  editGeometry={() => {}}
+                />
+              </div>
             ) : (
               <Waiting hasText={hasText} />
             )}
@@ -321,7 +354,7 @@ export function ElementPanel({
           </PanelBody>
         </PanelTabPanel>
         <PanelTabPanel value="html">
-          <HtmlTab key={selector} frame={frame} selector={selector} />
+          <HtmlTab key={`${frame.id}:${selector}`} frame={frame} selector={selector} />
         </PanelTabPanel>
         <PanelTabPanel value="prototype">
           <PanelBody>

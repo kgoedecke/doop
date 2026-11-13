@@ -1104,9 +1104,8 @@ export function CanvasPage({
           )}
           {!isMobile && !readOnly && selectedFrame && panelElement && !deferPanel && (
             <ElementPanel
-              /* keyed by frame, not element: picking the next element swaps
-                 the values in place instead of remounting the panel blank */
-              key={selectedFrame.id}
+              /* never keyed: picking the next element, in this frame or
+                 another, swaps the values in place instead of remounting */
               frame={selectedFrame}
               selector={panelElement.selector}
               surface={panelSurface}
