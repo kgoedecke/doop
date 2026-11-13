@@ -74,4 +74,20 @@ describe.skipIf(!findBrowserPath())('frame runtime body attributes', () => {
     const plain = await inspectBody()
     expect(plain?.backgroundColor).toBe('rgba(0, 0, 0, 0)')
   })
+
+  // A frame is an artboard: content taller than it still scrolls, but no
+  // scrollbar ever eats into its width, even when the design asks for one.
+  it('never shows a scrollbar on the frame', async () => {
+    await render(
+      '<!doctype html><html><head><style>:root,body.glaze{scrollbar-width:thin!important;overflow:scroll}</style></head>' +
+        '<body class="glaze" style="margin:0"><div style="height:5000px;width:5000px"></div></body></html>',
+    )
+    const frame = page.frames().find((f) => f !== page.mainFrame())!
+    // headless Chromium hides scrollbars itself, so the gutter cannot be measured
+    const widths = await frame.evaluate(() => [
+      getComputedStyle(document.documentElement).scrollbarWidth,
+      getComputedStyle(document.body).scrollbarWidth,
+    ])
+    expect(widths).toEqual(['none', 'none'])
+  })
 })

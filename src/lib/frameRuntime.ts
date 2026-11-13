@@ -17,12 +17,15 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
   ${FRAME_DROP_RUNTIME}
   ${FRAME_PROTO_RUNTIME}
   /* horizontal overscroll inside a frame must not chain to the parent page,
-     where the browser turns it into a history back/forward swipe. Adopted
-     sheet, not a <style> tag — the morph would wipe a tag from <head>. */
+     where the browser turns it into a history back/forward swipe. A frame
+     is an artboard, so it never wears a scrollbar either (its content still
+     scrolls): important, and html:root so a design's own :root or body.x
+     rule cannot outrank it.
+     Adopted sheet, not a <style> tag — the morph would wipe a tag from <head>. */
   var vSheet = null
   try {
     vSheet = new CSSStyleSheet()
-    vSheet.replaceSync('html,body{overscroll-behavior-x:none}[data-v-path-hidden]{visibility:hidden!important}')
+    vSheet.replaceSync('html,body{overscroll-behavior-x:none}html:root,html:root>body{scrollbar-width:none!important}html:root::-webkit-scrollbar,html:root>body::-webkit-scrollbar{display:none!important}[data-v-path-hidden]{visibility:hidden!important}')
     document.adoptedStyleSheets = document.adoptedStyleSheets.concat(vSheet)
   } catch (e) {}
   /* ⌘Y outline mode: every box drawn as a hairline, fills and shadows off.
