@@ -209,7 +209,7 @@
   `PATCH` and `DELETE`; `GET /api/model-account/models?kind=`) and every one answers with
   the whole view (`accountsView`: every account on or off, the default, the menus). The meter
   counts any connection that is on and names the default; image generation uses the enabled
-  account matching the image provider (ChatGPT before an OpenAI key), server keys only for
+  account matching the image provider (ChatGPT before an OpenAI key; the "GPT Image API" models (2.6, 2.5, chatgpt-image-latest, 1.5, 1 Mini) run on an OpenAI key only, through the Image API `/v1/images/generations`, since the ChatGPT backend ignores the image model id), server keys only for
   someone who connected none (switching every account off does not count). Tests: `anthropicAccount.test.ts` (end to end), `defaultRouting.test.ts`,
   `agentRunners.test.ts`, `chatgptProviderSwitch.test.tsx`, `localClaudeConnection.test.tsx`.
 - Which connection runs a task (`shared/agentRunner.ts`, `server/agentRunners.ts`):
