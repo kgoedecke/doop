@@ -582,7 +582,9 @@ describe.skipIf(!findBrowserPath())('drawing on the canvas', { timeout: 30_000 }
     /* 60px down the screen is 60px along the turned document's x: the layer
        itself moved, not the frame, and only along that axis */
     expect(saved[0]).toMatchObject({ x: 70, y: 50 })
-    expect(saved[0]!.html).toMatch(/translate: 60px (0|[0-9.e-]+)px/)
+    /* an absolute layer moves by its own left and top, no translate added */
+    expect(saved[0]!.html).toMatch(/left: 110px; top: (60|[0-9.e-]+)px/)
+    expect(saved[0]!.html).not.toContain('translate')
     const moved = await iframe.$eval('#rect', (el) => el.getBoundingClientRect().toJSON() as DOMRect)
     expect(moved.x).toBeCloseTo(110, 0)
     expect(moved.y).toBeCloseTo(60, 0)

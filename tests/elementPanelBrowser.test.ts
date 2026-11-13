@@ -1518,7 +1518,7 @@ describe.skipIf(!findBrowserPath())('element design controls', () => {
     )
     const position = () => frame.$eval('#nudged', (el) => [el.getBoundingClientRect().x, el.getBoundingClientRect().y])
     expect(await position()).toEqual([25, -20])
-    await expect.poll(() => saved.html).toContain('translate: 5px -50px')
+    await expect.poll(() => saved.html).toContain('left: 25px; top: -20px')
     await page.evaluate(() => window.elementPanelHarness.undo())
     await expect.poll(position).toEqual([20, 30])
   })

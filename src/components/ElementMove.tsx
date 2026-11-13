@@ -450,7 +450,55 @@ export function useElementMove(frame: Frame, layoutZoom: number) {
       target = drawingDropFrame(point, standalone ? frame.id : undefined)
       /* staying in its own frame is a plain move: only a new frame is marked */
       const into = target?.id === frame.id ? null : target
+      if (target?.id === frame.id) findDrawingDrop(point)
+      else clearDrawingDrop()
       setPreview({ rect, html, target: into, world: world!, owner, selector: hit!.selector })
+    }
+    /* Over its own frame a drawn shape can go into a box there, as a layer
+       dragged on the canvas does: a slot in a flex box or a div (the blue
+       line), or a spot in a group that places its layers by hand. Asked of
+       the frame as the pointer moves, one question at a time. */
+    let drawingDrop: LayoutDrop | null = null
+    let dropAsk: { x: number; y: number } | null = null
+    let dropAsking = false
+    function drawingDropQuery(point: { x: number; y: number }) {
+      const pointer = frameDesignPoint(point, frame)
+      const corner = frameDesignPoint({ x: rect!.x, y: rect!.y }, frame)
+      return elementMoveTarget(frame.id, hit!.selector, pointer.x - contentOffset.x, pointer.y - contentOffset.y, {
+        x: corner.x - contentOffset.x,
+        y: corner.y - contentOffset.y,
+        width: rect!.width,
+        height: rect!.height,
+      })
+    }
+    function findDrawingDrop(point: { x: number; y: number }) {
+      dropAsk = point
+      if (dropAsking || !hit || !rect) return
+      dropAsking = true
+      const asked = point
+      void drawingDropQuery(asked).then((result) => {
+        dropAsking = false
+        if (closed) return
+        drawingDrop = result?.drop && !result.free ? result.drop : null
+        setLayoutDrop(drawingDrop ? { drop: drawingDrop, world: world!, origin: contentOrigin } : null)
+        if (dropAsk && dropAsk !== asked) findDrawingDrop(dropAsk)
+      })
+    }
+    function clearDrawingDrop() {
+      dropAsk = null
+      drawingDrop = null
+      setLayoutDrop(null)
+    }
+    /* let go over its own frame: into the box under the pointer, asked once
+       more where it was let go, else moved to where it was dropped */
+    async function landDrawing(start: DrawingRect, moved: DrawingRect): Promise<string | undefined> {
+      if (target?.id === frame.id && dropAsk) {
+        const result = await drawingDropQuery(dropAsk)
+        if (result?.drop && !result.free && sourceUnchanged()) {
+          return dropLayer(frame, hit!.selector, result.drop.target, result.drop.styles) ? frame.id : undefined
+        }
+      }
+      return moveDrawing(frame, hit!.selector, dropRect(start, moved), target?.id, hit!)
     }
     /* a standalone shape left on the canvas moves its own frame by the
        drag's world travel; a drawing written into a frame's document goes
@@ -474,10 +522,7 @@ export function useElementMove(frame: Frame, layoutZoom: number) {
         )
         return
       }
-      const landed =
-        !layer && hit && complete && rect && bounds
-          ? moveDrawing(frame, hit.selector, dropRect(bounds, rect), target?.id, hit)
-          : undefined
+      const landed = !layer && hit && complete && rect && bounds ? landDrawing(bounds, rect) : undefined
       cancel(complete && !!layer, landed?.then(shown))
       // A Shift press remains a selection toggle until it actually drags.
       if (!complete && press.shiftKey) {
@@ -621,16 +666,18 @@ export function useElementMove(frame: Frame, layoutZoom: number) {
                   }}
                 />
               )}
-              <div
-                data-element-drop-indicator
-                className="absolute bg-brand"
-                style={{
-                  left: layoutDrop.drop.line.x,
-                  top: layoutDrop.drop.line.y,
-                  width: layoutDrop.drop.line.width || 'calc(2px / var(--zoom, 1))',
-                  height: layoutDrop.drop.line.height || 'calc(2px / var(--zoom, 1))',
-                }}
-              />
+              {layoutDrop.drop.line && (
+                <div
+                  data-element-drop-indicator
+                  className="absolute bg-brand"
+                  style={{
+                    left: layoutDrop.drop.line.x,
+                    top: layoutDrop.drop.line.y,
+                    width: layoutDrop.drop.line.width || 'calc(2px / var(--zoom, 1))',
+                    height: layoutDrop.drop.line.height || 'calc(2px / var(--zoom, 1))',
+                  }}
+                />
+              )}
             </div>,
             layoutDrop.world,
           )}
