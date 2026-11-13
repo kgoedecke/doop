@@ -206,6 +206,7 @@ const schema = {
   CHATGPT_CODEX_CLIENT_VERSION: str({ default: '0.163.0' }),
   CHATGPT_ORIGINATOR: str({ default: 'codex_cli_rs' }),
   OPENAI_RESPONSES_URL: str({ default: 'https://api.openai.com/v1/responses' }),
+  OPENAI_IMAGES_URL: str({ default: 'https://api.openai.com/v1/images/generations' }),
   OPENAI_MODELS_URL: str({ default: 'https://api.openai.com/v1/models' }),
   OPENROUTER_CHAT_URL: str({ default: 'https://openrouter.ai/api/v1/chat/completions' }),
   GEMINI_OPENAI_CHAT_URL: str({
