@@ -12,7 +12,17 @@ import {
   ContextMenuTrigger,
 } from './ui/context-menu'
 import { cn } from '@/lib/utils'
-import { closeAllTabs, closeOtherTabs, closeTab, ensureTab, openCanvasTab, openExternal, useTabs } from '../lib/desktop'
+import {
+  TAB_SHORTCUTS,
+  closeAllTabs,
+  closeOtherTabs,
+  closeTab,
+  ensureTab,
+  openCanvasTab,
+  openExternal,
+  useTabs,
+} from '../lib/desktop'
+import { chordHint } from '../lib/actions/chords'
 import { hasInsetTrafficLights, isDesktopShell } from '../lib/shell'
 import type { CanvasTab } from '../lib/desktop'
 import { useT } from '../lib/i18n'
@@ -54,7 +64,7 @@ export function DesktopTabs({ path }: { path: string }) {
           !activeId && 'bg-ink/[0.08] text-ink',
         )}
         onClick={() => navigate('/')}
-        title={t('canvas.allCanvases')}
+        title={withShortcut(t('canvas.allCanvases'), 0)}
       >
         <Logo className="size-[18px]" />
       </button>
@@ -63,7 +73,7 @@ export function DesktopTabs({ path }: { path: string }) {
         aria-label={t('canvas.openCanvases')}
         className="flex min-w-0 items-end overflow-x-auto overflow-y-hidden [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
       >
-        {tabs.map((tab) => {
+        {tabs.map((tab, index) => {
           const on = tab.id === activeId
           return (
             <ContextMenu key={tab.id}>
@@ -72,6 +82,7 @@ export function DesktopTabs({ path }: { path: string }) {
                   role="tab"
                   aria-selected={on}
                   tabIndex={0}
+                  title={withShortcut(tab.name, index + 1)}
                   className={cn(
                     'group relative -mb-px flex h-[36px] min-w-[110px] max-w-[210px] flex-1 basis-[210px] cursor-default items-center gap-1 rounded-t-[9px] border border-b-0 border-transparent pb-[2px] pl-3 pr-1.5 text-[12.5px] text-ink-soft',
                     on ? 'border-line bg-surface text-ink' : 'transition-colors hover:bg-ink/[0.04]',
@@ -110,6 +121,12 @@ export function DesktopTabs({ path }: { path: string }) {
       </button>
     </div>
   )
+}
+
+/** A tooltip with its ⌘1…⌘9 shortcut, when the slot has one. */
+function withShortcut(label: string, slot: number): string {
+  const chord = TAB_SHORTCUTS[slot]
+  return chord ? `${label} (${chordHint(chord)})` : label
 }
 
 /** Right-click menu on a tab: the browser-tab basics (Figma has the same

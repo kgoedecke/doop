@@ -805,6 +805,8 @@ export const FrameView = memo(function FrameView({
   const [runtimeReady, setRuntimeReady] = useState(false)
   /* the port the runtime relays keys over; see `replayKey` */
   const keyPort = useRef<MessagePort | null>(null)
+  /* saves a document the runtime serialized after a text edit (set below) */
+  const saveEditedRef = useRef<(html: string, discrete: boolean) => void>(() => {})
   useEffect(() => {
     /* a key pressed while the focus sits in this frame's document: replay
        it on the iframe, where it bubbles to the canvas shortcuts as if the
@@ -815,7 +817,13 @@ export const FrameView = memo(function FrameView({
     function replayKey(ev: MessageEvent) {
       const iframe = iframeRef.current
       if (!iframe || document.activeElement !== iframe || !document.hasFocus()) return
-      const relay = ev.data as Partial<KeyRelay> | undefined
+      const relay = ev.data as Partial<KeyRelay> | { event: 'edited'; html?: unknown } | undefined
+      /* text typed just before a key that leaves the canvas (⌘1…⌘9): sent
+         down this same port ahead of the key, so it is saved first */
+      if (relay?.event === 'edited') {
+        if (typeof relay.html === 'string') saveEditedRef.current(relay.html, false)
+        return
+      }
       if (!relay || (relay.event !== 'keydown' && relay.event !== 'keyup')) return
       if (typeof relay.key !== 'string' || typeof relay.code !== 'string') return
       const { event, key, code } = relay
@@ -1485,27 +1493,31 @@ export const FrameView = memo(function FrameView({
 
   /* serialized edits stream out of the iframe; save through the human path */
   useEffect(() => {
+    function saveEdited(edited: string, discrete: boolean) {
+      // The runtime already has this document. Echoing it through the HTML
+      // throttle can overwrite a newer style edit still waiting to save.
+      localHtml.current = edited
+      setRuntimeDocument({ html: edited, request: ++htmlRequest.current })
+      noteFrameDocument(frame.id, edited)
+      /* a newly used library font brings its @font-face along, a hosted one
+         its stylesheet link; the saved
+         document then differs from the runtime's, so the post effect sends
+         it back in and the face loads at once */
+      const library = canvasFonts()
+      const canvas = useStore.getState().canvas
+      /* tokens first, so a family named through a font token is seen by the font scan */
+      const withTokens = withTokenBlock(edited, canvas?.tokens ?? [], canvas?.tokenThemes ?? [])
+      const html = withWebFontLinks(withFontFaces(withTokens, library), library)
+      const before = useStore.getState().canvas?.frames.find((f) => f.id === frame.id)?.html
+      useStore.getState().patchFrameLocal(frame.id, { html })
+      trackSave(api.updateFrame(frame.id, { html }).catch(console.error))
+      if (before !== undefined) recordUpdate(frame.id, { html: before }, { html }, discrete)
+    }
+    saveEditedRef.current = saveEdited
     function onMsg(ev: MessageEvent) {
       if (ev.source !== iframeRef.current?.contentWindow) return
       if (ev.data?.type === 'doop:edited' && typeof ev.data.html === 'string') {
-        // The runtime already has this document. Echoing it through the HTML
-        // throttle can overwrite a newer style edit still waiting to save.
-        localHtml.current = ev.data.html
-        setRuntimeDocument({ html: ev.data.html, request: ++htmlRequest.current })
-        noteFrameDocument(frame.id, ev.data.html)
-        /* a newly used library font brings its @font-face along, a hosted one
-           its stylesheet link; the saved
-           document then differs from the runtime's, so the post effect sends
-           it back in and the face loads at once */
-        const library = canvasFonts()
-        const canvas = useStore.getState().canvas
-        /* tokens first, so a family named through a font token is seen by the font scan */
-        const withTokens = withTokenBlock(ev.data.html, canvas?.tokens ?? [], canvas?.tokenThemes ?? [])
-        const html = withWebFontLinks(withFontFaces(withTokens, library), library)
-        const before = useStore.getState().canvas?.frames.find((f) => f.id === frame.id)?.html
-        useStore.getState().patchFrameLocal(frame.id, { html })
-        trackSave(api.updateFrame(frame.id, { html }).catch(console.error))
-        if (before !== undefined) recordUpdate(frame.id, { html: before }, { html }, ev.data.discrete === true)
+        saveEdited(ev.data.html, ev.data.discrete === true)
       }
       if (ev.data?.type === 'doop:edit-esc') {
         setEditing(false)
