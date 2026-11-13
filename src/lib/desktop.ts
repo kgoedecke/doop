@@ -162,6 +162,21 @@ export function tabShortcutTarget(
   return tab ? `/c/${tab.id}` : null
 }
 
+/** ⌘, (Ctrl+, elsewhere) opens Settings, as every Mac app and most desktop
+ *  apps on Windows and Linux bind it. By physical key, like the tab chords. */
+export const SETTINGS_SHORTCUT: Chord = { code: 'Comma', mod: true }
+
+/** Where a shell-wide shortcut goes: a tab (tabShortcutTarget) or Settings.
+ *  Null when the keys are neither. */
+export function shellShortcutTarget(
+  e: Pick<KeyboardEvent, 'key' | 'code' | 'metaKey' | 'ctrlKey' | 'altKey' | 'shiftKey'>,
+  tabs: readonly CanvasTab[],
+  mac?: boolean,
+): string | null {
+  if (matchesChord(e, SETTINGS_SHORTCUT, mac)) return '/settings'
+  return tabShortcutTarget(e, tabs, mac)
+}
+
 export function closeAllTabs() {
   setTabs([])
   navigate('/')
@@ -336,12 +351,12 @@ export function initDesktopShell() {
     .catch(console.error)
   listenForDesktopLinks()
   /* capture phase, so a field that stops its keys (the zoom input, a colour
-     field) cannot swallow the tab shortcuts; a frame relays them from inside
+     field) cannot swallow the tab and Settings shortcuts; a frame relays them from inside
      too, text editing included (frameRuntime.ts) */
   document.addEventListener(
     'keydown',
     (e) => {
-      const target = tabShortcutTarget(e, useTabs.getState().tabs)
+      const target = shellShortcutTarget(e, useTabs.getState().tabs)
       if (target === null) return
       e.preventDefault()
       if (target !== location.pathname) navigate(target)

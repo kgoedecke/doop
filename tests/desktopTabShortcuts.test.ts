@@ -4,7 +4,7 @@ import { expect, it, vi } from 'vitest'
 vi.mock('../src/App', () => ({ navigate: vi.fn() }))
 vi.mock('../src/lib/auth', () => ({ authClient: {} }))
 vi.mock('../src/lib/shell', async (load) => ({ ...(await load<object>()), isDesktopShell: () => true }))
-import { tabShortcutTarget } from '../src/lib/desktop'
+import { shellShortcutTarget, tabShortcutTarget } from '../src/lib/desktop'
 
 const tabs = [
   { id: 'a', name: 'A' },
@@ -37,6 +37,16 @@ it('ignores a slot with no tab and chords that are not the plain modifier', () =
 it('uses Ctrl off a Mac and reads the physical key, not the typed character', () => {
   expect(tabShortcutTarget(keys('Digit2', { ctrlKey: true }), tabs, false)).toBe('/c/a')
   expect(tabShortcutTarget({ ...keys('Digit1', { ctrlKey: true }), key: '&' }, tabs, false)).toBe('/')
+})
+
+it('opens Settings on ⌘, (Ctrl+, off a Mac) and leaves the tab chords alone', () => {
+  const comma = (extra: Partial<KeyboardEvent>) => ({ ...keys('Comma', extra), key: ',' })
+  expect(shellShortcutTarget(comma({ metaKey: true }), tabs, true)).toBe('/settings')
+  expect(shellShortcutTarget(comma({ ctrlKey: true }), tabs, false)).toBe('/settings')
+  expect(shellShortcutTarget(comma({ ctrlKey: true }), tabs, true)).toBeNull()
+  expect(shellShortcutTarget(comma({ metaKey: true, shiftKey: true }), tabs, true)).toBeNull()
+  expect(shellShortcutTarget(comma({}), tabs, true)).toBeNull()
+  expect(shellShortcutTarget(keys('Digit2', { metaKey: true }), tabs, true)).toBe('/c/a')
 })
 
 it('hears the shortcuts from a field that stops its own keys', async () => {

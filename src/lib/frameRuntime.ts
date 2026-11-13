@@ -492,11 +492,12 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
     if (!(readTrusted ? apply(readTrusted, ev, []) : ev.isTrusted)) return
     var k = {}
     for (var f = 0; f < KEY_FIELDS.length; f++) k[KEY_FIELDS[f]] = apply(keyGetters[KEY_FIELDS[f]], ev, [])
-    /* ⌘1…⌘9 switch the desktop shell's tabs (desktop.ts), so they travel
-       from text being edited, a field and a playing prototype too: nothing
-       in here types with them */
+    /* ⌘1…⌘9 switch the desktop shell's tabs and ⌘, opens Settings
+       (desktop.ts), so they travel from text being edited and a field too:
+       nothing in here types with them. The prototype player hands its
+       screens no port, so a playing prototype keeps them (it is modal) */
     var tabChord =
-      (k.metaKey || k.ctrlKey) && !k.altKey && !k.shiftKey && /^Digit[1-9]$/.test(String(k.code))
+      (k.metaKey || k.ctrlKey) && !k.altKey && !k.shiftKey && /^(Digit[1-9]|Comma)$/.test(String(k.code))
     /* the shell is about to leave this canvas: text typed in the last
        400ms goes first, down the key's own port so it arrives ahead of it */
     if (tabChord && editing && editTimer && apply(readType, ev, []) === 'keydown') {
