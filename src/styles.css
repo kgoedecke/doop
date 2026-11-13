@@ -405,6 +405,18 @@
   ::selection {
     background: color-mix(in srgb, var(--brand) 18%, transparent);
   }
+  /* The canvas panels (Layers, Inspector, element panel, Agents) scroll
+     without a visible bar, as Figma's do: a classic always-on bar eats a
+     column of the panel and draws a grey track beside every field. The
+     panes still scroll by wheel, trackpad, touch and keyboard. */
+  [data-slot='panel'],
+  [data-slot='panel'] * {
+    scrollbar-width: none;
+  }
+  [data-slot='panel']::-webkit-scrollbar,
+  [data-slot='panel'] *::-webkit-scrollbar {
+    display: none;
+  }
   button:not(:disabled),
   [role='button']:not(:disabled) {
     cursor: pointer;
