@@ -40,6 +40,8 @@ import { zodToJsonSchema } from 'zod-to-json-schema'
 import { z } from 'zod'
 import { catalog, compactFrameHtml, findComponent, libraryCatalog } from './componentActions.ts'
 import { activeComponents } from '../shared/components.ts'
+import { isAutomationCard } from '../shared/automations.ts'
+import { getUserName } from './auth.ts'
 import { settleForRead } from './propagation.ts'
 import { runOperation } from './workBudget.ts'
 import { detached, savepoint } from './journal.ts'
@@ -182,7 +184,7 @@ Rules:
 - Queued cards are standalone work requests from the board. A card may be routed through several agents in turn — you own your stage of it and nothing else. If your specialty is to originate work: a new-asset card means create_frame sized for the job, a change request means editing the existing frame. One card, one deliverable.
 - Later stages inherit whatever earlier stages left. Read the frame as it is now; never undo a previous agent's work because you would have done it differently.
 - Resolve frame references against the numbered frame list in the request. A literal frame name wins; otherwise "Frame 1" means the first listed frame, and "the other frame" means the only remaining frame when there are two.
-- Each frame includes human approval metadata. Only ready_for_dev means the current design is approved for implementation; draft and needs_review are not approved. Content or size edits invalidate sign-off. Approval is context, not a new assignment: do only the requested work, and re-read the frame's approval before using it for implementation.
+- Each frame includes human approval metadata. Only ready_for_dev means the current design is approved for implementation; draft and needs_review are not approved. Content or size edits invalidate sign-off. Approval is context, not a new assignment: do only the requested work, and re-read the frame's approval before using it for implementation. Mark a frame ready for dev (set_frame_approval) only when the person explicitly asks for that; never approve your own work unasked.
 - Choose a size-aware strategy. For documents over 60,000 characters, call inspect_frame before reading HTML. Use get_frame_html with a query or bounded range only when markup is needed.
 - For requests to copy, match, or borrow another frame's design: screenshot and inspect BOTH the target and reference before editing. Use the reference screenshot and computed design tokens as the source of visual truth. Read target HTML only when you need to preserve its content; do not load a large reference document just to learn its style. For a full redesign, use begin_frame_rewrite, append_frame_rewrite in chunks under 12,000 characters, and commit_frame_rewrite; then screenshot the changed frame.
 - Element comments are pinned to ONE element (you get its data-doop-id and an HTML excerpt at comment time). Change that element or its immediate context — never rework unrelated parts of the frame because of an element comment.
@@ -272,9 +274,12 @@ interface RunState {
    *  list set): work a card can ask for on its own, delivered without a frame */
   tokenWrites: number
   /** page and frame-arrangement writes that took (a page added, renamed,
-   *  reordered or deleted, a frame renamed or moved): work a card can ask
-   *  for on its own, delivered without a design change */
+   *  reordered or deleted, a frame renamed, moved or its approval set): work a
+   *  card can ask for on its own, delivered without a design change */
   arrangeWrites: number
+  /** some of the run's work was queued by an automation: such a run never sets approval,
+   *  which would sign off its own output and could start the automation again */
+  automated?: boolean
 }
 
 export interface FramePlacement {
@@ -691,6 +696,7 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
       awaitingThreads: new Set(),
       tokenWrites: 0,
       arrangeWrites: 0,
+      automated: cards.some(isAutomationCard),
     }
     let refused = false
     let crashed = false
@@ -1485,6 +1491,19 @@ const TOOLS: Anthropic.Tool[] = [
         },
       },
       required: ['comment_id', 'text'],
+    },
+  },
+  {
+    name: 'set_frame_approval',
+    description:
+      'Mark a frame ready for dev, or move it back to draft, for the person who asked you. Only when they explicitly ask for that: never approve your own designs unasked. The approval is recorded as theirs, made through you, and starts any approval automations on the canvas like a human sign-off. Editing the HTML or size afterwards moves it to needs_review.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        frame_id: { type: 'string' },
+        status: { type: 'string', enum: ['ready_for_dev', 'draft'] },
+      },
+      required: ['frame_id', 'status'],
     },
   },
   {
@@ -2389,6 +2408,23 @@ async function runResidentTool(
             ? `replied (${posted.reply.id}); the thread is handed back to the person when you finish — stop here`
             : `replied in the thread (${posted.reply.id})`,
         )
+      }
+      case 'set_frame_approval': {
+        const status = input.status
+        if (status !== 'ready_for_dev' && status !== 'draft') return fail('status must be ready_for_dev or draft')
+        if (runState.automated) return fail('an automation run never changes approval — approval is for people')
+        const frame = store.getFrame(input.frame_id)
+        if (!frame || frame.canvasId !== canvasId) return fail('no such frame on this canvas')
+        const requester = runState.requesterId
+        if (!requester || !canEditCanvas(requester, canvasId))
+          return fail('approval is set for the person who asked, and nobody who can edit this canvas asked')
+        const name = await getUserName(requester)
+        if (!name) return fail('the person who asked could not be found')
+        const result = actions.agentSetFrameApproval(input.frame_id, status, { id: requester, name }, actor)
+        if (!result.ok) return fail(result.error)
+        /* "mark this ready for dev" is the whole job: a design edit after it would undo the sign-off */
+        runState.arrangeWrites += 1
+        return ok(status === 'ready_for_dev' ? `marked ready for dev for ${name}` : 'moved back to draft')
       }
       case 'resolve_comment': {
         const id = String(input.comment_id ?? '')

@@ -16,6 +16,7 @@ import type { AgentTask } from '../shared/types.ts'
 import { env } from './env.ts'
 import {
   MAX_NAME,
+  automationQueuedBy,
   incompleteReason,
   nextRunAt,
   normalizeSchedule,
@@ -380,7 +381,7 @@ async function queueAgent(
       color: '#0177d3',
       status: `${sourceBrief}${earlierResults}${step.prompt}`,
       startedAt: Date.now(),
-      queuedBy: `Automation · ${row.name}`,
+      queuedBy: automationQueuedBy(row.name),
       queuedByUserId: row.ownerId,
       pipeline,
       stage: 0,

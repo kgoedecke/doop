@@ -6,6 +6,13 @@ import type { FrameApproval } from './types.ts'
  * approval workflows use the watched canvas and carry only the signed-off sources.
  * Design tasks finish before the following step starts. */
 
+/** The `queuedBy` an automation's agent step puts on its board card: how a run tells work an
+ *  automation queued from work a person asked for. */
+export const automationQueuedBy = (name: string): string => `Automation · ${name}`
+
+export const isAutomationCard = (card: { queuedBy?: string }): boolean =>
+  card.queuedBy?.startsWith(automationQueuedBy('')) ?? false
+
 export type ScheduleKind = 'daily' | 'weekdays' | 'weekly'
 
 export interface Schedule {

@@ -97,6 +97,7 @@ export const stage: Catalog['stage'] = {
   needsReview: 'Precisa de revisão',
   approvedByOn: 'Aprovado por {name} em {date}',
   previouslyApprovedByOn: 'Aprovado anteriormente por {name} em {date}',
+  approverVia: '{name} via {agent}',
   markAsApproved: 'Marcar como aprovado',
   approvalReady: 'Os agentes podem ver que esta tela está aprovada para implementação.',
   approvalChanged: 'Este design mudou depois da aprovação. Revise-o antes de marcá-lo como pronto de novo.',

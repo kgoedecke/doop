@@ -115,7 +115,7 @@ const INSTRUCTIONS = `Doop is a shared multiplayer design canvas: humans and AI 
 You MUST call get_guide({ topic: "doop-instructions" }) once before using other Doop tools. Call it again if a long conversation may have compressed or dropped the guide text.
 
 - Context first: call get_canvas before adding or editing frames.
-- Implementation handoff: get_canvas and get_frame expose approvalStatus (draft, ready_for_dev, needs_review) and human approval attribution. Use get_canvas with approval_status="ready_for_dev" to find approved screens. Re-read get_frame before implementing; only ready_for_dev is current sign-off. HTML or size edits invalidate approval. Approval does not automatically start an implementation task; follow the human's implementation request.
+- Implementation handoff: get_canvas and get_frame expose approvalStatus (draft, ready_for_dev, needs_review) and human approval attribution. Use get_canvas with approval_status="ready_for_dev" to find approved screens. Re-read get_frame before implementing; only ready_for_dev is current sign-off. HTML or size edits invalidate approval. Approval does not automatically start an implementation task; follow the human's implementation request. When a human asks you to approve a frame (or withdraw an approval), set_frame_approval does it in their name; never approve on your own initiative.
 - Element links: /c/<canvas_id>?frame=<frame_id>&element=<element_id> identifies one element: the one carrying data-doop-id="<element_id>" in that frame's HTML. Read get_canvas and get_frame and find that attribute before applying the feedback. If no element carries the id any more, ask for an updated reference.
 - Page links: /c/<canvas_id>?page=<page_id> opens the canvas on that page (ids from get_canvas's pages); hand a human this form when you point them at a page.
 - Keep data-doop-* attributes on every element you rewrite: data-doop-id is how comments and links point at an element, data-doop-on / data-doop-action carry prototype wiring, data-doop-locked a layer lock. Drop one only together with its element.
@@ -2477,6 +2477,31 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
         frame.canvasId,
         [frame],
       )
+    },
+  )
+
+  server.registerTool(
+    'set_frame_approval',
+    {
+      title: 'Mark a frame ready for dev, or move it back to draft',
+      description:
+        'Set a frame\'s sign-off for the person you work for: status "ready_for_dev" marks the current design approved for implementation, "draft" withdraws an approval. Only when a human asks you to: never approve your own designs on your own initiative, and never to get past a review. The approval is recorded as theirs, made through you (approval.approvedBy is the person, approval.approvedVia your agent_name), and it starts any approval automations on the canvas just as a human sign-off does. Editing the HTML or size afterwards moves it to needs_review, as for every approval.',
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      inputSchema: {
+        frame_id: z.string(),
+        status: z.enum(['ready_for_dev', 'draft']),
+        agent_name: agentName,
+      },
+    },
+    async ({ frame_id, status, agent_name }) => {
+      if (!ownerId || !owner) return err('this connection is not signed in to a Doop account')
+      const found = frameFor(frame_id, 'edit')
+      if (!found) return noFrame(frame_id)
+      const actor = actorFrom(agent_name)
+      arrive(found.canvasId, agent_name)
+      const result = actions.agentSetFrameApproval(frame_id, status, { id: ownerId, name: owner }, actor)
+      if (!result.ok) return err(result.error)
+      return withFeedback(text({ ok: true, frame: frameSummary(result.frame) }), result.frame.canvasId, actor)
     },
   )
 
