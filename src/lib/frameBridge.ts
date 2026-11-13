@@ -128,6 +128,17 @@ export interface ElementInfo {
   borderStyle: string
   borderColor: string
   borderRadius: number | null
+  /** A vector layer's SVG paint (an `<svg>` of shapes, or a shape), read
+   *  from its first shape: Fill and Stroke edit these instead of the box's
+   *  background and border. `inline` is that shape's inline paint. */
+  vector?: {
+    fill: string
+    /** `fill-opacity`, which the panel folds into the fill's alpha */
+    fillOpacity: number | null
+    stroke: string
+    strokeWidth: number | null
+    inline: Record<string, string>
+  } | null
   color: string
   fontSize: number | null
   fontWeight: string

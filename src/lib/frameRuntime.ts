@@ -129,6 +129,13 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
         styleEdit.original = target.style.cssText
         styleEdit.touched = {}
         previewStyle(target, styleEdit.styles)
+        // A vector's paint preview sits on its shapes, which the update may
+        // have replaced: their fresh styles are the baseline, painted over again.
+        if (Object.keys(styleEdit.paint).length) {
+          var shapes = vectorShapes(target)
+          styleEdit.shapes = shapes.map(function (shape) { return { el: shape, original: shape.getAttribute('style') } })
+          paintShapes(shapes, styleEdit.paint)
+        }
       }
     }
   }
@@ -1315,6 +1322,7 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
       borderStyle: cs['border' + drawn + 'Style'],
       borderColor: cs['border' + drawn + 'Color'],
       borderRadius: px(cs.borderTopLeftRadius),
+      vector: vectorInfo(el),
       color: textValues.color,
       fontSize: px(textValues.fontSize),
       fontWeight: textValues.fontWeight,
@@ -1484,7 +1492,7 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
       postEdited()
     }
     styleEdit = { selector: selector, original: el.style.cssText, styles: {}, touched: {}, runs: [], created: [], renamed: [],
-      followers: gestureFollowers(el, followers) }
+      followers: gestureFollowers(el, followers), shapes: [], paint: {} }
     return true
   }
   function endStyleEdit(selector, cancel) {
@@ -1499,6 +1507,10 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
         if (follower.original === null) follower.el.removeAttribute('style')
         else follower.el.setAttribute('style', follower.original)
         settleGeometry(follower.el)
+      })
+      edit.shapes.forEach(function (shape) {
+        if (shape.original === null) shape.el.removeAttribute('style')
+        else shape.el.setAttribute('style', shape.original)
       })
       var original = document.createElement('div').style
       original.cssText = edit.original
@@ -1518,8 +1530,60 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
       if (selectedTextRange(el)) styleTextRange(el, edit.styles)
       postEdited(true)
       postTextState()
-    } else if (Object.keys(edit.touched).length || edit.runs.length || edit.created.length || edit.renamed.length) postEdited(true)
+    } else if (Object.keys(edit.touched).length || edit.shapes.length || edit.runs.length || edit.created.length || edit.renamed.length) postEdited(true)
     return true
+  }
+  /* A vector layer paints with SVG's fill and stroke, not the box's
+     background and border: the Design panel's Fill and Stroke write these,
+     and they go on the shapes themselves, where a drawn or imported path
+     carries them as attributes an inherited value from the <svg> loses to. */
+  var VECTOR_PAINT = ['fill', 'fill-opacity', 'stroke', 'stroke-width', 'stroke-opacity']
+  var VECTOR_SHAPE = /^(path|rect|circle|ellipse|line|polyline|polygon)$/
+  var VECTOR_SKIP = /^(defs|clippath|mask|symbol|pattern|marker|lineargradient|radialgradient|filter|foreignobject|text)$/
+  function vectorShapes(el) {
+    if (!el || el.namespaceURI !== 'http://www.w3.org/2000/svg') return []
+    var tag = el.tagName.toLowerCase()
+    if (VECTOR_SHAPE.test(tag)) return [el]
+    if (tag !== 'svg' && tag !== 'g') return []
+    var shapes = []
+    ;(function walk(node) {
+      for (var c = node.firstElementChild; c; c = c.nextElementSibling) {
+        var name = c.tagName.toLowerCase()
+        if (VECTOR_SHAPE.test(name)) shapes.push(c)
+        else if (!VECTOR_SKIP.test(name) && !(c.hasAttribute && c.hasAttribute('data-doop-defs'))) walk(c)
+      }
+    })(el)
+    return shapes
+  }
+  function vectorInfo(el) {
+    var shapes = vectorShapes(el)
+    if (!shapes.length) return null
+    var scs = getComputedStyle(shapes[0])
+    var inline = {}
+    for (var i = 0; i < VECTOR_PAINT.length; i++) {
+      var value = shapes[0].style.getPropertyValue(VECTOR_PAINT[i])
+      if (value) inline[VECTOR_PAINT[i]] = value
+    }
+    return { fill: scs.fill, fillOpacity: px(scs.fillOpacity), stroke: scs.stroke, strokeWidth: px(scs.strokeWidth), inline: inline }
+  }
+  /* the vector paint in a patch, taken out of it; null when there is none or
+     el is no vector */
+  function takeVectorPaint(el, styles) {
+    var paint = null
+    var rest = {}
+    var shapes = vectorShapes(el)
+    for (var k in styles) {
+      if (!Object.prototype.hasOwnProperty.call(styles, k)) continue
+      if (shapes.length && VECTOR_PAINT.indexOf(k) !== -1) (paint = paint || {})[k] = styles[k]
+      else rest[k] = styles[k]
+    }
+    return paint ? { shapes: shapes, paint: paint, rest: rest } : null
+  }
+  function paintShapes(shapes, paint) {
+    shapes.forEach(function (shape) {
+      patchStyle(shape, paint)
+      if (!shape.getAttribute('style')) shape.removeAttribute('style')
+    })
   }
   function applyStyle(selector, styles, uniformText) {
     var el = styleTarget(selector)
@@ -1533,6 +1597,27 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
       patchStyle(el, styles)
       if (!el.getAttribute('style')) el.removeAttribute('style')
       return true
+    }
+    var vector = takeVectorPaint(el, styles)
+    if (vector) {
+      if (gesture) {
+        Object.assign(styleEdit.paint, vector.paint)
+        // The shapes' own styles, put back on a cancel as a follower's are.
+        vector.shapes.forEach(function (shape) {
+          if (!styleEdit.shapes.some(function (known) { return known.el === shape })) {
+            styleEdit.shapes.push({ el: shape, original: shape.getAttribute('style') })
+          }
+        })
+      }
+      paintShapes(vector.shapes, vector.paint)
+      styles = vector.rest
+      if (!Object.keys(styles).length) {
+        if (!gesture) {
+          if (styleTimer) clearTimeout(styleTimer)
+          styleTimer = setTimeout(function () { styleTimer = null; postEdited() }, 250)
+        }
+        return true
+      }
     }
     function noteRuns(change) {
       if (!gesture) return
