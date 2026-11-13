@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
+import { useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import type { CanvasMeta } from '../../shared/types'
 import { cn } from '@/lib/utils'
 import { useT } from '../lib/i18n'
@@ -30,10 +30,6 @@ export function CanvasSearchModal({
   const [cursor, setCursor] = useState(0)
   const inputRef = useRef<HTMLInputElement>(null)
 
-  useEffect(() => {
-    inputRef.current?.focus()
-  }, [])
-
   const results = useMemo(() => {
     const q = query.trim().toLowerCase()
     if (!q) return canvases.slice(0, MAX_RESULTS)
@@ -57,7 +53,17 @@ export function CanvasSearchModal({
   }
 
   return (
-    <Modal size="lg" onClose={onClose} className="p-0 sm:p-0" aria-label={t('rail.searchCanvases')}>
+    <Modal
+      size="lg"
+      onClose={onClose}
+      className="p-0 sm:p-0"
+      aria-label={t('rail.searchCanvases')}
+      /* the field takes the keyboard as it opens: left to Radix, focus lands on the × */
+      onOpenAutoFocus={(e) => {
+        e.preventDefault()
+        inputRef.current?.focus()
+      }}
+    >
       <SearchField
         ref={inputRef}
         variant="bar"
