@@ -1,12 +1,38 @@
 /**
- * The deep playbook agents load via get_guide — kept out of the initialize
- * instructions so the handshake stays small (same pattern paper.design uses).
+ * The playbook agents load via get_guide, kept out of the initialize instructions so the
+ * handshake stays small (Claude Code cuts server instructions at 4,096 characters).
+ * As Paper and pen.dev do it: one main guide every agent loads first ("doop-instructions"),
+ * and topics an agent loads only when its task needs one, so every session does not pay
+ * for the whole playbook.
  */
 
 import { AGENT_ROLES } from '../shared/agents.ts'
 import { MAX_DECISION_CHARS } from '../shared/designDecisions.ts'
 
-export const GUIDE_TOPICS = ['doop-instructions'] as const
+export const GUIDE_TOPICS = [
+  'doop-instructions',
+  'images',
+  'components',
+  'prototypes',
+  'redesigns',
+  'comments-and-agents',
+  'export',
+  'imported-frames',
+] as const
+
+export type GuideTopic = (typeof GUIDE_TOPICS)[number]
+
+/** What each topic covers: listed in get_guide's description and at the end of the main guide. */
+export const GUIDE_TOPIC_SUMMARIES: Record<GuideTopic, string> = {
+  'doop-instructions': 'the main guide: load it first, before any other Doop tool',
+  images: 'photos, backgrounds, icons, logos, generated images and uploads in full',
+  components: 'nesting, variants, overrides, deleting, other canvases and workspace libraries',
+  prototypes: 'wiring screens into a clickable flow',
+  redesigns: 'redesigning an existing site or page: import, audit, two directions',
+  'comments-and-agents': "comment threads, and the built-in Doop Agent's roles",
+  export: 'images, PDF and PSD of a frame or one element',
+  'imported-frames': 'frames imported from a GitHub repo or synced from a live app',
+}
 
 /** The check a frame-writing tool's description asks for, at the moment the HTML is written:
  *  MCP's create_frame, append_frame_html and set_frame_html and the resident's matching tools. */
@@ -292,41 +318,6 @@ your edits render for them the moment you make them, your presence appears under
 agent_name, and every action lands in a visible activity feed. Work like a considerate
 colleague, not a batch job.
 
-## The Doop Agent
-
-Every canvas has a built-in Doop Agent: a set of roles that live in the server and pick
-work up on their own. Humans queue board cards addressed to them, and can route a card
-through several in order — design, then copy, then brand, then accessibility:
-
-${AGENT_ROLES.map((r) => `- **${r.name}** (@${r.id}) — ${r.blurb}`).join('\n')}
-
-A canvas's team can have more specialists of its own (its workspace's, or its owner's):
-get_canvas lists them as \`customAgents\`, each with the @mention that reaches it.
-
-They only take work addressed to them: a board card at their stage, an element comment
-that @mentions them, or feedback on a task they ran. Anything left unaddressed is open
-to you. If a human asks you for something one of these roles owns, just do it — the
-routing is for their benefit, not a lock on your work.
-
-Use get_comments({ canvas_id }) to read element-pinned comments and replies, including
-their frame, elementId, snippet, author, thread links, and claim/failure/resolution state. An
-element comment's elementId is the element's data-doop-id attribute in the frame HTML: find
-that attribute with get_frame to locate the element, and keep every data-doop-* attribute when
-you rewrite markup, or the comments and links pointing at it lose their element. A comment
-with a frame but no elementId and no x, y is one whose element is gone; its snippet shows
-what it looked like.
-Add frame_id to focus on one frame. Resolved comments are included by default to preserve
-conversation context; include_resolved: false returns only unresolved entries. The result
-is newest first and covers the retained history (up to 100 entries per canvas).
-
-Answer a thread with reply_to_comment({ canvas_id, comment_id, text, agent_name }) — the
-reply inherits the root's element anchor, so an @mention reaches the resident agent with
-the same context the conversation is about. Close the thread with resolve_comment once the
-request is carried out; resolving an @mention thread also records the exchange in the
-canvas Memory. Writing is metered only when a reply @mentions a resident role, exactly
-like a comment left in the browser. Reading does not claim work or resolve it; task
-feedback is separate (get_feedback).
-
 ## Narrate your work — set_status
 
 People watching the canvas cannot see your reasoning, only your edits. Bridge that gap
@@ -429,10 +420,8 @@ Viewers watch designs assemble live. Stream with append_frame_html:
   work. Hosted fonts: name a family get_canvas lists under \`webFonts\` in CSS and nothing
   more — Doop adds one <link data-doop-webfonts> for the families the frame uses (keep it,
   never add your own for those). Another Google Fonts family works with your own <link>.
-- Synced frames: frames a team's live app sends through the design-sync snippet are
-  captures of real screens. One stops updating 15 minutes after it was first captured
-  (re-import = delete it and visit the page again); content marked data-doop-mask arrives
-  masked and data-doop-sync-ignore never arrives. Design changes in a separate frame.
+- Imported frames: a frame from a GitHub repo or synced from a team's live app has rules of
+  its own (get_guide imported-frames).
 ${FRAME_STYLES}
 - Custom fonts: when get_canvas lists \`fonts\`, the team uploaded them — prefer them. Name the
   family in CSS (font-family: "Family", sans-serif) and nothing more: Doop adds the @font-face
@@ -454,25 +443,168 @@ ${FRAME_STYLES}
   and returns its id for create_frame's pageId; get_canvas with page_id reads one page;
   set_canvas_pages renames, reorders or deletes pages. A link to a page is
   /c/<canvas_id>?page=<page_id>.
+- Element links: /c/<canvas_id>?frame=<frame_id>&element=<element_id> points at the one
+  element carrying data-doop-id="<element_id>" in that frame's HTML. Find that attribute with
+  get_frame before applying the feedback; if no element carries it any more, ask for an
+  updated link.
 - Rearranging: update_frame is one call for a frame's name, x/y, size, lock, or its page
   (pageId; it keeps its x/y unless you pass new ones). Move a frame with it; never recreate
   or copy a frame's HTML to move it, which loses its comments, versions and approval.
 
-## GitHub-imported frames — the repo is the source of truth
+## Images — real imagery, never placeholders
 
-Frames whose HTML carries a "doop-github-screen" marker meta were imported from a
-connected GitHub repository: repo HTML as-is, or a screen that exists in that repo only
-as code (a Next.js page, a Storybook story, a component) sketched by Doop from its
-source. The marker records the repo, the route and the source file path.
+- Photos: search_images (you SEE the thumbnails; hotlink the image_url). Atmosphere for a
+  hero or section: list_backgrounds. Icons: search_icons (hotlink the svg_url). Logos:
+  search_logos, once per brand and by its domain, BEFORE writing the section that shows it.
+- Your own file: upload_asset (local_file=true for a file on your machine). A visual no stock
+  image can be (a hero scene in the frame's palette, a product render): generate_image, which
+  costs your human quota, so one considered prompt.
+- Never a placeholder logo or an invented brand, never emoji or Unicode symbols as icons
+  (they render as boxes in exports), never a guessed image URL, never a gray "image here"
+  box: when nothing fits, draw it in SVG or CSS.
+- get_guide({ topic: "images" }) has the full playbook: queries, backgrounds and when one
+  earns its place, the hero-background recipe, upload options.
 
-If you have that repository available (checked out locally, or reachable through your
-own tools), you are the best agent to improve such a frame: read the screen's source
-file and the components it imports, then set_frame_html a complete self-contained
-document that faithfully renders it — real CSS derived from its actual classes and
-design tokens, realistic placeholder data, no scripts. Design at the frame's width and
-resize the frame to the content. Keep the marker meta so the frame stays traceable.
+## Keep frames lean
 
-## Images — search first, then upload
+${LEAN_FRAMES}
+
+## Style guides — read before designing
+
+Canvases can carry named style guides: markdown packs of brand and style rules
+(palettes, fonts, layout recipes, asset URLs) that every frame on the canvas must
+follow. Humans see them as pinned cards on the canvas itself. get_canvas lists them
+with one-line summaries; list_guidelines shows the same list on demand.
+
+- Before creating or restyling frames on a canvas that has style guides, call
+  get_guidelines for each doc relevant to your task and follow it exactly — these
+  rules outrank your own aesthetic preferences.
+- When a human hands you brand rules or a reusable style recipe, persist it with
+  set_guidelines (a named markdown doc, e.g. "feature-image") so every later agent
+  inherits it. Write rules others can execute directly: palette hexes, font <link>s,
+  ready-to-paste <style> blocks, uploaded logo URLs, sizing rules.
+- Update a doc when its style evolves; empty markdown deletes it.
+
+## Design tokens and themes — values live once
+
+A canvas's palette, type scale, spacing, radii and fonts are typed design tokens: CSS custom
+properties every frame uses, each with a value per theme (light, dark, …) where it differs.
+
+- get_canvas lists them (and says when a canvas has none yet). Write var(--name) in CSS,
+  never the literal value, so one token change restyles every frame using it. Doop writes
+  the values a frame names into its own <style data-doop-tokens> block: keep that block and
+  never edit it, and never declare the palette on a frame's own :root.
+- No tokens yet: create_tokens before the first frame, from the brief (palette by role,
+  font families, type scale, spacing, radii). Decisions and their reasons go to
+  save_decision; values never do.
+- set_tokens changes, renames or deletes; set_token_themes declares the themes, and a frame
+  switches with data-doop-theme="dark" on its <html>.
+- get_tokens exports them as json, css, a Tailwind @theme block or markdown. People and
+  build scripts read the same over HTTP: /api/canvases/<id>/tokens?format=css|tailwind|md
+  and /api/canvases/<id>/styleguide.md (tokens plus style guides as one markdown file).
+- The same CSS repeated in several frames (a chip, a card, a pill) is a component, not a
+  pasted <style> block (see Components).
+
+## Memory references — the look to match
+
+Humans can pin frames to the canvas's Memory as style references: "more designs
+like this one". get_canvas lists them (id, title, size). When a reference exists
+and is relevant to your task, call get_reference for its full HTML and match its
+palette, typography, spacing and overall look — it is the ground truth for the
+canvas's style, alongside the style guides.
+
+Memory also learns from feedback. Feedback given inside Doop is captured
+automatically once addressed — but feedback your human gives YOU in
+conversation is invisible to the canvas unless you report it. After you
+address design feedback from your own chat ("rounder corners", "more white
+and blue"), call save_decision with the human's words and the reason. The same goes
+for a direction you choose yourself: the decision and why, never a list of values
+(those are tokens). Save one decision and its
+rationale per call, at most ${MAX_DECISION_CHARS} characters; split longer feedback into separate
+decisions by topic, preserving the reason for each choice. Design taste only —
+never one-off content edits like typos or copy tweaks.
+
+## Design quality
+
+${DESIGN_QUALITY}
+- Reference sites: when a request names a site or URL (a redesign of it, or "like acme.com"),
+  import_webpage that page FIRST and design from what is actually there, never invented
+  content (get_guide redesigns).
+
+## Components — design once, use everywhere
+
+A component is one design used in many places: change its main and every instance follows.
+get_canvas and list_components show a canvas's components with their props.
+
+- Anything on that list goes in through <doop-use>, never redrawn:
+      <doop-use component="Button" label="Start free" tone="ghost"></doop-use>
+  It works anywhere frame HTML goes; attributes are props, and a bad one comes back as a
+  COMPONENT note saying what is allowed. get_frame returns instances in this short form;
+  keep their id="…" when you write one back.
+- Before you write the same block a third time, make it a component (create_component) and
+  use that. Components nest: a main can hold <doop-use> too.
+- Vary with props, not copies. Change every instance at once with update_component, never
+  instance by instance; following a component keeps a frame's sign-off.
+- get_canvas → workspaceLibraries lists the components the workspace published: use them by
+  name, the same way.
+- get_guide({ topic: "components" }) covers nesting, slots, variants, overrides, deleting,
+  importing from other canvases and publishing libraries.
+
+## Comments and the Doop Agent
+
+get_comments reads a canvas's comment threads (an element comment's elementId is that
+element's data-doop-id); reply_to_comment answers one and resolve_comment closes it once
+the request is carried out. The built-in Doop Agent's roles take only work addressed to
+them; the rest is open to you. get_guide({ topic: "comments-and-agents" }) has both in full.
+
+## Exports
+
+Every frame result carries image_url, a public render of its current HTML. export_frame
+gives PNG, JPG, PDF or PSD, export_layer one element (get_guide export).
+
+## Multiplayer etiquette
+
+- Call get_canvas before adding or editing anything. Note each frame's updatedBy and
+  updatedAt: a frame touched seconds ago by someone else is probably mid-edit — do not
+  edit or delete another actor's frame unless asked to (human feedback you picked up
+  counts as being asked).
+- Put new work in new frames beside existing ones; omit x/y to auto-place.
+- Keep the SAME agent_name for your whole session. It is your identity in the room.
+- You act with the canvas role of the account you connected through: a view link reads, a
+  comment link reads and comments, and only edit access writes. A refused write means asking
+  the human for access, not retrying.
+- Rate limits, per account and per minute unless the server raised them: uploads 15
+  (upload_asset and upload_font together), searches 12 (images, logos, inspiration,
+  view_website), image generation 6, imports 5; report_issue and share_feedback 20 an hour;
+  save_decision 500 characters a decision. Work one after another rather than in bursts.
+
+## Problems with Doop itself — report_issue and share_feedback
+
+Two tools reach the Doop team, never the humans on the canvas, and change no canvas:
+
+- report_issue — Doop got in your way: a tool errored or did something other than its
+  description says, this guide or a tool description left you guessing, a capability you
+  needed was missing, or you had to invent a workaround. Call it after a retry fails, when
+  you fall back to a workaround, or when you give up on part of a task, then carry on.
+  Say what you tried (tool and arguments in brief), what happened and what you expected.
+- share_feedback — what would make Doop better for agents (a tool you wish existed, a
+  result field that would have saved calls, a clumsy workflow) or something that worked
+  well and should stay.
+
+Never include secrets. A human's design feedback is not this: record that with save_decision.
+
+## More topics
+
+Load one with get_guide({ topic }) when your task needs it:
+
+${GUIDE_TOPICS.filter((topic) => topic !== 'doop-instructions')
+  .map((topic) => `- **${topic}**: ${GUIDE_TOPIC_SUMMARIES[topic]}`)
+  .join('\n')}
+`
+
+/** The topics past the main guide, each loaded on its own when a task needs it. */
+const TOPIC_TEXT: Record<Exclude<GuideTopic, 'doop-instructions'>, string> = {
+  images: `# Images — search first, then upload
 
 Real imagery is what separates an appealing design from a wireframe. Frames can load
 any public image URL. Source images in this order:
@@ -558,67 +690,17 @@ any public image URL. Source images in this order:
 - **Nothing fits — draw it.** Inline SVG or pure CSS (gradients, patterns, shapes) in
   the frame. Never ship a gray "image goes here" box, and never guess an image URL
   from memory — unverified URLs are usually dead.
+`,
+  components: `# Components — design once, use everywhere
 
-## Keep frames lean
+${COMPONENTS}
+`,
+  prototypes: `# Prototypes — make frames clickable
 
-${LEAN_FRAMES}
-
-## Style guides — read before designing
-
-Canvases can carry named style guides: markdown packs of brand and style rules
-(palettes, fonts, layout recipes, asset URLs) that every frame on the canvas must
-follow. Humans see them as pinned cards on the canvas itself. get_canvas lists them
-with one-line summaries; list_guidelines shows the same list on demand.
-
-- Before creating or restyling frames on a canvas that has style guides, call
-  get_guidelines for each doc relevant to your task and follow it exactly — these
-  rules outrank your own aesthetic preferences.
-- When a human hands you brand rules or a reusable style recipe, persist it with
-  set_guidelines (a named markdown doc, e.g. "feature-image") so every later agent
-  inherits it. Write rules others can execute directly: palette hexes, font <link>s,
-  ready-to-paste <style> blocks, uploaded logo URLs, sizing rules.
-- Update a doc when its style evolves; empty markdown deletes it.
-
-## Design tokens and themes — values live once
-
-A canvas's palette, type scale, spacing, radii and fonts are typed design tokens: CSS custom
-properties every frame uses, each with a value per theme (light, dark, …) where it differs.
-
-- get_canvas lists them (and says when a canvas has none yet). Write var(--name) in CSS,
-  never the literal value, so one token change restyles every frame using it. Doop writes
-  the values a frame names into its own <style data-doop-tokens> block: keep that block and
-  never edit it, and never declare the palette on a frame's own :root.
-- No tokens yet: create_tokens before the first frame, from the brief (palette by role,
-  font families, type scale, spacing, radii). Decisions and their reasons go to
-  save_decision; values never do.
-- set_tokens changes, renames or deletes; set_token_themes declares the themes, and a frame
-  switches with data-doop-theme="dark" on its <html>.
-- get_tokens exports them as json, css, a Tailwind @theme block or markdown. People and
-  build scripts read the same over HTTP: /api/canvases/<id>/tokens?format=css|tailwind|md
-  and /api/canvases/<id>/styleguide.md (tokens plus style guides as one markdown file).
-- The same CSS repeated in several frames (a chip, a card, a pill) is a component, not a
-  pasted <style> block (see Components).
-
-## Memory references — the look to match
-
-Humans can pin frames to the canvas's Memory as style references: "more designs
-like this one". get_canvas lists them (id, title, size). When a reference exists
-and is relevant to your task, call get_reference for its full HTML and match its
-palette, typography, spacing and overall look — it is the ground truth for the
-canvas's style, alongside the style guides.
-
-Memory also learns from feedback. Feedback given inside Doop is captured
-automatically once addressed — but feedback your human gives YOU in
-conversation is invisible to the canvas unless you report it. After you
-address design feedback from your own chat ("rounder corners", "more white
-and blue"), call save_decision with the human's words and the reason. The same goes
-for a direction you choose yourself: the decision and why, never a list of values
-(those are tokens). Save one decision and its
-rationale per call, at most ${MAX_DECISION_CHARS} characters; split longer feedback into separate
-decisions by topic, preserving the reason for each choice. Design taste only —
-never one-off content edits like typos or copy tweaks.
-
-## Redesigns — audit first, then two drafts
+${PROTOTYPES}
+- Frame ids come from get_canvas.
+`,
+  redesigns: `# Redesigns — audit first, then two drafts
 
 When a request redesigns an existing page or site, do not restyle from vibes — audit,
 commit to directions, then deliver a choice:
@@ -650,9 +732,8 @@ commit to directions, then deliver a choice:
 - If the canvas already carries a redesign doc for the source, read it with
   get_guidelines and follow its directions instead of re-auditing.
 
-## Design quality
+## Reference sites
 
-${DESIGN_QUALITY}
 - Reference sites: when a request names a site or URL — a redesign of it, or "like
   acme.com" — call import_webpage on the relevant public page FIRST. It imports that
   one URL as an editable HTML snapshot/frame on the canvas. Design from what is actually
@@ -664,17 +745,43 @@ ${DESIGN_QUALITY}
   through view_website. Use your own browser or web-access tool and work only from content
   you actually observe; otherwise ask the user for screenshots or an HTML export instead
   of inventing the page.
+`,
+  'comments-and-agents': `# Comments and the Doop Agent
 
-## Prototypes — make frames clickable
+Every canvas has a built-in Doop Agent: a set of roles that live in the server and pick
+work up on their own. Humans queue board cards addressed to them, and can route a card
+through several in order — design, then copy, then brand, then accessibility:
 
-${PROTOTYPES}
-- Frame ids come from get_canvas.
+${AGENT_ROLES.map((r) => `- **${r.name}** (@${r.id}) — ${r.blurb}`).join('\n')}
 
-## Components — design once, use everywhere
+A canvas's team can have more specialists of its own (its workspace's, or its owner's):
+get_canvas lists them as \`customAgents\`, each with the @mention that reaches it.
 
-${COMPONENTS}
+They only take work addressed to them: a board card at their stage, an element comment
+that @mentions them, or feedback on a task they ran. Anything left unaddressed is open
+to you. If a human asks you for something one of these roles owns, just do it — the
+routing is for their benefit, not a lock on your work.
 
-## Exporting frames (images, PDF)
+Use get_comments({ canvas_id }) to read element-pinned comments and replies, including
+their frame, elementId, snippet, author, thread links, and claim/failure/resolution state. An
+element comment's elementId is the element's data-doop-id attribute in the frame HTML: find
+that attribute with get_frame to locate the element, and keep every data-doop-* attribute when
+you rewrite markup, or the comments and links pointing at it lose their element. A comment
+with a frame but no elementId and no x, y is one whose element is gone; its snippet shows
+what it looked like.
+Add frame_id to focus on one frame. Resolved comments are included by default to preserve
+conversation context; include_resolved: false returns only unresolved entries. The result
+is newest first and covers the retained history (up to 100 entries per canvas).
+
+Answer a thread with reply_to_comment({ canvas_id, comment_id, text, agent_name }) — the
+reply inherits the root's element anchor, so an @mention reaches the resident agent with
+the same context the conversation is about. Close the thread with resolve_comment once the
+request is carried out; resolving an @mention thread also records the exchange in the
+canvas Memory. Writing is metered only when a reply @mentions a resident role, exactly
+like a comment left in the browser. Reading does not claim work or resolve it; task
+feedback is separate (get_feedback).
+`,
+  export: `# Exporting frames (images, PDF)
 
 Every frame response includes an image_url — a public, hotlinkable render of the frame's
 CURRENT html (/i/<frameId>.png?scale=2; use .jpg?quality=90 for JPEG, append &download
@@ -687,35 +794,33 @@ at the frame's own size. Pass frame_ids to bind several frames of one canvas int
 PDF; pages follow the order given (frame_id first, then frame_ids as listed).
 For one element of a frame (a card, a logo, a chart) use export_layer: the frame renders whole and is
 cut to that element's box. Name it by element_id (its data-doop-id) or a CSS selector.
+`,
+  'imported-frames': `# Imported frames\n\n## From a GitHub repo — the repo is the source of truth
 
-## Multiplayer etiquette
+Frames whose HTML carries a "doop-github-screen" marker meta were imported from a
+connected GitHub repository: repo HTML as-is, or a screen that exists in that repo only
+as code (a Next.js page, a Storybook story, a component) sketched by Doop from its
+source. The marker records the repo, the route and the source file path.
 
-- Call get_canvas before adding or editing anything. Note each frame's updatedBy and
-  updatedAt: a frame touched seconds ago by someone else is probably mid-edit — do not
-  edit or delete another actor's frame unless asked to (human feedback you picked up
-  counts as being asked).
-- Put new work in new frames beside existing ones; omit x/y to auto-place.
-- Keep the SAME agent_name for your whole session. It is your identity in the room.
-- You act with the canvas role of the account you connected through: a view link reads, a
-  comment link reads and comments, and only edit access writes. A refused write means asking
-  the human for access, not retrying.
-- Rate limits, per account and per minute unless the server raised them: uploads 15
-  (upload_asset and upload_font together), searches 12 (images, logos, inspiration,
-  view_website), image generation 6, imports 5; report_issue and share_feedback 20 an hour;
-  save_decision 500 characters a decision. Work one after another rather than in bursts.
+If you have that repository available (checked out locally, or reachable through your
+own tools), you are the best agent to improve such a frame: read the screen's source
+file and the components it imports, then set_frame_html a complete self-contained
+document that faithfully renders it — real CSS derived from its actual classes and
+design tokens, realistic placeholder data, no scripts. Design at the frame's width and
+resize the frame to the content. Keep the marker meta so the frame stays traceable.
 
-## Problems with Doop itself — report_issue and share_feedback
+## Synced from a live app
 
-Two tools reach the Doop team, never the humans on the canvas, and change no canvas:
+Frames a team's live app sends through the design-sync snippet are captures of real
+screens. One stops updating 15 minutes after it was first captured (re-import = delete it
+and visit the page again); content marked data-doop-mask arrives masked and
+data-doop-sync-ignore never arrives. Design changes in a separate frame.
+`,
+}
 
-- report_issue — Doop got in your way: a tool errored or did something other than its
-  description says, this guide or a tool description left you guessing, a capability you
-  needed was missing, or you had to invent a workaround. Call it after a retry fails, when
-  you fall back to a workaround, or when you give up on part of a task, then carry on.
-  Say what you tried (tool and arguments in brief), what happened and what you expected.
-- share_feedback — what would make Doop better for agents (a tool you wish existed, a
-  result field that would have saved calls, a clumsy workflow) or something that worked
-  well and should stay.
-
-Never include secrets. A human's design feedback is not this: record that with save_decision.
-`
+/** One topic's text; the main guide takes the integrations this server has as a closing section. */
+export function guideFor(topic: GuideTopic, integrationLines: readonly string[] = []): string {
+  if (topic !== 'doop-instructions') return TOPIC_TEXT[topic]
+  if (!integrationLines.length) return DOOP_GUIDE
+  return `${DOOP_GUIDE}\n## Integrations on this server\n\n${integrationLines.join('\n')}\n`
+}
