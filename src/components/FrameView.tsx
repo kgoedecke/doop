@@ -955,6 +955,16 @@ export const FrameView = memo(function FrameView({
   const [nameHovered, setNameHovered] = useState(false)
   const frameCommentHover = nameHovered && tool === 'comment'
   const [openThread, setOpenThread] = useState<string | null>(null)
+  /* a selected frame, or one with a comment thread open, takes its parts out
+     of its own stacking context so its chrome (selection, an open thread) can
+     paint above every frame on the page; a frame in front never covers it */
+  const lifted = selected || openThread !== null
+  /* lifted, the frame's parts take its place in the stack one by one, so its
+     chrome can rise above the whole page. A turned frame cannot do that: its
+     wrapper's transform is a stacking context of its own whatever its
+     z-index, so it keeps its place, and the whole frame rises while a thread
+     is open, since nothing in front may cover the conversation */
+  const wrapperZ = !lifted ? stack : !frame.rotation ? undefined : openThread !== null ? SELECTION_CHROME_Z : stack
   const [linkedThread, setLinkedThread] = useState<string | null>(deepLinkedThread)
   const [pinPos, setPinPos] = useState<Record<string, { x: number; y: number } | null>>({})
   const probeReq = useRef(0)
@@ -1645,9 +1655,7 @@ export const FrameView = memo(function FrameView({
               height: frame.height,
               /* the whole frame turns about its centre: surface, name, grips */
               transform: frame.rotation ? `rotate(${frame.rotation}deg)` : undefined,
-              /* selected, the frame's parts take its place in the stack one by
-                 one, so its selection chrome can rise above the whole page */
-              zIndex: selected ? undefined : stack,
+              zIndex: wrapperZ,
               '--editing-color': stream?.color ?? remoteEditor?.color ?? flash?.color,
             } as React.CSSProperties
           }
@@ -1731,7 +1739,7 @@ export const FrameView = memo(function FrameView({
                 transform: `scale(calc(1 / var(--zoom, 1))) translateY(-${LABEL_GAP}px)`,
                 cursor: duping || dupKeyHeld ? DUP_CURSOR : undefined,
                 /* the frame's place in the stack, while its wrapper gives it up */
-                zIndex: selected ? stack : undefined,
+                zIndex: lifted ? stack : undefined,
               }}
               onPointerDown={(e) => startDrag(e, 'move', false, true)}
               onPointerEnter={() => setNameHovered(true)}
@@ -1857,7 +1865,7 @@ export const FrameView = memo(function FrameView({
               /* only while selected, when the wrapper gives up its place: inside
                  an unselected frame's own stacking context a z-index here would
                  cover the frame's pins and hover outlines */
-              zIndex: selected ? stack : undefined,
+              zIndex: lifted ? stack : undefined,
             }}
             onPointerDown={(e) => startDrag(e, 'move', true)}
             onDoubleClick={(e) => {
@@ -1949,7 +1957,7 @@ export const FrameView = memo(function FrameView({
           <div
             data-frame-chrome=""
             className="pointer-events-none absolute inset-0"
-            style={{ zIndex: selected ? SELECTION_CHROME_Z : undefined }}
+            style={{ zIndex: lifted ? SELECTION_CHROME_Z : undefined }}
           >
             {/* the frame's selection ring (not over an agent's stream, which has
               its own): two screen pixels straddling its edge, so on the pixel
