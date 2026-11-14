@@ -1,0 +1,1 @@
+-keep class design.doop.android.BlitzNative { *; }

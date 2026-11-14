@@ -315,6 +315,15 @@ in Xcode to run it against Doop Cloud or your own HTTPS server. It uses SwiftUI 
 renders frames with the Blitz HTML/CSS engine (Rust, no WebKit), over the same REST API and WebSocket rooms. The app is in development;
 see the iOS README for validation status and remaining release requirements.
 
+## Android app
+
+The native Kotlin/Jetpack Compose app lives in [`android/`](android/README.md).
+Open that directory in Android Studio or run `./gradlew assembleDebug` from it.
+It shares iOS's Blitz/Skia renderer and the existing REST/WebSocket backend, with
+native canvas gestures, editing, agent prompts, comments, exports and optional
+background task notifications. It targets ARM64 phones and tablets on Android 8+.
+See the Android README for setup, tests and release signing.
+
 ## Connect Claude
 
 Choose **Connect AI → Claude → Add to Claude**. On hosted Doop, this opens Claude's
