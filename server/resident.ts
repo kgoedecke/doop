@@ -56,6 +56,7 @@ import { executeGuardedBatch } from './guardedBatch.ts'
 import { runRepoCards } from './githubRecon.ts'
 import { retryModelTurn } from './modelTurnRetry.ts'
 import { recordAgentFeedback } from './agentFeedback.ts'
+import { agentSignal } from './glassray.ts'
 import { AGENT_IDEA_CATEGORIES, AGENT_ISSUE_CATEGORIES, type AgentFeedbackCategory } from '../shared/agentFeedback.ts'
 
 /**
@@ -1681,8 +1682,46 @@ async function frameImageBlocks(
   return blocks
 }
 
-/** Runs one tool call of the resident's loop. Exported for tests. */
+/** What a failed tool result says, as one line. */
+function toolErrorText(result: Anthropic.ToolResultBlockParam): string {
+  const { content } = result
+  if (typeof content === 'string') return content
+  if (!Array.isArray(content)) return 'the tool failed'
+  return content
+    .map((block) => (block.type === 'text' ? block.text : `[${block.type}]`))
+    .join(' ')
+    .trim()
+}
+
+/**
+ * Runs one tool call of the resident's loop. Exported for tests. A failure
+ * also goes to Glassray as the agent's own account of what went wrong, so it
+ * sits beside the reactions people had to this agent's work on the same
+ * canvas; report_issue and share_feedback are left out, since
+ * recordAgentFeedback already sends those.
+ */
 export async function execTool(
+  block: Anthropic.ToolUseBlockParam,
+  canvasId: string,
+  actor: ReturnType<typeof actions.resolveActor>,
+  runState: RunState,
+): Promise<Anthropic.ToolResultBlockParam> {
+  const result = await runTool(block, canvasId, actor, runState)
+  if (result.is_error && block.name !== 'report_issue' && block.name !== 'share_feedback') {
+    agentSignal({
+      kind: 'tool_failure',
+      tool: block.name,
+      message: `${block.name} failed: ${toolErrorText(result)}`,
+      canvasId,
+      userId: runState.payerId ?? store.getCanvas(canvasId)?.ownerId,
+      agent: { name: actor.name, client: 'doop-resident' },
+      sentiment: 'negative',
+    })
+  }
+  return result
+}
+
+async function runTool(
   block: Anthropic.ToolUseBlockParam,
   canvasId: string,
   actor: ReturnType<typeof actions.resolveActor>,

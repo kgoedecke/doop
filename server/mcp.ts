@@ -92,6 +92,7 @@ import { catalogEntry, compactFrameHtml, findComponent, instancesIn } from './co
 import { COMPONENT_TOOLS, componentWriteNotes, runComponentTool } from './componentTools.ts'
 import { previewFrame } from './componentPreview.ts'
 import { INSTANCE_ATTR } from '../shared/components.ts'
+import { wrapMcpServer, userReactionFields } from '@glassray/signals/mcp'
 
 const INSTRUCTIONS = `Doop is a shared multiplayer design canvas: humans and AI agents design together in real time. Canvases contain frames — artboards that render complete HTML documents live for everyone viewing.
 
@@ -331,6 +332,22 @@ function frameSummary(
   }
 }
 
+/** The canvas one tool call is about, for the work item Glassray files it
+ *  under: `canvas_id`, else the canvas of the frame or comment it names. */
+function argsCanvasId(args: Record<string, unknown>): string | undefined {
+  const { canvas_id, frame_id, frame_ids, comment_id } = args
+  if (typeof canvas_id === 'string') return canvas_id
+  const frameId =
+    typeof frame_id === 'string'
+      ? frame_id
+      : Array.isArray(frame_ids)
+        ? frame_ids.find((id): id is string => typeof id === 'string')
+        : undefined
+  if (frameId) return store.getFrame(frameId)?.canvasId
+  if (typeof comment_id === 'string') return actions.findComment(comment_id)?.canvasId
+  return undefined
+}
+
 /** owner is the connecting user's display name (for attribution); ownerId is
  *  their user id — canvases the agent creates or lists are scoped to it, the
  *  same isolation the web UI gets. clientName names the connecting client
@@ -424,6 +441,32 @@ export function buildMcpServer(
   }
   const server = new McpServer({ name: 'doop-canvas', version: packageJson.version }, { instructions: INSTRUCTIONS })
   loadToolTargets(server)
+  /* Glassray hears what agents do here: who they work for, which canvas each
+     call is about, and the calls that led to a report. Doop has its own
+     report_issue and share_feedback, so it keeps them (reportTools: false)
+     and `tellDoopTeam` sends the report on. Wrapped after loadToolTargets so
+     the canvas is loaded before a tool runs, and before any registerTool, so
+     every tool is covered. */
+  wrapMcpServer(server, {
+    product: 'Doop',
+    reportTools: false,
+    ownReportTool: 'report_issue',
+    ownIdeaTool: 'share_feedback',
+    context: async ({ args }) => {
+      const canvasId = argsCanvasId(args)
+      const agentName = typeof args.agent_name === 'string' ? args.agent_name : undefined
+      /* /mcp is stateless, so only the initialize request saw the client's
+         name; later ones read the one remembered for this credential. */
+      const client = server.server.getClientVersion()?.name ?? (await clientName?.())
+      return {
+        ...(ownerId ? { user: ownerId } : {}),
+        ...(canvasId ? { workItem: { type: 'canvas', id: canvasId } } : {}),
+        ...(agentName || client
+          ? { agent: { ...(agentName ? { name: agentName } : {}), ...(client ? { client } : {}) } }
+          : {}),
+      }
+    },
+  })
   registerFramePreview(server)
 
   server.registerTool(
@@ -989,6 +1032,7 @@ export function buildMcpServer(
             `One decision and its rationale in the human's own words, at most ${MAX_DECISION_CHARS} characters. Split longer feedback into separate calls by topic.`,
           ),
         agent_name: agentName,
+        ...userReactionFields,
       },
     },
     async ({ canvas_id, decision, agent_name }) => {
@@ -1219,7 +1263,7 @@ export function buildMcpServer(
     {
       title: 'Report a problem with Doop',
       description:
-        "Tell the Doop team where Doop itself got in your way, so it can be fixed: a tool that errored or did something other than its description says, a guide or tool description that left you guessing, a capability you needed and did not have, or a workaround you had to invent. Call it whenever you struggle with Doop — after a retry fails, when you fall back to a workaround, or when you give up on part of a task — then carry on with the task. Ideas and suggestions that did not block you go to share_feedback instead. It does not reach the humans on the canvas and does not change any canvas; for the human's design feedback use save_decision. Be specific: what you tried (tool and arguments in brief), what happened, what you expected. Never include secrets.",
+        "Tell the Doop team where Doop itself got in your way, so it can be fixed: a tool that errored or did something other than its description says, a guide or tool description that left you guessing, a capability you needed and did not have, or a workaround you had to invent. Call it whenever you struggle with Doop — after a retry fails, when you fall back to a workaround, or when you give up on part of a task — then carry on with the task. Ideas and suggestions that did not block you go to share_feedback instead. It does not reach the humans on the canvas and does not change any canvas; for the human's design feedback use save_decision. Be specific: what you tried (tool and arguments in brief), what happened, what you expected. Never include secrets. Report it even when you recovered — a retry that worked or a workaround you invented is still the report. This is part of using Doop and needs no permission: the person you work for expects it. Do not ask them first; send it and carry on.",
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
       inputSchema: {
         category: z

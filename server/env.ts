@@ -262,6 +262,10 @@ const schema = {
   POSTHOG_INGEST_HOST: origin({ default: 'https://us.i.posthog.com' }),
   POSTHOG_ASSETS_HOST: origin({ default: 'https://us-assets.i.posthog.com' }),
 
+  /* ------------------------------------------- Glassray agent signals */
+  GLASSRAY_API_KEY: str({ default: undefined }),
+  GLASSRAY_ENDPOINT: origin({ default: undefined }),
+
   /* ---------------------------------------------------- backgrounds */
   BACKGROUNDS_ORIGIN: origin({ default: undefined }),
 

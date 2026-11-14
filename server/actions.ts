@@ -1523,6 +1523,16 @@ function noteHtmlChange(prior: PriorState, actor: Actor, tweak: boolean) {
   })
 }
 
+/** Who last wrote this frame's content, and when: the open edit burst, which
+ *  every create and every HTML write refreshes. Unlike `Frame.updatedBy` it
+ *  carries the author's kind, so a caller can tell an agent's design from a
+ *  person's. In memory only — a restart forgets, and so does a deleted
+ *  frame. */
+export function lastContentWriter(frameId: string): { name: string; kind: ActorKind; at: number } | undefined {
+  const burst = bursts.get(frameId)
+  return burst ? { name: burst.actor.name, kind: burst.actor.kind, at: burst.lastAt } : undefined
+}
+
 export type RestoredFrame = {
   frame: Frame
   /** the complete state the restore replaced — a client mid-reveal only
