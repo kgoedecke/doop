@@ -4,6 +4,7 @@ import {
   DRAFTS_STORAGE_KEY,
   canvasNameFromPrompt,
   draftsCardTitle,
+  parseDraftCount,
   readStoredDrafts,
 } from '../src/lib/homePrompt.ts'
 
@@ -27,9 +28,21 @@ describe('home composer', () => {
   it('reads the stored draft count and falls back to the default', () => {
     const store = (value: string | null) => ({ getItem: () => value })
     expect(readStoredDrafts(store('2'))).toBe(2)
-    expect(readStoredDrafts(store('9'))).toBe(DEFAULT_DRAFTS)
+    expect(readStoredDrafts(store('9'))).toBe(9)
+    expect(readStoredDrafts(store('99'))).toBe(99)
+    expect(readStoredDrafts(store('2.5'))).toBe(DEFAULT_DRAFTS)
+    expect(readStoredDrafts(store('0'))).toBe(DEFAULT_DRAFTS)
     expect(readStoredDrafts(store(null))).toBe(DEFAULT_DRAFTS)
     expect(readStoredDrafts(undefined)).toBe(DEFAULT_DRAFTS)
     expect(DRAFTS_STORAGE_KEY).toBe('doop-home-drafts')
+  })
+
+  it('reads a typed draft count', () => {
+    expect(parseDraftCount(' 7 ')).toBe(7)
+    expect(parseDraftCount('40')).toBe(40)
+    expect(parseDraftCount('0')).toBeNull()
+    expect(parseDraftCount('')).toBeNull()
+    expect(parseDraftCount('2.5')).toBeNull()
+    expect(parseDraftCount('-3')).toBeNull()
   })
 })

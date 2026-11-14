@@ -99,6 +99,11 @@ export const home: Catalog['home'] = {
   drafts: { one: '{count} rascunho', other: '{count} rascunhos' },
   draftsCaption: 'Rascunhos por prompt',
   draftsDescription: { one: 'Uma versão do briefing', other: '{count} versões, lado a lado, para escolher' },
+  draftsCustom: 'Personalizado',
+  draftsCustomDescription: 'Qualquer número',
+  draftsFewer: 'Menos rascunhos',
+  draftsMore: 'Mais rascunhos',
+  draftsCustomAria: 'Número personalizado de rascunhos',
   send: 'Enviar',
   connectDesigns: 'Conecte seus designs existentes para resultados melhores',
 

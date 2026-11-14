@@ -98,6 +98,11 @@ export const home = {
   drafts: { one: '{count} draft', other: '{count} drafts' },
   draftsCaption: 'Drafts per prompt',
   draftsDescription: { one: 'One take on the brief', other: '{count} takes, side by side, to pick from' },
+  draftsCustom: 'Custom',
+  draftsCustomDescription: 'Any number',
+  draftsFewer: 'Fewer drafts',
+  draftsMore: 'More drafts',
+  draftsCustomAria: 'Custom number of drafts',
   send: 'Send',
   connectDesigns: 'Connect your existing designs for better results',
 
