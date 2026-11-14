@@ -54,8 +54,12 @@ fn base_font_context() -> FontContext {
 /// System families that carry the symbols pages use as text (★ ✓ → ● ⌘ ✦), first match wins.
 /// System Font and Apple Symbols come first, as WebKit's cascade picks them; a family the
 /// device lacks is skipped.
+#[cfg(not(target_os = "android"))]
 const SYMBOL_FAMILIES: &[&str] =
     &["System Font", "Apple Symbols", "Hiragino Sans", "Menlo", "Zapf Dingbats", "STIX Two Math"];
+#[cfg(target_os = "android")]
+const SYMBOL_FAMILIES: &[&str] =
+    &["Noto Sans Symbols", "Noto Sans Symbols 2", "Noto Sans Math", "Noto Color Emoji"];
 
 /// Fontique finds a fallback per script from one sample letter, and symbols belong to no
 /// script of their own: a ★ in a Latin run only gets the Latin fallback (Helvetica), and a
