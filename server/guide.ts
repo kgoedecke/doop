@@ -418,12 +418,21 @@ Viewers watch designs assemble live. Stream with append_frame_html:
 - Human sign-off: get_canvas and get_frame expose approvalStatus (draft, ready_for_dev,
   needs_review) and approval attribution. Filter get_canvas with approval_status="ready_for_dev"
   to find approved screens, then re-read get_frame before implementing. HTML and size edits
-  invalidate sign-off; needs_review requires another human approval. Approval alone does not
-  assign an implementation job — follow the human's request. When a human asks you to mark a
-  frame ready for dev (or move it back to draft), set_frame_approval does it in their name; never
+  move a ready_for_dev frame to needs_review, which requires another human approval. Renames,
+  moves (on its page or to another page), rotation, hiding and locking keep sign-off, and so
+  do Doop's own rewrites: a token change restyling the frame, a component it uses changing,
+  an element id stamped for a comment or link. Approval alone does not assign an
+  implementation job — follow the human's request. When a human asks you to mark a frame
+  ready for dev (or move it back to draft), set_frame_approval does it in their name; never
   approve your own work unasked.
 - A frame renders a complete HTML document in a sandboxed iframe. <style> and <script>
-  work; Google Fonts via <link> work.
+  work. Hosted fonts: name a family get_canvas lists under \`webFonts\` in CSS and nothing
+  more — Doop adds one <link data-doop-webfonts> for the families the frame uses (keep it,
+  never add your own for those). Another Google Fonts family works with your own <link>.
+- Synced frames: frames a team's live app sends through the design-sync snippet are
+  captures of real screens. One stops updating 15 minutes after it was first captured
+  (re-import = delete it and visit the page again); content marked data-doop-mask arrives
+  masked and data-doop-sync-ignore never arrives. Design changes in a separate frame.
 ${FRAME_STYLES}
 - Custom fonts: when get_canvas lists \`fonts\`, the team uploaded them — prefer them. Name the
   family in CSS (font-family: "Family", sans-serif) and nothing more: Doop adds the @font-face
@@ -570,6 +579,26 @@ with one-line summaries; list_guidelines shows the same list on demand.
   ready-to-paste <style> blocks, uploaded logo URLs, sizing rules.
 - Update a doc when its style evolves; empty markdown deletes it.
 
+## Design tokens and themes — values live once
+
+A canvas's palette, type scale, spacing, radii and fonts are typed design tokens: CSS custom
+properties every frame uses, each with a value per theme (light, dark, …) where it differs.
+
+- get_canvas lists them (and says when a canvas has none yet). Write var(--name) in CSS,
+  never the literal value, so one token change restyles every frame using it. Doop writes
+  the values a frame names into its own <style data-doop-tokens> block: keep that block and
+  never edit it, and never declare the palette on a frame's own :root.
+- No tokens yet: create_tokens before the first frame, from the brief (palette by role,
+  font families, type scale, spacing, radii). Decisions and their reasons go to
+  save_decision; values never do.
+- set_tokens changes, renames or deletes; set_token_themes declares the themes, and a frame
+  switches with data-doop-theme="dark" on its <html>.
+- get_tokens exports them as json, css, a Tailwind @theme block or markdown. People and
+  build scripts read the same over HTTP: /api/canvases/<id>/tokens?format=css|tailwind|md
+  and /api/canvases/<id>/styleguide.md (tokens plus style guides as one markdown file).
+- The same CSS repeated in several frames (a chip, a card, a pill) is a component, not a
+  pasted <style> block (see Components).
+
 ## Memory references — the look to match
 
 Humans can pin frames to the canvas's Memory as style references: "more designs
@@ -667,6 +696,13 @@ cut to that element's box. Name it by element_id (its data-doop-id) or a CSS sel
   counts as being asked).
 - Put new work in new frames beside existing ones; omit x/y to auto-place.
 - Keep the SAME agent_name for your whole session. It is your identity in the room.
+- You act with the canvas role of the account you connected through: a view link reads, a
+  comment link reads and comments, and only edit access writes. A refused write means asking
+  the human for access, not retrying.
+- Rate limits, per account and per minute unless the server raised them: uploads 15
+  (upload_asset and upload_font together), searches 12 (images, logos, inspiration,
+  view_website), image generation 6, imports 5; report_issue and share_feedback 20 an hour;
+  save_decision 500 characters a decision. Work one after another rather than in bursts.
 
 ## Problems with Doop itself — report_issue and share_feedback
 
