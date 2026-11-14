@@ -4,6 +4,7 @@ import type { ElementComment, Frame } from '../../shared/types'
 import { canEditOpenCanvas, pickedSelectors, useStore } from '../lib/store'
 import { isCanvasElement } from '../lib/drawing'
 import { isLayerLocked, standaloneSelector } from '../lib/layerEdits'
+import { documentRect } from '../lib/frameBleed'
 import { drawingDropFrame, moveDrawing, type DrawingHit } from '../lib/drawingMove'
 import { useElementMove } from './ElementMove'
 import { FrameLabelLayer } from './FrameLabelLayer'
@@ -812,6 +813,9 @@ export const FrameView = memo(function FrameView({
      flipped or shifted it away from a viewport edge */
   const menuAt = useRef({ x: 0, y: 0 })
   const [runtimeReady, setRuntimeReady] = useState(false)
+  /* the margin the iframe reaches past a standalone shape's box, so a stroke
+     spills past it as in Figma (the runtime asks, see `bleed` there) */
+  const [bleed, setBleed] = useState(0)
   /* the port the runtime relays keys over; see `replayKey` */
   const keyPort = useRef<MessagePort | null>(null)
   /* saves a document the runtime serialized after a text edit (set below) */
@@ -864,6 +868,10 @@ export const FrameView = memo(function FrameView({
         }
         setRuntimeReady(true)
       }
+      if (ev.data?.type === 'doop:bleed-want' && win && ev.source === win) {
+        const px = Number((ev.data as { px?: unknown }).px)
+        setBleed(Number.isFinite(px) ? Math.min(1024, Math.max(0, px)) : 0)
+      }
     }
     window.addEventListener('message', onMsg)
     return () => {
@@ -872,6 +880,10 @@ export const FrameView = memo(function FrameView({
       keyPort.current = null
     }
   }, [])
+  /* the runtime insets its body by the margin once the iframe has grown by it */
+  useLayoutEffect(() => {
+    if (runtimeReady) iframeRef.current?.contentWindow?.postMessage({ type: 'doop:bleed', px: bleed }, '*')
+  }, [runtimeReady, bleed])
   /* once the runtime answers, the element panel may talk to this document */
   useEffect(() => {
     const win = iframeRef.current?.contentWindow
@@ -1564,7 +1576,7 @@ export const FrameView = memo(function FrameView({
         window.requestAnimationFrame(() => {
           const surface = surfaceRef.current
           if (!surface) return
-          const rect = iframeRef.current?.getBoundingClientRect() ?? surface.getBoundingClientRect()
+          const rect = documentRect(iframeRef.current) ?? surface.getBoundingClientRect()
           const zoom = useStore.getState().viewport.zoom
           surface.dispatchEvent(
             new MouseEvent('contextmenu', {
@@ -1664,7 +1676,7 @@ export const FrameView = memo(function FrameView({
             }
             menuKind.current = 'element'
             setMenuTarget('loading')
-            const rect = iframeRef.current?.getBoundingClientRect() ?? surface.getBoundingClientRect()
+            const rect = documentRect(iframeRef.current) ?? surface.getBoundingClientRect()
             const zoom = useStore.getState().viewport.zoom
             setMenuProbe({
               request,
@@ -1809,7 +1821,9 @@ export const FrameView = memo(function FrameView({
             data-frame-surface=""
             ref={surfaceRef}
             className={cn(
-              'absolute inset-0 overflow-hidden',
+              /* a standalone shape's stroke spills past its box */
+              'absolute inset-0',
+              !isCanvasElement(frame.html) && 'overflow-hidden',
               /* the white a design without a background sits on, one screen
                  pixel in from the edge: painted to the edge, it showed past the
                  scaled iframe's antialiased edge as a light seam */
@@ -1874,14 +1888,23 @@ export const FrameView = memo(function FrameView({
             }}
             onPointerLeave={leaveHover}
           >
-            <iframe
-              ref={iframeRef}
-              className="relative block border-none bg-transparent"
-              title={frame.name}
-              data-doop-frame=""
-              sandbox="allow-scripts"
-              srcDoc={FRAME_BOOTSTRAP}
-              /* The world is laid out at CSS zoom k (Stage), which an iframe
+            {/* always there, so the iframe never moves in the DOM (that reloads
+                it): it carries the iframe out by the bleed margin */}
+            <div
+              className="relative"
+              /* the margin is drawn, never pointed at: presses outside the box
+                 belong to the canvas, so neither this box nor the iframe takes them */
+              style={{ left: -bleed, top: -bleed, ...(bleed ? { pointerEvents: 'none' } : null) }}
+            >
+              <iframe
+                ref={iframeRef}
+                className="relative block border-none bg-transparent"
+                data-bleed={bleed || undefined}
+                title={frame.name}
+                data-doop-frame=""
+                sandbox="allow-scripts"
+                srcDoc={FRAME_BOOTSTRAP}
+                /* The world is laid out at CSS zoom k (Stage), which an iframe
                  passes into its document. Chromium takes it as pixel density:
                  the document keeps its design-px viewport and rasterizes at
                  k×, even out of process, where a transform on this element
@@ -1889,21 +1912,24 @@ export const FrameView = memo(function FrameView({
                  document out at the zoomed width, so there the zoom is undone
                  here (keeping viewport, vh/vw, media queries and runtime rects
                  in design px) and the scale restores the box. */
-              style={{
-                width: frame.width,
-                height: frame.height,
-                ...(FRAME_DOCUMENTS_TAKE_ZOOM_AS_DENSITY
-                  ? null
-                  : { zoom: counterZoom(layoutZoom), transform: `scale(${layoutZoom})` }),
-                transformOrigin: '0 0',
-                /* Chromium paints an opaque backdrop behind an iframe whose
+                style={{
+                  width: frame.width + 2 * bleed,
+                  height: frame.height + 2 * bleed,
+                  /* while editing, the document takes the pointer back */
+                  ...(bleed ? { pointerEvents: editing ? 'auto' : 'none' } : null),
+                  ...(FRAME_DOCUMENTS_TAKE_ZOOM_AS_DENSITY
+                    ? null
+                    : { zoom: counterZoom(layoutZoom), transform: `scale(${layoutZoom})` }),
+                  transformOrigin: '0 0',
+                  /* Chromium paints an opaque backdrop behind an iframe whose
                    colour scheme differs from its document's; the page's dark
                    scheme reaches this element by inheritance while a
                    standalone element's document is light, so a shape on the
                    dark canvas sat on a white square */
-                ...(isCanvasElement(frame.html) ? { colorScheme: 'light' } : null),
-              }}
-            />
+                  ...(isCanvasElement(frame.html) ? { colorScheme: 'light' } : null),
+                }}
+              />
+            </div>
             {/* a standalone element is see-through: the paper's grid shows */}
             {!isCanvasElement(frame.html) && <PixelGrid layoutZoom={layoutZoom} />}
             {!frame.html && (

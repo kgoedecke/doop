@@ -13,6 +13,7 @@ import {
   seedFrames,
   visibleDrawing,
 } from './drawingPage'
+import type { Frame } from '../shared/types'
 
 describe.skipIf(!findBrowserPath())('drawing on the canvas', { timeout: 30_000 }, () => {
   drawingPage()
@@ -361,5 +362,73 @@ describe.skipIf(!findBrowserPath())('drawing on the canvas', { timeout: 30_000 }
       layerFrame('<p id="under" style="position:absolute;left:0;top:0;width:300px;height:200px">Under</p>'),
     ])
     await page.waitForFunction(() => document.querySelector('[data-hover-outline]')?.textContent === 'p')
+  })
+
+  describe('a group that is a standalone shape', () => {
+    /* a pinned group, as ⌘G makes of overlapping shapes: each placed by left and top */
+    const shapeIn = (id: string, left: number, color: string) =>
+      `<svg id="${id}" data-doop-drawing="path" data-name="${id}" viewBox="0 0 60 60" preserveAspectRatio="none" ` +
+      `style="position:absolute;left:${left}px;top:0px;width:60px;height:60px"><path d="M2 2 L58 30 L2 58 Z" fill="${color}"></path></svg>`
+    const standaloneGroup: Frame = {
+      id: 'g',
+      canvasId: 'c',
+      pageId: 'first',
+      name: 'g',
+      x: 70,
+      y: 50,
+      width: 150,
+      height: 60,
+      createdAt: 0,
+      updatedAt: 0,
+      updatedBy: 'User',
+      html:
+        '<!doctype html><html style="width:100%;height:100%;margin:0"><head></head>' +
+        '<body data-doop-canvas-element="true" style="width:100%;height:100%;margin:0">' +
+        '<div data-doop-drawing="group" data-name="Group" style="position:absolute;left:0;top:0;width:150px;height:60px">' +
+        `${shapeIn('a', 0, 'coral')}${shapeIn('b', 90, 'teal')}</div></body></html>`,
+    }
+    /* a point over shape a or b, on screen (the canvas is at 200%) */
+    async function over(x: number) {
+      const box = (await (await page.waitForSelector('iframe[title="g"]'))!.boundingBox())!
+      return [box.x + x * 2, box.y + 30 * 2] as [number, number]
+    }
+    async function enterA() {
+      await seedFrames([standaloneGroup])
+      await page.evaluate(() => window.drawingHarness.selectFrames(['g']))
+      await page.evaluate(() => window.drawingHarness.pick({ frameId: 'g', selector: '#a' }))
+      await page.waitForSelector('[data-element-outline]')
+    }
+
+    it('picks a sibling of the picked shape on the press, never the whole group in between', async () => {
+      await enterA()
+      await page.evaluate(() => {
+        const seen: string[] = []
+        ;(window as unknown as { seen: string[] }).seen = seen
+        const tick = () => {
+          const picked = window.drawingHarness.state().selectedElement?.selector ?? 'none'
+          if (seen.at(-1) !== picked) seen.push(picked)
+          requestAnimationFrame(tick)
+        }
+        tick()
+      })
+      await page.mouse.click(...(await over(120)))
+      /* before the click's 250ms probe could answer */
+      await page.waitForFunction(() => window.drawingHarness.state().selectedElement?.selector === '#b', {
+        timeout: 200,
+      })
+      await new Promise((r) => setTimeout(r, 500))
+      expect(await page.evaluate(() => (window as unknown as { seen: string[] }).seen)).toEqual(['#a', '#b'])
+    })
+
+    it('drags the sibling it presses, not the whole shape', async () => {
+      await enterA()
+      const from = await over(120)
+      await drag(from, [from[0] + 20, from[1] + 30])
+      await page.waitForFunction(() => window.drawingHarness.state().frames[0]!.html.includes('left: 100px'))
+      const after = await page.evaluate(() => window.drawingHarness.state().frames[0]!)
+      expect([after.x, after.y]).toEqual([70, 50])
+      expect(after.html).toMatch(/id="b"[^>]*style="[^"]*left: 100px; top: 15px/)
+      expect(after.html).toMatch(/id="a"[^>]*style="position:absolute;left:0px;top:0px/)
+    })
   })
 })
