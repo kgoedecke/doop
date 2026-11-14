@@ -29,6 +29,10 @@ const BY_CONTEXT = [
   'list_canvases', // a resident run is scoped to its canvas
   'create_canvas',
   'get_profile',
+  /* An MCP agent's chat happens somewhere Doop cannot see, so it passes the
+     person's words on itself. A resident run's chat IS Doop: cards, task
+     feedback and comments already arrive as signals of their own. */
+  'pass_on_user_reaction',
 ]
 
 /** Real gaps: MCP agents can do these and resident agents cannot yet. */

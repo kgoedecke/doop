@@ -8,6 +8,7 @@
         "@anthropic-ai/sdk": "^0.115.0",
         "@aws-sdk/client-s3": "^3.1110.0",
         "@electric-sql/pglite": "^0.5.4",
+        "@glassray/signals": "^0.3.0",
         "@modelcontextprotocol/sdk": "^1.12.0",
         "@radix-ui/react-alert-dialog": "^1.1.23",
         "@radix-ui/react-collapsible": "^1.1.20",
@@ -338,6 +339,8 @@
     "@floating-ui/react-dom": ["@floating-ui/react-dom@2.1.9", "", { "dependencies": { "@floating-ui/dom": "^1.8.0" }, "peerDependencies": { "react": ">=16.8.0", "react-dom": ">=16.8.0" } }, "sha512-JDjEFGCpImxDCA7JJKviA0M9+RtmJdj0m/NVU5IMgBK+AmZouAQQ7/+2GLH0GXXY0YMw9oXPB8hKdbPYg5QLYg=="],
 
     "@floating-ui/utils": ["@floating-ui/utils@0.2.12", "", {}, "sha512-HpCo8tmWzLVad5s2d19EhAz5zqrrQ6s69qd6moPMQvkOuSwDT1YgRfWSVuc4ennqrgv3OHppiOGMQ7oC13yIww=="],
+
+    "@glassray/signals": ["@glassray/signals@0.3.0", "", { "peerDependencies": { "@modelcontextprotocol/sdk": ">=1.17.0", "zod": ">=3.25.0" }, "optionalPeers": ["@modelcontextprotocol/sdk", "zod"], "bin": { "glassray-signals": "bin/glassray-signals.mjs" } }, "sha512-dhhyyqXSZCRfmcBs6gJH8+OF2Etx46bXH4T8WSEDvT4FgNb/YYzXkdcg+hX2bnvZiyVRT3FVSFbcZDKnKshQLQ=="],
 
     "@hono/node-server": ["@hono/node-server@2.1.1", "", { "peerDependencies": { "hono": "^4" } }, "sha512-ELuehkj5VCBdgEw9zs+ivkKwyzzUCSQuE96YmiPvn1ECBoZCczbFXJLeEGMTYjphP6gydh4pHMqEYPVMYUVgQg=="],
 

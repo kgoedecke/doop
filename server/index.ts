@@ -41,6 +41,7 @@ import { GuideLimitError, PageLimitError, store } from './store.ts'
 import { parseGuide } from '../shared/guides.ts'
 import { getImage } from './previews.ts'
 import * as actions from './actions.ts'
+import { AGENT_WORK_WINDOW_MS, agentWorkOnFrame, frameSignal, startGlassray, userSignal } from './glassray.ts'
 import { liveActivitiesRouter, logLiveActivityRequests, startLiveActivityDelivery } from './liveActivities.ts'
 import { onCanvasEvent } from './events.ts'
 import * as imageDescriptions from './imageDescriptions.ts'
@@ -2027,8 +2028,19 @@ app.delete('/api/canvases/:id/references/:refId', (req, res) => {
 app.post('/api/canvases/:id/proposals/:pid', (req, res) => {
   if (!requireCanvas(req, res, req.params.id, 'edit')) return
   const actor = userActor(req)
-  const proposal = actions.resolveProposal(req.params.id, req.params.pid, !!req.body?.accept, actor)
+  const accept = !!req.body?.accept
+  /* only the first answer is a reaction: resolveProposal leaves a resolved
+     one as it is and hands it back unchanged */
+  const pending = actions.getProposals(req.params.id).some((p) => p.id === req.params.pid && p.status === 'pending')
+  const proposal = actions.resolveProposal(req.params.id, req.params.pid, accept, actor)
   if (!proposal) return res.status(404).json({ error: 'proposal not found' })
+  if (pending)
+    userSignal({
+      kind: accept ? 'approved' : 'rejected',
+      canvasId: req.params.id,
+      userId: req.user!.id,
+      context: { proposal: proposal.id, guide: proposal.guideName, rule: proposal.rule },
+    })
   res.json(proposal)
 })
 
@@ -2248,8 +2260,14 @@ app.patch('/api/frames/:id', (req, res) => {
       return res.status(400).json({ error: 'rotation must be a finite number of degrees' })
     clean.rotation = normalizeRotation(patch.rotation)
   }
+  /* who wrote this design last, read before the write overwrites it */
+  const rewritten =
+    typeof clean.html === 'string' && clean.html !== current.html
+      ? agentWorkOnFrame(current.id, AGENT_WORK_WINDOW_MS)
+      : undefined
   const frame = actions.updateFrame(req.params.id, clean, actor)
   if (!frame) return res.status(404).json({ error: 'frame not found' })
+  if (rewritten) frameSignal({ kind: 'replaced_agent_work', frame, userId: req.user!.id, work: rewritten })
   res.json(frame)
 })
 
@@ -2459,7 +2477,14 @@ app.put('/api/frames/:id/approval', (req, res) => {
     return res.status(400).json({ error: 'status must be ready_for_dev or draft' })
   if (status === 'ready_for_dev' && actions.isFrameStreaming(current.id))
     return res.status(409).json({ error: 'Wait for the design to finish before approving it.' })
-  res.json(actions.setFrameApproval(current.id, status === 'ready_for_dev', req.user!))
+  const ready = status === 'ready_for_dev'
+  /* sign-off on an agent's design, however long ago it drew it; already
+     ready_for_dev, setFrameApproval changes nothing and nothing is sent */
+  const changes = ready ? current.approval?.status !== 'ready_for_dev' : current.approval != null
+  const work = changes ? agentWorkOnFrame(current.id) : undefined
+  const frame = actions.setFrameApproval(current.id, ready, req.user!)
+  if (frame && work) frameSignal({ kind: ready ? 'ready_for_dev' : 'needs_review', frame, userId: req.user!.id, work })
+  res.json(frame)
 })
 
 app.post('/api/frames/:id/append', (req, res) => {
@@ -2477,8 +2502,11 @@ app.post('/api/frames/:id/append', (req, res) => {
 app.delete('/api/frames/:id', (req, res) => {
   if (!requireFrame(req, res, req.params.id, 'edit', req.body?.expectedUpdatedAt)) return
   const actor = userActor(req)
+  /* deleteFrame forgets who wrote the frame, so ask first */
+  const thrownAway = agentWorkOnFrame(req.params.id, AGENT_WORK_WINDOW_MS)
   const frame = actions.deleteFrame(req.params.id, actor)
   if (!frame) return res.status(404).json({ error: 'frame not found' })
+  if (thrownAway) frameSignal({ kind: 'deleted_agent_work', frame, userId: req.user!.id, work: thrownAway })
   res.json({ ok: true })
 })
 
@@ -2500,9 +2528,14 @@ app.get('/api/frames/:id/versions/:versionId', async (req, res) => {
 app.post('/api/frames/:id/versions/:versionId/restore', async (req, res) => {
   if (!requireFrame(req, res, req.params.id, 'edit')) return
   const actor = userActor(req)
+  /* throwing away exactly what an agent drew is a reaction to it whenever
+     it happens, so this one has no window */
+  const undone = agentWorkOnFrame(req.params.id)
   const restored = await actions.restoreFrameVersion(req.params.id, req.params.versionId, actor)
   if (restored === null) return res.status(404).json({ error: 'version not found' })
   if (!restored) return res.status(404).json({ error: 'frame not found' })
+  if (undone && restored.frame.html !== restored.replaced.html)
+    frameSignal({ kind: 'revert', frame: restored.frame, userId: req.user!.id, work: undone })
   res.json(restored)
 })
 
@@ -2519,6 +2552,9 @@ app.post('/api/frames/:id/comments', async (req, res) => {
       return res.status(403).json({ error: 'resident_limit', used: gate.used, limit: gate.limit })
     }
   }
+  /* an @mention on a frame an agent drew is feedback on that design; on a
+     frame a person drew it is a fresh brief, which is not a reaction */
+  const about = mentionedRole(String(text ?? '')) ? agentWorkOnFrame(frame.id) : undefined
   const comment = await actions.addElementComment(
     req.params.id,
     { selector, elementId, snippet, text: String(text ?? ''), x, y, elementOrigin },
@@ -2526,6 +2562,7 @@ app.post('/api/frames/:id/comments', async (req, res) => {
     req.user!.id,
   )
   if (!comment) return res.status(404).json({ error: 'frame not found or empty text' })
+  if (about) frameSignal({ kind: 'correction', frame, userId: req.user!.id, work: about, message: comment.text })
   res.json(comment)
 })
 
@@ -2613,6 +2650,15 @@ app.post('/api/comments/:id/replies', async (req, res) => {
     }
     return res.status(409).json({ error: 'thread resolved meanwhile' })
   }
+  /* an @mention is the person answering the agent in its own thread */
+  if (mentionedRole(text))
+    userSignal({
+      kind: 'correction',
+      canvasId: found.canvasId,
+      userId: req.user!.id,
+      message: text,
+      context: { comment: reply.id, thread: found.id, ...(found.frameId ? { frame: found.frameId } : {}) },
+    })
   res.json(reply)
 })
 
@@ -2659,7 +2705,16 @@ app.post('/api/comments/:id/retry', async (req, res) => {
   if (!gate.ok) {
     return res.status(403).json({ error: 'resident_limit', used: gate.used, limit: gate.limit })
   }
-  res.json(actions.retryComment(req.params.id, req.user!.name))
+  const stalled = !!found.failedAt && !found.resolvedAt
+  const retried = actions.retryComment(req.params.id, req.user!.name)
+  if (retried && stalled)
+    userSignal({
+      kind: 'regenerate',
+      canvasId: found.canvasId,
+      userId: req.user!.id,
+      context: { comment: retried.id, frame: retried.frameId },
+    })
+  res.json(retried)
 })
 
 /* Import one page immediately, or discover + import a user-reviewed set of
@@ -2810,15 +2865,33 @@ app.post('/api/canvases/:canvasId/cards/:id/retry', async (req, res) => {
   if (!gate.ok) {
     return res.status(403).json({ error: 'resident_limit', used: gate.used, limit: gate.limit })
   }
+  /* read before the retry, which clears the failure in place; an already
+     running or finished card is handed back unchanged and is no reaction */
+  const stalled = actions.getTasks(req.params.canvasId).some((t) => t.id === req.params.id && t.failedAt && !t.endedAt)
   const card = actions.retryCard(req.params.canvasId, req.params.id, req.user!.name)
   if (!card) return res.status(404).json({ error: 'card not found' })
+  if (stalled)
+    userSignal({
+      kind: 'regenerate',
+      canvasId: req.params.canvasId,
+      userId: req.user!.id,
+      context: { task: card.id, card: card.status, ...(card.agentName ? { agent: card.agentName } : {}) },
+    })
   res.json(card)
 })
 
 app.post('/api/canvases/:canvasId/cards/:id/stop', (req, res) => {
   if (!requireCanvas(req, res, req.params.canvasId, 'edit')) return
+  const running = actions.getTasks(req.params.canvasId).some((t) => t.id === req.params.id && !t.endedAt && !t.failedAt)
   const card = actions.stopCard(req.params.canvasId, req.params.id, req.user!.name)
   if (!card) return res.status(404).json({ error: 'card not found' })
+  if (running)
+    userSignal({
+      kind: 'abandon',
+      canvasId: req.params.canvasId,
+      userId: req.user!.id,
+      context: { task: card.id, card: card.status, ...(card.agentName ? { agent: card.agentName } : {}) },
+    })
   res.json(card)
 })
 
@@ -2834,6 +2907,14 @@ app.post('/api/tasks/:id/feedback', async (req, res) => {
   }
   const fb = actions.addTaskFeedback(req.params.id, req.user!.name, text, req.user!.id)
   if (!fb) return res.status(404).json({ error: 'task not found or empty text' })
+  /* every task card is an agent's work, so this is always a reply to it */
+  userSignal({
+    kind: 'correction',
+    canvasId: fb.canvasId,
+    userId: req.user!.id,
+    message: text,
+    context: { task: req.params.id, agent: fb.agentName },
+  })
   res.json(fb)
 })
 
@@ -2845,7 +2926,16 @@ app.post('/api/feedback/:id/retry', async (req, res) => {
   if (!gate.ok) {
     return res.status(403).json({ error: 'resident_limit', used: gate.used, limit: gate.limit })
   }
-  res.json(actions.retryTaskFeedback(req.params.id, req.user!.name))
+  const stalled = !!found.failedAt
+  const retried = actions.retryTaskFeedback(req.params.id, req.user!.name)
+  if (retried && stalled)
+    userSignal({
+      kind: 'regenerate',
+      canvasId: found.canvasId,
+      userId: req.user!.id,
+      context: { feedback: retried.id, agent: retried.agentName },
+    })
+  res.json(retried)
 })
 
 app.get('/api/frames/:id/screenshot.png', async (req, res) => {
@@ -3207,6 +3297,14 @@ server.listen(PORT, () => {
     serverImageGenEnabled()
       ? '⟡ image generation  on — each user’s connected ChatGPT/OpenAI account, else this server’s OPENAI_API_KEY'
       : '⟡ image generation  on for users with a connected ChatGPT/OpenAI account only (set OPENAI_API_KEY to cover everyone else)',
+  )
+  /* Glassray hears what people do with the agents' work (server/glassray.ts);
+     with no GLASSRAY_API_KEY every signal call quietly does nothing */
+  startGlassray()
+  console.log(
+    env.GLASSRAY_API_KEY
+      ? `⟡ glassray          on — agent signals go to ${env.GLASSRAY_ENDPOINT ?? 'https://app.glassray.ai'}`
+      : '⟡ glassray          off — set GLASSRAY_API_KEY to see where the agents’ work goes wrong',
   )
   /* automations fire from here: one tick a minute over the due rows */
   startScheduler()

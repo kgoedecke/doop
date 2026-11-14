@@ -68,6 +68,27 @@
   feedback), 50 at a time with `kind`, `q` (searched on the server, account email included) and a
   `before=<at>:<id>` cursor for older pages. They never reach the humans on a canvas. Tests:
   `agentFeedback.test.ts`, `agentFeedbackHttp.test.ts` (separate HTTP requests).
+- Agent signals (`server/glassray.ts`, `@glassray/signals`): Glassray sees where the agents' work
+  goes wrong and why, from two kinds of signal on one work item — the canvas — and one person,
+  `refs.user`, the better-auth user id. From people (`userSignal` / `frameSignal`, hooked in
+  `server/index.ts` where each write lands): `replaced_agent_work` and `deleted_agent_work` when
+  someone rewrites or deletes a frame an agent wrote within the last 30 minutes
+  (`AGENT_WORK_WINDOW_MS`), `revert` for a version restore and `ready_for_dev` / `needs_review` for
+  sign-off, both at any age, `correction` for task feedback and for an `@mention` comment or reply
+  about an agent's frame (the person's words ride along), `regenerate` for a retry of a failed card,
+  reply or comment, `abandon` for a stopped card, `approved` / `rejected` for a Memory proposal.
+  Whether a frame is the agent's work comes from `actions.lastContentWriter`, the in-memory edit
+  burst, which is the only record carrying the author's kind (`Frame.updatedBy` is a display name);
+  a restart forgets it, so those frames stay quiet until an agent touches them again. From agents:
+  `wrapMcpServer` in `buildMcpServer` fills every MCP tool call with the person, the canvas
+  (`argsCanvasId`) and the client, keeps Doop's own `report_issue` / `share_feedback`
+  (`reportTools: false`) and adds `pass_on_user_reaction` plus `user_said` on `save_decision`;
+  `recordAgentFeedback` sends every report on as an agent signal, and the resident agent's
+  `execTool` sends a `tool_failure` for any tool result it marks `is_error`. Off unless
+  `GLASSRAY_API_KEY` is set, and `signal()` never throws or blocks, so no call site guards it.
+  Tests: `glassray.test.ts`, `glassrayMcp.test.ts` (the SDK's own `checkMcpServer` against the real
+  server), `glassraySignals.test.ts` (every hook over HTTP against a stand-in Glassray,
+  `tests/glassraySink.ts`).
 - Claude Code on the desktop (`shared/localAgent.ts`, `server/localAgent.ts`,
   `desktop/src-tauri/src/claude.rs`): the model menu is the CLI's aliases (`CLAUDE_MODEL_ALIASES`),
   which `claude --model` resolves to the newest model the installed CLI knows, plus a pinned

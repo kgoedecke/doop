@@ -4,6 +4,7 @@ import { db } from './db/index.ts'
 import { agentFeedback } from './db/schema.ts'
 import * as authSchema from './db/auth-schema.ts'
 import { capture } from './analytics.ts'
+import { agentSignal } from './glassray.ts'
 import {
   MAX_AGENT_FEEDBACK_CHARS,
   type AgentFeedbackCategory,
@@ -18,7 +19,21 @@ import {
  * guessing, a capability they needed and did not have. Feedback
  * (share_feedback) is what they would add or change, or what worked. Stored for the instance admins (GET /api/admin/agent-feedback)
  * and, on the hosted service, sent to PostHog as `agent_feedback_reported`.
+ * Every report also goes to Glassray as a signal from the agent, where it
+ * explains the reactions people had to that agent's work on the same canvas.
  */
+
+/** Doop's own categories said in Glassray's vocabulary (its AGENT_KINDS). */
+const SIGNAL_KIND: Record<AgentFeedbackCategory, string> = {
+  bug: 'tool_failure',
+  tool_error: 'tool_failure',
+  confusing: 'confusing',
+  missing_capability: 'missing_capability',
+  idea: 'idea',
+  improvement: 'idea',
+  praise: 'success',
+  other: 'other',
+}
 
 /* an agent stuck in a loop could otherwise report the same failure on every
    turn; issues and feedback share the one budget */
@@ -88,6 +103,18 @@ export async function recordAgentFeedback(input: AgentFeedbackInput): Promise<Re
       message: row.message,
     })
   }
+  agentSignal({
+    kind: SIGNAL_KIND[input.category] ?? 'other',
+    message,
+    sentiment: input.kind === 'issue' ? 'negative' : input.category === 'praise' ? 'positive' : 'neutral',
+    ...(row.canvasId ? { canvasId: row.canvasId } : {}),
+    ...(row.userId ? { userId: row.userId } : {}),
+    ...(row.tool ? { tool: row.tool } : {}),
+    ...(row.agentName || row.client
+      ? { agent: { ...(row.agentName ? { name: row.agentName } : {}), ...(row.client ? { client: row.client } : {}) } }
+      : {}),
+    context: { report_id: row.id, category: row.category, surface: row.source },
+  })
   return { ok: true, id: row.id }
 }
 
