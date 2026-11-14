@@ -25,7 +25,7 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
   var vSheet = null
   try {
     vSheet = new CSSStyleSheet()
-    vSheet.replaceSync('html,body{overscroll-behavior-x:none}html:root,html:root>body{scrollbar-width:none!important}html:root::-webkit-scrollbar,html:root>body::-webkit-scrollbar{display:none!important}[data-v-path-hidden]{visibility:hidden!important}')
+    vSheet.replaceSync('html,body{overscroll-behavior-x:none}html:root,html:root>body{scrollbar-width:none!important}html:root::-webkit-scrollbar,html:root>body::-webkit-scrollbar{display:none!important}[data-v-path-hidden]{visibility:hidden!important}svg[data-doop-drawing="path"]{overflow:visible}')
     document.adoptedStyleSheets = document.adoptedStyleSheets.concat(vSheet)
   } catch (e) {}
   /* ⌘Y outline mode: every box drawn as a hairline, fills and shadows off.
@@ -35,6 +35,78 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
     vOutlineSheet = new CSSStyleSheet()
     vOutlineSheet.replaceSync('html,body{background:transparent!important}body *{outline:1px solid rgba(1,119,211,.6)!important;outline-offset:-1px!important;background:transparent!important;box-shadow:none!important;text-shadow:none!important}body img,body video,body canvas,body svg{opacity:.25!important}')
   } catch (e) {}
+  /* ---- bleed ----
+     A standalone element (a shape on the canvas, no frame around it) is the
+     whole document, and an iframe paints nothing past its edge, so a stroke
+     wider than the path's box was cut off. As in Figma the box stays the
+     path's geometry and the stroke spills past it: the editor makes the
+     iframe that many px larger on every side (asked for with
+     doop:bleed-want, set with doop:bleed) and the body sits inset by it.
+     Everything this runtime says or hears stays in the frame's own design
+     px; only the browser's viewport APIs see the margin, through these. */
+  var bleed = 0
+  var bleedSheet = null
+  try { bleedSheet = new CSSStyleSheet() } catch (e) {}
+  function viewX(x) { return x + bleed }
+  function frameWidth() { return innerWidth - 2 * bleed }
+  function frameHeight() { return innerHeight - 2 * bleed }
+  function setBleed(px) {
+    bleed = px > 0 ? px : 0
+    if (!bleedSheet) return
+    bleedSheet.replaceSync(bleed
+      ? 'html:root{overflow:hidden!important}html:root>body[data-doop-canvas-element]{position:fixed!important;' +
+        'inset:' + bleed + 'px!important;width:auto!important;height:auto!important;margin:0!important}'
+      : '')
+    var rest = document.adoptedStyleSheets.filter(function (s) { return s !== bleedSheet })
+    document.adoptedStyleSheets = bleed ? rest.concat(bleedSheet) : rest
+  }
+  /* the margin a standalone shape's strokes need past its box: half the
+     stroke as drawn, a miter join (up to its own miter limit, which an
+     imported SVG may set past the default 4) or a square cap reaching
+     further, in steps so a stroke-width scrub resizes the iframe rarely */
+  var BLEED_STEP = 16
+  var BLEED_MAX = 1024
+  function neededBleed() {
+    var body = document.body
+    if (!body || !body.hasAttribute('data-doop-canvas-element')) return 0
+    var width = frameWidth(), height = frameHeight(), need = 0
+    var shapes = body.querySelectorAll('path,rect,circle,ellipse,line,polyline,polygon')
+    for (var i = 0; i < shapes.length; i++) {
+      var shape = shapes[i]
+      if (shape.closest('defs,clipPath,mask,symbol,pattern,marker,[data-doop-defs]')) continue
+      var cs = getComputedStyle(shape)
+      if (cs.stroke === 'none' || cs.display === 'none') continue
+      /* a circle of the stroke's width, through the shape's transform: how
+         far it reaches along x and along y (a stretched path's stroke
+         stretches with it) */
+      var m = shape.getScreenCTM && shape.getScreenCTM()
+      var join = /miter|arcs/.test(cs.strokeLinejoin) ? Math.max(1, parseFloat(cs.strokeMiterlimit) || 4) : 1
+      var cap = cs.strokeLinecap === 'square' ? Math.SQRT2 : 1
+      var half = (parseFloat(cs.strokeWidth) || 0) / 2 * Math.max(join, cap)
+      if (!half) continue
+      var hx = half * (m ? Math.hypot(m.a, m.c) : 1)
+      var hy = half * (m ? Math.hypot(m.b, m.d) : 1)
+      var r = designRect(shape)
+      need = Math.max(need, hx - r.x, hy - r.y, r.x + r.width + hx - width, r.y + r.height + hy - height)
+    }
+    return Math.min(BLEED_MAX, Math.ceil(Math.max(0, need) / BLEED_STEP) * BLEED_STEP)
+  }
+  var bleedWanted = 0
+  var bleedCheck = 0
+  function checkBleed() {
+    if (bleedCheck) return
+    bleedCheck = requestAnimationFrame(function () {
+      bleedCheck = 0
+      var want = neededBleed()
+      if (want === bleedWanted) return
+      bleedWanted = want
+      parent.postMessage({ type: 'doop:bleed-want', px: want }, '*')
+    })
+  }
+  try {
+    new MutationObserver(checkBleed).observe(document.documentElement, { attributes: true, childList: true, subtree: true })
+  } catch (e) {}
+  addEventListener('resize', checkBleed)
   function setOutlines(on) {
     if (!vOutlineSheet) return
     var rest = document.adoptedStyleSheets.filter(function (s) { return s !== vOutlineSheet })
@@ -233,9 +305,9 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
   function placeCaret(x, y) {
     var r = null
     if (document.caretRangeFromPoint) {
-      r = document.caretRangeFromPoint(x, y)
+      r = document.caretRangeFromPoint(viewX(x), viewX(y))
     } else if (document.caretPositionFromPoint) {
-      var p = document.caretPositionFromPoint(x, y)
+      var p = document.caretPositionFromPoint(viewX(x), viewX(y))
       if (p) { r = document.createRange(); r.setStart(p.offsetNode, p.offset); r.collapse(true) }
     }
     if (r) {
@@ -374,7 +446,7 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
     }
     var adopted = document.adoptedStyleSheets || []
     for (var t = 0; t < adopted.length; t++) {
-      if (adopted[t] === vSheet || adopted[t] === vOutlineSheet) continue // the runtime's own
+      if (adopted[t] === vSheet || adopted[t] === vOutlineSheet || adopted[t] === bleedSheet) continue // the runtime's own
       var adoptedText = rulesText(adopted[t])
       if (adoptedText === null) continue
       var adoptedStyle = document.createElement('style')
@@ -434,7 +506,7 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
     ev.preventDefault()
     ev.stopPropagation()
     var el = candidate(ev.target)
-    if (el) activate(el, ev.clientX, ev.clientY, ev.detail > 1)
+    if (el) activate(el, ev.clientX - bleed, ev.clientY - bleed, ev.detail > 1)
     else deactivate()
   }, true)
 
@@ -460,7 +532,7 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
     ev.stopPropagation()
     setEdit(false)
     parent.postMessage({ type: 'doop:edit-esc' }, '*')
-    parent.postMessage({ type: 'doop:context-menu', x: ev.clientX, y: ev.clientY }, '*')
+    parent.postMessage({ type: 'doop:context-menu', x: ev.clientX - bleed, y: ev.clientY - bleed }, '*')
   }, true)
 
   /* Focus stays in the frame after text editing ends, and the canvas page
@@ -596,7 +668,7 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
 
   function designRect(el) {
     var r = el.getBoundingClientRect()
-    return { x: r.left, y: r.top, width: r.width, height: r.height }
+    return { x: r.left - bleed, y: r.top - bleed, width: r.width, height: r.height }
   }
 
   /* The element's own turn, in degrees clockwise: its rotate property plus
@@ -750,7 +822,9 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
   }
 
   function drawingHit(x, y, standalone, selected) {
-    var top = elementAt(x, y)
+    // Inside an entered standalone the press is a layer's, as in a frame.
+    if (standalone && enteredStandalone(selected)) return null
+    var top = elementAt(x, y, selected)
     // A press inside a group drags the group, as a click there picks it.
     var el = standalone ? document.body.firstElementChild
       : top && groupLevel(top.closest('[data-doop-drawing]:not([data-doop-drawing="group"])') || top, selected, false)
@@ -805,7 +879,7 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
   /* the topmost unlocked element under a point, a standalone's root included:
      a double-click on a shape inside an imported group edits that shape */
   function vectorAt(x, y) {
-    var stack = document.elementsFromPoint(x, y)
+    var stack = document.elementsFromPoint(viewX(x), viewX(y))
     for (var i = 0; i < stack.length; i++) {
       var el = stack[i]
       if (el === document.documentElement || el === document.body) return null
@@ -838,6 +912,11 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
       layout = page.inverse().multiply(matrix)
     } finally { probe.remove() }
     var css = getComputedStyle(path)
+    matrix = matrix.translate(0, 0)
+    matrix.e -= bleed
+    matrix.f -= bleed
+    layout.e -= bleed / page.a
+    layout.f -= bleed / page.d
     var info = {
       selector: cssPath(svg), data: path.getAttribute('d'),
       matrix: [matrix.a, matrix.b, matrix.c, matrix.d, matrix.e, matrix.f],
@@ -847,7 +926,7 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
     /* a shape inside a group: where the group's box is, in the same layout px */
     if (svg.parentElement && svg.parentElement !== document.body) {
       var box = svg.parentElement.getBoundingClientRect()
-      info.parentBox = { x: box.left / page.a, y: box.top / page.d, width: box.width / page.a, height: box.height / page.d }
+      info.parentBox = { x: (box.left - bleed) / page.a, y: (box.top - bleed) / page.d, width: box.width / page.a, height: box.height / page.d }
     }
     return info
   }
@@ -862,9 +941,21 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
     return document.body.firstElementChild
   }
 
-  function elementAt(x, y) {
-    var stack = document.elementsFromPoint(x, y)
+  /* a layer inside the standalone's root is picked: the root has been
+     entered, so a press inside it is at that level, as in a group */
+  function enteredStandalone(selected) {
     var root = standaloneRoot()
+    if (!root) return false
+    var selectors = Array.isArray(selected) ? selected : selected ? [selected] : []
+    return selectors.some(function (sel) {
+      var picked = styleTarget(sel)
+      return !!picked && picked !== root && root.contains(picked)
+    })
+  }
+
+  function elementAt(x, y, selected) {
+    var stack = document.elementsFromPoint(viewX(x), viewX(y))
+    var root = enteredStandalone(selected) ? null : standaloneRoot()
     for (var i = 0; i < stack.length; i++) {
       var el = stack[i]
       if (el === document.documentElement || el === document.body) return null
@@ -897,7 +988,7 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
   }
 
   function probeTarget(x, y, grouped, selected, deeper) {
-    var el = elementAt(x, y)
+    var el = elementAt(x, y, selected)
     if (el) el = el.closest('[data-doop-drawing]:not([data-doop-drawing="group"])') || el
     return el && grouped ? groupLevel(el, selected, deeper) : el
   }
@@ -910,14 +1001,14 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
   /* Right-click can reach a lock so the menu can unlock it. SVGs are one
      layer in the rail, and their paths share that same context menu. */
   function contextHit(x, y) {
-    var el = document.elementFromPoint(x, y)
+    var el = document.elementFromPoint(viewX(x), viewX(y))
     if (!el || el === document.body || el === document.documentElement) return null
     el = el.closest('[data-doop-locked]') || el.closest('[data-doop-drawing]') || el.closest('svg') || el
     return hitInfo(el)
   }
 
   function moveHit(x, y, selected) {
-    var el = elementAt(x, y)
+    var el = elementAt(x, y, selected)
     // A selected group moves as a whole even when the press hits a child.
     var picked = el && pickedAround(selected, el)
     if (picked) el = picked
@@ -975,7 +1066,7 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
     var p = el.parentElement
     // The body's containing canvas is the viewport, even when all children are absolute.
     return p === document.body || !p || p === document.documentElement
-      ? { x: 0, y: 0, width: innerWidth, height: innerHeight }
+      ? { x: 0, y: 0, width: frameWidth(), height: frameHeight() }
       : designRect(p)
   }
 
@@ -1381,7 +1472,7 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
      cross-origin sheet cannot be read and is passed over. */
   function isRuntimeSheet(sheet) {
     var owner = sheet.ownerNode
-    return sheet === vSheet || sheet === vOutlineSheet || sheet === protoSheet ||
+    return sheet === vSheet || sheet === vOutlineSheet || sheet === bleedSheet || sheet === protoSheet ||
       !!(owner && owner.hasAttribute && owner.hasAttribute('data-v-edit'))
   }
   function sheetOutranksInline(el, name, value) {
@@ -1655,6 +1746,7 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
       parent.postMessage({ type: 'doop:inspect-result', reqId: d.reqId, info: inspect(d.selector) }, '*')
     }
     if (d.type === 'doop:outlines') setOutlines(d.on === true)
+    if (d.type === 'doop:bleed' && typeof d.px === 'number') setBleed(d.px)
     if (d.type === 'doop:computed' && Array.isArray(d.properties)) {
       var computedEl = styleTarget(d.selector)
       var values = null
@@ -1714,7 +1806,7 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
     if (d.type === 'doop:edit') {
       setEdit(!!d.on)
       if (d.on && typeof d.x === 'number' && typeof d.y === 'number') {
-        var dblEl = candidate(document.elementFromPoint(d.x, d.y))
+        var dblEl = candidate(document.elementFromPoint(viewX(d.x), viewX(d.y)))
         if (dblEl) {
           activate(dblEl, d.x, d.y, true)
           selectAllIn(dblEl)

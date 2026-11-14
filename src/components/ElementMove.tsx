@@ -3,6 +3,7 @@ import { frameDesignPoint, frameWorldPoint, rotateVector, turnedDropRect } from 
 import { createPortal } from 'react-dom'
 import type { Frame } from '../../shared/types'
 import { isCanvasElement } from '../lib/drawing'
+import { standaloneSelector } from '../lib/layerEdits'
 import { elementPath } from '../lib/layers'
 import {
   drawingDropFrame,
@@ -24,6 +25,7 @@ import {
   type LayoutDrop,
 } from '../lib/frameBridge'
 import { gesture } from '../lib/gesture'
+import { iframeBleed } from '../lib/frameBleed'
 import { FRAME_DOCUMENTS_TAKE_ZOOM_AS_DENSITY, counterZoom } from '../lib/layoutZoom'
 import { visibleGuides } from '../lib/guides'
 import { snapFrame } from '../lib/snap'
@@ -115,11 +117,17 @@ export function useElementMove(frame: Frame, layoutZoom: number) {
     if ((e.altKey && !duplicating) || !e.isPrimary || !frame.html) return false
     if (!e.shiftKey && s.selectedIds.includes(frame.id) && s.selectedIds.length > 1) return false
     const standalone = isCanvasElement(frame.html)
+    const shell = standalone ? standaloneSelector(frame) : null
     /* a standalone element is moved like a frame — live under the pointer,
        snapping to guides, one undo step — by the frame drag, which hands a
-       drop over a frame on to moveDrawing; there is no layer inside it to
-       move on its own */
-    if (standalone) return false
+       drop over a frame on to moveDrawing; once a layer inside it is picked
+       (a group entered), a press inside is that level's, as in a frame */
+    const entered =
+      standalone &&
+      s.selectedElement?.frameId === frame.id &&
+      !!shell &&
+      pickedSelectors(s).some((selector) => selector !== shell)
+    if (standalone && !entered) return false
     const surface = e.currentTarget
     const stage = surface.closest('.stage')
     const world = stage?.querySelector('.world')
@@ -138,7 +146,9 @@ export function useElementMove(frame: Frame, layoutZoom: number) {
       if (!iframe) return { x: 0, y: 0 }
       const b = iframe.getBoundingClientRect()
       const centre = frameDesignPoint(toWorld(b.left + b.width / 2, b.top + b.height / 2), frame)
-      return { x: centre.x - iframe.offsetWidth / 2, y: centre.y - iframe.offsetHeight / 2 }
+      /* the iframe reaches its bleed margin past the document on every side */
+      const margin = iframeBleed(iframe)
+      return { x: centre.x - iframe.offsetWidth / 2 + margin, y: centre.y - iframe.offsetHeight / 2 + margin }
     })()
     /* the document's top-left corner on the canvas, for the layout drop marks */
     const contentOrigin = frameWorldPoint(contentOffset, frame)
@@ -613,6 +623,8 @@ export function useElementMove(frame: Frame, layoutZoom: number) {
         })
         if (closed) return
         layer = (response?.hit ?? null) as ElementMoveHit | null
+        /* the standalone's own root moves with its shell, by the frame drag */
+        if (layer && layer.selector === shell) layer = null
         if (layer) {
           const pressed = layer.selector
           followers = duplicating || !pickedHere.includes(pressed) ? [] : pickedHere.filter((x) => x !== pressed)

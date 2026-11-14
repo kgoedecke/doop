@@ -625,6 +625,17 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   custom properties, as one `<style data-doop-carried>`, every rule scoped through a
   `data-doop-carried-scope` mark on the moved root so the destination's own layers keep their
   look); copy/paste across frames carries it the same way. Tests: `layerTransfer.test.ts`, `layersDragAcross.test.tsx`, `styleCarry.test.ts`.
+- A vector's stroke spills past its box, as in Figma (`src/lib/frameBleed.ts`, `bleed` in
+  `frameRuntime.ts`): a drawn path's `<svg>` paints its overflow (a runtime sheet), and a standalone
+  shape's iframe, which can paint nothing past its own edge, reaches a margin past the frame on every
+  side. The runtime asks for it (`doop:bleed-want`, half of the widest stroke past the box through the
+  shape's transform, a miter join or square cap further, in 16px steps up to 1024) and insets its body
+  once `FrameView` has grown the iframe (`doop:bleed`); the surface stops clipping a standalone, and the
+  margin takes no pointer events. Everything the runtime says or hears stays in the frame's design px:
+  only its viewport calls (`elementsFromPoint`, `caretRangeFromPoint`, `getBoundingClientRect`, event
+  `clientX`, `innerWidth`) see the margin, and editor code measuring the iframe element takes it off
+  (`documentRect`, `iframeBleed`). W/H stay the path's geometry. Server renders and exports still clip
+  at the frame. Tests: `vectorPaintBrowser.test.ts`, the thick-stroke case in `drawingShapesBrowser.test.ts`.
 - The pen snaps to the nearest anchor on its unfinished path within eight screen pixels,
   highlights the target, and previews a closed curve when approaching the first anchor.
   Alt bypasses snapping. Double-clicking a native path opens `PathEditor.tsx`: anchors and

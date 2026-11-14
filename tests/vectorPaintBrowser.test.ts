@@ -5,7 +5,14 @@ import { fixtureUrl, pagePerTest } from './browser'
 import type { ElementInfo, StylePatch } from '../src/lib/frameBridge'
 
 type Fixture = {
-  messages: { type: string; reqId?: string; html?: string; info?: ElementInfo }[]
+  messages: {
+    type: string
+    reqId?: string
+    html?: string
+    info?: ElementInfo
+    px?: number
+    hit?: { selector: string }
+  }[]
 }
 
 /* A drawn path, as `drawingElement` writes one on a standalone element. */
@@ -124,6 +131,84 @@ describe.skipIf(!findBrowserPath())('vector paint in the Design panel', { timeou
     })
     await style({ fill: '#ff0000', 'fill-opacity': '0.25' })
     expect(await frame.$eval('#vec path', (path) => getComputedStyle(path).fillOpacity)).toBe('0.25')
+  })
+
+  describe('a stroke wider than its box', () => {
+    /* the fixture's iframe sized as FrameView sizes it: the frame plus the margin */
+    async function sizeFrame(width: number, height: number, margin: number) {
+      await page.evaluate(
+        (width, height, margin) => {
+          const iframe = document.querySelector('iframe')!
+          iframe.style.cssText = `border:0;width:${width + 2 * margin}px;height:${height + 2 * margin}px`
+          iframe.contentWindow!.postMessage({ type: 'doop:bleed', px: margin }, '*')
+        },
+        width,
+        height,
+        margin,
+      )
+      await frame.waitForFunction((w) => innerWidth === w, {}, width + 2 * margin)
+    }
+    const wanted = () =>
+      page.evaluate(
+        () => (window as unknown as Fixture).messages.filter((m) => m.type === 'doop:bleed-want').at(-1)?.px,
+      )
+
+    beforeEach(() => sizeFrame(100, 100, 0))
+
+    it('asks for no margin while the stroke fits the box, and for one that holds it past', async () => {
+      await style({ 'stroke-width': '1px' })
+      await new Promise((r) => setTimeout(r, 100))
+      expect(await wanted()).toBeFalsy()
+      /* the curve's ends sit 10px from the edge: a 40px stroke reaches 10px past */
+      await style({ 'stroke-width': '40px', 'stroke-linecap': 'round', 'stroke-linejoin': 'round' })
+      await expect.poll(wanted).toBe(16)
+      await style({ 'stroke-width': '2px' })
+      await expect.poll(wanted).toBe(0)
+    })
+
+    it('holds a miter join out to the path own miter limit', async () => {
+      /* the default limit of 4: a 40px stroke's corner reaches 80px from its
+         point, 70px past the box */
+      await style({ 'stroke-width': '40px', 'stroke-linejoin': 'miter' })
+      await expect.poll(wanted).toBe(80)
+      /* an imported limit of 10 reaches 200px: 190px past, in a 16px step */
+      await frame.$eval('#vec path', (path) => path.setAttribute('stroke-miterlimit', '10'))
+      await expect.poll(wanted).toBe(192)
+    })
+
+    it('keeps the frame coordinates and paints the stroke into the margin', async () => {
+      await style({ stroke: '#ff0000', 'stroke-width': '40px' })
+      await expect.poll(wanted).toBeGreaterThan(0)
+      const margin = (await wanted())!
+      await sizeFrame(100, 100, margin)
+      const info = await ask('doop:inspect', { selector: '#vec' })
+      expect(info?.rect).toMatchObject({ x: 0, y: 0, width: 100, height: 100 })
+      /* a point in the frame's own px still finds the shape */
+      const reqId = 'probe-bleed'
+      await page.evaluate(
+        (reqId) =>
+          document
+            .querySelector('iframe')!
+            .contentWindow!.postMessage({ type: 'doop:probe', reqId, x: 50, y: 72, grouped: false }, '*'),
+        reqId,
+      )
+      await page.waitForFunction(
+        (reqId) => (window as unknown as Fixture).messages.some((m) => m.reqId === reqId),
+        {},
+        reqId,
+      )
+      const hit = await page.evaluate(
+        (reqId) => (window as unknown as Fixture).messages.find((m) => m.reqId === reqId)!.hit,
+        reqId,
+      )
+      expect(hit?.selector).toBe('#vec')
+      /* the stroke beside the curve's start, left of the box, is drawn in the margin */
+      const painted = await frame.evaluate((margin) => {
+        const el = document.elementFromPoint(margin - 5, margin + 16)
+        return el?.tagName.toLowerCase()
+      }, margin)
+      expect(painted).toBe('path')
+    })
   })
 
   it('leaves a box layer on background and border', async () => {

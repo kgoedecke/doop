@@ -139,8 +139,8 @@ export const FRAME_DROP_RUNTIME = `
     var position = getComputedStyle(source).position
     var floating = position === 'absolute' || position === 'fixed'
     if (!straightLayout(source.parentElement)) return { free: true, drop: null }
-    if (x < 0 || y < 0 || x >= innerWidth || y >= innerHeight) return { free: floating, drop: null }
-    var stack = document.elementsFromPoint(x, y)
+    if (x < 0 || y < 0 || x >= frameWidth() || y >= frameHeight()) return { free: floating, drop: null }
+    var stack = document.elementsFromPoint(viewX(x), viewX(y))
     var hit = null
     for (var i = 0; i < stack.length; i++) {
       if (!source.contains(stack[i])) { hit = stack[i]; break }
