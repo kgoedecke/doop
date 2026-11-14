@@ -812,9 +812,11 @@ resize the frame to the content. Keep the marker meta so the frame stays traceab
 ## Synced from a live app
 
 Frames a team's live app sends through the design-sync snippet are captures of real
-screens. One stops updating 15 minutes after it was first captured (re-import = delete it
-and visit the page again); content marked data-doop-mask arrives masked and
-data-doop-sync-ignore never arrives. Design changes in a separate frame.
+screens. One stops updating 15 minutes after it was first captured, and the browser that
+captured it remembers that and stops sending that screen, reloads included. To capture it
+again, delete the frame, then on that page in the app run window.doopSync.capture() in the
+browser console (a plain revisit sends nothing). Content marked data-doop-mask arrives
+masked and data-doop-sync-ignore never arrives. Design changes in a separate frame.
 `,
 }
 
