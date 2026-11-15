@@ -8,7 +8,7 @@ describe('clampPagesPx', () => {
     expect(clampPagesPx(300, 800)).toBe(300)
   })
 
-  it('keeps one row of Pages in a rail too short to hold both lists', () => {
+  it('keeps the Pages minimum in a rail too short to hold both lists', () => {
     expect(clampPagesPx(400, 200)).toBe(PAGES_MIN_PX)
   })
 })

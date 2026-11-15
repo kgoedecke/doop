@@ -4,8 +4,9 @@
    below the size the split was dragged in still shows both lists. */
 import { useEffect, useState } from 'react'
 
-/** the least the Pages section gets: its heading and one row */
-export const PAGES_MIN_PX = 54
+/** the least the Pages section gets, so its heading, one page row and the move picker
+ *  (30 + 27 + 4 + 40px) all fit; PagesPanel's classes set those sizes */
+export const PAGES_MIN_PX = 101
 /** what the Layers tree always keeps: the rail's header, the Layers heading
  *  and search footer, and room for a few rows */
 export const LAYERS_MIN_PX = 240

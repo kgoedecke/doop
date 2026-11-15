@@ -75,4 +75,27 @@ describe.skipIf(!findBrowserPath())('the Pages and Layers split', () => {
     await showCanvasPage(page, FRAMES, '', PAGES)
     expect((await sizes()).pages).toBeCloseTo(dragged.pages, 0)
   })
+
+  it('keeps one page row and the move picker inside the Pages section while a frame is selected', async () => {
+    await page.click('[role="treeitem"][data-row-key="f1"]')
+    await page.waitForSelector('[data-slot="pages-panel"] [data-slot="select-trigger"]')
+    await (await page.$('[data-slot="pages-split"]'))!.focus()
+    await page.keyboard.press('Home')
+    const fit = await page.evaluate(() => {
+      const edges = (el: Element) => {
+        const { top, bottom, height } = el.getBoundingClientRect()
+        return { top, bottom, height }
+      }
+      const pagesEl = document.querySelector('[data-slot="pages-panel"]')!
+      const row = pagesEl.querySelector('[data-page-id]')!
+      return {
+        pages: edges(pagesEl),
+        list: edges(row.parentElement!),
+        row: edges(row),
+        picker: edges(pagesEl.querySelector('[data-slot="select-trigger"]')!),
+      }
+    })
+    expect(fit.row.bottom).toBeLessThanOrEqual(fit.list.bottom + 0.5)
+    expect(fit.picker.bottom).toBeLessThanOrEqual(fit.pages.bottom + 0.5)
+  })
 })
