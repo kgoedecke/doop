@@ -100,6 +100,20 @@ describe('provenance marker', () => {
     expect(html).toContain('https://raw.githubusercontent.com/acme/app/main/public/')
   })
 
+  it('keeps $ replacement patterns in the branch name as written', () => {
+    const html = wrapRepoHtml(
+      '<html><head><title>x</title></head><body>hi</body></html>',
+      {
+        ...conn,
+        branch: "a$`b$'c$$",
+      },
+      screen,
+    )
+    expect(html).toContain(
+      '<base href="https://raw.githubusercontent.com/acme/app/a$`b$\'c$$/public/"><title>x</title></head><body>hi</body></html>',
+    )
+  })
+
   it('returns undefined for unmarked frames', () => {
     expect(githubFrameMarker('<html><body>plain</body></html>')).toBeUndefined()
   })
