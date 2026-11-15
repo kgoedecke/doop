@@ -5,6 +5,12 @@ Rules for agents working in this fork. Project conventions for the code itself a
 
 ## Rules
 
+- **CI gate (standing, from Arctic).** (1) Never merge a PR into the fork with red or pending CI; a Sol
+  approval does not override red CI. (2) `sync-upstream.yml` pushes to main only when typecheck, build and ALL
+  tests are green, otherwise it opens a PR or an issue. (3) Before each merge check that main is green
+  (`gh run list -R ArcticSlayy/doop --branch main --limit 3`); if main is red, fix main first. A failing test
+  gets classified before anything is skipped: real bug in the change, environment-only, or a specific flaky test
+  (skip only that test, mark it known-flaky, open an issue linking the failing run; never skip whole suites).
 - **Merge-friendly fork.** Put our changes in NEW files wherever possible; avoid editing upstream files, so the
   daily upstream sync stays conflict-free. Fork notes go in `FORK.md` or `docs/agents/`, never in upstream's
   `README.md`. If an upstream file must change, keep the edit small and list it in STATE under "Touched

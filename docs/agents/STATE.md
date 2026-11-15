@@ -21,6 +21,17 @@ Arctic OKs the RAM (self-hosting on `localhost:4300` waits for that and for impr
   files. Upstream's README is untouched.
 - Next sync: automatic, daily.
 
+## CI gate (standing rules)
+
+1. Never merge a PR into the fork with red or pending CI. A Sol approval does not override red CI.
+2. `sync-upstream.yml` pushes to main only when typecheck, build and all tests pass (it checks every step's
+   outcome, including the pinned-Chrome install and the full test run); otherwise it parks the merge on a PR or opens
+   an issue. Confirmed by reading the workflow, and by the scratch run.
+3. Before each merge, check that main is green; if main is red, fix main first.
+
+Known flaky tests: the browser tests in `elementPanelBrowser.test.ts` and `canvasClipboardBrowser.test.ts` fail
+intermittently on the fork's runners with 5 s waits (see the Flaky tests section).
+
 ## Inherited workflows (GitHub Actions on the fork)
 
 Managed with `gh workflow disable` only; no upstream workflow file is edited or deleted, so syncs stay
@@ -76,7 +87,35 @@ Skipped:
 
 ## Merged into our main
 
-_(updated as PRs land: number, our PR, Sol verdict)_
+| Upstream PR | Our PR | Sol verdict                        | CI                |
+| ----------- | ------ | ---------------------------------- | ----------------- |
+| 492         | #3     | approve                            | green             |
+| 390         | #5     | approve (our prettier fix commit)  | green after rerun |
+| 279         | #7     | approve                            | green             |
+| 278         | #8     | approve                            | green             |
+| 280         | #6     | approve on 2nd review (after #279) | green             |
+| (fork)      | #1     | approve on 4th round               | green             |
+
+Dropped after review (closed, branches deleted; leave to upstream):
+
+| Upstream PR | Our PR | Why                                                                                               |
+| ----------- | ------ | ------------------------------------------------------------------------------------------------- |
+| 506         | #2     | Rejected twice: url() matcher still mishandles CSS escapes                                        |
+| 399         | #4     | 3 blockers: concurrent recovery orphan Chromium, SIGKILL waits on close(), swallowed timeouts     |
+| 476         | #9     | 2 blockers: no edit-access recheck after the awaited fetch; NaN frame width from huge SVG viewBox |
+| 462         | #10    | 3 blockers: duplicate import, stale-snapshot cut, lock bypass while clipboard prompt is pending   |
+| 459, 458    |        | Stacked on unmerged upstream PRs (456/453/464): ~1.9k unrelated lines                             |
+
+Parked: 516 (our #11), Sol rejected once for a missing `aria-valuenow` on the resize separator; paused while main
+was red. Revisit: fix the ARIA values, one more Sol review, merge on green.
+
+## Flaky tests
+
+Tracked in https://github.com/ArcticSlayy/doop/issues/12: three different browser tests (`canvasClipboardBrowser`,
+`elementPanelBrowser` x2) failed once each on the fork's runners and passed on rerun with no code change. Verdict:
+timing-sensitive, not a bug in a merged PR and not a missing environment. Nothing is skipped yet; a test that fails
+twice gets skipped alone, marked known-flaky in that issue. Until then, rerun failed jobs
+(`gh run rerun <id> -R ArcticSlayy/doop --failed`) before treating red as real.
 
 ## Our improvements (ranked, not started; Arctic picks)
 
