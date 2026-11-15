@@ -21,7 +21,7 @@ import { FolderIcon, SearchIcon } from './ui/icons'
    checked is current. */
 function MenuRows({ menu }: { menu: MenuId }) {
   const t = useT()
-  const actions = ACTIONS.filter((a) => a.menu === menu)
+  const actions = ACTIONS.filter((a) => a.menu === menu && (!a.hideWhenDisabled || isEnabled(a)))
   const sections = [...new Set(actions.map((a) => a.section))]
   return sections.map((section, i) => (
     <Fragment key={section}>

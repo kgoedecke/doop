@@ -23,6 +23,7 @@ import { admin } from './admin'
 import { ui } from './ui'
 import { components } from './components'
 import { actions } from './actions'
+import { plans } from './plans'
 
 export const ptBR: Catalog = {
   common,
@@ -49,4 +50,5 @@ export const ptBR: Catalog = {
   ui,
   components,
   actions,
+  plans,
 }

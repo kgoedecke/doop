@@ -158,12 +158,12 @@ it('dismisses the card for the visit when the browser refuses to store it', asyn
 it('points a workspace without a plan at the upgrade, and says nothing about plans when billing is off', async () => {
   const onWall = vi.fn()
   await render({ status: status({ entitled: false, blocked: 'plan_required', workspaceId: 'ws1' }), onWall })
-  await act(async () => button('Upgrade to Team')!.click())
+  await act(async () => button('Upgrade to Pro')!.click())
   expect(onWall).toHaveBeenCalledWith({ workspaceId: 'ws1' })
 
   await render({ status: status({ billing: false, entitled: false, blocked: 'no_workspace' }) })
   expect(button('Move to a workspace')).toBeTruthy()
-  expect(container.textContent).not.toContain('Team')
+  expect(container.textContent).not.toContain('Pro')
 })
 
 it('shows viewers nothing', async () => {

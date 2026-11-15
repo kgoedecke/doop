@@ -18,7 +18,8 @@ import { Note } from './ui/note'
 import { EmptyState } from './ui/empty-state'
 import { cn } from '../lib/utils'
 import { CardDescription, CardHeader, CardRow, CardTitle, SettingsCard } from './ui/card'
-import { DesktopIcon, TrashIcon, UploadIcon } from './ui/icons'
+import { DesktopIcon, RocketIcon, TrashIcon, UploadIcon } from './ui/icons'
+import { openUpgrade } from '../lib/upgrade'
 
 const ACCEPT = '.ttf,.otf,.woff,.woff2,font/ttf,font/otf,font/woff,font/woff2'
 
@@ -57,6 +58,8 @@ export function FontLibrary({ workspaceId }: { workspaceId?: string }) {
   const [fonts, setFonts] = useState<CustomFont[] | null>(null)
   const [uploading, setUploading] = useState(0)
   const [error, setError] = useState('')
+  /* a Free library is full: the error line gets the way to Pro */
+  const [limited, setLimited] = useState(false)
   /* one face, or a whole family (every face it has), awaiting confirmation */
   const [removing, setRemoving] = useState<{ family: string; faces: CustomFont[] } | null>(null)
   const [dragging, setDragging] = useState(false)
@@ -85,6 +88,7 @@ export function FontLibrary({ workspaceId }: { workspaceId?: string }) {
 
   async function upload(files: File[]) {
     setError('')
+    setLimited(false)
     const problems: string[] = []
     setUploading((n) => n + files.length)
     for (const file of files) {
@@ -104,6 +108,7 @@ export function FontLibrary({ workspaceId }: { workspaceId?: string }) {
           font,
         ])
       } catch (e) {
+        if (e instanceof ApiError && e.status === 402) setLimited(true)
         const failed = t('fonts.uploadFailed')
         const reason = e instanceof ApiError ? errorMessage(e, failed) : e instanceof Error ? e.message : failed
         problems.push(reason.startsWith(file.name) ? reason : `${file.name}: ${reason}`)
@@ -252,7 +257,19 @@ export function FontLibrary({ workspaceId }: { workspaceId?: string }) {
       ) : (
         <CardRow label={t('fonts.upload')} action={uploadButton}>
           {error ? (
-            <Note tone="error">{error}</Note>
+            <>
+              <Note tone="error">{error}</Note>
+              {limited && (
+                <Button
+                  size="sm"
+                  variant="primary"
+                  className="mt-2 self-start"
+                  onClick={() => openUpgrade({ source: 'font-limit' })}
+                >
+                  <RocketIcon size="rail" /> {t('plans.fontLimitAction')}
+                </Button>
+              )}
+            </>
           ) : (
             <Note>
               {fonts === null

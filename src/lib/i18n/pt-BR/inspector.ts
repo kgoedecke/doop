@@ -189,7 +189,7 @@ export const inspector: Catalog['inspector'] = {
   imageUrlProtocol: 'Use uma URL de imagem http ou https.',
   imageUrlTimeout: 'A imagem demorou demais para carregar. Tente outra URL.',
   imageUrlLoadFailed: 'Não foi possível carregar essa imagem. Verifique a URL e tente novamente.',
-  imageTooLarge: 'Escolha uma imagem menor que 5 MB.',
+  imageTooLarge: 'Escolha uma imagem menor que 100 MB.',
   imageDesignChanged: 'O design mudou. Selecione a imagem e tente novamente.',
   imageNotEditable: 'A imagem não pode mais ser editada. Selecione-a e tente novamente.',
   imageReplaceFailed: 'Não foi possível substituir a imagem. Tente novamente.',

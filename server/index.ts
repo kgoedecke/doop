@@ -39,6 +39,7 @@ import { z } from 'zod'
 import { previewDocument } from './componentPreview.ts'
 import { codeSchema, propSchema } from './componentTools.ts'
 import { activeComponents } from '../shared/components.ts'
+import { PRO_UPLOAD_BYTES } from '../shared/billing.ts'
 import { canvasPages, framePageId, samePages } from '../shared/pages.ts'
 import { normalizePageBackground } from '../shared/pageBackground.ts'
 import { MAX_STACK_WRITES, type StackWrite } from '../shared/frameStack.ts'
@@ -97,6 +98,7 @@ import { startMcpTokenPrune } from './mcpTokens.ts'
 import { integrationsRouter, relayDesktopCallback } from './integrations.ts'
 import { extensions } from './extensions.ts'
 import * as workspaces from './workspaces.ts'
+import { uploadCap } from './entitlements.ts'
 import { startStallWatchdog } from './stallWatchdog.ts'
 import { beginOperation, endOperation, withinOperation, WorkBudgetError } from './workBudget.ts'
 import { openTransaction, outsideOperation, transaction, type OpenTransaction } from './journal.ts'
@@ -109,14 +111,7 @@ import * as authSchema from './db/auth-schema.ts'
 import * as persist from './db/persist.ts'
 import { handleMcpRequest } from './mcp.ts'
 import { RendererBusyError } from './renderBrowser.ts'
-import {
-  getAsset,
-  reconcileAssetRefs,
-  beginTicketUpload,
-  endTicketUpload,
-  createAsset,
-  MAX_ASSET_BYTES,
-} from './assets.ts'
+import { getAsset, reconcileAssetRefs, beginTicketUpload, endTicketUpload, createAsset } from './assets.ts'
 import * as ingest from './ingest.ts'
 import * as agentKeys from './agentKeys.ts'
 import * as backgrounds from './backgrounds.ts'
@@ -671,8 +666,9 @@ app.put(['/u/:token', '/u/:token/:name'], async (req, res) => {
     /* on any early rejection, destroy the request stream — otherwise curl
        keeps sending a body nobody reads and the connection deadlocks */
     const font = ticket.kind === 'font'
-    const cap = font ? MAX_FONT_BYTES : MAX_ASSET_BYTES
-    const tooBig = `file exceeds the ${cap / 1024 / 1024} MB limit`
+    const imageCap = uploadCap({ canvasId: ticket.canvasId, userId: ticket.ownerId })
+    const cap = font ? MAX_FONT_BYTES : imageCap.bytes
+    const tooBig = font ? `file exceeds the ${cap / 1024 / 1024} MB limit` : imageCap.exceeded
     if (Number(req.headers['content-length'] || 0) > cap) {
       res.status(413).json({ error: tooBig })
       req.destroy()
@@ -700,11 +696,11 @@ app.put(['/u/:token', '/u/:token/:name'], async (req, res) => {
       success = true
       return res.json(uploadedFontResult(added))
     }
-    const asset = await createAsset(Buffer.concat(chunks), {
-      canvasId: ticket.canvasId,
-      ownerId: ticket.ownerId,
-      uploadedBy: ticket.uploadedBy,
-    })
+    const asset = await createAsset(
+      Buffer.concat(chunks),
+      { canvasId: ticket.canvasId, ownerId: ticket.ownerId, uploadedBy: ticket.uploadedBy },
+      imageCap,
+    )
     success = true
     const url = `${env.BETTER_AUTH_URL}/a/${asset.id}.${asset.ext}`
     res.json({
@@ -941,6 +937,8 @@ app.get('/api/me', async (req, res) => {
     admin: isAdmin(req.user),
     /* 'team' while a member of a live paid workspace — the account menu's plan line */
     plan: workspaces.planFor(id),
+    /* whether this server sells plans at all: no Upgrade anywhere without it */
+    billing: billing.billingEnabled(),
     /* the SPA cannot infer this: impersonation swaps the session cookie
        outright, so everything else on this response describes the person
        being viewed, not the admin doing the viewing */
@@ -2165,20 +2163,22 @@ app.post('/api/canvases/:id/proposals/:pid', (req, res) => {
 
 /* Browser asset uploads (paste / drop): raw image bytes in, permanent /a/
    URL out. Same createAsset pipeline as the MCP ticket flow — the bytes are
-   sniffed for the real type and capped at 5 MB. express.json ignores the
-   image content-type, so express.raw here sees the untouched stream. */
+   sniffed for the real type and capped by the plan (5 MB on Free, 100 MB on
+   Pro). express.json ignores the image content-type, so express.raw here
+   sees the untouched stream; it reads up to the Pro cap and the plan's cap
+   is checked after, so a Free upload past 5 MB gets the reason, not a 413. */
 app.post(
   '/api/canvases/:id/assets',
-  express.raw({ type: () => true, limit: MAX_ASSET_BYTES + 1024 }),
+  express.raw({ type: () => true, limit: PRO_UPLOAD_BYTES + 1024 }),
   async (req, res) => {
     const c = requireCanvas(req, res, req.params.id, 'edit')
     if (!c) return
     try {
-      const asset = await createAsset(Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0), {
-        canvasId: c.id,
-        ownerId: req.user!.id,
-        uploadedBy: req.user!.name,
-      })
+      const asset = await createAsset(
+        Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0),
+        { canvasId: c.id, ownerId: req.user!.id, uploadedBy: req.user!.name },
+        uploadCap({ canvasId: c.id, userId: req.user!.id }),
+      )
       /* absolute like the MCP flow: frame HTML renders inside sandboxed
          srcdoc iframes where root-relative URLs don't resolve */
       res.json({ url: `${env.BETTER_AUTH_URL}/a/${asset.id}.${asset.ext}`, mime: asset.mime, size: asset.size })

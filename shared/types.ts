@@ -243,6 +243,8 @@ export interface WorkspaceSummary {
   interval: BillingInterval | null
   /** seats Stripe is billing for right now */
   seats: number
+  /** seats the owner chose to pay for; the bill is these or memberCount, whichever is larger */
+  seatsBought: number
   memberCount: number
   canvasCount: number
   /** next renewal (or the end, when cancelAtPeriodEnd) — epoch ms */

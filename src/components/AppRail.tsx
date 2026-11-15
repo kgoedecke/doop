@@ -10,12 +10,15 @@ import { useT } from '../lib/i18n'
 import { cn } from '@/lib/utils'
 import { AgentTile } from './AgentIcon'
 import { AccountMenu } from './DashShell'
+import { offersUpgrade, useMe } from '../lib/me'
+import { openUpgrade } from '../lib/upgrade'
 import { CanvasSearchModal } from './CanvasSearchModal'
 import { ConnectModal } from './ConnectModal'
 import { NativeAppCard } from './NativeAppPromo'
 import { DashNavItem, DashSectionLabel, DashSidebar, DashSidebarBrand } from './ui/dash'
 import { Dot } from './ui/dot'
 import { IconButton } from './ui/icon-button'
+import { Button } from './ui/button'
 import { Sheet, SheetContent, SheetTitle } from './ui/sheet'
 import {
   BlocksIcon,
@@ -36,6 +39,7 @@ import {
   UsersIcon,
   WebIcon,
   WorkflowIcon,
+  RocketIcon,
 } from './ui/icons'
 
 /**
@@ -121,6 +125,9 @@ export function AppRail({
   children?: ReactNode
 }) {
   const t = useT()
+  const { data: session } = authClient.useSession()
+  const me = useMe(session?.user.id)
+  const offerUpgrade = offersUpgrade(me)
   const [own, setOwn] = useState<RailLists | null>(() => lastLists)
   const needsOwn = canvases === undefined || workspaces === undefined
   useEffect(() => {
@@ -140,6 +147,10 @@ export function AppRail({
   const [open, setOpen] = useState(readRailOpen)
   const drawer = useRailDrawer((s) => s.open)
   const setDrawer = useRailDrawer((s) => s.setOpen)
+  const upgrade = () => {
+    setDrawer(false)
+    openUpgrade({ source: 'rail' })
+  }
   const setMounted = useRailDrawer((s) => s.setMounted)
   /* tells DashHeader a rail is here to open; before paint, so the phone's
      brand row does not pop in a frame after the rest of the header */
@@ -361,7 +372,12 @@ export function AppRail({
           </div>
         </>
       ) : null}
-      <div className="mt-auto pt-4">
+      <div className="mt-auto flex flex-col items-center gap-2 pt-4">
+        {offerUpgrade && (
+          <IconButton aria-label={t('plans.upgradeToPro')} title={t('plans.upgradeToPro')} onClick={upgrade}>
+            <RocketIcon size="rail" className="text-brand" />
+          </IconButton>
+        )}
         <AccountMenu face side="top" align="start" />
       </div>
     </div>
@@ -550,6 +566,13 @@ export function AppRail({
           leaves it to the App Store sheet */}
       <div className="mt-auto flex flex-col pt-4">
         {!inDrawer && <NativeAppCard className="mb-3" />}
+        {/* the one way to Pro that is always in view: people looked for it
+            and found only "Create workspace" */}
+        {offerUpgrade && (
+          <Button size="bar" className="mb-3 w-full justify-center" onClick={upgrade}>
+            <RocketIcon size="rail" className="text-brand" /> {t('plans.upgradeToPro')}
+          </Button>
+        )}
         <div className="flex items-center gap-2.5 px-1">
           <AccountMenu face side="top" align="start" />
           <AccountName />

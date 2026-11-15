@@ -1,0 +1,1 @@
+ALTER TABLE "workspaces" ADD COLUMN "seats_bought" integer DEFAULT 1 NOT NULL;

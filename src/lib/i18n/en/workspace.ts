@@ -1,6 +1,6 @@
 /** A workspace's settings page and the agents' one-click installs. */
 export const workspace = {
-  planActive: 'Team plan is active — welcome aboard',
+  planActive: 'Pro plan is active — welcome aboard',
   checkoutCanceled: 'Checkout canceled — nothing was charged',
   needsPlan: '"{name}" needs a plan first.',
   thisWorkspace: 'This workspace',
@@ -33,7 +33,7 @@ export const workspace = {
   canvasCount: { one: '{count} canvas', other: '{count} canvases' },
   selfHostedIncluded: 'Self-hosted, included',
   noPlanYet: 'No plan yet.',
-  noPlanBody: 'Inviting people and adding canvases waits until this workspace is on Team.',
+  noPlanBody: 'Inviting people and adding canvases waits until this workspace is on Pro.',
   canceledBody: ' Your existing canvases stay open to everyone in it.',
   reactivate: 'Reactivate',
   choosePlan: 'Choose a plan',
@@ -85,11 +85,11 @@ export const workspace = {
   upToDate: 'Up to date with Stripe',
   refreshFailed: 'Couldn’t refresh',
   billingDescription:
-    'Team is billed per seat: every person in the workspace, monthly or yearly. Seats follow the people list — add someone and the next invoice grows, remove them and it shrinks.',
+    'Pro is billed per seat: every person in the workspace, monthly or yearly. Seats follow the people list — add someone and the next invoice grows, remove them and it shrinks.',
   billingDisabledDescription:
     'Billing isn’t configured on this server. Workspaces are included on self-hosted doop; there is nothing to pay for here.',
   plan: 'Plan',
-  planTeam: 'Team',
+  planTeam: 'Pro',
   planPersonal: 'Personal',
   planSelfHosted: 'Self-hosted',
   endsOn: 'ends {date}',
@@ -104,7 +104,7 @@ export const workspace = {
   ends: 'Ends',
   renews: 'Renews',
   manage: 'Manage',
-  reactivateTeam: 'Reactivate on Team',
+  reactivateTeam: 'Reactivate on Pro',
   opening: 'Opening…',
   manageOnStripe: 'Manage billing on Stripe',
   refresh: 'Refresh',
@@ -127,7 +127,7 @@ export const workspace = {
   deleteWorkspace: 'Delete workspace',
   deleteDescription:
     'Every canvas goes back to the personal space of whoever owns it — nothing is deleted. People lose access to canvases that aren’t theirs.',
-  deleteCancelsTeam: ' The Team subscription is canceled immediately.',
+  deleteCancelsTeam: ' The Pro subscription is canceled immediately.',
   deleteNamed: 'Delete “{name}”',
   deleteTitle: 'Delete “{name}”?',
   deleteConfirmDescription: 'Canvases return to their owners and the subscription ends now. This can’t be undone.',

@@ -1,5 +1,6 @@
 import { useId, useRef, useState, type ReactNode } from 'react'
 import type { Frame } from '../../shared/types'
+import { PRO_UPLOAD_BYTES } from '../../shared/billing'
 import { api, errorMessage } from '../lib/api'
 import { replaceElementImage, type ElementInfo, type StylePatch } from '../lib/frameBridge'
 import { isLayerLocked } from '../lib/layerEdits'
@@ -157,7 +158,7 @@ export function ImagePicker({
   async function pick(source: File | string) {
     if (busy || disabled) return
     setError(null)
-    if (typeof source !== 'string' && source.size > 5 * 1024 * 1024) {
+    if (typeof source !== 'string' && source.size > PRO_UPLOAD_BYTES) {
       setError(t('inspector.imageTooLarge'))
       return
     }

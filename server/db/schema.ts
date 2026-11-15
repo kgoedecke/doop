@@ -110,6 +110,9 @@ export const workspaces = pgTable('workspaces', {
   interval: text('interval'),
   /** the paid seat count Stripe is billing for */
   seats: integer('seats').notNull().default(0),
+  /** the seats the owner chose to pay for: the billed quantity is this or
+   *  the member count, whichever is larger, so invites fill bought seats first */
+  seatsBought: integer('seats_bought').notNull().default(1),
   stripeCustomerId: text('stripe_customer_id'),
   stripeSubscriptionId: text('stripe_subscription_id'),
   /** epoch ms the current billing period ends (= the next renewal) */

@@ -233,7 +233,7 @@ export const panels = {
   shareLinkAria: 'What anyone with the link can do',
   shareLinkTitle: 'No access = only you, invited people and workspace members can open this canvas',
   shareCopyLink: 'Copy link',
-  shareUpgradeReason: 'Moving a canvas into a workspace needs a Team plan.',
+  shareUpgradeReason: 'Moving a canvas into a workspace needs a Pro plan.',
   shareGalleryTitle: 'Anyone on doop can preview and copy a listed canvas. The canvas itself stays private.',
   shareGallery: 'Show in the community gallery',
   shareGalleryBlurb: 'People can preview it and copy it into their own account. Your canvas stays private.',

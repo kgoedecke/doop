@@ -233,7 +233,7 @@ export const panels: Catalog['panels'] = {
   shareLinkAria: 'O que qualquer pessoa com o link pode fazer',
   shareLinkTitle: 'Sem acesso = só você, pessoas convidadas e membros do workspace podem abrir este canvas',
   shareCopyLink: 'Copiar link',
-  shareUpgradeReason: 'Mover um canvas para um workspace exige um plano Team.',
+  shareUpgradeReason: 'Mover um canvas para um workspace exige um plano Pro.',
   shareGalleryTitle:
     'Qualquer pessoa no doop pode visualizar e copiar um canvas listado. O canvas em si continua privado.',
   shareGallery: 'Mostrar na galeria da comunidade',
