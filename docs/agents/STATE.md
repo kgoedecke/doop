@@ -51,7 +51,7 @@ CI failure emails come from the account's Actions notification setting (no API):
 
 ## Open upstream PRs (34 on 2026-11-14) and verdicts
 
-Taken (each needs ONE Sol review before merging into our `main`; dropped after two rejections):
+Initially picked for review (the outcome of each is in "Merged into our main" below, which supersedes this list):
 
 | PR  | Title                                                      | Note               |
 | --- | ---------------------------------------------------------- | ------------------ |
@@ -72,7 +72,7 @@ Skipped:
 
 | PR                 | Reason                                                                                   |
 | ------------------ | ---------------------------------------------------------------------------------------- |
-| 505                | Security hardening: out of scope for now (Arctic dropped the security pass)              |
+| 505                | Security hardening: not taken; the fork-wide review is in `SECURITY.md`, not this PR     |
 | 439, 434           | Perf tweaks: out of scope for now (optimization dropped)                                 |
 | 515                | macOS WebKit launch panic: we are on Windows                                             |
 | 514                | Sends agent signals to a third-party service (Glassray): privacy, no value to us         |
@@ -108,6 +108,13 @@ Dropped after review (closed, branches deleted; leave to upstream):
 
 Parked: 516 (our #11), Sol rejected once for a missing `aria-valuenow` on the resize separator; paused while main
 was red. Revisit: fix the ARIA values, one more Sol review, merge on green.
+
+## Security
+
+Review done 2026-11-14, report in [`SECURITY.md`](SECURITY.md): secret scan of tree and history is clean, auth/OAuth
+handling has no exploitable finding, AGPL notices are intact, and `bun audit` reports 105 advisories (4 critical, none
+reachable in Doop's own use). Dependency bumps are not applied here (they would conflict with every upstream sync);
+re-run `bun audit` after each sync and revisit if an advisory becomes reachable.
 
 ## Flaky tests
 
