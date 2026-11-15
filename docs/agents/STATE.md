@@ -107,7 +107,7 @@ Dropped after review (closed, branches deleted; leave to upstream):
 | 459, 458    |        | Stacked on unmerged upstream PRs (456/453/464): ~1.9k unrelated lines                             |
 
 Dropped: 516 (our #11), rejected twice by Sol: first for a missing `aria-valuenow`, then because the added ARIA
-values go stale on window resize and page-list changes. Closed, branch deleted; left to upstream.
+values go stale on window resize and page-list changes, and on a one-page canvas `aria-valuenow` falls below `aria-valuemin`. Closed, branch deleted; left to upstream.
 
 ## Security
 
@@ -167,3 +167,11 @@ None so far. All additions are new files: `FORK.md`, `AGENTS.md`, `docs/agents/S
 - Baseline before: free RAM 7350 MB of 32464 MB; C: free 111.59 GB; G: free 1339.19 GB.
 - After: free RAM 4877 MB (machine-wide, other P0 work running; no Doop process or browser of ours is running);
   C: free 110.65 GB; G: free 1338.92 GB. `G:\Tools\Cache\doop` is 32 MB (cap 200 MB).
+- C: footprint (investigated 2026-11-15): the Doop setup used little on C:. bun cache 59 MB, npm cache 1 MB, no
+  Playwright browsers, our session scratch under `%TEMP%\claude` is tiny. The rest of the C: drift is other
+  projects (`%TEMP%` holds 32 GB and 700k files from inkstitch, pp-passive and others; `~/.cache/codex-runtimes`
+  2.6 GB) and was not touched. Moved: `BUN_INSTALL_CACHE_DIR=G:\Tools\Cache\bun`,
+  `PLAYWRIGHT_BROWSERS_PATH=G:\Tools\Cache\playwright` (user env) and `npm config set cache G:\Tools\Cache\npm`;
+  the old bun cache was deleted.
+- Sign-in: Codex (`codex mcp login doop`) and Claude Code (`claude mcp login doop`) are authenticated; smoke test
+  canvas `https://doop.design/c/3C8nB7f0d-` ("T3: smoke test").
