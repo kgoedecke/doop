@@ -58,6 +58,20 @@ jobs:
         # Explicit bash runs with -eo pipefail, so `cmd | tee log` keeps cmd's exit code.
         shell: bash
     steps:
+      # A scratch branch must never be production's bot branch (or a ref spelling of it), or its
+      # push would rewrite what the production run parked on a PR.
+      - name: Validate the branch input
+        if: inputs.branch != ''
+        env:
+          BRANCH: ${{ inputs.branch }}
+        run: |
+          case "$BRANCH" in
+            refs/* | sync/* | -* | *..* | */ )
+              echo "Refusing branch input '$BRANCH': use a plain scratch branch name, not refs/*, sync/* or odd spellings." >&2
+              exit 1
+              ;;
+          esac
+
       - uses: actions/checkout@v4
         with:
           ref: ${{ inputs.branch || 'main' }}
