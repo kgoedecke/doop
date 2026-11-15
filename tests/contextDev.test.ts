@@ -207,6 +207,15 @@ describe('Context.dev HTML preparation', () => {
     expect(prepared).not.toContain('127.0.0.1')
   })
 
+  it('keeps $ replacement patterns in the base URL as written', () => {
+    expect(
+      prepareContextHtmlForRendering(
+        '<html><head></head><body>x</body></html>',
+        "https://example.com/a$'b/?q=1$&p=$$&r=$`",
+      ),
+    ).toBe('<html><head><base href="https://example.com/a$\'b/?q=1$&amp;p=$$&amp;r=$`"></head><body>x</body></html>')
+  })
+
   it('prepends a base when the returned fragment has no head', () => {
     expect(prepareContextHtmlForRendering('<main><img src="hero.png"></main>', 'https://example.com/path/')).toBe(
       '<base href="https://example.com/path/"><main><img src="hero.png"></main>',

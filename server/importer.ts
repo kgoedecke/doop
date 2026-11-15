@@ -454,7 +454,7 @@ async function fetchCss(sheetUrl: string, budget: number, depth = 0): Promise<Ca
     if (!child.ok) return child
     /* Inline the import rather than leave it active in the snapshot for a
        later browser to fetch. */
-    css = css.replace(m[0], child.css)
+    css = css.replace(m[0], () => child.css)
     if (Buffer.byteLength(css) > budget) return OVERSIZED
   }
   /* relative url(...) inside the sheet must resolve against the SHEET's URL,
@@ -647,7 +647,7 @@ export async function importPage(rawUrl: string, options: { includePreview?: boo
       `<base href="${documentBase.replace(/&/g, '&amp;').replace(/"/g, '&quot;')}">` +
       (css.trim() ? `<style data-doop-import>\n${css.replace(/<\/style/gi, '<\\/style')}\n</style>` : '')
     const headMatch = html.match(/<head[^>]*>/i)
-    if (headMatch) html = html.replace(headMatch[0], headMatch[0] + inject)
+    if (headMatch) html = html.replace(headMatch[0], (head) => head + inject)
     else html = inject + html
     html = '<!doctype html>\n' + html
 
