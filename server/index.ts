@@ -2997,6 +2997,7 @@ function joinAsGuest(ws: WebSocket, canvasId: string, clientId: string, canvas: 
 }
 
 wss.on('connection', (ws, upgradeReq) => {
+  ws.on('error', () => {})
   /* the session cookie rides the upgrade request; resolve it once */
   const sessionPromise = auth.api.getSession({ headers: fromNodeHeaders(upgradeReq.headers) }).catch(() => null)
 
@@ -3007,7 +3008,7 @@ wss.on('connection', (ws, upgradeReq) => {
     } catch {
       return
     }
-    const conn = conns.get(ws)
+    if (!msg || typeof msg !== 'object') return
 
     if (msg.type === 'join') {
       const session = await sessionPromise
@@ -3058,6 +3059,10 @@ wss.on('connection', (ws, upgradeReq) => {
         activeFrameId: null,
       }
       const silent = !!(session.session as { impersonatedBy?: string | null }).impersonatedBy
+      const prevConn = conns.get(ws)
+      if (prevConn && !prevConn.silent && (prevConn.canvasId !== msg.canvasId || prevConn.presence.clientId !== msg.clientId)) {
+        broadcast(prevConn.canvasId, { type: 'presence:leave', clientId: prevConn.presence.clientId })
+      }
       conns.set(ws, { ws, canvasId: msg.canvasId, userId: session.user.id, presence, silent })
       const others = room(msg.canvasId)
         .filter((c) => c.ws !== ws && !c.silent)
@@ -3094,6 +3099,7 @@ wss.on('connection', (ws, upgradeReq) => {
       return
     }
 
+    const conn = conns.get(ws)
     if (!conn) return
     if (conn.silent) return // view-as connections receive updates but never emit
     const { canvasId, presence } = conn
