@@ -23,9 +23,9 @@ on:
   workflow_dispatch:
     inputs:
       branch:
-        description: 'Branch to sync (default main; use a scratch branch to test the workflow)'
+        description: 'Leave empty to sync main. A branch name makes a scratch run with its own bot branch and issue (to test the workflow)'
         required: false
-        default: main
+        default: ''
 
 permissions:
   contents: write
@@ -40,10 +40,10 @@ concurrency:
 env:
   BASE_BRANCH: ${{ inputs.branch || 'main' }}
   UPSTREAM_URL: https://github.com/kgoedecke/doop.git
-  # A scratch run (branch input other than main) gets its own bot branch and issue, so it can
+  # A scratch run (any branch input, even main or Main: empty is the only production value) gets its own bot branch and issue, so it can
   # never close or overwrite what the production run opened.
-  SYNC_BRANCH: ${{ (inputs.branch || 'main') == 'main' && 'sync/upstream' || format('sync/upstream-{0}', inputs.branch) }}
-  CONFLICT_ISSUE_TITLE: ${{ (inputs.branch || 'main') == 'main' && 'Upstream sync blocked by merge conflicts' || format('Upstream sync blocked by merge conflicts ({0})', inputs.branch) }}
+  SYNC_BRANCH: ${{ inputs.branch == '' && 'sync/upstream' || format('sync/upstream-{0}', inputs.branch) }}
+  CONFLICT_ISSUE_TITLE: ${{ inputs.branch == '' && 'Upstream sync blocked by merge conflicts' || format('Upstream sync blocked by merge conflicts ({0})', inputs.branch) }}
   GH_TOKEN: ${{ github.token }}
   # Adding the upstream remote makes gh resolve the fork's parent; always target this repo.
   GH_REPO: ${{ github.repository }}
