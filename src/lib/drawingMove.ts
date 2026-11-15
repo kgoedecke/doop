@@ -1,5 +1,6 @@
 import type { Frame } from '../../shared/types'
 import { framePageId } from '../../shared/pages'
+import { FRAME_PAPER_ATTR } from '../../shared/framePaper'
 import { api, ApiError } from './api'
 import { drawingDocument, isCanvasElement, queueDrawingSave, type Point } from './drawing'
 import { recordCreate, recordDrawingTransfer, recordUpdates } from './history'
@@ -209,7 +210,7 @@ export function moveDrawing(
     placeDrawing(el, rect, target, hit?.geometry)
     const destinationDoc = target ? parse(target.html) : parse(drawingDocument({ tool: 'frame', ...rect }))
     if (!target) {
-      destinationDoc.body.style.background = ''
+      destinationDoc.querySelector(`style[${FRAME_PAPER_ATTR}]`)?.remove()
       destinationDoc.body.setAttribute('data-doop-canvas-element', 'true')
     }
     /* an element with an id of its own keeps it (its carried rules name it)
