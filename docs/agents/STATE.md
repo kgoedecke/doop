@@ -106,8 +106,8 @@ Dropped after review (closed, branches deleted; leave to upstream):
 | 462         | #10    | 3 blockers: duplicate import, stale-snapshot cut, lock bypass while clipboard prompt is pending   |
 | 459, 458    |        | Stacked on unmerged upstream PRs (456/453/464): ~1.9k unrelated lines                             |
 
-Parked: 516 (our #11), Sol rejected once for a missing `aria-valuenow` on the resize separator; paused while main
-was red. Revisit: fix the ARIA values, one more Sol review, merge on green.
+Dropped: 516 (our #11), rejected twice by Sol: first for a missing `aria-valuenow`, then because the added ARIA
+values go stale on window resize and page-list changes. Closed, branch deleted; left to upstream.
 
 ## Security
 
@@ -123,6 +123,21 @@ Tracked in https://github.com/ArcticSlayy/doop/issues/12: three different browse
 timing-sensitive, not a bug in a merged PR and not a missing environment. Nothing is skipped yet; a test that fails
 twice gets skipped alone, marked known-flaky in that issue. Until then, rerun failed jobs
 (`gh run rerun <id> -R ArcticSlayy/doop --failed`) before treating red as real.
+
+## Optimization
+
+Looked for cheap measurable wins; none worth a change. The sync run's steps (full scratch run 43678868916):
+install 3 s, typecheck 4 s, build 3 s, tests 327 s (single job), whole run about 6 min and only when upstream has
+news, so sharding the tests (CI uses four shards) would save about 3 minutes of free GitHub minutes and add workflow
+complexity. Dependency and bundle changes would touch upstream files (`package.json`, `bun.lock`, vite config) and
+conflict with every sync, so they are not made here.
+
+## T3 integration
+
+Built as conventions in the shared skill (`~/.agents/skills/doop/SKILL.md`, "Working from a T3 thread"), not code: one
+canvas per T3 thread named `T3: <thread title>`, the canvas link returned in the thread, screenshots only when
+asked and cached under `G:\Tools\Cache\doop`, lite mode by default. Anything needing code stays in
+"Ideas (later, optional)".
 
 ## Our improvements (ranked, not started; Arctic picks)
 
@@ -150,3 +165,5 @@ None so far. All additions are new files: `FORK.md`, `AGENTS.md`, `docs/agents/S
 ## Hygiene log
 
 - Baseline before: free RAM 7350 MB of 32464 MB; C: free 111.59 GB; G: free 1339.19 GB.
+- After: free RAM 4877 MB (machine-wide, other P0 work running; no Doop process or browser of ours is running);
+  C: free 110.65 GB; G: free 1338.92 GB. `G:\Tools\Cache\doop` is 32 MB (cap 200 MB).
