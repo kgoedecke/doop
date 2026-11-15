@@ -12,7 +12,7 @@ import { dropWorkspaceFonts } from './fonts.ts'
 import { dropWorkspaceAgents } from './customAgents.ts'
 import { notifyUsers } from './userEvents.ts'
 import { avatarUrl } from '../shared/avatar.ts'
-import { isBillingInterval, isWorkspaceActive } from '../shared/billing.ts'
+import { billedSeats, isBillingInterval, isWorkspaceActive, parseSeats } from '../shared/billing.ts'
 import type { BillingInterval, WorkspaceStatus } from '../shared/billing.ts'
 import { isLibraryPublishPolicy, isWorkspaceRole } from '../shared/types.ts'
 import type {
@@ -46,6 +46,8 @@ export interface WorkspaceRecord {
   plan: 'team' | null
   interval: BillingInterval | null
   seats: number
+  /** seats the owner chose; billing never drops below them */
+  seatsBought: number
   stripeCustomerId: string | null
   stripeSubscriptionId: string | null
   currentPeriodEnd: number | null
@@ -85,6 +87,7 @@ export async function hydrateWorkspaces(): Promise<void> {
       plan: r.plan === 'team' ? 'team' : null,
       interval: isBillingInterval(r.interval) ? r.interval : null,
       seats: r.seats,
+      seatsBought: r.seatsBought,
       stripeCustomerId: r.stripeCustomerId,
       stripeSubscriptionId: r.stripeSubscriptionId,
       currentPeriodEnd: r.currentPeriodEnd,
@@ -171,6 +174,7 @@ export function summaryFor(ws: WorkspaceRecord, viewerId: string): WorkspaceSumm
     plan: ws.plan,
     interval: ws.interval,
     seats: ws.seats,
+    seatsBought: ws.seatsBought,
     memberCount: members.get(ws.id)?.size ?? 0,
     canvasCount: store.countWorkspaceCanvases(ws.id),
     ...(ws.currentPeriodEnd ? { currentPeriodEnd: ws.currentPeriodEnd } : {}),
@@ -217,6 +221,7 @@ export function createWorkspace(name: string, ownerId: string): WorkspaceRecord 
     plan: null,
     interval: null,
     seats: 0,
+    seatsBought: 1,
     stripeCustomerId: null,
     stripeSubscriptionId: null,
     currentPeriodEnd: null,
@@ -342,6 +347,12 @@ async function applySubscriptionNow(
   return { ws, applied: true }
 }
 
+function setSeatsBought(ws: WorkspaceRecord, seatsBought: number): void {
+  if (ws.seatsBought === seatsBought) return
+  ws.seatsBought = seatsBought
+  swallow(db.update(t.workspaces).set({ seatsBought }).where(eq(t.workspaces.id, ws.id)))
+}
+
 export function setCustomer(id: string, stripeCustomerId: string): void {
   const ws = records.get(id)
   if (!ws || ws.stripeCustomerId === stripeCustomerId) return
@@ -349,7 +360,8 @@ export function setCustomer(id: string, stripeCustomerId: string): void {
   swallow(db.update(t.workspaces).set({ stripeCustomerId }).where(eq(t.workspaces.id, id)))
 }
 
-/** Keep Stripe's quantity equal to the member count, in the background:
+/** Keep Stripe's quantity at the seats bought or the member count, whichever
+ *  is larger (`billedSeats`), in the background:
  *  seat changes must never make the invite itself fail. One chain per
  *  workspace, and the count is read when the update runs, not when it was
  *  queued — so a burst of adds and removes settles on the real number
@@ -357,20 +369,35 @@ export function setCustomer(id: string, stripeCustomerId: string): void {
 const seatChains = new Map<string, Promise<void>>()
 
 function reconcileSeats(ws: WorkspaceRecord): void {
+  onSeatChain(ws, () => syncSeatsNow(ws)).catch(() => {}) // logged on the chain
+}
+
+/** Run seat work after whatever this workspace already has queued. The
+ *  owner's seat change runs here whole (the choice, Stripe, the rollback),
+ *  so a failed change can never undo a later one. Rejects with the work's
+ *  error; the chain itself only logs it. */
+function onSeatChain<T>(ws: WorkspaceRecord, work: () => Promise<T>): Promise<T> {
+  const result = (seatChains.get(ws.id) ?? Promise.resolve()).then(work)
+  seatChains.set(
+    ws.id,
+    result.then(
+      () => {},
+      (err) => console.error(`[billing] seat sync failed for workspace ${ws.id}`, err),
+    ),
+  )
+  return result
+}
+
+/** Tell Stripe the quantity this workspace should be billed for now. */
+async function syncSeatsNow(ws: WorkspaceRecord): Promise<void> {
   if (!billing.billingEnabled() || !ws.stripeSubscriptionId) return
-  const run = async () => {
-    const seats = members.get(ws.id)?.size ?? 0
-    if (!records.has(ws.id)) return // deleted while queued
-    await billing.syncSeats(ws, seats)
-    if (ws.seats !== seats) {
-      ws.seats = seats
-      await db.update(t.workspaces).set({ seats }).where(eq(t.workspaces.id, ws.id))
-    }
+  if (!records.has(ws.id)) return // deleted while queued
+  const seats = billedSeats(ws.seatsBought, members.get(ws.id)?.size ?? 0)
+  await billing.syncSeats(ws, seats)
+  if (ws.seats !== seats) {
+    ws.seats = seats
+    await db.update(t.workspaces).set({ seats }).where(eq(t.workspaces.id, ws.id))
   }
-  const next = (seatChains.get(ws.id) ?? Promise.resolve())
-    .then(run)
-    .catch((err) => console.error(`[billing] seat sync failed for workspace ${ws.id}`, err))
-  seatChains.set(ws.id, next)
 }
 
 export function addMember(workspaceId: string, userId: string, role: WorkspaceRole, addedBy: string): boolean {
@@ -746,6 +773,8 @@ workspacesRouter.post('/:id/billing/checkout', async (req, res) => {
   if (!billing.billingEnabled()) return res.status(400).json({ error: 'billing is not configured on this server' })
   const interval = req.body?.interval
   if (!isBillingInterval(interval)) return res.status(400).json({ error: 'interval must be month or year' })
+  const wanted = req.body?.seats === undefined ? ws.seatsBought : parseSeats(req.body.seats)
+  if (wanted === null) return res.status(400).json({ error: 'seats must be a whole number from 1 to 500' })
   /* one subscription per workspace: a second checkout would bill twice
      while only the last one is on file */
   if (ws.stripeSubscriptionId && isWorkspaceActive(ws.status))
@@ -753,13 +782,41 @@ workspacesRouter.post('/:id/billing/checkout', async (req, res) => {
   try {
     const customerId = await billing.ensureCustomer(ws, req.user!.email)
     setCustomer(ws.id, customerId)
-    const seats = members.get(ws.id)?.size ?? 1
+    setSeatsBought(ws, wanted)
+    const seats = billedSeats(wanted, members.get(ws.id)?.size ?? 1)
     const url = await billing.createCheckout({ ...ws, stripeCustomerId: customerId }, interval, seats)
     res.json({ url })
   } catch (err) {
     console.error('[billing] checkout failed', err)
     res.status(502).json({ error: err instanceof Error ? err.message : 'could not start checkout' })
   }
+})
+
+/* The seats the owner pays for. Fewer than the people in the workspace is
+   allowed: the bill follows the people then, and freed seats are not kept.
+   Answered once Stripe has the new quantity; a refusal puts the old choice
+   back, so the page never shows a bill Stripe is not charging. */
+workspacesRouter.put('/:id/billing/seats', async (req, res) => {
+  const ws = requireWorkspace(req, res, req.params.id, 'owner')
+  if (!ws) return
+  if (!billing.billingEnabled()) return res.status(400).json({ error: 'billing is not configured on this server' })
+  const seats = parseSeats(req.body?.seats)
+  if (seats === null) return res.status(400).json({ error: 'seats must be a whole number from 1 to 500' })
+  try {
+    await onSeatChain(ws, async () => {
+      const before = ws.seatsBought
+      setSeatsBought(ws, seats)
+      try {
+        await syncSeatsNow(ws)
+      } catch (err) {
+        setSeatsBought(ws, before)
+        throw err
+      }
+    })
+  } catch {
+    return res.status(502).json({ error: 'Stripe did not take the seat change — nothing was changed, try again' })
+  }
+  res.json(summaryFor(ws, req.user!.id))
 })
 
 workspacesRouter.post('/:id/billing/portal', async (req, res) => {

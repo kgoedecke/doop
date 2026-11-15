@@ -22,6 +22,7 @@ import { admin } from './admin'
 import { ui } from './ui'
 import { components } from './components'
 import { actions } from './actions'
+import { plans } from './plans'
 
 /** The source catalog, one namespace per area of the app. */
 export const en = {
@@ -49,4 +50,5 @@ export const en = {
   ui,
   components,
   actions,
+  plans,
 }

@@ -1,7 +1,7 @@
 import type { Catalog } from '..'
 
 export const workspace: Catalog['workspace'] = {
-  planActive: 'O plano Team está ativo — boas-vindas',
+  planActive: 'O plano Pro está ativo — boas-vindas',
   checkoutCanceled: 'Checkout cancelado — nada foi cobrado',
   needsPlan: '"{name}" precisa de um plano primeiro.',
   thisWorkspace: 'Este workspace',
@@ -35,7 +35,7 @@ export const workspace: Catalog['workspace'] = {
   canvasCount: { one: '{count} canvas', other: '{count} canvases' },
   selfHostedIncluded: 'Auto-hospedado, incluído',
   noPlanYet: 'Ainda sem plano.',
-  noPlanBody: 'Convidar pessoas e adicionar canvases fica para quando este workspace estiver no Team.',
+  noPlanBody: 'Convidar pessoas e adicionar canvases fica para quando este workspace estiver no Pro.',
   canceledBody: ' Os canvases existentes continuam abertos para todos que estão nele.',
   reactivate: 'Reativar',
   choosePlan: 'Escolher um plano',
@@ -87,11 +87,11 @@ export const workspace: Catalog['workspace'] = {
   upToDate: 'Sincronizado com o Stripe',
   refreshFailed: 'Não foi possível atualizar',
   billingDescription:
-    'O Team é cobrado por assento: cada pessoa no workspace, mensal ou anualmente. Os assentos acompanham a lista de pessoas — adicione alguém e a próxima fatura aumenta, remova e ela diminui.',
+    'O Pro é cobrado por assento: cada pessoa no workspace, mensal ou anualmente. Os assentos acompanham a lista de pessoas — adicione alguém e a próxima fatura aumenta, remova e ela diminui.',
   billingDisabledDescription:
     'A cobrança não está configurada neste servidor. Workspaces estão incluídos no doop auto-hospedado; não há nada a pagar aqui.',
   plan: 'Plano',
-  planTeam: 'Team',
+  planTeam: 'Pro',
   planPersonal: 'Pessoal',
   planSelfHosted: 'Auto-hospedado',
   endsOn: 'termina em {date}',
@@ -106,7 +106,7 @@ export const workspace: Catalog['workspace'] = {
   ends: 'Termina',
   renews: 'Renova',
   manage: 'Gerenciar',
-  reactivateTeam: 'Reativar no Team',
+  reactivateTeam: 'Reativar no Pro',
   opening: 'Abrindo…',
   manageOnStripe: 'Gerenciar cobrança no Stripe',
   refresh: 'Atualizar',
@@ -129,7 +129,7 @@ export const workspace: Catalog['workspace'] = {
   deleteWorkspace: 'Excluir workspace',
   deleteDescription:
     'Cada canvas volta para o espaço pessoal de quem é dono dele — nada é excluído. As pessoas perdem o acesso aos canvases que não são delas.',
-  deleteCancelsTeam: ' A assinatura do Team é cancelada imediatamente.',
+  deleteCancelsTeam: ' A assinatura do Pro é cancelada imediatamente.',
   deleteNamed: 'Excluir “{name}”',
   deleteTitle: 'Excluir “{name}”?',
   deleteConfirmDescription: 'Os canvases voltam aos donos e a assinatura termina agora. Isso não pode ser desfeito.',

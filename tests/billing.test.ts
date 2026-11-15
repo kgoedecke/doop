@@ -1,7 +1,15 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import Stripe from 'stripe'
 import { Client, startServer, type Server } from './harness.ts'
-import { isWorkspaceActive, workspaceStatusFrom, TEAM_SEAT_PRICE, seatPerMonth, formatUsd } from '../shared/billing.ts'
+import {
+  billedSeats,
+  isWorkspaceActive,
+  parseSeats,
+  workspaceStatusFrom,
+  TEAM_SEAT_PRICE,
+  seatPerMonth,
+  formatUsd,
+} from '../shared/billing.ts'
 
 /**
  * Billing-gated workspaces: with Stripe configured a fresh workspace cannot
@@ -31,6 +39,19 @@ describe('plan catalogue', () => {
     expect(seatPerMonth('year')).toBe(1600)
     expect(formatUsd(2000)).toBe('$20')
     expect(formatUsd(1650)).toBe('$16.50')
+  })
+
+  it('bills the seats bought, or the people when there are more of them', () => {
+    expect(billedSeats(5, 2)).toBe(5)
+    expect(billedSeats(2, 5)).toBe(5)
+    expect(billedSeats(1, 0)).toBe(1)
+    expect([parseSeats(3), parseSeats(0), parseSeats(501), parseSeats(2.5), parseSeats('3')]).toEqual([
+      3,
+      null,
+      null,
+      null,
+      null,
+    ])
   })
 
   it('folds Stripe statuses into the product’s', () => {
@@ -93,6 +114,7 @@ describe('workspaces behind Stripe', () => {
   let owner: Client
   let mate: Client
   let workspaceId: string
+  let seatCoId: string
   const t0 = Math.floor(Date.now() / 1000)
 
   beforeAll(async () => {
@@ -174,6 +196,34 @@ describe('workspaces behind Stripe', () => {
     /* the admin runs the people list, not the bill */
     expect((await mate.post(`/api/workspaces/${workspaceId}/billing/checkout`, { interval: 'month' })).status).toBe(403)
     expect((await mate.post(`/api/workspaces/${workspaceId}/billing/portal`)).status).toBe(403)
+  })
+
+  it('the owner picks the seats they pay for; nobody else can, and the pick is checked', async () => {
+    const put = (who: Client, id: string, seats: unknown) =>
+      who.req(`/api/workspaces/${id}/billing/seats`, { method: 'PUT', body: JSON.stringify({ seats }) })
+    /* not paid yet: nothing to tell Stripe, the choice is kept for checkout */
+    const fresh = await (await owner.post('/api/workspaces', { name: 'Seat Co' })).json()
+    seatCoId = fresh.id
+    const res = await put(owner, fresh.id, 10)
+    expect(res.status).toBe(200)
+    expect((await res.json()).seatsBought).toBe(10)
+    expect((await (await owner.get(`/api/workspaces/${fresh.id}`)).json()).seatsBought).toBe(10)
+    expect((await put(owner, fresh.id, 0)).status).toBe(400)
+    expect((await put(owner, fresh.id, 'many')).status).toBe(400)
+    expect((await put(mate, workspaceId, 4)).status).toBe(403)
+    /* a checkout asking for nonsense seats is refused before Stripe is asked */
+    const bad = await owner.post(`/api/workspaces/${fresh.id}/billing/checkout`, { interval: 'month', seats: -2 })
+    expect(bad.status).toBe(400)
+  })
+
+  it('a seat change Stripe refuses is reported and nothing changes', async () => {
+    /* the fake key makes every Stripe call fail, as a refusal would */
+    const res = await owner.req(`/api/workspaces/${workspaceId}/billing/seats`, {
+      method: 'PUT',
+      body: JSON.stringify({ seats: 7 }),
+    })
+    expect(res.status).toBe(502)
+    expect((await (await owner.get(`/api/workspaces/${workspaceId}`)).json()).seatsBought).toBe(1)
   })
 
   it('a canceled subscription freezes growth but keeps the canvases open', async () => {
@@ -260,6 +310,7 @@ describe('workspaces behind Stripe', () => {
     expect(ws.status).toBe('active')
     expect(ws.seats).toBe(3)
     expect(ws.memberCount).toBe(3)
+    expect((await (await owner.get(`/api/workspaces/${seatCoId}`)).json()).seatsBought).toBe(10)
   }, 70_000)
 
   it('an event for an unknown workspace is acknowledged and ignored', async () => {

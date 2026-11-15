@@ -1,8 +1,6 @@
 /** The shell every page repeats: the account menu, the desktop app's update card and the native-app suggestion. */
 export const shell = {
   account: 'Account',
-  teamPlan: 'Team plan',
-  personalPlan: 'Personal plan',
   settings: 'Settings',
   admin: 'Admin',
   helpDocs: 'Help & docs',

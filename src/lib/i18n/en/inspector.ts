@@ -190,7 +190,7 @@ export const inspector = {
   imageUrlProtocol: 'Use an http or https image URL.',
   imageUrlTimeout: 'Image took too long to load. Try another URL.',
   imageUrlLoadFailed: 'Couldn’t load that image. Check the URL and try again.',
-  imageTooLarge: 'Choose an image smaller than 5 MB.',
+  imageTooLarge: 'Choose an image smaller than 100 MB.',
   imageDesignChanged: 'The design changed. Select the image and try again.',
   imageNotEditable: 'The image is no longer editable. Select it and try again.',
   imageReplaceFailed: 'Couldn’t replace the image. Please try again.',

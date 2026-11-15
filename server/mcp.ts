@@ -75,6 +75,7 @@ import {
 import { ESCAPED_HTML_NOTE, looksEscapedHtml } from './escapedHtml.ts'
 import { describeSyncFlow, getSyncFlow } from './ingest.ts'
 import * as assets from './assets.ts'
+import { uploadCap } from './entitlements.ts'
 import * as imageSearch from './imageSearch.ts'
 import * as imageGen from './imageGen.ts'
 import * as backgrounds from './backgrounds.ts'
@@ -1662,7 +1663,7 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
     'upload_asset',
     {
       title: 'Upload an image asset',
-      description: `Upload an image (png/jpg/webp/gif/svg, max 5 MB) and get back a permanent public URL to reference in frame HTML (<img src>, CSS background) — use this instead of inlining data: URIs. Pick ONE input by where the file lives: (1) remote — pass source_url and the server fetches it; (2) LOCAL FILE — pass local_file=true to receive a one-time upload URL and a ready-to-run curl command, run it in your shell, and the curl response JSON contains the permanent url. (3) data — base64, LAST RESORT for tiny files (under ~100 KB) when you cannot run shell commands; larger base64 payloads are slow and corrupt easily. At most ${UPLOADS_PER_MIN} uploads a minute per account, so upload one after another rather than in a parallel burst. Icons from search_icons and photos from search_images are already hosted and need no upload.`,
+      description: `Upload an image (png/jpg/webp/gif/svg, max 5 MB on the Free plan, 100 MB on Pro) and get back a permanent public URL to reference in frame HTML (<img src>, CSS background) — use this instead of inlining data: URIs. Pick ONE input by where the file lives: (1) remote — pass source_url and the server fetches it; (2) LOCAL FILE — pass local_file=true to receive a one-time upload URL and a ready-to-run curl command, run it in your shell, and the curl response JSON contains the permanent url. (3) data — base64, LAST RESORT for tiny files (under ~100 KB) when you cannot run shell commands; larger base64 payloads are slow and corrupt easily. At most ${UPLOADS_PER_MIN} uploads a minute per account, so upload one after another rather than in a parallel burst. Icons from search_icons and photos from search_images are already hosted and need no upload.`,
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
       inputSchema: {
         source_url: z.string().optional().describe('Public http(s) URL to fetch the file from (remote files)'),
@@ -1707,10 +1708,11 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
         )
       }
       try {
+        const cap = uploadCap({ canvasId: canvas_id, userId: ownerId })
         const buf = data
           ? Buffer.from(data.replace(/^data:[^,]*;base64,/, ''), 'base64')
-          : await assets.fetchRemote(source_url!)
-        const asset = await assets.createAsset(buf, { canvasId: canvas_id, ownerId, uploadedBy: agent_name })
+          : await assets.fetchRemote(source_url!, cap.bytes)
+        const asset = await assets.createAsset(buf, { canvasId: canvas_id, ownerId, uploadedBy: agent_name }, cap)
         const url = `${env.BETTER_AUTH_URL}/a/${asset.id}.${asset.ext}`
         const result = text({
           ok: true,

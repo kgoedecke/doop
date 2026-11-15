@@ -603,7 +603,7 @@ export const api = {
     req(`/api/canvases/${canvasId}/references/${refId}`, { method: 'DELETE' }),
   resolveProposal: (canvasId: string, proposalId: string, accept: boolean) =>
     req(`/api/canvases/${canvasId}/proposals/${proposalId}`, { method: 'POST', body: JSON.stringify({ accept }) }),
-  /* raw image bytes -> permanent /a/ URL (5 MB cap, type sniffed server-side) */
+  /* raw image bytes -> permanent /a/ URL (5 MB on Free, 100 MB on Pro; type sniffed server-side) */
   uploadAsset: async (canvasId: string, blob: Blob) => {
     const res = await fetch(`/api/canvases/${canvasId}/assets`, {
       method: 'POST',
@@ -611,7 +611,7 @@ export const api = {
       body: blob,
     })
     if (!res.ok) {
-      if (res.status === 413) throw new Error('image exceeds the 5 MB limit')
+      if (res.status === 413) throw new Error('image exceeds the 100 MB limit')
       const text = await res.text()
       let msg = `${res.status} ${text}`
       try {
@@ -945,6 +945,8 @@ export const api = {
     req<WorkspaceSummary>(`/api/workspaces/${id}`, { method: 'PATCH', body: JSON.stringify({ name }) }),
   setLibraryPublish: (id: string, libraryPublish: LibraryPublishPolicy) =>
     req<WorkspaceSummary>(`/api/workspaces/${id}`, { method: 'PATCH', body: JSON.stringify({ libraryPublish }) }),
+  setWorkspaceSeats: (id: string, seats: number) =>
+    req<WorkspaceSummary>(`/api/workspaces/${id}/billing/seats`, { method: 'PUT', body: JSON.stringify({ seats }) }),
   deleteWorkspace: (id: string) => req(`/api/workspaces/${id}`, { method: 'DELETE' }),
   inviteToWorkspace: (id: string, email: string, role: WorkspaceRole = 'member') =>
     req<WorkspaceInviteResult>(`/api/workspaces/${id}/members`, {
@@ -959,10 +961,11 @@ export const api = {
     req(`/api/workspaces/${id}/invites/${inviteId}`, { method: 'DELETE' }),
   /* billing: the catalogue, and the hosted Stripe pages */
   billingPlans: () => req<PlansResponse>('/api/billing/plans'),
-  workspaceCheckout: (id: string, interval: BillingInterval) =>
+  /** `seats` is how many to pay for; the bill never counts fewer than the members */
+  workspaceCheckout: (id: string, interval: BillingInterval, seats?: number) =>
     req<{ url: string }>(`/api/workspaces/${id}/billing/checkout`, {
       method: 'POST',
-      body: JSON.stringify({ interval }),
+      body: JSON.stringify({ interval, seats }),
     }),
   workspacePortal: (id: string) => req<{ url: string }>(`/api/workspaces/${id}/billing/portal`, { method: 'POST' }),
   syncWorkspaceBilling: (id: string, sessionId?: string) =>

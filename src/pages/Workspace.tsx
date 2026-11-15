@@ -1,14 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { LibraryPublishPolicy, WorkspaceDetail, WorkspaceRole, WorkspaceSummary } from '../../shared/types'
-import { formatUsd, TEAM_SEAT_PRICE, type WorkspaceStatus } from '../../shared/billing'
+import { billedSeats, formatUsd, TEAM_SEAT_PRICE, type WorkspaceStatus } from '../../shared/billing'
 import { navigate } from '../App'
 import { api, errorMessage, paywalledWorkspace } from '../lib/api'
 import { authClient } from '../lib/auth'
 import { cancelLibraryResume, confirmLibraryResume } from '../lib/libraryResume'
+import { takeNameAfterCheckout } from '../lib/upgrade'
 import { posthog } from '../lib/posthog'
 import { cachedWorkspace, fetchWorkspace } from '../lib/workspaceCache'
 import { AppRail, railLayout, workspacePanesFor, type WorkspacePane } from '../components/AppRail'
-import { UpgradeModal } from '../components/WorkspaceModals'
+import { NameWorkspaceModal, UpgradeModal } from '../components/WorkspaceModals'
+import { SeatStepper } from '../components/SeatStepper'
 import { Avatar } from '../components/ui/avatar'
 import { Badge } from '../components/ui/badge'
 import { Button } from '../components/ui/button'
@@ -81,6 +83,8 @@ export function Workspace({ workspaceId }: { workspaceId: string }) {
   const [missing, setMissing] = useState(false)
   const [upgrade, setUpgrade] = useState<string | null>(null)
   const [toast, setToast] = useState<string | null>(null)
+  /* paid for a workspace the upgrade modal named with a placeholder: ask for the real name */
+  const [naming, setNaming] = useState(false)
   /* the checkout round-trip lands here with its outcome in the query; read
      once, then clean the URL in the effect below */
   const [landing] = useState(() => {
@@ -111,7 +115,12 @@ export function Workspace({ workspaceId }: { workspaceId: string }) {
     const seq = ++reloadSeq.current
     fetchWorkspace(workspaceId)
       .then((detail) => {
-        if (seq === reloadSeq.current) setWs(detail)
+        if (seq !== reloadSeq.current) return
+        setWs(detail)
+        /* paid for a workspace the upgrade modal named with a placeholder: ask
+           for the real name the first time it shows as paid, whichever load
+           that is (the checkout return, a reload, Refresh) */
+        if (detail.role === 'owner' && detail.active && detail.plan && takeNameAfterCheckout(detail.id)) setNaming(true)
       })
       .catch(() => {
         if (seq === reloadSeq.current) setMissing(true)
@@ -273,6 +282,16 @@ export function Workspace({ workspaceId }: { workspaceId: string }) {
           )}
         </DashContent>
       </DashMain>
+
+      {naming && ws && (
+        <NameWorkspaceModal
+          workspace={ws}
+          onClose={() => {
+            setNaming(false)
+            reload()
+          }}
+        />
+      )}
 
       {upgrade !== null && (
         <UpgradeModal
@@ -504,7 +523,31 @@ function BillingPane({
 }) {
   const t = useT()
   const [busy, setBusy] = useState(false)
+  /* the seats the owner is about to pay for; null while unchanged */
+  const [seatDraft, setSeatDraft] = useState<number | null>(null)
   const perSeat = ws.interval ? TEAM_SEAT_PRICE[ws.interval] : TEAM_SEAT_PRICE.month
+  const people = Math.max(1, ws.memberCount)
+  /* the stepper edits the minimum the owner pays for; the bill is that or the
+     people, whichever is larger, so a minimum below the people releases it */
+  const minimum = seatDraft ?? ws.seatsBought
+  const billed = billedSeats(minimum, people)
+  const changingSeats = seatDraft !== null && seatDraft !== ws.seatsBought
+
+  async function saveSeats() {
+    if (busy || seatDraft === null) return
+    setBusy(true)
+    try {
+      await api.setWorkspaceSeats(ws.id, seatDraft)
+      posthog.capture('workspace_seats_changed', { workspaceId: ws.id, seats: seatDraft })
+      setSeatDraft(null)
+      onSynced()
+      onToast(t('plans.seatsUpdated'))
+    } catch (caught) {
+      onToast(errorMessage(caught, t('plans.seatsFailed')))
+    } finally {
+      setBusy(false)
+    }
+  }
   const paid = ws.plan === 'team' && ws.status !== 'inactive'
 
   async function portal() {
@@ -572,14 +615,21 @@ function BillingPane({
       {paid && (
         <>
           <CardRow label={t('workspace.seats')}>
+            {isOwner && <SeatStepper value={minimum} min={1} disabled={busy} onChange={setSeatDraft} />}
             <span className="text-copy">
-              {t('workspace.seatsMath', { seats: ws.seats, price: formatUsd(perSeat) })}{' '}
-              <b>{formatUsd(ws.seats * perSeat)}</b>{' '}
+              {t('workspace.seatsMath', { seats: billed, price: formatUsd(perSeat) })}{' '}
+              <b>{formatUsd(billed * perSeat)}</b>{' '}
               {ws.interval === 'year' ? t('workspace.perYear') : t('workspace.perMonth')}
             </span>
-            {ws.seats !== ws.memberCount && (
+            {changingSeats ? (
+              <Button size="sm" variant="primary" onClick={saveSeats} disabled={busy}>
+                {t('plans.updateSeats')}
+              </Button>
+            ) : (
               <span className="text-label text-ink-faint">
-                {t('workspace.seatsCatchUp', { count: ws.memberCount })}
+                {ws.seats !== billed
+                  ? t('workspace.seatsCatchUp', { count: ws.memberCount })
+                  : t('plans.seatsInUse', { count: ws.memberCount, seats: billed })}
               </span>
             )}
           </CardRow>
