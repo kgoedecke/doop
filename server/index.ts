@@ -3060,7 +3060,11 @@ wss.on('connection', (ws, upgradeReq) => {
       }
       const silent = !!(session.session as { impersonatedBy?: string | null }).impersonatedBy
       const prevConn = conns.get(ws)
-      if (prevConn && !prevConn.silent && (prevConn.canvasId !== msg.canvasId || prevConn.presence.clientId !== msg.clientId)) {
+      if (
+        prevConn &&
+        !prevConn.silent &&
+        (prevConn.canvasId !== msg.canvasId || prevConn.presence.clientId !== msg.clientId)
+      ) {
         broadcast(prevConn.canvasId, { type: 'presence:leave', clientId: prevConn.presence.clientId })
       }
       conns.set(ws, { ws, canvasId: msg.canvasId, userId: session.user.id, presence, silent })

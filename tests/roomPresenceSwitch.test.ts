@@ -49,8 +49,7 @@ describe('WebSocket room switching', () => {
         .poll(() =>
           bobMessages.some(
             (m) =>
-              m.type === 'presence:join' &&
-              (m as { presence: { clientId: string } }).presence.clientId === 'alice-tab',
+              m.type === 'presence:join' && (m as { presence: { clientId: string } }).presence.clientId === 'alice-tab',
           ),
         )
         .toBe(true)
@@ -117,8 +116,7 @@ describe('WebSocket room switching', () => {
         .poll(() =>
           bobMessages.some(
             (m) =>
-              m.type === 'presence:join' &&
-              (m as { presence: { clientId: string } }).presence.clientId === 'alice-tab',
+              m.type === 'presence:join' && (m as { presence: { clientId: string } }).presence.clientId === 'alice-tab',
           ),
         )
         .toBe(true)
