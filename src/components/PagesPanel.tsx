@@ -8,6 +8,7 @@ import { ApiError } from '../lib/api'
 import { Button } from './ui/button'
 import { PageIcon, PlusIcon } from './ui/icons'
 import { cn } from '../lib/utils'
+import { clampPagesPx, pagesHeightCss, pagesPctOf, pagesPxAfterKey } from '../lib/pagesSplit'
 import { ContextMenu, ContextMenuTrigger, ContextMenuContent, ContextMenuItem } from './ui/context-menu'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select'
 import { useT } from '@/lib/i18n'
@@ -18,7 +19,15 @@ import { useT } from '@/lib/i18n'
 export const sectionHeading = 'text-[11px] font-normal text-ink-faint'
 const sectionBtn = 'size-5 rounded-[5px] text-ink-faint hover:bg-paper-deep hover:text-ink'
 
-export function PagesPanel({ fill = false }: { fill?: boolean }) {
+export function PagesPanel({
+  pagesPct = null,
+  onPagesPctChange,
+}: {
+  /** the section's share of the rail's height once dragged; null keeps its own height */
+  pagesPct?: number | null
+  /** given in the Layers rail: the section's bottom edge is the handle that sets the share */
+  onPagesPctChange?: (pct: number) => void
+}) {
   const canvas = useStore((s) => s.canvas)
   const activePageId = useStore((s) => s.activePageId)
   const selectedIds = useStore((s) => s.selectedIds)
@@ -301,14 +310,20 @@ export function PagesPanel({ fill = false }: { fill?: boolean }) {
   )
 
   return (
-    <div className={cn('flex flex-none flex-col', fill && 'min-h-0 flex-1')}>
+    <div
+      data-slot="pages-panel"
+      className="relative flex flex-none flex-col"
+      style={pagesPct === null ? undefined : { height: pagesHeightCss(pagesPct) }}
+    >
       <div className={cn('mt-1.5 flex h-6 flex-none items-center justify-between pr-2.5 pl-3.5', sectionHeading)}>
         <span data-slot="page-section-heading" className={sectionHeading}>
           {t('panels.pagesTitle')}
         </span>
         {!readOnly && addPage}
       </div>
-      <div className={cn('overflow-y-auto px-2 pb-1', fill ? 'min-h-0 flex-1' : 'max-h-[30vh]')}>{list}</div>
+      <div className={cn('overflow-y-auto px-2 pb-1', pagesPct === null ? 'max-h-[30vh]' : 'min-h-0 flex-1')}>
+        {list}
+      </div>
       {!readOnly && selectedIds.length > 0 && pages.length > 1 && (
         /* the canvas shortcuts listen on window: ⌫ would delete the frames
            being moved and typed letters would switch tools, so the picker's
@@ -331,6 +346,57 @@ export function PagesPanel({ fill = false }: { fill?: boolean }) {
           </Select>
         </div>
       )}
+      {onPagesPctChange && <PagesSplitHandle onChange={onPagesPctChange} />}
     </div>
   )
+}
+
+/** The Pages section's bottom edge: dragged, or moved with the arrow keys, Home and End. Each step measures the
+ *  section and its rail again, so it starts from what is on screen. The browser releases the pointer's capture
+ *  when the drag ends, which resets the drag. */
+function PagesSplitHandle({ onChange }: { onChange: (pct: number) => void }) {
+  const t = useT()
+  const drag = useRef<{ y: number; pagesPx: number; railPx: number } | null>(null)
+  return (
+    <div
+      role="separator"
+      tabIndex={0}
+      aria-orientation="horizontal"
+      aria-label={t('panels.pagesResize')}
+      data-slot="pages-split"
+      className="absolute inset-x-2 top-full h-1.5 cursor-row-resize touch-none rounded-full focus-visible:bg-ink/20 focus-visible:outline-none"
+      onPointerDown={(e) => {
+        if (e.button !== 0) return
+        e.preventDefault()
+        e.stopPropagation()
+        drag.current = { y: e.clientY, ...measurePages(e.currentTarget) }
+        e.currentTarget.setPointerCapture(e.pointerId)
+      }}
+      onPointerMove={(e) => {
+        const start = drag.current
+        if (!start) return
+        e.stopPropagation()
+        const px = clampPagesPx(start.pagesPx + e.clientY - start.y, start.railPx)
+        onChange(pagesPctOf(px, start.railPx))
+      }}
+      onLostPointerCapture={() => {
+        drag.current = null
+      }}
+      onKeyDown={(e) => {
+        const { pagesPx, railPx } = measurePages(e.currentTarget)
+        const px = pagesPxAfterKey(e.key, pagesPx, railPx)
+        if (px === undefined) return
+        e.preventDefault()
+        e.stopPropagation()
+        onChange(pagesPctOf(px, railPx))
+      }}
+    />
+  )
+}
+
+/** The Pages section and the rail it sits in, both in px. */
+function measurePages(handle: HTMLElement) {
+  const pages = handle.closest<HTMLElement>('[data-slot="pages-panel"]')!
+  const rail = handle.closest<HTMLElement>('[data-slot="panel"]')!
+  return { pagesPx: pages.getBoundingClientRect().height, railPx: rail.getBoundingClientRect().height }
 }

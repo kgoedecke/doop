@@ -14,6 +14,7 @@ import type { ComponentDef } from '../../shared/components'
 import { canEditOpenCanvas, pickedSelectors, useStore } from '../lib/store'
 import { currentPageCanvas, usePageCanvas } from '../lib/pages'
 import { PagesPanel, sectionHeading } from './PagesPanel'
+import { usePagesPct } from '../lib/pagesSplit'
 import { getIdentity } from '../lib/identity'
 import { deleteFramesTracked } from '../lib/history'
 import { api } from '../lib/api'
@@ -258,6 +259,8 @@ export function LayersPanel({
   const setLayersOpen = useStore((s) => s.setLayersOpen)
   const t = useT()
   const [query, setQuery] = useState('')
+  /* the Pages section's share of the rail, once dragged; kept across reloads */
+  const [pagesPct, setPagesPct] = usePagesPct()
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set())
   /* the row being dragged and where it would land; the pointer handlers are
      bound to the window for the length of the press, so they read the rows
@@ -581,7 +584,7 @@ export function LayersPanel({
         <>
           {/* Figma's order: the pages at the top, the frames of the active page
           under them, the search at the bottom within thumb's reach */}
-          <PagesPanel />
+          <PagesPanel pagesPct={pagesPct} onPagesPctChange={setPagesPct} />
           <div className={cn('mt-1.5 flex h-6 flex-none items-center justify-between pr-2.5 pl-3.5', sectionHeading)}>
             <span data-slot="frame-section-heading" className={sectionHeading}>
               {t('panels.layersTitle')}

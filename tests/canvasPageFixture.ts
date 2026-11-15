@@ -1,10 +1,10 @@
 import type { Page } from 'puppeteer-core'
-import type { Frame } from '../shared/types'
+import type { CanvasPageInfo, Frame } from '../shared/types'
 import { fixtureUrl } from './browser'
 
 declare global {
   interface Window {
-    canvasPageHarness: { seed: (frames: Frame[]) => void }
+    canvasPageHarness: { seed: (frames: Frame[], pages?: CanvasPageInfo[]) => void }
   }
 }
 
@@ -18,11 +18,16 @@ export function canvasFrame(frame: Pick<Frame, 'id' | 'name' | 'x' | 'y' | 'widt
  * whose subject is what the browser does with the page: the room's socket
  * never opens, the session is a signed-in person, and every other API call is
  * answered with an empty object. `search` is the page URL's query, as a deep
- * link carries it.
+ * link carries it. `pages`, when given, are the canvas's pages.
  */
-export async function openCanvasPage(page: Page, frames: Frame[], search = ''): Promise<void> {
+export async function openCanvasPage(
+  page: Page,
+  frames: Frame[],
+  search = '',
+  pages?: CanvasPageInfo[],
+): Promise<void> {
   await prepareCanvasPage(page)
-  await showCanvasPage(page, frames, search)
+  await showCanvasPage(page, frames, search, pages)
 }
 
 /** The stubs alone, for a test that has something to do before the page loads. */
@@ -51,9 +56,14 @@ export async function prepareCanvasPage(page: Page): Promise<void> {
 }
 
 /** Load the fixture, or load it again, on a prepared page. */
-export async function showCanvasPage(page: Page, frames: Frame[], search = ''): Promise<void> {
+export async function showCanvasPage(
+  page: Page,
+  frames: Frame[],
+  search = '',
+  pages?: CanvasPageInfo[],
+): Promise<void> {
   await page.goto(fixtureUrl(`canvasPage.html${search}`))
   await page.waitForFunction(() => !!window.canvasPageHarness && !!document.querySelector('.stage'))
-  await page.evaluate((frames) => window.canvasPageHarness.seed(frames), frames)
+  await page.evaluate((frames, pages) => window.canvasPageHarness.seed(frames, pages), frames, pages)
   await page.waitForSelector('[data-frame-title]')
 }
