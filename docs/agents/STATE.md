@@ -134,10 +134,11 @@ conflict with every sync, so they are not made here.
 
 ## T3 integration
 
-Built as conventions in the shared skill (`~/.agents/skills/doop/SKILL.md`, "Working from a T3 thread"), not code: one
-canvas per T3 thread named `T3: <thread title>`, the canvas link returned in the thread, screenshots only when
-asked and cached under `G:\Tools\Cache\doop`, lite mode by default. Anything needing code stays in
-"Ideas (later, optional)".
+Built as conventions in the shared skill (`~/.agents/skills/doop/SKILL.md`, "Working from a T3 thread" and
+"Organizing canvases"), not code: one canvas per project and feature named `<Project> – <Feature>`, reused across runs;
+its link posted to the requesting thread as soon as it exists; frames `<Screen> / <State> / v<N>` with a `Tokens` frame
+first and superseded versions moved to `Archive`; screenshots only when asked, cached under `G:\Tools\Cache\doop`;
+lite mode by default. Anything needing code stays in "Ideas (later, optional)".
 
 ## Our improvements (ranked, not started; Arctic picks)
 
