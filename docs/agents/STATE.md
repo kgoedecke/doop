@@ -155,6 +155,10 @@ T3 integration. Logged only; do not build.
 
 - Post links and frame screenshots from a canvas back to the originating T3 thread.
 - One canvas per T3 thread, named after the thread, created on first design request.
+- Paper video review (youtube pGhRBJZRMvk, 2026-11-15): YouTube blocked captions (HTTP 429), so only the description and
+  chapters were read (design the whole app in one file first, one decision applied to every screen, a design system,
+  mockups as the spec). No Paper feature Doop lacks was identified from that; Doop already has tokens, components,
+  `/styleguide.md`, prototypes and MCP. Re-check with a transcript if Arctic supplies one.
 - A "lite mode": no Chromium, no screenshots, minimal memory, for a RAM-constrained machine.
 
 ## Touched upstream files
