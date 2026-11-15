@@ -12,3 +12,6 @@ stays untouched so syncs merge cleanly; everything fork-specific lives in this f
   cleanly.
 - Fork state, upstream PR verdicts and the ranked improvements list: [`docs/agents/STATE.md`](docs/agents/STATE.md).
 - Rules for agents working here: [`AGENTS.md`](AGENTS.md).
+
+Fork prerequisites for the sync workflow: Issues enabled on the fork (the workflow opens and closes one issue), and
+"Allow GitHub Actions to create and approve pull requests" turned on under Settings, Actions, General.
