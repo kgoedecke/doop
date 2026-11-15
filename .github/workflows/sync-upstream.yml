@@ -40,15 +40,23 @@ concurrency:
 env:
   BASE_BRANCH: ${{ inputs.branch || 'main' }}
   UPSTREAM_URL: https://github.com/kgoedecke/doop.git
-  SYNC_BRANCH: sync/upstream
-  CONFLICT_ISSUE_TITLE: 'Upstream sync blocked by merge conflicts'
+  # A scratch run (branch input other than main) gets its own bot branch and issue, so it can
+  # never close or overwrite what the production run opened.
+  SYNC_BRANCH: ${{ (inputs.branch || 'main') == 'main' && 'sync/upstream' || format('sync/upstream-{0}', inputs.branch) }}
+  CONFLICT_ISSUE_TITLE: ${{ (inputs.branch || 'main') == 'main' && 'Upstream sync blocked by merge conflicts' || format('Upstream sync blocked by merge conflicts ({0})', inputs.branch) }}
   GH_TOKEN: ${{ github.token }}
+  # Adding the upstream remote makes gh resolve the fork's parent; always target this repo.
+  GH_REPO: ${{ github.repository }}
 
 jobs:
   sync:
     if: github.repository != 'kgoedecke/doop'
     runs-on: ubuntu-latest
     timeout-minutes: 90
+    defaults:
+      run:
+        # Explicit bash runs with -eo pipefail, so `cmd | tee log` keeps cmd's exit code.
+        shell: bash
     steps:
       - uses: actions/checkout@v4
         with:
@@ -156,7 +164,7 @@ jobs:
             if [ -n "$pr" ]; then
               gh pr close "$pr" --delete-branch --comment "Superseded: $1 (run $RUN_URL)."
             fi
-            issue=$(gh issue list --state open --search "in:title \"$CONFLICT_ISSUE_TITLE\"" --json number --jq '.[0].number // empty')
+            issue=$(gh issue list --state open --limit 100 --json number,title --jq 'map(select(.title == env.CONFLICT_ISSUE_TITLE))[0].number // empty')
             if [ -n "$issue" ]; then
               gh issue close "$issue" --comment "Resolved: $1 (run $RUN_URL)."
             fi
@@ -187,7 +195,7 @@ jobs:
               echo '```'
               echo "</details>"
             } > "$RUNNER_TEMP/body.md"
-            issue=$(gh issue list --state open --search "in:title \"$CONFLICT_ISSUE_TITLE\"" --json number --jq '.[0].number // empty')
+            issue=$(gh issue list --state open --limit 100 --json number,title --jq 'map(select(.title == env.CONFLICT_ISSUE_TITLE))[0].number // empty')
             if [ -n "$issue" ]; then
               gh issue edit "$issue" --body-file "$RUNNER_TEMP/body.md"
               echo "Updated conflict issue #$issue." | tee -a "$GITHUB_STEP_SUMMARY"
@@ -235,8 +243,9 @@ jobs:
 
           pr=$(gh pr list --head "$SYNC_BRANCH" --state open --json number --jq '.[0].number // empty')
           git fetch --no-tags origin "$SYNC_BRANCH" 2>/dev/null || true
-          if [ -n "$pr" ] && git rev-parse -q --verify FETCH_HEAD >/dev/null && git merge-base --is-ancestor upstream/main FETCH_HEAD; then
-            echo "Sync PR #$pr already covers upstream $SHORT; nothing to do." | tee -a "$GITHUB_STEP_SUMMARY"
+          # The parked candidate is current only if it holds both today's upstream and today's base tip.
+          if [ -n "$pr" ] && git rev-parse -q --verify FETCH_HEAD >/dev/null && git merge-base --is-ancestor upstream/main FETCH_HEAD && git merge-base --is-ancestor HEAD^1 FETCH_HEAD; then
+            echo "Sync PR #$pr already covers upstream $SHORT and the current $BASE_BRANCH; nothing to do." | tee -a "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
           git push --force origin "HEAD:refs/heads/$SYNC_BRANCH"
