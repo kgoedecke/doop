@@ -7,6 +7,7 @@ import { t, type PlainMessageKey } from '../i18n'
 import { useStore } from '../store'
 import { currentMe, offersUpgrade } from '../me'
 import { openUpgrade } from '../upgrade'
+import { offersFeedback, openFeedback } from '../feedback'
 import { currentPageCanvas } from '../pages'
 import { readingOrder } from '../../../shared/frameOrder'
 import { redo, undo } from '../history'
@@ -1150,6 +1151,16 @@ export const ACTIONS: readonly CanvasAction[] = [
     menu: 'help',
     section: 1,
     run: () => h()?.contactSupport(),
+  },
+  {
+    /* a short note to the Doop team, where the server has an inbox for it */
+    id: 'feedback',
+    label: 'actions.sendFeedback',
+    menu: 'help',
+    section: 1,
+    enabled: () => !h()?.guest && offersFeedback(currentMe()),
+    hideWhenDisabled: true,
+    run: () => openFeedback(),
   },
   {
     /* the plans, from the editor's menu and the ⌘K palette */

@@ -25,8 +25,19 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from './ui/dropdown-menu'
-import { DesktopIcon, ExportIcon, GearIcon, HelpIcon, LogOutIcon, MailIcon, RocketIcon, ShieldIcon } from './ui/icons'
+import {
+  DesktopIcon,
+  ExportIcon,
+  GearIcon,
+  HelpIcon,
+  LogOutIcon,
+  MailIcon,
+  MegaphoneIcon,
+  RocketIcon,
+  ShieldIcon,
+} from './ui/icons'
 import { openUpgrade } from '../lib/upgrade'
+import { offersFeedback, openFeedback } from '../lib/feedback'
 import { PRIORITY_SUPPORT } from '../../shared/billing'
 import { DOWNLOAD_URL, WEBSITE_URL } from '../lib/siteLinks'
 
@@ -135,6 +146,11 @@ export function AccountMenu({
             <HelpIcon size="rail" /> {t('shell.helpDocs')}
           </a>
         </DropdownMenuItem>
+        {offersFeedback(me) && (
+          <DropdownMenuItem onSelect={openFeedback}>
+            <MegaphoneIcon size="rail" /> {t('shell.sendFeedback')}
+          </DropdownMenuItem>
+        )}
         {/* new tabs, which the desktop shell hands to the system browser
             (initDesktopShell); the desktop app has nothing to download */}
         {!isDesktopShell() && (

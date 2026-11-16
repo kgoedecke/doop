@@ -21,6 +21,7 @@ import { AutomationEditor } from './pages/AutomationEditor'
 import { Integrations } from './pages/Integrations'
 import { Workspace } from './pages/Workspace'
 import { UpgradeHost } from './components/UpgradeHost'
+import { FeedbackHost } from './components/FeedbackModal'
 import { authClient } from './lib/auth'
 import { useStore } from './lib/store'
 import { setName } from './lib/identity'
@@ -231,6 +232,7 @@ export function App() {
     <>
       {screen}
       <UpgradeHost />
+      <FeedbackHost />
     </>
   )
 

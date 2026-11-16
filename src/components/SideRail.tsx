@@ -5,7 +5,18 @@ import { navigate } from '../App'
 import { cn } from '@/lib/utils'
 import { Tooltip } from './ui/tooltip'
 import { Toolbar, ToolbarButton, ToolbarControl, ToolbarDot } from './ui/toolbar'
-import { BookOpenIcon, CommentIcon, GearIcon, HelpIcon, PulseIcon, SlidersIcon, SparkIcon } from './ui/icons'
+import { offersFeedback, openFeedback } from '../lib/feedback'
+import { currentMe } from '../lib/me'
+import {
+  BookOpenIcon,
+  CommentIcon,
+  GearIcon,
+  HelpIcon,
+  MegaphoneIcon,
+  PulseIcon,
+  SlidersIcon,
+  SparkIcon,
+} from './ui/icons'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from './ui/dropdown-menu'
 import { openSupportChat } from '../lib/posthog'
 import { PresenceFace } from './PeerAvatars'
@@ -111,6 +122,12 @@ export function SideRail({
             <DropdownMenuItem onSelect={() => openSupportChat()}>
               <CommentIcon /> {t('canvas.contactSupport')}
             </DropdownMenuItem>
+            {/* read when the menu opens, by which time /api/me has answered */}
+            {!guest && offersFeedback(currentMe()) && (
+              <DropdownMenuItem onSelect={openFeedback}>
+                <MegaphoneIcon /> {t('shell.sendFeedback')}
+              </DropdownMenuItem>
+            )}
           </DropdownMenuContent>
         </DropdownMenu>
         {!guest && (

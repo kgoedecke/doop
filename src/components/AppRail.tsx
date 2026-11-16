@@ -12,6 +12,7 @@ import { AgentTile } from './AgentIcon'
 import { AccountMenu } from './DashShell'
 import { offersUpgrade, useMe } from '../lib/me'
 import { openUpgrade } from '../lib/upgrade'
+import { offersFeedback, openFeedback } from '../lib/feedback'
 import { CanvasSearchModal } from './CanvasSearchModal'
 import { ConnectModal } from './ConnectModal'
 import { NativeAppCard } from './NativeAppPromo'
@@ -39,6 +40,7 @@ import {
   UsersIcon,
   WebIcon,
   WorkflowIcon,
+  MegaphoneIcon,
   RocketIcon,
 } from './ui/icons'
 
@@ -128,6 +130,7 @@ export function AppRail({
   const { data: session } = authClient.useSession()
   const me = useMe(session?.user.id)
   const offerUpgrade = offersUpgrade(me)
+  const offerFeedback = offersFeedback(me)
   const [own, setOwn] = useState<RailLists | null>(() => lastLists)
   const needsOwn = canvases === undefined || workspaces === undefined
   useEffect(() => {
@@ -150,6 +153,10 @@ export function AppRail({
   const upgrade = () => {
     setDrawer(false)
     openUpgrade({ source: 'rail' })
+  }
+  const feedback = () => {
+    setDrawer(false)
+    openFeedback()
   }
   const setMounted = useRailDrawer((s) => s.setMounted)
   /* tells DashHeader a rail is here to open; before paint, so the phone's
@@ -373,6 +380,11 @@ export function AppRail({
         </>
       ) : null}
       <div className="mt-auto flex flex-col items-center gap-2 pt-4">
+        {offerFeedback && (
+          <IconButton aria-label={t('shell.sendFeedback')} title={t('shell.sendFeedback')} onClick={feedback}>
+            <MegaphoneIcon size="rail" />
+          </IconButton>
+        )}
         {offerUpgrade && (
           <IconButton aria-label={t('plans.upgradeToPro')} title={t('plans.upgradeToPro')} onClick={upgrade}>
             <RocketIcon size="rail" className="text-brand" />
@@ -566,6 +578,11 @@ export function AppRail({
           leaves it to the App Store sheet */}
       <div className="mt-auto flex flex-col pt-4">
         {!inDrawer && <NativeAppCard className="mb-3" />}
+        {offerFeedback && (
+          <DashNavItem density="rail" className="mb-3" icon={<MegaphoneIcon size="rail" />} onClick={feedback}>
+            {t('shell.feedback')}
+          </DashNavItem>
+        )}
         {/* the one way to Pro that is always in view: people looked for it
             and found only "Create workspace" */}
         {offerUpgrade && (

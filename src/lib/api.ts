@@ -9,6 +9,7 @@ import type { CustomProviderConfig, CustomProviderKind } from '../../shared/cust
 import type { NotificationPrefs, NotificationSettings } from '../../shared/notifications'
 import type { WebhookDeliveryResult, WebhookEventType, WebhookInfo } from '../../shared/webhooks'
 import type { AgentFeedbackKind, AgentFeedbackReport } from '../../shared/agentFeedback'
+import type { ProductFeedbackInput } from '../../shared/productFeedback'
 import type {
   ActivityItem,
   Canvas,
@@ -512,6 +513,8 @@ export const api = {
   notificationSettings: () => req<NotificationSettings>('/api/notifications'),
   setNotificationPrefs: (prefs: NotificationPrefs) =>
     req<NotificationSettings>('/api/notifications', { method: 'PUT', body: JSON.stringify(prefs) }),
+  sendProductFeedback: (feedback: ProductFeedbackInput) =>
+    req<{ ok: true }>('/api/product-feedback', { method: 'POST', body: JSON.stringify(feedback) }),
   imageDescriptions: () => req<ImageDescriptionPreference>('/api/image-descriptions'),
   setImageDescriptions: (mode: ImageDescriptionMode) =>
     req<ImageDescriptionPreference>('/api/image-descriptions', { method: 'PUT', body: JSON.stringify({ mode }) }),

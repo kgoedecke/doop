@@ -146,6 +146,7 @@ export const actions = {
   keyboardShortcuts: 'Keyboard shortcuts',
   docs: 'Docs',
   customerSupport: 'Customer support',
+  sendFeedback: 'Send feedback…',
   upgradeToPro: 'Upgrade to Pro…',
   shortcutsSearch: 'Search shortcuts',
   shortcutsEmpty: 'No shortcut matches “{query}”',
