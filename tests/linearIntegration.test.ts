@@ -94,7 +94,13 @@ it('offers read-only MCP tools with no credential inputs and refuses an ownerles
     const result = await client.callTool({ name: 'get_linear_issue', arguments: { id: 'ENG-123' } })
     expect(result.isError).toBe(true)
     expect(JSON.stringify(result)).toContain('Connect Linear')
-    expect(client.getInstructions()).toContain('list_linear_issues')
+    /* integration and library lines live in the main guide, not the handshake's short instructions */
+    const guide = (
+      (await client.callTool({ name: 'get_guide', arguments: { topic: 'doop-instructions' } })) as {
+        content: { text: string }[]
+      }
+    ).content[0]!.text
+    expect(guide).toContain('list_linear_issues')
   } finally {
     await client.close()
     await mcp.close()
