@@ -53,6 +53,11 @@ export interface ComponentLibrary {
   name: string
   /** a library the canvas's workspace has published, rather than a canvas to copy from */
   library?: boolean
+  /** a canvas to copy from: when it was last edited, the frame Home shows for it,
+   *  and whether someone else owns it */
+  updatedAt?: number
+  previewFrameId?: string
+  shared?: boolean
   components: {
     id: string
     name: string

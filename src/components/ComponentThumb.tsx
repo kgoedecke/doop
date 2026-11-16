@@ -22,16 +22,21 @@ export interface PreviewSheet {
   height: number
 }
 
-/** A component's sheet in an inert iframe: no scripts, no clicks, scaled to the
- *  card. `sheetKey` names what is drawn, so a new revision asks again. */
+/** A component's sheet in an inert iframe: no scripts, no clicks, fitted into a
+ *  well of a fixed `height` and centred, so a list of them never moves while the
+ *  sheets load (the well is there, empty, from the first frame). `sheetKey` names
+ *  what is drawn, so a new revision asks again. */
 export function ComponentThumb({
   title,
   sheetKey,
   load,
+  height = 96,
 }: {
   title: string
   sheetKey: string
   load: () => Promise<PreviewSheet>
+  /** the well's height in px; the sheet is scaled down to fit inside it */
+  height?: number
 }) {
   const [sheet, setSheet] = useState<({ key: string } & PreviewSheet) | null>(null)
   /* the panel is resizable, so the sheet scales to the card it is in */
@@ -62,22 +67,28 @@ export function ComponentThumb({
     }
   }, [sheetKey])
   const ready = sheet?.key === sheetKey && boxWidth > 0
-  const scale = ready ? boxWidth / sheet.width : 1
+  /* contain: the whole sheet shows, never wider than the well nor taller */
+  const scale = ready ? Math.min(boxWidth / sheet.width, height / sheet.height) : 1
   return (
-    <div ref={box} className="w-full">
-      {ready ? (
-        <div className="overflow-hidden rounded-row bg-surface shadow-ring" style={{ height: sheet.height * scale }}>
-          <iframe
-            title={title}
-            sandbox=""
-            srcDoc={sheet.html}
-            tabIndex={-1}
-            className="pointer-events-none origin-top-left border-0"
-            style={{ width: sheet.width, height: sheet.height, transform: `scale(${scale})` }}
-          />
-        </div>
-      ) : (
-        <div className="h-16 rounded-row bg-paper-deep" />
+    <div
+      ref={box}
+      className="relative w-full overflow-hidden rounded-row bg-paper-deep shadow-ring"
+      style={{ height }}
+      data-component-thumb={ready ? 'ready' : 'loading'}
+    >
+      {ready && (
+        <iframe
+          title={title}
+          sandbox=""
+          srcDoc={sheet.html}
+          tabIndex={-1}
+          className="pointer-events-none absolute top-1/2 left-1/2 origin-center border-0 bg-surface"
+          style={{
+            width: sheet.width,
+            height: sheet.height,
+            transform: `translate(-50%, -50%) scale(${scale})`,
+          }}
+        />
       )}
     </div>
   )

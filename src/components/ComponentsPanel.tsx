@@ -7,6 +7,7 @@ import { useCanvasLibrary } from '../lib/library'
 import { useLibraryResume } from '../lib/libraryResume'
 import { cn } from '@/lib/utils'
 import { canEditOpenCanvas, useStore } from '../lib/store'
+import { ImportCanvasList, ImportComponentsModal } from './ComponentImport'
 import { ComponentThumb, useTokenStamp } from './ComponentThumb'
 import { LibraryNotices, LibrarySection, LibraryUpgradeFlow, PublishLibraryDialog } from './LibrarySection'
 import { ConfirmDialog } from './ui/alert-dialog'
@@ -75,7 +76,10 @@ export function ComponentsPanel() {
     onPublish: (only) => setPublishing(only ? { only } : {}),
   })
   const [query, setQuery] = useState('')
+  /* importing: the panel lists the other canvases, and one picked opens its components */
+  const [browsing, setBrowsing] = useState(false)
   const [libraries, setLibraries] = useState<ComponentLibrary[] | null>(null)
+  const [picking, setPicking] = useState<ComponentLibrary | null>(null)
   const [confirmDelete, setConfirmDelete] = useState<ComponentDef | null>(null)
   const [renaming, setRenaming] = useState<string | null>(null)
   /* Rename picked from the menu opens the field once the menu has closed, in
@@ -103,11 +107,35 @@ export function ComponentsPanel() {
       ...(def ? { only: def.id } : {}),
     })
   }
-  const browse = () =>
+  const browse = () => {
+    setBrowsing(true)
+    setLibraries(null)
     api
       .componentLibraries(canvasId)
       .then((all) => setLibraries(all.filter((library) => !library.library)))
-      .catch(console.error)
+      .catch((error: unknown) => {
+        console.error(error)
+        setLibraries([])
+      })
+  }
+
+  if (browsing)
+    return (
+      <>
+        <ImportCanvasList sources={libraries} onBack={() => setBrowsing(false)} onPick={setPicking} />
+        {picking && (
+          <ImportComponentsModal
+            canvasId={canvasId}
+            source={picking}
+            onBack={() => setPicking(null)}
+            onDone={() => {
+              setPicking(null)
+              setBrowsing(false)
+            }}
+          />
+        )}
+      </>
+    )
 
   return (
     <>
@@ -117,37 +145,10 @@ export function ComponentsPanel() {
       >
         <LibraryNotices canvasId={canvasId} canEdit={canEdit} status={status} onPublish={() => share()} />
         {canEdit && (
-          <div className="flex flex-col gap-1.5 border-b border-line-soft pb-2.5">
-            <div className="flex flex-col gap-1.5">
-              <Button size="sm" onClick={() => void browse()}>
-                {t('components.importFromCanvas')}
-              </Button>
-            </div>
-            {libraries?.length === 0 && <p className="text-caption text-ink-soft">{t('components.noLibraries')}</p>}
-            {libraries?.map((library) => (
-              <div key={library.id} className="flex flex-col gap-0.5">
-                <span className="text-caption text-ink-soft">{library.name}</span>
-                {library.components.map((entry) => (
-                  <Button
-                    key={entry.id}
-                    size="inline"
-                    variant="link"
-                    onClick={() => {
-                      api
-                        .importComponent(canvasId, library.id, entry.id)
-                        .then(() => useStore.getState().pushNotice(t('components.imported', { name: entry.name })))
-                        .catch((error: unknown) =>
-                          useStore
-                            .getState()
-                            .pushNotice(error instanceof Error ? error.message : t('components.importFailed')),
-                        )
-                    }}
-                  >
-                    {entry.name}
-                  </Button>
-                ))}
-              </div>
-            ))}
+          <div className="flex flex-col border-b border-line-soft pb-2.5">
+            <Button size="sm" onClick={browse}>
+              {t('components.importFromCanvas')}
+            </Button>
           </div>
         )}
         {shown.length === 0 && (

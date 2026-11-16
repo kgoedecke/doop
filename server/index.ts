@@ -2485,13 +2485,19 @@ app.get('/api/canvases/:id/components', (req, res) => {
 
 /* what this canvas can take components from: its workspace's published libraries
    first (`library`, read from their snapshots), then every other canvas this
-   person can read that holds components, as a linked copy. Importing takes edit,
-   and this walks every canvas the person can read, so a viewer gets no such scan */
+   person can read, newest edit first, as a linked copy. A canvas with no
+   components is listed too (the panel shows it greyed), so the list reads like
+   Home. Importing takes edit, and this walks every canvas the person can read,
+   so a viewer gets no such scan */
 app.get('/api/canvases/:id/component-libraries', (req, res) => {
   const canvas = requireCanvas(req, res, req.params.id, 'edit')
   if (!canvas) return
   const shared = librariesForCanvas(canvas)
   const sharedIds = new Set(shared.map((library) => library.canvasId))
+  const others = workspaces
+    .canvasesFor(req.user!.id)
+    .filter((meta) => meta.id !== canvas.id && !sharedIds.has(meta.id))
+    .sort((a, b) => b.updatedAt - a.updatedAt)
   res.json([
     ...shared.map((library) => ({
       id: library.canvasId,
@@ -2499,14 +2505,17 @@ app.get('/api/canvases/:id/component-libraries', (req, res) => {
       library: true,
       components: library.components.map((entry) => ({ ...libraryEntry(entry), instances: 0 })),
     })),
-    ...workspaces.canvasesFor(req.user!.id).flatMap((meta) => {
+    ...others.flatMap((meta) => {
       const other = store.getCanvas(meta.id)
-      if (!other || other.id === canvas.id || sharedIds.has(other.id) || !other.components?.length) return []
+      if (!other) return []
       return [
         {
           id: other.id,
           name: other.name,
-          components: other.components.map((def) => ({ ...importableEntry(def), instances: 0 })),
+          updatedAt: meta.updatedAt,
+          ...(meta.previewFrameId ? { previewFrameId: meta.previewFrameId } : {}),
+          ...(meta.shared ? { shared: true } : {}),
+          components: activeComponents(other.components).map((def) => ({ ...importableEntry(def), instances: 0 })),
         },
       ]
     }),
