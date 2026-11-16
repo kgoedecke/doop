@@ -40,7 +40,7 @@ import * as workspaces from './workspaces.ts'
 import { auth, getUserName, isBanned } from './auth.ts'
 import { capture, captureThrottled } from './analytics.ts'
 import { captureFeature, captureTokenResults } from './featureEvents.ts'
-import { renderFrame } from './screenshot.ts'
+import { inspectFrame, renderFrame } from './screenshot.ts'
 import { imagesForFrames } from './assets.ts'
 import type { FrameImage } from '../shared/imageDescriptions.ts'
 import { renderedHeight } from './renderLimits.ts'
@@ -2311,6 +2311,40 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
         }
       } catch (e) {
         return err(e instanceof Error ? e.message : 'render failed')
+      }
+    },
+  )
+
+  server.registerTool(
+    'inspect_frame',
+    {
+      title: 'Inspect a rendered frame',
+      description:
+        "Render a frame and read it as data rather than pixels: the design in use (colours, backgrounds, fonts, sizes, radii, shadows, CSS variables), an outline of its key elements with text, box (design px) and computed style, and `problems`: content past the frame's edge, text cut off by its box, and text or controls overlapping. Problems are candidates to check against the screenshot: a deliberate overlap (stacked avatars, a label on a photo) or a clipped preview is fine as it is. Pass selectors to report on those elements instead of the automatic outline (a data-doop-id, a class, any CSS selector). Use it with get_frame_screenshot to pin down what looks wrong, and before editing a large frame.",
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      inputSchema: {
+        frame_id: z.string(),
+        selectors: z
+          .array(z.string())
+          .max(20)
+          .optional()
+          .describe('CSS selectors to report on (up to 20 matches each) instead of the automatic outline'),
+        agent_name: agentName.optional(),
+      },
+    },
+    async ({ frame_id, selectors, agent_name }) => {
+      const f = frameFor(frame_id, 'view')
+      if (!f) return noFrame(frame_id)
+      arrive(f.canvasId, agent_name)
+      try {
+        const inspection = await inspectFrame({ ...f }, { selectors })
+        return withFeedbackNotice(
+          text({ ...inspection, approvalStatus: f.approval?.status ?? 'draft' }),
+          f.canvasId,
+          agent_name ? actorFrom(agent_name) : undefined,
+        )
+      } catch (e) {
+        return err(e instanceof Error ? e.message : 'inspection failed')
       }
     },
   )

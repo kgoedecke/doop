@@ -1224,10 +1224,17 @@ const TOOLS: Anthropic.Tool[] = [
   {
     name: 'inspect_frame',
     description:
-      'Inspect the rendered page without relying on class names. Returns a compact semantic element outline, visible text, geometry, computed colors, typography, radii, shadows, and CSS variables. Use this before working with large frames and for cross-frame visual references.',
+      "Inspect the rendered page without relying on class names. Returns a compact semantic element outline, visible text, geometry, computed colors, typography, radii, shadows, and CSS variables, plus `problems`: content past the frame's edge, text cut off by its box, and text or controls overlapping (candidates to check against the screenshot; a deliberate overlap is fine). Pass selectors to report on those elements instead of the automatic outline. Use this before working with large frames, for cross-frame visual references and to pin down layout faults.",
     input_schema: {
       type: 'object',
-      properties: { frame_id: { type: 'string' } },
+      properties: {
+        frame_id: { type: 'string' },
+        selectors: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'CSS selectors to report on (up to 20 matches each) instead of the automatic outline',
+        },
+      },
       required: ['frame_id'],
     },
   },
@@ -1955,7 +1962,9 @@ async function runResidentTool(
       case 'inspect_frame': {
         const f = store.getFrame(input.frame_id)
         if (!f || f.canvasId !== canvasId) return fail('frame not found on this canvas')
-        const inspection = await inspectFrame(f)
+        const asked = (input as Record<string, unknown>).selectors
+        const selectors = Array.isArray(asked) ? asked.filter((x): x is string => typeof x === 'string') : undefined
+        const inspection = await inspectFrame(f, { selectors })
         return ok(
           JSON.stringify({
             ...inspection,
