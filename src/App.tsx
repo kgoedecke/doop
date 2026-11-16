@@ -166,8 +166,7 @@ export function App() {
      player stays behind sign-in. */
   if (!session && canvasId && !path.includes('/proto') && !signInRequired && !guestAuth)
     return (
-      <>
-        <ShellDragBar />
+      <ShellDragBar>
         <CanvasPage
           canvasId={canvasId}
           key={canvasId}
@@ -175,7 +174,7 @@ export function App() {
           onSignUp={() => setGuestAuth('signup')}
           onSignIn={() => setGuestAuth('signin')}
         />
-      </>
+      </ShellDragBar>
     )
 
   /* signed out: every path lands on the sign-in form. The marketing site is

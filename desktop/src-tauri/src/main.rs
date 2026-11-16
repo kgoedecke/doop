@@ -10,6 +10,13 @@
 // only marks the page as desktop; opening links in the system browser goes
 // through the opener plugin, granted in capabilities/default.json.
 //
+// Windows opens with the native frame, and the page drops it itself
+// (set_decorations, granted in capabilities/default.json) and draws the
+// caption buttons at the end of the tab strip (src/lib/windowFrame.ts). The
+// page rather than the shell decides because the two ship apart: a server
+// running an older app never drops the frame, so the window always keeps a
+// way to be closed.
+//
 // Because tabs live in the page, the macOS menu is built here rather than
 // taken from Tauri's default: that one binds Cmd+W to "Close Window", which
 // on a single-window app closes the whole app. Ours binds Cmd+W to "Close
