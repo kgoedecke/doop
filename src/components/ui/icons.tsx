@@ -139,6 +139,8 @@ import {
   Ruler,
   Space,
   ZoomIn,
+  Rocket,
+  Mail,
 } from 'lucide-react'
 
 type SvgProps = Omit<SVGProps<SVGSVGElement>, 'ref'>
@@ -388,4 +390,7 @@ export const HotspotIcon = icon(SquareMousePointer)
 export const MessageSquareIcon = icon(MessageSquare)
 /** draft a page: a page skeleton */
 export const LayoutTemplateIcon = icon(LayoutTemplate)
-/** the ⌘ key, in shortcut hints */
+
+/* the plan and upgrade surfaces */
+export const RocketIcon = icon(Rocket)
+export const MailIcon = icon(Mail)

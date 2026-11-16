@@ -72,8 +72,8 @@
   like an `/a/` asset (nosniff, open CORS, a script-free CSP on SVG; photos immutable). Hotlinks to
   `api.iconify.design` rendered blank in screenshots on and off, since the hosted renderer fetched
   them itself; the renderer (`loadFrameInto`) also points a frame's existing Iconify and Pexels
-  hotlinks at Doop before loading it, and Figma export reads both in-process (`hostedIconSvg`,
-  `hostedPhoto`) since a private `BETTER_AUTH_URL` is refused by `fetchRemote`. Pexels' licence
+  hotlinks at Doop before loading it; `hostedIconSvg` and `hostedPhoto` read both in-process,
+  since a private `BETTER_AUTH_URL` is refused by `fetchRemote`. Pexels' licence
   allows rehosting; arbitrary hotlinked images are never copied. Tests: `iconProxy.test.ts`,
   `photoProxy.test.ts`.
 - Where frame CSS goes (`FRAME_STYLES` in `server/guide.ts`): agents are asked to style an element
@@ -235,7 +235,7 @@
   `captureFeature` (`server/featureEvents.ts`) at the REST route, MCP tool and resident tool, on the
   signed-in user, the agent's connecting user or the resident run's requester, with `via` (`ui`,
   `mcp`, `resident`, `automation`): `tokens_changed`, `token_themes_set`, `page_background_changed`,
-  `prototype_start_set`, `frame_version_restored`, `figma_imported`. Browser-only features capture
+  `prototype_start_set`, `frame_version_restored`. Browser-only features capture
   with posthog-js: every export and Copy as PNG through `src/lib/exportEvents.ts` (`frames_exported`
   with `source` and `target`, `png_copied`), `prototype_played`, `prototype_interactions_saved`,
   `text_formatted`, `svg_imported`, `pdf_imported`.
@@ -325,23 +325,10 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   load falls back to the initials); it rides `Presence` (set at `join`, re-announced to the person's
   rooms on a change), `/api/me`, the session, canvas `people`, the share list and workspace members.
   Tests: `avatar.test.ts`, `avatarFace.test.tsx`.
-- Onboarding questionnaire (`shared/onboarding.ts`, `server/onboarding.ts`,
-  `src/components/OnboardingSurvey.tsx`, `src/hooks/use-onboarding.ts`): two skippable questions
-  an account is asked once, in a modal over whichever page it lands on first (sign-up opens the
-  first canvas, so `CanvasPage` mounts the hook as well as `Home`): who they are (`ONBOARDING_ROLES`: designer, engineer, vibe coder,
-  founder or PM, marketer, exploring) and what they came to make first (`ONBOARDING_INTENTS`). Answers live in `onboarding_profiles` (one row per account, a skipped
-  question null, migration `0045`) behind `GET` / `PUT /api/me/onboarding`; no row means Home
-  asks, and closing the modal saves what is answered so nobody is asked twice. The server
-  captures `onboarding_completed` (`role`, `intent`, `skipped_steps`, `updated`) with the same
-  answers as `$set` person properties (`onboarding_role`, `onboarding_intent`), so cohorts are
-  one PostHog filter. The answers change nothing else on Home: `src/lib/onboardingOptions.ts`
-  holds the option lists and the labels Settings reads back. Settings → Your account → About you shows
-  the answers as a line and reopens the same modal. Tests: `onboarding.test.ts` (parser, routing,
-  the route), `onboardingSurvey.test.tsx` (the modal in happy-dom).
 - Plans and the way to Pro (`shared/billing.ts`, `server/entitlements.ts`, `src/lib/upgrade.ts`,
   `src/lib/planFeatures.ts`, `src/components/PlanCards.tsx`): the paid plan is sold as Pro (its id
   stays `team`: Stripe metadata, the workspaces table and `/api/me` carry it); plan copy lives in the
-  `plans` catalog, the hosted-only import/export lines in `hosted`. Pro still lives in a workspace,
+  `plans` catalog. Pro still lives in a workspace,
   and its perks follow the person (a member of a live paid workspace, `planFor`) or the canvas (in
   one): uploads to 100 MB instead of 5 (`uploadCap`, applied to browser uploads, the `/u/` ticket and
   MCP `upload_asset`; imports and generated images keep `MAX_ASSET_BYTES`), and font libraries past
@@ -355,7 +342,7 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   workspace, or names a new one that checkout creates, or says which workspace they are on Pro
   through. Its name is a placeholder (`plans.defaultWorkspaceName`): when checkout comes back paid the
   Workspace page asks for the real one once (`NameWorkspaceModal`, a per-browser note from
-  `noteNameAfterCheckout`). Seats are a minimum (`workspaces.seats_bought`, migration 0060): the owner
+  `noteNameAfterCheckout`). Seats are a minimum (`workspaces.seats_bought`, migration 0059): the owner
   picks them at checkout (`SeatStepper`) or on the billing pane (`PUT /api/workspaces/:id/billing/seats`),
   and Stripe bills `billedSeats` = the larger of seats bought and members, so invites fill bought seats
   first. "Team API keys for CLI and CI" is listed as Soon: not built. Tests: `planLimits.test.ts`,
@@ -921,7 +908,7 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   or a double-click on its name in that tab, or from its main's Layers row (`renameComponent`; instances are
   linked by id, so they follow). As in Figma, renaming an instance's row names that layer
   alone (`data-doop-name`, kept as an override of that instance, still linked). Stored in `components`
-  (migration `0049_components`). Tests: `components.test.ts`, `componentsEdgeCases.test.ts`,
+  (migration `0052_components`). Tests: `components.test.ts`, `componentsEdgeCases.test.ts`,
   `componentTools.test.ts`, `componentsRoutes.test.ts`, `componentsBrowser.test.ts`. A bare
   `data-doop-prop="name"` binds an element's text, except where there is none: on `img`, `source`,
   `video`, `audio`, `iframe` and `embed` it binds `src`, on `input` its `value` (`parseBindings`

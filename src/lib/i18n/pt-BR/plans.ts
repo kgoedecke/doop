@@ -55,7 +55,7 @@ export const plans: Catalog['plans'] = {
   rowExportFiles: 'Exportar para PNG, JPG, SVG e PDF',
   rowMultiplayer: 'Multiplayer em tempo real e comentários',
   rowSharing: 'Links de compartilhamento e convites por canvas',
-  rowIntegrations: 'Integrações com Linear, Slack e PostHog',
+  rowIntegrations: 'Integrações com Linear e Slack',
   rowApps: 'Apps para desktop e iOS',
   rowWorkspace: 'Workspace compartilhado',
   rowLibrary: 'Biblioteca de componentes compartilhada',

@@ -411,15 +411,8 @@
     {
       "idx": 59,
       "version": "7",
-      "when": 1794552431652,
-      "tag": "0059_canvas_actor_flag",
-      "breakpoints": true
-    },
-    {
-      "idx": 60,
-      "version": "7",
       "when": 1794783638191,
-      "tag": "0060_workspace_seats_bought",
+      "tag": "0059_workspace_seats_bought",
       "breakpoints": true
     }
   ]

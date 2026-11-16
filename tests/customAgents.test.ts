@@ -61,7 +61,6 @@ describe('parseCustomAgentInput', () => {
     for (const handle of ['doop', 'copy', 'uxlead', 'usability', 'a11y'])
       expect(parseCustomAgentInput({ ...valid, handle })).toMatchObject({ ok: false })
     expect(parseCustomAgentInput({ ...valid, name: 'copywriter' })).toMatchObject({ ok: false })
-    expect(parseCustomAgentInput({ ...valid, name: 'Figma import' })).toMatchObject({ ok: false })
   })
 
   it('refuses malformed fields', () => {

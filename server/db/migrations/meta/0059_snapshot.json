@@ -1,6 +1,6 @@
 {
   "id": "1180ab66-a1b3-4550-970e-f586cac2f865",
-  "prevId": "3a7d0f29-2b99-40c0-af88-f969261f23e3",
+  "prevId": "4feda452-6efc-4d76-aaa3-6ba4dc1a0f34",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -74,31 +74,6 @@
           "with": {}
         }
       },
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.actor_cleanups": {
-      "name": "actor_cleanups",
-      "schema": "",
-      "columns": {
-        "canvas_id": {
-          "name": "canvas_id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true
-        }
-      },
-      "indexes": {},
       "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
@@ -1036,12 +1011,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "frame_store": {
-          "name": "frame_store",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
         "created_at": {
           "name": "created_at",
           "type": "bigint",
@@ -1653,42 +1622,6 @@
         "design_tokens_canvas_id_name_pk": {
           "name": "design_tokens_canvas_id_name_pk",
           "columns": ["canvas_id", "name"]
-        }
-      },
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.feature_flags": {
-      "name": "feature_flags",
-      "schema": "",
-      "columns": {
-        "flag": {
-          "name": "flag",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "user_id": {
-          "name": "user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {},
-      "compositePrimaryKeys": {
-        "feature_flags_flag_user_id_pk": {
-          "name": "feature_flags_flag_user_id_pk",
-          "columns": ["flag", "user_id"]
         }
       },
       "uniqueConstraints": {},
@@ -2552,12 +2485,6 @@
           "primaryKey": false,
           "notNull": true
         },
-        "refresh_token": {
-          "name": "refresh_token",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
         "expires_at": {
           "name": "expires_at",
           "type": "bigint",
@@ -2575,12 +2502,6 @@
           "type": "jsonb",
           "primaryKey": false,
           "notNull": true
-        },
-        "api_base": {
-          "name": "api_base",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
         },
         "connected_at": {
           "name": "connected_at",
@@ -3441,43 +3362,6 @@
         },
         "updated_at": {
           "name": "updated_at",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.onboarding_profiles": {
-      "name": "onboarding_profiles",
-      "schema": "",
-      "columns": {
-        "user_id": {
-          "name": "user_id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "role": {
-          "name": "role",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "intent": {
-          "name": "intent",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "completed_at": {
-          "name": "completed_at",
           "type": "bigint",
           "primaryKey": false,
           "notNull": true

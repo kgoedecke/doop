@@ -6,7 +6,7 @@ import type { Browser, BrowserContext, Page } from 'puppeteer-core'
  * answering.
  *
  * Every server-side render (frame images, MCP screenshots, the resident
- * agent's checks, PDF / PSD / Figma / Canva exports, website imports) shares
+ * agent's checks, PDF exports, website imports) shares
  * one browser process. On 2026-11-05 that process wedged on prod: it kept its
  * DevTools socket open, so `connected` stayed true, but no new page ever
  * appeared and every render waited out puppeteer's 30s target timeout for
