@@ -1,7 +1,5 @@
 /** The plans: what each one offers, the comparison table, and the places
- *  that sell Pro (the rail, the account menu, Settings → Plan). Lines that
- *  name hosted-only features (Figma, Canva, Photoshop, Illustrator) live in
- *  the `hosted` namespace. */
+ *  that sell Pro (the rail, the account menu, Settings → Plan). */
 export const plans = {
   freeName: 'Free',
   proName: 'Pro',
@@ -59,7 +57,7 @@ export const plans = {
   rowExportFiles: 'Export to PNG, JPG, SVG and PDF',
   rowMultiplayer: 'Realtime multiplayer and comments',
   rowSharing: 'Share links and per-canvas invites',
-  rowIntegrations: 'Linear, Slack and PostHog integrations',
+  rowIntegrations: 'Linear and Slack integrations',
   rowApps: 'Desktop and iOS apps',
   rowWorkspace: 'Shared workspace',
   rowLibrary: 'Shared component library',

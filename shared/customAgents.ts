@@ -9,7 +9,7 @@
  * works under in presence, tasks and comment threads) are fixed once it
  * exists: open work points at them. Everything else can change.
  */
-import { AGENT_ROLES, DEFAULT_ROLE_ID, isJobWorker, mentionsFor, type AgentRole } from './agents.ts'
+import { AGENT_ROLES, DEFAULT_ROLE_ID, mentionsFor, type AgentRole } from './agents.ts'
 
 export const MAX_CUSTOM_AGENTS = 20
 export const MAX_AGENT_NAME = 32
@@ -84,7 +84,7 @@ function handleTaken(handle: string): boolean {
 /** A name a built-in agent or a server job already works under. */
 function nameTaken(name: string): boolean {
   const key = name.toLowerCase()
-  return isJobWorker(name) || AGENT_ROLES.some((role) => role.name.toLowerCase() === key)
+  return AGENT_ROLES.some((role) => role.name.toLowerCase() === key)
 }
 
 /** A suggested handle for a name: its letters and digits, lowercased. */

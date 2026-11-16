@@ -2466,12 +2466,6 @@
           "primaryKey": false,
           "notNull": true
         },
-        "refresh_token": {
-          "name": "refresh_token",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
         "expires_at": {
           "name": "expires_at",
           "type": "bigint",
@@ -2489,12 +2483,6 @@
           "type": "jsonb",
           "primaryKey": false,
           "notNull": true
-        },
-        "api_base": {
-          "name": "api_base",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
         },
         "connected_at": {
           "name": "connected_at",
@@ -3355,43 +3343,6 @@
         },
         "updated_at": {
           "name": "updated_at",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.onboarding_profiles": {
-      "name": "onboarding_profiles",
-      "schema": "",
-      "columns": {
-        "user_id": {
-          "name": "user_id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "role": {
-          "name": "role",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "intent": {
-          "name": "intent",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "completed_at": {
-          "name": "completed_at",
           "type": "bigint",
           "primaryKey": false,
           "notNull": true
