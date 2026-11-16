@@ -22,7 +22,7 @@ if (mailerConfigured) {
   })
 }
 
-export async function sendMail(opts: { to: string; subject: string; text: string }) {
+export async function sendMail(opts: { to: string; subject: string; text: string; replyTo?: string }) {
   if (!transport) {
     console.log(
       `[mail] SMTP not configured — logging instead\n  to: ${opts.to}\n  subject: ${opts.subject}\n  ${opts.text.replace(/\n/g, '\n  ')}`,
@@ -34,5 +34,6 @@ export async function sendMail(opts: { to: string; subject: string; text: string
     to: opts.to,
     subject: opts.subject,
     text: opts.text,
+    replyTo: opts.replyTo,
   })
 }

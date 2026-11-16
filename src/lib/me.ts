@@ -13,6 +13,8 @@ export interface Me {
   plan: 'free' | 'team'
   /** whether this server sells plans; without it nothing offers an upgrade */
   billing: boolean
+  /** whether this server takes feedback notes; without it no Feedback button */
+  feedback?: boolean
   /** set when this session is an admin viewing as someone else. The rest of
    *  this object then describes the person being viewed, not the admin —
    *  impersonation replaces the session cookie outright — so this flag is the

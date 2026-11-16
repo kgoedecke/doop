@@ -143,6 +143,7 @@ import {
   Rocket,
   Mail,
   Star,
+  Megaphone,
 } from 'lucide-react'
 
 type SvgProps = Omit<SVGProps<SVGSVGElement>, 'ref'>
@@ -375,6 +376,7 @@ export const ServerIcon = icon(Server)
 export const BlocksIcon = icon(Blocks)
 /** a component's main, and components in general (the Components tab, the toolbar): four diamonds */
 export const ComponentIcon = icon(LucideComponent)
+export const MegaphoneIcon = icon(Megaphone)
 /** an instance of a component: one hollow diamond, as Figma marks it, so it never reads as the main */
 export const InstanceIcon = icon(Diamond)
 /** connect an agent: a plus in a ring */

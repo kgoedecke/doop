@@ -426,6 +426,15 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   load falls back to the initials); it rides `Presence` (set at `join`, re-announced to the person's
   rooms on a change), `/api/me`, the session, canvas `people`, the share list and workspace members.
   Tests: `avatar.test.ts`, `avatarFace.test.tsx`.
+- Feedback from people (`shared/productFeedback.ts`, `server/productFeedback.ts`, `src/lib/feedback.ts`,
+  `src/components/FeedbackModal.tsx`): a signed-in person writes a short note (up to 2,000 characters)
+  and `POST /api/product-feedback` emails it to `FEEDBACK_EMAIL` through `sendMail`, with the sender as
+  Reply-To and the page they were on; nothing is stored, five notes an hour per account, PostHog gets
+  `product_feedback_sent` (length and page, never the text). Unset `FEEDBACK_EMAIL`, `/api/me` carries
+  `feedback: false` and no button shows. Entry points all call `openFeedback()`, shown by the one
+  `FeedbackHost` in `App`: the rail's Feedback row, the account menu, the canvas Help menu and the
+  `feedback` action (main menu, ⌘K). Agents have their own channel (Agent feedback, above). Tests:
+  `productFeedback.test.ts`.
 - Plans and the way to Pro (`shared/billing.ts`, `server/entitlements.ts`, `src/lib/upgrade.ts`,
   `src/lib/planFeatures.ts`, `src/components/PlanCards.tsx`): the paid plan is sold as Pro (its id
   stays `team`: Stripe metadata, the workspaces table and `/api/me` carry it); plan copy lives in the

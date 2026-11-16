@@ -125,6 +125,7 @@ import { seed } from './seed.ts'
 import * as allowance from './allowance.ts'
 import * as modelAccounts from './modelAccounts.ts'
 import { getLocalAgentPreference } from './localAgentPreferences.ts'
+import { productFeedbackEnabled, productFeedbackRouter } from './productFeedback.ts'
 import { serverTierInfo } from './agentModel.ts'
 import { imageModelAvailability, serverImageGenEnabled } from './imageGen.ts'
 import { setImagePref } from './imagePrefs.ts'
@@ -952,12 +953,17 @@ app.get('/api/me', async (req, res) => {
     plan: workspaces.planFor(id),
     /* whether this server sells plans at all: no Upgrade anywhere without it */
     billing: billing.billingEnabled(),
+    /* whether a note from the Feedback button has somewhere to go */
+    feedback: productFeedbackEnabled(),
     /* the SPA cannot infer this: impersonation swaps the session cookie
        outright, so everything else on this response describes the person
        being viewed, not the admin doing the viewing */
     impersonating: req.impersonatedBy ? { byName: (await getUserName(req.impersonatedBy)) ?? 'an admin' } : undefined,
   })
 })
+
+/* the Feedback button: a person's note, emailed to FEEDBACK_EMAIL */
+app.use('/api/product-feedback', productFeedbackRouter)
 
 /* The profile photo: raw image bytes in, the face's URL out. Rooms the
    person is in see the new face at once; the session the browser holds is

@@ -150,6 +150,8 @@ const schema = {
   SMTP_PASS: str({ default: undefined }),
   SMTP_SECURE: bool({ default: false }),
   EMAIL_FROM: str({ default: 'doop <no-reply@localhost>' }),
+  /** where the app's Feedback button sends a person's note; unset = no button */
+  FEEDBACK_EMAIL: str({ default: undefined }),
 
   /* ------------------------------------------------------ webhooks */
   WEBHOOK_ALLOW_PRIVATE_URLS: bool({ default: false }),
