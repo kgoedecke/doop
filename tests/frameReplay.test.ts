@@ -162,9 +162,10 @@ describe.skipIf(!findBrowserPath())('sandboxed frame replay', () => {
   })
 
   it('records prototype player screens', async () => {
+    await recordDesign()
     await page.evaluate(() => window.addFrame('data-doop-proto-frame'))
-    await page.waitForFunction(() => window.messages.filter((m) => m.type === 'doop:frame-ready').length === 3)
-    await render('<h1>Prototype screen</h1>', 2)
+    await page.waitForFunction(() => window.messages.filter((m) => m.type === 'doop:frame-ready').length === 2)
+    await render('<h1>Prototype screen</h1>', 1)
     await captured('Prototype screen')
     const frame = await page.evaluate(
       () => JSON.stringify(window.events).match(/"data-doop-proto-frame":""[^}]*}/)?.[0],
