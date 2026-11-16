@@ -9,7 +9,7 @@ const rect = (x: number, y: number, width: number, height: number) => ({ x, y, w
 
 describe('planGroup', () => {
   it('stacks layers one above the other as a column, the space between them the gap', () => {
-    /* the two rects of Paper's example: 51×62, 22px apart */
+    /* two rects, 51×62, 22px apart */
     const plan = planGroup([rect(205, 109, 51, 62), rect(205, 25, 51, 62)])
     expect(plan).toEqual({ kind: 'flex', direction: 'column', gap: 22, align: 'start', order: [1, 0], x: 205, y: 25 })
   })
