@@ -609,7 +609,7 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   drag zooms onto the box it draws, filling the stage's open area. Z is the tool only while held:
   letting go returns to the previous tool, and the tool rail has no button for it.
   Tests: `zoomTool.test.ts`, the Zoom cases in `tools.test.ts`.
-- Layers placed by hand (`src/lib/groupLayout.ts`, Paper's model): a shape drawn into a frame is
+- Layers placed by hand (`src/lib/groupLayout.ts`): a shape drawn into a frame is
   `position:absolute; left; top; width; height`, and moving an absolute layer (drag, nudge, X/Y)
   rewrites its `left`/`top` (`moveByOffsets` in the runtime) instead of adding a `translate`;
   layers in flow still move by `translate`. ⌘G / ⌥⌘G / ⇧A on layers that all sit absolute make one

@@ -3,7 +3,7 @@ import type { KeyInput } from 'puppeteer-core'
 import { findBrowserPath } from '../server/screenshot'
 import { drawingPage, layerFrame, page, saved, seedFrames, visibleDrawing } from './drawingPage'
 
-/* Paper's example: two loose rectangles and two stacked 22px apart */
+/* two loose rectangles and two stacked 22px apart */
 const SHAPES =
   '<div id="a" style="position:absolute;left:10px;top:30px;width:98px;height:85px;background:#ddd"></div>' +
   '<div id="b" style="position:absolute;left:136px;top:30px;width:20px;height:20px;background:#ddd"></div>' +
