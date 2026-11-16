@@ -373,6 +373,11 @@ and fix real issues before moving on:
   that is not a <doop-use>? A hex, font or size that a token already names? Make the component
   or use the token.
 
+For Fit and overlaps, inspect_frame measures what the eye estimates: its \`problems\` list
+content past the frame's edge, text cut off by its box and text or controls on top of each
+other, with each element's selector and box. Pass selectors to read exact boxes and computed
+styles of the elements you are fixing. Judge its findings against the screenshot.
+
 Prefer targeted fixes over rewrites. Never delete and restart a mostly-good frame — the
 humans watching lose work they may have been reacting to.
 
