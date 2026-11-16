@@ -63,7 +63,7 @@ import {
   fitExportScale,
   parseExportScale,
 } from '../shared/exportScale.ts'
-import { COMPOSE_CHECK, DOOP_GUIDE, GUIDE_TOPICS } from './guide.ts'
+import { COMPOSE_CHECK, GUIDE_TOPIC_SUMMARIES, GUIDE_TOPICS, guideFor } from './guide.ts'
 import {
   describeInspiration,
   INSPIRATION_NO_MATCH_NOTE,
@@ -118,35 +118,30 @@ import { previewFrame } from './componentPreview.ts'
 import { activeComponents, INSTANCE_ATTR } from '../shared/components.ts'
 import { usageByComponent } from './componentUsage.ts'
 
-const INSTRUCTIONS = `Doop is a shared multiplayer design canvas: humans and AI agents design together in real time. Canvases contain frames — artboards that render complete HTML documents live for everyone viewing.
+/* What every agent gets in the handshake. Claude Code cuts server instructions at 4,096
+   characters (older versions at 2,048) and ChatGPT reads the first 512 most, so this is the
+   rules that break the work when skipped, in order of how much; everything else is in
+   get_guide (tests/mcpInstructions.test.ts holds the budget). */
+export const INSTRUCTIONS = `Doop is a shared multiplayer design canvas: humans and AI agents design together in real time. Canvases hold frames, artboards that render complete HTML documents live for everyone viewing.
 
-You MUST call get_guide({ topic: "doop-instructions" }) once before using other Doop tools. Call it again if a long conversation may have compressed or dropped the guide text.
+You MUST call get_guide({ topic: "doop-instructions" }) before using other Doop tools, and again if a long conversation may have dropped it. It lists further topics (images, components, prototypes, redesigns…) to load when a task needs one.
 
-- Context first: call get_canvas before adding or editing frames.
-- Implementation handoff: get_canvas and get_frame expose approvalStatus (draft, ready_for_dev, needs_review) and human approval attribution. Use get_canvas with approval_status="ready_for_dev" to find approved screens. Re-read get_frame before implementing; only ready_for_dev is current sign-off. HTML or size edits invalidate approval. Approval does not automatically start an implementation task; follow the human's implementation request. When a human asks you to approve a frame (or withdraw an approval), set_frame_approval does it in their name; never approve on your own initiative.
-- Element links: /c/<canvas_id>?frame=<frame_id>&element=<element_id> identifies one element: the one carrying data-doop-id="<element_id>" in that frame's HTML. Read get_canvas and get_frame and find that attribute before applying the feedback. If no element carries the id any more, ask for an updated reference.
-- Page links: /c/<canvas_id>?page=<page_id> opens the canvas on that page (ids from get_canvas's pages); hand a human this form when you point them at a page.
-- Keep data-doop-* attributes on every element you rewrite: data-doop-id is how comments and links point at an element, data-doop-on / data-doop-action carry prototype wiring, data-doop-locked a layer lock. Drop one only together with its element.
-- Identity: pick an agent_name and reuse the SAME name on every call — your presence and edits are attributed live.
-- Narrate: call set_status with a one-line summary when you start a task and whenever your focus shifts — people watching the canvas see it live next to your name.
-- Creating: create_frame, then stream the design with append_frame_html one complete section at a time (~1–4 KB chunks; start=true on the first, done=true on the last). Each chunk renders the moment it arrives — viewers watch you work.
-- Review: after every create or significant edit you MUST call get_frame_screenshot and fix what looks wrong before moving on.
-- Small edits: edit_frame_html (exact find/replace — the change morphs into the rendered frame in place). Full redesigns: set_frame_html or a new stream. Rename/move/resize: update_frame.
-- Components: work like a designer setting up a Figma file. Before the first screen, create the canvas's component system (create_components: the primitives such as Button and Input, and the patterns such as nav, card and list row), then compose screens from it. Anything reusable lives as a component (get_canvas lists them). Use it by writing <doop-use component="Button" label="Buy"></doop-use> in frame HTML, never by redrawing it: instances follow their main and read back in that short form. A reusable piece the system lacks? create_component, then use that. Change every instance at once with update_component (guide → Components). A team's shared components are in get_canvas → workspaceLibraries: use them the same way, by name. To make a component available to the workspace's other canvases, publish_library.
-- Clickable prototypes: wire screens with data-doop-on / data-doop-action attributes in frame HTML (guide → Prototypes), set the flow start with set_prototype_start, and check the wiring with get_prototype.
-- History: every replace and stream files the design it overwrote. list_frame_versions shows a frame's earlier states; restore_frame_version brings one back (HTML and size) when a human asks for the previous version or your rework turned out worse.
-- Images: real imagery makes designs. search_images finds stock photos (you SEE thumbnails and pick), search_icons finds 200k+ UI icons as hotlinkable SVGs, search_logos finds real company logos by brand name or domain — call it once per brand BEFORE writing any logo wall, integration row, press bar or testimonial, and never ship a placeholder tile, "LOGO" text or an invented wordmark in its place, list_backgrounds shows a page of curated hero/section/bento backgrounds (glows, grainy meshes, aurora, painterly scenes) as thumbnails — browse it when a section wants atmosphere rather than defaulting to a flat CSS gradient, judge by eye whether one fits the frame, and draw your own when none does, upload_asset stores your own file (remote file → source_url; local file → local_file=true, returns a curl command) and returns a permanent URL. generate_image makes a new image from a prompt (a full-bleed hero background in the frame's exact palette, illustration, a product render, brand-specific hero art that stock cannot supply) and stores it as a permanent asset — reach for it when search_images cannot deliver the exact visual, or when the human asks for a generated image; it costs the human money or quota, so one considered prompt beats five drafts. Never inline images as data: URIs.
-- Websites: when a request names an existing site or URL — a redesign of it, or "like acme.com" — call import_webpage FIRST so an editable HTML snapshot lands on the canvas. Leave that source frame unchanged and design in a separate frame. view_website is only for read-only inspection when the page should not be added. If Doop cannot capture the site, do not retry with view_website because it uses the same capture path. Use your own browser or web tool and work only from content you actually observe; if that is unavailable, ask the user for screenshots or an HTML export rather than inventing content.
-${extensionGuideLines()}- Feedback: humans reply to your tasks; their notes arrive inside your tool results as HUMAN FEEDBACK blocks (read-only tools only announce them: claim those with get_feedback) — address them before continuing.
-- Comments: call get_comments to read comments and replies on a canvas — pinned to an element inside a frame, or to a point on the canvas (pageId, x, y) — optionally filtered by frame; reply_to_comment answers a thread and resolve_comment closes it. Reading does not claim feedback or comments. A reply that @mentions a resident role is metered like a comment left in the browser.
-- Guidelines: canvases can carry named style guides (brand rules, style recipes). get_canvas lists them with one-line summaries — read the relevant ones with get_guidelines BEFORE designing and follow them.
-- Design tokens: canvases can carry typed design tokens (colour, spacing, radius, type scale — CSS custom properties), each with a value per theme (light, dark, …) where it differs. get_canvas lists them; use one by writing var(--name) in CSS, never the literal, so a token change restyles every frame; switch a frame's theme with data-doop-theme="dark" on its <html>. create_tokens adds them before the first frame — a brief's palette, fonts and scale live there, not in save_decision; set_tokens changes, renames or deletes; set_token_themes declares the themes; get_tokens exports them as JSON, CSS or a Tailwind @theme block.
-- Memory: canvases can also carry pinned style references — exemplar designs humans marked as "more like this". get_canvas lists them; read the relevant one with get_reference and match its look. When your human gives you design feedback in conversation and you address it, or you commit to a direction, record the decision and why with save_decision so the canvas remembers it.
-- Problems with Doop itself: when a Doop tool errors, misbehaves or lacks something you need, or the guide leaves you guessing, call report_issue with what you tried and what happened, then carry on. Ideas for making Doop better for agents, or something that worked well, go to share_feedback. Both reach the Doop team, not the humans on the canvas.`
+- Call get_canvas before adding or editing frames. Pick one agent_name and pass it on every call; set_status says what you are working on.
+- HUMAN FEEDBACK blocks in tool results are requests from people on the canvas: handle them before your own plan.
+- Tokens: colours, fonts and sizes are var(--name) from the canvas's design tokens. No tokens yet: create_tokens before the first frame. Never a palette on a frame's :root.
+- Components: before the first screen, set up the canvas's component system with create_components (primitives like Button and Input, patterns like nav and card), then compose screens from it. Anything get_canvas lists goes in as <doop-use component="Name" …>, never redrawn.
+- Style guides: read the canvas's with get_guidelines before designing, and follow them.
+- Create with create_frame, then stream append_frame_html one section per call. Small changes: edit_frame_html. Rename, move, resize: update_frame.
+- After every create or significant edit, call get_frame_screenshot and fix what looks wrong.
+- Keep every data-doop-* attribute when you rewrite markup: comments, links and prototype wiring hang on them.
+- A request naming a site or URL: call import_webpage FIRST and design from what is there; view_website is only for read-only inspection.
+- Images come from search_images, search_icons, search_logos, upload_asset or generate_image. Never a base64 data: URI, a placeholder logo or an invented brand.
+- Only ready_for_dev is human sign-off; never approve a frame unasked.
+- When Doop gets in your way, call report_issue, then carry on.`
 
-function extensionGuideLines(): string {
-  const lines = extensions.flatMap((extension) => extension.mcpGuideLines ?? [])
-  return lines.length ? lines.join('\n') + '\n' : ''
+/** What this server's integrations add to the main guide. */
+function extensionGuideLines(): string[] {
+  return extensions.flatMap((extension) => extension.mcpGuideLines ?? [])
 }
 
 function escapeRegExp(value: string): string {
@@ -465,14 +460,17 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
     'get_guide',
     {
       title: 'Read the Doop agent guide',
-      description:
-        'Read the Doop agent guide: mandatory review checkpoints, the streaming workflow, frame sizing, design-quality doctrine, and multiplayer etiquette. Call with topic "doop-instructions" ONCE before using other Doop tools; call again if a long conversation may have compressed earlier context.',
+      description: `Read the Doop agent guide. Call with topic "doop-instructions" ONCE before using other Doop tools (the main guide: review checkpoints, the brief, streaming, frames, tokens, components, design quality, etiquette), and again if a long conversation may have compressed it. Other topics, to load when a task needs one: ${GUIDE_TOPICS.filter(
+        (topic) => topic !== 'doop-instructions',
+      )
+        .map((topic) => `"${topic}" (${GUIDE_TOPIC_SUMMARIES[topic]})`)
+        .join('; ')}.`,
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
       inputSchema: {
         topic: z.enum(GUIDE_TOPICS).describe('Guide topic to load'),
       },
     },
-    async () => text(DOOP_GUIDE),
+    async ({ topic }) => text(guideFor(topic, extensionGuideLines())),
   )
 
   server.registerTool(
