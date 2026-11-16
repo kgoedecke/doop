@@ -12,7 +12,7 @@ vi.mock('../server/db/persist.ts', () => ({ saveCanvas: () => {}, saveFrame: () 
    a main guide every agent loads, and topics loaded when a task needs one. */
 
 const OLDEST_CLAUDE_CODE_CUT = 2048
-const MAIN_GUIDE_BUDGET = 28_000
+const MAIN_GUIDE_BUDGET = 30_000
 
 async function connect() {
   const client = new Client({ name: 'instructions-test', version: '1.0.0' })

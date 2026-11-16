@@ -541,8 +541,8 @@ get_canvas and list_components show a canvas's components with their props.
   It works anywhere frame HTML goes; attributes are props, and a bad one comes back as a
   COMPONENT note saying what is allowed. get_frame returns instances in this short form;
   keep their id="…" when you write one back.
-- Before you write the same block a third time, make it a component (create_component) and
-  use that. Components nest: a main can hold <doop-use> too.
+- A reusable piece a screen needs that the system lacks: create_component first, then use
+  it. Components nest: a main can hold <doop-use> too.
 - Vary with props, not copies. Change every instance at once with update_component, never
   instance by instance; following a component keeps a frame's sign-off.
 - get_canvas → workspaceLibraries lists the components the workspace published: use them by
