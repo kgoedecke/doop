@@ -101,6 +101,8 @@ export function CanvasComments({
     }
     function onPress(e: PointerEvent) {
       if (rootRef.current?.contains(e.target as Node)) return
+      /* an open thread is portalled out of this root (CommentPin) */
+      if (e.target instanceof Element && e.target.closest('[data-comment-thread-anchor]')) return
       close()
     }
     window.addEventListener('keydown', onKey)

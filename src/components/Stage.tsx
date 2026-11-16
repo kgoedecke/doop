@@ -46,7 +46,7 @@ import {
 } from './ui/icons'
 import { TOOLS, isDrawingTool, resolvePointerAction, toolForKey, type Tool } from '../lib/tools'
 import { useCanvasDrawing } from './CanvasDrawing'
-import { FrameLabelLayer } from './FrameLabelLayer'
+import { CommentThreadLayer, FrameLabelLayer } from './FrameLabelLayer'
 import { pixelGridLines } from './PixelGrid'
 import { layoutZoomFor } from '../lib/layoutZoom'
 import { useT, type PlainMessageKey } from '../lib/i18n'
@@ -236,6 +236,7 @@ export function Stage({
   const gridRef = useRef<HTMLDivElement>(null)
   const pixelGridRef = useRef<HTMLDivElement>(null)
   const [labelLayer, setLabelLayer] = useState<HTMLDivElement | null>(null)
+  const [threadLayer, setThreadLayer] = useState<HTMLDivElement | null>(null)
   const zoomLabelRef = useRef<HTMLSpanElement>(null)
   const setViewport = useStore((s) => s.setViewport)
   const canvas = usePageCanvas()
@@ -1197,27 +1198,32 @@ export function Stage({
               className="world absolute left-0 top-0 origin-top-left will-change-transform data-rezoom:**:transition-none!"
               ref={worldRef}
             >
-              <FrameLabelLayer.Provider value={labelLayer}>
-                <FrameStack frames={canvas?.frames ?? []} layoutZoom={layoutZoom} />
-              </FrameLabelLayer.Provider>
-              <GhostFrames />
-              <FlowOverlay />
-              <GuideLines stage={ref} />
-              <PrototypeOverlay />
-              <SnapGuides />
-              <CanvasComments composeAt={composeAt} onComposeDone={dismissCompose} />
-              {showCursors && <Cursors />}
-              {drawing.preview}
-              {marquee && (
-                <div
-                  className="pointer-events-none absolute bg-brand/10 [box-shadow:inset_0_0_0_calc(1px/var(--zoom,1))_var(--brand)]"
-                  style={{ left: marquee.x, top: marquee.y, width: marquee.width, height: marquee.height }}
-                />
-              )}
+              <CommentThreadLayer.Provider value={threadLayer}>
+                <FrameLabelLayer.Provider value={labelLayer}>
+                  <FrameStack frames={canvas?.frames ?? []} layoutZoom={layoutZoom} />
+                </FrameLabelLayer.Provider>
+                <GhostFrames />
+                <FlowOverlay />
+                <GuideLines stage={ref} />
+                <PrototypeOverlay />
+                <SnapGuides />
+                <CanvasComments composeAt={composeAt} onComposeDone={dismissCompose} />
+                {showCursors && <Cursors />}
+                {drawing.preview}
+                {marquee && (
+                  <div
+                    className="pointer-events-none absolute bg-brand/10 [box-shadow:inset_0_0_0_calc(1px/var(--zoom,1))_var(--brand)]"
+                    style={{ left: marquee.x, top: marquee.y, width: marquee.width, height: marquee.height }}
+                  />
+                )}
+              </CommentThreadLayer.Provider>
             </div>
             {/* the selected frame's size badge, in screen px (FrameLabelLayer); after
                 the world so no frame, however it stacks, covers it */}
             <div className="pointer-events-none absolute inset-0" ref={setLabelLayer} />
+            {/* an open comment thread, in screen px above the badges, so no
+                badge covers it; CommentPin keeps it on its pin */}
+            <div data-comment-ui className="pointer-events-none absolute inset-0" ref={setThreadLayer} />
             {showRulers && <Rulers stage={ref} />}
           </div>
         </ContextMenuTrigger>
