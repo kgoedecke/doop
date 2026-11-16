@@ -247,6 +247,16 @@ function ElementMenuItems({ frame, selector, hit, onRename, onExport }: ElementI
           </ContextMenuItem>
         </>
       )}
+      {/* an element a script made is not in the saved HTML, but one wearing
+          an id in the live document can still be linked */}
+      {selector && !exists && hit?.elementId && (
+        <>
+          <ContextMenuSeparator />
+          <ContextMenuItem onSelect={() => void copyElementLink(frame, { selector, ...hit })}>
+            {t('stage.copyLinkToElement')}
+          </ContextMenuItem>
+        </>
+      )}
     </>
   )
 }

@@ -82,9 +82,7 @@ describe.skipIf(!findBrowserPath() || !CLIPBOARD_IS_RELIABLE)('canvas clipboard 
     })
   }
 
-  /* the frame's name at its left end: a picked element near the frame's
-     top wears its toolbar over the middle of the name, clear of the rotate
-     zones, and a centre click would land on the toolbar */
+  /* the frame's name at its left end, clear of a picked element's rotate zones */
   async function clickFrameTitle(button: 'left' | 'right' = 'left') {
     await page.click('[data-frame-title]', { button, offset: { x: 4, y: 9 } })
   }
@@ -104,15 +102,13 @@ describe.skipIf(!findBrowserPath() || !CLIPBOARD_IS_RELIABLE)('canvas clipboard 
     await page.waitForSelector('[role="menu"]', { hidden: true })
   }
 
+  /* a double-click on text opens it for editing */
   async function editText() {
     const doc = (await (await page.$('iframe[data-doop-frame]'))!.contentFrame())!
-    await doc.click('h1')
-    const edit = await page.waitForFunction(() =>
-      [...document.querySelectorAll('button')].find((el) => el.textContent?.trim() === 'Edit text'),
-    )
-    const button = await edit.asElement()!.toElement('button')
-    await button.click()
-    await doc.click('h1')
+    const inner = await doc.$eval('h1', (el) => el.getBoundingClientRect().toJSON())
+    const outer = await page.$eval('iframe[data-doop-frame]', (el) => el.getBoundingClientRect().toJSON())
+    const zoom = outer.width / FRAME.width
+    await page.mouse.click(outer.x + (inner.x + 5) * zoom, outer.y + (inner.y + 5) * zoom, { count: 2 })
     await doc.waitForSelector('[contenteditable]')
     return doc
   }

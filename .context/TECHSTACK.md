@@ -29,7 +29,7 @@
   internal selection language.
 - Element links use `/c/<canvasId>?frame=<frameId>&element=<data-doop-id>` (no selector form,
   and no backwards compatibility for the old one). `src/lib/elementLink.ts` owns copying from the
-  element toolbar and Layers menu, stamping first when the element has no id; `Stage.tsx`
+  element menu and Layers menu, stamping first when the element has no id; `Stage.tsx`
   focuses its page and frame; `FrameView.tsx` resolves the id in the ready iframe, including
   script-created elements, re-picks the positional path so the Layers panel follows, and falls
   back to frame details if nothing carries the id. Browser regressions in
@@ -762,8 +762,7 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   bounds and turned with it, so a turned layer keeps its grips and resizes along its own axes
   (`derotateDelta`; no guide snapping while turned). `sizable` now admits the element's own turn
   and still refuses a turned, skewed, 3D or nonuniformly scaled ancestor; unsupported transforms
-  use the axis-aligned rendered bounds for the selection outline. The element toolbar lifts to 30px above a
-  selection wearing furniture, clear of the top zones. Tests: `elementRotate.test.ts`,
+  use the axis-aligned rendered bounds for the selection outline. Tests: `elementRotate.test.ts`,
   `elementRotateBrowser.test.ts`, the turned cases in `elementResizeBrowser.test.ts`.
 - Rulers and guides (`src/components/Rulers.tsx`, math in `src/lib/rulers.ts`): ⇧R or the zoom menu
   toggles `<canvas>` rulers docked on the stage's top and left edges (the top bar and the floating
