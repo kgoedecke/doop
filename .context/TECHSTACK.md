@@ -929,6 +929,22 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   no markup (`empty_template`), and on a whole write one never closed (`unclosed_use`), which is
   placed with no slot content so the ones after it still expand (mid-stream it waits for its
   end). Tests: `componentDrops.test.ts`.
+- Component system first (`SYSTEM_FIRST`, `COMPOSE_CHECK` in `server/guide.ts`): the guide opens
+  with a must-do list (tokens, then a component system set up the way a designer sets up a Figma
+  file, then screens composed from it; themes are tokens, never a copied frame), the brief creates
+  the kit after the tokens, and `COMPONENTS` asks for components by judgment (primitives and the
+  patterns a product reuses, from the first copy) instead of after a third copy. `create_frame`,
+  `append_frame_html` and `set_frame_html` (and the resident's create, set and rewrite tools) end
+  their descriptions with the check. `create_components` (`server/componentTools.ts`, MCP and
+  resident) makes up to 12 components from markup in one call, in order so a later one nests an
+  earlier one, each entry its own unit (a refused one is reported, the rest are made). The
+  `COMPONENT SYSTEM` notes (`componentSystemPlan`, `componentSystemNotes`): an empty `create_frame`
+  hears to set up the system or compose from it; a product screen (8+ elements with a control,
+  link, nav or form; never a main, a Components-page frame, a canvas shape or a demo) written with
+  no instance hears that the canvas has no system, or which components it ignored. Mid-stream it
+  is said once per stream (`streamChunkNotes`), on the first chunk that shows a screen. Notes go
+  right after a result's data, ahead of the generic nudges. Tests: `reuseNotes.test.ts`, the
+  `create_components` cases in `componentTools.test.ts`, `tokenComponentGuidance.test.ts`.
 - Reuse notes (`server/reuseNotes.ts`): a whole-frame write (MCP `create_frame`, `set_frame_html`, the
   `done` chunk of a stream; the resident's `create_frame`, `set_frame_html`, `commit_frame_rewrite`)
   gets `componentWriteNotes(frame, { review: true })`, which adds what the frame should have reused:

@@ -2022,6 +2022,11 @@ export function takeComponentIssues(frameId: string): ComponentIssue[] {
   return issues
 }
 
+/** What the last write to this frame had to say about its components, left for whoever takes them. */
+export function peekComponentIssues(frameId: string): readonly ComponentIssue[] {
+  return componentIssues.get(frameId) ?? []
+}
+
 /** Something found out about a frame's last write after it landed: heard with the rest. */
 export function addComponentIssue(frameId: string, issue: ComponentIssue) {
   setKey(componentIssues, frameId, [...(componentIssues.get(frameId) ?? []), issue])

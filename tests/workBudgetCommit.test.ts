@@ -436,6 +436,23 @@ const OPERATIONS: Record<string, Case> = {
         canvas,
       ),
   },
+  'create_components (the tool), one nesting the other': {
+    run: ({ canvas }) =>
+      tool(
+        'create_components',
+        {
+          components: [
+            { name: 'Chip', html: '<span class="chip">New</span>', css: '.chip { padding: 2px 6px }' },
+            {
+              name: 'Row',
+              html: '<div class="row"><b>Title</b><doop-use component="Chip"></doop-use></div>',
+              css: '.row { display: flex }',
+            },
+          ],
+        },
+        canvas,
+      ),
+  },
   'create_component (the tool) with replace_matching': {
     run: ({ canvas, page }) =>
       tool('create_component', { name: 'Tag', frame_id: page.id, element: 'tagone', replace_matching: true }, canvas),

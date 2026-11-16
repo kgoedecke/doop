@@ -35,7 +35,16 @@ import * as backgrounds from './backgrounds.ts'
 import * as ingest from './ingest.ts'
 import { viewWebsite, referencedUrls } from './website.ts'
 import { createImportedWebpageFrame, findImportedWebpageFrame } from './webpageImport.ts'
-import { COMPONENTS, DESIGN_BRIEF, DESIGN_QUALITY, FRAME_STYLES, LEAN_FRAMES, PROTOTYPES } from './guide.ts'
+import {
+  COMPONENTS,
+  COMPOSE_CHECK,
+  DESIGN_BRIEF,
+  DESIGN_QUALITY,
+  FRAME_STYLES,
+  LEAN_FRAMES,
+  PROTOTYPES,
+  SYSTEM_FIRST,
+} from './guide.ts'
 import { zodToJsonSchema } from 'zod-to-json-schema'
 import { z } from 'zod'
 import { catalog, compactFrameHtml, findComponent, libraryCatalog } from './componentActions.ts'
@@ -193,7 +202,7 @@ Rules:
 ${FRAME_STYLES}
 ${LEAN_FRAMES}
 - Prefer edit_frame_html (exact find/replace) for small changes; use set_frame_html only when the change is structural.
-- After any visual change, call screenshot_frame and LOOK at the result. If it doesn't clearly satisfy the feedback, fix it before finishing. Check reuse too: a block repeated three or more times that is not a <doop-use>, or a hex, font or size a token already names.
+- After any visual change, call screenshot_frame and LOOK at the result. If it doesn't clearly satisfy the feedback, fix it before finishing. Check reuse too: a part of the canvas's component system drawn inline, a reusable piece (button, input, nav, card, row) that is not a component yet, a block repeated that is not a <doop-use>, or a hex, font or size a token already names.
 - Call set_status when you start ("Fixing: …") and when your focus shifts. One line, under 80 chars, present tense. People watch this live.
 - Never leave a frame worse than you found it.
 - Reference sites: when a request names a site or URL — a redesign of it, or "like acme.com" — call import_webpage with as_reference=true FIRST so an editable HTML snapshot lands on the canvas, then call screenshot_frame on that imported source and design from what is actually there: its real copy, nav labels, product facts, and imagery direction. Leave the imported source unchanged and deliver your work in a separate frame. If importing or editing the snapshot itself is the requested deliverable, use as_reference=false. view_website is read-only; use it only when you need to inspect a live page without adding it to the canvas. A redesign that invents content is wrong even when it looks good. If automated access is blocked and there is no existing source frame or attached screenshot, stop and ask the user to attach screenshots; never approximate the site from guesses.
@@ -207,6 +216,9 @@ ${DESIGN_QUALITY}
 
 Design brief — when your card asks you to ORIGINATE new design work:
 ${DESIGN_BRIEF}
+
+Set up the system, then compose:
+${SYSTEM_FIRST}
 
 Clickable prototypes:
 ${PROTOTYPES}
@@ -1190,7 +1202,8 @@ const TOOLS: Anthropic.Tool[] = [
   {
     name: 'create_frame',
     description:
-      'Add a new frame to the canvas — use this when a queued card asks for a new design rather than a change to an existing frame. Streams in live for viewers.',
+      'Add a new frame to the canvas — use this when a queued card asks for a new design rather than a change to an existing frame. Streams in live for viewers. ' +
+      COMPOSE_CHECK,
     input_schema: {
       type: 'object',
       properties: {
@@ -1253,7 +1266,8 @@ const TOOLS: Anthropic.Tool[] = [
   {
     name: 'set_frame_html',
     description:
-      'Replace a frame with a complete compact HTML document in one call. Use only when the entire html argument is under 12,000 characters; use the staged rewrite tools for larger documents.',
+      'Replace a frame with a complete compact HTML document in one call. Use only when the entire html argument is under 12,000 characters; use the staged rewrite tools for larger documents. ' +
+      COMPOSE_CHECK,
     input_schema: {
       type: 'object',
       properties: {
@@ -1266,7 +1280,8 @@ const TOOLS: Anthropic.Tool[] = [
   {
     name: 'begin_frame_rewrite',
     description:
-      'Start an atomic full-frame rewrite. This creates an empty server-side draft and does not change the live frame. Follow with one or more append_frame_rewrite calls, then commit_frame_rewrite.',
+      'Start an atomic full-frame rewrite. This creates an empty server-side draft and does not change the live frame. Follow with one or more append_frame_rewrite calls, then commit_frame_rewrite. ' +
+      COMPOSE_CHECK,
     input_schema: {
       type: 'object',
       properties: { frame_id: { type: 'string' } },
@@ -1788,6 +1803,8 @@ function canEditCanvas(userId: string, canvasId: string): boolean {
 }
 
 /** The resident agents' tool names; tests hold them to the MCP server's (agentToolParity.test.ts). */
+/** The tools a resident run is offered, as the model sees them. */
+export const RESIDENT_TOOLS: readonly Anthropic.Tool[] = TOOLS
 export const RESIDENT_TOOL_NAMES = TOOLS.map((tool) => tool.name)
 
 /* tall frames (imported landing pages) are CROPPED to the top 4000px at full

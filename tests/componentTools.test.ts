@@ -18,6 +18,7 @@ import * as propagation from '../server/propagation.ts'
 import { takeComponentIssues } from '../server/actions.ts'
 import { findComponent } from '../server/componentActions.ts'
 import { previewDocument } from '../server/componentPreview.ts'
+import { activeComponents } from '../shared/components.ts'
 
 const OWNER = 'owner-1'
 const AGENT = { agent_name: 'Tester' }
@@ -594,5 +595,92 @@ describe('an agent working with components', () => {
     })
     expect(imported.isError).toBe(true)
     expect(imported.text).toContain('cannot read')
+  })
+})
+
+describe('setting up a component system in one call', () => {
+  const kit = (canvasId: string, components: Record<string, unknown>[]) =>
+    call('create_components', { canvas_id: canvasId, components })
+
+  it('makes a kit in order, so a pattern can nest the primitive listed before it', async () => {
+    const canvas = newCanvas()
+    const made = await kit(canvas.id, [
+      { name: 'Button', html: BUTTON, css: CSS, props: [{ name: 'tone', type: 'enum', options: ['solid', 'ghost'] }] },
+      { name: 'Badge', html: '<span class="badge">New</span>', css: '.badge { padding: 2px 6px }' },
+      {
+        name: 'Card',
+        html: '<div class="card"><h3>Title</h3><doop-use component="Badge"></doop-use><doop-use component="Button" tone="ghost"></doop-use></div>',
+        css: '.card { padding: 16px }',
+      },
+    ])
+    expect(made.isError).toBe(false)
+    expect(made.data).toMatchObject({ ok: true, created: 3, failed: 0 })
+    expect(made.data.results.map((result: { component: { name: string } }) => result.component.name)).toEqual([
+      'Button',
+      'Badge',
+      'Card',
+    ])
+    expect(made.text).toContain('<doop-use component="Card"')
+    const canvasNow = store.getCanvas(canvas.id)!
+    const mains = made.data.results.map((result: { main_frame_id: string }) => store.getFrame(result.main_frame_id)!)
+    const page = canvasNow.pages?.find((candidate) => candidate.name === 'Components')
+    expect(mains.every((main: { pageId?: string }) => main.pageId === page?.id)).toBe(true)
+    /* the card's main renders the nested ones as linked instances */
+    const card = mains[2]
+    for (const nested of ['Badge', 'Button'])
+      expect(card.html).toMatch(new RegExp(`<[a-z]+[^>]*data-doop-instance="${findComponent(canvas.id, nested)!.id}"`))
+    /* and the mains do not sit on top of each other */
+    const boxes = mains.map((main: { x: number; y: number }) => `${main.x},${main.y}`)
+    expect(new Set(boxes).size).toBe(3)
+  })
+
+  it('reports a refused entry and still makes the others', async () => {
+    const canvas = newCanvas()
+    await button(canvas.id)
+    const made = await kit(canvas.id, [
+      { name: 'Button', html: BUTTON, css: CSS },
+      { name: 'Badge', html: '<span class="badge">New</span>' },
+    ])
+    expect(made.isError).toBe(false)
+    expect(made.data).toMatchObject({ ok: false, created: 1, failed: 1 })
+    expect(made.data.results[0]).toMatchObject({ index: 0, ok: false, name: 'Button' })
+    expect(made.data.results[0].error).toBeTruthy()
+    expect(made.data.results[1]).toMatchObject({ index: 1, ok: true })
+    expect(made.text).toContain('1 entry was refused')
+    const names = activeComponents(store.getCanvas(canvas.id)!.components).map((def) => def.name)
+    expect(names.sort()).toEqual(['Badge', 'Button'])
+  })
+
+  it('refuses an entry that nests a refused one, rather than saving it without that part', async () => {
+    const canvas = newCanvas()
+    const made = await kit(canvas.id, [
+      /* an enum with no options is refused */
+      { name: 'Button', html: BUTTON, css: CSS, props: [{ name: 'tone', type: 'enum' }] },
+      { name: 'Card', html: '<div class="card"><h3>Title</h3><doop-use component="Button"></doop-use></div>' },
+      { name: 'Badge', html: '<span class="badge">New</span>' },
+    ])
+    expect(made.data).toMatchObject({ ok: false, created: 1, failed: 2 })
+    expect(made.data.results[1]).toMatchObject({ ok: false, name: 'Card' })
+    expect(made.data.results[1].error).toContain('it nests “Button”')
+    expect(made.data.results[2]).toMatchObject({ ok: true })
+    expect(activeComponents(store.getCanvas(canvas.id)!.components).map((def) => def.name)).toEqual(['Badge'])
+    /* nothing of the refused card is left on the Components page */
+    expect(store.getCanvas(canvas.id)!.frames.map((frame) => frame.name)).toEqual(['Badge'])
+    /* sent again in order once fixed, both are made, the card holding its button */
+    const again = await kit(canvas.id, [
+      { name: 'Button', html: BUTTON, css: CSS },
+      { name: 'Card', html: '<div class="card"><h3>Title</h3><doop-use component="Button"></doop-use></div>' },
+    ])
+    expect(again.data).toMatchObject({ ok: true, created: 2 })
+    const card = store.getFrame(again.data.results[1].main_frame_id)!
+    expect(card.html).toContain(`data-doop-instance="${findComponent(canvas.id, 'Button')!.id}"`)
+  })
+
+  it('takes at most twelve at a time', async () => {
+    const canvas = newCanvas()
+    const many = Array.from({ length: 13 }, (_, index) => ({ name: `Part${index}`, html: `<i>${index}</i>` }))
+    const refused = await kit(canvas.id, many)
+    expect(refused.isError).toBe(true)
+    expect(activeComponents(store.getCanvas(canvas.id)!.components)).toEqual([])
   })
 })
