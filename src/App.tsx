@@ -30,6 +30,7 @@ import { adminApi } from './lib/api'
 import { Button } from './components/ui/button'
 import { AuthScreen } from './components/ui/screen'
 import { DesktopTabs, ShellDragBar } from './components/DesktopTabs'
+import { WindowControls } from './components/WindowControls'
 import { setTabsUser } from './lib/desktop'
 import { isDesktopShell } from './lib/shell'
 import { SIGNUP_PARAM, parseSignupMethod } from '../shared/firstCanvas'
@@ -257,8 +258,13 @@ export function App() {
 function ImpersonationBanner({ name }: { name: string }) {
   const t = useT()
   const [leaving, setLeaving] = useState(false)
+  /* the banner is the top of the window while it shows, so on Windows it is
+     also the drag handle and carries the caption buttons (windowFrame.ts) */
   return (
-    <div className="fixed inset-x-0 top-0 z-[900] flex min-h-14 items-center justify-between gap-2 border-b border-accent-ink px-2.5 py-[7px] text-[11.5px] leading-tight text-accent-ink backdrop-blur-[6px] [background:repeating-linear-gradient(-45deg,rgba(208,52,31,0.16)_0_10px,rgba(208,52,31,0.08)_10px_20px)] sm:h-10 sm:min-h-0 sm:justify-center sm:gap-4 sm:text-[13px]">
+    <div
+      data-tauri-drag-region
+      className="fixed inset-x-0 top-0 z-[900] flex min-h-14 items-center justify-between gap-2 border-b border-accent-ink px-2.5 py-[7px] text-[11.5px] leading-tight text-accent-ink backdrop-blur-[6px] [background:repeating-linear-gradient(-45deg,rgba(208,52,31,0.16)_0_10px,rgba(208,52,31,0.08)_10px_20px)] sm:h-10 sm:min-h-0 sm:justify-center sm:gap-4 sm:text-[13px]"
+    >
       <span>
         {t('auth.viewingAsBefore')} <strong>{name}</strong> {t('auth.viewingAsAfter')}
       </span>
@@ -278,6 +284,7 @@ function ImpersonationBanner({ name }: { name: string }) {
       >
         {leaving ? t('auth.leaving') : t('auth.stopViewing')}
       </Button>
+      <WindowControls className="absolute inset-y-0 right-0" />
     </div>
   )
 }

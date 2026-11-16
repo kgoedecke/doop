@@ -499,6 +499,13 @@ fn main() {
                     .on_page_load(move |window, payload| {
                         if payload.event() == PageLoadEvent::Started {
                             updates::page_loading(window.app_handle());
+                            // Windows: the page drops the native frame once it
+                            // has loaded (src/lib/windowFrame.ts). Give it back
+                            // on every full load, so a page that never takes
+                            // over (the webview's error page after a failed
+                            // reload, an older app) still has a way to close.
+                            #[cfg(windows)]
+                            let _ = window.set_decorations(true);
                         }
                         #[cfg(all(chromium, target_os = "macos"))]
                         if migrating {
