@@ -33,6 +33,7 @@ const directory = [
 ]
 
 function respond(routes: Record<string, unknown>) {
+  resetRegistryDirectory()
   network.fetch.mockImplementation(async (raw: string | URL) => {
     const value = { [DIRECTORY_URL]: directory, ...routes }[String(raw)]
     if (value instanceof Response) return value
@@ -216,6 +217,23 @@ describe('resolving an import', () => {
       'input',
       'marquee',
     ])
+  })
+
+  it('brings in the shadcn primitives an item imports without listing them', async () => {
+    respond({
+      [root]: {
+        ...button,
+        name: 'demo',
+        files: [
+          { path: 'demo.tsx', content: `import { Card } from "@/components/ui/card"\nexport default () => <Card />` },
+        ],
+      },
+      'https://ui.shadcn.com/r/styles/new-york-v4/card.json': {
+        ...card,
+        files: [{ path: 'ui/card.tsx', content: 'x' }],
+      },
+    })
+    expect((await prepareRegistryImport(only('demo'))).items.map((item) => item.name)).toEqual(['demo', 'card'])
   })
 
   it('keeps dependencies in the selected official style instead of mixing Nova and New York', async () => {

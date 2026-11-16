@@ -2695,6 +2695,35 @@ app.post('/api/canvases/:id/import/registry/preview', async (req, res) => {
   }
 })
 
+/* A picture of one registry item for the library, rendered as an import
+   would render it and cached across people. */
+app.get('/api/canvases/:id/import/registry/thumbnail', async (req, res) => {
+  const canvas = requireCanvas(req, res, req.params.id, 'edit')
+  if (!canvas) return
+  const query = z
+    .object({
+      source: z.string().url().max(2000),
+      name: z.string().min(1).max(100),
+      tokens: z.enum(['0', '1']).optional(),
+    })
+    .safeParse(req.query)
+  if (!query.success) return res.status(400).json({ error: 'source and name are required' })
+  try {
+    const { registryThumbnail } = await import('./registryThumbnails.ts')
+    const { registryTheme } = await import('./registryTheme.ts')
+    const theme = query.data.tokens === '1' ? registryTheme(canvas.tokens ?? [], canvas.tokenThemes) : undefined
+    const image = await registryThumbnail(query.data.source, query.data.name, theme)
+    res.setHeader('Content-Type', 'image/webp')
+    res.setHeader('Cache-Control', 'private, max-age=3600')
+    res.send(image)
+  } catch (error) {
+    const { ThumbnailBusyError } = await import('./registryThumbnails.ts')
+    if (error instanceof ThumbnailBusyError)
+      return res.status(503).setHeader('Retry-After', '3').json({ error: error.message })
+    res.status(422).json({ error: error instanceof Error ? error.message : 'preview failed' })
+  }
+})
+
 app.post('/api/canvases/:id/import/registry', async (req, res) => {
   if (!requireCanvas(req, res, req.params.id, 'edit')) return
   try {

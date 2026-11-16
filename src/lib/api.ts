@@ -699,6 +699,12 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ input }),
     }),
+  registryThumbnail: async (canvasId: string, item: RegistrySelection, matchTokens: boolean, signal?: AbortSignal) => {
+    const query = new URLSearchParams({ source: item.source, name: item.name, tokens: matchTokens ? '1' : '0' })
+    const res = await fetch(`/api/canvases/${canvasId}/import/registry/thumbnail?${query}`, { signal })
+    if (!res.ok) throw new ApiError(res.status, await res.text())
+    return res.blob()
+  },
   importRegistry: (canvasId: string, items: RegistrySelection[], matchTokens: boolean) =>
     req<RegistryImportResult>(`/api/canvases/${canvasId}/import/registry`, {
       method: 'POST',

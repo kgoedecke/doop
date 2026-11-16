@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type {
   RegistryDirectoryEntry,
   RegistryItemSummary,
@@ -8,13 +8,15 @@ import type {
 import { api, ApiError } from '@/lib/api'
 import { useT } from '@/lib/i18n'
 import { useStore } from '@/lib/store'
+import { registryPicture } from '@/lib/registryThumbnails'
 import { cn } from '@/lib/utils'
 import { Button } from './ui/button'
 import { CheckboxCard } from './ui/checkbox'
 import { ChoiceList, ChoiceRow } from './ui/choice-list'
-import { ArrowLeftIcon, BlocksIcon } from './ui/icons'
+import { ArrowLeftIcon, BlocksIcon, ImageIcon } from './ui/icons'
 import { Input } from './ui/input'
 import { Modal, ModalLede, ModalTitle } from './ui/modal'
+import { Skeleton } from './ui/skeleton'
 import { SearchField } from './ui/search-field'
 import { Switch } from './ui/switch'
 
@@ -35,6 +37,75 @@ function RegistryTile() {
   return (
     <span className="flex size-8 items-center justify-center rounded-row bg-paper-deep text-ink-soft">
       <BlocksIcon size="rail" aria-hidden />
+    </span>
+  )
+}
+
+/** The item as it will look, rendered on the server once the card scrolls into view. */
+function ItemPicture({
+  canvasId,
+  item,
+  matchTokens,
+}: {
+  canvasId: string
+  item: RegistryItemSummary
+  matchTokens: boolean
+}) {
+  const t = useT()
+  const box = useRef<HTMLSpanElement>(null)
+  const [seen, setSeen] = useState(false)
+  const [picture, setPicture] = useState<{ key: string; url: string | null } | null>(null)
+  const key = `${keyOf(item)}:${matchTokens}`
+  useEffect(() => {
+    const node = box.current
+    if (!node || seen) return
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) setSeen(true)
+      },
+      { rootMargin: '120px' },
+    )
+    observer.observe(node)
+    return () => observer.disconnect()
+  }, [seen])
+  useEffect(() => {
+    if (!seen) return
+    let live = true
+    registryPicture(canvasId, { source: item.source, name: item.name }, matchTokens).then(
+      (url) => live && setPicture({ key, url }),
+      () => live && setPicture({ key, url: null }),
+    )
+    return () => {
+      live = false
+    }
+  }, [seen, canvasId, item.source, item.name, matchTokens, key])
+  const current = picture?.key === key ? picture : null
+  /* pictures are taken at 2x: shown at their own size, so a button reads as a
+     button, and only scaled down when they would not fit */
+  const [width, setWidth] = useState<number | undefined>(undefined)
+  return (
+    <span
+      ref={box}
+      /* white like the render's own page, so the picture's edges disappear */
+      className="flex h-28 items-center justify-center overflow-hidden rounded-row bg-white shadow-ring"
+    >
+      {!current ? (
+        <Skeleton className="size-full" />
+      ) : current.url ? (
+        <img
+          src={current.url}
+          alt=""
+          style={{ width }}
+          className="max-h-full max-w-full object-contain"
+          draggable={false}
+          onLoad={(event) => setWidth(event.currentTarget.naturalWidth / 2)}
+        />
+      ) : (
+        <span className="flex flex-col items-center gap-1 text-caption text-ink-faint">
+          <ImageIcon size="rail" aria-hidden />
+          {t('canvas.libraryNoPreview')}
+        </span>
+      )}
     </span>
   )
 }
@@ -252,13 +323,15 @@ export function ComponentLibrary({
               )}
             </div>
             <div
-              className="mt-3 grid max-h-[min(380px,calc(100dvh-360px))] grid-cols-1 gap-2 overflow-y-auto sm:grid-cols-2"
+              className="mt-3 grid max-h-[min(460px,calc(100dvh-340px))] grid-cols-1 items-start gap-2 overflow-y-auto sm:grid-cols-3"
               role="group"
               aria-label={t('canvas.libraryItems')}
             >
               {items.map((item) => (
                 <CheckboxCard
                   key={keyOf(item)}
+                  className="mt-0"
+                  media={<ItemPicture canvasId={canvasId} item={item} matchTokens={hasTokens && matchTokens} />}
                   title={item.title}
                   description={item.description || item.type.replace(/^registry:/, '')}
                   checked={selected.has(keyOf(item))}

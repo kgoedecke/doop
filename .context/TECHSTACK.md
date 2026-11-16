@@ -727,15 +727,23 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   (`{style}` tried as new-york-v4, new-york, default), a bare name in a command as an official item,
   a JSON URL, or a docs page's install commands, else its site's `/r/registry.json`. Each listed
   item carries its `source`; `POST /api/canvases/:id/import/registry { items: [{ source, name }],
-matchTokens }` resolves dependencies (`@namespace/` ones through the directory too) and renders.
+matchTokens }` resolves dependencies (`@namespace/` ones through the directory too, and any
+  `@/components/ui/<name>` a file imports without listing it, from the official registry) and renders.
   Theming: `registryTheme` maps shadcn's variables to canvas tokens by type and common names
   (`--primary` ← `--color-brand`, `--radius` ← `--radius-lg`), appends `--primary:var(--color-brand)`
   last in the base layer, strips the component's own definitions of those token names (Tailwind's
   theme uses the same namespaces, so they would shadow the token or close a cycle), and supplies the
   token values while rendering only, so the frame's token block keeps them live. The component
-  preview sheet carries the token block too. Tests: `shadcnRegistry.test.ts`, `registryTheme.test.ts`,
+  preview sheet carries the token block too. Item pictures: `GET
+/api/canvases/:id/import/registry/thumbnail?source&name&tokens` renders the item as an import
+  would (its `-demo` example when the registry has one, falling back to the item; themed when
+  asked) at 720px and 2x with transitions off, cropped to what paints, and returns a WebP
+  (`server/registryThumbnails.ts`: 24-hour cache of 400 shared across people, a failure kept 10
+  minutes, three renders at a time and 60 waiting, else 503); registry JSON is kept 10 minutes so a
+  big index is read once per browse. The library asks two at a time once a card scrolls into view
+  (`src/lib/registryThumbnails.ts`, retrying a 503) and shows each at its own size. Tests: `shadcnRegistry.test.ts`, `registryTheme.test.ts`,
   `registryRenderer.test.ts` (Chromium, themed instance following a token edit),
-  `componentLibrary.test.tsx`, `shadcnRegistryHttp.test.ts`.
+  `componentLibrary.test.tsx`, `shadcnRegistryHttp.test.ts`, `registryThumbnails.test.ts`.
 - Prototypes (`.context/specs/prototyping.md`): interactions are `data-doop-on` /
   `data-doop-action` (or the JSON `data-doop-interactions`) attributes in frame HTML, parsed by
   `shared/prototype.ts`, whose parser the frame runtime inlines by source. `PrototypePlayer.tsx`

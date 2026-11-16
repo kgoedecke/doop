@@ -153,13 +153,31 @@ async function fetchBody(
   throw new Error('Too many registry redirects')
 }
 
+/* Registry JSON read in the last few minutes: browsing a registry's previews
+   reads its index once per item, and an index can run to megabytes. */
+const JSON_CACHE_MS = 10 * 60 * 1000
+const JSON_CACHE_SIZE = 60
+const jsonCache = new Map<string, { at: number; value: Promise<{ url: string; value: unknown }> }>()
+
 async function fetchJson(raw: string, signal: AbortSignal, maxBytes = MAX_ITEM_BYTES) {
-  const body = await fetchBody(raw, signal, maxBytes)
-  try {
-    return { url: body.url, value: JSON.parse(body.text) as unknown }
-  } catch {
-    throw new Error('The URL did not return valid registry JSON')
-  }
+  const key = `${maxBytes}:${raw}`
+  const known = jsonCache.get(key)
+  if (known && Date.now() - known.at < JSON_CACHE_MS) return known.value
+  const value = (async () => {
+    const body = await fetchBody(raw, signal, maxBytes)
+    try {
+      return { url: body.url, value: JSON.parse(body.text) as unknown }
+    } catch {
+      throw new Error('The URL did not return valid registry JSON')
+    }
+  })()
+  jsonCache.set(key, { at: Date.now(), value })
+  while (jsonCache.size > JSON_CACHE_SIZE) jsonCache.delete(jsonCache.keys().next().value!)
+  /* a failed read is not kept: the next request tries again */
+  value.catch(() => {
+    if (jsonCache.get(key)?.value === value) jsonCache.delete(key)
+  })
+  return value
 }
 
 /* ---------------------------------------------------------------- directory */
@@ -219,9 +237,10 @@ export async function registryDirectory(): Promise<RegistryDirectoryEntry[]> {
     .map(({ namespace, homepage, description, featured }) => ({ namespace, homepage, description, featured }))
 }
 
-/** Test seam: forget the cached directory. */
+/** Test seam: forget the cached directory and registry JSON. */
 export function resetRegistryDirectory() {
   directoryCache = undefined
+  jsonCache.clear()
 }
 
 async function namespaceRecord(namespace: string): Promise<DirectoryRecord> {
@@ -520,6 +539,23 @@ export async function prepareRegistryImport(selections: RegistrySelection[]) {
     if (!item) throw new RegistryInputError(`Registry item “${selection.name}” is no longer available`)
     const root = await visit(registry, item, registry.index ? registry.itemUrl(item.name) : registry.url)
     if (root) rootItems.push(root)
+  }
+  /* community items (demos especially) import shadcn's own primitives,
+     `@/components/ui/card`, without listing them: their users already have
+     them. Whatever is imported and not provided comes from the official
+     registry, as `npx shadcn add card` would bring it. */
+  const provided = (name: string) =>
+    [...resolved.values()].some(({ item }) =>
+      item.files?.some((file) => new RegExp(`(^|/)ui/${name}\\.[jt]sx?$`).test(file.target ?? file.path)),
+    )
+  for (let round = 0; round < 3; round++) {
+    const wanted = new Set<string>()
+    for (const { item } of resolved.values())
+      for (const file of item.files ?? [])
+        for (const match of (file.content ?? '').matchAll(/["'](?:@|~)\/components\/ui\/([a-z0-9-]+)["']/g))
+          if (!provided(match[1]!)) wanted.add(match[1]!)
+    if (!wanted.size) break
+    for (const name of wanted) await visit(null, null, templateUrls(OFFICIAL.template, name)[0]!)
   }
   return { selected: rootItems, items: [...resolved.values()].map(({ item }) => item) }
 }

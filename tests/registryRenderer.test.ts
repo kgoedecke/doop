@@ -224,6 +224,12 @@ describe.skipIf(!inject('browserRig'))('registry rendering and component registr
     }
   }, 30_000)
 
+  it('takes a picture of the render when asked, for the library', async () => {
+    const rendered = await renderRegistryComponent(button, [button], undefined, { image: true })
+    expect(rendered.image?.subarray(8, 12).toString()).toBe('WEBP')
+    expect((await renderRegistryComponent(button, [button])).image).toBeUndefined()
+  }, 30_000)
+
   it('renders primitive providers and captures portaled content as part of the component', async () => {
     const dialog: RegistryItem = {
       name: 'dialog',

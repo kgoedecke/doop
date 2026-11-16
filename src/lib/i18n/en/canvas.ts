@@ -13,6 +13,7 @@ export const canvas = {
   libraryFeatured: 'Featured',
   libraryItems: 'Components to add',
   libraryItemCount: { one: '{count} component', other: '{count} components' },
+  libraryNoPreview: 'No preview',
   libraryNoMatch: 'Nothing matches.',
   libraryMatchTokens: 'Use this canvas’s tokens',
   libraryMatchTokensHint: 'Colours, corners and type follow the design’s tokens.',

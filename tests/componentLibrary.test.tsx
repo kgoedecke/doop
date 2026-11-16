@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   importRegistry: vi.fn(),
   setComponentLocal: vi.fn(),
   setLayersTab: vi.fn(),
+  registryPicture: vi.fn(),
   state: { canvas: { tokens: [] as unknown[] } },
 }))
 vi.mock('../src/lib/api', () => ({ api: mocks, ApiError: class extends Error {} }))
@@ -17,6 +18,7 @@ vi.mock('../src/lib/store', () => {
   useStore.getState = () => mocks
   return { useStore }
 })
+vi.mock('../src/lib/registryThumbnails', () => ({ registryPicture: mocks.registryPicture }))
 import { ComponentLibrary } from '../src/components/ComponentLibrary'
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
@@ -33,8 +35,21 @@ async function mount(initialInput = '') {
   )
 }
 
+/* cards count as in view at once */
+class SeenAtOnce {
+  constructor(private callback: (entries: { isIntersecting: boolean }[]) => void) {}
+  observe() {
+    this.callback([{ isIntersecting: true }])
+  }
+  disconnect() {}
+}
+globalThis.IntersectionObserver = SeenAtOnce as unknown as typeof IntersectionObserver
+
 beforeEach(() => {
   vi.clearAllMocks()
+  mocks.registryPicture.mockImplementation(async (_canvas: string, item: { name: string }) =>
+    item.name === 'globe' ? Promise.reject(new Error('no')) : `blob:${item.name}`,
+  )
   mocks.state.canvas.tokens = []
   mocks.registryDirectory.mockResolvedValue([
     { namespace: '@shadcn', homepage: 'https://ui.shadcn.com', description: 'Official', featured: true },
@@ -111,4 +126,11 @@ it('keeps the selection for a retry when adding fails', async () => {
   expect(document.querySelector('[role="alert"]')?.textContent).toContain('Dependency unavailable')
   await click(buttonNamed('Add 1 component'))
   expect(done).toHaveBeenCalledOnce()
+})
+
+it('shows each item as it renders, and says so when one cannot', async () => {
+  await mount('@magicui')
+  expect(mocks.registryPicture).toHaveBeenCalledWith('c1', { source, name: 'marquee' }, false)
+  expect(document.querySelector<HTMLImageElement>('img')?.getAttribute('src')).toBe('blob:marquee')
+  expect(document.body.textContent).toContain('No preview')
 })

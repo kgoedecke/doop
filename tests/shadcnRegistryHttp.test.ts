@@ -45,6 +45,14 @@ describe('registry import access and validation', () => {
     expect(response.status).toBe(400)
   })
 
+  it('gives item pictures to editors only, and asks for what to picture', async () => {
+    const query = `source=${encodeURIComponent('https://example.com/r/registry.json')}&name=button`
+    expect((await visitor.get(`/api/canvases/${canvasId}/import/registry/thumbnail?${query}`)).status).toBe(403)
+    expect((await owner.get(`/api/canvases/${canvasId}/import/registry/thumbnail?name=button`)).status).toBe(400)
+    const privateSource = `source=${encodeURIComponent('http://127.0.0.1/r/registry.json')}&name=button`
+    expect((await owner.get(`/api/canvases/${canvasId}/import/registry/thumbnail?${privateSource}`)).status).toBe(422)
+  })
+
   it('lists the registry directory only to signed-in people', async () => {
     expect((await new Client(server).get('/api/registry/directory')).status).toBe(401)
   })

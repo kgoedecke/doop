@@ -54,6 +54,11 @@ export function registryMount(entry: Record<string, unknown>, preferred: string[
       part('Content', {}, 'Use this component to group related information and actions.'),
       has('Footer') ? part('Footer', {}, 'Card footer') : null,
     )
+  } else if (/^(?:Input|Textarea)$/.test(name)) {
+    /* an <input> takes no children; the label becomes its placeholder */
+    node = part('', { placeholder: label, className: 'w-64' })
+  } else if (/^(?:Separator|Progress|Slider|Skeleton)$/.test(name)) {
+    node = part('', { className: 'w-64', ...(name === 'Progress' ? { value: 60 } : {}) })
   } else {
     node = part('', {}, label)
   }

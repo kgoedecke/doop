@@ -15,6 +15,7 @@ export const canvas: Catalog['canvas'] = {
   libraryFeatured: 'Destaque',
   libraryItems: 'Componentes a adicionar',
   libraryItemCount: { one: '{count} componente', other: '{count} componentes' },
+  libraryNoPreview: 'Sem prévia',
   libraryNoMatch: 'Nada corresponde.',
   libraryMatchTokens: 'Usar os tokens deste canvas',
   libraryMatchTokensHint: 'Cores, cantos e tipografia seguem os tokens do design.',
