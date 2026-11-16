@@ -20,16 +20,16 @@ describe('registry import access and validation', () => {
   for (const path of ['/preview', '']) {
     it(`requires edit access for ${path || 'import'}`, async () => {
       const response = await visitor.post(`/api/canvases/${canvasId}/import/registry${path}`, {
-        url: 'https://example.com/r/registry.json',
-        names: ['button'],
+        input: 'https://example.com/r/registry.json',
+        items: [{ source: 'https://example.com/r/registry.json', name: 'button' }],
       })
       expect(response.status).toBe(403)
     })
 
     it(`rejects private URLs without changing the design for ${path || 'import'}`, async () => {
       const response = await owner.post(`/api/canvases/${canvasId}/import/registry${path}`, {
-        url: 'http://127.0.0.1/registry.json',
-        names: ['button'],
+        input: 'http://127.0.0.1/registry.json',
+        items: [{ source: 'http://127.0.0.1/registry.json', name: 'button' }],
       })
       expect(response.status).toBe(400)
       const canvas = await (await owner.get(`/api/canvases/${canvasId}`)).json()
@@ -41,10 +41,11 @@ describe('registry import access and validation', () => {
   }
 
   it('rejects an empty selection before fetching registry source', async () => {
-    const response = await owner.post(`/api/canvases/${canvasId}/import/registry`, {
-      url: 'https://example.com/r/registry.json',
-      names: [],
-    })
+    const response = await owner.post(`/api/canvases/${canvasId}/import/registry`, { items: [] })
     expect(response.status).toBe(400)
+  })
+
+  it('lists the registry directory only to signed-in people', async () => {
+    expect((await new Client(server).get('/api/registry/directory')).status).toBe(401)
   })
 })

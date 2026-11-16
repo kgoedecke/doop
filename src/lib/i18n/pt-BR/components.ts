@@ -32,6 +32,7 @@ export const components: Catalog['components'] = {
   nothingRepeats: 'Nada se repete neste canvas.',
   copiesInFrames: { one: '{copies} cópias em {count} frame', other: '{copies} cópias em {count} frames' },
   makeAndLink: 'Criar um componente e vincular todos',
+  addFromLibrary: 'Adicionar de registros shadcn',
   importFromCanvas: 'Importar de outro canvas',
   noLibraries: 'Nenhum outro canvas que você pode abrir tem componentes.',
   imported: '“{name}” importado',

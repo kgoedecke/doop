@@ -10,6 +10,7 @@ import * as JSXRuntime from 'react/jsx-runtime'
 import { openIsolatedPage } from './screenshot.ts'
 import { fetchPinnedPublicUrl, guardPublicPageRequests } from './publicUrl.ts'
 import type { RegistryItem } from './shadcnRegistry.ts'
+import { applyRegistryTheme, type RegistryTheme } from './registryTheme.ts'
 
 export interface RenderedRegistryComponent {
   name: string
@@ -213,7 +214,7 @@ function registryCss(value: unknown): string {
     .join('')
 }
 
-async function componentCss(items: RegistryItem[], candidates: string[]): Promise<string> {
+async function componentCss(items: RegistryItem[], candidates: string[], canvasTheme?: RegistryTheme): Promise<string> {
   const theme = await readFile(new URL(import.meta.resolve('tailwindcss/theme.css')), 'utf8')
   const preflight = await readFile(new URL(import.meta.resolve('tailwindcss/preflight.css')), 'utf8')
   const modern = items.some((item) => item.files?.some((file) => /registry\/(?:radix|base|aria)-/.test(file.path)))
@@ -259,7 +260,7 @@ body{color:var(--foreground);background:var(--background)}
 ${font}
 @layer utilities {@tailwind utilities;}
 ${extra}`)
-  return compiler.build(candidates)
+  return applyRegistryTheme(compiler.build(candidates), canvasTheme)
 }
 
 /** React runs only in a disposable browser, with no app cookies, server APIs,
@@ -267,6 +268,7 @@ ${extra}`)
 export async function renderRegistryComponent(
   item: RegistryItem,
   items: RegistryItem[],
+  theme?: RegistryTheme,
 ): Promise<RenderedRegistryComponent> {
   const bundled = await bundleRegistryComponent(item, items)
   const isolated = await openIsolatedPage()
@@ -309,7 +311,18 @@ export async function renderRegistryComponent(
     const candidates = await page.evaluate(() => [
       ...new Set([...document.querySelectorAll('*')].flatMap((element) => [...element.classList])),
     ])
-    const css = await componentCss(items, candidates)
+    const css = await componentCss(items, candidates, theme)
+    /* the canvas's token values, so a themed component renders and measures as
+       it will look; left out of the snapshot, since the frame's own token block
+       supplies them and keeps them live */
+    if (theme?.renderTokens) {
+      await page.evaluate((content) => {
+        const style = document.createElement('style')
+        style.setAttribute('data-doop-render-only', '')
+        style.textContent = content
+        document.head.append(style)
+      }, theme.renderTokens)
+    }
     await page.addStyleTag({ content: css })
     await page.evaluate(() => document.fonts.ready)
     const snapshot = await page.evaluate(() => {
@@ -333,6 +346,7 @@ export async function renderRegistryComponent(
         height: Math.max(0, ...boxes.map((box) => box.bottom)) - Math.min(0, ...boxes.map((box) => box.top)),
       }
       const styles = [...document.styleSheets]
+        .filter((sheet) => !(sheet.ownerNode as Element | null)?.hasAttribute?.('data-doop-render-only'))
         .flatMap((sheet) => {
           try {
             return [...sheet.cssRules].map((rule) => rule.cssText)

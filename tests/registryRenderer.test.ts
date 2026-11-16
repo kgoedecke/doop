@@ -10,6 +10,9 @@ vi.mock('../server/db/persist.ts', () => ({
   saveTask: () => {},
   saveComponent: () => {},
   deleteComponent: () => {},
+  saveToken: () => {},
+  deleteToken: () => {},
+  saveTokenThemes: () => {},
 }))
 const browserMock = vi.hoisted(() => ({ open: vi.fn() }))
 vi.mock('../server/screenshot.ts', async (original) => ({
@@ -21,6 +24,7 @@ import { createComponentFromHtml, insertInstance } from '../server/componentActi
 import { store } from '../server/store.ts'
 import * as actions from '../server/actions.ts'
 import type { RegistryItem } from '../server/shadcnRegistry.ts'
+import { registryTheme } from '../server/registryTheme.ts'
 import type { Actor } from '../shared/types.ts'
 import novaCard from './fixtures/registry/nova-card.json'
 
@@ -115,6 +119,45 @@ describe.skipIf(!inject('browserRig'))('registry rendering and component registr
     } finally {
       await page.close()
     }
+  }, 30_000)
+
+  it('themes a component with the canvas tokens and follows a later token change', async () => {
+    const canvas = store.createCanvas('Themed registry')
+    actions.createTokens(
+      canvas.id,
+      [
+        { name: '--color-brand', type: 'color', value: 'rgb(200, 30, 60)' },
+        { name: '--color-on-brand', type: 'color', value: 'rgb(255, 255, 255)' },
+        { name: '--radius-md', type: 'radius', value: '3px' },
+      ],
+      actor,
+    )
+    const theme = registryTheme(store.getCanvas(canvas.id)!.tokens ?? [])
+    const rendered = await renderRegistryComponent(button, [button], theme)
+    expect(rendered.css).toContain('var(--color-brand)')
+    expect(rendered.css).not.toContain('rgb(200, 30, 60)')
+    const component = createComponentFromHtml(canvas.id, rendered, actor)
+    const frame = actions.createFrame(
+      canvas.id,
+      { name: 'Use', html: '<html><head></head><body></body></html>' },
+      actor,
+    )!
+    insertInstance(canvas.id, { component: component.id, frameId: frame.id }, actor)
+    const look = async () => {
+      const page = await browser.newPage()
+      try {
+        await page.setContent(store.getFrame(frame.id)!.html)
+        return await page.$eval('button', (element) => {
+          const css = getComputedStyle(element)
+          return { background: css.backgroundColor, color: css.color, radius: css.borderRadius }
+        })
+      } finally {
+        await page.close()
+      }
+    }
+    expect(await look()).toEqual({ background: 'rgb(200, 30, 60)', color: 'rgb(255, 255, 255)', radius: '1px' })
+    actions.setTokens(canvas.id, [{ name: '--color-brand', value: 'rgb(0, 120, 90)' }], actor)
+    expect((await look()).background).toBe('rgb(0, 120, 90)')
   }, 30_000)
 
   it('preserves the official Nova Card typography, compact spacing, ring and footer in mains and instances', async () => {

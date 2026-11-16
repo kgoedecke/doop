@@ -30,7 +30,12 @@ import { SearchField } from './ui/search-field'
 function ComponentThumb({ def, canvasId }: { def: ComponentDef; canvasId: string }) {
   const t = useT()
   const [sheet, setSheet] = useState<{ key: string; html: string; width: number; height: number } | null>(null)
-  const key = `${def.id}:${def.rev}`
+  /* a token edit re-themes the sheet without a new revision */
+  const tokenStamp = useStore(
+    (s) =>
+      `${s.canvas?.tokens?.length ?? 0}.${s.canvas?.tokens?.reduce((at, token) => Math.max(at, token.updatedAt), 0) ?? 0}`,
+  )
+  const key = `${def.id}:${def.rev}:${tokenStamp}`
   /* the panel is resizable, so the sheet scales to the card it is in */
   const box = useRef<HTMLDivElement>(null)
   const [boxWidth, setBoxWidth] = useState(0)
@@ -277,6 +282,9 @@ export function ComponentsPanel() {
               </Button>
             </div>
           ))}
+          <Button size="sm" onClick={() => useStore.getState().openComponentLibrary()}>
+            {t('components.addFromLibrary')}
+          </Button>
           <Button size="sm" onClick={() => void browse()}>
             {t('components.importFromCanvas')}
           </Button>

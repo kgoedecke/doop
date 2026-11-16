@@ -2678,13 +2678,18 @@ function takeImportSlot(userId: string): boolean {
 }
 
 /* Registry React is rendered to passive HTML before writing components. */
+app.get('/api/registry/directory', async (_req, res) => {
+  const { registryDirectory } = await import('./shadcnRegistry.ts')
+  res.json(await registryDirectory())
+})
+
 app.post('/api/canvases/:id/import/registry/preview', async (req, res) => {
   if (!requireCanvas(req, res, req.params.id, 'edit')) return
   try {
     const { previewRegistry } = await import('./shadcnRegistry.ts')
-    const url = z.string().url().parse(req.body?.url)
+    const input = z.string().trim().min(1).max(4000).parse(req.body?.input)
     if (!takeImportSlot(req.user!.id)) return res.status(429).json({ error: 'too many imports — wait a minute' })
-    res.json(await previewRegistry(url))
+    res.json(await previewRegistry(input))
   } catch (error) {
     res.status(400).json({ error: error instanceof Error ? error.message : 'registry preview failed' })
   }
@@ -2696,18 +2701,25 @@ app.post('/api/canvases/:id/import/registry', async (req, res) => {
     const { prepareRegistryImport, MAX_REGISTRY_SELECTION } = await import('./shadcnRegistry.ts')
     const input = z
       .object({
-        url: z.string().url(),
-        names: z.array(z.string().min(1).max(100)).min(1).max(MAX_REGISTRY_SELECTION),
+        items: z
+          .array(z.object({ source: z.string().url().max(2000), name: z.string().min(1).max(100) }))
+          .min(1)
+          .max(MAX_REGISTRY_SELECTION),
+        matchTokens: z.boolean().optional(),
       })
       .parse(req.body)
     if (!takeImportSlot(req.user!.id)) return res.status(429).json({ error: 'too many imports — wait a minute' })
-    const prepared = await prepareRegistryImport(input.url, input.names)
+    const prepared = await prepareRegistryImport(input.items)
     const { renderRegistryComponent } = await import('./registryRenderer.ts')
+    const { registryTheme } = await import('./registryTheme.ts')
+    const before = requireCanvas(req, res, req.params.id, 'edit')
+    if (!before) return
+    const theme = input.matchTokens === false ? undefined : registryTheme(before.tokens ?? [], before.tokenThemes)
     const rendered = []
     const failures: { name: string; error: string }[] = []
     for (const item of prepared.selected) {
       try {
-        rendered.push(await renderRegistryComponent(item, prepared.items))
+        rendered.push(await renderRegistryComponent(item, prepared.items, theme))
       } catch (error) {
         failures.push({ name: item.name, error: error instanceof Error ? error.message : 'component rendering failed' })
       }
@@ -2736,7 +2748,7 @@ app.post('/api/canvases/:id/import/registry', async (req, res) => {
     }
     if (!components.length)
       return res.status(400).json({ error: failures[0]?.error ?? 'Component import failed', failures })
-    res.json({ components, failures })
+    res.json({ components, failures, themed: theme?.mapped ?? [] })
   } catch (error) {
     res.status(400).json({ error: error instanceof Error ? error.message : 'registry import failed' })
   }

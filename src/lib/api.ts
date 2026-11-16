@@ -1,4 +1,9 @@
-import type { RegistryPreview } from '../../shared/shadcnRegistry'
+import type {
+  RegistryDirectoryEntry,
+  RegistryImportResult,
+  RegistryPreview,
+  RegistrySelection,
+} from '../../shared/shadcnRegistry'
 import { useStore } from './store'
 import type { InstanceSettings, InstanceSettingsPatch } from '../../shared/instanceSettings'
 import { beginFrameSave } from './frameSaves'
@@ -688,19 +693,17 @@ export const api = {
     ),
   sendTaskFeedback: (taskId: string, text: string) =>
     req(`/api/tasks/${taskId}/feedback`, { method: 'POST', body: JSON.stringify({ text, from: getIdentity().name }) }),
-  previewRegistry: (canvasId: string, url: string) =>
+  registryDirectory: () => req<RegistryDirectoryEntry[]>('/api/registry/directory'),
+  previewRegistry: (canvasId: string, input: string) =>
     req<RegistryPreview>(`/api/canvases/${canvasId}/import/registry/preview`, {
       method: 'POST',
-      body: JSON.stringify({ url }),
+      body: JSON.stringify({ input }),
     }),
-  importRegistry: (canvasId: string, url: string, names: string[]) =>
-    req<{ components: ComponentDef[]; failures: { name: string; error: string }[] }>(
-      `/api/canvases/${canvasId}/import/registry`,
-      {
-        method: 'POST',
-        body: JSON.stringify({ url, names }),
-      },
-    ),
+  importRegistry: (canvasId: string, items: RegistrySelection[], matchTokens: boolean) =>
+    req<RegistryImportResult>(`/api/canvases/${canvasId}/import/registry`, {
+      method: 'POST',
+      body: JSON.stringify({ items, matchTokens }),
+    }),
   importPage: (canvasId: string, url: string) =>
     req<Frame>(`/api/canvases/${canvasId}/import`, { method: 'POST', body: JSON.stringify({ url }) }),
   discoverSitePages: (canvasId: string, url: string) =>

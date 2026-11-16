@@ -78,6 +78,29 @@ describe('component routes', () => {
     expect(sheet.html).toContain('One')
   })
 
+  it('gives the preview sheet the canvas token values its component names', async () => {
+    await owner.post(`/api/canvases/${canvasId}/tokens`, {
+      tokens: [{ name: '--color-tag', type: 'color', value: '#123456' }],
+    })
+    const frame = (await (
+      await owner.post(`/api/canvases/${canvasId}/frames`, {
+        name: 'Tokened',
+        html: doc('<b data-doop-id="tokens" style="color:var(--color-tag)">Tokened</b>'),
+      })
+    ).json()) as { id: string }
+    const made = await owner.post(`/api/canvases/${canvasId}/components`, {
+      name: 'Tokened',
+      frameId: frame.id,
+      element: 'tokens',
+    })
+    const { component } = (await made.json()) as { component: { id: string } }
+    const sheet = (await (await owner.get(`/api/canvases/${canvasId}/components/${component.id}/preview`)).json()) as {
+      html: string
+    }
+    expect(sheet.html).toContain('data-doop-tokens')
+    expect(sheet.html).toContain('--color-tag:#123456')
+  })
+
   it('keeps people without access out', async () => {
     expect((await stranger.get(`/api/canvases/${canvasId}/components`)).status).toBe(403)
     expect(

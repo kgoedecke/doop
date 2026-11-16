@@ -305,7 +305,7 @@ export const panels: Catalog['panels'] = {
   importLiveApp: 'App ao vivo',
   importLiveAppBlurb: 'Atrás de um login, de uma VPN ou em localhost.',
   importShadcn: 'shadcn/ui',
-  importShadcnBlurb: 'Componentes e temas de um registro.',
+  importShadcnBlurb: 'Componentes de qualquer registro shadcn, com os seus tokens.',
   importGithub: 'Repositório do GitHub',
   importGithubBlurb: 'Telas lidas a partir das rotas do repositório.',
 
