@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useContext, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import type { ElementComment } from '../../shared/types'
 import { colorFor } from '../../shared/types'
 import { DEFAULT_ROLE_NAME, mentionedRole } from '../../shared/agents'
@@ -11,6 +12,7 @@ import { Textarea } from './ui/textarea'
 import { CheckIcon, CommentIcon, SparkIcon, SyncIcon } from './ui/icons'
 import { RoleMark } from './RoleMark'
 import { useT, type Translate } from '../lib/i18n'
+import { CommentThreadLayer } from './FrameLabelLayer'
 
 /* The comment UI — pins, the composer, an open thread — is shared by the
    frames (element comments, FrameView) and the canvas itself (canvas
@@ -29,7 +31,11 @@ export const PIN_SCALE = '[transform:translate(-50%,-50%)_scale(calc(1/var(--zoo
  *  every frame, since this pin may sit inside a frame that clips it. On
  *  release the thread is re-pinned to whatever is under the pointer
  *  (src/lib/commentMove.ts); Esc puts it back. A press that moves less than
- *  the threshold is the click that toggles the thread. */
+ *  the threshold is the click that toggles the thread.
+ *
+ *  Under a Stage the open thread is portalled into its screen-space layer
+ *  (`CommentThreadLayer`), above the frames' size badges, and kept on its
+ *  pin as the camera pans and zooms, as Figma's thread is. */
 export function CommentPin({
   thread,
   open,
@@ -58,6 +64,54 @@ export function CommentPin({
   const abandonPress = useRef<(() => void) | null>(null)
   useEffect(() => () => abandonPress.current?.(), [])
   const t = useT()
+  const threadLayer = useContext(CommentThreadLayer)
+  const pinRef = useRef<HTMLDivElement>(null)
+  const anchorRef = useRef<HTMLDivElement>(null)
+  const showThread = open && !dragged
+  useLayoutEffect(() => {
+    const pin = pinRef.current
+    const anchor = anchorRef.current
+    if (!showThread || !threadLayer || !pin || !anchor) return
+    /* the anchor is the pin's box in the layer, the thread hangs under it */
+    const place = () => {
+      const p = pin.getBoundingClientRect()
+      const l = threadLayer.getBoundingClientRect()
+      anchor.style.left = `${p.left - l.left}px`
+      anchor.style.top = `${p.top - l.top}px`
+      anchor.style.width = `${p.width}px`
+      anchor.style.height = `${p.height}px`
+    }
+    place()
+    /* the pin's pop-in animates its transform, which drops its centring
+       while it runs: a thread opened mid-pop is placed again once it ends */
+    let live = true
+    for (const a of pin.getAnimations()) void a.finished.then(() => live && place()).catch(() => {})
+    let raf = 0
+    const unsub = useStore.subscribe((s, prev) => {
+      /* a frame moved or resized (a drag, a peer's edit): measured once the
+         pin has been drawn where it now is */
+      if (s.canvas !== prev.canvas) {
+        cancelAnimationFrame(raf)
+        raf = requestAnimationFrame(place)
+      }
+      const v = s.viewport
+      const u = prev.viewport
+      if (v === u) return
+      /* the pin is drawn in the world (screen = world × zoom + offset) at a
+         constant screen size, so its centre moves with the camera. Worked
+         out here rather than measured: the Stage may not have moved the
+         world for this camera yet */
+      const cx = parseFloat(anchor.style.left) + anchor.offsetWidth / 2
+      const cy = parseFloat(anchor.style.top) + anchor.offsetHeight / 2
+      anchor.style.left = `${parseFloat(anchor.style.left) + ((cx - u.x) / u.zoom) * v.zoom + v.x - cx}px`
+      anchor.style.top = `${parseFloat(anchor.style.top) + ((cy - u.y) / u.zoom) * v.zoom + v.y - cy}px`
+    })
+    return () => {
+      live = false
+      unsub()
+      cancelAnimationFrame(raf)
+    }
+  }, [showThread, threadLayer, left, top])
 
   function onPointerDown(e: React.PointerEvent<HTMLDivElement>) {
     e.stopPropagation()
@@ -134,6 +188,7 @@ export function CommentPin({
         working &&
           "after:absolute after:-inset-1.5 after:rounded-[inherit] after:border-2 after:border-current after:opacity-50 after:content-[''] after:[animation:stream-pulse_1.1s_ease-in-out_infinite]",
       )}
+      ref={pinRef}
       style={{ left, top, background: colorFor(root.from) }}
       onPointerDown={onPointerDown}
       onClick={() => {
@@ -146,7 +201,19 @@ export function CommentPin({
       title={`${root.from}: ${root.text}${thread.length > 1 ? t('stage.pinReplies', { count: thread.length - 1 }) : ''}`}
     >
       {agentItem?.failedAt ? '!' : working ? <SparkIcon size={14} /> : <CommentIcon size={14} />}
-      {open && !dragged && children}
+      {showThread &&
+        (threadLayer
+          ? createPortal(
+              <div
+                ref={anchorRef}
+                data-comment-thread-anchor
+                className="pointer-events-none absolute *:pointer-events-auto"
+              >
+                {children}
+              </div>,
+              threadLayer,
+            )
+          : children)}
     </div>
   )
 }

@@ -1699,6 +1699,10 @@ export const FrameView = memo(function FrameView({
             !shapeMoving &&
             !editing &&
             !pathEdit &&
+            /* the badge's layer paints above the whole world, so it would sit
+               on top of this frame's composer (an open thread is in a layer
+               above the badges) */
+            !composing &&
             (!wantedSel || shellPicked) &&
             createPortal(
               <div
