@@ -95,6 +95,7 @@ final class AppModel: ObservableObject {
     init() {
         let address = UserDefaults.standard.string(forKey: "serverOrigin").flatMap(ServerAddress.init) ?? .hosted
         client = DoopClient(server: address)
+        Analytics.shared.start(server: address)
         // Start following Live Activities at once: iOS may have launched the app in
         // the background only to hand over a server-started activity's push token.
         let client = self.client
@@ -130,6 +131,7 @@ final class AppModel: ObservableObject {
             #endif
             guard self.client === client else { return }
             user = session?.user
+            if let user { Analytics.shared.identify(user) }
             #if DEBUG
             // -exportCanvas <id>: write the canvas JSON the app can read to its tmp dir (simulator automation).
             if user != nil, let id = UserDefaults.standard.string(forKey: "exportCanvas") {
@@ -189,7 +191,7 @@ final class AppModel: ObservableObject {
             await AgentLiveActivities.shared.reconcile(canvases: items, openBefore: openBefore, client: client)
         } catch {
             guard self.client === client else { return }
-            if (error as? APIError)?.status == 401 { user = nil; canvases = []; workspaces = [] }
+            if (error as? APIError)?.status == 401 { user = nil; canvases = []; workspaces = []; Analytics.shared.reset() }
             self.error = error.localizedDescription
         }
     }
@@ -210,6 +212,7 @@ final class AppModel: ObservableObject {
         await AgentLiveActivities.shared.endAll(client: client)
         _ = try await client.data("/api/auth/sign-out", method: "POST", body: [:])
         await client.clearCookies()
+        Analytics.shared.reset()
         user = nil
         canvases = []
         workspaces = []
@@ -250,6 +253,7 @@ final class AppModel: ObservableObject {
             throw APIError(status: error.status, message: "Sign out, sign in again, and then delete your account.")
         }
         await client.clearCookies()
+        Analytics.shared.reset()
         user = nil
         canvases = []
         workspaces = []
@@ -259,6 +263,8 @@ final class AppModel: ObservableObject {
         await AgentLiveActivities.shared.stopSystem(client: client)
         await AgentLiveActivities.shared.endAll(client: client)
         client = DoopClient(server: server)
+        Analytics.shared.reset()
+        Analytics.shared.start(server: server)
         UserDefaults.standard.set(server.origin.absoluteString, forKey: "serverOrigin")
         user = nil
         canvases = []

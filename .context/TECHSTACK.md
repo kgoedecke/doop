@@ -336,6 +336,13 @@
   with posthog-js: every export and Copy as PNG through `src/lib/exportEvents.ts` (`frames_exported`
   with `source` and `target`, `png_copied`), `prototype_played`, `prototype_interactions_saved`,
   `text_formatted`, `svg_imported`, `pdf_imported`.
+- Which client: web events carry posthog-js's `$os`; the desktop shell registers `desktop_app`,
+  `desktop_app_platform` (`macos` / `windows` / `linux`) and `desktop_app_version` on every event
+  (`src/lib/posthog.ts`); the iOS app sends its own through posthog-ios (`ios/Doop/Analytics.swift`,
+  `$lib = posthog-ios`, `ios_app: true`, named `$screen`s), with the token from the public
+  `GET /api/analytics-config` (`analyticsConfig` in `server/analytics.ts`: `VITE_POSTHOG_KEY`, else
+  `POSTHOG_KEY`, else null and the app sends nothing) and through that server's `/relay`.
+  `$os = iOS` without `$lib = posthog-ios` is mobile Safari. Tests: `analyticsConfig.test.ts`.
 - `ws` 8.18.0 - WebSocket server for realtime multiplayer (cursors, presence, frame edits,
   activity feed) over one room per canvas.
 - Custom fonts (`shared/fonts.ts`, `server/fonts.ts`, `server/fontFile.ts`): font libraries, one

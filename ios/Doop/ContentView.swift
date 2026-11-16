@@ -4,20 +4,26 @@ import SwiftUI
 struct ContentView: View {
     @StateObject private var app = AppModel()
     @State private var settings = false
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         Group {
             if app.loading {
                 VStack(spacing: 20) { DoopWordmark(); ProgressView("Opening your workspace…") }
             } else if app.user == nil {
-                SignInView(app: app, settings: $settings)
+                SignInView(app: app, settings: $settings).analyticsScreen("Sign in")
             } else {
                 LibraryView(app: app, settings: $settings)
             }
         }
         .tint(.primary)
         .task { await app.restore() }
-        .sheet(isPresented: $settings) { NativeSettings(app: app).tint(.primary) }
+        /* a setup that ran out of retries (offline at launch) tries again on each return */
+        .task(id: scenePhase) {
+            guard scenePhase == .active else { return }
+            Analytics.shared.start(server: app.client.server)
+        }
+        .sheet(isPresented: $settings) { NativeSettings(app: app).tint(.primary).analyticsScreen("Settings") }
     }
 }
 
@@ -209,6 +215,7 @@ private struct LibraryView: View {
             Group {
                 if showingAgents {
                     WorkingAgentsView(client: app.client) { canvas in path.append(canvas) }
+                        .analyticsScreen("Agents")
                 } else {
             ScrollView {
                 VStack(alignment: .leading, spacing: 24) {
@@ -246,6 +253,8 @@ private struct LibraryView: View {
                     }
                 }.padding(24).frame(maxWidth: 1200).frame(maxWidth: .infinity)
             }
+            // on the library content, not LibraryView: switching back from Agents re-appears only this
+            .analyticsScreen("Library")
                 }
             }
             .background(Color(uiColor: .systemGroupedBackground))
@@ -283,6 +292,7 @@ private struct LibraryView: View {
             // would otherwise reuse the destination and keep the old canvas's `@StateObject` model.
             .navigationDestination(for: CanvasSummary.self) { canvas in
                 NativeCanvasView(summary: canvas, client: app.client, currentUser: app.user).id(canvas.id)
+                    .analyticsScreen("Canvas", properties: ["canvas_id": canvas.id])
             }
             .onOpenURL { url in
                 // `open` reloads the list when the canvas is not in it yet, so a link that

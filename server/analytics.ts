@@ -12,6 +12,17 @@ import { env } from './env.ts'
 const PH_INGEST = env.POSTHOG_INGEST_HOST
 const PH_KEY = env.POSTHOG_KEY ?? env.VITE_POSTHOG_KEY
 
+/* What the native apps need to send their own events: the browser's public
+ * project token, and they post through this server's same-origin /relay.
+ * No key → the app sends nothing (self-hosted installs with analytics off). */
+export interface AnalyticsConfig {
+  posthogKey: string | null
+}
+
+export function analyticsConfig(): AnalyticsConfig {
+  return { posthogKey: env.VITE_POSTHOG_KEY ?? env.POSTHOG_KEY ?? null }
+}
+
 export function capture(distinctId: string, event: string, properties: Record<string, unknown> = {}) {
   if (!PH_KEY) return
   fetch(`${PH_INGEST}/capture/`, {
