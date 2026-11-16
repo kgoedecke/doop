@@ -91,7 +91,10 @@ it('lists components to import from a canvas whose frame HTML is not loaded', as
   const res = await owner.get(`/api/canvases/${canvas.id}/component-libraries`)
   expect(res.status).toBe(200)
   const libraries = (await res.json()) as { name: string; components: { name: string }[] }[]
-  expect(libraries.map((library) => [library.name, library.components.map((entry) => entry.name)])).toEqual([
+  /* every other canvas is listed, the one with no components too (the panel greys it) */
+  const listed = libraries.map((library) => [library.name, library.components.map((entry) => entry.name)] as const)
+  expect(listed.sort(([a], [b]) => a.localeCompare(b))).toEqual([
     ['Kit', ['Chip']],
+    ["Lazy's first canvas", []],
   ])
 })
