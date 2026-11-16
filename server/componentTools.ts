@@ -33,7 +33,7 @@ import {
 } from './componentActions.ts'
 import { isLibrary, librariesForCanvas } from './componentLibrary.ts'
 import * as actions from './actions.ts'
-import { componentReuseNotes, frameReuseNotes } from './reuseNotes.ts'
+import { componentReuseNotes, componentSystemNotes, frameReuseNotes } from './reuseNotes.ts'
 import { store } from './store.ts'
 import { inlineDataRefusal, type Surface } from './inlineData.ts'
 import { optional, WorkBudgetError } from './workBudget.ts'
@@ -91,6 +91,19 @@ interface ComponentTool {
   /** a promise only where the tool has to load other canvases (update_library_everywhere) */
   run(input: Record<string, unknown>, context: ToolContext): ToolResult | Promise<ToolResult>
 }
+
+/** The components a new main names in a <doop-use> that resolved to nothing, by the name it gave. */
+function missingNested(def: ComponentDef): string[] {
+  if (!def.mainFrameId) return []
+  const refs = actions
+    .peekComponentIssues(def.mainFrameId)
+    .filter((issue) => issue.code === 'unknown_component')
+    .map((issue) => /“([^”]*)”/.exec(issue.message)?.[1] ?? '')
+  return [...new Set(refs)]
+}
+
+/** One create_components call: a canvas's starting kit, not its whole library. */
+export const MAX_BATCH_COMPONENTS = 12
 
 const COMPONENT_REF = z.string().describe('Component name or id')
 const FRAME_ID = z.string().describe('Frame id from get_canvas')
@@ -292,6 +305,104 @@ export const COMPONENT_TOOLS: ComponentTool[] = [
           component,
           converted.map((entry) => entry.frameId),
         ),
+      }
+    },
+  },
+  {
+    name: 'create_components',
+    title: 'Create several components',
+    description: `Make up to ${MAX_BATCH_COMPONENTS} components from new markup in one call: the way to set up a canvas's component system (the primitives and patterns its screens are built from) before the first screen. Each entry takes what create_component takes from html: name, description, html (one root element), css, width, height, props, auto_props, code. Entries are made in order, so a later one can <doop-use> an earlier one: list primitives first (Button, Input, Badge), then what is built from them (Card, NavItem, Sidebar). Each entry stands alone: one that is refused is reported with its reason and the others are still made. The mains land on the Components page and no instance is placed anywhere; use them with <doop-use> in frame HTML. To make a component from an element already in a frame, use create_component.`,
+    readOnly: false,
+    shape: {
+      components: z
+        .array(
+          z.object({
+            name: z.string().describe('Short and unique, e.g. "Button"'),
+            description: z.string().optional().describe('When to use this. Later agents choose by it'),
+            html: z.string().describe('Markup, one root element'),
+            css: z.string().optional().describe('The rules it needs, unscoped; they get scoped for you'),
+            width: z.number().optional().describe('The main frame width, default 480'),
+            height: z.number().optional().describe('The main frame height, default 240'),
+            props: z.array(propSchema).optional().describe('Enum props, and metadata for bound ones'),
+            auto_props: z.boolean().optional().describe('false = do not infer props'),
+            code: codeSchema.optional(),
+          }),
+        )
+        .min(1)
+        .max(MAX_BATCH_COMPONENTS)
+        .describe('In dependency order: a component another one nests comes first'),
+    },
+    run(input, { canvas, actor }) {
+      const entries = (Array.isArray(input.components) ? input.components : []) as Record<string, unknown>[]
+      if (!entries.length) throw new ComponentError('pass at least one component')
+      if (entries.length > MAX_BATCH_COMPONENTS)
+        throw new ComponentError(`at most ${MAX_BATCH_COMPONENTS} components per call; send the rest in another call`)
+      const made: ComponentDef[] = []
+      const refused: string[] = []
+      const notes: string[] = []
+      const results = entries.map((entry, index) => {
+        const name = String(entry.name ?? '')
+        try {
+          /* each entry is its own unit: a refused one leaves nothing behind and the rest go on */
+          const { component: def, inferred } = transaction(() => {
+            const created = createComponentFromHtml(
+              canvas.id,
+              {
+                name,
+                description: entry.description as string | undefined,
+                props: entry.props as never,
+                code: entry.code as never,
+                autoProps: entry.auto_props as boolean | undefined,
+                html: String(entry.html ?? ''),
+                css: entry.css as string | undefined,
+                width: entry.width as number | undefined,
+                height: entry.height as number | undefined,
+              },
+              actor,
+            )
+            /* a <doop-use> naming nothing renders as nothing: saved, the entry would lose that part for
+               good, so it is refused (undone with this unit) and can be sent again once that one exists */
+            const missing = missingNested(created.component)
+            if (missing.length)
+              throw new ComponentError(
+                `it nests ${missing.map((ref) => (ref ? `“${ref}”` : 'a <doop-use> that could not be read')).join(', ')}, which ${missing.length === 1 ? 'is' : 'are'} not a component on this canvas${refused.length ? ' (an entry this call refused, or one never made)' : ''}; nothing was made for it`,
+              )
+            return created
+          })
+          made.push(def)
+          notes.push(
+            ...(optional(() => componentReuseNotes(canvas, def, entry.auto_props as boolean | undefined)) ?? []),
+          )
+          return {
+            index,
+            ok: true as const,
+            component: summary(canvas, def),
+            main_frame_id: def.mainFrameId,
+            ...inferredProps(inferred),
+          }
+        } catch (error) {
+          /* a refusal is this entry's; a spent work budget refuses the whole call (runComponentTool) */
+          if (!(error instanceof ComponentError)) throw error
+          refused.push(name)
+          return { index, ok: false as const, name, error: error.message }
+        }
+      })
+      const failed = results.filter((result) => !result.ok)
+      const usage = made.map((def) => usageExample(def)).join('\n')
+      return {
+        data: { ok: failed.length === 0, created: made.length, failed: failed.length, results },
+        note: [
+          made.length
+            ? `Made ${made.length} component${made.length === 1 ? '' : 's'} on the Components page. No instance was placed: compose screens from them with\n${usage}\nCall get_frame_screenshot on a main_frame_id or two, and resize a main to fit with update_frame. Props each one inferred are in its inferred_props.`
+            : 'Nothing was made.',
+          ...(failed.length
+            ? [
+                `${failed.length} entr${failed.length === 1 ? 'y was' : 'ies were'} refused (see results): fix ${failed.length === 1 ? 'it' : 'them'} and send ${failed.length === 1 ? 'it' : 'them'} again. An entry that nests a refused one is refused too.`,
+              ]
+            : []),
+          ...notes,
+        ].join('\n'),
+        frames: made.flatMap((def) => outcomeFrames({ canvas } as ToolContext, def)),
       }
     },
   },
@@ -724,5 +835,27 @@ export function componentWriteNotes(frame: Frame, { review = false }: { review?:
       `COMPONENT: ${lookalike.occurrences} element${lookalike.occurrences === 1 ? '' : 's'} in this frame match${lookalike.occurrences === 1 ? 'es' : ''} “${lookalike.component}” but ${lookalike.occurrences === 1 ? 'is' : 'are'} not linked to it, so ${lookalike.occurrences === 1 ? 'it' : 'they'} will not follow changes. Use ${lookalike.usage} instead.`,
     )
   }
+  return notes
+}
+
+/** Frames whose stream has already heard the component-system note: said once, not per chunk. */
+const toldThisStream = new Set<string>()
+const SYSTEM_NOTE = 'COMPONENT SYSTEM:'
+
+/** The notes one chunk of a stream hears. Mid-stream, only the component-system note, the first
+ *  time the screen's markup shows it is being drawn without components (the agent can still change
+ *  course); the last chunk hears the whole review, without that note again. */
+export function streamChunkNotes(frame: Frame, { start, done }: { start?: boolean; done?: boolean }): string[] {
+  if (start) toldThisStream.delete(frame.id)
+  const told = toldThisStream.has(frame.id)
+  if (done) {
+    toldThisStream.delete(frame.id)
+    const notes = componentWriteNotes(frame, { review: true })
+    return told ? notes.filter((note) => !note.startsWith(SYSTEM_NOTE)) : notes
+  }
+  if (told) return []
+  const canvas = store.getCanvas(frame.canvasId)
+  const notes = canvas ? (optional(() => componentSystemNotes(canvas, frame)) ?? []) : []
+  if (notes.length) toldThisStream.add(frame.id)
   return notes
 }

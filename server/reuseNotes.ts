@@ -1,4 +1,5 @@
-import { CSS_ATTR, type ComponentDef } from '../shared/components.ts'
+import { activeComponents, COMPONENT_ATTR, CSS_ATTR, INSTANCE_ATTR, type ComponentDef } from '../shared/components.ts'
+import { canvasPages, COMPONENTS_PAGE, framePageId } from '../shared/pages.ts'
 import { resolveToken, TOKEN_BLOCK_ATTR, type DesignToken } from '../shared/designTokens.ts'
 import { FONT_BLOCK_ATTR } from '../shared/fonts.ts'
 import type { Canvas, Frame } from '../shared/types.ts'
@@ -149,14 +150,66 @@ function tokenNotes(canvas: Canvas, frame: Frame): string[] {
   return notes
 }
 
+/* ---- the component system: a screen is composed from the canvas's components ---- */
+
+/** A screen worth composing from components: enough markup, and something a product UI is made of. */
+const SCREEN_ELEMENTS = 8
+const UI_ELEMENT = /<(?:button|input|select|textarea|nav|form)\b|<a\b[^>]*\bhref=/i
+const NAMED_COMPONENTS = 6
+
+/** The markup a person sees: the body, without its styles and scripts. */
+function bodyMarkup(html: string): string {
+  const body = /<body\b[^>]*>([\s\S]*)/i.exec(html)?.[1] ?? html.replace(/<head\b[\s\S]*?<\/head>/i, '')
+  return body.replace(/<(style|script)\b[\s\S]*?(?:<\/\1>|$)/gi, '')
+}
+
+/** A screen of a product, as opposed to a component's main, a shape on the canvas or a demo. */
+function isScreen(canvas: Canvas, frame: Frame): boolean {
+  if (frame.demo) return false
+  if (frame.html.includes(COMPONENT_ATTR)) return false
+  if (/<body\b[^>]*\bdata-doop-canvas-element=/i.test(frame.html)) return false
+  const page = canvasPages(canvas).find((candidate) => candidate.id === framePageId(canvas, frame))
+  if (page?.name === COMPONENTS_PAGE) return false
+  const body = bodyMarkup(frame.html)
+  return (body.match(/<[a-z][\w-]*\b/gi)?.length ?? 0) >= SCREEN_ELEMENTS && UI_ELEMENT.test(body)
+}
+
+function namedComponents(defs: readonly ComponentDef[]): string {
+  const names = defs.slice(0, NAMED_COMPONENTS).map((def) => def.name)
+  const more = defs.length - names.length
+  return `${names.join(', ')}${more > 0 ? ` and ${more} more` : ''}`
+}
+
+/** Before a screen is written (create_frame with no HTML yet): set up the system, or compose from it. */
+export function componentSystemPlan(canvas: Canvas): string {
+  const defs = activeComponents(canvas.components)
+  if (!defs.length)
+    return 'COMPONENT SYSTEM: this canvas has no components yet. Before you write this screen, set up its component system the way a designer sets up a Figma file: create_components with the primitives and patterns it is built from (a Button with its variants, inputs, a badge; the nav, a card, a list row), styled with the canvas tokens. Then compose the screen from them with <doop-use>. One-off layout (a hero composition, section wrappers) stays plain HTML.'
+  return `COMPONENT SYSTEM: compose this screen from the canvas's components (${namedComponents(defs)}; list_components shows their props) with <doop-use>. When it needs a reusable piece the system lacks, add it to the system first (create_component) rather than drawing it inline.`
+}
+
+/** After a screen is written: built without any component, on a canvas with or without a system. */
+export function componentSystemNotes(canvas: Canvas, frame: Frame): string[] {
+  if (frame.html.includes(INSTANCE_ATTR) || !isScreen(canvas, frame)) return []
+  const defs = activeComponents(canvas.components)
+  if (!defs.length)
+    return [
+      `COMPONENT SYSTEM: this screen is built without components, and the canvas has no component system yet. Set one up the way a designer would in Figma: make the screen's reusable parts (buttons, inputs, nav, cards, rows) components, with create_components, or create_component with frame_id "${frame.id}" and an element's data-doop-id to turn one in place. Then use them through <doop-use>. One-off layout stays plain HTML.`,
+    ]
+  return [
+    `COMPONENT SYSTEM: this canvas's components are ${namedComponents(defs)}, and this screen uses none of them. Where it draws one of those, write <doop-use> instead; where it needs a reusable piece the system lacks, add it (create_component) and use that.`,
+  ]
+}
+
 /** What a whole-frame write should have reused: components and tokens. */
 export function frameReuseNotes(canvas: Canvas, frame: Frame): string[] {
   if (frame.demo) return []
-  const notes = repeatsIn(canvas, frame).map(
+  const notes = componentSystemNotes(canvas, frame)
+  const repeats = repeatsIn(canvas, frame).map(
     (repeat) =>
       `REUSE: ${repeat.occurrences} blocks in this frame share one structure (“${repeat.suggested_name}”${repeat.sample_text ? `, e.g. “${repeat.sample_text.slice(0, 40)}”` : ''}). Make it a component: create_component with frame_id "${frame.id}", element "${repeat.example.element}" and replace_matching=true turns them all into instances.`,
   )
-  return [...notes, ...tokenNotes(canvas, frame)]
+  return [...notes, ...repeats, ...tokenNotes(canvas, frame)]
 }
 
 /** What a component's main repeats by hand that should be a component nested in it. */

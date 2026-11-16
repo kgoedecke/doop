@@ -63,7 +63,7 @@ import {
   fitExportScale,
   parseExportScale,
 } from '../shared/exportScale.ts'
-import { DOOP_GUIDE, GUIDE_TOPICS } from './guide.ts'
+import { COMPOSE_CHECK, DOOP_GUIDE, GUIDE_TOPICS } from './guide.ts'
 import {
   describeInspiration,
   INSPIRATION_NO_MATCH_NOTE,
@@ -106,7 +106,14 @@ import {
   libraryCatalog,
 } from './componentActions.ts'
 import { existingStyle, existingStyleBrief } from './existingStyle.ts'
-import { COMPONENT_TOOLS, componentWriteNotes, libraryFeatureEvent, runComponentTool } from './componentTools.ts'
+import {
+  COMPONENT_TOOLS,
+  componentWriteNotes,
+  libraryFeatureEvent,
+  runComponentTool,
+  streamChunkNotes,
+} from './componentTools.ts'
+import { componentSystemPlan } from './reuseNotes.ts'
 import { previewFrame } from './componentPreview.ts'
 import { activeComponents, INSTANCE_ATTR } from '../shared/components.ts'
 import { usageByComponent } from './componentUsage.ts'
@@ -125,7 +132,7 @@ You MUST call get_guide({ topic: "doop-instructions" }) once before using other 
 - Creating: create_frame, then stream the design with append_frame_html one complete section at a time (~1–4 KB chunks; start=true on the first, done=true on the last). Each chunk renders the moment it arrives — viewers watch you work.
 - Review: after every create or significant edit you MUST call get_frame_screenshot and fix what looks wrong before moving on.
 - Small edits: edit_frame_html (exact find/replace — the change morphs into the rendered frame in place). Full redesigns: set_frame_html or a new stream. Rename/move/resize: update_frame.
-- Components: anything reusable lives as a component (get_canvas lists them). Use it by writing <doop-use component="Button" label="Buy"></doop-use> in frame HTML, never by redrawing it: instances follow their main and read back in that short form. Repeating a block? create_component, then use that. Change every instance at once with update_component (guide → Components). A team's shared components are in get_canvas → workspaceLibraries: use them the same way, by name. To make a component available to the workspace's other canvases, publish_library.
+- Components: work like a designer setting up a Figma file. Before the first screen, create the canvas's component system (create_components: the primitives such as Button and Input, and the patterns such as nav, card and list row), then compose screens from it. Anything reusable lives as a component (get_canvas lists them). Use it by writing <doop-use component="Button" label="Buy"></doop-use> in frame HTML, never by redrawing it: instances follow their main and read back in that short form. A reusable piece the system lacks? create_component, then use that. Change every instance at once with update_component (guide → Components). A team's shared components are in get_canvas → workspaceLibraries: use them the same way, by name. To make a component available to the workspace's other canvases, publish_library.
 - Clickable prototypes: wire screens with data-doop-on / data-doop-action attributes in frame HTML (guide → Prototypes), set the flow start with set_prototype_start, and check the wiring with get_prototype.
 - History: every replace and stream files the design it overwrote. list_frame_versions shows a frame's earlier states; restore_frame_version brings one back (HTML and size) when a human asks for the previous version or your rework turned out worse.
 - Images: real imagery makes designs. search_images finds stock photos (you SEE thumbnails and pick), search_icons finds 200k+ UI icons as hotlinkable SVGs, search_logos finds real company logos by brand name or domain — call it once per brand BEFORE writing any logo wall, integration row, press bar or testimonial, and never ship a placeholder tile, "LOGO" text or an invented wordmark in its place, list_backgrounds shows a page of curated hero/section/bento backgrounds (glows, grainy meshes, aurora, painterly scenes) as thumbnails — browse it when a section wants atmosphere rather than defaulting to a flat CSS gradient, judge by eye whether one fits the frame, and draw your own when none does, upload_asset stores your own file (remote file → source_url; local file → local_file=true, returns a curl command) and returns a permanent URL. generate_image makes a new image from a prompt (a full-bleed hero background in the frame's exact palette, illustration, a product render, brand-specific hero art that stock cannot supply) and stores it as a permanent asset — reach for it when search_images cannot deliver the exact visual, or when the human asks for a generated image; it costs the human money or quota, so one considered prompt beats five drafts. Never inline images as data: URIs.
@@ -190,7 +197,12 @@ function withEscapeNote<T extends { content: { type: 'text' | 'image'; [k: strin
 
 /** What a frame write could not do with components, and components it redrew by hand. */
 function withComponentNotes<T extends ToolContent>(result: T, frame: Frame, options?: { review?: boolean }): T {
-  for (const note of componentWriteNotes(frame, options)) result.content.push({ type: 'text' as const, text: note })
+  return withNotesFirst(result, componentWriteNotes(frame, options))
+}
+
+/** Notes right after the result's data, ahead of the generic nudges: they name the call to make. */
+function withNotesFirst<T extends ToolContent>(result: T, notes: string[]): T {
+  result.content.splice(1, 0, ...notes.map((note) => ({ type: 'text' as const, text: note })))
   return result
 }
 
@@ -1455,7 +1467,8 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
          has no card either). The review screenshot after the stream is the
          first card the person sees. */
       description:
-        'Create a new frame on a canvas with an HTML design. A frame is a rectangular artboard that renders a full HTML document (no external network access needed). Put the styles of an element in its style attribute; a <style> block is for what an attribute cannot say (keyframes, states, pseudo-elements, media queries, the reset), and <script> is allowed. If x/y are omitted the frame is auto-placed to the right of existing frames. Everyone viewing the canvas sees it appear live. Use <doop-use> for anything get_canvas lists under components.',
+        'Create a new frame on a canvas with an HTML design. A frame is a rectangular artboard that renders a full HTML document (no external network access needed). Put the styles of an element in its style attribute; a <style> block is for what an attribute cannot say (keyframes, states, pseudo-elements, media queries, the reset), and <script> is allowed. If x/y are omitted the frame is auto-placed to the right of existing frames. Everyone viewing the canvas sees it appear live. Use <doop-use> for anything get_canvas lists under components. ' +
+        COMPOSE_CHECK,
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
       inputSchema: {
         canvas_id: z.string(),
@@ -1479,11 +1492,14 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
       if (inline) return err(inline)
       const frame = actions.createFrame(canvas_id, { name, pageId, html, x, y, width, height }, actorFrom(agent_name))
       if (!frame) return noCanvas(canvas_id)
+      const canvas = store.getCanvas(canvas_id)
       const result = withComponentNotes(
         withEscapeNote(
           frame.html.length > 0
             ? textWithNudge({ ok: true, frame: frameSummary(frame) }, REVIEW_NUDGE)
-            : text({ ok: true, frame: frameSummary(frame) }),
+            : canvas
+              ? textWithNudge({ ok: true, frame: frameSummary(frame) }, componentSystemPlan(canvas))
+              : text({ ok: true, frame: frameSummary(frame) }),
           html,
         ),
         frame,
@@ -1537,7 +1553,8 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
       title: 'Replace a frame’s HTML',
       _meta: previewToolMeta('Redesigning the frame…', 'Frame redesigned'),
       description:
-        'Replace the HTML design of a frame in one shot. The change renders live for everyone viewing the canvas. For new or heavily reworked designs, prefer append_frame_html so viewers can watch the design stream in. Keep data-doop-* attributes on elements you carry over: comments and links point at data-doop-id, prototype wiring and locks ride on the others.',
+        'Replace the HTML design of a frame in one shot. The change renders live for everyone viewing the canvas. For new or heavily reworked designs, prefer append_frame_html so viewers can watch the design stream in. Keep data-doop-* attributes on elements you carry over: comments and links point at data-doop-id, prototype wiring and locks ride on the others. ' +
+        COMPOSE_CHECK,
       annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
       inputSchema: { frame_id: z.string(), html: z.string(), agent_name: agentName },
     },
@@ -2354,7 +2371,8 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
     {
       title: 'Stream HTML into a frame',
       description:
-        'Stream a design into a frame section by section — every chunk renders for viewers the moment it arrives, so they watch the design build up live. Prefer this over set_frame_html when creating or reworking a whole design. Send the HTML in document order, ONE complete section per call (head+styles first, then the hero, then each following section), roughly 1–4 KB per chunk. Set start=true on the FIRST chunk (replaces any existing content and shows a live "designing…" badge) and done=true on the LAST chunk. End chunks at element boundaries — partial HTML is healed, but a complete section paints cleanly. When reworking, keep data-doop-* attributes on elements you carry over (comments and links point at data-doop-id).',
+        'Stream a design into a frame section by section — every chunk renders for viewers the moment it arrives, so they watch the design build up live. Prefer this over set_frame_html when creating or reworking a whole design. Send the HTML in document order, ONE complete section per call (head+styles first, then the hero, then each following section), roughly 1–4 KB per chunk. Set start=true on the FIRST chunk (replaces any existing content and shows a live "designing…" badge) and done=true on the LAST chunk. End chunks at element boundaries — partial HTML is healed, but a complete section paints cleanly. When reworking, keep data-doop-* attributes on elements you carry over (comments and links point at data-doop-id). ' +
+        COMPOSE_CHECK,
       annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
       inputSchema: {
         frame_id: z.string(),
@@ -2383,16 +2401,15 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
       if (inline) return err(inline)
       const frame = actions.appendFrameHtml(frame_id, html_chunk, actorFrom(agent_name), { start, done })
       if (!frame) return noFrame(frame_id)
-      const result = done
-        ? withComponentNotes(
-            textWithNudge(
+      const result = withNotesFirst(
+        done
+          ? textWithNudge(
               { ok: true, streaming: false, htmlBytes: frame.html.length },
               `Stream complete. ${REVIEW_NUDGE}`,
-            ),
-            frame,
-            { review: true },
-          )
-        : text({ ok: true, streaming: true, htmlBytes: frame.html.length })
+            )
+          : text({ ok: true, streaming: true, htmlBytes: frame.html.length }),
+        streamChunkNotes(frame, { start, done }),
+      )
       /* nudge only on the first chunk — mid-stream results should stay lean.
          The escape check rides along: the opening chunk decides the stream. */
       const nudged = start

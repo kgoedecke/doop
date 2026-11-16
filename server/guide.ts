@@ -8,6 +8,30 @@ import { MAX_DECISION_CHARS } from '../shared/designDecisions.ts'
 
 export const GUIDE_TOPICS = ['doop-instructions'] as const
 
+/** The check a frame-writing tool's description asks for, at the moment the HTML is written:
+ *  MCP's create_frame, append_frame_html and set_frame_html and the resident's matching tools. */
+export const COMPOSE_CHECK =
+  "Before you send the HTML, check it against the canvas's component system: is anything here a part of the system you are redrawing (use <doop-use>), or a reusable piece the system should gain (create it first)? One-off layout stays plain HTML."
+
+/** The must-do list at the top of the guide and the resident prompt: how a canvas is set up
+ *  before its screens, said first so it is not buried under streaming and images. */
+export const SYSTEM_FIRST = `Set up the system, then compose. Work the way a designer sets up a Figma file:
+
+1. **Tokens first.** The brief's colours, type, radii and spacing become the canvas's tokens
+   (create_tokens) before the first frame; frames use them as var(--…).
+2. **A component system before screens.** Sketch the few primitives a product like this is
+   built from (a Button with its variants, inputs, a tag or badge) and the patterns it leans on
+   (nav, a card, a list row), and make them components with create_components, on the tokens.
+   A button that appears once is still the system's Button. Then compose every screen from
+   them with <doop-use>, and grow the system as you go: a reusable piece a screen needs is
+   added to the system, not drawn inline. One-off layout (a hero's composition, section
+   wrappers, the page grid) stays plain HTML. Ask what a designer would put on the
+   Components page.
+3. **Themes are tokens.** Dark mode, or any other theme, is set_token_themes and
+   data-doop-theme on the frame, never a copied frame with its colours changed.
+
+On a canvas that already has tokens and components, use them: get_canvas lists both.`
+
 /** The taste doctrine every design surface shares. The MCP guide serves it to
  *  external agents and the resident system prompt embeds it verbatim, so the
  *  two cannot drift apart. */
@@ -68,6 +92,11 @@ brief. It is part of the deliverable, not private scratch work:
    font families, the type scale, radii and spacing. Frames and components then use them
    as var(--…), and a change to a token restyles every frame that names it. The tokens
    are where the values live; nothing else holds them.
+   **Then set up the component system on them.** Name the primitives and patterns the
+   design is built from, the way a designer starts a Figma file's Components page (a Button
+   with its variants, inputs, a badge; the nav, a card, a list row), and create them in one
+   create_components call, primitives first so the patterns can <doop-use> them. The first
+   frame is composed from these.
 4. **Post it.** Summarize in set_status ("Designing grocery landing — candlelit mood,
    after Oatside") and record the choices that need a reason with save_decision: the
    exemplar you followed and why it won, why this mood, why this accent. A decision is
@@ -163,6 +192,15 @@ export const LEAN_FRAMES = `- Frames carry markup, never files. A frame is sent 
 export const COMPONENTS = `A component is one design used in many places: change its main and every instance follows.
 get_canvas and list_components show a canvas's components with their props.
 
+Think in a component system, the way a designer builds a Figma file: screens are composed from
+the canvas's components, not drawn from scratch. Before writing a screen, decide which of its
+parts belong to the system: the primitives (buttons, inputs, tags, avatars), the patterns a
+product reuses (nav, cards, list and table rows, modals, footers), and anything you expect to
+repeat. Those are components from the start, even when this screen shows one of them; what is
+genuinely one-off (a hero's composition, an illustration, a section's layout) stays plain HTML.
+create_components makes a starting kit in one call. Grow the system as you go: when a screen
+needs a reusable piece the system lacks, add it, then use it.
+
 - Anything on that list goes in through <doop-use>, never redrawn. It is shorter, and it stays linked:
       <doop-use component="Button" label="Start free" tone="ghost"></doop-use>
   Write it anywhere frame HTML goes (create_frame, set_frame_html, append_frame_html,
@@ -176,7 +214,7 @@ get_canvas and list_components show a canvas's components with their props.
   lines. Keep the id="…" when you write one back: comments and links point at it. Pass
   expand_components=true only if you must read the full markup. edit_frame_html matches either
   form.
-- Before you write the same block a third time, make it a component and use that. Adding to a
+- Write a reusable piece as a component the first time, not after the third copy. Adding to a
   canvas whose pages already repeat a block: make the block a component from one existing copy
   (create_component with its frame_id and element) and use it in
   what you add, rather than writing it out again. replace_matching=true turns every other copy
@@ -201,7 +239,8 @@ get_canvas and list_components show a canvas's components with their props.
   will change (navigation, menus, rows) is nested components or a slot, not text in one main.
 - create_component from html puts the main on the Components page and places nothing: use it
   with <doop-use> in a frame, or insert_instance. Its result lists the props it inferred; name
-  your own with data-doop-prop.
+  your own with data-doop-prop. create_components does the same for up to 12 at once, in order,
+  so a later one can nest an earlier one; an entry that is refused does not stop the others.
 - A component inside a component: write <doop-use> in the template and give it fixed props. One
   component cannot pass its props on to another (data-doop-prop on a <doop-use> is dropped, with
   a COMPONENT note); where each instance should choose, make that spot a data-doop-slot. Its CSS
@@ -241,6 +280,10 @@ get_canvas and list_components show a canvas's components with their props.
   it changes other people's canvases; approved frames keep their sign-off).`
 
 export const DOOP_GUIDE = `# Doop Agent Guide
+
+## Before anything else — set up the system, then compose
+
+${SYSTEM_FIRST}
 
 ## The room you're in
 
@@ -333,9 +376,11 @@ and fix real issues before moving on:
   copy (invented product names, believable numbers, human sentences).
 - **Logos**: any placeholder brand mark (gray tile, "LOGO", initials, an invented company
   wordmark) still in the frame — replace it with a real logo from search_logos.
-- **Reuse**: a block repeated three or more times, in this frame or inside a component it
-  uses, or copied from another frame, that is not a <doop-use>? A hex, font or size that a
-  token already names? Make the component or use the token.
+- **Reuse**: is the screen composed from the canvas's components? A part of the system
+  drawn inline, a reusable piece (button, input, nav, card, row) that is not a component yet,
+  or a block repeated in this frame, inside a component it uses, or copied from another frame,
+  that is not a <doop-use>? A hex, font or size that a token already names? Make the component
+  or use the token.
 
 Prefer targeted fixes over rewrites. Never delete and restart a mostly-good frame — the
 humans watching lose work they may have been reacting to.

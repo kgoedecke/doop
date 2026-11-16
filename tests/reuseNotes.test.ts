@@ -20,7 +20,8 @@ vi.mock('../server/fonts.ts', () => ({ fontsForCanvas: () => [] }))
 
 const actions = await import('../server/actions.ts')
 const { store } = await import('../server/store.ts')
-const { componentWriteNotes, runComponentTool } = await import('../server/componentTools.ts')
+const { componentWriteNotes, runComponentTool, streamChunkNotes } = await import('../server/componentTools.ts')
+const { componentSystemPlan } = await import('../server/reuseNotes.ts')
 
 /**
  * What an agent hears right after a whole-frame write or a component write: blocks it wrote out
@@ -70,7 +71,8 @@ describe('reuse notes on frame writes', () => {
 
   it('leaves two copies alone, and says nothing on a small edit', () => {
     const canvasId = canvasWithTokens()
-    expect(write(canvasId, page(`<nav>${row('Overview', '12')}${row('Files', '9')}</nav>`))).toEqual([])
+    const two = write(canvasId, page(`<nav>${row('Overview', '12')}${row('Files', '9')}</nav>`))
+    expect(two.filter((note) => note.startsWith('REUSE:'))).toEqual([])
     const repeated = page(`<nav>${row('A', '1')}${row('B', '2')}${row('C', '3')}</nav>`)
     expect(write(canvasId, repeated, false)).toEqual([])
   })
@@ -187,5 +189,89 @@ describe('reuse inside components', () => {
       css: '.rail{display:flex}',
     })
     expect(nested.note).not.toContain('REUSE')
+  })
+})
+
+/** A product screen as an agent writes one: a nav, a form, a couple of buttons. */
+const screen = page(
+  `<nav><a href="#">Home</a><a href="#">Pricing</a></nav><main><h1>Sign up</h1><form><input placeholder="Email"><button class="btn">Start</button><button class="btn ghost">Later</button></form></main>`,
+)
+
+async function componentOn(canvasId: string, name: string, html: string) {
+  const outcome = await runComponentTool(
+    'create_component',
+    { name, html, css: '.x{display:block}' },
+    {
+      canvas: store.getCanvas(canvasId)!,
+      actor: agent,
+      canRead: () => true,
+      canEdit: () => true,
+      userId: undefined,
+      readableCanvases: () => [],
+    },
+  )
+  if (!outcome.ok) throw new Error(outcome.error)
+}
+
+const systemNotes = (notes: string[]) => notes.filter((note) => note.startsWith('COMPONENT SYSTEM:'))
+
+describe('the component system notes', () => {
+  it('asks for a component system before the first screen, and for composing from one after', async () => {
+    const canvasId = store.createCanvas('plan', 'kevin').id
+    expect(componentSystemPlan(store.getCanvas(canvasId)!)).toContain('has no components yet')
+    expect(componentSystemPlan(store.getCanvas(canvasId)!)).toContain('create_components')
+    await componentOn(canvasId, 'Button', '<button class="btn">Go</button>')
+    const plan = componentSystemPlan(store.getCanvas(canvasId)!)
+    expect(plan).toContain("compose this screen from the canvas's components (Button;")
+  })
+
+  it('tells a screen built without components on a canvas with none to set the system up', () => {
+    const notes = systemNotes(write(store.createCanvas('bare', 'kevin').id, screen))
+    expect(notes).toHaveLength(1)
+    expect(notes[0]).toContain('the canvas has no component system yet')
+    expect(notes[0]).toContain('create_components')
+  })
+
+  it('names the components a screen ignores, and goes quiet once it uses one', async () => {
+    const canvasId = store.createCanvas('kit', 'kevin').id
+    await componentOn(canvasId, 'Button', '<button class="btn">Go</button>')
+    await componentOn(canvasId, 'Badge', '<span class="badge">New</span>')
+    const ignored = systemNotes(write(canvasId, screen))
+    expect(ignored).toEqual([expect.stringContaining('components are Button, Badge, and this screen uses none')])
+    const composed = screen.replace('<button class="btn">Start</button>', '<doop-use component="Button"></doop-use>')
+    expect(systemNotes(write(canvasId, composed))).toEqual([])
+  })
+
+  it('leaves alone what is not a product screen', () => {
+    const canvasId = store.createCanvas('quiet', 'kevin').id
+    /* a poster: no controls, nothing a component system is made of */
+    expect(
+      systemNotes(write(canvasId, page('<h1>Summer sale</h1><p>Up to 40% off</p><img src="/a/x.jpg" alt="">'))),
+    ).toEqual([])
+    /* a shape drawn on the canvas */
+    expect(systemNotes(write(canvasId, screen.replace('<body>', '<body data-doop-canvas-element="true">')))).toEqual([])
+    /* a small write, not a review */
+    expect(systemNotes(write(canvasId, screen, false))).toEqual([])
+    /* a demo frame */
+    const demo = actions.createFrame(canvasId, { name: 'Welcome', html: screen }, agent)!
+    demo.demo = true
+    expect(systemNotes(componentWriteNotes(demo, { review: true }))).toEqual([])
+  })
+
+  it('says it once per stream: on the chunk that shows the screen, not on every chunk or again at the end', () => {
+    const canvasId = store.createCanvas('stream', 'kevin').id
+    const frame = actions.createFrame(canvasId, { name: 'Screen', html: '' }, agent)!
+    const chunk = (html: string, flags: { start?: boolean; done?: boolean } = {}) =>
+      systemNotes(streamChunkNotes(actions.appendFrameHtml(frame.id, html, agent, flags)!, flags))
+    expect(chunk('<!doctype html><html><head><style>body{margin:0}</style></head><body>', { start: true })).toEqual([])
+    /* the nav alone is not a screen yet */
+    expect(chunk('<nav><a href="#">Home</a><a href="#">Pricing</a></nav>')).toEqual([])
+    expect(
+      chunk('<main><h1>Sign up</h1><form><input><button>Start</button><button>Later</button></form>'),
+    ).toHaveLength(1)
+    expect(chunk('<section><h2>Why</h2><p>Because</p><button>More</button></section>')).toEqual([])
+    expect(chunk('</main></body></html>', { done: true })).toEqual([])
+    /* a new stream on the same frame hears it again */
+    expect(chunk(screen, { start: true, done: true })).toHaveLength(1)
   })
 })
