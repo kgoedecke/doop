@@ -301,7 +301,7 @@ export const panels = {
   importLiveApp: 'Live app',
   importLiveAppBlurb: 'Behind a login, a VPN or localhost.',
   importShadcn: 'shadcn/ui',
-  importShadcnBlurb: 'Components and themes from a registry.',
+  importShadcnBlurb: 'Components from any shadcn registry, themed by your tokens.',
   importGithub: 'GitHub repo',
   importGithubBlurb: 'Screens read from the repo’s routes.',
 

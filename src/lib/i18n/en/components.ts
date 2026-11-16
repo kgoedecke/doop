@@ -30,6 +30,7 @@ export const components = {
   nothingRepeats: 'Nothing repeats on this canvas.',
   copiesInFrames: { one: '{copies} copies in {count} frame', other: '{copies} copies in {count} frames' },
   makeAndLink: 'Make a component and link all',
+  addFromLibrary: 'Add from shadcn registries',
   importFromCanvas: 'Import from another canvas',
   noLibraries: 'No other canvas you can open has components.',
   imported: '“{name}” imported',

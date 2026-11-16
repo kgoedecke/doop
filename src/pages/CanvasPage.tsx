@@ -1,4 +1,5 @@
-import { RegistryImportSection } from '../components/RegistryImportSection'
+import { ComponentLibrary } from '../components/ComponentLibrary'
+import { isRegistryPaste } from '../../shared/shadcnRegistry'
 import { CAPTURE_PREFIX, pasteWebCapture } from '../lib/webCapture'
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { canEditOpenCanvas, pickedSelectors, roleOf, useStore } from '../lib/store'
@@ -320,6 +321,7 @@ export function CanvasPage({
     history.replaceState(history.state, '', `${url.pathname}${url.search}${url.hash}`)
   }, [])
   const [showImport, setShowImport] = useState(!!ghInstallPass || !!ghInstallError || !!importRequested)
+  const componentLibrary = useStore((s) => s.componentLibrary)
   const [exporting, setExporting] = useState<{ frames: Frame[]; selected: string[] } | null>(null)
   const [showMobileActions, setShowMobileActions] = useState(false)
   const [showMobileLayers, setShowMobileLayers] = useState(false)
@@ -455,6 +457,12 @@ export function CanvasPage({
       /* every paste lands a frame or a layer */
       if (!canEditOpenCanvas(useStore.getState())) return
       const captureText = e.clipboardData?.getData('text/plain') ?? ''
+      /* an install command, @registry/item or registry JSON URL: the component library */
+      if (!e.clipboardData?.files.length && isRegistryPaste(captureText)) {
+        e.preventDefault()
+        useStore.getState().openComponentLibrary(captureText.trim())
+        return
+      }
       if (captureText.startsWith(CAPTURE_PREFIX)) {
         e.preventDefault()
         void pasteWebCapture(canvasId, captureText).catch((error: Error) => {
@@ -1348,6 +1356,23 @@ export function CanvasPage({
             setGhInstallPass(null)
             showToast(t('canvas.cardsQueued', { count: cardCount }))
           }}
+          onOpenLibrary={() => {
+            setShowImport(false)
+            useStore.getState().openComponentLibrary()
+          }}
+        />
+      )}
+      {componentLibrary && editorReady && (
+        <ComponentLibrary
+          key={componentLibrary.input}
+          canvasId={canvasId}
+          initialInput={componentLibrary.input}
+          onClose={() => useStore.getState().closeComponentLibrary()}
+          onDone={(frameIds, message) => {
+            useStore.getState().closeComponentLibrary()
+            select(frameIds[0] ?? null)
+            showToast(message)
+          }}
         />
       )}
       {updateReady ? (
@@ -1377,6 +1402,7 @@ function ImportModal({
   onClose,
   onDone,
   onQueued,
+  onOpenLibrary,
 }: {
   canvasId: string
   installPass: string | null
@@ -1387,6 +1413,8 @@ function ImportModal({
   onDone: (frameIds: string[], failedCount: number) => void
   /** a repo import queues cards on the board instead of landing frames */
   onQueued: (cardCount: number) => void
+  /** shadcn components come through the component library, not a step here */
+  onOpenLibrary: () => void
 }) {
   /* which source's screen is open — null is the picker; landing back from
      GitHub's install flow jumps straight to that screen */
@@ -1702,7 +1730,10 @@ function ImportModal({
         ) : !discovery ? (
           <>
             {source === null ? (
-              <SourcePicker onPick={setSource} sources={importSources()} />
+              <SourcePicker
+                onPick={(id) => (id === 'shadcn' ? onOpenLibrary() : setSource(id))}
+                sources={importSources()}
+              />
             ) : source === 'website' ? (
               <>
                 <ImportStepHeader
@@ -1766,14 +1797,6 @@ function ImportModal({
                   </Button>
                 </ImportStepFooter>
               </>
-            ) : source === 'shadcn' ? (
-              <RegistryImportSection
-                canvasId={canvasId}
-                busy={busy}
-                onBusy={setBusy}
-                onBack={() => setSource(null)}
-                onDone={onDone}
-              />
             ) : source === 'liveapp' ? (
               <SyncKeysSection canvasId={canvasId} onBack={() => setSource(null)} />
             ) : source === 'github' ? (

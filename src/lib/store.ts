@@ -107,6 +107,8 @@ interface State {
   layersOpen: boolean
   /** which face the Layers panel shows: the layer tree, or the design tokens */
   layersTab: 'layers' | 'components' | 'tokens'
+  /** the component library modal, open with what to look up first ('' for the directory) */
+  componentLibrary: { input: string } | null
   /** ⌘. — every panel and toolbar is off screen, leaving only the canvas.
    *  A plain overlay flag: the panels' own open/closed state is untouched
    *  underneath, so toggling back shows exactly what was open before */
@@ -264,6 +266,8 @@ interface State {
   setElementPanelOpen(v: boolean): void
   setLayersOpen(v: boolean): void
   setLayersTab(tab: 'layers' | 'components' | 'tokens'): void
+  openComponentLibrary(input?: string): void
+  closeComponentLibrary(): void
   toggleUiHidden(): void
   setPrototypeMode(on: boolean): void
   setViewport(v: Viewport): void
@@ -336,6 +340,7 @@ export const useStore = create<State>((set, get) => ({
   elementPanelOpen: false,
   layersOpen: readLayersOpen(),
   layersTab: 'layers',
+  componentLibrary: null,
   uiHidden: false,
   prototypeMode: false,
   viewport: { x: 0, y: 0, zoom: 1 },
@@ -732,6 +737,8 @@ export const useStore = create<State>((set, get) => ({
     set({ layersOpen })
   },
   setLayersTab: (layersTab) => set({ layersTab }),
+  openComponentLibrary: (input = '') => set({ componentLibrary: { input } }),
+  closeComponentLibrary: () => set({ componentLibrary: null }),
   /* hidden guides cannot stay selected: Delete would remove one unseen */
   toggleUiHidden: () => set((s) => ({ uiHidden: !s.uiHidden, ...(s.uiHidden ? {} : { selectedGuideId: null }) })),
   setPrototypeMode: (prototypeMode) => set({ prototypeMode }),

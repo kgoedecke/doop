@@ -202,23 +202,26 @@ Comment on any element or anywhere on the canvas. The **Comments** tab lists the
 comment get an email digest (opt out under Settings → Account), and canvases opened through a
 view-only or comment-only link show a badge and disable editing.
 
-The import source picker offers **shadcn/ui** (paste a public registry index or item JSON URL, review
-its items, then render them directly into reusable HTML/CSS components), **Website** (one
+The import source picker offers **shadcn/ui** (the component library, below), **Website** (one
 page, or discover a whole site and pick its pages),
 **Live app** (the [sync snippet](#design-sync-push-an-apps-live-screens-onto-a-canvas)), and
 **GitHub repo** (through the GitHub App or a fine-grained token: Doop reviews the repo's screens and
 components and queues cards for the Doop Agent to sketch them and extract the design system into a
 style guide).
 
-shadcn/ui imports appear immediately in the **Components** list, with their mains on the Components
-page. They use no agent task or model account. React is compiled and rendered in an isolated browser;
-the saved component contains passive HTML and CSS, including Tailwind styles, with its original source
-path for handoff. Components that need application data or providers should be imported through a
-self-contained demo or example export. Runtime interactions become a static design snapshot.
-Indexes may include file contents inline or refer to published item JSON files alongside the index
-(for example `/r/registry.json` and `/r/button.json`). URL dependencies and standard shadcn dependencies
-are resolved automatically. Private registries and `@namespace` dependencies are not supported; use
-public item URLs. Select up to 20 items per import.
+The **component library** brings shadcn components into a design. Open it from **Add from shadcn
+registries** in the Components tab, from the import picker, or by pasting on the canvas. Browse the
+public registries in shadcn's directory (featured ones first), or paste whatever you have: a docs
+page (`magicui.design/docs/components/marquee`), an install command (`npx shadcn@latest add
+@magicui/marquee card`), an `@registry/item` name, or a registry JSON URL. Pick up to 20 items and
+they appear in **Components** with their mains on the Components page, with no agent task or
+model account. React is compiled and rendered in an isolated browser; the saved component is
+passive HTML and CSS, with its source path for handoff. **Use this canvas's tokens** (on when the
+design has tokens) points shadcn's variables (`--primary`, `--radius`, `--font-sans`…) at the
+matching canvas tokens, so components arrive in the design's colours, corners and type and follow
+later token edits; a component that hard-codes its own colours keeps them. Components that need
+application data or providers should be imported through a self-contained demo or example; runtime
+interactions become a static snapshot.
 
 Right-click a frame and choose **Export…** to download PNG, JPG or a vector PDF (of the frame, or of
 every selected frame as one PDF). **Export** in the top bar binds any frames of the page into one PDF. A progress toast tracks the

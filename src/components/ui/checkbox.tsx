@@ -37,8 +37,11 @@ function CheckboxCard({
   onChange,
   title,
   description,
+  media,
   className,
 }: {
+  /** a picture of what is being chosen, across the top of the card */
+  media?: React.ReactNode
   checked: boolean
   disabled?: boolean
   onChange: (checked: boolean) => void
@@ -55,6 +58,7 @@ function CheckboxCard({
         className,
       )}
     >
+      {media ? <span className="col-span-2 -mx-1.5 -mt-1.5 block">{media}</span> : null}
       <Checkbox checked={checked} disabled={disabled} onChange={(e) => onChange(e.target.checked)} />
       <span>
         <span className="block text-copy/4 font-bold text-ink">{title}</span>

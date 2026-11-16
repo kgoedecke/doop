@@ -48,9 +48,11 @@ function blockEnd(css: string, open: number): number {
   let quote = ''
   for (let i = open; i < css.length; i++) {
     const char = css[i]
-    if (quote) {
-      if (char === '\\') i++
-      else if (char === quote) quote = ''
+    /* a backslash escapes the next character inside a string and outside one:
+       Tailwind escapes the quotes of `[class*='size-']` in a class selector */
+    if (char === '\\') i++
+    else if (quote) {
+      if (char === quote) quote = ''
     } else if (char === '"' || char === "'") quote = char
     else if (char === '{') depth++
     else if (char === '}' && --depth === 0) return i
@@ -68,9 +70,9 @@ function parseCss(source: string): CssNode[] {
     let quote = ''
     for (let i = at; i < css.length; i++) {
       const char = css[i]
-      if (quote) {
-        if (char === '\\') i++
-        else if (char === quote) quote = ''
+      if (char === '\\') i++
+      else if (quote) {
+        if (char === quote) quote = ''
       } else if (char === '"' || char === "'") quote = char
       else if (char === '{') {
         open = i

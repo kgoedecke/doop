@@ -10,6 +10,7 @@ import * as JSXRuntime from 'react/jsx-runtime'
 import { openIsolatedPage } from './screenshot.ts'
 import { fetchPinnedPublicUrl, guardPublicPageRequests } from './publicUrl.ts'
 import type { RegistryItem } from './shadcnRegistry.ts'
+import { applyRegistryTheme, type RegistryTheme } from './registryTheme.ts'
 
 export interface RenderedRegistryComponent {
   name: string
@@ -19,6 +20,8 @@ export interface RenderedRegistryComponent {
   width: number
   height: number
   code: { path: string; name: string }
+  /** a WebP picture of the render, when asked for (the library's thumbnails) */
+  image?: Buffer
 }
 
 const RUNTIME_MODULES: Record<string, { key: string; exports: object }> = {
@@ -213,7 +216,7 @@ function registryCss(value: unknown): string {
     .join('')
 }
 
-async function componentCss(items: RegistryItem[], candidates: string[]): Promise<string> {
+async function componentCss(items: RegistryItem[], candidates: string[], canvasTheme?: RegistryTheme): Promise<string> {
   const theme = await readFile(new URL(import.meta.resolve('tailwindcss/theme.css')), 'utf8')
   const preflight = await readFile(new URL(import.meta.resolve('tailwindcss/preflight.css')), 'utf8')
   const modern = items.some((item) => item.files?.some((file) => /registry\/(?:radix|base|aria)-/.test(file.path)))
@@ -259,7 +262,66 @@ body{color:var(--foreground);background:var(--background)}
 ${font}
 @layer utilities {@tailwind utilities;}
 ${extra}`)
-  return compiler.build(candidates)
+  return applyRegistryTheme(compiler.build(candidates), canvasTheme)
+}
+
+/** The rendered component's painted box, padded and capped, as a WebP. */
+async function picture(page: Awaited<ReturnType<typeof openIsolatedPage>>['page']): Promise<Buffer> {
+  /* the box of what actually paints: text, pictures and anything with a fill,
+     border or shadow, so a full-width wrapper around a small button does not
+     make the picture 720px wide */
+  const box = await page.evaluate(() => {
+    const rects: DOMRect[] = []
+    const roots = [...document.body.children].filter(
+      (element) => !['SCRIPT', 'STYLE', 'LINK'].includes(element.tagName),
+    )
+    const replaced = new Set(['IMG', 'SVG', 'CANVAS', 'VIDEO', 'INPUT', 'TEXTAREA', 'SELECT', 'PROGRESS', 'HR'])
+    for (const root of roots) {
+      const walker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT)
+      for (let node: Node | null = walker.currentNode; node; node = walker.nextNode()) {
+        if (node.nodeType === Node.TEXT_NODE) {
+          if (!node.textContent?.trim()) continue
+          const range = document.createRange()
+          range.selectNodeContents(node)
+          rects.push(range.getBoundingClientRect())
+          continue
+        }
+        const element = node as Element
+        const css = getComputedStyle(element)
+        if (css.visibility === 'hidden' || css.display === 'none' || css.opacity === '0') continue
+        const border = ['Top', 'Right', 'Bottom', 'Left'].some(
+          (side) => parseFloat(css.getPropertyValue(`border-${side.toLowerCase()}-width`)) > 0,
+        )
+        const paints =
+          replaced.has(element.tagName.toUpperCase()) ||
+          !/rgba\(0, 0, 0, 0\)|transparent/.test(css.backgroundColor) ||
+          css.backgroundImage !== 'none' ||
+          css.boxShadow !== 'none' ||
+          border
+        if (paints) rects.push(element.getBoundingClientRect())
+      }
+    }
+    const shown = rects.filter((rect) => rect.width > 0 && rect.height > 0)
+    if (!shown.length) return null
+    const left = Math.min(...shown.map((rect) => rect.left))
+    const top = Math.min(...shown.map((rect) => rect.top))
+    return {
+      x: left,
+      y: top,
+      width: Math.max(...shown.map((rect) => rect.right)) - left,
+      height: Math.max(...shown.map((rect) => rect.bottom)) - top,
+    }
+  })
+  const pad = 16
+  const clip = box
+    ? {
+        x: Math.max(0, box.x - pad),
+        y: Math.max(0, box.y - pad),
+        width: Math.min(720, box.width + pad * 2),
+        height: Math.min(900, box.height + pad * 2),
+      }
+    : { x: 0, y: 0, width: 320, height: 200 }
+  return Buffer.from(await page.screenshot({ type: 'webp', quality: 80, clip, captureBeyondViewport: true }))
 }
 
 /** React runs only in a disposable browser, with no app cookies, server APIs,
@@ -267,6 +329,8 @@ ${extra}`)
 export async function renderRegistryComponent(
   item: RegistryItem,
   items: RegistryItem[],
+  theme?: RegistryTheme,
+  options: { image?: boolean } = {},
 ): Promise<RenderedRegistryComponent> {
   const bundled = await bundleRegistryComponent(item, items)
   const isolated = await openIsolatedPage()
@@ -284,7 +348,12 @@ export async function renderRegistryComponent(
         return fetchPinnedPublicUrl(raw, init)
       },
     })
-    await page.setViewport({ width: 1024, height: 768 })
+    /* a picture is taken at a card-friendly width, where a full-width block reads as a block */
+    await page.setViewport({
+      width: options.image ? 720 : 1024,
+      height: 768,
+      deviceScaleFactor: options.image ? 2 : 1,
+    })
     const imports = Object.fromEntries(
       Object.keys(RUNTIME_MODULES).map((name) => [
         name,
@@ -309,9 +378,33 @@ export async function renderRegistryComponent(
     const candidates = await page.evaluate(() => [
       ...new Set([...document.querySelectorAll('*')].flatMap((element) => [...element.classList])),
     ])
-    const css = await componentCss(items, candidates)
+    const css = await componentCss(items, candidates, theme)
+    /* the canvas's token values, so a themed component renders and measures as
+       it will look; left out of the snapshot, since the frame's own token block
+       supplies them and keeps them live */
+    /* for a picture: no transitions caught halfway (shadcn's buttons fade their
+       colours in), and room around the component; never part of the snapshot */
+    if (options.image) {
+      await page.evaluate(() => {
+        const style = document.createElement('style')
+        style.setAttribute('data-doop-render-only', '')
+        style.textContent = '*,*::before,*::after{transition:none!important}body{padding:16px!important}'
+        document.head.append(style)
+      })
+    }
+    if (theme?.renderTokens) {
+      await page.evaluate((content) => {
+        const style = document.createElement('style')
+        style.setAttribute('data-doop-render-only', '')
+        style.textContent = content
+        document.head.append(style)
+      }, theme.renderTokens)
+    }
     await page.addStyleTag({ content: css })
     await page.evaluate(() => document.fonts.ready)
+    /* let entrance animations reach a frame worth showing */
+    if (options.image) await new Promise((resolve) => setTimeout(resolve, 400))
+    const image = options.image ? await picture(page) : undefined
     const snapshot = await page.evaluate(() => {
       const root = document.createElement('div')
       for (const element of document.body.children) {
@@ -333,6 +426,7 @@ export async function renderRegistryComponent(
         height: Math.max(0, ...boxes.map((box) => box.bottom)) - Math.min(0, ...boxes.map((box) => box.top)),
       }
       const styles = [...document.styleSheets]
+        .filter((sheet) => !(sheet.ownerNode as Element | null)?.hasAttribute?.('data-doop-render-only'))
         .flatMap((sheet) => {
           try {
             return [...sheet.cssRules].map((rule) => rule.cssText)
@@ -372,6 +466,7 @@ export async function renderRegistryComponent(
       width: Math.min(1440, Math.max(160, snapshot.width + 48)),
       height: Math.min(4000, Math.max(100, snapshot.height + 48)),
       code: { path: bundled.entry, name: snapshot.exportName },
+      ...(image ? { image } : {}),
     }
   } finally {
     clearTimeout(deadline)

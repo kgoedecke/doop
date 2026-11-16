@@ -1,8 +1,10 @@
 import { serializeOuter } from 'parse5'
 import { CSS_ATTR, type ComponentDef, type InstanceOverrides } from '../shared/components.ts'
+import { withTokenBlock } from '../shared/designTokens.ts'
 import type { Frame } from '../shared/types.ts'
 import { contextFor } from './components.ts'
 import { renderInstance } from './componentEngine.ts'
+import { store } from './store.ts'
 
 /**
  * A sheet of one component in every combination of its enum props, for people in
@@ -62,7 +64,15 @@ main{display:grid;grid-template-columns:repeat(${columns},1fr);gap:1px;backgroun
 figure{margin:0;background:#fff;padding:20px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;min-width:0;overflow:hidden}
 figcaption{font:11px/1.3 ui-monospace,monospace;color:#777}
 </style></head><body><main>${cells.join('')}</main></body></html>`
-  return { html, width: SHEET_WIDTH, height: rows * CELL_HEIGHT, variants: combos.length }
+  /* the canvas's token values, as every frame carries them: a component
+     styled with var(--color-brand) shows the brand colour, not nothing */
+  const canvas = store.getCanvas(canvasId)
+  return {
+    html: withTokenBlock(html, canvas?.tokens ?? [], canvas?.tokenThemes ?? []),
+    width: SHEET_WIDTH,
+    height: rows * CELL_HEIGHT,
+    variants: combos.length,
+  }
 }
 
 /** The sheet as a frame-shaped value, for the screenshot renderer. */
