@@ -30,7 +30,7 @@ export const GUIDE_TOPIC_SUMMARIES: Record<GuideTopic, string> = {
   prototypes: 'wiring screens into a clickable flow',
   redesigns: 'redesigning an existing site or page: import, audit, two directions',
   'comments-and-agents': "comment threads, and the built-in Doop Agent's roles",
-  export: 'images, PDF and PSD of a frame or one element',
+  export: 'images and PDF of a frame or one element',
   'imported-frames': 'frames imported from a GitHub repo or synced from a live app',
 }
 
@@ -560,7 +560,7 @@ them; the rest is open to you. get_guide({ topic: "comments-and-agents" }) has b
 ## Exports
 
 Every frame result carries image_url, a public render of its current HTML. export_frame
-gives PNG, JPG, PDF or PSD, export_layer one element (get_guide export).
+gives PNG, JPG or PDF, export_layer one element (get_guide export).
 
 ## Multiplayer etiquette
 
