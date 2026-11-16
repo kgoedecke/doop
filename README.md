@@ -713,11 +713,16 @@ docker run -p 4400:4400 -e BETTER_AUTH_URL=http://localhost:4400 -e BETTER_AUTH_
 Every variable is optional except the two marked required in production. Each one is declared and
 validated once at boot ([`server/env.ts`](server/env.ts)) and documented in
 [`.env.example`](.env.example), which also lists endpoint overrides and other rarely needed knobs.
+
+The server listens on port `4400` on all interfaces by default (IPv6 when available, otherwise IPv4;
+most operating systems also accept IPv4 on the default IPv6 listener). Set `HOST=127.0.0.1` to restrict
+it to local IPv4 connections, or `HOST=::1` for local IPv6, and `PORT` to change the listening port.
+
 This is the short list a self-hoster usually touches:
 
 | What               | Variables                                                                                                                                                            | Without them                                                                       |
 | ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
-| Core               | `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL` (both required in production), `DATABASE_URL`, `TRUSTED_ORIGINS`, `PORT`                                                     | Embedded PGlite in `data/pg`, localhost origins                                    |
+| Core               | `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL` (both required in production), `DATABASE_URL`, `TRUSTED_ORIGINS`, `HOST`, `PORT`                                             | Embedded PGlite in `data/pg`, localhost origins                                    |
 | Sign-in            | `OIDC_*`, `GOOGLE_*`, `MICROSOFT_*`, `APPLE_*`, `SIGNUP_EMAIL_DOMAINS`, `ADMIN_EMAILS` ([Accounts](#accounts))                                                       | Email/password only, open signup                                                   |
 | Email              | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `SMTP_SECURE`, `EMAIL_FROM`, `REQUIRE_EMAIL_VERIFICATION`                                                        | Emails print to the server log; no verification                                    |
 | Object storage     | `BUCKET`, `ACCESS_KEY_ID`, `SECRET_ACCESS_KEY`, `ENDPOINT`, `REGION` (any S3-compatible store)                                                                       | Uploaded assets stored under `data/assets`                                         |
