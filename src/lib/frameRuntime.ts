@@ -292,7 +292,7 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
   }
 
   /* tell the parent which element is selected for editing, so it can anchor
-     the element toolbar (comment etc.) to it */
+     the text formatting bar to it */
   function activeInfo() {
     return activeEl ? hitInfo(activeEl) : null
   }

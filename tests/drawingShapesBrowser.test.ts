@@ -152,7 +152,7 @@ describe.skipIf(!findBrowserPath())('drawing on the canvas', { timeout: 30_000 }
     expect(inserted[0]!.html).toContain('data-doop-drawing="circle"')
     expect(inserted[0]!.html).toContain('left: 55px; top: 60px; width: 40px; height: 40px;')
     await page.waitForFunction(() => window.drawingHarness.state().selectedElement?.frameId === 'drawn-1')
-    await page.waitForSelector('[data-comment-ui] button')
+    await page.waitForSelector('[data-rotate-handle]')
     // Deselect first: a shape can be grabbed directly, not only after a prior pick.
     await page.mouse.click(1100, 550)
     await drag([350, 360], [750, 360])
@@ -163,7 +163,7 @@ describe.skipIf(!findBrowserPath())('drawing on the canvas', { timeout: 30_000 }
        save after it, still on its way when the store already shows the move */
     await expect.poll(() => saved[0]!.html).not.toContain('data-doop-drawing')
     await page.waitForFunction(() => window.drawingHarness.state().selectedElement?.frameId === 'drawn-2')
-    await page.waitForSelector('[data-comment-ui] button')
+    await page.waitForSelector('[data-rotate-handle]')
     await page.mouse.click(1100, 550)
     await drag([750, 360], [500, 600])
     const outside = (await waitForFrames(3))[2]!

@@ -16,6 +16,7 @@ import { MenuHint } from './ui/menu'
 import { FrameExportModal } from './FrameExportModal'
 import { FrameHistoryModal } from './FrameHistoryModal'
 import { trackPngCopy } from '../lib/exportEvents'
+import { copyElementLink, type LinkTarget } from '../lib/elementLink'
 
 async function copyImageUrl(frame: Frame) {
   const notify = useStore.getState().pushNotice
@@ -33,10 +34,14 @@ export function FrameContextMenu({
   frame,
   at,
   onRename,
+  element,
 }: {
   frame: Frame
   at: MutableRefObject<{ x: number; y: number }>
   onRename?: () => void
+  /** the element a reader has picked in the frame: readers get this menu
+   *  everywhere, so the element's link is offered here */
+  element?: LinkTarget
 }) {
   const t = useT()
   const renameRequested = useRef(false)
@@ -169,6 +174,11 @@ export function FrameContextMenu({
         >
           {t('stage.copyLink')}
         </ContextMenuItem>
+        {element && (
+          <ContextMenuItem onSelect={() => void copyElementLink(frame, element)}>
+            {t('stage.copyLinkToElement')}
+          </ContextMenuItem>
+        )}
         <ContextMenuItem
           onSelect={() => {
             trackPngCopy('frame', 'frame_menu')
