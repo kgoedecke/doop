@@ -49,6 +49,7 @@ import type { LocaleConfig } from '../shared/locales.ts'
 import { FIRST_CANVAS_PATH, SIGNUP_PARAM, parseSignupMethod } from '../shared/firstCanvas.ts'
 import { localAgentRouter, handleLocalAgentMcp, wake as wakeUserWork } from './localAgent.ts'
 import { handleGeminiCloudMcp } from './geminiCloudMcp.ts'
+import { analyticsConfig } from './analytics.ts'
 import { geminiCloudWorkerFor } from './geminiCloudRuns.ts'
 import http from 'node:http'
 import { createHash } from 'node:crypto'
@@ -842,6 +843,12 @@ app.get('/api/oidc-config', (req, res) => {
 app.get('/api/locale-config', (_req, res) => {
   const config: LocaleConfig = { defaultLocale: env.DEFAULT_LOCALE }
   res.json(config)
+})
+
+/* Public: the PostHog project token the iOS app sends its events with,
+   through /relay on this same origin. */
+app.get('/api/analytics-config', (_req, res) => {
+  res.json(analyticsConfig())
 })
 
 /* ------------------------------------------------------------------ */

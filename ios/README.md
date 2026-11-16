@@ -24,6 +24,14 @@ HTML/CSS engine (Stylo + Taffy + Parley), compiled into the app as a static libr
   Messages may be up to 64 MiB; larger messages and invalid payloads report a specific
   error instead of retrying forever. Backgrounding cancels the current connection,
   and callbacks from that connection cannot change a later foreground session.
+- **Analytics** (`Doop/Analytics.swift`, posthog-ios pinned in the Xcode project): the
+  server decides. It hands out its public PostHog token on `/api/analytics-config` and
+  the SDK posts through that server's `/relay`, so a self-hosted server without a token
+  gets no events. The person is identified by user id like the web client, and reset on
+  sign-out, account deletion and server change. Events carry `$lib = posthog-ios` and
+  `ios_app: true`, plus app lifecycle events and named `$screen`s (Sign in, Library,
+  Agents, Canvas with `canvas_id`, Settings). No session replay, feature flags or PostHog
+  push hooks (the app owns its APNs token). `PrivacyInfo.xcprivacy` declares it.
 - **Native canvas** (`Doop/Blitz/BlitzCanvasView.swift`): a UIKit view with one
   Core Animation layer per frame. Pan, pinch zoom, tap to select and dismiss the
   keyboard, double tap a frame or its title to fit it, then toggle between a closer

@@ -44,6 +44,8 @@
 		00000000000000000000026E /* DoopActivity/DoopActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000025C /* DoopActivity/DoopActivity.swift */; };
 		00000000000000000000026F /* Doop/Core/Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000025D /* Doop/Core/Models.swift */; };
 		000000000000000000000277 /* DoopActivity.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = 000000000000000000000276 /* DoopActivity.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		0000000000000000000003A0 /* Analytics.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0000000000000000000003A1 /* Analytics.swift */; };
+		0000000000000000000003A2 /* PostHog in Frameworks */ = {isa = PBXBuildFile; productRef = 0000000000000000000003A4 /* PostHog */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -108,6 +110,7 @@
 		00000000000000000000025C /* DoopActivity/DoopActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DoopActivity/DoopActivity.swift; sourceTree = SOURCE_ROOT; };
 		00000000000000000000025D /* Doop/Core/Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Doop/Core/Models.swift; sourceTree = SOURCE_ROOT; };
 		000000000000000000000276 /* DoopActivity.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; path = DoopActivity.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		0000000000000000000003A1 /* Analytics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Analytics.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -115,6 +118,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				0000000000000000000003A2 /* PostHog in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -155,6 +159,7 @@
 				000000000000000000000355 /* Core/ProviderSignIn.swift */,
 				000000000000000000000359 /* Core/AppleSignIn.swift */,
 				000000000000000000000357 /* WebSignIn.swift */,
+				0000000000000000000003A1 /* Analytics.swift */,
 				00000000000000000000012D /* DoopClient.swift */,
 				00000000000000000000012E /* CanvasModel.swift */,
 				000000000000000000000130 /* NativeCanvasView.swift */,
@@ -206,6 +211,9 @@
 				000000000000000000000285 /* PBXTargetDependency */,
 			);
 			name = Doop;
+			packageProductDependencies = (
+				0000000000000000000003A4 /* PostHog */,
+			);
 			productName = Doop;
 			productReference = 00000000000000000000006F /* Doop.app */;
 			productType = "com.apple.product-type.application";
@@ -244,6 +252,9 @@
 				Base,
 			);
 			mainGroup = 000000000000000000000002;
+			packageReferences = (
+				0000000000000000000003A3 /* XCRemoteSwiftPackageReference "posthog-ios" */,
+			);
 			productRefGroup = 000000000000000000000004 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
@@ -313,6 +324,7 @@
 				000000000000000000000354 /* Core/ProviderSignIn.swift in Sources */,
 				000000000000000000000358 /* Core/AppleSignIn.swift in Sources */,
 				000000000000000000000356 /* WebSignIn.swift in Sources */,
+				0000000000000000000003A0 /* Analytics.swift in Sources */,
 				000000000000000000000191 /* DoopClient.swift in Sources */,
 				000000000000000000000192 /* CanvasModel.swift in Sources */,
 				000000000000000000000194 /* NativeCanvasView.swift in Sources */,
@@ -558,6 +570,25 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		0000000000000000000003A3 /* XCRemoteSwiftPackageReference "posthog-ios" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/PostHog/posthog-ios.git";
+			requirement = {
+				kind = exactVersion;
+				version = 3.97.2;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		0000000000000000000003A4 /* PostHog */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 0000000000000000000003A3 /* XCRemoteSwiftPackageReference "posthog-ios" */;
+			productName = PostHog;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 000000000000000000000001 /* Project object */;
 }
