@@ -153,6 +153,7 @@ import * as userEvents from './userEvents.ts'
 import type { Actor, Canvas, ClientMessage, Presence, ServerMessage } from '../shared/types.ts'
 
 const PORT = env.PORT
+const HOST = env.HOST
 
 /* Identifies the client bundle this process serves. Hashing dist/index.html
    works because Vite writes hashed asset names into it — any frontend change
@@ -3502,8 +3503,9 @@ wss.on('connection', (ws, upgradeReq) => {
   })
 })
 
-server.listen(PORT, () => {
-  console.log(`⟡ doop server     http://localhost:${PORT}`)
+server.listen({ port: PORT, host: HOST }, () => {
+  const displayHost = HOST?.includes(':') ? `[${HOST}]` : (HOST ?? 'localhost')
+  console.log(`⟡ doop server     http://${displayHost}:${PORT}`)
   /* frame HTML is loaded per canvas; a canvas nobody has used for
      CANVAS_IDLE_MS gives it back, unless a room, agent or stream is on it.
      Started here, once the room state it asks about exists. */

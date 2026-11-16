@@ -12,6 +12,20 @@ import { stubEnv, unstubAllEnvs } from './envStub.ts'
 afterEach(unstubAllEnvs)
 
 describe('server/env.ts', () => {
+  it('leaves the listen host unspecified by default', () => {
+    stubEnv('HOST', undefined)
+    expect(env.HOST).toBeUndefined()
+    stubEnv('HOST', '   ')
+    expect(env.HOST).toBeUndefined()
+  })
+
+  it('accepts a custom listen host and validated port', () => {
+    stubEnv('HOST', '127.0.0.1')
+    stubEnv('PORT', '4500')
+    expect(env.HOST).toBe('127.0.0.1')
+    expect(env.PORT).toBe(4500)
+  })
+
   it('parses numbers, booleans, lists and origins', () => {
     stubEnv('MCP_UPLOADS_PER_MIN', '2')
     stubEnv('WEBHOOK_ALLOW_PRIVATE_URLS', '1')
