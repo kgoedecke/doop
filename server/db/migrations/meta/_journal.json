@@ -414,6 +414,13 @@
       "when": 1794783638191,
       "tag": "0059_workspace_seats_bought",
       "breakpoints": true
+    },
+    {
+      "idx": 60,
+      "version": "7",
+      "when": 1794911677505,
+      "tag": "0060_agent_identities",
+      "breakpoints": true
     }
   ]
 }

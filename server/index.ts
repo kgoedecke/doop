@@ -114,6 +114,8 @@ import { RendererBusyError } from './renderBrowser.ts'
 import { getAsset, reconcileAssetRefs, beginTicketUpload, endTicketUpload, createAsset } from './assets.ts'
 import * as ingest from './ingest.ts'
 import * as agentKeys from './agentKeys.ts'
+import * as agentIdentities from './agentIdentities.ts'
+import { isAgentBrandChoice, type AgentBrandChoice } from '../shared/agentBrand.ts'
 import * as backgrounds from './backgrounds.ts'
 import { serveIcon } from './iconProxy.ts'
 import { servePhoto } from './photoProxy.ts'
@@ -393,6 +395,19 @@ function agentTouch(
     }
     if (statusChanged) {
       broadcast(canvasId, { type: 'status', clientId: p.clientId, status: p.status ?? null })
+    }
+  }
+}
+
+/* An owner changed one agent's icon: re-announce that agent on every canvas
+   where it is on screen, so viewers redraw the mark without a leave/join
+   flicker. Only the brand moves — the presence itself stays put. */
+function refreshAgentPresence(ownerName: string, agentName: string, brand: AgentBrandChoice | undefined) {
+  for (const [canvasId, byName] of agentPresences) {
+    for (const p of byName.values()) {
+      if (p.name !== agentName || p.owner !== ownerName || p.brand === brand) continue
+      p.brand = brand
+      broadcast(canvasId, { type: 'presence:join', presence: p })
     }
   }
 }
@@ -1470,6 +1485,27 @@ app.delete('/api/agent-keys/:id', async (req, res) => {
   if (!(await agentKeys.deleteAgentKey(req.user!.id, req.params.id)))
     return res.status(404).json({ error: 'agent key not found' })
   res.json({ ok: true })
+})
+
+/* ---- Agent identities: the icon an owner picked for a named agent, keyed
+   by the name the agent introduced itself with. No row means automatic — the
+   mark Doop reads off the agent's client and name. */
+
+app.get('/api/agent-identities', async (req, res) => {
+  res.json(await agentIdentities.listAgentIdentities(req.user!.id))
+})
+
+app.put('/api/agent-identities/:agentName', async (req, res) => {
+  const agentName = String(req.params.agentName ?? '').trim()
+  if (!agentName || agentName.length > 60)
+    return res.status(400).json({ error: 'agent name must be 1 to 60 characters' })
+  const raw = req.body?.brand
+  /* null is a real choice here (automatic); a missing brand is a bad request */
+  if (raw !== null && !isAgentBrandChoice(raw)) return res.status(400).json({ error: 'unknown agent brand' })
+  const brand: AgentBrandChoice | null = raw
+  await agentIdentities.setAgentIdentity(req.user!.id, agentName, brand)
+  refreshAgentPresence(req.user!.name, agentName, brand ?? undefined)
+  res.json({ agentName, brand })
 })
 
 app.get('/api/canvases', async (req, res) => {

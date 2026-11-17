@@ -20,7 +20,7 @@ import { MAX_PAGES, PageLimitError, store } from './store.ts'
 import * as persist from './db/persist.ts'
 import * as thumbs from './thumbs.ts'
 import { colorFor } from '../shared/types.ts'
-import type { AgentBrand } from '../shared/agentBrand.ts'
+import type { AgentBrandChoice } from '../shared/agentBrand.ts'
 import type { StackWrite } from '../shared/frameStack.ts'
 import {
   DEFAULT_ROLE_ID,
@@ -280,7 +280,7 @@ function logActivity(canvasId: string, actor: Actor, message: string, frameId?: 
 }
 
 export function resolveActor(
-  raw: { name?: string; kind?: string; clientId?: string; owner?: string; brand?: AgentBrand } | undefined,
+  raw: { name?: string; kind?: string; clientId?: string; owner?: string; brand?: AgentBrandChoice } | undefined,
 ): Actor {
   const kind = raw?.kind === 'agent' ? 'agent' : raw?.kind === 'user' ? 'user' : 'agent'
   const name = raw?.name?.trim() || (kind === 'agent' ? 'AI Agent' : 'Anonymous')

@@ -1,4 +1,4 @@
-import type { AgentBrand } from './agentBrand.ts'
+import type { AgentBrandChoice } from './agentBrand.ts'
 import type { BillingInterval, WorkspaceStatus } from './billing.ts'
 import type { CanvasRole, LinkAccess } from './canvasRole.ts'
 import type { ComponentDef } from './components.ts'
@@ -373,8 +373,9 @@ export interface Actor {
   clientId?: string
   /** for agents: display name of the user whose OAuth token authorized it */
   owner?: string
-  /** for agents: the product it reads as (shared/agentBrand.ts) */
-  brand?: AgentBrand
+  /** for agents: the product it reads as, or the Doop mark it opted into
+   *  (shared/agentBrand.ts) */
+  brand?: AgentBrandChoice
 }
 
 export interface Presence {
@@ -395,8 +396,9 @@ export interface Presence {
   status?: string
   /** for agents: whose token they connected with */
   owner?: string
-  /** for agents: the product it reads as, from its MCP client (shared/agentBrand.ts) */
-  brand?: AgentBrand
+  /** for agents: the product it reads as, or the Doop mark its owner picked
+   *  (shared/agentBrand.ts) */
+  brand?: AgentBrandChoice
 }
 
 /** A unit of work an agent announced via set_status. A new status completes the previous task.

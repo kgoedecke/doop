@@ -2,7 +2,7 @@ import * as React from 'react'
 import { useState, type CSSProperties } from 'react'
 
 import { cn } from '@/lib/utils'
-import type { AgentBrand } from '../../../shared/agentBrand'
+import type { AgentBrandChoice } from '../../../shared/agentBrand'
 import { AgentIcon } from '../AgentIcon'
 
 /** The one or two letters a person is shown as: first and last initial, the
@@ -34,7 +34,7 @@ export interface AvatarProps extends Omit<React.ComponentProps<'span'>, 'color' 
   color?: string
   kind?: 'user' | 'agent'
   /** an agent's brand, from its presence (shared/agentBrand.ts); its name decides when unset */
-  brand?: AgentBrand
+  brand?: AgentBrandChoice
   /** `ink`: the account's own face on the dashboard, initials on an ink disc
    *  with no collar, instead of the tint of a presence colour */
   tone?: 'tint' | 'ink'

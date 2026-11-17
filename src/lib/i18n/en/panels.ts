@@ -168,6 +168,10 @@ export const panels = {
   activityStop: 'Stop',
   activityRetry: 'Retry',
   activityEmpty: 'No activity yet. Add a frame, or connect an agent.',
+  activityAgentIcon: 'Agent icon',
+  activityAgentIconAuto: 'Automatic',
+  activityAgentIconDoop: 'Doop',
+  activityAgentIconFailed: 'Could not change the icon. Try again.',
 
   promptSendFailed: 'Something went wrong — try again',
   promptElement: 'element',

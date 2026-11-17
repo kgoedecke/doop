@@ -168,6 +168,10 @@ export const panels: Catalog['panels'] = {
   activityStop: 'Parar',
   activityRetry: 'Tentar de novo',
   activityEmpty: 'Nenhuma atividade ainda. Adicione um frame ou conecte um agente.',
+  activityAgentIcon: 'Ícone do agente',
+  activityAgentIconAuto: 'Automático',
+  activityAgentIconDoop: 'Doop',
+  activityAgentIconFailed: 'Não foi possível alterar o ícone. Tente novamente.',
 
   promptSendFailed: 'Algo deu errado — tente de novo',
   promptElement: 'elemento',

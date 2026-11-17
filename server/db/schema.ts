@@ -307,6 +307,20 @@ export const agentKeys = pgTable(
   (t) => [index('agent_keys_user_idx').on(t.userId), uniqueIndex('agent_keys_hash_idx').on(t.secretHash)],
 )
 
+/** An agent owner's icon choice, keyed by owner and the name the agent calls
+ *  itself. `brand` is an AgentBrandChoice (a product mark, or 'doop' to opt out
+ *  of the one its client would otherwise give it). No row = automatic: the
+ *  brand is detected from the client and agent names. */
+export const agentIdentities = pgTable(
+  'agent_identities',
+  {
+    userId: text('user_id').notNull(),
+    agentName: text('agent_name').notNull(),
+    brand: text('brand').notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.userId, t.agentName] })],
+)
+
 /** A GitHub repo connected to a canvas as an import source. Two credential
  *  modes: a GitHub App installation (`installationId` set, short-lived
  *  tokens minted per call — the preferred flow) or a fine-grained PAT

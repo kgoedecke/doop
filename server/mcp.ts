@@ -1,5 +1,5 @@
 import { env } from './env.ts'
-import { resolveAgentBrand } from '../shared/agentBrand.ts'
+import { resolveAgentBrand, type AgentBrandChoice } from '../shared/agentBrand.ts'
 import { MAX_DECISION_CHARS } from '../shared/designDecisions.ts'
 import packageJson from '../package.json' with { type: 'json' }
 import { createHash } from 'node:crypto'
@@ -36,6 +36,7 @@ import * as actions from './actions.ts'
 import { canvasRole } from './access.ts'
 import { roleAllows, type CanvasRole } from '../shared/canvasRole.ts'
 import { isAgentKeySecret, verifyAgentKey } from './agentKeys.ts'
+import { agentIdentitiesFor } from './agentIdentities.ts'
 import * as workspaces from './workspaces.ts'
 import { auth, getUserName, isBanned } from './auth.ts'
 import { capture, captureThrottled } from './analytics.ts'
@@ -368,10 +369,23 @@ function frameSummary(
  *  same isolation the web UI gets. clientName names the connecting client
  *  (handleMcpRequest builds one server per stateless request, so it is the
  *  name remembered from initialize, else the OAuth application's): feedback
- *  records it and agent presence reads its brand from it. */
-export function buildMcpServer(owner?: string, ownerId?: string, clientName?: string): McpServer {
+ *  records it and agent presence reads its brand from it. brandChoice answers
+ *  with the name's owner's icon pick, and that pick wins outright — `'doop'`
+ *  is an explicit opt-out, not a miss. Failing a pick, the brand comes from
+ *  the client name, then the agent's own name, else the Doop mark. */
+export function buildMcpServer(
+  owner?: string,
+  ownerId?: string,
+  clientName?: string,
+  brandChoice?: (agentName?: string) => AgentBrandChoice | undefined,
+): McpServer {
   const actorFrom = (agent_name?: string) =>
-    actions.resolveActor({ name: agent_name, kind: 'agent', owner, brand: resolveAgentBrand(clientName, agent_name) })
+    actions.resolveActor({
+      name: agent_name,
+      kind: 'agent',
+      owner,
+      brand: brandChoice?.(agent_name) ?? resolveAgentBrand(clientName, agent_name),
+    })
   /* Canvas access for agents mirrors the web UI: the OAuth user's id runs
      through the same canvasRole gate as browser sessions, so an agent
      connected by someone holding a view or comment link reads but cannot
@@ -2733,7 +2747,18 @@ export async function handleMcpRequest(req: Request, res: Response) {
   const clientName =
     (bearer ? clientNamesByCredential.get(credentialKey(bearer)) : undefined) ??
     (oauthClientId ? await oauthClientName(oauthClientId) : undefined)
-  const server = buildMcpServer(owner, session?.userId ?? undefined, clientName)
+  /* The owner's icon pick beats whatever the client announces, but a lookup
+     that fails must not take MCP down with it: without choices, presence
+     falls back to brand detection as before. */
+  let brandChoice: ((agentName?: string) => AgentBrandChoice | undefined) | undefined
+  if (session?.userId) {
+    try {
+      brandChoice = await agentIdentitiesFor(session.userId)
+    } catch (e) {
+      console.error('agent identities unavailable', e)
+    }
+  }
+  const server = buildMcpServer(owner, session?.userId ?? undefined, clientName, brandChoice)
   /* Stateless, and plain JSON rather than an SSE stream per response: no
      tool here sends notifications mid-call, so a stream carries nothing a
      JSON body does not, and JSON is what every client — including ChatGPT's

@@ -12,6 +12,7 @@ export const AGENT_BRANDS = [
   'github',
   'microsoft',
   'kimi',
+  'deepseek',
   'grok',
   'opencode',
   'pi',
@@ -28,6 +29,7 @@ const RULES: ReadonlyArray<readonly [RegExp, AgentBrand]> = [
   [/codex|openai|chatgpt|\bgpt/, 'openai'],
   [/gemini|antigravity/, 'gemini'],
   [/kimi/, 'kimi'],
+  [/deepseek/, 'deepseek'],
   [/visual studio code|vscode/, 'microsoft'],
   [/\bgrok|\bxai\b/, 'grok'],
   [/opencode/, 'opencode'],
@@ -50,4 +52,18 @@ export function resolveAgentBrand(clientName: string | undefined, agentName: str
 
 export function isAgentBrand(value: unknown): value is AgentBrand {
   return typeof value === 'string' && (AGENT_BRANDS as readonly string[]).includes(value)
+}
+
+/** What an agent's owner can pick for it: any product mark, or the Doop mark
+ *  so an agent can opt out of the brand its client would otherwise give it.
+ *  `undefined`/null is not a choice — it means automatic. */
+export type AgentBrandChoice = AgentBrand | 'doop'
+
+export function isAgentBrandChoice(value: unknown): value is AgentBrandChoice {
+  return value === 'doop' || isAgentBrand(value)
+}
+
+/** The product mark a choice draws: the Doop mark has no brand of its own. */
+export function brandMarkOf(choice: AgentBrandChoice | undefined): AgentBrand | undefined {
+  return choice === 'doop' ? undefined : choice
 }
