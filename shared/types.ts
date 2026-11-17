@@ -1,4 +1,4 @@
-import type { AgentBrandChoice } from './agentBrand.ts'
+import type { AgentBrand, AgentBrandChoice } from './agentBrand.ts'
 import type { BillingInterval, WorkspaceStatus } from './billing.ts'
 import type { CanvasRole, LinkAccess } from './canvasRole.ts'
 import type { ComponentDef } from './components.ts'
@@ -376,6 +376,9 @@ export interface Actor {
   /** for agents: the product it reads as, or the Doop mark it opted into
    *  (shared/agentBrand.ts) */
   brand?: AgentBrandChoice
+  /** for agents: the brand its client implies, kept even while the owner's
+   *  pick overrides it, so choosing Automatic can restore it live */
+  detectedBrand?: AgentBrand
 }
 
 export interface Presence {
@@ -410,6 +413,10 @@ export interface AgentTask {
   agentName: string
   /** whose token the agent connected with */
   owner?: string
+  /** the mark the agent wore while this task ran: the owner's pick, 'doop',
+   *  or the detected client brand. Kept with the task so teammates still see
+   *  it after the live presence expires. */
+  brand?: AgentBrandChoice
   color: string
   status: string
   startedAt: number

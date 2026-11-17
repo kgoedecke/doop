@@ -385,7 +385,11 @@ function RecentTaskRow({ task }: { task: AgentTask }) {
     >
       <span className="flex min-w-0 items-center gap-1.5 whitespace-nowrap">
         <span className="grid size-4 flex-none place-items-center">
-          {ownsAgent ? <AgentBrandMenu name={task.agentName} /> : <AgentIcon name={task.agentName} size={14} />}
+          {ownsAgent ? (
+            <AgentBrandMenu name={task.agentName} fallbackBrand={task.brand} />
+          ) : (
+            <AgentIcon name={task.agentName} brand={task.brand} size={14} />
+          )}
         </span>
         <b className="truncate font-medium text-ink">{task.agentName}</b>
         {task.owner && (

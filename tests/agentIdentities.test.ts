@@ -20,6 +20,7 @@ afterAll(() => server?.stop())
 
 type RoomMessage = { type: string; [key: string]: unknown }
 type Presence = { name?: string; brand?: string }
+type Task = { id?: string; agentName?: string; status?: string; brand?: string; endedAt?: number }
 
 /** A room connection that stays open: everything the server sends, in order. */
 class Room {
@@ -65,6 +66,14 @@ function presenceOf(message: RoomMessage): Presence | undefined {
   /* WebSocket JSON from our own server, in the shape shared/types.ts defines */
   const presence = message.presence as Presence | undefined
   return presence && typeof presence === 'object' ? presence : undefined
+}
+
+/** The task a message carries, when it is a task broadcast. */
+function taskOf(message: RoomMessage): Task | undefined {
+  if (message.type !== 'task') return undefined
+  /* WebSocket JSON from our own server, in the shape shared/types.ts defines */
+  const task = message.task as Task | undefined
+  return task && typeof task === 'object' ? task : undefined
 }
 
 function joinedPresence(message: RoomMessage): Presence {
@@ -194,6 +203,7 @@ describe('live agent presence and the owner’s pick', () => {
   let mainCanvas: string
   let optOutCanvas: string
   let namedCanvas: string
+  let taskCanvas: string
   let main: Room
   let optOut: Room
   let named: Room
@@ -205,7 +215,8 @@ describe('live agent presence and the owner’s pick', () => {
     mainCanvas = await canvas('Icons')
     optOutCanvas = await canvas('Icons opt-out')
     namedCanvas = await canvas('Icons by name')
-    for (const id of [mainCanvas, optOutCanvas, namedCanvas]) {
+    taskCanvas = await canvas('Icons on tasks')
+    for (const id of [mainCanvas, optOutCanvas, namedCanvas, taskCanvas]) {
       expect((await owner.post(`/api/canvases/${id}/members`, { email: VIEWER_EMAIL })).status).toBe(200)
     }
     /* a Cursor connection and one whose client name places no product */
@@ -246,19 +257,21 @@ describe('live agent presence and the owner’s pick', () => {
     })
   })
 
-  it('re-announces without a brand when the owner returns the agent to automatic', async () => {
+  it('restores the mark the client implied when the owner returns the agent to automatic', async () => {
     const mark = main.messages.length
     expect((await owner.put('/api/agent-identities/Bau', { brand: null })).status).toBe(200)
-    const cleared = joinedPresence(await main.waitFor(joined('Bau', undefined), 4000, mark))
-    expect(cleared).toMatchObject({ name: 'Bau' })
-    expect(cleared.brand).toBeUndefined()
-
-    /* and the next tool call detects the client again */
-    const redetect = main.messages.length
-    await setStatus(cursorKey, mainCanvas, 'Bau', 'Reviewing the hero')
-    expect(joinedPresence(await main.waitFor(joined('Bau', 'cursor'), 4000, redetect))).toMatchObject({
+    /* automatic puts a Cursor agent back on the Cursor mark at once, rather
+       than dropping the icon until its next tool call re-reads the client */
+    expect(joinedPresence(await main.waitFor(joined('Bau', 'cursor'), 4000, mark))).toMatchObject({
+      name: 'Bau',
       brand: 'cursor',
     })
+
+    /* the next tool call finds the mark already there and leaves it alone */
+    const redetect = main.messages.length
+    await setStatus(cursorKey, mainCanvas, 'Bau', 'Reviewing the hero')
+    await main.waitFor((m) => m.type === 'status', 4000, redetect)
+    expect(main.messages.slice(redetect).filter(presenceOf)).toEqual([])
   })
 
   it('lets the owner opt out of the brand the client would give it', async () => {
@@ -302,6 +315,86 @@ describe('live agent presence and the owner’s pick', () => {
       })
     } finally {
       freshRoom.close()
+    }
+  })
+
+  it('stamps a new task with the owner’s pick, not the mark the client implies', async () => {
+    expect((await owner.put('/api/agent-identities/Bau', { brand: 'kimi' })).status).toBe(200)
+    const mark = main.messages.length
+    await setStatus(cursorKey, mainCanvas, 'Bau', 'Redrawing the hero')
+    const started = taskOf(await main.waitFor((m) => taskOf(m)?.status === 'Redrawing the hero', 4000, mark))
+    expect(started).toMatchObject({ agentName: 'Bau', status: 'Redrawing the hero', brand: 'kimi' })
+  })
+
+  it('re-brands the task it already started when the owner picks a new mark', async () => {
+    expect((await owner.put('/api/agent-identities/Bau', { brand: 'kimi' })).status).toBe(200)
+    const room = await Room.join(viewer, taskCanvas)
+    try {
+      const start = room.messages.length
+      await setStatus(cursorKey, taskCanvas, 'Bau', 'Sketching the signup form')
+      const started = taskOf(await room.waitFor((m) => taskOf(m)?.status === 'Sketching the signup form', 4000, start))
+      expect(started).toMatchObject({ agentName: 'Bau', brand: 'kimi' })
+
+      /* the same task comes back wearing the new mark, in place */
+      const mark = room.messages.length
+      expect((await owner.put('/api/agent-identities/Bau', { brand: 'gemini' })).status).toBe(200)
+      const retagged = taskOf(await room.waitFor((m) => taskOf(m)?.id === started?.id, 4000, mark))
+      expect(retagged).toMatchObject({ id: started?.id, status: 'Sketching the signup form', brand: 'gemini' })
+    } finally {
+      room.close()
+    }
+  })
+
+  it('puts the detected mark back on the task when the owner returns it to automatic', async () => {
+    expect((await owner.put('/api/agent-identities/Bau', { brand: 'kimi' })).status).toBe(200)
+    const room = await Room.join(viewer, taskCanvas)
+    try {
+      const start = room.messages.length
+      await setStatus(cursorKey, taskCanvas, 'Bau', 'Reviewing the checkout copy')
+      const started = taskOf(
+        await room.waitFor((m) => taskOf(m)?.status === 'Reviewing the checkout copy', 4000, start),
+      )
+      expect(started).toMatchObject({ brand: 'kimi' })
+
+      const mark = room.messages.length
+      expect((await owner.put('/api/agent-identities/Bau', { brand: null })).status).toBe(200)
+      /* automatic falls back to the Cursor mark the client implied — on the
+         card as well, rather than dropping the icon until the next tool call */
+      const restored = taskOf(await room.waitFor((m) => taskOf(m)?.id === started?.id, 4000, mark))
+      expect(restored).toMatchObject({ id: started?.id, status: 'Reviewing the checkout copy', brand: 'cursor' })
+    } finally {
+      room.close()
+    }
+  })
+
+  it('hands a late viewer the mark a finished task kept', async () => {
+    expect((await owner.put('/api/agent-identities/Bau', { brand: 'kimi' })).status).toBe(200)
+    const live = await Room.join(viewer, taskCanvas)
+    let finished: Task | undefined
+    try {
+      const start = live.messages.length
+      await setStatus(cursorKey, taskCanvas, 'Bau', 'Finishing the footer')
+      finished = taskOf(await live.waitFor((m) => taskOf(m)?.status === 'Finishing the footer', 4000, start))
+      expect(finished).toMatchObject({ agentName: 'Bau', brand: 'kimi' })
+      /* the next status ends it, and the agent goes quiet: no later tool call
+         will re-announce the mark this task wore */
+      await setStatus(cursorKey, taskCanvas, 'Bau', 'Wrapping up')
+      await live.waitFor((m) => taskOf(m)?.status === 'Wrapping up', 4000, start)
+    } finally {
+      live.close()
+    }
+
+    /* someone who opens the canvas now gets the ended task from init, with the
+       brand it stored, long after the presence that carried it is gone */
+    const late = await Room.join(viewer, taskCanvas)
+    try {
+      const init = late.messages.find((m) => m.type === 'init')
+      const tasks = (init?.tasks ?? []) as Task[]
+      const kept = tasks.find((task) => task.id === finished?.id)
+      expect(kept).toMatchObject({ status: 'Finishing the footer', brand: 'kimi' })
+      expect(kept?.endedAt).toEqual(expect.any(Number))
+    } finally {
+      late.close()
     }
   })
 })

@@ -32,11 +32,21 @@ const BRAND_OPTIONS: { value: AgentBrandChoice; label: string }[] = [
 ]
 
 /** The icon its owner picked for an outside agent, on the agent's own row:
- *  the mark itself is the trigger, so the menu stays one 16px square. */
-export function AgentBrandMenu({ name, size = 14 }: { name: string; size?: number }) {
+ *  the mark itself is the trigger, so the menu stays one 16px square.
+ *  `fallbackBrand` is the mark the task was run under, drawn only until the
+ *  owner's own answer arrives — "no saved choice" there means Automatic. */
+export function AgentBrandMenu({
+  name,
+  size = 14,
+  fallbackBrand,
+}: {
+  name: string
+  size?: number
+  fallbackBrand?: AgentBrandChoice
+}) {
   const t = useT()
-  const { brandFor, setBrand } = useAgentIdentities()
-  const brand = brandFor(name)
+  const { brandFor, setBrand, loaded } = useAgentIdentities()
+  const brand = loaded ? brandFor(name) : fallbackBrand
   const [open, setOpen] = useState(false)
   const [saving, setSaving] = useState(false)
   const [failed, setFailed] = useState(false)
@@ -74,7 +84,9 @@ export function AgentBrandMenu({ name, size = 14 }: { name: string; size?: numbe
           <AgentIcon name={name} brand={brand} size={size} />
         </IconButton>
       </DropdownMenuTrigger>
-      <DropdownMenuContent side="bottom" align="start" width="sm">
+      {/* the menu renders in a portal, but its clicks still bubble up through
+          the React tree to the row, which selects and flies to the frame */}
+      <DropdownMenuContent side="bottom" align="start" width="sm" onClick={(e) => e.stopPropagation()}>
         <DropdownMenuRadioGroup value={brand ?? AUTOMATIC} onValueChange={choose}>
           <DropdownMenuRadioItem value={AUTOMATIC} onSelect={(e) => e.preventDefault()}>
             {t('panels.activityAgentIconAuto')}

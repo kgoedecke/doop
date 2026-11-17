@@ -372,20 +372,25 @@ function frameSummary(
  *  records it and agent presence reads its brand from it. brandChoice answers
  *  with the name's owner's icon pick, and that pick wins outright — `'doop'`
  *  is an explicit opt-out, not a miss. Failing a pick, the brand comes from
- *  the client name, then the agent's own name, else the Doop mark. */
+ *  the client name, then the agent's own name, else the Doop mark; that
+ *  client-implied mark also rides along as detectedBrand, so switching the
+ *  name back to Automatic can restore it without a fresh tool call. */
 export function buildMcpServer(
   owner?: string,
   ownerId?: string,
   clientName?: string,
   brandChoice?: (agentName?: string) => AgentBrandChoice | undefined,
 ): McpServer {
-  const actorFrom = (agent_name?: string) =>
-    actions.resolveActor({
+  const actorFrom = (agent_name?: string) => {
+    const detectedBrand = resolveAgentBrand(clientName, agent_name)
+    return actions.resolveActor({
       name: agent_name,
       kind: 'agent',
       owner,
-      brand: brandChoice?.(agent_name) ?? resolveAgentBrand(clientName, agent_name),
+      brand: brandChoice?.(agent_name) ?? detectedBrand,
+      detectedBrand,
     })
+  }
   /* Canvas access for agents mirrors the web UI: the OAuth user's id runs
      through the same canvasRole gate as browser sessions, so an agent
      connected by someone holding a view or comment link reads but cannot

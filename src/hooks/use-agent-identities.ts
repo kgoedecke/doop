@@ -7,6 +7,10 @@ import { api } from '../lib/api'
    request per process, and a save updates every row at once. */
 let choices: Map<string, AgentBrandChoice> | null = null
 let loading: Promise<void> | null = null
+/* A save can land while the first load is still in flight, and the server's
+   answer is already older than it: every save is remembered here and laid over
+   the load, so a late answer neither undoes a pick nor drops anyone else's. */
+const writes = new Map<string, AgentBrandChoice | null>()
 /* bumped on every change so useSyncExternalStore re-renders its subscribers */
 let version = 0
 const listeners = new Set<() => void>()
@@ -30,7 +34,12 @@ function loadChoices() {
   loading = api
     .listAgentIdentities()
     .then((identities) => {
-      choices = new Map(identities.map((identity) => [identity.agentName, identity.brand]))
+      const next = new Map(identities.map((identity) => [identity.agentName, identity.brand]))
+      for (const [agentName, brand] of writes) {
+        if (brand === null) next.delete(agentName)
+        else next.set(agentName, brand)
+      }
+      choices = next
     })
     .catch((err) => {
       console.error(err)
@@ -53,8 +62,10 @@ export function useAgentIdentities() {
      next render shows the icon that was actually stored */
   const setBrand = useCallback(async (agentName: string, brand: AgentBrandChoice | null) => {
     const saved = await api.setAgentIdentity(agentName, brand)
+    const stored = isAgentBrandChoice(saved.brand) ? saved.brand : null
+    writes.set(saved.agentName, stored)
     const next = new Map(choices ?? [])
-    if (isAgentBrandChoice(saved.brand)) next.set(saved.agentName, saved.brand)
+    if (stored) next.set(saved.agentName, stored)
     else next.delete(saved.agentName)
     choices = next
     notify()

@@ -384,6 +384,9 @@ export const tasks = pgTable(
     runner: text('runner'),
     /** a card's agent answer: the latest run's closing words */
     reply: text('reply'),
+    /** the brand the agent wore during this task (an AgentBrandChoice), so the
+     *  mark survives the presence that carried it */
+    brand: text('brand'),
   },
   (t) => [index('tasks_canvas_idx').on(t.canvasId)],
 )

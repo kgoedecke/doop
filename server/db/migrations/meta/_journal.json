@@ -421,6 +421,13 @@
       "when": 1794911677505,
       "tag": "0060_agent_identities",
       "breakpoints": true
+    },
+    {
+      "idx": 61,
+      "version": "7",
+      "when": 1794912740881,
+      "tag": "0061_agent_task_brand",
+      "breakpoints": true
     }
   ]
 }

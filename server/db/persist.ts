@@ -11,6 +11,7 @@ import { storedLinkAccess } from '../../shared/canvasRole.ts'
 import type { ComponentDef, LibraryComponent } from '../../shared/components.ts'
 import type { DesignToken, TokenType } from '../../shared/designTokens.ts'
 import { parseRunnerPick } from '../../shared/agentRunner.ts'
+import { isAgentBrandChoice } from '../../shared/agentBrand.ts'
 import { byStack } from '../../shared/frameStack.ts'
 import { unloadHtml } from '../frameHtml.ts'
 import type {
@@ -983,6 +984,7 @@ export function saveTask(canvasId: string, task: AgentTask) {
     frameIds: task.frameIds?.join(',') ?? null,
     runner: task.runner ? JSON.stringify(task.runner) : null,
     reply: task.reply ?? null,
+    brand: task.brand ?? null,
   }
   const write = () =>
     db
@@ -1002,6 +1004,7 @@ export function saveTask(canvasId: string, task: AgentTask) {
           stage: row.stage,
           frameIds: row.frameIds,
           reply: row.reply,
+          brand: row.brand,
         },
       })
   queueRowWrite(taskWrites, task.id, canvasId, write)
@@ -1333,6 +1336,7 @@ export async function hydrate(): Promise<Hydrated> {
       ...(row.frameIds ? { frameIds: row.frameIds.split(',').filter(Boolean) } : {}),
       ...runnerField(row.runner),
       ...(row.reply != null ? { reply: row.reply } : {}),
+      ...(isAgentBrandChoice(row.brand) ? { brand: row.brand } : {}),
     })
     tasks.set(row.canvasId, list)
   }

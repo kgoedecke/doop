@@ -4,6 +4,9 @@ import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest'
 import { AGENT_ROLES } from '../shared/agents'
 import type { AgentTask, Canvas } from '../shared/types'
+import type * as ActivityModule from '../src/components/ActivityPanel'
+import type * as TooltipModule from '../src/components/ui/tooltip'
+import type * as StoreModule from '../src/lib/store'
 
 /**
  * The Agents-panel icon menu: who may change an outside agent's mark, which
@@ -41,9 +44,12 @@ vi.mock('../src/lib/frameClipboard', () => ({ uploadImageFrames: () => Promise.r
 vi.mock('../src/components/ChatPanel', () => ({ ChatPanel: () => null }))
 vi.mock('../src/components/MemoryPanel', () => ({ MemoryPanel: () => null }))
 
-const { useStore } = await import('../src/lib/store')
-const { ActivityPanel } = await import('../src/components/ActivityPanel')
-const { TooltipProvider } = await import('../src/components/ui/tooltip')
+/** Re-imported after every `vi.resetModules()`: the icon choices and the
+ *  component state live in module scope, and one test's pick must not decide
+ *  what another test sees checked. */
+let useStore: typeof StoreModule.useStore
+let ActivityPanel: typeof ActivityModule.ActivityPanel
+let TooltipProvider: typeof TooltipModule.TooltipProvider
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
@@ -136,12 +142,19 @@ async function waitUntil(predicate: () => boolean, ms = 2000) {
   }
 }
 
-beforeEach(() => {
+beforeEach(async () => {
   vi.clearAllMocks()
   consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
   /* one account, one outside agent whose icon was pinned to Kimi */
   mocks.listIdentities.mockResolvedValue([{ agentName: 'Bau', brand: 'kimi' }])
   mocks.setIdentity.mockResolvedValue({ agentName: 'Bau', brand: 'claude' })
+  /* the icon choices live in a module-level cache (one request per process),
+     so every case gets its own module graph rather than inheriting the pick a
+     case before it made */
+  vi.resetModules()
+  ;({ useStore } = await import('../src/lib/store'))
+  ;({ ActivityPanel } = await import('../src/components/ActivityPanel'))
+  ;({ TooltipProvider } = await import('../src/components/ui/tooltip'))
   useStore.setState({
     canvas,
     tasks: [],
@@ -162,8 +175,6 @@ afterEach(() => {
 })
 
 describe('the Agents-panel icon menu', () => {
-  /* The choices live in a module-level cache (one request per process), so
-     the checked-state case runs before the picks below change it. */
   it('checks the choice its owner already made, and only that one', async () => {
     seed(task({ id: 't1', agentName: 'Bau', owner: 'Alice' }))
     await render()
@@ -225,5 +236,35 @@ describe('the Agents-panel icon menu', () => {
     )
     /* still open, so the choice can be retried */
     expect(document.querySelector('[role="menu"]')).not.toBeNull()
+  })
+
+  it('picks the brand without also selecting and flying to the task’s frame', async () => {
+    const select = vi.fn()
+    const requestFlyTo = vi.fn()
+    useStore.setState({
+      canvas: { ...canvas, frames: [{ id: 'f1', name: 'Hero' }] } as unknown as Canvas,
+      select,
+      requestFlyTo,
+    })
+    seed(task({ id: 't1', agentName: 'Bau', owner: 'Alice', frameIds: ['f1'] }))
+    await render()
+    await settle()
+
+    await open()
+    await pick('Claude')
+    expect(mocks.setIdentity).toHaveBeenCalledExactlyOnceWith('Bau', 'claude')
+    /* the menu portals its content, but a pick's click still bubbles through
+       the React tree to the row's goToFrame: its click guard is what keeps the
+       camera where the person left it */
+    expect(select).not.toHaveBeenCalled()
+    expect(requestFlyTo).not.toHaveBeenCalled()
+    await waitUntil(() => document.querySelector('[role="menu"]') === null)
+
+    /* and the row itself is still click-to-frame: the frame really is linked,
+       so the assertions above are about the menu keeping the click, not a
+       dead frame reference */
+    act(() => taskRow('Bau').click())
+    expect(select).toHaveBeenCalledExactlyOnceWith('f1')
+    expect(requestFlyTo).toHaveBeenCalledExactlyOnceWith('f1')
   })
 })
