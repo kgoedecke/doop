@@ -22,8 +22,8 @@ export const home = {
   movedToPersonal: 'Moved to Personal',
 
   /* upgrade reasons */
-  reasonAddCanvas: 'Adding a canvas to a workspace needs a Team plan.',
-  reasonMoveCanvas: 'Moving a canvas into a workspace needs a Team plan.',
+  reasonAddCanvas: 'Adding a canvas to a workspace needs a Pro plan.',
+  reasonMoveCanvas: 'Moving a canvas into a workspace needs a Pro plan.',
   reasonWorkspaceReady: '"{name}" is ready — pick a plan to start using it.',
 
   /* scopes */
@@ -34,12 +34,12 @@ export const home = {
   /* a workspace without a plan */
   noPlanTitle: '{name} has no plan yet.',
   noPlanAskOwner: 'Ask the owner to choose one — until then no canvases can be added here.',
-  noPlanChoose: 'Choose a Team plan to add canvases and invite your team.',
+  noPlanChoose: 'Choose a Pro plan to add canvases and invite your team.',
   choosePlan: 'Choose a plan',
 
   /* list header */
   people: { one: '{count} person', other: '{count} people' },
-  teamPlan: 'Team plan',
+  teamPlan: 'Pro plan',
   sharedWorkspace: 'Shared workspace',
   noPlanYet: 'No plan yet',
   sortAria: 'Sort: {label}',
@@ -98,6 +98,11 @@ export const home = {
   drafts: { one: '{count} draft', other: '{count} drafts' },
   draftsCaption: 'Drafts per prompt',
   draftsDescription: { one: 'One take on the brief', other: '{count} takes, side by side, to pick from' },
+  draftsCustom: 'Custom',
+  draftsCustomDescription: 'Any number',
+  draftsFewer: 'Fewer drafts',
+  draftsMore: 'More drafts',
+  draftsCustomAria: 'Custom number of drafts',
   send: 'Send',
   connectDesigns: 'Connect your existing designs for better results',
 
@@ -139,7 +144,6 @@ export const home = {
   createWorkspaceFailed: 'Couldn’t create the workspace',
 
   /* the upgrade wall */
-  upgradeEyebrow: 'Team plan · {price} per seat per month',
   plansFor: 'Plans for {name}',
   unlock: 'Unlock {name}',
   plans: 'Plans',
@@ -151,10 +155,9 @@ export const home = {
   yearly: 'Yearly',
   yearlyPrice: '{perMonth} a seat a month, billed {perYear} a year',
   monthlyPrice: '{price} a seat, billed monthly',
-  seats: { one: '{count} seat × {price}', other: '{count} seats × {price}' },
   totalPerMonth: '= {total} per month',
   totalPerYear: '= {total} per year',
-  alreadyOnTeam: ' — already on Team; manage it from Billing.',
+  alreadyOnTeam: ' — already on Pro; manage it from Billing.',
   countingSeats: 'Counting seats…',
   stripeNote: 'You’ll set up payment on Stripe’s secure checkout. Cancel any time from the billing portal.',
   askOwnerBefore: 'Ask',
@@ -163,9 +166,6 @@ export const home = {
   openingStripe: 'Opening Stripe…',
   continueCheckout: 'Continue to checkout',
   checkoutFailed: 'Couldn’t start checkout',
-  receipts: 'Receipts go to {email}. Need invoicing, SSO or a bigger team?',
-  talkToUs: 'Talk to us',
-  receiptsEnd: '.',
   popular: 'Popular',
   current: 'Current',
   letsTalk: 'Let’s talk',

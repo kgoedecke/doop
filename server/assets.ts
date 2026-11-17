@@ -6,6 +6,7 @@ import * as t from './db/schema.ts'
 import * as storage from './storage.ts'
 import type { FrameImage } from '../shared/imageDescriptions.ts'
 import { emitCanvasEvent } from './events.ts'
+import { FREE_UPLOAD_BYTES } from '../shared/billing.ts'
 
 /**
  * Uploaded assets (images, and the files of font libraries): bytes in object storage (server/storage.ts), one
@@ -18,7 +19,8 @@ import { emitCanvasEvent } from './events.ts'
  * some day, asset_refs is the ledger to build it on.
  */
 
-export const MAX_ASSET_BYTES = 5 * 1024 * 1024
+/** The default cap: imports, generated images and Free uploads. */
+export const MAX_ASSET_BYTES = FREE_UPLOAD_BYTES
 
 const MIME_EXT = {
   'image/png': 'png',
@@ -60,12 +62,19 @@ interface UploadTicket {
   canvasId: string
   ownerId?: string
   uploadedBy: string
+  /** what the curl brings: an image for upload_asset (the default), a font file for upload_font */
+  kind?: 'asset' | 'font'
   expiresAt: number
   inFlight: boolean
 }
 const tickets = new Map<string, UploadTicket>()
 
-export function createUploadTicket(meta: { canvasId: string; ownerId?: string; uploadedBy: string }): {
+export function createUploadTicket(meta: {
+  canvasId: string
+  ownerId?: string
+  uploadedBy: string
+  kind?: 'asset' | 'font'
+}): {
   token: string
   expiresAt: number
 } {
@@ -108,13 +117,18 @@ export interface AssetMeta {
   size: number
 }
 
+/** `limit` is the uploader's cap where a person uploads (entitlements.ts
+ *  uploadLimit); imports and generated images keep the default. */
 export async function createAsset(
   buf: Buffer,
   meta: { canvasId?: string; ownerId?: string; uploadedBy: string },
+  limit: { bytes: number; message: (bytes: number) => string } = {
+    bytes: MAX_ASSET_BYTES,
+    message: (bytes) => `file is ${(bytes / 1024 / 1024).toFixed(1)} MB — the limit is 5 MB`,
+  },
 ): Promise<AssetMeta> {
   if (buf.length === 0) throw new Error('empty file')
-  if (buf.length > MAX_ASSET_BYTES)
-    throw new Error(`file is ${(buf.length / 1024 / 1024).toFixed(1)} MB — the limit is 5 MB`)
+  if (buf.length > limit.bytes) throw new Error(limit.message(buf.length))
   const mime = sniffMime(buf)
   if (!mime) throw new Error('unsupported file type — png, jpg, webp, gif and svg are accepted')
   return storeAsset(buf, { mime, ext: MIME_EXT[mime] }, meta)
@@ -212,9 +226,11 @@ export async function getAsset(id: string, signal?: AbortSignal): Promise<{ meta
 }
 
 /** Fetch a remote image through the SSRF guard, validating every redirect
- *  hop, with a hard size cap enforced while streaming. */
-export async function fetchRemote(rawUrl: string): Promise<Buffer> {
+ *  hop, with a hard size cap enforced while streaming. A caller that only
+ *  reads a small file (a favicon) may pass a tighter cap than the store's. */
+export async function fetchRemote(rawUrl: string, maxBytes: number = MAX_ASSET_BYTES): Promise<Buffer> {
   const { fetchPinnedPublicUrl, parsePublicHttpUrl } = await import('./publicUrl.ts')
+  const tooBig = new Error(`file exceeds the ${Math.round(maxBytes / 1024 / 1024)} MB limit`)
   let url = parsePublicHttpUrl(rawUrl)
   for (let hop = 0; hop < 4; hop++) {
     const res = await fetchPinnedPublicUrl(url, {
@@ -229,7 +245,7 @@ export async function fetchRemote(rawUrl: string): Promise<Buffer> {
       continue
     }
     if (!res.ok) throw new Error(`fetch failed: HTTP ${res.status}`)
-    if (Number(res.headers.get('content-length') || 0) > MAX_ASSET_BYTES) throw new Error('file exceeds the 5 MB limit')
+    if (Number(res.headers.get('content-length') || 0) > maxBytes) throw tooBig
     if (!res.body) throw new Error('empty response')
     const chunks: Uint8Array[] = []
     let total = 0
@@ -238,9 +254,9 @@ export async function fetchRemote(rawUrl: string): Promise<Buffer> {
       const { done, value } = await reader.read()
       if (done) break
       total += value.byteLength
-      if (total > MAX_ASSET_BYTES) {
+      if (total > maxBytes) {
         await reader.cancel()
-        throw new Error('file exceeds the 5 MB limit')
+        throw tooBig
       }
       chunks.push(value)
     }

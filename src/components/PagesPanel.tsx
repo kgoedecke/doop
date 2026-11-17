@@ -4,11 +4,12 @@ import { canvasPages } from '../../shared/pages'
 import type { CanvasPageInfo } from '../../shared/types'
 import { canEditOpenCanvas, useStore } from '../lib/store'
 import { savePages, duplicatePage, moveFramesToPage } from '../lib/pageEdits'
+import { copyPageLink } from '../lib/pageUrl'
 import { ApiError } from '../lib/api'
 import { Button } from './ui/button'
 import { PageIcon, PlusIcon } from './ui/icons'
 import { cn } from '../lib/utils'
-import { clampPagesPx, pagesHeightCss, pagesPctOf, pagesPxAfterKey } from '../lib/pagesSplit'
+import { clampPagesPx, pagesMaxHeightCss, pagesMaxPx, pagesMinPx, pagesPctOf, pagesPxAfterKey } from '../lib/pagesSplit'
 import { ContextMenu, ContextMenuTrigger, ContextMenuContent, ContextMenuItem } from './ui/context-menu'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select'
 import { useT } from '@/lib/i18n'
@@ -23,7 +24,7 @@ export function PagesPanel({
   pagesPct = null,
   onPagesPctChange,
 }: {
-  /** the section's share of the rail's height once dragged; null keeps its own height */
+  /** the most of the rail's height the section takes once dragged, as a share of it; null keeps the default cap */
   pagesPct?: number | null
   /** given in the Layers rail: the section's bottom edge is the handle that sets the share */
   onPagesPctChange?: (pct: number) => void
@@ -49,6 +50,8 @@ export function PagesPanel({
   if (!canvas) return null
   const pages = canvasPages(canvas)
   const movableIds = canvas.frames.filter((f) => selectedIds.includes(f.id) && !f.locked).map((f) => f.id)
+  /* the picker is there to move the selection somewhere else, so it needs a second page */
+  const showMovePicker = !readOnly && selectedIds.length > 0 && pages.length > 1
 
   async function moveSelection(pageId: string) {
     if (!canvas || busy || !movableIds.length) return
@@ -210,7 +213,7 @@ export function PagesPanel({
     <>
       {pages.map((page) => (
         <ContextMenu key={page.id}>
-          <ContextMenuTrigger asChild disabled={readOnly}>
+          <ContextMenuTrigger asChild>
             <div
               data-page-id={page.id}
               onContextMenu={() => useStore.getState().setActivePage(page.id)}
@@ -288,21 +291,31 @@ export function PagesPanel({
               if (renaming === page.id) e.preventDefault()
             }}
           >
-            <ContextMenuItem disabled={busy} onSelect={() => startRename(page)}>
-              {t('panels.pagesRename')}
+            {!readOnly && (
+              <>
+                <ContextMenuItem disabled={busy} onSelect={() => startRename(page)}>
+                  {t('panels.pagesRename')}
+                </ContextMenuItem>
+                <ContextMenuItem disabled={busy || pages.length >= 100} onSelect={() => void duplicate(page.id)}>
+                  {t('panels.pagesDuplicate')}
+                </ContextMenuItem>
+              </>
+            )}
+            {/* the one entry a viewer has too: a link changes nothing */}
+            <ContextMenuItem onSelect={() => void copyPageLink(canvas.id, page.id)}>
+              {t('panels.pagesCopyLink')}
             </ContextMenuItem>
-            <ContextMenuItem disabled={busy || pages.length >= 100} onSelect={() => void duplicate(page.id)}>
-              {t('panels.pagesDuplicate')}
-            </ContextMenuItem>
-            <ContextMenuItem
-              tone="danger"
-              disabled={busy || pages.length === 1}
-              onSelect={() =>
-                void save((current) => (current.length > 1 ? current.filter((p) => p.id !== page.id) : null))
-              }
-            >
-              {t('panels.pagesDelete')}
-            </ContextMenuItem>
+            {!readOnly && (
+              <ContextMenuItem
+                tone="danger"
+                disabled={busy || pages.length === 1}
+                onSelect={() =>
+                  void save((current) => (current.length > 1 ? current.filter((p) => p.id !== page.id) : null))
+                }
+              >
+                {t('panels.pagesDelete')}
+              </ContextMenuItem>
+            )}
           </ContextMenuContent>
         </ContextMenu>
       ))}
@@ -312,8 +325,8 @@ export function PagesPanel({
   return (
     <div
       data-slot="pages-panel"
-      className="relative flex flex-none flex-col"
-      style={pagesPct === null ? undefined : { height: pagesHeightCss(pagesPct) }}
+      className="relative flex flex-none flex-col border-b border-line-soft"
+      style={pagesPct === null ? undefined : { maxHeight: pagesMaxHeightCss(pagesPct, pagesMinPx(showMovePicker)) }}
     >
       <div className={cn('mt-1.5 flex h-6 flex-none items-center justify-between pr-2.5 pl-3.5', sectionHeading)}>
         <span data-slot="page-section-heading" className={sectionHeading}>
@@ -321,15 +334,13 @@ export function PagesPanel({
         </span>
         {!readOnly && addPage}
       </div>
-      <div className={cn('overflow-y-auto px-2 pb-1', pagesPct === null ? 'max-h-[30vh]' : 'min-h-0 flex-1')}>
-        {list}
-      </div>
-      {!readOnly && selectedIds.length > 0 && pages.length > 1 && (
+      <div className={cn('overflow-y-auto px-2 pb-1', pagesPct === null ? 'max-h-[30vh]' : 'min-h-0')}>{list}</div>
+      {showMovePicker && (
         /* the canvas shortcuts listen on window: ⌫ would delete the frames
            being moved and typed letters would switch tools, so the picker's
            keys stop here; React bubbles the portalled list's keys through this
            div too, before the native event reaches window */
-        <div className="px-2 pb-2" onKeyDown={(e) => e.stopPropagation()}>
+        <div className="flex-none px-2 pb-2" onKeyDown={(e) => e.stopPropagation()}>
           <Select value="" disabled={busy || !movableIds.length} onValueChange={(id) => void moveSelection(id)}>
             <SelectTrigger size="sm" className="w-full" aria-label={t('panels.pagesMoveSelection')}>
               <SelectValue placeholder={t('panels.pagesMoveSelectionPlaceholder')} />
@@ -346,23 +357,42 @@ export function PagesPanel({
           </Select>
         </div>
       )}
-      {onPagesPctChange && <PagesSplitHandle onChange={onPagesPctChange} />}
+      {onPagesPctChange && <PagesSplitHandle minPx={pagesMinPx(showMovePicker)} onChange={onPagesPctChange} />}
     </div>
   )
 }
 
 /** The Pages section's bottom edge: dragged, or moved with the arrow keys, Home and End. Each step measures the
- *  section and its rail again, so it starts from what is on screen. The browser releases the pointer's capture
- *  when the drag ends, which resets the drag. */
-function PagesSplitHandle({ onChange }: { onChange: (pct: number) => void }) {
+ *  section and its rail again, so it starts from what is on screen. The separator's value and range are those
+ *  measures too: the section also changes height when its content or the window does, not only on a drag. The
+ *  browser releases the pointer's capture when the drag ends, which resets the drag. */
+function PagesSplitHandle({ minPx, onChange }: { minPx: number; onChange: (pct: number) => void }) {
   const t = useT()
+  const handle = useRef<HTMLDivElement>(null)
   const drag = useRef<{ y: number; pagesPx: number; railPx: number } | null>(null)
+  const [sizes, setSizes] = useState({ pagesPx: 0, railPx: 0 })
+  useEffect(() => {
+    const el = handle.current
+    if (!el) return
+    const measure = () => {
+      const next = measurePages(el)
+      setSizes((prev) => (prev.pagesPx === next.pagesPx && prev.railPx === next.railPx ? prev : next))
+    }
+    const observer = new ResizeObserver(measure)
+    observer.observe(el.closest('[data-slot="pages-panel"]')!)
+    observer.observe(el.closest('[data-slot="panel"]')!)
+    return () => observer.disconnect()
+  }, [])
   return (
     <div
+      ref={handle}
       role="separator"
       tabIndex={0}
       aria-orientation="horizontal"
       aria-label={t('panels.pagesResize')}
+      aria-valuemin={minPx}
+      aria-valuemax={pagesMaxPx(sizes.railPx, minPx)}
+      aria-valuenow={Math.round(sizes.pagesPx)}
       data-slot="pages-split"
       className="absolute inset-x-2 top-full h-1.5 cursor-row-resize touch-none rounded-full focus-visible:bg-ink/20 focus-visible:outline-none"
       onPointerDown={(e) => {
@@ -376,7 +406,7 @@ function PagesSplitHandle({ onChange }: { onChange: (pct: number) => void }) {
         const start = drag.current
         if (!start) return
         e.stopPropagation()
-        const px = clampPagesPx(start.pagesPx + e.clientY - start.y, start.railPx)
+        const px = clampPagesPx(start.pagesPx + e.clientY - start.y, start.railPx, minPx)
         onChange(pagesPctOf(px, start.railPx))
       }}
       onLostPointerCapture={() => {
@@ -384,7 +414,7 @@ function PagesSplitHandle({ onChange }: { onChange: (pct: number) => void }) {
       }}
       onKeyDown={(e) => {
         const { pagesPx, railPx } = measurePages(e.currentTarget)
-        const px = pagesPxAfterKey(e.key, pagesPx, railPx)
+        const px = pagesPxAfterKey(e.key, pagesPx, railPx, minPx)
         if (px === undefined) return
         e.preventDefault()
         e.stopPropagation()

@@ -402,8 +402,9 @@ export const imageDescriptionsRouter = Router()
 
 async function preference(userId: string) {
   const mode = await getImageDescriptionMode(userId)
-  const { status } = await describerFor(userId)
-  return { mode, describer: status }
+  const describer = await describerFor(userId)
+  const paidBy = !describer.model ? null : describer.payerId === userId ? 'account' : 'server'
+  return { mode, describer: describer.status, paidBy }
 }
 
 imageDescriptionsRouter.get('/', (req, res, next) => {

@@ -1,22 +1,45 @@
 import { nanoid } from 'nanoid'
+import { indexOfAscii, lastIndexOfAscii } from '../shared/asciiSearch.ts'
+import { env } from './env.ts'
+import * as propagation from './propagation.ts'
+import { runOperation, WorkBudgetError } from './workBudget.ts'
+import {
+  afterCommit,
+  atomic,
+  checkpoint,
+  detached,
+  inTransaction,
+  postCommit,
+  recordUndo,
+  transaction,
+} from './journal.ts'
+import { dedupeIssues, prepareChunk, prepareFrameHtml, referencesComponent, rederiveFromMains } from './components.ts'
+import { COMPONENT_ATTR, isDeleted, isHollow, type ComponentDef, type ComponentIssue } from '../shared/components.ts'
 import { MAX_DECISION_CHARS } from '../shared/designDecisions.ts'
-import { prepareChunk, prepareFrameHtml, referencesComponent } from './components.ts'
-import { COMPONENT_ATTR, type ComponentDef, type ComponentIssue } from '../shared/components.ts'
 import { MAX_PAGES, PageLimitError, store } from './store.ts'
 import * as persist from './db/persist.ts'
 import * as thumbs from './thumbs.ts'
 import { colorFor } from '../shared/types.ts'
+import type { AgentBrand } from '../shared/agentBrand.ts'
 import type { StackWrite } from '../shared/frameStack.ts'
-import { DEFAULT_ROLE_ID, mentionedRole, normalizePipeline, roleByAgentName, roleName } from '../shared/agents.ts'
+import {
+  DEFAULT_ROLE_ID,
+  DEFAULT_ROLE_NAME,
+  mentionedRole,
+  normalizePipeline,
+  roleByAgentName,
+  roleName,
+  type Roster,
+} from '../shared/agents.ts'
+import { rosterFor, teamOfCanvas } from './customAgents.ts'
 import { canvasPages } from '../shared/pages.ts'
 import { FRAME_COMMENT_SELECTOR, isCanvasComment, type CommentAnchorInput } from '../shared/comments.ts'
 import { isElementId } from '../shared/elementId.ts'
 import { parseRunnerPick, runnerKey, type RunnerPick } from '../shared/agentRunner.ts'
 import { hasElementId, stampElementId } from './elementIds.ts'
 import { decodeEscapedHtml, looksEscapedHtml, repairEscapedHtml } from './escapedHtml.ts'
-import { fontsForCanvas } from './fonts.ts'
-import { withFontFaces } from '../shared/fonts.ts'
-import { withWebFontLinks } from '../shared/webFonts.ts'
+import { forgetLibrary } from './componentLibrary.ts'
+import { withCanvasFaces, withCanvasFacesMidStream } from './canvasFaces.ts'
 import {
   MAX_TOKENS,
   MAX_TOKEN_DESCRIPTION,
@@ -27,10 +50,11 @@ import {
   isTokenType,
   normalizeTokenName,
   normalizeTokenValue,
+  referencedTokens,
   renameThemeAttrs,
   resolveToken,
+  tokensUsedBy,
   usesToken,
-  withTokenBlock,
   type DesignToken,
   type TokenEdit,
   type TokenResult,
@@ -39,6 +63,7 @@ import {
 import { emitCanvasEvent } from './events.ts'
 import type {
   Actor,
+  Canvas,
   CanvasGuide,
   ActorKind,
   ActivityItem,
@@ -68,15 +93,111 @@ type AgentTouch = (
   agentName: string,
   frameId?: string | null,
   status?: string | null,
-  owner?: string,
+  identity?: Pick<Actor, 'owner' | 'brand'>,
 ) => void
 
-let broadcast: Broadcast = () => {}
+let send: Broadcast = () => {}
+/* presence is a heartbeat, not a write: it is never queued, so a tool call that takes long
+   shows its agent alive from its first moment */
 let agentTouch: AgentTouch = () => {}
 
 export function wire(b: Broadcast, t: AgentTouch) {
-  broadcast = b
+  send = b
   agentTouch = t
+}
+
+/* ------------------------------------------------------------------ */
+/* The write boundary (server/journal.ts). Inside an operation nothing  */
+/* here leaves the process before the commit: a broadcast, a presence   */
+/* touch, a database write, an event and a kick to another module all   */
+/* queue, in order, and are dropped if the operation is refused (the   */
+/* presence heartbeat alone is sent at once). What                     */
+/* this module keeps in memory (its logs, streams, reveals, bursts) is  */
+/* changed through the helpers below, which record how to put it back.  */
+/* With no operation open each of these acts at once, as it always did. */
+/* ------------------------------------------------------------------ */
+
+const broadcast: Broadcast = (canvasId, msg, excludeClientId) =>
+  afterCommit(() => (excludeClientId === undefined ? send(canvasId, msg) : send(canvasId, msg, excludeClientId)))
+
+/** The database writes of this module, each waiting for the commit. The row is read when
+ *  it is written, so a record changed again before then is stored as it ended up. */
+const stored = {
+  saveTask: (canvasId: string, task: AgentTask) => afterCommit(() => persist.saveTask(canvasId, task)),
+  saveFeedback: (feedback: TaskFeedback) => afterCommit(() => persist.saveFeedback(feedback)),
+  saveComment: (comment: ElementComment) => afterCommit(() => persist.saveComment(comment)),
+  saveActivity: (canvasId: string, item: ActivityItem) => afterCommit(() => persist.saveActivity(canvasId, item)),
+  saveDecision: (canvasId: string, decision: DesignDecision) =>
+    afterCommit(() => persist.saveDecision(canvasId, decision)),
+  saveProposal: (canvasId: string, proposal: MemoryProposal) =>
+    afterCommit(() => persist.saveProposal(canvasId, proposal)),
+  saveFrameVersion: (version: Parameters<typeof persist.saveFrameVersion>[0]) =>
+    afterCommit(() => persist.saveFrameVersion(version)),
+  saveGuidelineVersion: (...args: Parameters<typeof persist.saveGuidelineVersion>) =>
+    afterCommit(() => persist.saveGuidelineVersion(...args)),
+}
+
+const emitEvent: typeof emitCanvasEvent = (canvasId, event) => afterCommit(() => emitCanvasEvent(canvasId, event))
+
+/** Work for the resident agents (a card, feedback, an @mention) is in: they hear once it is
+ *  committed, and start from nothing, never inside the request that queued it. Dynamic
+ *  import: resident depends on this module. No-op without an API key. */
+function kickResident(canvasId: string, what: 'onFeedback' | 'onCardStopped' = 'onFeedback') {
+  afterCommit(() =>
+    detached(() => {
+      import('./resident.ts').then((r) => r[what](canvasId)).catch(() => {})
+    }),
+  )
+}
+
+/** A record of one of the logs (a task, a comment, feedback) is about to be changed in
+ *  place: its fields go back if the operation is undone. The object stays the same one,
+ *  since runs hold on to the cards they claimed. */
+function edit<T extends object>(record: T): T {
+  if (!inTransaction()) return record
+  const before = { ...record }
+  recordUndo(() => {
+    for (const key of Object.keys(record)) if (!(key in before)) delete (record as Record<string, unknown>)[key]
+    Object.assign(record, before)
+  })
+  return record
+}
+
+/** Put a new record at the head of a canvas's log, newest first, capped. */
+function prepend<T>(log: Map<string, T[]>, canvasId: string, record: T, cap = 100) {
+  const had = log.has(canvasId)
+  const list = log.get(canvasId) ?? []
+  list.unshift(record)
+  const dropped = list.length > cap ? list.splice(cap) : []
+  log.set(canvasId, list)
+  recordUndo(() => {
+    const at = list.indexOf(record)
+    if (at !== -1) list.splice(at, 1)
+    list.push(...dropped)
+    if (!had && !list.length && log.get(canvasId) === list) log.delete(canvasId)
+  })
+}
+
+/** `map.set`, with the way back. */
+function setKey<K, V>(map: Map<K, V>, key: K, value: V) {
+  const had = map.has(key)
+  const before = map.get(key)
+  map.set(key, value)
+  recordUndo(() => {
+    if (map.get(key) !== value) return
+    if (had) map.set(key, before as V)
+    else map.delete(key)
+  })
+}
+
+/** `map.delete`, with the way back. */
+function dropKey<K, V>(map: Map<K, V>, key: K) {
+  if (!map.has(key)) return
+  const before = map.get(key) as V
+  map.delete(key)
+  recordUndo(() => {
+    if (!map.has(key)) map.set(key, before)
+  })
 }
 
 const activityLog = new Map<string, ActivityItem[]>() // canvasId -> items (newest first)
@@ -153,24 +274,21 @@ function logActivity(canvasId: string, actor: Actor, message: string, frameId?: 
     frameId,
     at: Date.now(),
   }
-  const list = activityLog.get(canvasId) ?? []
-  list.unshift(item)
-  if (list.length > 100) list.length = 100
-  activityLog.set(canvasId, list)
-  persist.saveActivity(canvasId, item)
+  prepend(activityLog, canvasId, item)
+  stored.saveActivity(canvasId, item)
   broadcast(canvasId, { type: 'activity', item })
 }
 
 export function resolveActor(
-  raw: { name?: string; kind?: string; clientId?: string; owner?: string } | undefined,
+  raw: { name?: string; kind?: string; clientId?: string; owner?: string; brand?: AgentBrand } | undefined,
 ): Actor {
   const kind = raw?.kind === 'agent' ? 'agent' : raw?.kind === 'user' ? 'user' : 'agent'
   const name = raw?.name?.trim() || (kind === 'agent' ? 'AI Agent' : 'Anonymous')
-  return { name, kind, color: colorFor(name), clientId: raw?.clientId, owner: raw?.owner }
+  return { name, kind, color: colorFor(name), clientId: raw?.clientId, owner: raw?.owner, brand: raw?.brand }
 }
 
 function touch(canvasId: string, actor: Actor, frameId?: string | null) {
-  if (actor.kind === 'agent') agentTouch(canvasId, actor.name, frameId, undefined, actor.owner)
+  if (actor.kind === 'agent') agentTouch(canvasId, actor.name, frameId, undefined, actor)
 }
 
 /** Refresh an agent's presence without changing its frame or status. A model
@@ -198,10 +316,24 @@ export function pipelineOf(task: AgentTask): string[] {
   return task.pipeline?.length ? task.pipeline : [DEFAULT_ROLE_ID]
 }
 
+/** The roster a canvas's work is addressed with: the built-in team plus its
+ *  custom agents. */
+export function canvasRoster(canvasId: string): Roster {
+  return rosterFor(store.getCanvas(canvasId))
+}
+
+/** The resident agent a comment or reply is for, by the name it was addressed
+ *  to: that agent while the canvas still has it, else the default agent (a
+ *  custom agent deleted with work still waiting on it). Unset stays unset. */
+function addressee(target: string | undefined, roster: Roster): string | undefined {
+  if (!target) return undefined
+  return roleByAgentName(target, roster)?.name ?? DEFAULT_ROLE_NAME
+}
+
 /** The agent whose turn it is on this card. */
-function stageAgent(task: AgentTask): string {
+function stageAgent(task: AgentTask, roster: Roster): string {
   const pipeline = pipelineOf(task)
-  return roleName(pipeline[Math.min(task.stage ?? 0, pipeline.length - 1)])
+  return roleName(pipeline[Math.min(task.stage ?? 0, pipeline.length - 1)], roster)
 }
 
 /** Distinct resident agents with work waiting, in the order work arrived. */
@@ -210,15 +342,17 @@ export function pendingWorkAgents(canvasId: string): string[] {
   const add = (name: string) => {
     if (!names.includes(name)) names.push(name)
   }
+  const roster = canvasRoster(canvasId)
   /* oldest first so a queue is worked in the order humans filled it */
   for (const card of [...(taskLog.get(canvasId) ?? [])].reverse()) {
-    if (card.queuedBy && !card.agentName && !card.failedAt && !card.endedAt) add(stageAgent(card))
+    if (card.queuedBy && !card.agentName && !card.failedAt && !card.endedAt) add(stageAgent(card, roster))
   }
   for (const f of [...(feedbackLog.get(canvasId) ?? [])].reverse()) {
-    if (!f.deliveredAt && !f.failedAt) add(f.targetAgent ?? roleName(DEFAULT_ROLE_ID))
+    if (!f.deliveredAt && !f.failedAt) add(addressee(f.targetAgent, roster) ?? DEFAULT_ROLE_NAME)
   }
   for (const c of [...(commentLog.get(canvasId) ?? [])].reverse()) {
-    if (c.forAgent && !c.claimedBy && !c.failedAt && !c.resolvedAt) add(c.targetAgent ?? roleName(DEFAULT_ROLE_ID))
+    if (c.forAgent && !c.claimedBy && !c.failedAt && !c.resolvedAt)
+      add(addressee(c.targetAgent, roster) ?? DEFAULT_ROLE_NAME)
   }
   return names
 }
@@ -272,8 +406,9 @@ function oldestWork(canvasId: string, agentName: string, passOver: (work: NextWo
     if (passOver({ payer, key })) return
     if (!oldest || at < oldest.at) oldest = { at, work: { payer, ...(runner ? { runner } : {}), key } }
   }
+  const roster = canvasRoster(canvasId)
   for (const card of taskLog.get(canvasId) ?? []) {
-    if (card.queuedBy && !card.agentName && !card.failedAt && !card.endedAt && stageAgent(card) === agentName) {
+    if (card.queuedBy && !card.agentName && !card.failedAt && !card.endedAt && stageAgent(card, roster) === agentName) {
       consider(card.startedAt, card.queuedByUserId, card.runner)
     }
   }
@@ -283,17 +418,24 @@ function oldestWork(canvasId: string, agentName: string, passOver: (work: NextWo
       !c.claimedBy &&
       !c.failedAt &&
       !c.resolvedAt &&
-      (c.targetAgent ?? roleName(DEFAULT_ROLE_ID)) === agentName
+      (addressee(c.targetAgent, roster) ?? DEFAULT_ROLE_NAME) === agentName
     ) {
       consider(c.at, c.fromUserId, undefined)
     }
   }
   for (const f of feedbackLog.get(canvasId) ?? []) {
-    if (!f.deliveredAt && !f.failedAt && (!f.targetAgent || f.targetAgent === agentName)) {
+    if (!f.deliveredAt && !f.failedAt && feedbackFor(f, agentName, roster)) {
       consider(f.at, f.fromUserId, feedbackRunner(f))
     }
   }
   return oldest?.work
+}
+
+/** Whether this agent may take a reply: one addressed to it, or one left for
+ *  whoever shows up (the work it answers was an outside agent's). */
+function feedbackFor(f: TaskFeedback, agentName: string, roster: Roster): boolean {
+  const target = addressee(f.targetAgent, roster)
+  return !target || target === agentName
 }
 
 /** The requester behind the oldest work, for callers that bill but do not
@@ -324,7 +466,7 @@ export function taskCanvasId(taskId: string): string | undefined {
 /** Agent announces what it is working on right now (empty string clears it). */
 export function setAgentStatus(canvasId: string, actor: Actor, status: string) {
   const clean = status.trim()
-  agentTouch(canvasId, actor.name, undefined, clean || null, actor.owner)
+  agentTouch(canvasId, actor.name, undefined, clean || null, actor)
 
   const list = taskLog.get(canvasId) ?? []
   /* board cards stay open until explicitly completed — a status change
@@ -333,8 +475,8 @@ export function setAgentStatus(canvasId: string, actor: Actor, status: string) {
   if (open?.status === clean) return // same status re-posted: nothing new
   const runStartedAt = open ? (open.runStartedAt ?? open.startedAt) : undefined
   if (open) {
-    open.endedAt = Date.now()
-    persist.saveTask(canvasId, open)
+    edit(open).endedAt = Date.now()
+    stored.saveTask(canvasId, open)
     broadcast(canvasId, { type: 'task', task: open })
   }
   if (clean) {
@@ -347,10 +489,8 @@ export function setAgentStatus(canvasId: string, actor: Actor, status: string) {
       startedAt: Date.now(),
       ...(runStartedAt ? { runStartedAt } : {}),
     }
-    list.unshift(task)
-    if (list.length > 100) list.length = 100
-    taskLog.set(canvasId, list)
-    persist.saveTask(canvasId, task)
+    prepend(taskLog, canvasId, task)
+    stored.saveTask(canvasId, task)
     broadcast(canvasId, { type: 'task', task })
     logActivity(canvasId, actor, `is working on: ${clean}`)
   }
@@ -390,7 +530,7 @@ export function addTaskFeedback(
     if (!task) continue
     /* a reply goes back to the agent whose work it is about — unless that was
        an outside agent, in which case it stays open to whoever shows up */
-    const target = roleByAgentName(task.agentName)?.name
+    const target = roleByAgentName(task.agentName, canvasRoster(canvasId))?.name
     const fb: TaskFeedback = {
       id: nanoid(8),
       taskId,
@@ -403,15 +543,12 @@ export function addTaskFeedback(
       text: clean,
       at: Date.now(),
     }
-    const list = feedbackLog.get(canvasId) ?? []
-    list.unshift(fb)
-    if (list.length > 100) list.length = 100
-    feedbackLog.set(canvasId, list)
-    persist.saveFeedback(fb)
+    prepend(feedbackLog, canvasId, fb)
+    stored.saveFeedback(fb)
     broadcast(canvasId, { type: 'feedback', feedback: fb })
     /* resident Doop agent picks feedback up instantly (no-op without an API
        key). Dynamic import: resident depends on this module. */
-    import('./resident.ts').then((r) => r.onFeedback(canvasId)).catch(() => {})
+    kickResident(canvasId)
     logActivity(
       canvasId,
       resolveActor({ name: from, kind: 'user' }),
@@ -425,11 +562,12 @@ export function addTaskFeedback(
 /** The feedback takeFeedbackFor would claim, left unclaimed: what read-only
  *  tools mention without assigning anything. */
 export function openFeedbackFor(canvasId: string, agentName: string, payer?: string, runner?: string): TaskFeedback[] {
+  const roster = canvasRoster(canvasId)
   return (feedbackLog.get(canvasId) ?? []).filter(
     (f) =>
       !f.deliveredAt &&
       !f.failedAt &&
-      (!f.targetAgent || f.targetAgent === agentName) &&
+      feedbackFor(f, agentName, roster) &&
       (payer === undefined || (f.fromUserId ?? '') === payer) &&
       (runner === undefined || runnerKey(feedbackRunner(f)) === runner),
   )
@@ -440,11 +578,33 @@ export function openFeedbackFor(canvasId: string, agentName: string, payer?: str
  *  identified agent call wins. `runner` (a `runnerKey`) narrows the claim to
  *  one connection, since a run calls one model. */
 export function takeFeedbackFor(canvasId: string, agentName: string, payer?: string, runner?: string): TaskFeedback[] {
+  return claimFeedback(canvasId, agentName, false, payer, runner)
+}
+
+/** takeFeedbackFor for a resident run: the claim is marked in-process, which
+ *  is what restart recovery fails as interrupted. */
+export function takeResidentFeedbackFor(
+  canvasId: string,
+  agentName: string,
+  payer?: string,
+  runner?: string,
+): TaskFeedback[] {
+  return claimFeedback(canvasId, agentName, true, payer, runner)
+}
+
+function claimFeedback(
+  canvasId: string,
+  agentName: string,
+  resident: boolean,
+  payer?: string,
+  runner?: string,
+): TaskFeedback[] {
   const pending = openFeedbackFor(canvasId, agentName, payer, runner)
   for (const f of pending) {
-    f.deliveredAt = Date.now()
+    edit(f).deliveredAt = Date.now()
     f.claimedBy = agentName
-    persist.saveFeedback(f)
+    f.claimedByResident = resident
+    stored.saveFeedback(f)
     broadcast(canvasId, { type: 'feedback', feedback: f }) // clients flip the entry to "picked up"
   }
   return pending
@@ -454,9 +614,9 @@ export function failTaskFeedback(feedbackId: string, reason: string): TaskFeedba
   for (const [canvasId, list] of feedbackLog) {
     const feedback = list.find((f) => f.id === feedbackId)
     if (!feedback) continue
-    feedback.failedAt = Date.now()
+    edit(feedback).failedAt = Date.now()
     feedback.failureReason = reason
-    persist.saveFeedback(feedback)
+    stored.saveFeedback(feedback)
     broadcast(canvasId, { type: 'feedback', feedback })
     return feedback
   }
@@ -467,10 +627,10 @@ export function completeTaskFeedback(feedbackId: string): TaskFeedback | undefin
   for (const [canvasId, list] of feedbackLog) {
     const feedback = list.find((f) => f.id === feedbackId)
     if (!feedback) continue
-    feedback.completedAt = Date.now()
+    edit(feedback).completedAt = Date.now()
     delete feedback.failedAt
     delete feedback.failureReason
-    persist.saveFeedback(feedback)
+    stored.saveFeedback(feedback)
     broadcast(canvasId, { type: 'feedback', feedback })
     /* addressed feedback is a settled design decision — capture it into Memory */
     captureDecision(canvasId, {
@@ -489,15 +649,16 @@ export function retryTaskFeedback(feedbackId: string, by: string): TaskFeedback 
     const feedback = list.find((f) => f.id === feedbackId)
     if (!feedback) continue
     if (!feedback.failedAt) return feedback
+    edit(feedback)
     delete feedback.deliveredAt
     delete feedback.claimedBy
     delete feedback.completedAt
     delete feedback.failedAt
     delete feedback.failureReason
-    persist.saveFeedback(feedback)
+    stored.saveFeedback(feedback)
     broadcast(canvasId, { type: 'feedback', feedback })
     logActivity(canvasId, resolveActor({ name: by, kind: 'user' }), 'retried agent feedback')
-    import('./resident.ts').then((r) => r.onFeedback(canvasId)).catch(() => {})
+    kickResident(canvasId)
     return feedback
   }
   return undefined
@@ -626,6 +787,9 @@ export async function ensureElementId(
   const pending = unsavedStamps.get(frameId) ?? { ids: new Set<string>() }
   pending.ids.add(stamped.id)
   unsavedStamps.set(frameId, pending)
+  /* a sub-commit: the stamp is an annotation that stands whatever becomes of the request
+     (it goes to disk here, before anything names it), and nothing is held across the write */
+  checkpoint()
   if (!(await stampSaved(frameId, stamped.id))) return undefined
   /* deleted meanwhile: an update now would put it back on every screen */
   if (!store.getFrame(frameId)) return undefined
@@ -786,7 +950,7 @@ function reanchored(comment: ElementComment): boolean {
  *  frame as a whole or on the canvas, on any frame of the same canvas. The
  *  root and its replies move together, since replies inherit the anchor.
  *  Undefined when the comment, the frame or the page is not there. */
-export async function moveComment(
+export const moveComment = atomic(async function moveComment(
   commentId: string,
   input: CommentAnchorInput,
   by: string,
@@ -823,8 +987,12 @@ export async function moveComment(
     } = c
     const next: ElementComment = { ...rest, ...fields }
     list[i] = next
+    recordUndo(() => {
+      const at = list.indexOf(next)
+      if (at !== -1) list[at] = c
+    })
     if (c.id === root.id) moved = next
-    persist.saveComment(next)
+    stored.saveComment(next)
     broadcast(root.canvasId, { type: 'comment', comment: next })
   })
   const frame = 'frame' in anchor ? anchor.frame : undefined
@@ -835,7 +1003,7 @@ export async function moveComment(
     frame?.id,
   )
   return moved
-}
+})
 
 /** A comment pinned to a point on the canvas (world coordinates on one of
  *  its pages) rather than to an element — a note about the layout, a gap
@@ -910,7 +1078,7 @@ function postComment(
   const clean = text.trim()
   if (!clean) return undefined
   /* @Doop, @brand, @a11y… — whichever resident agent is mentioned picks it up */
-  const mentioned = mentionedRole(clean)
+  const mentioned = mentionedRole(clean, canvasRoster(canvasId))
   const list = commentLog.get(canvasId) ?? []
   /* strictly increasing per canvas: thread order is reconstructed from `at`
      after a restart, so two messages must never share a timestamp */
@@ -927,10 +1095,8 @@ function postComment(
     ...(mentioned ? { forAgent: true, targetAgent: mentioned.name } : {}),
     ...(parentId ? { parentId } : {}),
   }
-  list.unshift(comment)
-  if (list.length > 100) list.length = 100
-  commentLog.set(canvasId, list)
-  persist.saveComment(comment)
+  prepend(commentLog, canvasId, comment)
+  stored.saveComment(comment)
   broadcast(canvasId, { type: 'comment', comment })
   const excerpt = clean.length > 80 ? clean.slice(0, 77) + '…' : clean
   const where = frame ? `in “${frame.name}”` : 'on the canvas'
@@ -947,9 +1113,9 @@ function postComment(
   if (comment.forAgent) {
     /* @Doop mention: the resident agent picks it up instantly (no-op without
        an API key). Dynamic import: resident depends on this module. */
-    import('./resident.ts').then((r) => r.onFeedback(canvasId)).catch(() => {})
+    kickResident(canvasId)
   }
-  emitCanvasEvent(canvasId, {
+  emitEvent(canvasId, {
     type: parentId ? 'comment.replied' : 'comment.created',
     comment,
     frame,
@@ -979,19 +1145,20 @@ export function takeAgentCommentsFor(
   runner?: string,
 ): ElementComment[] {
   if (runner) return []
+  const roster = canvasRoster(canvasId)
   const pending = (commentLog.get(canvasId) ?? []).filter(
     (c) =>
       c.forAgent &&
       !c.claimedBy &&
       !c.failedAt &&
       !c.resolvedAt &&
-      (c.targetAgent ?? roleName(DEFAULT_ROLE_ID)) === agentName &&
+      (addressee(c.targetAgent, roster) ?? DEFAULT_ROLE_NAME) === agentName &&
       (payer === undefined || (c.fromUserId ?? '') === payer),
   )
   for (const c of pending) {
-    c.claimedBy = agentName
+    edit(c).claimedBy = agentName
     c.claimedAt = Date.now()
-    persist.saveComment(c)
+    stored.saveComment(c)
     broadcast(canvasId, { type: 'comment', comment: c }) // pins flip to "Doop is on it"
   }
   return pending
@@ -1001,9 +1168,9 @@ export function failComment(commentId: string, reason: string): ElementComment |
   for (const [canvasId, list] of commentLog) {
     const comment = list.find((c) => c.id === commentId)
     if (!comment || comment.resolvedAt) continue
-    comment.failedAt = Date.now()
+    edit(comment).failedAt = Date.now()
     comment.failureReason = reason
-    persist.saveComment(comment)
+    stored.saveComment(comment)
     broadcast(canvasId, { type: 'comment', comment })
     return comment
   }
@@ -1015,14 +1182,15 @@ export function retryComment(commentId: string, by: string): ElementComment | un
     const comment = list.find((c) => c.id === commentId)
     if (!comment || comment.resolvedAt) continue
     if (!comment.failedAt) return comment
+    edit(comment)
     delete comment.claimedBy
     delete comment.claimedAt
     delete comment.failedAt
     delete comment.failureReason
-    persist.saveComment(comment)
+    stored.saveComment(comment)
     broadcast(canvasId, { type: 'comment', comment })
     logActivity(canvasId, resolveActor({ name: by, kind: 'user' }), 'retried a comment', comment.frameId)
-    import('./resident.ts').then((r) => r.onFeedback(canvasId)).catch(() => {})
+    kickResident(canvasId)
     return comment
   }
   return undefined
@@ -1038,13 +1206,14 @@ export function handBackComment(commentId: string, by: string): ElementComment |
   for (const [canvasId, list] of commentLog) {
     const comment = list.find((c) => c.id === commentId)
     if (!comment || comment.resolvedAt) continue
+    edit(comment)
     delete comment.claimedBy
     delete comment.claimedAt
     delete comment.failedAt
     delete comment.failureReason
     delete comment.forAgent
     delete comment.targetAgent
-    persist.saveComment(comment)
+    stored.saveComment(comment)
     broadcast(canvasId, { type: 'comment', comment })
     logActivity(canvasId, resolveActor({ name: by, kind: 'agent' }), 'asked a question in a comment', comment.frameId)
     return comment
@@ -1052,7 +1221,10 @@ export function handBackComment(commentId: string, by: string): ElementComment |
   return undefined
 }
 
-export function resolveComment(commentId: string, by: string): ElementComment | undefined {
+export const resolveComment = atomic(function resolveComment(
+  commentId: string,
+  by: string,
+): ElementComment | undefined {
   for (const [canvasId, list] of commentLog) {
     const c = list.find((x) => x.id === commentId)
     if (!c) continue
@@ -1061,9 +1233,9 @@ export function resolveComment(commentId: string, by: string): ElementComment | 
        resolved pin would be invisible yet still queued for an agent */
     const closing = c.parentId ? [c] : list.filter((x) => x.id === c.id || (x.parentId === c.id && !x.resolvedAt))
     for (const item of closing) {
-      item.resolvedBy = by
+      edit(item).resolvedBy = by
       item.resolvedAt = Date.now()
-      persist.saveComment(item)
+      stored.saveComment(item)
       broadcast(canvasId, { type: 'comment', comment: item })
       /* a resolved @agent comment was an instruction that got carried out —
          capture it as a decision (plain human-to-human notes are not) */
@@ -1077,7 +1249,7 @@ export function resolveComment(commentId: string, by: string): ElementComment | 
         })
       }
     }
-    emitCanvasEvent(canvasId, {
+    emitEvent(canvasId, {
       type: 'comment.resolved',
       comment: c,
       frame: c.frameId ? store.getFrame(c.frameId) : undefined,
@@ -1086,13 +1258,38 @@ export function resolveComment(commentId: string, by: string): ElementComment | 
     return c
   }
   return undefined
-}
+})
 
 /** Surface an agent's closing summary in the activity feed. */
 export function agentSummary(canvasId: string, actor: Actor, text: string) {
   const clean = text.replace(/\s+/g, ' ').trim()
   if (!clean) return
   logActivity(canvasId, actor, `finished: “${clean.length > 220 ? clean.slice(0, 217) + '…' : clean}”`)
+}
+
+/** Longest reply a card or feedback keeps; a run's closing words are a few
+ *  sentences, so this only bounds a runaway answer. */
+const MAX_REPLY_CHARS = 4000
+
+/** Keep a run's closing words on the cards and feedback it worked on: the
+ *  agent's answer in the Agents tab's chat. A later stage of a pipeline card
+ *  replaces its earlier stage's answer. */
+export function recordWorkReply(canvasId: string, work: { cardIds: string[]; feedbackIds: string[] }, text: string) {
+  const clean = text.trim()
+  if (!clean) return
+  const reply = clean.length > MAX_REPLY_CHARS ? `${clean.slice(0, MAX_REPLY_CHARS - 1)}…` : clean
+  for (const task of taskLog.get(canvasId) ?? []) {
+    if (!work.cardIds.includes(task.id)) continue
+    edit(task).reply = reply
+    stored.saveTask(canvasId, task)
+    broadcast(canvasId, { type: 'task', task })
+  }
+  for (const feedback of feedbackLog.get(canvasId) ?? []) {
+    if (!work.feedbackIds.includes(feedback.id)) continue
+    edit(feedback).reply = reply
+    stored.saveFeedback(feedback)
+    broadcast(canvasId, { type: 'feedback', feedback })
+  }
 }
 
 /** True if the agent has an explicitly announced (non-auto) task open. */
@@ -1111,8 +1308,8 @@ function trackTaskFrame(canvasId: string, actor: Actor, frameId: string) {
   for (const open of taskLog.get(canvasId) ?? []) {
     if (!sameAgent(open, actor) || open.endedAt) continue
     if (open.frameIds?.at(-1) === frameId) continue
-    open.frameIds = [...(open.frameIds ?? []).filter((id) => id !== frameId), frameId].slice(-TASK_FRAMES_CAP)
-    persist.saveTask(canvasId, open)
+    edit(open).frameIds = [...(open.frameIds ?? []).filter((id) => id !== frameId), frameId].slice(-TASK_FRAMES_CAP)
+    stored.saveTask(canvasId, open)
     broadcast(canvasId, { type: 'task', task: open })
   }
 }
@@ -1135,18 +1332,16 @@ function autoTask(canvasId: string, actor: Actor, status: string, frameId: strin
     auto: true,
     frameIds: [frameId],
   }
-  list.unshift(task)
-  if (list.length > 100) list.length = 100
-  taskLog.set(canvasId, list)
-  persist.saveTask(canvasId, task)
+  prepend(taskLog, canvasId, task)
+  stored.saveTask(canvasId, task)
   broadcast(canvasId, { type: 'task', task })
 }
 
 function endAutoTask(canvasId: string, actor: Actor) {
   const open = (taskLog.get(canvasId) ?? []).find((t) => sameAgent(t, actor) && !t.endedAt && t.auto)
   if (open) {
-    open.endedAt = Date.now()
-    persist.saveTask(canvasId, open)
+    edit(open).endedAt = Date.now()
+    stored.saveTask(canvasId, open)
     broadcast(canvasId, { type: 'task', task: open })
   }
 }
@@ -1155,15 +1350,16 @@ function endAutoTask(canvasId: string, actor: Actor) {
 export function endAgentTasks(canvasId: string, agentName: string) {
   for (const t of taskLog.get(canvasId) ?? []) {
     if (t.agentName === agentName && !t.endedAt) {
+      if (t.queuedBy && t.failedAt) continue
+      edit(t)
       if (t.queuedBy) {
         /* Interrupted cards pause for a human decision; never auto-retry. */
-        if (t.failedAt) continue
         t.failedAt = Date.now()
         t.failureReason = `${agentName} disconnected before finishing. Retry when you are ready.`
       } else {
         t.endedAt = Date.now()
       }
-      persist.saveTask(canvasId, t)
+      stored.saveTask(canvasId, t)
       broadcast(canvasId, { type: 'task', task: t })
     }
   }
@@ -1204,7 +1400,7 @@ export function addQueuedCard(
 ): AgentTask | undefined {
   const clean = title.trim().slice(0, MAX_CARD_CHARS)
   if (!clean || !store.getCanvas(canvasId)) return undefined
-  const pipeline = normalizePipeline(agents)
+  const pipeline = normalizePipeline(agents, canvasRoster(canvasId))
   const target = normalizeScope(canvasId, scope)
   const pick = parseRunnerPick(runner)
   /* reference-image frame ids: only frames that actually live on this canvas */
@@ -1238,17 +1434,16 @@ export function addQueuedCard(
     ...(target ? { scope: target } : {}),
     ...(pick ? { runner: pick } : {}),
   }
-  list.unshift(card)
-  taskLog.set(canvasId, trimTaskLog(list))
-  persist.saveTask(canvasId, card)
+  enqueueCards(canvasId, [card])
+  stored.saveTask(canvasId, card)
   broadcast(canvasId, { type: 'task', task: card })
   logActivity(
     canvasId,
     resolveActor({ name: from, kind: 'user' }),
-    `queued a card for ${pipeline.map(roleName).join(' → ')}: “${clean}”`,
+    `queued a card for ${pipeline.map((id) => roleName(id, canvasRoster(canvasId))).join(' → ')}: “${clean}”`,
   )
   /* the resident agents pick queued cards up instantly (no-op without a key) */
-  import('./resident.ts').then((r) => r.onFeedback(canvasId)).catch(() => {})
+  kickResident(canvasId)
   return card
 }
 
@@ -1256,8 +1451,23 @@ export function addQueuedCard(
 export function publishQueuedCard(canvasId: string, card: AgentTask): void {
   const list = taskLog.get(canvasId) ?? []
   if (list.some((task) => task.id === card.id)) return
-  taskLog.set(canvasId, trimTaskLog([card, ...list]))
+  enqueueCards(canvasId, [card])
   broadcast(canvasId, { type: 'task', task: card })
+}
+
+/** Put new cards at the head of the canvas's task log (the last given ends up first) and
+ *  trim it; undone, the log holds what it held before, in the list it already was. */
+function enqueueCards(canvasId: string, cards: AgentTask[]) {
+  const had = taskLog.has(canvasId)
+  const list = taskLog.get(canvasId) ?? []
+  const before = [...list]
+  for (const card of cards) list.unshift(card)
+  taskLog.set(canvasId, trimTaskLog(list))
+  recordUndo(() => {
+    list.length = 0
+    list.push(...before)
+    if (!had && taskLog.get(canvasId) === list) taskLog.delete(canvasId)
+  })
 }
 
 const TASK_LOG_CAP = 100
@@ -1325,7 +1535,6 @@ export function planRepoCards(
 export function addRepoCards(canvasId: string, input: RepoImportInput, from: string, fromUserId: string): AgentTask[] {
   const wanted = planRepoCards(canvasId, input)
   if (!wanted.length) return []
-  const list = taskLog.get(canvasId) ?? []
   const actor = resolveActor({ name: from, kind: 'user' })
   const cards: AgentTask[] = []
   /* startedAt orders the queue (oldest first); a shared timestamp would leave
@@ -1345,12 +1554,11 @@ export function addRepoCards(canvasId: string, input: RepoImportInput, from: str
       kind: w.kind,
       payload: w.payload,
     }
-    list.unshift(card)
-    persist.saveTask(canvasId, card)
+    stored.saveTask(canvasId, card)
     broadcast(canvasId, { type: 'task', task: card })
     cards.push(card)
   })
-  taskLog.set(canvasId, trimTaskLog(list))
+  enqueueCards(canvasId, cards)
   if (cards.length) {
     const sketches = cards.filter((c) => c.kind === 'sketch').length
     const what = [
@@ -1360,7 +1568,7 @@ export function addRepoCards(canvasId: string, input: RepoImportInput, from: str
       .filter(Boolean)
       .join(' and ')
     logActivity(canvasId, actor, `queued ${what} from ${input.repo} for ${roleName(DEFAULT_ROLE_ID)}`)
-    import('./resident.ts').then((r) => r.onFeedback(canvasId)).catch(() => {})
+    kickResident(canvasId)
   }
   return cards
 }
@@ -1370,21 +1578,22 @@ export function addRepoCards(canvasId: string, input: RepoImportInput, from: str
 /** `runner` (a `runnerKey`) narrows the claim to cards sent to one
  *  connection; unset takes them all. */
 export function takeQueuedCardsFor(canvasId: string, agentName: string, payer?: string, runner?: string): AgentTask[] {
+  const roster = canvasRoster(canvasId)
   const pending = (taskLog.get(canvasId) ?? []).filter(
     (t) =>
       t.queuedBy &&
       !t.agentName &&
       !t.failedAt &&
       !t.endedAt &&
-      stageAgent(t) === agentName &&
+      stageAgent(t, roster) === agentName &&
       (payer === undefined || (t.queuedByUserId ?? '') === payer) &&
       (runner === undefined || runnerKey(t.runner) === runner),
   )
   for (const c of pending) {
-    c.agentName = agentName
+    edit(c).agentName = agentName
     c.color = colorFor(agentName)
     c.claimedAt = Date.now()
-    persist.saveTask(canvasId, c)
+    stored.saveTask(canvasId, c)
     broadcast(canvasId, { type: 'task', task: c })
   }
   return pending
@@ -1400,25 +1609,25 @@ export function advanceCard(canvasId: string, cardId: string, by: Actor): AgentT
   const next = (card.stage ?? 0) + 1
   if (next >= pipeline.length) return completeCard(canvasId, cardId)
 
-  card.stage = next
+  edit(card).stage = next
   card.agentName = ''
   delete card.claimedAt
   delete card.failedAt
   delete card.failureReason
-  persist.saveTask(canvasId, card)
+  stored.saveTask(canvasId, card)
   broadcast(canvasId, { type: 'task', task: card })
-  logActivity(canvasId, by, `handed “${card.status}” to ${roleName(pipeline[next])}`)
-  import('./resident.ts').then((r) => r.onFeedback(canvasId)).catch(() => {})
+  logActivity(canvasId, by, `handed “${card.status}” to ${roleName(pipeline[next], canvasRoster(canvasId))}`)
+  kickResident(canvasId)
   return card
 }
 
 export function completeCard(canvasId: string, cardId: string): AgentTask | undefined {
   const card = (taskLog.get(canvasId) ?? []).find((t) => t.id === cardId && t.queuedBy)
   if (!card || card.endedAt) return card
-  card.endedAt = Date.now()
-  persist.saveTask(canvasId, card)
+  edit(card).endedAt = Date.now()
+  stored.saveTask(canvasId, card)
   broadcast(canvasId, { type: 'task', task: card })
-  emitCanvasEvent(canvasId, { type: 'task.completed', task: card })
+  emitEvent(canvasId, { type: 'task.completed', task: card })
   return card
 }
 
@@ -1428,13 +1637,13 @@ export function completeCard(canvasId: string, cardId: string): AgentTask | unde
 export function failCard(canvasId: string, cardId: string, reason: string): AgentTask | undefined {
   const card = (taskLog.get(canvasId) ?? []).find((t) => t.id === cardId && t.queuedBy)
   if (!card || card.endedAt || card.failedAt) return card
-  card.failedAt = Date.now()
+  edit(card).failedAt = Date.now()
   card.failureReason = reason
-  persist.saveTask(canvasId, card)
+  stored.saveTask(canvasId, card)
   broadcast(canvasId, { type: 'task', task: card })
-  emitCanvasEvent(canvasId, { type: 'task.failed', task: card, reason })
+  emitEvent(canvasId, { type: 'task.failed', task: card, reason })
   /* a run whose every card is now failed lets go of its model call at once */
-  import('./resident.ts').then((r) => r.onCardStopped(canvasId)).catch(() => {})
+  kickResident(canvasId, 'onCardStopped')
   return card
 }
 
@@ -1452,14 +1661,14 @@ export function retryCard(canvasId: string, cardId: string, by: string): AgentTa
   const card = (taskLog.get(canvasId) ?? []).find((t) => t.id === cardId && t.queuedBy)
   if (!card || card.endedAt) return card
   if (!card.failedAt) return card
-  card.agentName = ''
+  edit(card).agentName = ''
   delete card.claimedAt
   delete card.failedAt
   delete card.failureReason
-  persist.saveTask(canvasId, card)
+  stored.saveTask(canvasId, card)
   broadcast(canvasId, { type: 'task', task: card })
   logActivity(canvasId, resolveActor({ name: by, kind: 'user' }), `retried a card: “${card.status}”`)
-  import('./resident.ts').then((r) => r.onFeedback(canvasId)).catch(() => {})
+  kickResident(canvasId)
   return card
 }
 
@@ -1504,12 +1713,12 @@ function noteHtmlChange(prior: PriorState, actor: Actor, tweak: boolean) {
     open.actor.name === actor.name &&
     open.actor.kind === actor.kind &&
     now - open.lastAt < BURST_IDLE_MS
-  bursts.set(prior.id, { actor, lastAt: now })
+  setKey(bursts, prior.id, { actor, lastAt: now })
   if (joins || !prior.html) return
   /* the open burst wrote this state; without one (first write since boot)
      the frame's own stamp is the best attribution there is, even though a
      move or rename since may have refreshed it */
-  persist.saveFrameVersion({
+  stored.saveFrameVersion({
     id: nanoid(10),
     frameId: prior.id,
     canvasId: prior.canvasId,
@@ -1533,7 +1742,7 @@ export type RestoredFrame = {
 /** Put a frame back to one of its recorded versions (HTML and size; the name
  *  and position stay). null = no such version on this frame. The state being
  *  replaced is filed as a version first, so a restore is itself reversible. */
-export async function restoreFrameVersion(
+export const restoreFrameVersion = atomic(async function restoreFrameVersion(
   frameId: string,
   versionId: string,
   actor: Actor,
@@ -1545,21 +1754,22 @@ export async function restoreFrameVersion(
   const replaced = { html: before.html, width: before.width, height: before.height }
   if (before.html === version.html && before.width === version.width && before.height === version.height)
     return { frame: before, replaced }
+  /* prepared first: a refusal (the work budget) must find the frame's stream as it was */
+  const prepared = prepareWrite(before.canvasId, frameId, version.html, before.html, actor.name)
   /* whoever restores takes over: any live stream or playback ends */
   finishStream(frameId, false)
   finishReveal(frameId)
   const prior = priorState(before)
-  const prepared = prepareWrite(before.canvasId, frameId, version.html, before.html, actor.name)
   const patch = { html: prepared.html, width: version.width, height: version.height }
   const frame = store.updateFrame(frameId, patch, actor.name)
   if (!frame) return undefined
   noteHtmlChange(prior, actor, false)
   broadcast(frame.canvasId, { type: 'frame:updated', frame, actor })
-  if (prepared.changed.length) propagateComponents(frame.canvasId, prepared.changed, actor, frameId)
+  if (prepared.changed.length) propagateFromFrameWrite(frame.canvasId, prepared.changed, actor, frameId)
   logActivity(frame.canvasId, actor, `restored “${frame.name}” to an earlier version by ${version.savedBy}`, frame.id)
   touch(frame.canvasId, actor, frame.id)
   return { frame, replaced }
-}
+})
 
 /* ------------------------------------------------------------------ */
 /* Live rendering of agent writes.                                     */
@@ -1580,11 +1790,32 @@ interface StreamState {
   /** the opening chunk was HTML-escaped: decode every chunk of this stream */
   escaped: boolean
   lastActivity: number
+  /** the frame's HTML before the opening chunk replaced it: what a later chunk
+   *  may carry over (server/inlineData.ts compares against it) */
+  base: string
+  /** the end of the agent's last chunk as it sent it, before components expanded:
+   *  enough to catch a data: URI prefix split across two chunks */
+  tail: string
 }
+
+const STREAM_TAIL_CHARS = 256
 
 const streams = new Map<string, StreamState>() // frameId -> state
 
+/** The HTML a frame had before its live stream began, or undefined when none is open. */
+export function streamBase(frameId: string): string | undefined {
+  return streams.get(frameId)?.base
+}
+
+/** The end of the last chunk an open stream received, as the agent wrote it. */
+export function streamTail(frameId: string): string | undefined {
+  return streams.get(frameId)?.tail
+}
+
 interface RevealState {
+  /** started by an operation that has not committed yet: viewers have not heard of this
+   *  write, so the playback does not tick until they have */
+  held?: boolean
   actor: Actor
   /** how many chars of the frame's html are currently revealed to viewers */
   shown: number
@@ -1609,13 +1840,12 @@ export function healPartialHtml(html: string): string {
   // drop a trailing half-written tag: "<div cla"
   const lastOpen = html.lastIndexOf('<')
   if (lastOpen > html.lastIndexOf('>')) html = html.slice(0, lastOpen)
-  const lower = html.toLowerCase()
   // drop an unclosed <script> entirely — never run half-written JS
-  const scriptAt = lower.lastIndexOf('<script')
-  if (scriptAt !== -1 && lower.indexOf('</script', scriptAt) === -1) html = html.slice(0, scriptAt)
+  const scriptAt = lastIndexOfAscii(html, '<script')
+  if (scriptAt !== -1 && indexOfAscii(html, '</script', scriptAt) === -1) html = html.slice(0, scriptAt)
   // close an unclosed <style> so everything after it renders
-  const styleAt = html.toLowerCase().lastIndexOf('<style')
-  if (styleAt !== -1 && html.toLowerCase().indexOf('</style', styleAt) === -1) html += '</style>'
+  const styleAt = lastIndexOfAscii(html, '<style')
+  if (styleAt !== -1 && indexOfAscii(html, '</style', styleAt) === -1) html += '</style>'
   return html
 }
 
@@ -1639,14 +1869,23 @@ function sharedSpan(a: string, b: string): { prefix: number; shared: number } {
 }
 
 function startReveal(frame: Frame, actor: Actor, shown: number) {
-  reveals.set(frame.id, { actor, shown, deadline: Date.now() + revealDuration(frame.html.length - shown) })
+  const reveal: RevealState = {
+    held: inTransaction(),
+    actor,
+    shown,
+    deadline: Date.now() + revealDuration(frame.html.length - shown),
+  }
+  setKey(reveals, frame.id, reveal)
+  afterCommit(() => {
+    reveal.held = false
+  })
   broadcast(frame.canvasId, { type: 'frame:streaming', frameId: frame.id, active: true, actor })
 }
 
 function finishReveal(frameId: string) {
   const r = reveals.get(frameId)
   if (!r) return
-  reveals.delete(frameId)
+  dropKey(reveals, frameId)
   const frame = store.getFrame(frameId)
   if (!frame) return
   broadcast(frame.canvasId, { type: 'frame:streaming', frameId, active: false, actor: r.actor })
@@ -1656,7 +1895,10 @@ function finishReveal(frameId: string) {
 function finishStream(frameId: string, logDone: boolean) {
   const s = streams.get(frameId)
   if (!s) return
-  streams.delete(frameId)
+  dropKey(streams, frameId)
+  dropKey(streamIssues, frameId)
+  /* background work that waited for this stream (a detach-all) takes its turn now */
+  afterCommit(() => propagation.resumeFrame(frameId))
   const current = store.getFrame(frameId)
   if (!current) return
   /* a stream that ends without its done chunk (the agent went idle, or a
@@ -1664,8 +1906,8 @@ function finishStream(frameId: string, logDone: boolean) {
      a finished one already has them, and this is then a no-op */
   let renamed = current.html
   for (const rename of pendingRenames.get(frameId) ?? []) renamed = applyRename(renamed, rename)
-  pendingRenames.delete(frameId)
-  const html = withLibraryFaces(current.canvasId, renamed)
+  dropKey(pendingRenames, frameId)
+  const html = withCanvasFaces(current.canvasId, renamed)
   /* compare the HTML, not the objects: updateFrame edits the frame in place */
   const htmlChanged = html !== current.html
   const frame = htmlChanged ? store.updateFrame(frameId, { html }, s.actor.name)! : current
@@ -1685,6 +1927,7 @@ function finishStream(frameId: string, logDone: boolean) {
 setInterval(() => {
   const now = Date.now()
   for (const [frameId, r] of reveals) {
+    if (r.held) continue
     const frame = store.getFrame(frameId)
     if (!frame) {
       reveals.delete(frameId)
@@ -1712,24 +1955,41 @@ setInterval(() => {
 /** An agent that died mid-stream never sends the last chunk, so its work is settled here: a
  *  component change skipped while it streamed, the stylesheets, a main written in the stream. */
 export function expireIdleStreams(now = Date.now()) {
-  for (const [frameId, s] of streams) {
+  /* a copy: a settling that is undone puts its stream back into the map */
+  for (const [frameId, s] of [...streams]) {
     if (now - s.lastActivity <= STREAM_IDLE_MS) continue
-    const before = store.getFrame(frameId)
-    const prepared = before ? prepareWrite(before.canvasId, frameId, before.html, before.html, s.actor.name) : undefined
-    if (before && prepared && prepared.html !== before.html) {
-      const prior = priorState(before)
-      const frame = store.updateFrame(frameId, { html: prepared.html }, s.actor.name)!
-      noteHtmlChange(prior, s.actor, true)
-      /* viewers get it healed, like every chunk, so a script cut off mid-way never runs */
-      broadcast(frame.canvasId, {
-        type: 'frame:updated',
-        frame: { ...frame, html: healPartialHtml(frame.html) },
-        actor: s.actor,
-      })
+    const canvasId = store.getFrame(frameId)?.canvasId
+    try {
+      runOperation(`settle stream of frame ${frameId}`, canvasId, () => settleIdleStream(frameId, s))
+    } catch (error) {
+      if (!(error instanceof WorkBudgetError)) throw error
+      /* it runs on a timer, where nothing would catch a refusal: a frame over the work
+         budget stays as its stream left it (the settling is undone as one), the stream
+         still closes, and the frame's next write settles it */
+      console.error(`[streams] ${error.message}`)
+      runOperation(`close stream of frame ${frameId}`, canvasId, () => finishStream(frameId, false))
     }
-    finishStream(frameId, false)
-    if (before && prepared?.changed.length) propagateComponents(before.canvasId, prepared.changed, s.actor, frameId)
   }
+}
+
+/** The settling pass of a stream nobody closed, and its close: one operation, so a refusal
+ *  part of the way leaves the frame, its components and the room as they were. */
+function settleIdleStream(frameId: string, s: StreamState) {
+  const before = store.getFrame(frameId)
+  const prepared = before ? prepareWrite(before.canvasId, before.id, before.html, before.html, s.actor.name) : undefined
+  if (before && prepared && prepared.html !== before.html) {
+    const prior = priorState(before)
+    const frame = store.updateFrame(frameId, { html: prepared.html }, s.actor.name)!
+    noteHtmlChange(prior, s.actor, true)
+    /* viewers get it healed, like every chunk, so a script cut off mid-way never runs */
+    broadcast(frame.canvasId, {
+      type: 'frame:updated',
+      frame: { ...frame, html: healPartialHtml(frame.html) },
+      actor: s.actor,
+    })
+  }
+  finishStream(frameId, false)
+  if (before && prepared?.changed.length) propagateFromFrameWrite(before.canvasId, prepared.changed, s.actor, frameId)
 }
 
 /** A deleted frame held a component's main: the component points at another
@@ -1752,27 +2012,112 @@ function releaseMains(canvasId: string, frameId: string, actor: Actor) {
 /* ------------------------------------------------------------------ */
 
 const componentIssues = new Map<string, ComponentIssue[]>()
+/** What a stream's chunks had to say about the uses they expanded, held for its done chunk. */
+const streamIssues = new Map<string, ComponentIssue[]>()
 
 /** What the last write to this frame had to say about its components; reading clears it. */
 export function takeComponentIssues(frameId: string): ComponentIssue[] {
   const issues = componentIssues.get(frameId) ?? []
-  componentIssues.delete(frameId)
+  dropKey(componentIssues, frameId)
   return issues
 }
 
-function prepareWrite(canvasId: string, frameId: string, html: string, priorHtml: string, by: string) {
+/** What the last write to this frame had to say about its components, left for whoever takes them. */
+export function peekComponentIssues(frameId: string): readonly ComponentIssue[] {
+  return componentIssues.get(frameId) ?? []
+}
+
+/** Something found out about a frame's last write after it landed: heard with the rest. */
+export function addComponentIssue(frameId: string, issue: ComponentIssue) {
+  setKey(componentIssues, frameId, [...(componentIssues.get(frameId) ?? []), issue])
+}
+
+function prepareWrite(
+  canvasId: string,
+  frameId: string,
+  html: string,
+  priorHtml: string,
+  by: string,
+  carried: ComponentIssue[] = [],
+) {
   const canvas = store.getCanvas(canvasId)
   if (!canvas) return { html, changed: [] as ComponentDef[] }
   const prepared = prepareFrameHtml(canvas, frameId, html, by, priorHtml)
-  if (prepared.issues.length) componentIssues.set(frameId, prepared.issues)
-  else componentIssues.delete(frameId)
+  const issues = dedupeIssues([...carried, ...prepared.issues])
+  if (issues.length) setKey(componentIssues, frameId, issues)
+  else dropKey(componentIssues, frameId)
   /* no new revision, so no propagation either: only "Go to main" needs to hear of it */
   for (const def of prepared.moved) broadcastComponent(canvasId, def, resolveActor({ name: by, kind: 'user' }))
+  announceAdopted(canvasId, prepared.adopted, resolveActor({ name: by, kind: 'user' }), true)
   /* faces after the components: an expanded <doop-use> may name a library family */
-  return { ...prepared, html: withLibraryFaces(canvasId, prepared.html) }
+  return { ...prepared, html: withCanvasFaces(canvasId, prepared.html) }
+}
+
+/** Components a canvas just took up from its workspace library: the room gets
+ *  the definitions, and the canvas the library's tokens they name and it lacks
+ *  (an existing token of the same name is left alone). Inside a frame write the
+ *  token pass waits for that write to land, since adding tokens restyles frames. */
+export function announceAdopted(canvasId: string, adopted: ComponentDef[], actor: Actor, withinWrite = false) {
+  if (!adopted.length) return
+  for (const def of adopted) broadcastComponent(canvasId, def, actor)
+  const names = adopted.map((def) => `“${def.name}”`).join(', ')
+  logComponent(canvasId, actor, `added ${names} from the workspace library`)
+  const carry = () => carryLibraryTokens(canvasId, adopted, actor)
+  if (!withinWrite) return carry()
+  /* once the write has landed and been sent, as work of its own */
+  if (inTransaction()) postCommit(carry)
+  else queueMicrotask(carry)
+}
+
+/** Create the library's tokens these linked components name and the canvas
+ *  lacks: on first use, and again when a pulled update starts naming new ones. */
+export function carryLibraryTokens(canvasId: string, adopted: ComponentDef[], actor: Actor) {
+  const have = new Set(store.getTokens(canvasId).map((token) => token.name))
+  const missing = new Map<string, DesignToken>()
+  for (const def of adopted) {
+    if (!def.source) continue
+    const used = tokensUsedBy(`${def.template}\n${def.css}`, store.getTokens(def.source.canvasId))
+    for (const token of used) if (!have.has(token.name)) missing.set(token.name, token)
+  }
+  if (!missing.size || !store.getCanvas(canvasId)) return
+  const inputs = aliasesLast([...missing.values()]).map(({ name, type, value, themes, description }) => ({
+    name,
+    type,
+    value,
+    ...(themes ? { themes } : {}),
+    ...(description ? { description } : {}),
+  }))
+  createTokens(canvasId, inputs, actor)
+}
+
+/** Tokens ordered so each comes after the ones its values read: an alias is
+ *  refused while what it points at does not exist yet. */
+function aliasesLast(tokens: DesignToken[]): DesignToken[] {
+  const placed = new Set<string>()
+  const ordered: DesignToken[] = []
+  const names = new Set(tokens.map((token) => token.name))
+  const reads = (token: DesignToken) =>
+    [token.value, ...Object.values(token.themes ?? {})].flatMap(referencedTokens).filter((name) => names.has(name))
+  let waiting = tokens
+  while (waiting.length) {
+    const ready = waiting.filter((token) => reads(token).every((name) => placed.has(name)))
+    /* a cycle cannot be ordered: hand the rest over and let each be refused on its own */
+    const next = ready.length ? ready : waiting
+    for (const token of next) {
+      placed.add(token.name)
+      ordered.push(token)
+    }
+    waiting = waiting.filter((token) => !placed.has(token.name))
+  }
+  return ordered
 }
 
 /** A component's own line in the activity feed. */
+/** A component that is no longer on the canvas at all (an import taken back): not a soft delete. */
+export function broadcastComponentGone(canvasId: string, id: string, actor: Actor) {
+  broadcast(canvasId, { type: 'component', id, component: null, actor })
+}
+
 export function logComponent(canvasId: string, actor: Actor, line: string) {
   logActivity(canvasId, actor, line)
   touch(canvasId, actor)
@@ -1782,90 +2127,228 @@ export function broadcastComponent(canvasId: string, component: ComponentDef, ac
   broadcast(canvasId, { type: 'component', id: component.id, component, actor })
 }
 
-export function broadcastComponentDeleted(canvasId: string, id: string, actor: Actor) {
-  broadcast(canvasId, { type: 'component', id, component: null, actor })
+/** A library published or withdrew something: every canvas of its workspace hears,
+ *  the library canvas included (its own panel shows what is still unpublished). */
+export function broadcastLibrary(library: Pick<Canvas, 'id' | 'workspaceId'>, actor: Actor) {
+  for (const canvas of store.allCanvases()) {
+    if (canvas.id === library.id || (library.workspaceId && canvas.workspaceId === library.workspaceId))
+      broadcast(canvas.id, { type: 'library', actor })
+  }
 }
 
-export interface PropagationReport {
-  components: string[]
-  frames: { id: string; name: string; approvalLost: boolean }[]
+/** A canvas moved between a workspace and its owner's personal space (or got
+ *  an owner): its team is now another scope's, so its room hears the new one. */
+export function announceTeam(canvasId: string) {
+  const canvas = store.getCanvas(canvasId)
+  if (canvas) broadcast(canvas.id, { type: 'team', team: teamOfCanvas(canvas) })
 }
 
-/** A main changed: bring every frame using it up to date, and tell the room. Frames
- *  mid-stream catch up when their stream ends, since prepareFrameHtml upgrades instances. */
-export function propagateComponents(
+/** A workspace's (or a person's own) custom agents changed: every canvas
+ *  that takes its agents from there gets the new list, so its mention picker
+ *  and its automation steps offer what the team now has. */
+export function broadcastCustomAgents(scope: { workspaceId: string } | { ownerId: string }) {
+  for (const canvas of store.allCanvases()) {
+    const hears =
+      'workspaceId' in scope
+        ? canvas.workspaceId === scope.workspaceId
+        : !canvas.workspaceId && canvas.ownerId === scope.ownerId
+    if (hears) broadcast(canvas.id, { type: 'team', team: teamOfCanvas(canvas) })
+  }
+}
+
+export type PropagationReport = propagation.DrainReport
+
+/** Propagation an operation still open has asked for: it enters the queue at the commit. */
+const propagationAsked = new Map<string, true>()
+
+/** Is this component waiting to be carried to frames of the canvas: in the queue, or asked
+ *  for by the operation in progress and queued when it commits? */
+export function propagationPending(canvasId: string, componentId: string): boolean {
+  return propagationAsked.has(`${canvasId}:${componentId}`) || propagation.isPending(canvasId, 'propagate', componentId)
+}
+
+/** A frame write that changed a main. Every other frame using it is brought up to date in
+ *  the background (server/propagation.ts); with DOOP_DEFER_COMPONENT_PROPAGATION each
+ *  catches up on its own next write instead (prepareFrameHtml upgrades instances). */
+function propagateFromFrameWrite(canvasId: string, changed: ComponentDef[], actor: Actor, originFrameId: string) {
+  if (env.DOOP_DEFER_COMPONENT_PROPAGATION) {
+    for (const def of changed) broadcast(canvasId, { type: 'component', id: def.id, component: def, actor })
+    return
+  }
+  queuePropagation(canvasId, changed, actor, originFrameId)
+}
+
+/** A main changed: tell the room now, and queue every frame using it to be brought up to
+ *  date, one per tick. Returns at once; nothing is read or rewritten here. `originFrameId`
+ *  is the frame whose write this came from, which already has the change. */
+export function queuePropagation(canvasId: string, changed: ComponentDef[], actor: Actor, originFrameId?: string) {
+  for (const def of changed) broadcast(canvasId, { type: 'component', id: def.id, component: def, actor })
+  /* nothing follows a deleted component: its instances keep the markup they have */
+  const followed = changed.filter((def) => !isDeleted(def)).map((def) => def.id)
+  const others = store.getCanvas(canvasId)?.frames.some((frame) => frame.id !== originFrameId) ?? false
+  const asked = others ? followed.map((id) => `${canvasId}:${id}`) : []
+  for (const key of asked) setKey(propagationAsked, key, true)
+  /* queued with the commit: a refused write has asked for nothing */
+  afterCommit(() => {
+    for (const key of asked) propagationAsked.delete(key)
+    propagation.enqueue('propagate', canvasId, followed, actor, { exceptFrameId: originFrameId })
+  })
+}
+
+/** One frame's turn in the queue: what the synchronous sweep did per frame. History is filed
+ *  and the room sees frame:updated; sign-off stands, since the frame itself was not edited.
+ *  A frame mid-stream catches up when its stream ends. */
+function propagateIntoFrame(
   canvasId: string,
-  changed: ComponentDef[],
+  frameId: string,
+  componentIds: string[],
   actor: Actor,
-  originFrameId?: string,
-): PropagationReport {
-  const report: PropagationReport = { components: [], frames: [] }
-  const queue = [...changed]
-  const seen = new Set<string>()
-  const touched = new Map<string, PropagationReport['frames'][number]>()
-  for (let def = queue.shift(); def; def = queue.shift()) {
-    if (seen.has(def.id)) continue
-    seen.add(def.id)
-    report.components.push(def.name)
-    broadcast(canvasId, { type: 'component', id: def.id, component: def, actor })
-    const canvas = store.getCanvas(canvasId)
-    if (!canvas) break
-    for (const frame of [...canvas.frames]) {
-      if (frame.id === originFrameId && !seen.has(`origin:${frame.id}`)) {
-        seen.add(`origin:${frame.id}`)
-        continue
-      }
-      /* a one-shot reveal is only playback of what is already stored, so it updates like any frame */
-      if (streams.has(frame.id) || !referencesComponent(frame.html, def.id)) continue
-      const prepared = prepareFrameHtml(canvas, frame.id, frame.html, actor.name, frame.html)
-      queue.push(...prepared.changed)
-      /* the ordinary write's font pass too: a main that took up a library family
-         brings its face along to every frame it reaches */
-      const html = withLibraryFaces(canvasId, prepared.html)
-      if (html === frame.html) continue
-      const prior = priorState(frame)
-      const wasApproved = frame.approval?.status === 'ready_for_dev'
-      const updated = store.updateFrame(frame.id, { html }, actor.name)
-      if (!updated) continue
-      noteHtmlChange(prior, actor, true)
-      broadcast(canvasId, { type: 'frame:updated', frame: updated, actor })
-      touched.set(frame.id, {
-        id: frame.id,
-        name: frame.name,
-        approvalLost: wasApproved || !!touched.get(frame.id)?.approvalLost,
+): propagation.FrameOutcome {
+  const canvas = store.getCanvas(canvasId)
+  const frame = store.getFrame(frameId)
+  if (!canvas || !frame || frame.canvasId !== canvasId) return {}
+  /* a one-shot reveal is only playback of what is already stored, so it updates like any frame */
+  const followed = componentIds.filter((id) => !isDeleted(canvas.components?.find((def) => def.id === id)))
+  if (streams.has(frame.id) || !followed.some((id) => referencesComponent(frame.html, id))) return {}
+  const stamp = frame.updatedAt
+  const prepared = prepareFrameHtml(canvas, frame.id, frame.html, actor.name, frame.html)
+  /* a main in this frame that is built from what changed: its own instances are next */
+  if (prepared.changed.length) queuePropagation(canvasId, prepared.changed, actor)
+  /* the ordinary write's font pass too: a main that took up a library family
+     brings its face along to every frame it reaches */
+  const html = withCanvasFaces(canvasId, prepared.html)
+  const latest = store.getFrame(frameId)
+  if (!latest) return {}
+  /* written underneath the preparation: what was prepared is of an older frame */
+  if (latest.updatedAt !== stamp) return { requeue: true }
+  if (html === latest.html) return {}
+  const prior = priorState(latest)
+  /* a component it uses changed, not the frame: sign-off stands (decided 2026-11-12) */
+  const updated = store.updateFrame(latest.id, { html }, actor.name, { annotation: true })
+  if (!updated) return {}
+  noteHtmlChange(prior, actor, true)
+  broadcast(canvasId, { type: 'frame:updated', frame: updated, actor })
+  return { touched: { id: updated.id, name: updated.name, approvalLost: false } }
+}
+
+function propagationDrained(canvasId: string, report: PropagationReport, actor: Actor) {
+  if (!report.frames.length) return
+  const names = report.components.flatMap((id) => {
+    const def = store.getComponents(canvasId).find((candidate) => candidate.id === id)
+    return def ? [`“${def.name}”`] : []
+  })
+  const lost = report.frames.filter((frame) => frame.approvalLost).length
+  const count = report.frames.length
+  logActivity(
+    canvasId,
+    actor,
+    `updated ${names.join(', ')} in ${count} frame${count === 1 ? '' : 's'}${
+      lost ? `; ${lost} approved frame${lost === 1 ? '' : 's'} now need${lost === 1 ? 's' : ''} review` : ''
+    }`,
+  )
+  touch(canvasId, actor)
+}
+
+propagation.registerFrameTask('propagate', { frame: propagateIntoFrame, drained: propagationDrained })
+
+/**
+ * Bring instances left on an older revision up to their component: the frames a propagation
+ * never reached, since the queue lives in memory and a restart mid-drain drops it. Queued as
+ * an ordinary propagation per canvas, in the name of whoever last changed the component.
+ */
+export async function catchUpComponentsBehind(): Promise<{ components: number; canvases: number }> {
+  /* propagation switched off: frames follow on their own next write, by choice */
+  if (env.DOOP_DEFER_COMPONENT_PROPAGATION) return { components: 0, canvases: 0 }
+  const behind = await persist.componentsBehind()
+  const byCanvas = new Map<string, Set<string>>()
+  for (const { canvasId, componentId } of behind)
+    byCanvas.set(canvasId, (byCanvas.get(canvasId) ?? new Set()).add(componentId))
+  let components = 0
+  let canvases = 0
+  for (const [canvasId, ids] of byCanvas) {
+    const defs = store.getComponents(canvasId).filter((def) => ids.has(def.id) && !isDeleted(def))
+    if (!defs.length) continue
+    components += defs.length
+    canvases += 1
+    for (const def of defs) {
+      const actor = resolveActor({ name: def.updatedBy, kind: 'user' })
+      transaction(() => queuePropagation(canvasId, [def], actor))
+    }
+    /* one canvas at a time: a queued canvas is loaded and held until it drains, so queueing
+       them all at once would hold every one of them in memory together */
+    await propagation.whenCanvasIdle(canvasId)
+  }
+  return { components, canvases }
+}
+
+/**
+ * Give hollow definitions their markup back from their mains, as the next write of each main
+ * would: rows that lost it when an older write landed last, before writes to a component row
+ * were queued (2026-11-11). One canvas at a time, after boot; nothing to do once every
+ * definition is whole. Instances need no update (they were rendered from what the main
+ * holds), and the main's frame is written only when the pass marked it up (part keys), as an
+ * annotation that leaves sign-off standing.
+ */
+export async function healHollowComponents(): Promise<{
+  healed: number
+  noMain: number
+  failed: number
+}> {
+  const counts = { healed: 0, noMain: 0, failed: 0 }
+  const hollowOn = (canvas: Canvas) =>
+    (canvas.components ?? []).filter((def) => isHollow(def) && !isDeleted(def) && !def.source?.library)
+  for (const listed of store.allCanvases()) {
+    const waiting = hollowOn(listed).length
+    if (!waiting) continue
+    try {
+      await store.withCanvas(listed.id, async (canvas) => {
+        if (canvas) healCanvas(canvas, counts)
       })
+    } catch (err) {
+      /* this canvas could not be read: the rest still get theirs, and the next boot tries again */
+      counts.failed += waiting
+      console.error(`[components] healing hollow definitions on ${listed.id}: the canvas did not load`, err)
     }
   }
-  report.frames = [...touched.values()]
-  if (report.frames.length) {
-    const lost = report.frames.filter((frame) => frame.approvalLost).length
-    const count = report.frames.length
-    logActivity(
-      canvasId,
-      actor,
-      `updated ${report.components.map((name) => `“${name}”`).join(', ')} in ${count} frame${count === 1 ? '' : 's'}${
-        lost ? `; ${lost} approved frame${lost === 1 ? '' : 's'} now need${lost === 1 ? 's' : ''} review` : ''
-      }`,
-    )
-    touch(canvasId, actor)
+  return counts
+}
+
+function healCanvas(canvas: Canvas, counts: { healed: number; noMain: number; failed: number }) {
+  const byFrame = new Map<Frame, Set<string>>()
+  for (const def of canvas.components ?? []) {
+    if (!isHollow(def) || isDeleted(def) || def.source?.library) continue
+    const main = canvas.frames.find((frame) => frame.html.includes(`${COMPONENT_ATTR}="${def.id}"`))
+    if (!main) {
+      counts.noMain++
+      continue
+    }
+    byFrame.set(main, (byFrame.get(main) ?? new Set()).add(def.id))
   }
-  return report
+  for (const [frame, ids] of byFrame) {
+    try {
+      transaction(() => healFromMain(canvas, frame, ids))
+    } catch (err) {
+      console.error(`[components] healing ${[...ids].join(', ')} from frame ${frame.id} failed:`, err)
+    }
+    for (const id of ids) {
+      if (isHollow(store.getComponents(canvas.id).find((def) => def.id === id))) counts.failed++
+      else counts.healed++
+    }
+  }
 }
 
-/** A finished document with the @font-face rules for the canvas's library
- *  fonts it uses (shared/fonts.ts) and the stylesheet link for the hosted
- *  fonts it names (shared/webFonts.ts), so naming a family is all it takes. */
-function withLibraryFaces(canvasId: string, html: string): string {
-  const canvas = store.getCanvas(canvasId)
-  if (!canvas) return html
-  const library = fontsForCanvas(canvas)
-  /* tokens first: a family named only through a font token is then in the
-     document for the font scan to find */
-  const withTokens = withTokenBlock(html, canvas.tokens ?? [], canvas.tokenThemes ?? [])
-  return withWebFontLinks(withFontFaces(withTokens, library), library)
+/** The definitions only: the frame is written just where a main needed part keys, as an
+ *  annotation, since nothing in it looks different. */
+function healFromMain(canvas: Canvas, frame: Frame, ids: ReadonlySet<string>) {
+  const actor = resolveActor({ name: frame.updatedBy, kind: 'user' })
+  const { html, saved } = rederiveFromMains(canvas, frame.id, ids, actor.name)
+  for (const def of saved) broadcastComponent(canvas.id, def, actor)
+  if (html === frame.html) return
+  const next = store.updateFrame(frame.id, { html }, frame.updatedBy, { annotation: true })
+  if (next) broadcast(canvas.id, { type: 'frame:updated', frame: next, actor })
 }
 
-export function appendFrameHtml(
+export const appendFrameHtml = atomic(function appendFrameHtml(
   frameId: string,
   chunk: string,
   actor: Actor,
@@ -1875,36 +2358,54 @@ export function appendFrameHtml(
   if (!before) return undefined
 
   const starting = opts.start || !streams.has(frameId)
+  /* read now: the store updates `before` in place below */
+  const base = before.html
   /* an agent that escapes its opening chunk escapes the whole stream, so latch
      the verdict there: a chunk mid-design can hold a legitimate `&lt;` (a code
      sample) and must never be sniffed on its own */
   const escaped = starting ? looksEscapedHtml(chunk) : (streams.get(frameId)?.escaped ?? false)
   const piece = escaped ? decodeEscapedHtml(chunk) : chunk
   const canvas = store.getCanvas(before.canvasId)
-  const expanded = canvas ? prepareChunk(canvas, piece, opts.start ? '' : before.html) : piece
+  /* the chunk's own pass can take up a library component, and the last chunk's whole-frame
+     pass below can still be refused (the work budget): the write boundary undoes it then */
+  const chunked = canvas
+    ? prepareChunk(canvas, piece, opts.start ? '' : before.html, actor.name)
+    : { html: piece, issues: [], adopted: [] }
+  const expanded = chunked.html
+  const carried = [...(starting ? [] : (streamIssues.get(frameId) ?? [])), ...chunked.issues]
   /* the last chunk settles the whole document: a <doop-use> split across
      chunks, the component stylesheets, a main written in the stream, the
-     faces of the library fonts it names */
+     faces of the library fonts it names. Until then each chunk gets the
+     canvas's tokens and fonts, so a mid-stream screenshot shows them. A
+     token renamed mid-stream waits for the stream to close (pendingRenames):
+     until then the block stays as written, under the names the frame uses. */
   const joined = opts.start ? expanded : before.html + expanded
   const prepared = opts.done
-    ? prepareWrite(before.canvasId, frameId, joined, before.html, actor.name)
-    : { html: joined, changed: [] as ComponentDef[] }
+    ? prepareWrite(before.canvasId, before.id, joined, before.html, actor.name, carried)
+    : {
+        html: pendingRenames.has(frameId) ? joined : withCanvasFacesMidStream(before.canvasId, joined),
+        changed: [] as ComponentDef[],
+      }
   const html = prepared.html
+  if (opts.done) dropKey(streamIssues, frameId)
+  else setKey(streamIssues, frameId, carried)
   const prior = priorState(before)
   const frame = store.updateFrame(frameId, { html }, actor.name)!
   /* the opening chunk replaces the design; every later one extends this burst */
   noteHtmlChange(prior, actor, !starting)
+  announceAdopted(before.canvasId, chunked.adopted, actor, true)
 
   if (starting) {
     finishReveal(frameId) /* a live stream overrides any one-shot playback in flight */
-    streams.set(frameId, { actor, escaped, lastActivity: Date.now() })
+    setKey(streams, frameId, { actor, escaped, lastActivity: Date.now(), base, tail: '' })
     broadcast(frame.canvasId, { type: 'frame:streaming', frameId, active: true, actor })
     logActivity(frame.canvasId, actor, `is designing “${frame.name}” live…`, frameId)
     autoTask(frame.canvasId, actor, `Designing “${frame.name}”`, frameId)
   }
-  const s = streams.get(frameId)!
+  const s = edit(streams.get(frameId)!)
   s.lastActivity = Date.now()
   s.escaped = escaped
+  s.tail = (s.tail + piece).slice(-STREAM_TAIL_CHARS)
 
   /* the chunk renders the moment it arrives — viewers see the agent's real progress */
   broadcast(frame.canvasId, {
@@ -1914,22 +2415,26 @@ export function appendFrameHtml(
   })
   if (opts.done) {
     finishStream(frameId, true)
-    if (prepared.changed.length) propagateComponents(frame.canvasId, prepared.changed, actor, frameId)
+    if (prepared.changed.length) propagateFromFrameWrite(frame.canvasId, prepared.changed, actor, frameId)
   }
 
   touch(frame.canvasId, actor, frameId)
   return frame
-}
+})
 
 /* ------------------------------------------------------------------ */
 
-export function setCanvasPages(canvasId: string, pages: import('../shared/types.ts').CanvasPageInfo[], actor: Actor) {
+export const setCanvasPages = atomic(function setCanvasPages(
+  canvasId: string,
+  pages: import('../shared/types.ts').CanvasPageInfo[],
+  actor: Actor,
+) {
   const saved = store.setPages(canvasId, pages)
   const next = saved?.pages ?? pages
   broadcast(canvasId, { type: 'canvas:pages', pages: next, actor })
   for (const guide of saved?.dropped ?? []) broadcast(canvasId, { type: 'guide', id: guide.id, guide: null, actor })
   return next
-}
+})
 
 /** Add one page at the end of the canvas, named `name`, with a fresh id; peers
  *  get the page list. Returns the new page and the whole list. */
@@ -1977,14 +2482,14 @@ export async function duplicatePage(canvasId: string, pageId: string, actor: Act
   for (const guide of copy.guides) broadcast(canvasId, { type: 'guide', id: guide.id, guide, actor })
   for (const frame of copy.frames) {
     broadcast(canvasId, { type: 'frame:created', frame, actor })
-    emitCanvasEvent(canvasId, { type: 'frame.created', frame, actor })
+    emitEvent(canvasId, { type: 'frame.created', frame, actor })
   }
   logActivity(canvasId, actor, `duplicated page “${copy.source.name}” as “${copy.page.name}”`)
   touch(canvasId, actor)
   return copy
 }
 
-export function createFrame(
+export const createFrame = atomic(function createFrame(
   canvasId: string,
   input: {
     name: string
@@ -2010,8 +2515,8 @@ export function createFrame(
   const frame = store.createFrame(canvasId, input, actor.name)
   if (!frame) return undefined
   const createIssues = takeComponentIssues('')
-  if (createIssues.length) componentIssues.set(frame.id, createIssues)
-  bursts.set(frame.id, { actor, lastAt: frame.createdAt })
+  if (createIssues.length) setKey(componentIssues, frame.id, createIssues)
+  setKey(bursts, frame.id, { actor, lastAt: frame.createdAt })
   if (actor.kind === 'agent' && frame.html.length > 0) {
     /* agent one-shot creation still plays back as a reveal */
     broadcast(canvasId, { type: 'frame:created', frame: { ...frame, html: '' }, actor })
@@ -2022,15 +2527,15 @@ export function createFrame(
   }
   logActivity(canvasId, actor, `created frame “${frame.name}”`, frame.id)
   touch(canvasId, actor, frame.id)
-  emitCanvasEvent(canvasId, { type: 'frame.created', frame, actor })
+  emitEvent(canvasId, { type: 'frame.created', frame, actor })
   return frame
-}
+})
 
 /** `replace` marks a deliberate whole-document write (set_frame_html): it
  *  always opens a history burst, even when the new document keeps most of
  *  the old one's wrapper — only the reveal-or-morph choice stays similarity
  *  based. Without it a write is judged by how much it changed. */
-export function updateFrame(
+export const updateFrame = atomic(function updateFrame(
   frameId: string,
   patch: Partial<
     Pick<Frame, 'name' | 'pageId' | 'x' | 'y' | 'width' | 'height' | 'html' | 'hidden' | 'locked' | 'z' | 'rotation'>
@@ -2066,7 +2571,7 @@ export function updateFrame(
     const openReveal = reveals.get(frameId)
     if (openReveal) {
       /* new content mid-playback: rewind to the divergence and re-arm the deadline */
-      openReveal.actor = actor
+      edit(openReveal).actor = actor
       openReveal.shown = Math.min(openReveal.shown, prefix)
       openReveal.deadline = Date.now() + revealDuration(frame.html.length - openReveal.shown)
       trackTaskFrame(frame.canvasId, actor, frameId)
@@ -2099,33 +2604,40 @@ export function updateFrame(
     logActivity(frame.canvasId, actor, `${frame.locked ? 'locked' : 'unlocked'} “${frame.name}”`, frame.id)
   }
 
-  if (changedComponents.length) propagateComponents(frame.canvasId, changedComponents, actor, frameId)
+  if (changedComponents.length) propagateFromFrameWrite(frame.canvasId, changedComponents, actor, frameId)
   touch(frame.canvasId, actor, frame.id)
   return frame
-}
+})
 
 /** Several frames' places in the stack at once (the Layers panel renumbering
  *  a page, or undoing that): every frame is checked before any is written,
  *  so the order changes whole or not at all. Undefined when a frame is
  *  gone or on another canvas. Not a design edit: no activity line. */
-export function restackFrames(canvasId: string, writes: StackWrite[], actor: Actor): Frame[] | undefined {
+export const restackFrames = atomic(function restackFrames(
+  canvasId: string,
+  writes: StackWrite[],
+  actor: Actor,
+): Frame[] | undefined {
   if (writes.some((w) => store.getFrame(w.id)?.canvasId !== canvasId)) return undefined
   const frames = writes.map((w) => store.updateFrame(w.id, { z: w.z }, actor.name)!)
   for (const frame of frames) broadcast(canvasId, { type: 'frame:updated', frame, actor })
   touch(canvasId, actor, frames[0]?.id)
   return frames
-}
+})
 
-/** Sign-off is a human action, separate from ordinary frame editing. */
-export function setFrameApproval(
+/** Sign-off is a human action, separate from ordinary frame editing. An agent may set it
+ *  for the person it works for: the approval stays theirs (`approvedBy`), with the agent
+ *  recorded as `approvedVia` and as the actor of the broadcast and activity line. */
+export const setFrameApproval = atomic(function setFrameApproval(
   frameId: string,
   ready: boolean,
   user: { id: string; name: string },
+  agent?: Actor,
 ): Frame | undefined {
   const current = store.getFrame(frameId)
   if (!current) return undefined
   if (ready && current.approval?.status === 'ready_for_dev') return current
-  const actor = resolveActor({ name: user.name, kind: 'user' })
+  const actor = agent ?? resolveActor({ name: user.name, kind: 'user' })
   const approval = ready
     ? {
         status: 'ready_for_dev' as const,
@@ -2133,17 +2645,41 @@ export function setFrameApproval(
         approvedByUserId: user.id,
         approvedAt: Math.max(Date.now(), current.updatedAt + 1),
         approvedFrameUpdatedAt: current.updatedAt,
+        ...(agent ? { approvedVia: agent.name } : {}),
       }
     : null
-  const frame = store.updateFrame(frameId, { approval }, user.name)!
+  const frame = store.updateFrame(frameId, { approval }, actor.name)!
   broadcast(frame.canvasId, { type: 'frame:updated', frame, actor })
   logActivity(
     frame.canvasId,
     actor,
-    ready ? `marked “${frame.name}” ready for dev` : `moved “${frame.name}” back to draft`,
+    ready
+      ? `marked “${frame.name}” ready for dev${agent ? ` for ${user.name}` : ''}`
+      : `moved “${frame.name}” back to draft`,
     frameId,
   )
   return frame
+})
+
+/** An agent's approval request, shared by the MCP tool and the resident agent. */
+export function agentSetFrameApproval(
+  frameId: string,
+  status: 'ready_for_dev' | 'draft',
+  user: { id: string; name: string },
+  agent: Actor,
+): { ok: true; frame: Frame } | { ok: false; error: string } {
+  const current = store.getFrame(frameId)
+  if (!current) return { ok: false, error: `no frame with id ${frameId}` }
+  if (status === 'ready_for_dev' && isFrameStreaming(frameId))
+    return { ok: false, error: 'the design is still streaming — wait for it to finish before approving it' }
+  const frame = setFrameApproval(frameId, status === 'ready_for_dev', user, agent)
+  return frame ? { ok: true, frame } : { ok: false, error: `no frame with id ${frameId}` }
+}
+
+/** An agent is appending to this frame right now. A one-shot reveal does not count: it is
+ *  only playback of what is already stored, so background work may rewrite the frame. */
+export function isFrameMidStream(frameId: string): boolean {
+  return streams.has(frameId)
 }
 
 export function isFrameStreaming(frameId: string): boolean {
@@ -2159,40 +2695,41 @@ export function isCanvasStreaming(canvasId: string): boolean {
   return false
 }
 
-export function deleteFrame(frameId: string, actor: Actor): Frame | undefined {
+export const deleteFrame = atomic(function deleteFrame(frameId: string, actor: Actor): Frame | undefined {
   /* close any live stream or playback while the frame still exists,
      so their auto “Designing…” tasks end with it */
   finishStream(frameId, false)
   finishReveal(frameId)
   const frame = store.deleteFrame(frameId)
   if (!frame) return undefined
-  unsavedStamps.delete(frameId)
-  bursts.delete(frameId)
-  thumbs.purge(frameId)
+  dropKey(unsavedStamps, frameId)
+  dropKey(bursts, frameId)
+  afterCommit(() => thumbs.purge(frameId))
   broadcast(frame.canvasId, { type: 'frame:deleted', frameId, actor })
   releaseMains(frame.canvasId, frameId, actor)
   logActivity(frame.canvasId, actor, `deleted frame “${frame.name}”`, frame.id)
   touch(frame.canvasId, actor, null)
   return frame
-}
+})
 
 /** Remove a canvas with everything attached to it; viewers are told to leave. */
-export function deleteCanvas(canvasId: string): boolean {
+export const deleteCanvas = atomic(function deleteCanvas(canvasId: string): boolean {
   const c = store.deleteCanvas(canvasId)
+  forgetLibrary(canvasId)
   if (!c) return false
   for (const f of c.frames) {
-    thumbs.purge(f.id)
-    bursts.delete(f.id)
+    afterCommit(() => thumbs.purge(f.id))
+    dropKey(bursts, f.id)
   }
   broadcast(canvasId, { type: 'canvas:deleted' })
-  taskLog.delete(canvasId)
-  feedbackLog.delete(canvasId)
-  commentLog.delete(canvasId)
-  activityLog.delete(canvasId)
-  decisionLog.delete(canvasId)
-  proposalLog.delete(canvasId)
+  dropKey(taskLog, canvasId)
+  dropKey(feedbackLog, canvasId)
+  dropKey(commentLog, canvasId)
+  dropKey(activityLog, canvasId)
+  dropKey(decisionLog, canvasId)
+  dropKey(proposalLog, canvasId)
   return true
-}
+})
 
 export function renameCanvas(canvasId: string, name: string, actor: Actor) {
   const canvas = store.renameCanvas(canvasId, name)
@@ -2231,7 +2768,7 @@ export function guidelineSummary(doc: GuidelineDoc): string {
 /** Upsert (or, with empty markdown, delete) a design doc. Returns the doc,
  *  null for a deletion, undefined when the canvas is missing; throws on
  *  invalid input with a message meant for the caller's error channel. */
-export function setGuideline(
+export const setGuideline = atomic(function setGuideline(
   canvasId: string,
   name: string,
   markdown: string,
@@ -2251,7 +2788,7 @@ export function setGuideline(
   if (!clean) {
     const existing = store.getGuidelines(canvasId).find((d) => d.name === slug)
     if (!store.deleteGuideline(canvasId, slug)) return store.getCanvas(canvasId) ? null : undefined
-    persist.saveGuidelineVersion(canvasId, slug, '', actor.name, Date.now())
+    stored.saveGuidelineVersion(canvasId, slug, '', actor.name, Date.now())
     broadcast(canvasId, { type: 'guidelines', name: slug, doc: null, actor })
     logActivity(canvasId, actor, `deleted the design guide “${existing ? guidelineTitle(existing) : slug}”`)
     touch(canvasId, actor)
@@ -2263,12 +2800,12 @@ export function setGuideline(
     throw new Error(`this canvas already has ${MAX_GUIDELINE_DOCS} design guides — delete one first`)
   const doc = store.setGuideline(canvasId, slug, clean, actor.name, pos, cleanTitle)
   if (!doc) return undefined
-  persist.saveGuidelineVersion(canvasId, slug, clean, actor.name, doc.updatedAt)
+  stored.saveGuidelineVersion(canvasId, slug, clean, actor.name, doc.updatedAt)
   broadcast(canvasId, { type: 'guidelines', name: slug, doc, actor })
   logActivity(canvasId, actor, `updated the design guide “${guidelineTitle(doc)}”`)
   touch(canvasId, actor)
   return doc
-}
+})
 
 /** Patch design-guide metadata (card position, display title) without touching
  *  the content: no version snapshot, position changes make no activity noise. */
@@ -2420,21 +2957,21 @@ function restyleTokenFrames(canvasId: string, actor: Actor, rename?: TokenRename
   for (const frame of [...canvas.frames]) {
     /* an open append stream gets its block, and any rename, with its done chunk */
     if (streams.has(frame.id)) {
-      if (rename) pendingRenames.set(frame.id, [...(pendingRenames.get(frame.id) ?? []), rename])
+      if (rename) setKey(pendingRenames, frame.id, [...(pendingRenames.get(frame.id) ?? []), rename])
       continue
     }
     let html = frame.html
     if (rename) html = applyRename(html, rename)
-    html = withLibraryFaces(canvasId, html)
+    html = withCanvasFaces(canvasId, html)
     if (html === frame.html) continue
     const prevHtml = frame.html
     const updated = store.updateFrame(frame.id, { html }, actor.name, { annotation: true })
     if (!updated) continue
-    thumbs.purge(frame.id)
+    afterCommit(() => thumbs.purge(frame.id))
     const openReveal = reveals.get(frame.id)
     if (openReveal) {
       /* mid-playback: rewind to where the documents diverge, as a rewrite does */
-      openReveal.shown = Math.min(openReveal.shown, sharedSpan(prevHtml, updated.html).prefix)
+      edit(openReveal).shown = Math.min(openReveal.shown, sharedSpan(prevHtml, updated.html).prefix)
       openReveal.deadline = Date.now() + revealDuration(updated.html.length - openReveal.shown)
     } else broadcast(canvasId, { type: 'frame:updated', frame: updated, actor })
     changed++
@@ -2457,7 +2994,11 @@ function tokenSummary(results: TokenResult[], verb: string): string {
 
 /** Add tokens; one result per entry, errors in-band so a batch with one bad
  *  entry still lands the rest. Returns undefined when the canvas is missing. */
-export function createTokens(canvasId: string, inputs: unknown[], actor: Actor): TokenResult[] | undefined {
+export const createTokens = atomic(function createTokens(
+  canvasId: string,
+  inputs: unknown[],
+  actor: Actor,
+): TokenResult[] | undefined {
   const canvas = store.getCanvas(canvasId)
   if (!canvas) return undefined
   const results: TokenResult[] = []
@@ -2545,11 +3086,15 @@ export function createTokens(canvasId: string, inputs: unknown[], actor: Actor):
     touch(canvasId, actor)
   }
   return results
-}
+})
 
 /** Change, rename or delete tokens by name, in order; one result per entry.
  *  Every frame naming a changed token is restyled before this returns. */
-export function setTokens(canvasId: string, edits: TokenEdit[], actor: Actor): TokenResult[] | undefined {
+export const setTokens = atomic(function setTokens(
+  canvasId: string,
+  edits: TokenEdit[],
+  actor: Actor,
+): TokenResult[] | undefined {
   if (!store.getCanvas(canvasId)) return undefined
   const results: TokenResult[] = []
   const renames: TokenRename[] = []
@@ -2675,12 +3220,12 @@ export function setTokens(canvasId: string, edits: TokenEdit[], actor: Actor): T
     touch(canvasId, actor)
   }
   return results
-}
+})
 
 /** Replace the canvas's token themes (order included): a theme that leaves
  *  takes its values with it, and every frame is restyled. Throws on bad
  *  input with a message for the caller's error channel. */
-export function setTokenThemes(
+export const setTokenThemes = atomic(function setTokenThemes(
   canvasId: string,
   themes: unknown,
   actor: Actor,
@@ -2730,7 +3275,7 @@ export function setTokenThemes(
   )
   touch(canvasId, actor)
   return names
-}
+})
 
 /* ------------------------------------------------------------------ */
 /* Design memory: pinned reference frames (exemplars), captured        */
@@ -2767,16 +3312,17 @@ function captureDecision(
     ...(input.agentName ? { agentName: input.agentName } : {}),
     at: Date.now(),
   }
-  const list = decisionLog.get(canvasId) ?? []
-  list.unshift(decision)
-  if (list.length > 100) list.length = 100
-  decisionLog.set(canvasId, list)
-  persist.saveDecision(canvasId, decision)
+  prepend(decisionLog, canvasId, decision)
+  stored.saveDecision(canvasId, decision)
   broadcast(canvasId, { type: 'decision', decision })
   /* generalize the raw words into a preference, then maybe propose a rule
      (both no-ops without an API key). Dynamic import: distill depends on
      this module. */
-  import('./distill.ts').then((d) => d.onDecision(canvasId, decision.id)).catch(() => {})
+  afterCommit(() =>
+    detached(() => {
+      import('./distill.ts').then((d) => d.onDecision(canvasId, decision.id)).catch(() => {})
+    }),
+  )
   return decision
 }
 
@@ -2785,8 +3331,8 @@ function captureDecision(
 export function setDecisionSummary(canvasId: string, id: string, summary: string) {
   const decision = getDecisions(canvasId).find((d) => d.id === id)
   if (!decision) return
-  decision.summary = summary
-  persist.saveDecision(canvasId, decision)
+  edit(decision).summary = summary
+  stored.saveDecision(canvasId, decision)
   broadcast(canvasId, { type: 'decision', decision })
 }
 
@@ -2849,8 +3395,8 @@ export function markDecisionsDistilled(canvasId: string, ids: string[]) {
   const now = Date.now()
   for (const d of getDecisions(canvasId)) {
     if (ids.includes(d.id)) {
-      d.distilledAt = now
-      persist.saveDecision(canvasId, d)
+      edit(d).distilledAt = now
+      stored.saveDecision(canvasId, d)
     }
   }
 }
@@ -2870,18 +3416,15 @@ export function addProposal(
     at: Date.now(),
     status: 'pending',
   }
-  const list = proposalLog.get(canvasId) ?? []
-  list.unshift(proposal)
-  if (list.length > 100) list.length = 100
-  proposalLog.set(canvasId, list)
-  persist.saveProposal(canvasId, proposal)
+  prepend(proposalLog, canvasId, proposal)
+  stored.saveProposal(canvasId, proposal)
   broadcast(canvasId, { type: 'proposal', proposal })
   return proposal
 }
 
 /** A human accepted (rule lands in the guide, versioned like any edit) or
  *  dismissed a proposal. */
-export function resolveProposal(
+export const resolveProposal = atomic(function resolveProposal(
   canvasId: string,
   proposalId: string,
   accept: boolean,
@@ -2896,11 +3439,11 @@ export function resolveProposal(
       : `# ${proposal.guideTitle ?? guidelineTitle({ name: proposal.guideName })}\n\n${proposal.rule}`
     setGuideline(canvasId, proposal.guideName, markdown, actor, undefined, guide ? undefined : proposal.guideTitle)
   }
-  proposal.status = accept ? 'accepted' : 'dismissed'
+  edit(proposal).status = accept ? 'accepted' : 'dismissed'
   proposal.resolvedBy = actor.name
   proposal.resolvedAt = Date.now()
-  persist.saveProposal(canvasId, proposal)
+  stored.saveProposal(canvasId, proposal)
   broadcast(canvasId, { type: 'proposal', proposal })
   if (accept) logActivity(canvasId, actor, `accepted a Memory rule into “${proposal.guideName}”`)
   return proposal
-}
+})

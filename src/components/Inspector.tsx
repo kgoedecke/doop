@@ -14,7 +14,7 @@ import { FrameApprovalControl } from './FrameApproval'
 import { cn } from '@/lib/utils'
 import { Panel, PanelClose, PanelHeader, type PanelSurface } from './ui/panel'
 import { Collapsible, CollapsibleContent } from './ui/collapsible'
-import { CopyIcon, DownloadIcon, FrameIcon, LockIcon } from './ui/icons'
+import { CopyIcon, DownloadIcon, FrameIcon, LockIcon, RotationIcon } from './ui/icons'
 import { Button } from './ui/button'
 import { Input } from './ui/input'
 import { Textarea } from './ui/textarea'
@@ -22,6 +22,7 @@ import { NumberField, PropertyScrubContext } from './ui/property-field'
 import { normalizeRotation } from '../../shared/frameRotation'
 import { MIN_FRAME_SIZE } from '../lib/frameResize'
 import { t as translate, useT } from '../lib/i18n'
+import { trackExport, trackPngCopy } from '../lib/exportEvents'
 
 const HTML_OPEN_KEY = 'doop:inspector-html'
 
@@ -276,7 +277,7 @@ export function Inspector({
               />
               <NumberField
                 label={t('inspector.rotation')}
-                prefix="∠"
+                prefix={<RotationIcon size="rail" />}
                 unit="°"
                 min={-Infinity}
                 value={frame.rotation ?? 0}
@@ -289,13 +290,16 @@ export function Inspector({
         <InspectorGroup title={t('inspector.groupExport')}>
           <div className="grid grid-cols-2 gap-1.5">
             <div className="col-span-2">
-              <ExportOptions value={exportSettings} onChange={setExportSettings} />
+              <ExportOptions value={exportSettings} onChange={setExportSettings} compact />
             </div>
             <Button
               variant="bare"
               className={cn(fillBtn, 'col-span-2 gap-1.5')}
               title={t('inspector.exportImageTitle')}
-              onClick={() => void downloadFrameExport(frame, exportSettings.format, exportSettings.scale)}
+              onClick={() => {
+                trackExport(exportSettings.format, 1, 'inspector')
+                void downloadFrameExport(frame, exportSettings.format, exportSettings.scale)
+              }}
             >
               <DownloadIcon className="size-3.5" />
               {t('inspector.export')}
@@ -304,7 +308,10 @@ export function Inspector({
               variant="bare"
               className={cn(fillBtn, 'col-span-2')}
               title={t('inspector.copyPngTitle', { scale: formatExportScale(exportScale) })}
-              onClick={() => void copyFramePng(frame, exportSettings.scale)}
+              onClick={() => {
+                trackPngCopy('frame', 'inspector')
+                void copyFramePng(frame, exportSettings.scale)
+              }}
             >
               {t('inspector.copyPng')}
             </Button>

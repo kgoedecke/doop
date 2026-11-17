@@ -3,6 +3,7 @@ import net from 'node:net'
 import type { LookupFunction } from 'node:net'
 import type { Page } from 'puppeteer-core'
 import { Agent, fetch as undiciFetch, type RequestInit as UndiciRequestInit } from 'undici'
+import { env } from './env.ts'
 
 export interface PublicAddress {
   address: string
@@ -230,15 +231,25 @@ function browserResponseHeaders(response: Response, document: boolean): Record<s
 
 /** Chromium requests are fulfilled through pinned Node connections. Merely
  * validating and then calling request.continue() would let Chromium resolve an
- * attacker-controlled hostname again after a DNS rebind. */
+ * attacker-controlled hostname again after a DNS rebind.
+ *
+ * `offNetwork` is a browser that cannot reach the server's private network
+ * (REMOTE_BROWSER_ISOLATED, a hosted provider): no address it can resolve is
+ * one of ours, so the pinned proxy protects nothing, and shipping every
+ * response body back to it over the DevTools socket made heavy pages time
+ * out. Its public http(s) requests continue in the browser; other schemes are
+ * still refused. Being remote is not enough: a self-hosted renderer may sit on
+ * the same private network, so this is an explicit declaration. */
 export async function guardPublicPageRequests(
   page: Page,
   options: {
     allowUrl?: (url: URL) => boolean
     fetchUrl?: typeof fetchPinnedPublicUrl
+    offNetwork?: boolean
   } = {},
 ): Promise<void> {
   const fetchUrl = options.fetchUrl ?? fetchPinnedPublicUrl
+  const offNetwork = options.offNetwork ?? (!!env.REMOTE_BROWSER_URL && env.REMOTE_BROWSER_ISOLATED)
   let pageBytes = 0
   await page.setBypassServiceWorker(true)
   const client = await page.createCDPSession()
@@ -260,6 +271,10 @@ export async function guardPublicPageRequests(
           return
         }
         parsePublicHttpUrl(raw)
+        if (offNetwork) {
+          await request.continue()
+          return
+        }
         const method = request.method().toUpperCase()
         if (!['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'].includes(method)) {
           throw new Error('unsupported browser request method')

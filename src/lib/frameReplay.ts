@@ -5,11 +5,17 @@ import type { serializedNodeWithId } from 'posthog-js/dist/rrweb-types'
 type Recorder = typeof record
 type Options = NonNullable<Parameters<Recorder>[0]>
 
+/** Every sandboxed design document: canvas frames and prototype player screens. */
+const FRAME_ATTRIBUTES = ['data-doop-frame', 'data-doop-proto-frame'] as const
+const FRAME_SELECTOR = FRAME_ATTRIBUTES.map((name) => `iframe[${name}]`).join(', ')
+const isFrameElement = (element: unknown): element is HTMLIFrameElement =>
+  element instanceof HTMLIFrameElement && element.matches(FRAME_SELECTOR)
+
 /** Replay must rebuild the recorded DOM, not navigate back to our empty
  * bootstrap. These attributes are changed only in snapshots; the live iframe
  * retains its opaque-origin sandbox. The replay sandbox still blocks scripts. */
 function prepareFrameNode(node: serializedNodeWithId) {
-  if ('attributes' in node && node.tagName === 'iframe' && 'data-doop-frame' in node.attributes) {
+  if ('attributes' in node && node.tagName === 'iframe' && FRAME_ATTRIBUTES.some((name) => name in node.attributes)) {
     delete node.attributes.srcdoc
     node.attributes.sandbox = 'allow-same-origin'
   }
@@ -28,7 +34,7 @@ export function installFrameReplay(
   const original = rrweb.record
   let options: Options | null = null
   let generation = 0
-  const frames = () => document.querySelectorAll<HTMLIFrameElement>('iframe[data-doop-frame]')
+  const frames = () => document.querySelectorAll<HTMLIFrameElement>(FRAME_SELECTOR)
   function send(frame: HTMLIFrameElement, snapshot = false) {
     frame.contentWindow?.postMessage(
       { type: 'doop:replay', options, generation, snapshot, url: new URL(recorderUrl, location.href).href },
@@ -81,7 +87,7 @@ export function installFrameReplay(
             event.data.adds.forEach(({ node }) => prepareFrameNode(node))
             for (const mutation of event.data.attributes) {
               const element = original.mirror.getNode(mutation.id)
-              if (element instanceof HTMLIFrameElement && element.hasAttribute('data-doop-frame')) {
+              if (isFrameElement(element)) {
                 delete mutation.attributes.srcdoc
                 if ('sandbox' in mutation.attributes) mutation.attributes.sandbox = 'allow-same-origin'
               }

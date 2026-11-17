@@ -10,6 +10,7 @@ import type { ElementInfo, GeometryEdit } from '../src/lib/frameBridge'
 
 declare global {
   interface Window {
+    skeletonSeen: boolean
     elementPanelHarness: {
       seed: (frame: Frame) => void
       remote: (frame: Frame) => void
@@ -1014,7 +1015,7 @@ describe.skipIf(!findBrowserPath())('element design controls', () => {
   }
 
   async function startScrub(label: string) {
-    const unit = (await page.$(`label:has(input[aria-label="${label}"]) > span[data-unit]`))!
+    const unit = (await page.$(`label:has(input[aria-label="${label}"]) [data-scrub]`))!
     await unit.scrollIntoView()
     expect(await unit.evaluate((el) => getComputedStyle(el).cursor)).toBe('ew-resize')
     const box = (await unit.boundingBox())!
@@ -1518,7 +1519,7 @@ describe.skipIf(!findBrowserPath())('element design controls', () => {
     )
     const position = () => frame.$eval('#nudged', (el) => [el.getBoundingClientRect().x, el.getBoundingClientRect().y])
     expect(await position()).toEqual([25, -20])
-    await expect.poll(() => saved.html).toContain('translate: 5px -50px')
+    await expect.poll(() => saved.html).toContain('left: 25px; top: -20px')
     await page.evaluate(() => window.elementPanelHarness.undo())
     await expect.poll(position).toEqual([20, 30])
   })
@@ -1625,6 +1626,66 @@ describe.skipIf(!findBrowserPath())('element design controls', () => {
       '200px',
       '100px',
     ])
+  }, 15_000)
+
+  it('swaps to the next layer in place, without a loading skeleton in between', async () => {
+    await seedPanel(
+      `<!doctype html><html><body>
+        <div id="first" style="width:120px;height:40px"></div>
+        <div id="second" style="width:80px;height:40px"></div>
+      </body></html>`,
+      '#first',
+    )
+    await page.evaluate(() => {
+      window.skeletonSeen = false
+      new MutationObserver(() => {
+        if (document.body.textContent?.includes('Reading the element')) window.skeletonSeen = true
+      }).observe(document.body, { childList: true, subtree: true, characterData: true })
+    })
+    await page.evaluate(() => window.elementPanelHarness.select('#second'))
+    // until its own read lands, the previous values stand in and cannot be edited
+    const standIn = await page.$('[aria-busy="true"][inert] [aria-label="Width"]')
+    if (standIn) expect(await standIn.evaluate((el) => (el as HTMLInputElement).value)).toBe('120')
+    await page.waitForFunction(() => document.querySelector<HTMLInputElement>('[aria-label="Width"]')?.value === '80')
+    await page.waitForFunction(() => !document.querySelector('[aria-busy]'))
+    expect(await page.evaluate(() => window.skeletonSeen)).toBe(false)
+  }, 15_000)
+
+  it('gives a layer whose read was once slow its grace again on a later visit', async () => {
+    const html = (note: string) =>
+      `<!doctype html><html><body>
+        <div id="first" style="width:120px;height:40px"></div>
+        <div id="second" style="width:80px;height:40px"></div>${note}
+      </body></html>`
+    const frame = await seedPanel(html(''), '#first')
+    // the frame cannot read styles for a while, so the first visit to #second outlasts the grace
+    await frame.evaluate(() => {
+      const read = window.getComputedStyle
+      Object.assign(window, { restoreStyles: () => (window.getComputedStyle = read) })
+      window.getComputedStyle = () => {
+        throw new Error('styles held by the grace test')
+      }
+    })
+    await page.evaluate(() => window.elementPanelHarness.select('#second'))
+    await page.waitForFunction(() => document.body.textContent?.includes('Reading the element'))
+    await frame.evaluate(() => (window as unknown as { restoreStyles: () => void }).restoreStyles())
+    // the frame's own unread throws are this test's doing, not the panel's
+    for (let i = errors.length - 1; i >= 0; i--)
+      if (errors[i]!.includes('styles held by the grace test')) errors.splice(i, 1)
+    saved = { ...saved, html: html('<!-- read again -->') }
+    await page.evaluate((value) => window.elementPanelHarness.remote(value), saved)
+    await page.waitForFunction(() => document.querySelector<HTMLInputElement>('[aria-label="Width"]')?.value === '80')
+
+    await selectLayer('#first')
+    await page.evaluate(() => {
+      window.skeletonSeen = false
+      new MutationObserver(() => {
+        if (document.body.textContent?.includes('Reading the element')) window.skeletonSeen = true
+      }).observe(document.body, { childList: true, subtree: true, characterData: true })
+    })
+    await selectLayer('#second')
+    expect(await page.$eval('[aria-label="Width"]', (el) => (el as HTMLInputElement).value)).toBe('80')
+    expect(await page.evaluate(() => window.skeletonSeen)).toBe(false)
   }, 15_000)
 
   it('uses a loaded image natural ratio instead of its auto fallback while editing', async () => {

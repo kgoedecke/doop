@@ -1,0 +1,30 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <title>Sync CSS</title>
+  </head>
+  <body>
+    <p>Synced text</p>
+    <script>
+      /* added at run time so the fixture build leaves both untouched: the
+         stylesheet keeps its sheet-relative url()s, an inline <style> keeps its
+         page-relative one, and the snippet loads
+         as an app embeds it, posting to this origin */
+      var inline = document.createElement('style')
+      inline.textContent = '.probe-inline { background-image: url(../inline.svg) }'
+      document.head.appendChild(inline)
+      var sheet = document.createElement('link')
+      sheet.rel = 'stylesheet'
+      sheet.href = 'syncCss/sheet.css'
+      sheet.onload = function () {
+        var snippet = document.createElement('script')
+        snippet.src = '/doop-sync.js'
+        snippet.setAttribute('data-key', 'dk_testtesttesttesttesttest')
+        snippet.setAttribute('data-host', location.origin)
+        document.body.appendChild(snippet)
+      }
+      document.head.appendChild(sheet)
+    </script>
+  </body>
+</html>

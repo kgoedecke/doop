@@ -27,9 +27,13 @@ import {
  * entry's provider names the credentials that can run it:
  *
  *  - `openai` (GPT Image) rides the Responses API's hosted `image_generation`
- *    tool — a connected ChatGPT subscription through the Codex backend (the
- *    same request the Codex CLI's $imagegen skill makes) or an OpenAI key,
- *    else the server's OPENAI_API_KEY;
+ *    tool — a connected ChatGPT subscription through the Codex backend or an
+ *    OpenAI key, else the server's OPENAI_API_KEY. The Codex backend ignores
+ *    the tool's `model` (ChatGPT picks), so the subscription has no choice;
+ *  - `openai-api` (the GPT Image API row: 2.6, 2.5, chatgpt-image-latest, 1.5, 1 Mini) calls OpenAI's Image API
+ *    (`/v1/images/generations`) on an OpenAI key only — the user's, else the
+ *    server's — where those models are documented and the model id is
+ *    honoured;
  *  - `gemini` (Nano Banana) calls generateContent with image output — a
  *    connected Gemini key, else the server's GEMINI_API_KEY;
  *  - `ark` (Seedream, BytePlus ModelArk) — server-only via ARK_API_KEY; there
@@ -193,6 +197,48 @@ function apiKeyGenerator(apiKey: string, label: string, routerModel: string, ima
 }
 
 /* ---------------------------------------------------------------- */
+/* OpenAI's Image API: the GPT Image models an API key can choose   */
+/* ---------------------------------------------------------------- */
+
+const OPENAI_IMAGES_URL = env.OPENAI_IMAGES_URL
+
+interface OpenAiImageResponse {
+  data?: { b64_json?: string }[]
+}
+
+/* No text model fronts this call, so the prompt reaches the image model as
+   written and the size is the request's own field. */
+function imageApiGenerator(apiKey: string, label: string, model: string): Generator {
+  /* the server's key is billed as "server" but the error names the provider */
+  const provider = 'OpenAI'
+  return {
+    ok: true,
+    label,
+    ...(label === 'server' ? { authHint: 'OPENAI_API_KEY' } : {}),
+    run: async (req) => {
+      const res = await fetch(OPENAI_IMAGES_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+        body: JSON.stringify({
+          model,
+          prompt: req.prompt,
+          n: 1,
+          size: SIZES[req.aspect ?? 'square'],
+          quality: req.quality ?? 'medium',
+          output_format: 'png',
+        }),
+        signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+      })
+      if (!res.ok) throw await responseError(res, provider)
+      const body = (await res.json()) as OpenAiImageResponse
+      const b64 = body.data?.[0]?.b64_json
+      if (!b64) throw new Error(`${provider} returned no image`)
+      return Buffer.from(b64, 'base64')
+    },
+  }
+}
+
+/* ---------------------------------------------------------------- */
 /* Gemini (Nano Banana): generateContent with image output          */
 /* ---------------------------------------------------------------- */
 
@@ -330,10 +376,11 @@ interface PayerAccounts {
 const NO_ACCOUNTS: PayerAccounts = { on: [], own: false }
 
 function openAiAccount(accounts: readonly ModelAccount[]): ModelAccount | undefined {
-  return (
-    accounts.find((account) => account.kind === 'chatgpt') ??
-    accounts.find((account) => account.kind === 'openai-key' && Boolean(account.apiKey))
-  )
+  return accounts.find((account) => account.kind === 'chatgpt') ?? openAiKeyAccount(accounts)
+}
+
+function openAiKeyAccount(accounts: readonly ModelAccount[]): ModelAccount | undefined {
+  return accounts.find((account) => account.kind === 'openai-key' && Boolean(account.apiKey))
 }
 
 function geminiAccount(accounts: readonly ModelAccount[]): ModelAccount | undefined {
@@ -344,6 +391,9 @@ function available(option: ImageModelOption, accounts: PayerAccounts): boolean {
   switch (option.provider) {
     case 'openai':
       if (accounts.own) return Boolean(openAiAccount(accounts.on))
+      return Boolean(env.OPENAI_API_KEY)
+    case 'openai-api':
+      if (accounts.own) return Boolean(openAiKeyAccount(accounts.on))
       return Boolean(env.OPENAI_API_KEY)
     case 'gemini':
       if (accounts.own) return Boolean(geminiAccount(accounts.on))
@@ -410,6 +460,17 @@ function providerGenerator(option: ImageModelOption, accounts: PayerAccounts): G
       return {
         ok: false,
         reason: `${option.name} is not available: connect a ChatGPT subscription or OpenAI API key in Settings, or pick another image model there. Meanwhile draw the visual as inline SVG/CSS or use search_images.`,
+      }
+    }
+    case 'openai-api': {
+      /* a ChatGPT subscription cannot run these: its backend ignores the model id */
+      const account = openAiKeyAccount(accounts.on)
+      if (account?.apiKey) return imageApiGenerator(account.apiKey, 'OpenAI', option.id)
+      const serverKey = own ? undefined : env.OPENAI_API_KEY
+      if (serverKey) return imageApiGenerator(serverKey, 'server', option.id)
+      return {
+        ok: false,
+        reason: `${option.name} needs an OpenAI API key (a ChatGPT subscription cannot choose its image model): connect one in Settings, or pick another image model there. Meanwhile draw the visual as inline SVG/CSS or use search_images.`,
       }
     }
     case 'gemini': {

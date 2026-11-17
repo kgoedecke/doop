@@ -12,6 +12,7 @@ const meta = {
       options: [
         'default',
         'primary',
+        'brand',
         'ghost',
         'danger',
         'bare',
@@ -43,6 +44,7 @@ export const Variants: Story = {
       <Button>
         <UploadIcon width={15} height={15} /> Import
       </Button>
+      <Button variant="brand">Publish changes</Button>
       <Button variant="ghost">Manage</Button>
       <Button variant="danger">Disconnect</Button>
       <Button variant="bare">Cancel</Button>

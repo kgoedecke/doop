@@ -27,7 +27,7 @@ export function FollowFrame() {
           {t('canvas.following')}{' '}
           {leader.kind === 'agent' && (
             <>
-              <AgentIcon name={leader.name} size={11} color="#fff" />{' '}
+              <AgentIcon name={leader.name} brand={leader.brand} size={11} color="#fff" />{' '}
             </>
           )}
           {leader.name}

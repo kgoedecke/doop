@@ -1,13 +1,18 @@
 import type { Page } from 'puppeteer-core'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { findBrowserPath } from '../server/screenshot'
-import { LAYERS_MIN_PX, PAGES_MIN_PX } from '../src/lib/pagesSplit'
+import { LAYERS_MIN_PX, PAGES_BASE_MIN_PX, PAGES_MOVE_PICKER_PX, pagesMinPx } from '../src/lib/pagesSplit'
 import { pagePerTest } from './browser'
 import { canvasFrame, openCanvasPage, showCanvasPage } from './canvasPageFixture'
 
-/* enough pages to reach the Pages list's 30vh cap in an 800px window */
-const PAGES = Array.from({ length: 12 }, (_, i) => ({ id: `p${i + 1}`, name: `Page ${i + 1}` }))
+/* enough pages to outgrow both the Pages list's 30vh default and the largest split an 800px window allows */
+const PAGES = Array.from({ length: 30 }, (_, i) => ({ id: `p${i + 1}`, name: `Page ${i + 1}` }))
 const FRAMES = [canvasFrame({ id: 'f1', name: 'Home', x: 0, y: 0, width: 100, height: 100 })]
+const FRAME_ROW = '[role="treeitem"][data-row-key="f1"]'
+const MOVE_PICKER = '[data-slot="pages-panel"] [data-slot="select-trigger"]'
+
+/** the separator reports whole pixels, so it may differ from the laid-out size by one */
+const withinPx = (reported: number, laidOut: number) => expect(Math.abs(reported - laidOut)).toBeLessThanOrEqual(1)
 
 describe.skipIf(!findBrowserPath())('the Pages and Layers split', () => {
   const pages = pagePerTest()
@@ -16,7 +21,7 @@ describe.skipIf(!findBrowserPath())('the Pages and Layers split', () => {
   beforeEach(async () => {
     page = await pages.open()
     await page.setViewport({ width: 1280, height: 800 })
-    await openCanvasPage(page, FRAMES, '', PAGES)
+    await openCanvasPage(page, FRAMES, '', { pages: PAGES })
   })
 
   /** the Pages section, the Layers tree and the rail they share, in px */
@@ -32,6 +37,34 @@ describe.skipIf(!findBrowserPath())('the Pages and Layers split', () => {
       }
     })
 
+  /** what the separator reports */
+  const separator = () =>
+    page.evaluate(() => {
+      const el = document.querySelector('[data-slot="pages-split"]')!
+      const value = (name: string) => Number(el.getAttribute(name))
+      return { now: value('aria-valuenow'), min: value('aria-valuemin'), max: value('aria-valuemax') }
+    })
+
+  /** the separator's values once they have caught up with the layout on screen */
+  async function liveSeparator() {
+    await page.waitForFunction(
+      (layersMin) => {
+        const el = document.querySelector('[data-slot="pages-split"]')!
+        const pagesEl = document.querySelector('[data-slot="pages-panel"]')!
+        const rail = pagesEl.closest('[data-slot="panel"]')!
+        return (
+          Math.abs(Number(el.getAttribute('aria-valuenow')) - pagesEl.getBoundingClientRect().height) <= 1 &&
+          Math.abs(Number(el.getAttribute('aria-valuemax')) - (rail.getBoundingClientRect().height - layersMin)) <= 1
+        )
+      },
+      {},
+      LAYERS_MIN_PX,
+    )
+    return separator()
+  }
+
+  const focusSplit = async () => (await page.$('[data-slot="pages-split"]'))!.focus()
+
   /** press the split and drag it `dy` px, in steps the way a hand moves */
   async function dragSplit(dy: number) {
     const box = await (await page.$('[data-slot="pages-split"]'))!.boundingBox()
@@ -42,6 +75,32 @@ describe.skipIf(!findBrowserPath())('the Pages and Layers split', () => {
     await page.mouse.move(x, y + dy, { steps: 8 })
     await page.mouse.up()
   }
+
+  /** the split a long list took to its largest, as a person leaves it, then the page loaded on `canvas` */
+  async function reloadAfterLargestSplit(frames: typeof FRAMES, canvas: Parameters<typeof showCanvasPage>[3]) {
+    await focusSplit()
+    await page.keyboard.press('End')
+    await showCanvasPage(page, frames, '', canvas)
+  }
+
+  /** the edges of a section's parts, for what must stay inside it */
+  const fit = () =>
+    page.evaluate((pickerSelector) => {
+      const edges = (el: Element | null) => {
+        if (!el) return null
+        const { top, bottom, height } = el.getBoundingClientRect()
+        return { top, bottom, height }
+      }
+      const pagesEl = document.querySelector('[data-slot="pages-panel"]')!
+      const rows = [...pagesEl.querySelectorAll('[data-page-id]')]
+      return {
+        pages: edges(pagesEl)!,
+        list: edges(rows[0]!.parentElement)!,
+        firstRow: edges(rows[0]!)!,
+        lastRow: edges(rows.at(-1)!)!,
+        picker: edges(pagesEl.querySelector(pickerSelector)),
+      }
+    }, MOVE_PICKER)
 
   it('dragging the split up gives the Layers tree the room the Pages list gives up', async () => {
     const before = await sizes()
@@ -59,11 +118,11 @@ describe.skipIf(!findBrowserPath())('the Pages and Layers split', () => {
 
   it('moves the split 10px an arrow press, and Home and End take it to its limits', async () => {
     const start = await sizes()
-    await (await page.$('[data-slot="pages-split"]'))!.focus()
+    await focusSplit()
     await page.keyboard.press('ArrowUp')
     expect((await sizes()).pages).toBeCloseTo(start.pages - 10, 0)
     await page.keyboard.press('Home')
-    expect((await sizes()).pages).toBeCloseTo(PAGES_MIN_PX, 0)
+    expect((await sizes()).pages).toBeCloseTo(pagesMinPx(false), 0)
     await page.keyboard.press('End')
     const end = await sizes()
     expect(end.pages).toBeCloseTo(end.rail - LAYERS_MIN_PX, 0)
@@ -72,30 +131,129 @@ describe.skipIf(!findBrowserPath())('the Pages and Layers split', () => {
   it('keeps the split when the page loads again', async () => {
     await dragSplit(-120)
     const dragged = await sizes()
-    await showCanvasPage(page, FRAMES, '', PAGES)
+    await showCanvasPage(page, FRAMES, '', { pages: PAGES })
     expect((await sizes()).pages).toBeCloseTo(dragged.pages, 0)
   })
 
-  it('keeps one page row and the move picker inside the Pages section while a frame is selected', async () => {
-    await page.click('[role="treeitem"][data-row-key="f1"]')
-    await page.waitForSelector('[data-slot="pages-panel"] [data-slot="select-trigger"]')
-    await (await page.$('[data-slot="pages-split"]'))!.focus()
+  it('reports where the split is and the range it can move in, as the keys, a drag and the window move it', async () => {
+    const start = await liveSeparator()
+    expect(start.min).toBe(pagesMinPx(false))
+    const layout = await sizes()
+    withinPx(start.now, layout.pages)
+    withinPx(start.max, layout.rail - LAYERS_MIN_PX)
+
+    await focusSplit()
+    await page.keyboard.press('ArrowUp')
+    withinPx((await liveSeparator()).now, start.now - 10)
     await page.keyboard.press('Home')
-    const fit = await page.evaluate(() => {
-      const edges = (el: Element) => {
-        const { top, bottom, height } = el.getBoundingClientRect()
-        return { top, bottom, height }
-      }
-      const pagesEl = document.querySelector('[data-slot="pages-panel"]')!
-      const row = pagesEl.querySelector('[data-page-id]')!
-      return {
-        pages: edges(pagesEl),
-        list: edges(row.parentElement!),
-        row: edges(row),
-        picker: edges(pagesEl.querySelector('[data-slot="select-trigger"]')!),
-      }
+    expect((await liveSeparator()).now).toBe(start.min)
+    await page.keyboard.press('End')
+    withinPx((await liveSeparator()).now, start.max)
+
+    await dragSplit(-120)
+    const dragged = await liveSeparator()
+    withinPx(dragged.now, start.max - 120)
+
+    await page.setViewport({ width: 1280, height: 600 })
+    const shrunk = await liveSeparator()
+    const shrunkLayout = await sizes()
+    expect(shrunk.max).toBeLessThan(start.max)
+    withinPx(shrunk.now, shrunkLayout.pages)
+    expect(shrunk.now).toBeLessThanOrEqual(shrunk.max + 1)
+    expect(shrunk.now).toBeGreaterThanOrEqual(shrunk.min)
+  })
+
+  it('keeps one page row and the move picker inside the Pages section while a frame is selected', async () => {
+    await focusSplit()
+    await page.keyboard.press('Home')
+    const bare = await liveSeparator()
+    expect(bare.min).toBe(pagesMinPx(false))
+    const unselected = await fit()
+    expect(unselected.picker).toBeNull()
+    expect(unselected.pages.height).toBeCloseTo(pagesMinPx(false), 0)
+    expect(unselected.firstRow.bottom).toBeLessThanOrEqual(unselected.list.bottom + 0.5)
+
+    await page.click(FRAME_ROW)
+    await page.waitForSelector(MOVE_PICKER)
+    const selected = await liveSeparator()
+    expect(selected.min).toBe(pagesMinPx(true))
+    withinPx(selected.now, pagesMinPx(true))
+    const withPicker = await fit()
+    expect(withPicker.pages.height).toBeCloseTo(pagesMinPx(true), 0)
+    expect(withPicker.firstRow.bottom).toBeLessThanOrEqual(withPicker.list.bottom + 0.5)
+    expect(withPicker.picker!.bottom).toBeLessThanOrEqual(withPicker.pages.bottom + 0.5)
+  })
+
+  describe('with few pages after a large split was saved', () => {
+    /** the divider as the section draws it, the panel's own outline color, and the room under it */
+    const divider = () =>
+      page.evaluate(() => {
+        const pagesEl = document.querySelector<HTMLElement>('[data-slot="pages-panel"]')!
+        const rail = pagesEl.closest<HTMLElement>('[data-slot="panel"]')!
+        const probe = document.createElement('div')
+        probe.className = 'border-t border-line-soft'
+        document.body.append(probe)
+        const panelOutline = getComputedStyle(probe).borderTopColor
+        probe.remove()
+        const style = getComputedStyle(pagesEl)
+        const layersHeading = document.querySelector('[data-slot="frame-section-heading"]')!.parentElement!
+        return {
+          width: pagesEl.getBoundingClientRect().width,
+          railWidth: rail.clientWidth,
+          thickness: style.borderBottomWidth,
+          line: style.borderBottomStyle,
+          color: style.borderBottomColor,
+          panelOutline,
+          gapToLayers: layersHeading.getBoundingClientRect().top - pagesEl.getBoundingClientRect().bottom,
+        }
+      })
+
+    it('sizes a single page to its row on an empty canvas, with a full-width divider in the panel outline color', async () => {
+      await reloadAfterLargestSplit([], { pages: [PAGES[0]!] })
+      const section = await fit()
+      /* the list's bottom padding and the divider are all that is left under the row */
+      expect(section.pages.bottom - section.firstRow.bottom).toBeLessThanOrEqual(6)
+      expect(section.pages.height).toBeCloseTo(PAGES_BASE_MIN_PX, 0)
+      const sep = await liveSeparator()
+      expect(sep.now).toBe(sep.min)
+      expect(sep.max).toBeGreaterThan(sep.min)
+
+      const line = await divider()
+      expect(line.thickness).toBe('1px')
+      expect(line.line).toBe('solid')
+      expect(line.color).toBe(line.panelOutline)
+      expect(line.width).toBeCloseTo(line.railWidth, 0)
+      expect(line.gapToLayers).toBeLessThanOrEqual(8)
     })
-    expect(fit.row.bottom).toBeLessThanOrEqual(fit.list.bottom + 0.5)
-    expect(fit.picker.bottom).toBeLessThanOrEqual(fit.pages.bottom + 0.5)
+
+    it('grows by the move picker while a frame is selected, keeping the row and the picker inside', async () => {
+      await reloadAfterLargestSplit(FRAMES, { pages: PAGES.slice(0, 2) })
+      const before = await fit()
+      expect(before.picker).toBeNull()
+      expect(before.pages.bottom - before.lastRow.bottom).toBeLessThanOrEqual(6)
+
+      await page.click(FRAME_ROW)
+      await page.waitForSelector(MOVE_PICKER)
+      const after = await fit()
+      expect(after.pages.height - before.pages.height).toBeCloseTo(PAGES_MOVE_PICKER_PX, 0)
+      expect(after.lastRow.bottom).toBeLessThanOrEqual(after.list.bottom + 0.5)
+      expect(after.picker!.bottom).toBeLessThanOrEqual(after.pages.bottom + 0.5)
+      const sep = await liveSeparator()
+      expect(sep.min).toBe(pagesMinPx(true))
+      withinPx(sep.now, after.pages.height)
+    })
+
+    it('keeps the divider and the resize for a viewer, who gets no move picker', async () => {
+      await showCanvasPage(page, FRAMES, '', { pages: PAGES, role: 'view' })
+      await page.click(FRAME_ROW)
+      await page.waitForSelector(`${FRAME_ROW}[aria-selected="true"]`)
+      expect(await page.$(MOVE_PICKER)).toBeNull()
+      expect((await divider()).thickness).toBe('1px')
+      await focusSplit()
+      await page.keyboard.press('Home')
+      const sep = await liveSeparator()
+      expect(sep.min).toBe(pagesMinPx(false))
+      expect(sep.now).toBe(pagesMinPx(false))
+    })
   })
 })

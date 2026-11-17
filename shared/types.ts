@@ -1,6 +1,8 @@
+import type { AgentBrand } from './agentBrand.ts'
 import type { BillingInterval, WorkspaceStatus } from './billing.ts'
 import type { CanvasRole, LinkAccess } from './canvasRole.ts'
 import type { ComponentDef } from './components.ts'
+import type { AgentRole } from './agents.ts'
 import type { DesignToken } from './designTokens.ts'
 import type { RunnerPick } from './agentRunner.ts'
 
@@ -46,6 +48,8 @@ export interface FrameApproval {
   approvedAt: number
   /** The frame revision the person reviewed before approving. */
   approvedFrameUpdatedAt: number
+  /** The agent that set this approval on the person's behalf, when an agent did. */
+  approvedVia?: string
 }
 
 /** One entry of a frame's design history: the HTML (and size) the frame had
@@ -162,6 +166,16 @@ export interface Canvas {
   /** the caller's own role, set on the copy a canvas GET or a room `init`
    *  hands one person; never stored */
   role?: CanvasRole
+  /** on a canvas that publishes a workspace library, the page its component
+   *  mains are on, where a link naming no page opens (shared/pages.ts). Set on
+   *  the copy a canvas GET or a room `init` hands out; never stored */
+  landingPageId?: string
+  /** the canvas's Doop Agent team: the built-in agents its workspace (or, on a
+   *  personal canvas, its owner) has on, with their changes, then its custom
+   *  agents (shared/customAgents.ts), every `brief` left empty. Set on the copy
+   *  a canvas GET or a room `init` hands out; never stored. Unset reads as the
+   *  built-in team as it ships */
+  team?: AgentRole[]
   /** user ids invited to collaborate (the owner is not listed) */
   memberIds?: string[]
   /** reusable designs on this canvas; unset = none. See shared/components.ts. */
@@ -205,6 +219,15 @@ export function isWorkspaceRole(value: unknown): value is WorkspaceRole {
   return typeof value === 'string' && (WORKSPACE_ROLES as readonly string[]).includes(value)
 }
 
+/** Who may publish to a workspace's component library: everyone who can edit
+ *  the library canvas, or the workspace's owner and admins only. */
+export const LIBRARY_PUBLISH_POLICIES = ['everyone', 'admins'] as const
+export type LibraryPublishPolicy = (typeof LIBRARY_PUBLISH_POLICIES)[number]
+
+export function isLibraryPublishPolicy(value: unknown): value is LibraryPublishPolicy {
+  return LIBRARY_PUBLISH_POLICIES.includes(value as LibraryPublishPolicy)
+}
+
 /** A workspace as the dashboard lists it — for one viewer, hence `role`. */
 export interface WorkspaceSummary {
   id: string
@@ -220,11 +243,15 @@ export interface WorkspaceSummary {
   interval: BillingInterval | null
   /** seats Stripe is billing for right now */
   seats: number
+  /** seats the owner chose to pay for; the bill is these or memberCount, whichever is larger */
+  seatsBought: number
   memberCount: number
   canvasCount: number
   /** next renewal (or the end, when cancelAtPeriodEnd) — epoch ms */
   currentPeriodEnd?: number
   cancelAtPeriodEnd: boolean
+  /** who may publish to its component library */
+  libraryPublish: LibraryPublishPolicy
   createdAt: number
   updatedAt: number
 }
@@ -346,6 +373,8 @@ export interface Actor {
   clientId?: string
   /** for agents: display name of the user whose OAuth token authorized it */
   owner?: string
+  /** for agents: the product it reads as (shared/agentBrand.ts) */
+  brand?: AgentBrand
 }
 
 export interface Presence {
@@ -366,6 +395,8 @@ export interface Presence {
   status?: string
   /** for agents: whose token they connected with */
   owner?: string
+  /** for agents: the product it reads as, from its MCP client (shared/agentBrand.ts) */
+  brand?: AgentBrand
 }
 
 /** A unit of work an agent announced via set_status. A new status completes the previous task.
@@ -398,6 +429,9 @@ export interface AgentTask {
   /** unsuccessful agent attempt; failed work waits for an explicit human retry */
   failedAt?: number
   failureReason?: string
+  /** board cards: the closing words of the latest agent run that worked on
+   *  the card — what the Agents tab's chat shows as the agent's answer */
+  reply?: string
   /** board cards: ordered agent-role ids the card walks through, one at a time.
    *  Absent on status tasks and on cards queued before pipelines existed. */
   pipeline?: string[]
@@ -468,11 +502,16 @@ export interface TaskFeedback {
   deliveredAt?: number
   /** the agent that picked it up */
   claimedBy?: string
+  /** the claim was a resident run's (in-process), not an outside agent's
+   *  with the same name: what restart recovery fails as interrupted */
+  claimedByResident?: boolean
   /** resident Doop finished handling this feedback */
   completedAt?: number
   /** unsuccessful resident-agent attempt; never retried automatically */
   failedAt?: number
   failureReason?: string
+  /** the closing words of the agent run that handled it */
+  reply?: string
 }
 
 /** A comment pinned to a specific element inside a frame, to a frame as a
@@ -597,6 +636,11 @@ export type ServerMessage =
   | { type: 'guide'; id: string; guide: CanvasGuide | null; actor: Actor }
   /** a component changed, or was deleted (`component` null) */
   | { type: 'component'; id: string; component: ComponentDef | null; actor: Actor }
+  /** a workspace library this canvas can use published or withdrew components:
+   *  what the Components panel offers, and which updates wait, should be read again */
+  | { type: 'library'; actor: Actor }
+  /** the canvas's team changed (shared/customAgents.ts): the whole new one */
+  | { type: 'team'; team: AgentRole[] }
   /** a style-guide doc was written, moved (doc set) or deleted (doc null) */
   | { type: 'guidelines'; name: string; doc: GuidelineDoc | null; actor: Actor }
   /** the canvas's design tokens changed: the whole list after the change */

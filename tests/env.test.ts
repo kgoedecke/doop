@@ -12,6 +12,20 @@ import { stubEnv, unstubAllEnvs } from './envStub.ts'
 afterEach(unstubAllEnvs)
 
 describe('server/env.ts', () => {
+  it('leaves the listen host unspecified by default', () => {
+    stubEnv('HOST', undefined)
+    expect(env.HOST).toBeUndefined()
+    stubEnv('HOST', '   ')
+    expect(env.HOST).toBeUndefined()
+  })
+
+  it('accepts a custom listen host and validated port', () => {
+    stubEnv('HOST', '127.0.0.1')
+    stubEnv('PORT', '4500')
+    expect(env.HOST).toBe('127.0.0.1')
+    expect(env.PORT).toBe(4500)
+  })
+
   it('parses numbers, booleans, lists and origins', () => {
     stubEnv('MCP_UPLOADS_PER_MIN', '2')
     stubEnv('WEBHOOK_ALLOW_PRIVATE_URLS', '1')
@@ -42,6 +56,18 @@ describe('server/env.ts', () => {
     expect(() => stubEnv('BETTER_AUTH_URL', 'doop.example')).toThrow(/BETTER_AUTH_URL: Invalid URL/)
     stubEnv('BETTER_AUTH_URL', undefined)
     expect(() => stubEnv('DOOP_AGENT_PROVIDER', 'openai')).toThrow(/DOOP_AGENT_PROVIDER/)
+  })
+
+  it('refuses a stall log threshold that comes after the exit threshold', () => {
+    vi.stubEnv('STALL_LOG_MS', '90000')
+    vi.stubEnv('STALL_EXIT_MS', '60000')
+    expect(() => reloadEnv()).toThrow(/STALL_LOG_MS: 90000 is greater than STALL_EXIT_MS \(60000\)/)
+    /* either one off, or in order, is fine */
+    vi.stubEnv('STALL_EXIT_MS', '0')
+    expect(() => reloadEnv()).not.toThrow()
+    vi.stubEnv('STALL_LOG_MS', '5000')
+    vi.stubEnv('STALL_EXIT_MS', '60000')
+    expect(() => reloadEnv()).not.toThrow()
   })
 
   it('reports every bad variable in one error', () => {

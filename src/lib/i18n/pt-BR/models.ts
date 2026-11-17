@@ -143,9 +143,20 @@ export const models: Catalog['models'] = {
   /* ImageModelCard */
   imageNeedsOpenai:
     'Precisa de uma assinatura do ChatGPT ou de uma chave de API da OpenAI conectada acima (ou de uma chave do servidor).',
+  imageNeedsOpenaiKey:
+    'Precisa de uma chave de API da OpenAI conectada acima. Uma assinatura do ChatGPT não pode escolher o modelo de imagem.',
   imageNeedsGemini: 'Precisa de uma chave de API do Gemini conectada acima (ou de uma chave do servidor).',
   imageNeedsArk: 'Não configurado neste servidor (o operador define ARK_API_KEY).',
-  imageGptBlurb: 'O modelo de imagem da OpenAI — texto bem renderizado e assets de UI confiáveis.',
+  imageGptBlurb: 'O ChatGPT escolhe o modelo (hoje o GPT Image 2). Também funciona com uma chave de API da OpenAI.',
+  imageFamilyChatgpt: 'GPT Image pela assinatura do ChatGPT',
+  imageFamilyApi: 'GPT Image API',
+  imageGptSunburstBlurb: 'O modelo de imagem mais capaz da OpenAI — edições precisas e detalhe.',
+  imageGptFlareBlurb: 'Imagens do dia a dia rápidas e de alta qualidade, da OpenAI.',
+  imageGpt26SunburstBlurb: 'O modelo de imagem mais novo da OpenAI — trabalho visual detalhado e edição.',
+  imageGpt26FlareBlurb: 'O modelo de imagem mais novo da OpenAI, ajustado para iterar rápido.',
+  imageChatgptLatestBlurb: 'O modelo de imagem que o ChatGPT usa agora, mantido atual pela OpenAI.',
+  imageGpt15Blurb: 'O modelo de imagem da geração anterior da OpenAI.',
+  imageGpt1MiniBlurb: 'O modelo de imagem de baixo custo da OpenAI, para rascunhos e volume.',
   imageNanoBananaBlurb: 'O modelo de imagem do Google — cenas fotorrealistas, edição, 4K.',
   imageSeedreamProBlurb: 'O melhor modelo de imagem da ByteDance — qualidade rica, quase pictórica.',
   imageSeedreamLiteBlurb: 'Versão mais rápida e barata do Seedream.',

@@ -1,10 +1,14 @@
 import type { Page } from 'puppeteer-core'
-import type { CanvasPageInfo, Frame } from '../shared/types'
+import type { Canvas, CanvasPageInfo, Frame } from '../shared/types'
 import { fixtureUrl } from './browser'
 
 declare global {
   interface Window {
-    canvasPageHarness: { seed: (frames: Frame[], pages?: CanvasPageInfo[]) => void }
+    canvasPageHarness: {
+      seed: (frames: Frame[], canvas?: Partial<Canvas>) => void
+      /** the page list as the room would send it after someone's edit */
+      setPages: (pages: CanvasPageInfo[]) => void
+    }
   }
 }
 
@@ -18,16 +22,17 @@ export function canvasFrame(frame: Pick<Frame, 'id' | 'name' | 'x' | 'y' | 'widt
  * whose subject is what the browser does with the page: the room's socket
  * never opens, the session is a signed-in person, and every other API call is
  * answered with an empty object. `search` is the page URL's query, as a deep
- * link carries it. `pages`, when given, are the canvas's pages.
+ * link carries it. `canvas` is anything else the room's canvas would carry:
+ * its pages, or the `landingPageId` the server sends for a library canvas.
  */
 export async function openCanvasPage(
   page: Page,
   frames: Frame[],
   search = '',
-  pages?: CanvasPageInfo[],
+  canvas: Partial<Canvas> = {},
 ): Promise<void> {
   await prepareCanvasPage(page)
-  await showCanvasPage(page, frames, search, pages)
+  await showCanvasPage(page, frames, search, canvas)
 }
 
 /** The stubs alone, for a test that has something to do before the page loads. */
@@ -60,10 +65,11 @@ export async function showCanvasPage(
   page: Page,
   frames: Frame[],
   search = '',
-  pages?: CanvasPageInfo[],
+  canvas: Partial<Canvas> = {},
 ): Promise<void> {
   await page.goto(fixtureUrl(`canvasPage.html${search}`))
   await page.waitForFunction(() => !!window.canvasPageHarness && !!document.querySelector('.stage'))
-  await page.evaluate((frames, pages) => window.canvasPageHarness.seed(frames, pages), frames, pages)
-  await page.waitForSelector('[data-frame-title]')
+  await page.evaluate((frames, canvas) => window.canvasPageHarness.seed(frames, canvas), frames, canvas)
+  /* an empty canvas has no frame title to wait for: its Layers rail is what shows */
+  await page.waitForSelector(frames.length ? '[data-frame-title]' : '[data-slot="pages-panel"]')
 }

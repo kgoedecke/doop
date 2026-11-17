@@ -213,6 +213,17 @@ rectangle. Repeating tiles use an image brush; a weak-keyed, 16 MiB cache per pa
 thread reuses them across paints without retaining documents. Individual textures
 are capped at 4 megapixels / 4096 px per side. `rust/tests/svg_background.rs`
 checks repetition, filtered noise, and full-frame versus region rendering.
+
+Frames imported from a website keep the site's `<base href>`, and their paths
+(`/img/logo.svg`) are relative to it. Blitz takes its base URL from the embedder and
+starts image and stylesheet fetches while it parses, so `Doc::new` parses with the
+fetches held, reads the first `<base href>` (resolved against the server origin, http(s)
+only), and parses again against it when it differs; otherwise the held fetches go out.
+Every document also matches `prefers-reduced-motion: reduce` (`Viewport::reduced_motion`
+in the Blitz fork, the media feature in the Stylo fork), so content a page hides until an
+entry animation has run shows through the page's own reduced-motion fallback; frames are
+mostly painted as still pictures at time 0. A page without such a fallback still paints
+its pre-animation state there. `rust/tests/imported_pages.rs` covers both.
 As with gradients, spaced backgrounds requiring more than 500 explicit tile
 draws are skipped to keep painting bounded; repeat/round use a single brush fill.
 

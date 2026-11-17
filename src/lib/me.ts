@@ -11,6 +11,8 @@ export interface Me {
   admin: boolean
   /** 'team' while a member of a live paid workspace; the account menu's plan line */
   plan: 'free' | 'team'
+  /** whether this server sells plans; without it nothing offers an upgrade */
+  billing: boolean
   /** set when this session is an admin viewing as someone else. The rest of
    *  this object then describes the person being viewed, not the admin —
    *  impersonation replaces the session cookie outright — so this flag is the
@@ -25,6 +27,19 @@ export interface Me {
    entering and leaving a "view as" session refetch, since impersonation
    changes who the session belongs to. */
 let cache: { key: string; promise: Promise<Me> } | null = null
+/* the last answer for the current identity, for code outside React (the
+   canvas commands) that asks synchronously */
+let latest: Me | null = null
+
+/** The signed-in account as last loaded, or null before /api/me answered. */
+export function currentMe(): Me | null {
+  return latest
+}
+
+/** Whether to offer Pro: the server sells plans and the account is on Free. */
+export function offersUpgrade(me: Me | null | undefined): boolean {
+  return !!me && me.billing && me.plan !== 'team'
+}
 
 export function loadMe(key: string): Promise<Me> {
   if (cache?.key !== key) {
@@ -32,9 +47,15 @@ export function loadMe(key: string): Promise<Me> {
       if (!r.ok) throw new Error(`me ${r.status}`)
       return r.json() as Promise<Me>
     })
-    promise.catch(() => {
-      if (cache?.promise === promise) cache = null // retry on the next call
-    })
+    promise.then(
+      (me) => {
+        if (cache?.promise === promise) latest = me
+      },
+      () => {
+        if (cache?.promise === promise) cache = null // retry on the next call
+      },
+    )
+    latest = null
     cache = { key, promise }
   }
   return cache.promise

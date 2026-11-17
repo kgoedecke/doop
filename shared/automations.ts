@@ -1,9 +1,17 @@
-import { normalizePipeline } from './agents.ts'
+import { AGENT_ROLES, DEFAULT_ROLE_ID, normalizePipeline, roleById, type Roster } from './agents.ts'
+import { isAgentHandle } from './customAgents.ts'
 import type { FrameApproval } from './types.ts'
 
 /** Scheduled or approval-triggered workflows. Every step names a canvas;
  * approval workflows use the watched canvas and carry only the signed-off sources.
  * Design tasks finish before the following step starts. */
+
+/** The `queuedBy` an automation's agent step puts on its board card: how a run tells work an
+ *  automation queued from work a person asked for. */
+export const automationQueuedBy = (name: string): string => `Automation · ${name}`
+
+export const isAutomationCard = (card: { queuedBy?: string }): boolean =>
+  card.queuedBy?.startsWith(automationQueuedBy('')) ?? false
 
 export type ScheduleKind = 'daily' | 'weekdays' | 'weekly'
 
@@ -283,6 +291,25 @@ export function normalizeSchedule(raw: unknown): Schedule {
   }
 }
 
+/** how many ids a step keeps for the server to choose from */
+const MAX_ROLE_CANDIDATES = 8
+
+function stepRoles(roles: unknown): string[] {
+  const ids = Array.isArray(roles) ? roles.filter((r): r is string => typeof r === 'string') : []
+  const candidates = ids.filter((id, i) => ids.indexOf(id) === i && (roleById(id, AGENT_ROLES) || isAgentHandle(id)))
+  return candidates.length > 0 ? candidates.slice(0, MAX_ROLE_CANDIDATES) : [DEFAULT_ROLE_ID]
+}
+
+/** One agent per task: the first of a step's candidate ids the step's canvas
+ *  has (built-in or custom) wins, else the default agent. */
+export function narrowStepRoles(steps: Step[], rosterOf: (canvasId: string) => Roster): Step[] {
+  return steps.map((step) =>
+    step.type === 'agent'
+      ? { ...step, roles: normalizePipeline(step.roles, rosterOf(step.canvasId)).slice(0, 1) }
+      : step,
+  )
+}
+
 function stepId(raw: unknown, index: number): string {
   return typeof raw === 'string' && /^[A-Za-z0-9_-]{1,24}$/.test(raw) ? raw : `s${index + 1}`
 }
@@ -329,8 +356,11 @@ export function normalizeSteps(raw: unknown): Step[] | string {
         type: 'agent',
         title: typeof s.title === 'string' ? s.title.trim().slice(0, MAX_NAME) : '',
         prompt: typeof s.prompt === 'string' ? s.prompt.trim().slice(0, MAX_PROMPT) : '',
-        /* one agent per task — the first real role wins */
-        roles: normalizePipeline(s.roles).slice(0, 1),
+        /* the ids that could name an agent, in order: built-in ones, and ones
+           shaped like a custom handle, which only the step's canvas can tell
+           from junk. The server narrows this to the one real agent on save
+           (`narrowStepRoles`) and checks it again when the step runs */
+        roles: stepRoles(s.roles),
         canvasId,
       })
     }

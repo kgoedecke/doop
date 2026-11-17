@@ -21,7 +21,11 @@ afterAll(() => server?.stop())
 it('defaults to the owner’s account and reports the describer', async () => {
   const res = await alice.get('/api/image-descriptions')
   expect(res.status).toBe(200)
-  expect(await res.json()).toEqual({ mode: 'account', describer: { label: null, reason: 'no-model' } })
+  expect(await res.json()).toEqual({
+    mode: 'account',
+    describer: { label: null, reason: 'no-model' },
+    paidBy: null,
+  })
 })
 
 it('saves each mode and reads it back', async () => {

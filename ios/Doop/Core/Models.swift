@@ -80,20 +80,57 @@ public struct AgentModelOption: Decodable, Identifiable {
     public let blurb: String?
 }
 
-/// Uses the same server-owned menu and account preference as desktop.
-public struct AgentModelAccount: Decodable {
-    public let connected: Bool
-    public let kind: String?
-    public let model: String?
-    public let menus: [String: [AgentModelOption]]?
+/// One connection a task may run on, as `GET /api/agent-runners` lists it
+/// (`AgentRunner` in shared/agentRunner.ts): every provider that is connected and on.
+public struct AgentRunner: Decodable, Identifiable {
+    public let provider: String
+    /// "ChatGPT", "Claude Plan", "OpenAI"…
+    public let name: String
+    /// What the connection runs on when a pick names no model.
+    public let model: String
+    public let effort: String?
+    public let models: [AgentModelOption]
+    public let efforts: [AgentModelOption]?
+    public var id: String { provider }
 
-    public var options: [AgentModelOption] {
-        guard connected, let kind else { return [] }
-        return menus?[kind] ?? []
+    public func modelName(_ id: String) -> String { models.first { $0.id == id }?.name ?? id }
+}
+
+public struct AgentRunners: Decodable {
+    public let runners: [AgentRunner]
+    /// What work without a pick runs on: the Settings default.
+    public let `default`: String?
+
+    /// The stored pick resolved against what is connected now, as the web
+    /// composer's `resolveRunnerPick` does: a pick naming a connection that is
+    /// gone falls back to the default, then to the first connection.
+    public func resolve(_ stored: RunnerPick?) -> (runner: AgentRunner, pick: RunnerPick)? {
+        guard let runner = runners.first(where: { $0.provider == stored?.provider })
+            ?? runners.first(where: { $0.provider == self.default }) ?? runners.first else { return nil }
+        let same = stored?.provider == runner.provider
+        let model = same ? stored?.model ?? runner.model : runner.model
+        let effort = same && runner.efforts?.contains(where: { $0.id == stored?.effort }) == true ? stored?.effort : runner.effort
+        return (runner, RunnerPick(provider: runner.provider, model: model, effort: effort))
     }
-    public var label: String {
-        guard connected else { return "Auto" }
-        return options.first { $0.id == model }?.name ?? model ?? "Auto"
+}
+
+/// What a card asks to run on: the `runner` field of `POST /api/canvases/:id/cards`.
+public struct RunnerPick: Codable, Equatable {
+    public var provider: String
+    public var model: String?
+    public var effort: String?
+
+    public init(provider: String, model: String? = nil, effort: String? = nil) {
+        self.provider = provider
+        self.model = model
+        self.effort = effort
+    }
+
+    public var body: [String: Any] {
+        var body: [String: Any] = ["provider": provider]
+        if let model { body["model"] = model }
+        if let effort { body["effort"] = effort }
+        return body
     }
 }
 
@@ -235,17 +272,20 @@ public struct CardQueueRequest {
     public var title: String
     public var scope: CardScope?
     public var assignment: AgentAssignment
+    public var runner: RunnerPick?
 
-    public init(title: String, scope: CardScope?, assignment: AgentAssignment = .automatic) {
+    public init(title: String, scope: CardScope?, assignment: AgentAssignment = .automatic, runner: RunnerPick? = nil) {
         self.title = title
         self.scope = scope
         self.assignment = assignment
+        self.runner = runner
     }
 
     public var body: [String: Any] {
         var body: [String: Any] = ["title": title]
         if let scope { body["scope"] = scope.body }
         if let agentIDs = assignment.agentIDs { body["agents"] = agentIDs }
+        if let runner { body["runner"] = runner.body }
         return body
     }
 }

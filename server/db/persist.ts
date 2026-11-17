@@ -5,10 +5,10 @@ import { and, desc, eq, inArray, sql } from 'drizzle-orm'
 import { db } from './index.ts'
 import * as t from './schema.ts'
 import { extractAssetIds } from '../assets.ts'
-import { roleByAgentName } from '../../shared/agents.ts'
+import { AGENT_ROLES, roleByAgentName } from '../../shared/agents.ts'
 import { isCommunityCategory } from '../../shared/types.ts'
 import { storedLinkAccess } from '../../shared/canvasRole.ts'
-import type { ComponentDef } from '../../shared/components.ts'
+import type { ComponentDef, LibraryComponent } from '../../shared/components.ts'
 import type { DesignToken, TokenType } from '../../shared/designTokens.ts'
 import { parseRunnerPick } from '../../shared/agentRunner.ts'
 import { byStack } from '../../shared/frameStack.ts'
@@ -154,7 +154,6 @@ export function deleteMember(canvasId: string, userId: string) {
   )
 }
 
-/* Single-shot writes (one save per explicit edit) — no debounce needed. */
 function componentRow(canvasId: string, def: ComponentDef) {
   return {
     canvasId,
@@ -172,16 +171,105 @@ function componentRow(canvasId: string, def: ComponentDef) {
     code: def.code ?? null,
     source: def.source ?? null,
     history: def.history,
+    status: def.status ?? ('active' as const),
+    deletedAt: def.deletedAt ?? null,
+    deletedBy: def.deletedBy ?? null,
     createdAt: def.createdAt,
     updatedAt: def.updatedAt,
     updatedBy: def.updatedBy,
   }
 }
 
+/*
+ * Writes to one component row go one at a time, and only the latest state waits: a create
+ * saves a blank definition and then the filled one, and on a pooled connection two
+ * fire-and-forget upserts land in either order. The blank one landing last left a hollow
+ * row that the next boot loaded as the component (2026-11-11: 236 definitions, 7%). A write
+ * that fails is retried while nothing newer waits, and logged when it gives up.
+ */
+interface RowQueue {
+  next: (() => Promise<unknown>) | undefined
+  drained: Promise<void>
+}
+
+const componentWrites = new Map<string, RowQueue>()
+
+/** How long to wait before each retry of a failed component write. */
+export const COMPONENT_WRITE_RETRIES_MS = [500, 5_000, 30_000]
+
+/* a retry waiting out its delay: shutdown cuts the wait short, so the write gets its last try */
+const retryWaits = new Set<() => void>()
+let draining = false
+
+const pause = (ms: number) =>
+  draining
+    ? Promise.resolve()
+    : new Promise<void>((resolve) => {
+        const wake = () => {
+          clearTimeout(timer)
+          retryWaits.delete(wake)
+          resolve()
+        }
+        const timer = setTimeout(wake, ms)
+        retryWaits.add(wake)
+      })
+
+function queueComponentWrite(canvasId: string, id: string, write: () => Promise<unknown>) {
+  const key = `${canvasId}\0${id}`
+  const queued = componentWrites.get(key)
+  if (queued) {
+    queued.next = write
+    return
+  }
+  const queue: RowQueue = { next: write, drained: Promise.resolve() }
+  componentWrites.set(key, queue)
+  queue.drained = drainComponentWrites(key, queue)
+}
+
+async function drainComponentWrites(key: string, queue: RowQueue) {
+  try {
+    for (let write = queue.next; write; write = queue.next) {
+      queue.next = undefined
+      await writeWithRetries(key, write, queue)
+    }
+  } finally {
+    componentWrites.delete(key)
+  }
+}
+
+async function writeWithRetries(key: string, write: () => Promise<unknown>, queue: RowQueue) {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      await write()
+      return
+    } catch (error) {
+      /* a newer state is waiting: it replaces this one, so this one need not land */
+      if (queue.next) return
+      const wait = COMPONENT_WRITE_RETRIES_MS[attempt]
+      if (wait === undefined) {
+        console.error(`[db] component write failed for good: ${key.replace('\0', '/')}`, error)
+        return
+      }
+      console.error(`[db] component write failed, retrying in ${wait}ms: ${key.replace('\0', '/')}`, error)
+      await pause(wait)
+      if (queue.next) return
+    }
+  }
+}
+
+/** Every queued component write, settled: what a canvas delete waits for (so a queued save
+ *  cannot put a row back afterwards), and what a test awaits. */
+export function pendingComponentWrites(canvasId?: string): Promise<unknown> {
+  const prefix = canvasId === undefined ? '' : `${canvasId}\0`
+  return Promise.allSettled(
+    [...componentWrites].filter(([key]) => key.startsWith(prefix)).map(([, queue]) => queue.drained),
+  )
+}
+
 export function saveComponent(canvasId: string, def: ComponentDef) {
   const row = componentRow(canvasId, def)
   const { canvasId: _canvasId, id: _id, createdAt: _createdAt, ...set } = row
-  swallow(
+  queueComponentWrite(canvasId, def.id, () =>
     db
       .insert(t.components)
       .values(row)
@@ -189,8 +277,51 @@ export function saveComponent(canvasId: string, def: ComponentDef) {
   )
 }
 
+/**
+ * The components with an instance stored at an older revision than the component: the
+ * frames a propagation never reached (the queue lives in memory, so a restart mid-drain
+ * drops it; the kill switch of 2026-11-11 deferred it). Read in the database, where matching
+ * every frame's HTML costs the server nothing.
+ */
+export async function componentsBehind(): Promise<{ canvasId: string; componentId: string }[]> {
+  const result = await db.execute(sql`
+    select distinct c.canvas_id as "canvasId", c.id as "componentId"
+    from components c
+    join frames f on f.canvas_id = c.canvas_id
+      and position('data-doop-instance="' || c.id || '"' in f.html) > 0
+    cross join lateral regexp_matches(f.html, 'data-doop-instance="' || c.id || '" data-doop-rev="(\\d+)"', 'g') as m
+    where coalesce(c.status, 'active') = 'active' and c.rev > 1 and m[1]::int < c.rev`)
+  return (result as unknown as { rows: { canvasId: string; componentId: string }[] }).rows
+}
+
 export function deleteComponent(canvasId: string, id: string) {
-  swallow(db.delete(t.components).where(and(eq(t.components.canvasId, canvasId), eq(t.components.id, id))))
+  queueComponentWrite(canvasId, id, () =>
+    db.delete(t.components).where(and(eq(t.components.canvasId, canvasId), eq(t.components.id, id))),
+  )
+}
+
+export function saveLibraryComponent(snapshot: LibraryComponent) {
+  const row = { ...snapshot, code: snapshot.code ?? null, nested: snapshot.nested ?? null }
+  const { canvasId: _canvasId, id: _id, ...set } = row
+  swallow(
+    db
+      .insert(t.libraryComponents)
+      .values(row)
+      .onConflictDoUpdate({ target: [t.libraryComponents.canvasId, t.libraryComponents.id], set }),
+  )
+}
+
+export function deleteLibraryComponent(canvasId: string, id: string) {
+  swallow(
+    db
+      .delete(t.libraryComponents)
+      .where(and(eq(t.libraryComponents.canvasId, canvasId), eq(t.libraryComponents.id, id))),
+  )
+}
+
+export async function loadLibraryComponents(): Promise<LibraryComponent[]> {
+  const rows = await db.select().from(t.libraryComponents).orderBy(t.libraryComponents.name)
+  return rows.map(({ code, nested, ...row }) => ({ ...row, ...(code ? { code } : {}), ...(nested ? { nested } : {}) }))
 }
 
 export function saveGuideline(canvasId: string, doc: GuidelineDoc) {
@@ -723,12 +854,21 @@ export function deleteCanvas(canvasId: string) {
       )
       .then(() => db.delete(t.frames).where(eq(t.frames.canvasId, canvasId))),
   )
-  swallow(db.delete(t.tasks).where(eq(t.tasks.canvasId, canvasId)))
-  swallow(db.delete(t.feedback).where(eq(t.feedback.canvasId, canvasId)))
+  /* a queued task or feedback write (a run's reply, then its completion)
+     would otherwise re-insert its row after the delete */
+  swallow(pendingRowWrites(taskWrites, canvasId).then(() => db.delete(t.tasks).where(eq(t.tasks.canvasId, canvasId))))
+  swallow(
+    pendingRowWrites(feedbackWrites, canvasId).then(() =>
+      db.delete(t.feedback).where(eq(t.feedback.canvasId, canvasId)),
+    ),
+  )
   swallow(db.delete(t.comments).where(eq(t.comments.canvasId, canvasId)))
   swallow(db.delete(t.activity).where(eq(t.activity.canvasId, canvasId)))
   swallow(db.delete(t.guidelines).where(eq(t.guidelines.canvasId, canvasId)))
-  swallow(db.delete(t.components).where(eq(t.components.canvasId, canvasId)))
+  swallow(
+    pendingComponentWrites(canvasId).then(() => db.delete(t.components).where(eq(t.components.canvasId, canvasId))),
+  )
+  swallow(db.delete(t.libraryComponents).where(eq(t.libraryComponents.canvasId, canvasId)))
   swallow(db.delete(t.guidelineVersions).where(eq(t.guidelineVersions.canvasId, canvasId)))
   swallow(
     pendingTokenWrites(canvasId).then(() => db.delete(t.designTokens).where(eq(t.designTokens.canvasId, canvasId))),
@@ -797,7 +937,26 @@ function repoCardFields(kind: string | null, payload: string | null): Pick<Agent
 /* Task rows are written as whole snapshots and never awaited by callers, so
    two quick edits could otherwise race on the pool and leave the older one
    in the table. Writes to the same task queue behind each other instead. */
-const taskWrites = new Map<string, Promise<unknown>>()
+/* queued writes per row id, with the canvas each belongs to, so deleting a
+   canvas can wait for its rows' writes instead of having one land after */
+interface QueuedWrite {
+  canvasId: string
+  write: Promise<unknown>
+}
+
+/** Chain `write` after the row's earlier writes, in order. */
+function queueRowWrite(queue: Map<string, QueuedWrite>, id: string, canvasId: string, write: () => Promise<unknown>) {
+  const queued = (queue.get(id)?.write ?? Promise.resolve()).then(write, write)
+  queue.set(id, { canvasId, write: queued })
+  swallow(queued.finally(() => queue.get(id)?.write === queued && queue.delete(id)))
+}
+
+/** Settles once every write queued so far for this canvas's rows has. */
+function pendingRowWrites(queue: Map<string, QueuedWrite>, canvasId: string): Promise<unknown> {
+  return Promise.allSettled([...queue.values()].filter((q) => q.canvasId === canvasId).map((q) => q.write))
+}
+
+const taskWrites = new Map<string, QueuedWrite>()
 
 export function saveTask(canvasId: string, task: AgentTask) {
   const row = {
@@ -823,6 +982,7 @@ export function saveTask(canvasId: string, task: AgentTask) {
     scope: task.scope ? JSON.stringify(task.scope) : null,
     frameIds: task.frameIds?.join(',') ?? null,
     runner: task.runner ? JSON.stringify(task.runner) : null,
+    reply: task.reply ?? null,
   }
   const write = () =>
     db
@@ -841,12 +1001,16 @@ export function saveTask(canvasId: string, task: AgentTask) {
           pipeline: row.pipeline,
           stage: row.stage,
           frameIds: row.frameIds,
+          reply: row.reply,
         },
       })
-  const queued = (taskWrites.get(task.id) ?? Promise.resolve()).then(write, write)
-  taskWrites.set(task.id, queued)
-  swallow(queued.finally(() => taskWrites.get(task.id) === queued && taskWrites.delete(task.id)))
+  queueRowWrite(taskWrites, task.id, canvasId, write)
 }
+
+/* One feedback row is often saved twice in a row (its reply, then its
+   completion), and each write carries the whole state. Without an order the
+   older write can land last and undo the newer one, so writes per row queue. */
+const feedbackWrites = new Map<string, QueuedWrite>()
 
 export function saveFeedback(fb: TaskFeedback) {
   const row = {
@@ -861,12 +1025,14 @@ export function saveFeedback(fb: TaskFeedback) {
     at: fb.at,
     deliveredAt: fb.deliveredAt ?? null,
     claimedBy: fb.claimedBy ?? null,
+    claimedByResident: fb.claimedByResident ?? null,
     completedAt: fb.completedAt ?? null,
     failedAt: fb.failedAt ?? null,
     failureReason: fb.failureReason ?? null,
     runner: fb.runner ? JSON.stringify(fb.runner) : null,
+    reply: fb.reply ?? null,
   }
-  swallow(
+  const write = () =>
     db
       .insert(t.feedback)
       .values(row)
@@ -875,12 +1041,14 @@ export function saveFeedback(fb: TaskFeedback) {
         set: {
           deliveredAt: row.deliveredAt,
           claimedBy: row.claimedBy,
+          claimedByResident: row.claimedByResident,
           completedAt: row.completedAt,
           failedAt: row.failedAt,
           failureReason: row.failureReason,
+          reply: row.reply,
         },
-      }),
-  )
+      })
+  queueRowWrite(feedbackWrites, fb.id, fb.canvasId, write)
 }
 
 export function saveComment(c: ElementComment) {
@@ -975,6 +1143,9 @@ export async function flush(getFrame: (id: string) => Frame | undefined): Promis
     }),
   )
   await pendingVersionWrites(() => true)
+  draining = true
+  for (const wake of [...retryWaits]) wake()
+  await pendingComponentWrites()
 }
 
 /* ------------------------------------------------------------------ */
@@ -1083,8 +1254,13 @@ export async function hydrate(): Promise<Hydrated> {
   for (const row of componentRows) {
     const c = byId.get(row.canvasId)
     if (!c) continue
-    const { canvasId: _canvasId, code, source, ...def } = row
-    ;(c.components ??= []).push({ ...def, ...(code ? { code } : {}), ...(source ? { source } : {}) })
+    const { canvasId: _canvasId, code, source, status, deletedAt, deletedBy, ...def } = row
+    ;(c.components ??= []).push({
+      ...def,
+      ...(code ? { code } : {}),
+      ...(source ? { source } : {}),
+      ...(status === 'deleted' ? { status, deletedAt: deletedAt ?? def.updatedAt, deletedBy: deletedBy ?? '' } : {}),
+    })
   }
   for (const g of guidelineRows) {
     const c = byId.get(g.canvasId)
@@ -1156,6 +1332,7 @@ export async function hydrate(): Promise<Hydrated> {
       ...scopeField(row.scope),
       ...(row.frameIds ? { frameIds: row.frameIds.split(',').filter(Boolean) } : {}),
       ...runnerField(row.runner),
+      ...(row.reply != null ? { reply: row.reply } : {}),
     })
     tasks.set(row.canvasId, list)
   }
@@ -1164,10 +1341,12 @@ export async function hydrate(): Promise<Hydrated> {
   for (const row of feedbackRows) {
     const list = feedback.get(row.canvasId) ?? []
     if (list.length >= LOG_CAP) continue
-    /* only resident agents run in-process; feedback claimed by an outside MCP
-       agent may still be in flight elsewhere, so it is left alone */
+    /* only resident runs are in-process; feedback claimed by an outside MCP
+       agent may still be in flight elsewhere, so it is left alone. The claim
+       records which it was, since a custom agent may share an outside agent's
+       name; a claim from before that record could only be a built-in's */
     const interrupted =
-      roleByAgentName(row.claimedBy ?? undefined) != null &&
+      (row.claimedByResident ?? roleByAgentName(row.claimedBy ?? undefined, AGENT_ROLES) != null) &&
       row.deliveredAt != null &&
       row.completedAt == null &&
       row.failedAt == null
@@ -1187,9 +1366,11 @@ export async function hydrate(): Promise<Hydrated> {
       at: row.at,
       ...(row.deliveredAt != null ? { deliveredAt: row.deliveredAt } : {}),
       ...(row.claimedBy != null ? { claimedBy: row.claimedBy } : {}),
+      ...(row.claimedByResident != null ? { claimedByResident: row.claimedByResident } : {}),
       ...(row.completedAt != null ? { completedAt: row.completedAt } : {}),
       ...(failedAt !== undefined ? { failedAt } : {}),
       ...(failureReason !== undefined ? { failureReason } : {}),
+      ...(row.reply != null ? { reply: row.reply } : {}),
     })
     feedback.set(row.canvasId, list)
   }

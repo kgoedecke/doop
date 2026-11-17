@@ -1,21 +1,22 @@
 import { useMemo, useState } from 'react'
-import { BIND_ATTR, SLOT_ATTR, type ComponentProp } from '../../shared/components'
+import { BIND_ATTR, SLOT_ATTR, isDeleted, type ComponentProp } from '../../shared/components'
 import type { Frame } from '../../shared/types'
 import { api } from '../lib/api'
 import {
   changeInstance,
   componentContextOf,
   exposeOnMain,
+  restoreDeletedComponent,
   templateValue,
   type ComponentContext,
 } from '../lib/components'
 import { useT } from '../lib/i18n'
 import { isLayerLocked } from '../lib/layerEdits'
-import { useStore } from '../lib/store'
+import { canEditOpenCanvas, useStore } from '../lib/store'
 import { Button } from './ui/button'
 import { ComponentIcon } from './ui/icons'
-import { Input } from './ui/input'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select'
+import { ImagePicker } from './ImageFill'
+import { PropertyRow, SelectField, TextField } from './ui/property-field'
 import { Switch } from './ui/switch'
 import { Textarea } from './ui/textarea'
 
@@ -26,11 +27,8 @@ export function ComponentSection({ frame, selector }: { frame: Frame; selector: 
   const context = useMemo(() => componentContextOf(frame.html, selector, defs ?? []), [frame.html, selector, defs])
   if (!context) return null
   return (
-    <section
-      data-slot="component-section"
-      className="mb-3 flex flex-col gap-2.5 border-b border-line-soft px-3.5 pt-1 pb-3.5"
-    >
-      <header className="flex min-w-0 items-center gap-1.5 text-body font-medium text-ink">
+    <section data-slot="component-section" className="flex flex-col border-b border-line-soft px-3 pt-3 pb-2.5">
+      <header className="mb-[5px] flex min-h-5 min-w-0 items-center gap-1.5 text-body font-medium text-ink">
         <ComponentIcon size="rail" className="flex-none text-brand" />
         <span className="truncate">{context.def.name}</span>
         <span className="ml-auto flex-none text-caption font-normal text-ink-faint">
@@ -39,10 +37,50 @@ export function ComponentSection({ frame, selector }: { frame: Frame; selector: 
       </header>
       {context.kind === 'main' ? (
         <MainControls key={context.def.id} frame={frame} context={context} />
+      ) : isDeleted(context.def) ? (
+        <DeletedInstanceControls frame={frame} context={context} />
       ) : (
         <InstanceControls frame={frame} context={context} />
       )}
     </section>
+  )
+}
+
+/** An instance whose component was deleted: it keeps its look and follows nothing, until the
+ *  component is restored (every instance is linked again) or this one is detached. */
+function DeletedInstanceControls({
+  frame,
+  context,
+}: {
+  frame: Frame
+  context: Extract<ComponentContext, { kind: 'instance' }>
+}) {
+  const { def, instanceId, rootSelector } = context
+  const t = useT()
+  const canEdit = useStore(canEditOpenCanvas)
+  const locked = isLayerLocked(frame, rootSelector)
+  return (
+    <div data-slot="deleted-component" className="flex flex-col gap-2">
+      <p className="text-caption font-medium text-ink">{t('components.mainDeleted')}</p>
+      <p className="text-caption text-ink-soft">{t('components.mainDeletedHint')}</p>
+      {canEdit && (
+        <div className="flex flex-wrap gap-1.5">
+          <Button size="sm" onClick={() => void restoreDeletedComponent(def)}>
+            {t('components.restoreComponent')}
+          </Button>
+          <Button
+            size="sm"
+            disabled={locked}
+            onClick={() => {
+              const current = useStore.getState().canvas?.frames.find((f) => f.id === frame.id)
+              if (current) void changeInstance(current, { instanceId, detach: true })
+            }}
+          >
+            {t('components.detach')}
+          </Button>
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -62,6 +100,7 @@ function InstanceControls({
         <Button
           size="inline"
           variant="link"
+          className="self-start"
           onClick={() => useStore.getState().setSelectedElement({ frameId: frame.id, selector: rootSelector })}
         >
           {t('components.selectInstance')}
@@ -70,11 +109,18 @@ function InstanceControls({
       {def.props.map((prop) => (
         <PropField
           key={`${instanceId}:${prop.name}`}
+          canvasId={frame.canvasId}
           prop={prop}
           disabled={locked}
           value={context.props[prop.name]}
           fallback={prop.default ?? (prop.type === 'boolean' ? 'true' : templateValue(def, prop.name))}
-          onChange={(value) => void changeInstance(frame, { instanceId, props: { [prop.name]: value } })}
+          onChange={(value) => {
+            /* the frame as it is now: an image pick waits on an upload, and undo's baseline
+               and the lock check must not be the design from before it */
+            const current = useStore.getState().canvas?.frames.find((f) => f.id === frame.id)
+            if (!current || isLayerLocked(current, selector)) return
+            void changeInstance(current, { instanceId, props: { [prop.name]: value } })
+          }}
         />
       ))}
     </>
@@ -82,12 +128,14 @@ function InstanceControls({
 }
 
 function PropField({
+  canvasId,
   prop,
   value,
   fallback,
   disabled,
   onChange,
 }: {
+  canvasId: string
   prop: ComponentProp
   disabled: boolean
   value: string | undefined
@@ -95,64 +143,60 @@ function PropField({
   onChange: (value: string) => void
 }) {
   const shown = value ?? fallback
-  const [draft, setDraft] = useState(shown)
-  const [seen, setSeen] = useState(shown)
-  if (seen !== shown) {
-    setSeen(shown)
-    setDraft(shown)
+  return <PropertyRow label={prop.name}>{propControl()}</PropertyRow>
+
+  function propControl() {
+    switch (prop.type) {
+      case 'boolean':
+        return (
+          <Switch
+            size="sm"
+            className="my-auto"
+            disabled={disabled}
+            checked={shown !== 'false'}
+            onCheckedChange={(checked) => onChange(checked ? 'true' : 'false')}
+            aria-label={prop.name}
+          />
+        )
+      case 'enum':
+        return (
+          <SelectField
+            label={prop.name}
+            value={shown}
+            disabled={disabled}
+            options={(prop.options ?? []).map((option) => ({ value: option, label: option }))}
+            onChange={onChange}
+          />
+        )
+      case 'image':
+        return (
+          <ImagePicker
+            canvasId={canvasId}
+            src={shown}
+            label={prop.name}
+            disabled={disabled}
+            className="h-[26px] min-w-0 flex-1 gap-1.5 rounded-row px-[3px] text-caption"
+            onPick={async (resolve) => {
+              const url = await resolve()
+              if (url !== shown) onChange(url)
+            }}
+            onClear={() => onChange('')}
+          />
+        )
+      case 'text':
+      case 'link':
+        return (
+          <TextField
+            label={prop.name}
+            value={shown}
+            disabled={disabled}
+            className={prop.type === 'text' ? 'font-sans' : undefined}
+            placeholder={prop.type === 'link' ? 'https://…' : undefined}
+            onCommit={onChange}
+          />
+        )
+    }
   }
-  const label = <span className="text-caption text-ink-soft">{prop.name}</span>
-  if (prop.type === 'boolean') {
-    return (
-      <label className="flex items-center justify-between gap-2">
-        {label}
-        <Switch
-          size="sm"
-          disabled={disabled}
-          checked={shown !== 'false'}
-          onCheckedChange={(checked) => onChange(checked ? 'true' : 'false')}
-          aria-label={prop.name}
-        />
-      </label>
-    )
-  }
-  if (prop.type === 'enum') {
-    return (
-      <label className="flex flex-col gap-1">
-        {label}
-        <Select value={shown} disabled={disabled} onValueChange={onChange}>
-          <SelectTrigger size="sm" aria-label={prop.name}>
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {(prop.options ?? []).map((option) => (
-              <SelectItem key={option} value={option}>
-                {option}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </label>
-    )
-  }
-  const commit = () => {
-    if (draft !== shown) onChange(draft)
-  }
-  return (
-    <label className="flex flex-col gap-1">
-      {label}
-      <Input
-        value={draft}
-        disabled={disabled}
-        aria-label={prop.name}
-        onChange={(event) => setDraft(event.target.value)}
-        onBlur={commit}
-        onKeyDown={(event) => {
-          if (event.key === 'Enter') event.currentTarget.blur()
-        }}
-      />
-    </label>
-  )
 }
 
 function MainControls({ frame, context }: { frame: Frame; context: Extract<ComponentContext, { kind: 'main' }> }) {
@@ -179,7 +223,7 @@ function MainControls({ frame, context }: { frame: Frame; context: Extract<Compo
       .catch(() => useStore.getState().pushNotice(t('components.descriptionFailed')))
   }
   return (
-    <>
+    <div className="flex flex-col gap-2.5">
       <p className="text-caption text-ink-soft">
         {instances === 0 ? t('components.noInstances') : t('components.reachesInstances', { count: instances })}
       </p>
@@ -207,6 +251,6 @@ function MainControls({ frame, context }: { frame: Frame; context: Extract<Compo
           </Button>
         </div>
       )}
-    </>
+    </div>
   )
 }

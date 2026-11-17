@@ -4,7 +4,7 @@ import type { Canvas, Frame } from '../shared/types.ts'
 import { readingOrder } from '../shared/frameOrder.ts'
 import { canvasPages, pageFrames } from '../shared/pages.ts'
 import { MAX_PDF_FRAMES, PDF_RENDER_CONCURRENCY } from '../shared/pdfLimits.ts'
-import { findBrowserPath, loadFramePage } from './screenshot.ts'
+import { loadFramePage, rendererAvailable } from './screenshot.ts'
 
 /**
  * Vector PDF export: each frame prints through headless Chrome onto one page
@@ -36,7 +36,7 @@ export class PdfRendererUnavailableError extends Error {
 }
 
 export function pdfRendererAvailable(): boolean {
-  return findBrowserPath() !== null
+  return rendererAvailable()
 }
 
 interface PageSize {

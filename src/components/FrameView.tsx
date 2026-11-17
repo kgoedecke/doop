@@ -4,6 +4,7 @@ import type { ElementComment, Frame } from '../../shared/types'
 import { canEditOpenCanvas, pickedSelectors, useStore } from '../lib/store'
 import { isCanvasElement } from '../lib/drawing'
 import { isLayerLocked, standaloneSelector } from '../lib/layerEdits'
+import { documentRect } from '../lib/frameBleed'
 import { drawingDropFrame, moveDrawing, type DrawingHit } from '../lib/drawingMove'
 import { useElementMove } from './ElementMove'
 import { FrameLabelLayer } from './FrameLabelLayer'
@@ -26,7 +27,6 @@ import { resolvePointerAction } from '../lib/tools'
 import { FrameContextMenu } from './FrameContextMenu'
 import { FrameApprovalBadge } from './FrameApproval'
 import { ElementContextMenu, type LiveHit } from './ElementContextMenu'
-import { CodePanel } from './CodePanel'
 import { TextFormatToolbar } from './TextFormatToolbar'
 import type { TextFormatState } from '../lib/richText'
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from './ui/context-menu'
@@ -40,7 +40,7 @@ import { elementIdSelector } from '../../shared/elementId'
 import { cn } from '@/lib/utils'
 import { Button } from './ui/button'
 import { Tooltip } from './ui/tooltip'
-import { CodeIcon, CommentIcon, EditIcon, EyeClosedIcon, GithubIcon, LockIcon, SyncIcon, SparkIcon } from './ui/icons'
+import { CommentIcon, EditIcon, EyeClosedIcon, GithubIcon, LockIcon, SyncIcon, SparkIcon } from './ui/icons'
 import { isSyncedFrame } from '../lib/sync'
 import { isGithubFrame, isGithubPlaceholder } from '../lib/github'
 import { AgentIcon } from './AgentIcon'
@@ -400,7 +400,11 @@ export const FrameView = memo(function FrameView({
           if (released) drag?.up()
         },
         (selector) => {
-          void enterElementEdit({ selector })
+          /* a double-click on a picked group goes into it, else edits */
+          const at = designOffset(e, frame.rotation)
+          void enterGroup(at).then((entered) => {
+            if (!entered) void enterElementEdit({ selector })
+          })
         },
         (hit) => {
           clearHover()
@@ -435,7 +439,13 @@ export const FrameView = memo(function FrameView({
     } else if (!useStore.getState().selectedIds.includes(frame.id)) {
       /* clicking a frame already in a group keeps the group — the drag
          moves all of them */
+      const panelShowing = useStore.getState().elementPanelOpen && !!useStore.getState().selectedElement
       select(frame.id)
+      /* a standalone shape is the whole of its shell: with the element panel
+         up, the press picks it at once, so the panel swaps to it in place
+         instead of closing until the click's probe answers a beat later */
+      const shape = panelShowing && mode === 'move' && probeOnClick ? standaloneSelector(frame) : null
+      if (shape) useStore.getState().pickElement({ frameId: frame.id, selector: shape })
     } else if (panelOnClick && useStore.getState().selectedElement?.frameId === frame.id) {
       /* grabbing the title bar while one of its elements is picked means
          "the whole frame now" — drop the element selection */
@@ -803,8 +813,13 @@ export const FrameView = memo(function FrameView({
      flipped or shifted it away from a viewport edge */
   const menuAt = useRef({ x: 0, y: 0 })
   const [runtimeReady, setRuntimeReady] = useState(false)
+  /* the margin the iframe reaches past a standalone shape's box, so a stroke
+     spills past it as in Figma (the runtime asks, see `bleed` there) */
+  const [bleed, setBleed] = useState(0)
   /* the port the runtime relays keys over; see `replayKey` */
   const keyPort = useRef<MessagePort | null>(null)
+  /* saves a document the runtime serialized after a text edit (set below) */
+  const saveEditedRef = useRef<(html: string, discrete: boolean) => void>(() => {})
   useEffect(() => {
     /* a key pressed while the focus sits in this frame's document: replay
        it on the iframe, where it bubbles to the canvas shortcuts as if the
@@ -815,7 +830,13 @@ export const FrameView = memo(function FrameView({
     function replayKey(ev: MessageEvent) {
       const iframe = iframeRef.current
       if (!iframe || document.activeElement !== iframe || !document.hasFocus()) return
-      const relay = ev.data as Partial<KeyRelay> | undefined
+      const relay = ev.data as Partial<KeyRelay> | { event: 'edited'; html?: unknown } | undefined
+      /* text typed just before a key that leaves the canvas (⌘1…⌘9): sent
+         down this same port ahead of the key, so it is saved first */
+      if (relay?.event === 'edited') {
+        if (typeof relay.html === 'string') saveEditedRef.current(relay.html, false)
+        return
+      }
       if (!relay || (relay.event !== 'keydown' && relay.event !== 'keyup')) return
       if (typeof relay.key !== 'string' || typeof relay.code !== 'string') return
       const { event, key, code } = relay
@@ -847,6 +868,10 @@ export const FrameView = memo(function FrameView({
         }
         setRuntimeReady(true)
       }
+      if (ev.data?.type === 'doop:bleed-want' && win && ev.source === win) {
+        const px = Number((ev.data as { px?: unknown }).px)
+        setBleed(Number.isFinite(px) ? Math.min(1024, Math.max(0, px)) : 0)
+      }
     }
     window.addEventListener('message', onMsg)
     return () => {
@@ -855,6 +880,10 @@ export const FrameView = memo(function FrameView({
       keyPort.current = null
     }
   }, [])
+  /* the runtime insets its body by the margin once the iframe has grown by it */
+  useLayoutEffect(() => {
+    if (runtimeReady) iframeRef.current?.contentWindow?.postMessage({ type: 'doop:bleed', px: bleed }, '*')
+  }, [runtimeReady, bleed])
   /* once the runtime answers, the element panel may talk to this document */
   useEffect(() => {
     const win = iframeRef.current?.contentWindow
@@ -926,6 +955,16 @@ export const FrameView = memo(function FrameView({
   const [nameHovered, setNameHovered] = useState(false)
   const frameCommentHover = nameHovered && tool === 'comment'
   const [openThread, setOpenThread] = useState<string | null>(null)
+  /* a selected frame, or one with a comment thread open, takes its parts out
+     of its own stacking context so its chrome (selection, an open thread) can
+     paint above every frame on the page; a frame in front never covers it */
+  const lifted = selected || openThread !== null
+  /* lifted, the frame's parts take its place in the stack one by one, so its
+     chrome can rise above the whole page. A turned frame cannot do that: its
+     wrapper's transform is a stacking context of its own whatever its
+     z-index, so it keeps its place, and the whole frame rises while a thread
+     is open, since nothing in front may cover the conversation */
+  const wrapperZ = !lifted ? stack : !frame.rotation ? undefined : openThread !== null ? SELECTION_CHROME_Z : stack
   const [linkedThread, setLinkedThread] = useState<string | null>(deepLinkedThread)
   const [pinPos, setPinPos] = useState<Record<string, { x: number; y: number } | null>>({})
   const probeReq = useRef(0)
@@ -954,7 +993,10 @@ export const FrameView = memo(function FrameView({
     if (!force && now - hoverLast.current < 40) return
     hoverLast.current = now
     hoverReq.current += 1
-    iframeRef.current?.contentWindow?.postMessage({ type: 'doop:hover', reqId: hoverReq.current, x, y }, '*')
+    iframeRef.current?.contentWindow?.postMessage(
+      { type: 'doop:hover', reqId: hoverReq.current, x, y, selected: pickedHere() },
+      '*',
+    )
   }
 
   function clearHover() {
@@ -1008,15 +1050,8 @@ export const FrameView = memo(function FrameView({
     if (!layerHover) setHover(null)
   }
 
-  /* source view + composer prefill for the element toolbar */
-  const [codeView, setCodeView] = useState<string | null>(null)
+  /* composer prefill for the element toolbar */
   const [composePrefill, setComposePrefill] = useState('')
-  const codeReq = useRef(0)
-
-  function requestCode(selector: string) {
-    codeReq.current += 1
-    iframeRef.current?.contentWindow?.postMessage({ type: 'doop:code', reqId: codeReq.current, selector }, '*')
-  }
 
   function cancelProbe() {
     probeReq.current += 1
@@ -1031,7 +1066,6 @@ export const FrameView = memo(function FrameView({
     cancelProbe()
     setComposing(false)
     setComposePrefill('')
-    setCodeView(null)
     setOpenThread(null)
   }
 
@@ -1056,6 +1090,13 @@ export const FrameView = memo(function FrameView({
   /* delayed slightly so the second click of a double-click (→ edit mode)
      cancels it instead of flashing the toolbar; a comment click has no
      double-click to wait out, so it probes at once */
+  /* the layers picked in this frame, which tell the runtime how deep in its
+     groups a click lands */
+  function pickedHere(): string[] {
+    const s = useStore.getState()
+    return s.selectedElement?.frameId === frame.id ? pickedSelectors(s) : []
+  }
+
   function probeAt(x: number, y: number, intent: ProbeIntent = 'toolbar') {
     if (!frame.html || editing) return
     /* the current pick stays until the probe answers: clearing it here would
@@ -1068,7 +1109,11 @@ export const FrameView = memo(function FrameView({
       () => {
         probeTimer.current = null
         probeReq.current += 1
-        iframeRef.current?.contentWindow?.postMessage({ type: 'doop:probe', reqId: probeReq.current, x, y }, '*')
+        /* a click picks a group as a whole; the Comment tool pins to what is under it */
+        iframeRef.current?.contentWindow?.postMessage(
+          { type: 'doop:probe', reqId: probeReq.current, x, y, grouped: intent !== 'comment', selected: pickedHere() },
+          '*',
+        )
       },
       intent === 'toolbar' ? 250 : 0,
     )
@@ -1333,9 +1378,6 @@ export const FrameView = memo(function FrameView({
            so it can't take back a pick made in Layers meanwhile. */
         if (hit) setProbe((p) => (moved || p?.selector === hit.selector ? hit : p))
       }
-      if (ev.data?.type === 'doop:code-result' && ev.data.reqId === codeReq.current) {
-        setCodeView(typeof ev.data.html === 'string' ? ev.data.html : null)
-      }
       if (ev.data?.type === 'doop:located' && typeof ev.data.reqId === 'string') {
         if (ev.data.reqId === '__layer-hover__') {
           /* the pointer may have left the row while the runtime looked: a late
@@ -1402,6 +1444,21 @@ export const FrameView = memo(function FrameView({
   /* ---- inline text editing ---- */
   const canEdit = !!frame.html && !stream && !frame.locked && !readOnly && !/<script/i.test(frame.html)
 
+  async function enterGroup(at: { x: number; y: number }): Promise<boolean> {
+    const selected = pickedHere()
+    if (!selected.length) return false
+    const reply = await requestFrame(frame.id, 'doop:enter-group', { ...at, selected })
+    const hit = reply?.hit as ProbeHit | null | undefined
+    if (!hit || typeof hit.selector !== 'string') return false
+    /* the pending single-click probe would put the group back */
+    if (probeTimer.current !== null) window.clearTimeout(probeTimer.current)
+    probeTimer.current = null
+    probeReq.current += 1
+    useStore.getState().pickElement({ frameId: frame.id, selector: hit.selector })
+    setProbe({ ...hit, point: at })
+    return true
+  }
+
   async function enterElementEdit(where: { x: number; y: number } | { selector: string }) {
     if (
       !frame.html ||
@@ -1414,6 +1471,8 @@ export const FrameView = memo(function FrameView({
     )
       return
     const request = ++editRequest.current
+    /* a double-click on a picked group goes into it, as in a design tool */
+    if ('x' in where && (await enterGroup(where))) return
     const canvasId = useStore.getState().canvas?.id
     const pageId = useStore.getState().activePageId
     const path = await loadPathEdit(frame, where)
@@ -1448,7 +1507,7 @@ export const FrameView = memo(function FrameView({
       probeIntent.current = 'toolbar'
       probeReq.current += 1
       iframeRef.current?.contentWindow?.postMessage(
-        { type: 'doop:probe', reqId: probeReq.current, x: at.x, y: at.y },
+        { type: 'doop:probe', reqId: probeReq.current, x: at.x, y: at.y, grouped: true, selected: pickedHere() },
         '*',
       )
     }
@@ -1485,27 +1544,31 @@ export const FrameView = memo(function FrameView({
 
   /* serialized edits stream out of the iframe; save through the human path */
   useEffect(() => {
+    function saveEdited(edited: string, discrete: boolean) {
+      // The runtime already has this document. Echoing it through the HTML
+      // throttle can overwrite a newer style edit still waiting to save.
+      localHtml.current = edited
+      setRuntimeDocument({ html: edited, request: ++htmlRequest.current })
+      noteFrameDocument(frame.id, edited)
+      /* a newly used library font brings its @font-face along, a hosted one
+         its stylesheet link; the saved
+         document then differs from the runtime's, so the post effect sends
+         it back in and the face loads at once */
+      const library = canvasFonts()
+      const canvas = useStore.getState().canvas
+      /* tokens first, so a family named through a font token is seen by the font scan */
+      const withTokens = withTokenBlock(edited, canvas?.tokens ?? [], canvas?.tokenThemes ?? [])
+      const html = withWebFontLinks(withFontFaces(withTokens, library), library)
+      const before = useStore.getState().canvas?.frames.find((f) => f.id === frame.id)?.html
+      useStore.getState().patchFrameLocal(frame.id, { html })
+      trackSave(api.updateFrame(frame.id, { html }).catch(console.error))
+      if (before !== undefined) recordUpdate(frame.id, { html: before }, { html }, discrete)
+    }
+    saveEditedRef.current = saveEdited
     function onMsg(ev: MessageEvent) {
       if (ev.source !== iframeRef.current?.contentWindow) return
       if (ev.data?.type === 'doop:edited' && typeof ev.data.html === 'string') {
-        // The runtime already has this document. Echoing it through the HTML
-        // throttle can overwrite a newer style edit still waiting to save.
-        localHtml.current = ev.data.html
-        setRuntimeDocument({ html: ev.data.html, request: ++htmlRequest.current })
-        noteFrameDocument(frame.id, ev.data.html)
-        /* a newly used library font brings its @font-face along, a hosted one
-           its stylesheet link; the saved
-           document then differs from the runtime's, so the post effect sends
-           it back in and the face loads at once */
-        const library = canvasFonts()
-        const canvas = useStore.getState().canvas
-        /* tokens first, so a family named through a font token is seen by the font scan */
-        const withTokens = withTokenBlock(ev.data.html, canvas?.tokens ?? [], canvas?.tokenThemes ?? [])
-        const html = withWebFontLinks(withFontFaces(withTokens, library), library)
-        const before = useStore.getState().canvas?.frames.find((f) => f.id === frame.id)?.html
-        useStore.getState().patchFrameLocal(frame.id, { html })
-        trackSave(api.updateFrame(frame.id, { html }).catch(console.error))
-        if (before !== undefined) recordUpdate(frame.id, { html: before }, { html }, ev.data.discrete === true)
+        saveEdited(ev.data.html, ev.data.discrete === true)
       }
       if (ev.data?.type === 'doop:edit-esc') {
         setEditing(false)
@@ -1523,7 +1586,7 @@ export const FrameView = memo(function FrameView({
         window.requestAnimationFrame(() => {
           const surface = surfaceRef.current
           if (!surface) return
-          const rect = iframeRef.current?.getBoundingClientRect() ?? surface.getBoundingClientRect()
+          const rect = documentRect(iframeRef.current) ?? surface.getBoundingClientRect()
           const zoom = useStore.getState().viewport.zoom
           surface.dispatchEvent(
             new MouseEvent('contextmenu', {
@@ -1592,9 +1655,7 @@ export const FrameView = memo(function FrameView({
               height: frame.height,
               /* the whole frame turns about its centre: surface, name, grips */
               transform: frame.rotation ? `rotate(${frame.rotation}deg)` : undefined,
-              /* selected, the frame's parts take its place in the stack one by
-                 one, so its selection chrome can rise above the whole page */
-              zIndex: selected ? undefined : stack,
+              zIndex: wrapperZ,
               '--editing-color': stream?.color ?? remoteEditor?.color ?? flash?.color,
             } as React.CSSProperties
           }
@@ -1623,7 +1684,7 @@ export const FrameView = memo(function FrameView({
             }
             menuKind.current = 'element'
             setMenuTarget('loading')
-            const rect = iframeRef.current?.getBoundingClientRect() ?? surface.getBoundingClientRect()
+            const rect = documentRect(iframeRef.current) ?? surface.getBoundingClientRect()
             const zoom = useStore.getState().viewport.zoom
             setMenuProbe({
               request,
@@ -1678,7 +1739,7 @@ export const FrameView = memo(function FrameView({
                 transform: `scale(calc(1 / var(--zoom, 1))) translateY(-${LABEL_GAP}px)`,
                 cursor: duping || dupKeyHeld ? DUP_CURSOR : undefined,
                 /* the frame's place in the stack, while its wrapper gives it up */
-                zIndex: selected ? stack : undefined,
+                zIndex: lifted ? stack : undefined,
               }}
               onPointerDown={(e) => startDrag(e, 'move', false, true)}
               onPointerEnter={() => setNameHovered(true)}
@@ -1736,7 +1797,11 @@ export const FrameView = memo(function FrameView({
                   .filter((p) => p.name !== stream?.name)
                   .map((p) => (
                     <span key={p.clientId} className={EDITOR_CHIP} style={{ background: p.color }} title={p.name}>
-                      {p.kind === 'agent' ? <AgentIcon name={p.name} size={9} color="#fff" /> : <EditIcon size={9} />}
+                      {p.kind === 'agent' ? (
+                        <AgentIcon name={p.name} brand={p.brand} size={9} color="#fff" />
+                      ) : (
+                        <EditIcon size={9} />
+                      )}
                       <span className={EDITOR_CHIP_TEXT}>{p.name}</span>
                     </span>
                   ))}
@@ -1764,7 +1829,9 @@ export const FrameView = memo(function FrameView({
             data-frame-surface=""
             ref={surfaceRef}
             className={cn(
-              'absolute inset-0 overflow-hidden',
+              /* a standalone shape's stroke spills past its box */
+              'absolute inset-0',
+              !isCanvasElement(frame.html) && 'overflow-hidden',
               /* the white a design without a background sits on, one screen
                  pixel in from the edge: painted to the edge, it showed past the
                  scaled iframe's antialiased edge as a light seam */
@@ -1798,7 +1865,7 @@ export const FrameView = memo(function FrameView({
               /* only while selected, when the wrapper gives up its place: inside
                  an unselected frame's own stacking context a z-index here would
                  cover the frame's pins and hover outlines */
-              zIndex: selected ? stack : undefined,
+              zIndex: lifted ? stack : undefined,
             }}
             onPointerDown={(e) => startDrag(e, 'move', true)}
             onDoubleClick={(e) => {
@@ -1829,14 +1896,23 @@ export const FrameView = memo(function FrameView({
             }}
             onPointerLeave={leaveHover}
           >
-            <iframe
-              ref={iframeRef}
-              className="relative block border-none bg-transparent"
-              title={frame.name}
-              data-doop-frame=""
-              sandbox="allow-scripts"
-              srcDoc={FRAME_BOOTSTRAP}
-              /* The world is laid out at CSS zoom k (Stage), which an iframe
+            {/* always there, so the iframe never moves in the DOM (that reloads
+                it): it carries the iframe out by the bleed margin */}
+            <div
+              className="relative"
+              /* the margin is drawn, never pointed at: presses outside the box
+                 belong to the canvas, so neither this box nor the iframe takes them */
+              style={{ left: -bleed, top: -bleed, ...(bleed ? { pointerEvents: 'none' } : null) }}
+            >
+              <iframe
+                ref={iframeRef}
+                className="relative block border-none bg-transparent"
+                data-bleed={bleed || undefined}
+                title={frame.name}
+                data-doop-frame=""
+                sandbox="allow-scripts"
+                srcDoc={FRAME_BOOTSTRAP}
+                /* The world is laid out at CSS zoom k (Stage), which an iframe
                  passes into its document. Chromium takes it as pixel density:
                  the document keeps its design-px viewport and rasterizes at
                  k×, even out of process, where a transform on this element
@@ -1844,21 +1920,24 @@ export const FrameView = memo(function FrameView({
                  document out at the zoomed width, so there the zoom is undone
                  here (keeping viewport, vh/vw, media queries and runtime rects
                  in design px) and the scale restores the box. */
-              style={{
-                width: frame.width,
-                height: frame.height,
-                ...(FRAME_DOCUMENTS_TAKE_ZOOM_AS_DENSITY
-                  ? null
-                  : { zoom: counterZoom(layoutZoom), transform: `scale(${layoutZoom})` }),
-                transformOrigin: '0 0',
-                /* Chromium paints an opaque backdrop behind an iframe whose
+                style={{
+                  width: frame.width + 2 * bleed,
+                  height: frame.height + 2 * bleed,
+                  /* while editing, the document takes the pointer back */
+                  ...(bleed ? { pointerEvents: editing ? 'auto' : 'none' } : null),
+                  ...(FRAME_DOCUMENTS_TAKE_ZOOM_AS_DENSITY
+                    ? null
+                    : { zoom: counterZoom(layoutZoom), transform: `scale(${layoutZoom})` }),
+                  transformOrigin: '0 0',
+                  /* Chromium paints an opaque backdrop behind an iframe whose
                    colour scheme differs from its document's; the page's dark
                    scheme reaches this element by inheritance while a
                    standalone element's document is light, so a shape on the
                    dark canvas sat on a white square */
-                ...(isCanvasElement(frame.html) ? { colorScheme: 'light' } : null),
-              }}
-            />
+                  ...(isCanvasElement(frame.html) ? { colorScheme: 'light' } : null),
+                }}
+              />
+            </div>
             {/* a standalone element is see-through: the paper's grid shows */}
             {!isCanvasElement(frame.html) && <PixelGrid layoutZoom={layoutZoom} />}
             {!frame.html && (
@@ -1878,7 +1957,7 @@ export const FrameView = memo(function FrameView({
           <div
             data-frame-chrome=""
             className="pointer-events-none absolute inset-0"
-            style={{ zIndex: selected ? SELECTION_CHROME_Z : undefined }}
+            style={{ zIndex: lifted ? SELECTION_CHROME_Z : undefined }}
           >
             {/* the frame's selection ring (not over an agent's stream, which has
               its own): two screen pixels straddling its edge, so on the pixel
@@ -2114,12 +2193,13 @@ export const FrameView = memo(function FrameView({
                             <div className="mb-1 flex w-fit rounded-control bg-ink p-1 shadow-pop">
                               <TextFormatToolbar
                                 state={textFormat}
-                                onFormat={(command) =>
+                                onFormat={(command) => {
+                                  posthog.capture('text_formatted', { command })
                                   iframeRef.current?.contentWindow?.postMessage(
                                     { type: 'doop:text-format', command },
                                     '*',
                                   )
-                                }
+                                }}
                               />
                             </div>
                           )}
@@ -2152,13 +2232,6 @@ export const FrameView = memo(function FrameView({
                             <Button
                               variant="inverse"
                               className={EL_TOOLBAR_BTN}
-                              onClick={() => (codeView === null ? requestCode(anchor.selector) : setCodeView(null))}
-                            >
-                              <CodeIcon size="button" /> {t('stage.code')}
-                            </Button>
-                            <Button
-                              variant="inverse"
-                              className={EL_TOOLBAR_BTN}
                               aria-label={t('stage.copyLinkToElement')}
                               onClick={() => void copyElementLink(frame, anchor)}
                             >
@@ -2176,7 +2249,6 @@ export const FrameView = memo(function FrameView({
                               </Button>
                             )}
                           </div>
-                          {codeView !== null && <CodePanel key={anchor.selector} code={codeView} />}
                         </>
                       ) : (
                         <CommentComposer

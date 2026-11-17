@@ -3,6 +3,7 @@ import { api, errorMessage } from './api'
 import { recordCreate, recordUpdates, trackSave } from './history'
 import { currentPageCanvas } from './pages'
 import { useStore } from './store'
+import { bodyPlacementOrigin } from './frameBridge'
 import { currentPaper } from './paper'
 import type { ResolvedTheme } from './theme'
 import type { DrawingTool } from './tools'
@@ -136,11 +137,12 @@ export function drawingElement(doc: Document, drawing: Drawing, standalone: bool
       : doc.createElement(drawing.tool === 'text' ? 'p' : 'div')
   el.setAttribute('data-doop-drawing', drawing.tool)
   el.setAttribute('data-name', names[drawing.tool])
-  // Fixed coordinates inside an existing iframe ignore the imported body's
-  // margins, positioning and layout. Standalone elements scale with their frame.
+  // Placed the way a design tool places a layer: absolute, by left and top
+  // from the frame's corner, so moves rewrite those and groups can lay the
+  // layers out as flex. Standalone elements fill, and scale with, their frame.
   el.setAttribute(
     'style',
-    `position:${standalone ? 'absolute' : 'fixed'};left:${standalone ? 0 : round(drawing.x)}px;top:${standalone ? 0 : round(drawing.y)}px;width:${standalone ? '100%' : `${round(drawing.width)}px`};height:${standalone ? '100%' : `${round(drawing.height)}px`};box-sizing:border-box;margin:0;`,
+    `position:absolute;left:${standalone ? 0 : round(drawing.x)}px;top:${standalone ? 0 : round(drawing.y)}px;width:${standalone ? '100%' : `${round(drawing.width)}px`};height:${standalone ? '100%' : `${round(drawing.height)}px`};margin:0;`,
   )
   if (drawing.tool === 'path') {
     el.setAttribute('viewBox', `0 0 ${round(drawing.width)} ${round(drawing.height)}`)
@@ -159,7 +161,7 @@ export function drawingElement(doc: Document, drawing: Drawing, standalone: bool
       style.cssText += `font:24px/1.4 Arial,sans-serif;color:${ink};white-space:pre-wrap;overflow-wrap:anywhere;`
       el.textContent = drawing.text ?? ''
     } else {
-      style.background = DRAWING_FILL
+      style.backgroundColor = DRAWING_FILL
       if (drawing.tool === 'circle') style.borderRadius = '50%'
     }
   }
@@ -188,16 +190,26 @@ export function saveDrawing(drawing: Drawing, target: DrawingTarget): Promise<vo
     // This gesture is complete. Navigation only cancels drafts; queued saves
     // still belong to their recorded canvas/page, not the current viewport.
     if (target.frameId) {
-      const canvas = s.canvas?.id === target.canvasId ? s.canvas : await api.getCanvas(target.canvasId)
+      /* absolute from the corner the body places its layers from, which a
+         positioned body with a margin moves off the frame's own; asked
+         before the frame is read, so no edit lands between the two */
+      const asked = bodyPlacementOrigin(target.frameId)
+      const at = asked instanceof Promise ? await asked : asked
+      /* the store as it is after that wait: an edit made meanwhile is the
+         document this drawing goes into */
+      const live = useStore.getState().canvas
+      const canvas = live?.id === target.canvasId ? live : await api.getCanvas(target.canvasId)
       const frame = canvas.frames.find((f) => f.id === target.frameId)
       if (!frame || frame.locked || frame.hidden) {
         s.pushNotice('Couldn’t add the drawing: its frame was deleted, locked, or hidden.')
         return
       }
       const doc = new DOMParser().parseFromString(frame.html, 'text/html')
-      const local = { ...drawing, x: drawing.x - frame.x, y: drawing.y - frame.y }
+      const dx = frame.x + at.x
+      const dy = frame.y + at.y
+      const local = { ...drawing, x: drawing.x - dx, y: drawing.y - dy }
       // Path points and bounds must use the same coordinate system.
-      local.points = drawing.points?.map((p) => ({ ...p, x: p.x - frame.x, y: p.y - frame.y }))
+      local.points = drawing.points?.map((p) => ({ ...p, x: p.x - dx, y: p.y - dy }))
       const el = drawingElement(doc, local, false)
       el.id = `doop-drawing-${crypto.randomUUID()}`
       doc.body.append(el)

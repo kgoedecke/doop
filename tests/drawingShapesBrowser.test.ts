@@ -412,7 +412,11 @@ describe.skipIf(!findBrowserPath())('drawing on the canvas', { timeout: 30_000 }
     expect(grown.height).toBeGreaterThan(edited.height)
     /* the rendered path follows the shell: no empty band, no clipping */
     const after = await visibleDrawing('Pen', 'svg')
-    const shell = (await (await page.$('iframe[title="Pen"]'))!.boundingBox())!
+    /* the shell is the frame's surface: the iframe reaches past it by the margin a stroke bleeds into */
+    const surface = await page.evaluateHandle(() =>
+      document.querySelector('iframe[title="Pen"]')!.closest('[data-frame-surface]'),
+    )
+    const shell = (await surface.asElement()!.boundingBox())!
     expect(after.width).toBeCloseTo(shell.width, 0)
     expect(after.height).toBeCloseTo(shell.height, 0)
   })
@@ -673,6 +677,23 @@ describe.skipIf(!findBrowserPath())('drawing on the canvas', { timeout: 30_000 }
     /* typing while editing stays in the text */
     await page.keyboard.press('r')
     expect(await page.evaluate(() => window.drawingHarness.state().tool)).toBe('select')
+    /* ⌘1…⌘9 still reach the page, for the desktop shell's tab switching */
+    await page.evaluate(() => {
+      document.addEventListener('keydown', (e) => {
+        if (e.code === 'Digit2') document.documentElement.dataset.tabKey = String(e.metaKey || e.ctrlKey)
+      })
+    })
+    /* and the text typed just before one is saved ahead of it, not 400ms
+       later on a canvas the shell has already left */
+    const typed = await iframe.$eval('#text', (el) => el.textContent)
+    await page.keyboard.press('q')
+    const tabMod = process.platform === 'darwin' ? 'Meta' : 'Control'
+    await page.keyboard.down(tabMod)
+    await page.keyboard.press('Digit2')
+    await page.keyboard.up(tabMod)
+    await page.waitForFunction(() => document.documentElement.dataset.tabKey === 'true')
+    await expect.poll(() => saved[0]?.html, { timeout: 250 }).toContain(`${typed}q<`)
+    expect(await iframe.$eval('#text', (el) => el.textContent)).toBe(`${typed}q`)
     await page.keyboard.press('Escape')
     await iframe.waitForFunction(() => !document.querySelector('style[data-v-edit]'))
     /* the Escape that ended editing is not also the canvas's Escape */
@@ -795,5 +816,70 @@ describe.skipIf(!findBrowserPath())('drawing on the canvas', { timeout: 30_000 }
     await page.click('[data-drawing-hint] button')
     expect((await waitForFrames(2))[1]!.html).toContain(' C ')
     await page.screenshot({ path: '/tmp/doop-canvas-curves-mobile.png' })
+  })
+
+  it('paints a standalone path thick stroke past its box, and keeps the box', async () => {
+    const pen: Frame = {
+      id: 'thick',
+      canvasId: 'c',
+      pageId: 'first',
+      name: 'Thick',
+      x: 60,
+      y: 60,
+      width: 100,
+      height: 100,
+      createdAt: 0,
+      updatedAt: 0,
+      updatedBy: 'User',
+      html:
+        '<!doctype html><html style="width:100%;height:100%;margin:0"><head></head>' +
+        '<body data-doop-canvas-element="true" style="width:100%;height:100%;margin:0">' +
+        '<svg data-doop-drawing="path" data-name="Path" viewBox="0 0 100 100" preserveAspectRatio="none" ' +
+        'style="position:absolute;left:0;top:0;width:100%;height:100%;margin:0">' +
+        '<path d="M0 0 L100 50 L0 100" fill="#aaff33" stroke="#ff3322" stroke-width="30" stroke-linejoin="round"></path>' +
+        '</svg></body></html>',
+    }
+    await seedFrames([pen])
+    const iframe = await page.waitForSelector('iframe[title="Thick"][data-bleed]')
+    /* half the 30px stroke past a box edge the path runs along: 15px, in a 16px step */
+    expect(await iframe!.evaluate((el) => (el as HTMLElement).dataset.bleed)).toBe('16')
+    /* the shape itself still fills exactly the frame's box on the canvas */
+    const surface = (await (
+      await page.evaluateHandle(() => document.querySelector('iframe[title="Thick"]')!.closest('[data-frame-surface]'))
+    )
+      .asElement()!
+      .boundingBox())!
+    const svg = await visibleDrawing('Thick', 'svg')
+    expect(svg.x).toBeCloseTo(surface.x, 0)
+    expect(svg.y).toBeCloseTo(surface.y, 0)
+    expect(svg.width).toBeCloseTo(surface.width, 0)
+    if (process.env.BLEED_SHOT) await page.screenshot({ path: process.env.BLEED_SHOT })
+    /* and the stroke shows past the box: the round join, 5 design px right of its edge
+       (polled: the grown iframe may not have repainted yet) */
+    const redPastBox = async () => {
+      const shot = await page.screenshot({
+        clip: { x: surface.x + surface.width + 8, y: surface.y + surface.height / 2 - 2, width: 4, height: 4 },
+        encoding: 'base64',
+      })
+      return page.evaluate(async (data) => {
+        const img = new Image()
+        img.src = `data:image/png;base64,${data}`
+        await img.decode()
+        const c = document.createElement('canvas')
+        c.width = img.width
+        c.height = img.height
+        const ctx = c.getContext('2d')!
+        ctx.drawImage(img, 0, 0)
+        const [r, g, b] = ctx.getImageData(1, 1, 1, 1).data
+        return r! > 200 && g! < 100 && b! < 100
+      }, shot)
+    }
+    await expect.poll(redPastBox).toBe(true)
+    /* the margin takes no presses: the canvas under it does */
+    const inMargin = await page.evaluate(
+      ([x, y]) => !!document.elementFromPoint(x!, y!)?.closest('[data-frame-surface]'),
+      [surface.x - 8, surface.y + surface.height + 8],
+    )
+    expect(inMargin).toBe(false)
   })
 })

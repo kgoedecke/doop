@@ -1,9 +1,13 @@
+import { transaction } from './journal.ts'
 import { store } from './store.ts'
 
 /** Create a demo canvas on first run so the app isn't empty. */
 export function seed() {
   if (store.canvases.size > 0) return
+  transaction(seedWelcomeCanvas)
+}
 
+function seedWelcomeCanvas() {
   const canvas = store.createCanvas('Welcome Canvas')
 
   store.createFrame(

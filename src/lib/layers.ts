@@ -1,5 +1,6 @@
-import { COMPONENT_ATTR, INSTANCE_ATTR } from '../../shared/components'
+import { COMPONENT_ATTR, INSTANCE_ATTR, OVERRIDES_ATTR } from '../../shared/components'
 import { ELEMENT_ID_ATTR, newElementId } from '../../shared/elementId'
+import { holdsPlaced } from './groupLayout'
 
 /**
  * The Layers panel's view of a frame: the element tree of its HTML, parsed
@@ -27,6 +28,11 @@ export interface LayerNode {
   component?: 'main' | 'instance'
   /** which component, for the row to show its name */
   componentId?: string
+  /** the label is a name given in the Layers panel, not one read off the element */
+  named?: boolean
+  /** on an instance root: the part keys its saved overrides name, which tells
+   *  its own name from one inherited from its main */
+  namedParts?: string[]
   children: LayerNode[]
 }
 
@@ -150,7 +156,25 @@ function detailOf(el: Element): string {
 function toNode(el: Element): LayerNode {
   const node = defaultNode(el)
   const name = el.getAttribute(NAME_ATTR)?.trim()
-  return name ? { ...node, label: name, detail: '' } : node
+  if (!name) return node
+  const namedParts = nameOverrides(el)
+  return { ...node, label: name, detail: '', named: true, ...(namedParts.length ? { namedParts } : {}) }
+}
+
+/** The part keys an instance root's saved overrides give a name to. A name its
+ *  main carries is rendered onto every instance too, so the attribute alone
+ *  cannot tell an instance's own name from an inherited one. */
+function nameOverrides(el: Element): string[] {
+  if (!el.hasAttribute(INSTANCE_ATTR)) return []
+  try {
+    const parts: unknown = JSON.parse(el.getAttribute(OVERRIDES_ATTR) ?? '{}')
+    if (!parts || typeof parts !== 'object') return []
+    return Object.entries(parts as Record<string, { attrs?: Record<string, unknown> } | null>)
+      .filter(([, part]) => typeof part?.attrs?.[NAME_ATTR] === 'string')
+      .map(([key]) => key)
+  } catch {
+    return []
+  }
 }
 
 function defaultNode(el: Element): LayerNode {
@@ -478,6 +502,58 @@ export interface FlowPlacement {
   order: string
   orderChanged?: boolean
   transform?: string
+  /** the element was in flow already: only its drag offset goes */
+  fromFlow?: boolean
+  /** the slot is in a flex box, whose items keep their size */
+  flexItem?: boolean
+  /** a box that places its layers by hand: the element goes absolute here,
+   *  in design px from the box's containing block */
+  absolute?: { left: number; top: number }
+}
+
+/* what pins an element in place, which a slot in a flow replaces */
+const PLACEMENT_PROPS = ['position', 'inset', 'left', 'top', 'right', 'bottom', 'translate', 'float', 'z-index']
+
+function placeInFlow(style: CSSStyleDeclaration, flow: FlowPlacement, el?: Element) {
+  if (flow.absolute) {
+    for (const name of ['inset', 'right', 'bottom', 'translate', 'order', 'flex-shrink', 'float'])
+      style.removeProperty(name)
+    style.setProperty('position', 'absolute')
+    style.setProperty('left', `${flow.absolute.left}px`)
+    style.setProperty('top', `${flow.absolute.top}px`)
+    return
+  }
+  const order = () => {
+    if (flow.order === '0') style.removeProperty('order')
+    else style.setProperty('order', flow.order)
+  }
+  if (flow.fromFlow) {
+    style.removeProperty('translate')
+    if (flow.orderChanged) order()
+    return
+  }
+  if (style.getPropertyValue('position')) {
+    /* placed by its own inline styles: dropping them puts it in the flow,
+       positioned still when it holds layers placed absolute in it */
+    for (const name of PLACEMENT_PROPS) style.removeProperty(name)
+    if (el && holdsPlaced(el)) style.setProperty('position', 'relative')
+    order()
+    if (flow.flexItem) style.setProperty('flex-shrink', '0')
+    return
+  }
+  // Placed by a stylesheet: override it. Relative positioning also preserves
+  // the containing block for positioned descendants.
+  for (const [name, value] of Object.entries({
+    position: 'relative',
+    inset: 'auto',
+    'inset-block': 'auto',
+    'inset-inline': 'auto',
+    translate: 'none',
+    float: 'none',
+    order: flow.order,
+    'grid-area': 'auto',
+  }))
+    style.setProperty(name, value, 'important')
 }
 
 export interface MovedElement {
@@ -578,29 +654,24 @@ function alreadyAt(el: Element, at: Element, where: DropPlace): boolean {
 
 function move(doc: Document, el: Element, at: Element, where: DropPlace, flow?: FlowPlacement): MovedElement | null {
   if (el === at || el.contains(at)) return null
-  if (alreadyAt(el, at, where) && !flow?.orderChanged && flow?.transform === undefined) return null
+  if (alreadyAt(el, at, where) && !flow?.orderChanged && flow?.transform === undefined && !flow?.absolute) return null
   if (where === 'inside' && !holdsChildren(at.tagName)) return null
   const parent = where === 'inside' ? at : at.parentElement
   if (!parent || parent.closest(`[${LOCK_ATTR}]`) || !doc.body.contains(parent)) return null
+  const left = el.parentElement
   if (where === 'inside') at.prepend(el)
   else if (where === 'before') at.before(el)
   else at.after(el)
+  /* a canvas group whose last layer left goes with it, as in a design tool */
+  if (left && left !== parent && left.getAttribute('data-doop-drawing') === 'group' && !left.children.length)
+    left.remove()
   if (flow) {
-    // Keep size, rotation and scale, but let DOM order determine layout. Relative
-    // positioning also preserves the containing block for positioned descendants.
+    // Keep size, rotation and scale, but let DOM order (or the box's own
+    // placement) determine where it lands.
     const style = (el as HTMLElement | SVGElement).style
-    for (const [name, value] of Object.entries({
-      position: 'relative',
-      inset: 'auto',
-      'inset-block': 'auto',
-      'inset-inline': 'auto',
-      translate: 'none',
-      float: 'none',
-      order: flow.order,
-      'grid-area': 'auto',
-    }))
-      style.setProperty(name, value, 'important')
+    placeInFlow(style, flow, el)
     if (flow.transform !== undefined) style.setProperty('transform', flow.transform, 'important')
+    if (!el.getAttribute('style')) el.removeAttribute('style')
   }
   const html = serialize(doc)
   const selector = elementPath(el)
@@ -784,8 +855,26 @@ export interface GroupOptions {
   name: string
   /** inline styles for the wrapper (auto layout's flex), none for a plain group */
   style?: string
-  /** inline styles each wrapped element takes on (auto layout drops their margins) */
-  childStyle?: Record<string, string>
+  /** inline styles each wrapped element takes on (auto layout drops their
+   *  margins), or per element, by its index in `selectors`; null removes one */
+  childStyle?: StyleChanges | ((index: number) => StyleChanges)
+  /** wrap the elements in the order `selectors` lists them (a flex group's
+   *  flow order) rather than the order the document holds them */
+  inGivenOrder?: boolean
+  /** mark the wrapper a canvas group, which a click picks as a whole */
+  drawing?: boolean
+}
+
+type StyleChanges = Record<string, string | null>
+
+function restyle(el: Element, styles: StyleChanges) {
+  const style = (el as HTMLElement).style
+  for (const [prop, value] of Object.entries(styles)) {
+    if (value === null) style.removeProperty(prop)
+    else if (value.endsWith(' !important')) style.setProperty(prop, value.slice(0, -' !important'.length), 'important')
+    else style.setProperty(prop, value)
+  }
+  if (!el.getAttribute('style')) el.removeAttribute('style')
 }
 
 /** The frame's HTML with the elements wrapped in one new `div`, placed where
@@ -796,12 +885,13 @@ export interface GroupOptions {
 export function groupElements(
   html: string,
   selectors: string[],
-  { name, style, childStyle }: GroupOptions,
+  { name, style, childStyle, inGivenOrder, drawing }: GroupOptions,
 ): { html: string; selector: string } | null {
   const doc = parse(html)
   const found = findAll(doc, selectors)
   if (!found?.length) return null
   const els = inDocumentOrder(found)
+  if (inGivenOrder && els.length !== found.length) return null
   const parent = els[0]!.parentElement
   if (!parent || els.some((el) => el.parentElement !== parent)) return null
   if (UNWRAPPABLE_PARENTS.has(parent.tagName) || parent.closest(`[${LOCK_ATTR}]`)) return null
@@ -809,12 +899,13 @@ export function groupElements(
   const svg = parent.namespaceURI === 'http://www.w3.org/2000/svg'
   const wrapper = svg ? doc.createElementNS(parent.namespaceURI, 'g') : doc.createElement('div')
   wrapper.setAttribute(NAME_ATTR, name)
+  if (drawing && !svg) wrapper.setAttribute('data-doop-drawing', 'group')
   if (style && !svg) wrapper.setAttribute('style', style)
   els[0]!.before(wrapper)
-  for (const el of els) {
+  for (const el of inGivenOrder ? found : els) {
     wrapper.append(el)
     if (!childStyle || svg) continue
-    for (const [prop, value] of Object.entries(childStyle)) (el as HTMLElement).style.setProperty(prop, value)
+    restyle(el, typeof childStyle === 'function' ? childStyle(found.indexOf(el)) : childStyle)
   }
   const next = serialize(doc)
   const selector = elementPath(wrapper)
@@ -826,7 +917,13 @@ export function groupElements(
  *  children's paths: the group goes, what it held stays where it was. Only
  *  boxes holding elements unwrap (text would lose the box that styled it);
  *  null when none of them can. */
-export function ungroupElements(html: string, selectors: string[]): { html: string; selectors: string[] } | null {
+export function ungroupElements(
+  html: string,
+  selectors: string[],
+  /** inline styles for freed children, by their path before the unwrap (a
+   *  positioned group's layers are placed where they were) */
+  childStyles: Record<string, StyleChanges> = {},
+): { html: string; selectors: string[] } | null {
   const doc = parse(html)
   const found = findAll(doc, selectors)
   if (!found?.length) return null
@@ -837,11 +934,16 @@ export function ungroupElements(html: string, selectors: string[]): { html: stri
       !ownText(el) &&
       !IMAGE_TAGS.has(el.tagName) &&
       !el.closest(`[${LOCK_ATTR}]`) &&
-      !el.hasAttribute('data-doop-drawing') &&
+      (!el.hasAttribute('data-doop-drawing') || el.getAttribute('data-doop-drawing') === 'group') &&
       !(el.parentElement && UNWRAPPABLE_PARENTS.has(el.parentElement.tagName)),
   )
   if (!groups.length) return null
   const freed: Element[] = []
+  /* paths read before any unwrap, which shifts them */
+  for (const [path, styles] of Object.entries(childStyles)) {
+    const child = find(doc, path)
+    if (child && groups.includes(child.parentElement!)) restyle(child, styles)
+  }
   for (const group of groups) {
     const children = [...group.children]
     group.replaceWith(...group.childNodes)

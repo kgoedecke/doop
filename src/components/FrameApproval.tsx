@@ -10,9 +10,12 @@ import { CheckIcon, ClockIcon } from './ui/icons'
 import { Switch } from './ui/switch'
 import { Tooltip } from './ui/tooltip'
 
-/** Who signed the frame off, and when; "previously" once it changed since. */
+/** Who signed the frame off (and through which agent), and when; "previously" once it changed since. */
 function approvalLine(t: Translate, approval: NonNullable<Frame['approval']>): string {
-  const vars = { name: approval.approvedBy, date: new Date(approval.approvedAt).toLocaleString(getLocale()) }
+  const name = approval.approvedVia
+    ? t('stage.approverVia', { name: approval.approvedBy, agent: approval.approvedVia })
+    : approval.approvedBy
+  const vars = { name, date: new Date(approval.approvedAt).toLocaleString(getLocale()) }
   return approval.status === 'ready_for_dev' ? t('stage.approvedByOn', vars) : t('stage.previouslyApprovedByOn', vars)
 }
 

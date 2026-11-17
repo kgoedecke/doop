@@ -22,6 +22,8 @@ export type DescriberStatus = { label: string; reason?: undefined } | { label: n
 export interface ImageDescriptionPreference {
   mode: ImageDescriptionMode
   describer: DescriberStatus
+  /** whose model the preview would bill: this user's own account, or the server's; null when none runs */
+  paidBy: 'account' | 'server' | null
 }
 
 /** One image a frame references, as agents see it in get_canvas / get_frame. */
