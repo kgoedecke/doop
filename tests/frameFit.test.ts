@@ -223,6 +223,16 @@ describe.skipIf(!findBrowserPath())('fit_height in a browser', () => {
     await fit(bare)
     await fit(typed)
     expect(bare.height).toBe(typed.height)
+    /* a min-height in px is the design's own: its centred content stays where it is drawn */
+    const centred = frameWith(
+      doc(block(100, 'width:100px'), 'margin:0;min-height:600px;display:flex;align-items:center'),
+    )
+    await fit(centred)
+    expect(centred.height).toBe(600)
+    /* a fixed-size panel scrolling inside a shorter page is no app shell: the page shrinks to it */
+    const panel = frameWith(doc(`<div style="height:300px;overflow:auto">${block(1000)}</div>`), { height: 500 })
+    await fit(panel)
+    expect(panel.height).toBe(300)
   }, 60_000)
 
   it('counts body margins, positioned layers and overflowing text, not fixed bars, hidden menus or clipped content', async () => {
@@ -250,6 +260,15 @@ describe.skipIf(!findBrowserPath())('fit_height in a browser', () => {
     await fit(clipped)
     /* overflow-x:clip leaves overflow-y visible */
     expect(clipped.height).toBe(700)
+
+    const decorated = frameWith(
+      doc(
+        '<style>.card{position:relative;height:100px}.card::after{content:"";position:absolute;left:0;top:100%;width:10px;height:200px}.cut{position:relative;height:100px;overflow:hidden}.cut::after{content:"";position:absolute;top:0;width:10px;height:900px}</style><div class="card"></div><div class="cut"></div>',
+      ),
+    )
+    await fit(decorated)
+    /* the card's ::after runs 200px past its box; the clipper's is cut at its edge */
+    expect(decorated.height).toBe(300)
 
     const words = 'Doop measures every line of text that spills past its box. '.repeat(40)
     const spill = frameWith(doc(`<p style="height:40px;margin:0;font:16px/20px sans-serif">${words}</p>`))
