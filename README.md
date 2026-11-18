@@ -34,7 +34,8 @@ runs on **GPT, Claude, Gemini, DeepSeek, Kimi or Qwen** models
   free tasks as `RESIDENT_TASK_LIMIT` grants (none by default) ([setup](#the-doop-agent)); the
   first-canvas welcome performance is scripted and runs without any of it.
 - **Pages within a canvas** — organize frames into named pages from the Layers panel. Add, rename,
-  drag to reorder, double-click to rename, or right-click to rename and delete empty pages.
+  drag to reorder, or double-click to rename. Right-click for page actions, including copying
+  a link, without switching away from the open page.
   Page edits support Undo/Redo; selected frames can move between pages. Agents can list pages
   with `get_canvas`, manage them with `set_canvas_pages` (passing the original list as
   `expectedPages` to protect collaborators), and target frames with `pageId`. Each page can wear
