@@ -342,6 +342,20 @@ function readRulers(): boolean {
 /** ends a follow: the leader and, for an agent, its last-seen record */
 const UNFOLLOW = { following: null, followedAgent: null }
 
+/**
+ * The server renders a frame again, with no write of it, when a component it uses changes
+ * its markup: `html` and `rendered` move and `updatedAt` stays (the frame stores a reference
+ * to the component, so nothing a save could conflict with changed). A copy of the frame that
+ * left the server before that (a save's HTTP response overtaken by the room's message) has
+ * the same `updatedAt` and the older rendering: it keeps its other fields and takes the
+ * newer rendering this browser already holds.
+ */
+function newestRendering(incoming: Frame, held: Frame | undefined): Frame {
+  if (!held || held.updatedAt !== incoming.updatedAt) return incoming
+  if ((held.rendered ?? 0) <= (incoming.rendered ?? 0) || held.html === undefined) return incoming
+  return { ...incoming, html: held.html, rendered: held.rendered }
+}
+
 /** A frame as the store keeps it: its source. What the canvas supplies to every frame
  *  (component stylesheets, token values) is composed in where a frame is shown
  *  (src/lib/frameCompose.ts), so a frame that arrives carrying those blocks (stored before
@@ -607,7 +621,10 @@ export const useStore = create<State>((set, get) => ({
   upsertFrame: (wire) =>
     set((s) => {
       if (!s.canvas || wire.canvasId !== s.canvas.id) return {}
-      const f = withHtml(asSource(wire, s.canvas.components), s.canvas)
+      const f = newestRendering(
+        withHtml(asSource(wire, s.canvas.components), s.canvas),
+        s.canvas.frames.find((x) => x.id === wire.id),
+      )
       const frames = sortByStack(
         s.canvas.frames.some((x) => x.id === f.id)
           ? s.canvas.frames.map((x) => (x.id === f.id ? f : x))

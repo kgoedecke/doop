@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
 import { nanoid } from 'nanoid'
@@ -14,6 +15,8 @@ import type { DesignToken, TokenType } from '../../shared/designTokens.ts'
 import { parseRunnerPick } from '../../shared/agentRunner.ts'
 import { byStack } from '../../shared/frameStack.ts'
 import { unloadHtml } from '../frameHtml.ts'
+import { definitionSerial, restingHtml } from '../frameRest.ts'
+import { WorkBudgetError } from '../workBudget.ts'
 import type {
   ActivityItem,
   ActorKind,
@@ -41,6 +44,61 @@ import type {
 
 function swallow(p: Promise<unknown>) {
   p.catch((err) => console.error('[db] write failed', err))
+}
+
+/* Frames at rest (server/frameRest.ts): the HTML of a frame's row, and of a version of it,
+   holds each component instance as a reference, rendered from its component when the frame
+   is read. What a frame is stored as depends on its canvas's components, which the store
+   holds: the server hands them over (server/index.ts). Without that (a script, a test of
+   this file alone) HTML is stored as given. */
+let componentsOf: ((canvasId: string) => readonly ComponentDef[] | undefined) | undefined
+
+/** Store frames at rest as references into these components: `components(canvasId)` is
+ *  what the canvas has now, undefined for a canvas whose frames are stored as given (one
+ *  on an actor, one the store does not hold). */
+export function restFramesThrough(components: (canvasId: string) => readonly ComponentDef[] | undefined) {
+  componentsOf = components
+}
+
+/* Definitions the database holds as they stand: what boot read, and every one whose write
+   has landed. A reference is only as good as the row it renders from after a restart, so
+   an instance of a definition not in here is stored written out. */
+const storedDefs = new WeakSet<ComponentDef>()
+
+const isStored = (def: ComponentDef) => storedDefs.has(def)
+
+/* What a frame's HTML was last stored as, by a hash of that HTML and the state of its canvas's
+   definitions: a write that changed no HTML (a move, a rename, a sign-off, a version of the
+   same document) does not parse the frame again. */
+const MAX_KEPT_RESTING = 300
+const keptResting = new Map<string, string>()
+
+function restingKey(
+  canvasId: string,
+  html: string,
+  defs: readonly ComponentDef[],
+  stored: (def: ComponentDef) => boolean,
+) {
+  const state = defs.map((def) => `${definitionSerial(def)}${stored(def) ? '' : '!'}`).join(',')
+  return createHash('sha1').update(`${canvasId}\u0000${state}\u0000${html}`).digest('base64')
+}
+
+/** A frame's HTML as its row keeps it. Never fails a save: out of budget, or anything the
+ *  engine trips over, the rendered HTML is stored, which is always a form a read accepts. */
+function atRest(canvasId: string, html: string, defs = componentsOf?.(canvasId), stored = isStored): string {
+  if (!defs || !html) return html
+  try {
+    const key = restingKey(canvasId, html, defs, stored)
+    const kept = keptResting.get(key)
+    if (kept !== undefined) return kept
+    const resting = restingHtml(html, defs, { stored })
+    keptResting.set(key, resting)
+    if (keptResting.size > MAX_KEPT_RESTING) keptResting.delete(keptResting.keys().next().value ?? '')
+    return resting
+  } catch (error) {
+    if (!(error instanceof WorkBudgetError)) console.error('[db] a frame could not be made compact', canvasId, error)
+    return html
+  }
 }
 
 /** every mutable canvas column, so insert and upsert can't drift apart */
@@ -73,6 +131,9 @@ export function saveCanvas(c: Canvas) {
 /** Persist a newly duplicated canvas as one unit. Unlike ordinary live edits,
  * duplication must not report success until every copied row is durable. */
 export async function saveCanvasCopy(c: Canvas): Promise<void> {
+  /* a copy's frames are stored as they are in memory, written out: making every frame of a
+     canvas compact in one turn is the whole-canvas work this server never does at once
+     (2026-11-11). Each goes compact on its own first write; a read takes either form */
   await db.transaction(async (tx) => {
     await tx.insert(t.canvases).values({ id: c.id, ...canvasColumns(c), createdAt: c.createdAt })
 
@@ -150,7 +211,10 @@ export async function saveCanvasCopy(c: Canvas): Promise<void> {
     )
     if (refs.length) await tx.insert(t.assetRefs).values(refs)
   })
-  for (const def of c.components ?? []) noteRevisionsFiled(c.id, def.id, def.history)
+  for (const def of c.components ?? []) {
+    noteRevisionsFiled(c.id, def.id, def.history)
+    storedDefs.add(def)
+  }
 }
 
 export function saveMember(canvasId: string, userId: string, addedBy: string, addedAt: number) {
@@ -333,6 +397,7 @@ export function saveComponent(canvasId: string, def: ComponentDef) {
         .onConflictDoUpdate({ target: [t.components.canvasId, t.components.id], set })
     if (!added.length && !restarted) {
       await upsert(db)
+      storedDefs.add(def)
       return
     }
     await db.transaction(async (tx) => {
@@ -350,25 +415,8 @@ export function saveComponent(canvasId: string, def: ComponentDef) {
         .where(and(ofComponent(canvasId, def.id), lt(t.componentRevisions.rev, oldest)))
     })
     noteRevisionsFiled(canvasId, def.id, history)
+    storedDefs.add(def)
   })
-}
-
-/**
- * The components with an instance behind them: one marked with a revision older than the
- * one the component last changed its markup at (`render_rev`; revisions of its rules alone
- * leave instances as they are). These are the frames a propagation never reached (the queue
- * lives in memory, so a restart mid-drain drops it; the kill switch of 2026-11-11 deferred
- * it). Read in the database, where matching every frame's HTML costs the server nothing.
- */
-export async function componentsBehind(): Promise<{ canvasId: string; componentId: string }[]> {
-  const result = await db.execute(sql`
-    select distinct c.canvas_id as "canvasId", c.id as "componentId"
-    from components c
-    join frames f on f.canvas_id = c.canvas_id
-      and position('data-doop-instance="' || c.id || '"' in f.html) > 0
-    cross join lateral regexp_matches(f.html, 'data-doop-instance="' || c.id || '" data-doop-rev="(\\d+)"', 'g') as m
-    where coalesce(c.status, 'active') = 'active' and c.rev > 1 and m[1]::int < coalesce(c.render_rev, c.rev)`)
-  return (result as unknown as { rows: { canvasId: string; componentId: string }[] }).rows
 }
 
 export function deleteComponent(canvasId: string, id: string) {
@@ -697,9 +745,17 @@ async function writeFrame(f: Frame) {
 }
 
 async function writeFrameRow(f: Frame) {
+  /* a reference needs its definition's row: the canvas's queued component writes go first,
+     and the frame is read once they have landed, as it stands then */
+  if (componentsOf?.(f.canvasId)?.length) {
+    const wasDirty = dirtyFrames.has(f.id)
+    await pendingComponentWrites(f.canvasId)
+    /* deleted while this waited (its frame, or its whole canvas): the row must not come back */
+    if ((wasDirty && !dirtyFrames.has(f.id)) || !componentsOf(f.canvasId)) return
+  }
   const generation = dirtyFrames.get(f.id)
   const html = f.html
-  const row = frameRowOf(f)
+  const row = { ...frameRowOf(f), html: atRest(f.canvasId, html) }
   const { id, createdAt, ...set } = row
   await db.insert(t.frames).values(row).onConflictDoUpdate({ target: t.frames.id, set })
   /* a save made while this one was in flight keeps the frame dirty */
@@ -814,8 +870,15 @@ function queueVersionWrite(frameId: string, canvasId: string, work: () => Promis
   swallow(queued.finally(() => versionWrites.get(frameId)?.queued === queued && versionWrites.delete(frameId)))
 }
 
+/** A version is stored like a frame's row: its instances as references, made when its turn
+ *  to be written comes, once the canvas's queued component writes have landed (a reference
+ *  needs its definition's row). A preview or a restore renders them from the components as
+ *  they are then. */
 export function saveFrameVersion(version: FrameVersion) {
-  queueVersionWrite(version.frameId, version.canvasId, () => appendFrameVersion(version))
+  queueVersionWrite(version.frameId, version.canvasId, async () => {
+    if (componentsOf?.(version.canvasId)?.length) await pendingComponentWrites(version.canvasId)
+    await appendFrameVersion({ ...version, html: atRest(version.canvasId, version.html) })
+  })
 }
 
 /** Settles once every queued version write the filter picks has landed. */
@@ -938,6 +1001,12 @@ export function viewAssetsThrough(view: (canvasId: string, html: string) => stri
    set on every durable write (never increment/decrement — nothing to drift). A change to
    a component's stylesheet writes no frame, so an asset it starts to name joins a frame's
    refs with that frame's own next write. */
+/** A frame rendered again in memory with no write of it (a component it uses changed its
+ *  markup, store.rerenderFrame): the assets it shows may have changed with the component. */
+export function refreshAssetRefs(frame: Frame) {
+  swallow(syncAssetRefs(frame, frame.html))
+}
+
 async function syncAssetRefs(frame: Pick<Frame, 'id' | 'canvasId'>, html: string) {
   const frameId = frame.id
   const ids = [...extractAssetIds(assetView(frame.canvasId, html))]
@@ -1248,6 +1317,11 @@ export function saveActivity(canvasId: string, item: ActivityItem) {
 /** Flush pending debounced frame writes and queued version writes (called
  *  on shutdown): a design must not survive a restart without its history. */
 export async function flush(getFrame: (id: string) => Frame | undefined): Promise<void> {
+  /* a component write waiting out a retry gets its last try now: a frame's row waits for
+     its canvas's component writes (it may hold references to them), and must not sit out
+     the wait behind one */
+  draining = true
+  for (const wake of [...retryWaits]) wake()
   /* every dirty frame, a failed write included, not only the debounced ones */
   const ids = [...dirtyFrames.keys()]
   for (const [, timer] of frameTimers) clearTimeout(timer)
@@ -1259,8 +1333,6 @@ export async function flush(getFrame: (id: string) => Frame | undefined): Promis
     }),
   )
   await pendingVersionWrites(() => true)
-  draining = true
-  for (const wake of [...retryWaits]) wake()
   await pendingComponentWrites()
 }
 
@@ -1388,14 +1460,16 @@ export async function hydrate(): Promise<Hydrated> {
     const { canvasId: _canvasId, code, source, status, deletedAt, deletedBy, renderRev, ...def } = row
     const history = (histories.get(componentKey(row.canvasId, row.id)) ?? []).slice(-MAX_COMPONENT_HISTORY)
     noteRevisionsFiled(row.canvasId, row.id, history)
-    ;(c.components ??= []).push({
+    const read: ComponentDef = {
       ...def,
       ...(renderRev != null && renderRev < def.rev ? { renderRev } : {}),
       history,
       ...(code ? { code } : {}),
       ...(source ? { source } : {}),
       ...(status === 'deleted' ? { status, deletedAt: deletedAt ?? def.updatedAt, deletedBy: deletedBy ?? '' } : {}),
-    })
+    }
+    storedDefs.add(read)
+    ;(c.components ??= []).push(read)
   }
   for (const g of guidelineRows) {
     const c = byId.get(g.canvasId)

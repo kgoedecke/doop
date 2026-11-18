@@ -23,6 +23,7 @@ vi.mock('../server/db/persist.ts', () => ({
   saveActivity: () => {},
   saveDecision: () => {},
   saveProposal: () => {},
+  refreshAssetRefs: () => {},
   saveFrame: () => {},
   saveCanvas: () => {},
   deleteFrame: (id: string) => {

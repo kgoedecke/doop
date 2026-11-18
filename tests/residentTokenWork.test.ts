@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 /* Token writes persist and broadcast like any canvas change; these tests
    only care about what the run counts as delivered, so both are stubbed. */
 vi.mock('../server/db/persist.ts', () => ({
+  refreshAssetRefs: () => {},
   saveFrame: () => {},
   saveFrameNow: async () => {},
   saveCanvas: () => {},

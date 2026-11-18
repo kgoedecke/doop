@@ -400,6 +400,27 @@
   `set_token_themes`, mirrored on the resident agent; the Layers panel's Tokens tab
   (`TokensPanel.tsx`) and token menus on the Design panel's colour, radius and font-size fields.
   Tests: `designTokens.test.ts`, `designTokenWrites.test.ts`, `designTokensHttp.test.ts`.
+- Compact frame storage (`server/frameRest.ts`, spec `.context/specs/components.md`, Model): in memory
+  and on the wire a frame's HTML holds every component instance written out, as before; at rest
+  (`frames.html`, `frame_versions.html`) an instance is a reference,
+  `<doop-use component="<id>" id="…" …>` with its props, overrides and slot content. `restingHtml` makes
+  the references where `server/db/persist.ts` writes a frame row or a version (a canvas or page
+  copy is stored written out and goes compact frame by frame; `persist.restFramesThrough`, wired in `server/index.ts`, hands it the canvas's components), and
+  only for an instance whose reference, expanded there and then, gives exactly the markup the write
+  pipeline would hold for it; an instance of an unknown, deleted, hollow or not-yet-stored definition
+  stays written out. `wakingHtml` writes references out where the store reads frame HTML
+  (`store.wakeHtml`: page loads, `renderableFrame`, the version preview and restore), one frame per
+  operation and per turn of the event loop, and brings instances stored written out up to their
+  components' current revision; a reference it cannot render is kept as a visible placeholder
+  (`data-doop-lost-use`) that the next save stores as the reference again, never dropped. So a change to
+  a component's markup writes no frame: frames in memory are rendered again (`store.rerenderFrame`:
+  `html` and `rendered` move, `updatedAt` does not; the room gets `frame:updated` with `rerender`), and
+  the rest are rendered from the component when their page is read. Both forms are read under either
+  setting of `DOOP_COMPACT_FRAME_STORAGE` (false stores instances written out again); existing frames
+  go compact on their next write. Rolling the code back past
+  this needs the compact rows written out first. Tests: `frameRest.test.ts`,
+  `compactFramesHttp.test.ts`, `frameRerenderStore.test.ts`, `frameRestBench.test.ts` (what a heavy
+  page costs to read and store).
 - Lean frame storage (`shared/frameCompose.ts`, `server/frameCompose.ts`, `src/lib/frameCompose.ts`): a
   frame's stored HTML is its source. What the canvas supplies to every frame is not in it: the
   stylesheet of each component it uses (`<style data-doop-component-css>`), the head tags those
@@ -637,7 +658,9 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   `frameIds` wherever they are) by id, 200 ids a query, concurrent loads
   sharing each frame's read; `store.load(canvasId)` is every page, for work on the whole canvas;
   `store.loadForFrames` is a frame write's: its page plus every component main (a write that carries a main
-  asks whether it lives in another frame). `evictIdle` drops a page after `CANVAS_IDLE_MS` (10 min) unused,
+  asks whether it lives in another frame). What a read takes into memory is the frame rendered: stored
+  component references are written out, each frame in its own operation and turn of the event loop
+  (`store.wakeHtml`, Compact frame storage); a frame that cannot be rendered within its budget fails the load. `evictIdle` drops a page after `CANVAS_IDLE_MS` (10 min) unused,
   never while a load is on its canvas, a `store.hold` keeps it (a hold names a scope: `'all'` for an agent run,
   a job or a whole-canvas route, else the pages and frames a write or a drawing reads, `framesScope` /
   `pageScope`; releasing it counts only those pages as used), an MCP agent's presence or a stream is on the
@@ -1186,15 +1209,18 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   instance is full markup marked `data-doop-instance`, so frame consumers need no changes. Every
   frame write passes `prepareFrameHtml` (`server/components.ts`): `<doop-use>` expands, a changed main
   becomes a revision, instances reconcile against the revision they were rendered from
-  (`server/componentEngine.ts`) and upgrade. `actions.propagateComponents` carries a change across the
-  canvas. The components pass runs first on every write, then `withLibraryFaces`, so an expanded
+  (`server/componentEngine.ts`) and upgrade. A frame's row holds an instance as a reference, rendered
+  from its component when the frame is read (Compact frame storage, under Design tokens), so a changed
+  main rewrites no frame: the queue (`server/propagation.ts`, `actions.queuePropagation`) renders the
+  frames in memory again, one per tick, and loads or holds no canvas for it. The components pass runs
+  first on every write, then `withLibraryFaces`, so an expanded
   `<doop-use>` naming a library family gets its face. A component's stylesheet and head tags are
   composed into a frame where it is rendered, not stored in it (Lean frame storage, under Design
   tokens), so a change to its rules alone writes no frame using it. A definition's `renderRev`
   (`components.render_rev`, migration `0063_component_render_rev`, null meaning `rev`; set by
   `store.saveComponent`) is the revision its template or props last changed at: instances are
-  marked with it, a rules-only revision raises `rev` alone, "behind" everywhere (`componentsBehind`,
-  propagation) means a mark older than `renderRev`, and `stateAtRev` finds the base for a stale
+  marked with it, a rules-only revision raises `rev` alone, "behind" everywhere (a frame read from
+  storage, propagation) means a mark older than `renderRev`, and `stateAtRev` finds the base for a stale
   save by the span of revisions (`renderRev`..`rev`) a kept state covers, so rules-only revisions
   using up the 20 kept never strand an instance. Agents read and write the short form
   (`get_frame`, `edit_frame_html`); tools live once in `server/componentTools.ts` for MCP and the

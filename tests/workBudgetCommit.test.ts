@@ -5,7 +5,11 @@ import type { ActivityItem, Actor, Canvas, Frame, FrameVersion, ServerMessage } 
 
 /* The database, as far as this file needs one: what each persist call would leave in its
    table. A refused operation must leave it exactly as it was, and after any operation it
-   must hold what memory holds. */
+   must hold what memory holds. A frame's row holds it at rest, its component instances as
+   references (server/frameRest.ts), as the real persist layer writes it: what the row
+   holds is what reading it back gives (`stored`), so a frame rendered again in memory
+   because its component changed, with no row written, is still what the database holds. */
+const rest = vi.hoisted(() => ({ of: (_canvasId: string, html: string) => html }))
 const db = vi.hoisted(() => ({
   frames: new Map<string, { canvasId: string; name: string; html: string }>(),
   components: new Map<string, { canvasId: string; id: string; row: string }>(),
@@ -19,7 +23,9 @@ const db = vi.hoisted(() => ({
 
 vi.mock('../server/db/persist.ts', () => ({
   saveCanvas: (c: Canvas) => void db.pages.set(c.id, JSON.stringify(c.pages ?? null)),
-  saveFrame: (f: Frame) => void db.frames.set(f.id, { canvasId: f.canvasId, name: f.name, html: f.html }),
+  refreshAssetRefs: () => {},
+  saveFrame: (f: Frame) =>
+    void db.frames.set(f.id, { canvasId: f.canvasId, name: f.name, html: rest.of(f.canvasId, f.html) }),
   deleteFrame: (id: string) => void db.frames.delete(id),
   saveActivity: (canvasId: string, item: ActivityItem) =>
     void db.activity.set(canvasId, [item.id, ...(db.activity.get(canvasId) ?? [])]),
@@ -98,6 +104,30 @@ import { parse, runOperation, WorkBudgetError } from '../server/workBudget.ts'
 import { COMPONENT_ATTR } from '../shared/components.ts'
 import { canvasPages } from '../shared/pages.ts'
 import { stubEnv, unstubAllEnvs } from './envStub.ts'
+import { restingHtml, wakingHtml } from '../server/frameRest.ts'
+
+/** The modelled database's own parsing (a row made compact, a row read back) is not part of
+ *  the operation under test: it is not counted, and never the parse that is made slow. */
+function uncounted<T>(run: () => T): T {
+  const { parses, at } = slow
+  slow.at = 0
+  try {
+    return run()
+  } finally {
+    slow.parses = parses
+    slow.at = at
+  }
+}
+
+/* as the real layer does: a row that cannot be made compact is stored rendered */
+rest.of = (canvasId, html) =>
+  uncounted(() => {
+    try {
+      return restingHtml(html, store.getComponents(canvasId))
+    } catch {
+      return html
+    }
+  })
 
 const actor = { name: 'Tester', kind: 'user', color: '#000', clientId: 'x' } as unknown as Actor
 const agent = actions.resolveActor({ name: 'Doop', kind: 'agent' })
@@ -212,7 +242,13 @@ function stored(canvas: Canvas) {
   const mine = <T extends { canvasId: string }>(rows: Map<string, T>) =>
     [...rows].filter(([, row]) => row.canvasId === canvas.id)
   return {
-    frames: sorted(mine(db.frames).map(([id, row]) => ({ id, name: row.name, html: row.html }))),
+    frames: sorted(
+      mine(db.frames).map(([id, row]) => ({
+        id,
+        name: row.name,
+        html: uncounted(() => wakingHtml(row.html, canvas.components ?? [], `frame ${id}`)),
+      })),
+    ),
     components: sorted(mine(db.components).map(([, row]) => row.row)),
     pages: db.pages.get(canvas.id),
     activity: [...(db.activity.get(canvas.id) ?? [])],
@@ -222,10 +258,20 @@ function stored(canvas: Canvas) {
   }
 }
 
-/** What the database should hold for the canvas, given what memory holds. */
+/** What the database should hold for the canvas, given what memory holds. A frame the queue
+ *  passed over for its budget keeps its instances on the older revision in memory, while its
+ *  row, which holds references, reads back at the current one: the two agree once the frame
+ *  in memory is brought up to its components, which is what `wakingHtml` does to instances
+ *  left behind (and nothing, to a frame that is up to date). */
 function storedFrom(canvas: Canvas): ReturnType<typeof stored> {
   return {
-    frames: sorted(canvas.frames.map((frame) => ({ id: frame.id, name: frame.name, html: frame.html }))),
+    frames: sorted(
+      canvas.frames.map((frame) => ({
+        id: frame.id,
+        name: frame.name,
+        html: uncounted(() => wakingHtml(frame.html, canvas.components ?? [], `frame ${frame.id}`)),
+      })),
+    ),
     components: sorted((canvas.components ?? []).map((def) => JSON.stringify(def))),
     pages: JSON.stringify(canvas.pages ?? null),
     activity: actions.getActivity(canvas.id).map((item) => item.id),

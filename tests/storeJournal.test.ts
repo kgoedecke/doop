@@ -7,6 +7,7 @@ const writes = vi.hoisted(() => [] as string[])
 vi.mock('../server/db/persist.ts', () => ({
   saveCanvas: (c: Canvas) => void writes.push(`canvas:${c.id}`),
   deleteCanvas: (id: string) => void writes.push(`delete-canvas:${id}`),
+  refreshAssetRefs: () => {},
   saveFrame: (f: Frame, now?: boolean) => void writes.push(`frame:${f.id}${now ? ':now' : ''}`),
   deleteFrame: (id: string) => void writes.push(`delete-frame:${id}`),
   saveComponent: (_canvasId: string, def: { id: string; rev: number }) =>

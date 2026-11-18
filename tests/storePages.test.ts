@@ -17,6 +17,7 @@ vi.mock('../server/db/persist.ts', () => {
     deleteReference: noop,
     saveCanvas: noop,
     saveCanvasCopy: noop,
+    refreshAssetRefs: () => {},
     saveFrame: (frame: Frame, immediate?: boolean) =>
       rig.savedFrames.push({ id: frame.id, pageId: frame.pageId, immediate }),
     saveGuideline: noop,

@@ -4,9 +4,8 @@ import { db } from '../server/db/index.ts'
 import * as t from '../server/db/schema.ts'
 import type { ComponentDef } from '../shared/components.ts'
 
-/* The propagation queue lives in memory: a restart mid-drain leaves instances on an older
-   revision until their frame is written again (1,585 of them on prod, 2026-11-12). This
-   finds them, in the database. */
+/* The propagation queue lives in memory: a restart mid-drain left instances on an older
+   revision until their frame was written again (1,585 of them on prod, 2026-11-12). */
 vi.mock('../server/db/index.ts', async () => {
   const { PGlite } = await import('@electric-sql/pglite')
   const { drizzle } = await import('drizzle-orm/pglite')
@@ -15,6 +14,7 @@ vi.mock('../server/db/index.ts', async () => {
 })
 
 const persist = await import('../server/db/persist.ts')
+const { wakingHtml } = await import('../server/frameRest.ts')
 
 beforeAll(async () => {
   const { migrate } = await import('drizzle-orm/pglite/migrator')
@@ -54,37 +54,54 @@ const frame = (id: string, canvasId: string, body: string) => ({
   updatedBy: 'Ada',
 })
 
-const use = (id: string, rev: number) => `<b data-doop-instance="${id}" data-doop-rev="${rev}"></b>`
+/** An instance as the engine writes it: the template's root, then its marker. */
+const use = (id: string, rev: number, elementId: string, cls = '') =>
+  `<b${cls ? ` class="${cls}"` : ''} data-doop-instance="${id}" data-doop-rev="${rev}" data-doop-id="${elementId}"></b>`
+
+const kept = (rev: number, template: string) => ({
+  rev,
+  template,
+  rawCss: '',
+  head: [],
+  props: [],
+  savedAt: 1,
+  savedBy: 'Ada',
+})
 
 describe('components with instances behind', () => {
-  it('are the ones a stored instance is older than, and no others', async () => {
-    persist.saveComponent('c1', def('behind', 3))
-    persist.saveComponent('c1', def('current', 2))
-    persist.saveComponent('c1', def('gone', 4, 'deleted'))
-    persist.saveComponent('c2', def('behind', 5))
-    await persist.pendingComponentWrites()
-    await db.insert(t.frames).values([
-      frame('f1', 'c1', use('behind', 3) + use('behind', 2) + use('current', 2) + use('gone', 1)),
-      /* the same id on another canvas is that canvas's component */
-      frame('f2', 'c2', use('behind', 5)),
-    ])
-    expect(await persist.componentsBehind()).toEqual([{ canvasId: 'c1', componentId: 'behind' }])
+  /* These were found by a query over every stored frame at boot (`componentsBehind`) and
+     rewritten through the propagation queue. A frame is now brought up to its components
+     when it is read (server/frameRest.ts), so what is behind is decided there, per frame,
+     by the same rule: an instance marked older than its component's `renderRev`. */
+  const awake = (body: string, defs: ComponentDef[]) => wakingHtml(frame('f', 'c', body).html, defs, 'test')
+  const NOW = '<b class="now"></b>'
+
+  it('are the ones a stored instance is older than, and no others', () => {
+    const defs = [
+      { ...def('behind', 3), template: NOW, history: [kept(2, '<b></b>')] },
+      def('current', 2),
+      { ...def('gone', 4, 'deleted'), template: NOW },
+    ]
+    const stored = [use('behind', 3, 'aaaaa1', 'now'), use('behind', 2, 'aaaaa2'), use('current', 2, 'aaaaa3')]
+    const read = awake(stored.join('') + use('gone', 1, 'aaaaa4'), defs)
+    /* the one behind is rendered at the current markup; the rest are as stored, byte for byte */
+    expect(read).toContain(
+      [stored[0], use('behind', 3, 'aaaaa2', 'now'), stored[2], use('gone', 1, 'aaaaa4')].join('') + '</body>',
+    )
+    /* the same id on another canvas is that canvas's component */
+    const other = use('behind', 5, 'aaaaa5')
+    expect(awake(other, [def('behind', 5)])).toBe(frame('f', 'c', other).html)
   })
 
-  it('do not include instances behind only in revisions of the component’s rules', async () => {
+  it('do not include instances behind only in revisions of the component’s rules', () => {
     /* 30 revisions, the markup last changed at the 4th: an instance marked 4 is current,
        however many times the stylesheet was saved since and whatever history was kept */
-    persist.saveComponent('c3', { ...def('restyled', 30), renderRev: 4 })
-    persist.saveComponent('c4', { ...def('restyled', 30), renderRev: 4 })
-    await persist.pendingComponentWrites()
-    await db.insert(t.frames).values([
-      frame('f3', 'c3', use('restyled', 4) + use('restyled', 17)),
-      /* one from before the markup changed is behind */
-      frame('f4', 'c4', use('restyled', 4) + use('restyled', 3)),
-    ])
-    const behind = await persist.componentsBehind()
-    expect(behind).not.toContainEqual({ canvasId: 'c3', componentId: 'restyled' })
-    expect(behind).toContainEqual({ canvasId: 'c4', componentId: 'restyled' })
+    const restyled = { ...def('restyled', 30), renderRev: 4, template: NOW, history: [kept(3, '<b></b>')] }
+    const current = use('restyled', 4, 'aaaaa1', 'now') + use('restyled', 17, 'aaaaa2', 'now')
+    expect(awake(current, [restyled])).toBe(frame('f', 'c', current).html)
+    /* one from before the markup changed is behind */
+    const read = awake(use('restyled', 4, 'aaaaa1', 'now') + use('restyled', 3, 'aaaaa2'), [restyled])
+    expect(read).toContain(use('restyled', 4, 'aaaaa1', 'now') + use('restyled', 4, 'aaaaa2', 'now') + '</body>')
   })
 
   it('keep where a component last changed its markup, and each kept state’s span, across a load', async () => {

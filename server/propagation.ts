@@ -1,20 +1,29 @@
 import type { Actor } from '../shared/types.ts'
+import { FrameHtmlNotLoadedError, htmlLoaded } from './frameHtml.ts'
 import { store } from './store.ts'
 import { detached } from './journal.ts'
 import { runOperation, WorkBudgetError } from './workBudget.ts'
 
 /**
- * Whole-canvas component work, done in the background. A change to a main (or
- * a request to detach every instance of a component) names the components it
- * concerns and returns; the frames are visited later, ONE per event-loop tick,
+ * Component work across a canvas's frames, done in the background. A change to a
+ * main (or a request to detach every instance of a component) names the components
+ * it concerns and returns; the frames are visited later, ONE per event-loop tick,
  * so no request ever rewrites a canvas synchronously. That synchronous sweep
  * blocked the server's one event loop for minutes on 2026-11-11.
  *
  * Work is kept per canvas and per frame: a frame waits once however many
  * components ask for it, so a burst of edits to one main (or a pull of fifty)
  * prepares each frame once. Canvases take turns, one frame each, so a large
- * canvas cannot starve the others. A canvas with work pending is loaded and
- * held (store.load / store.hold) until its queue drains.
+ * canvas cannot starve the others.
+ *
+ * Which frames a task visits is its handler's `scope`. `loaded` (a changed main,
+ * `propagate`): the frames whose HTML is in memory when the work is asked for,
+ * and nothing is read or held for it. A frame at rest holds references to its
+ * components, not their markup (server/frameRest.ts), so one that is not in
+ * memory needs nothing: it is rendered from the component as it then is when its
+ * page is read. `all` (`detach`, which writes real markup into every frame, and
+ * `propagate` on a canvas whose frames live on an actor, rendered): the canvas is
+ * loaded and held (store.load / store.hold) until its queue drains.
  *
  * What is done to a frame belongs to the task's handler (actions.ts registers
  * `propagate`, componentActions.ts `detach`); this file only decides which
@@ -33,7 +42,8 @@ export interface TouchedFrame {
 }
 
 export interface FrameOutcome {
-  /** the frame was rewritten */
+  /** the frame shows the change now: rendered again in memory, or rewritten where what it
+   *  stores changed too */
   touched?: TouchedFrame
   /** something else wrote the frame while it was being prepared: nothing was written, try again */
   requeue?: boolean
@@ -52,6 +62,9 @@ export interface DrainReport {
 }
 
 export interface FrameTaskHandler {
+  /** The frames the task visits on this canvas: every one (the canvas is loaded and held
+   *  for it), or the ones in memory when it is asked for. Every one, when absent. */
+  scope?(canvasId: string): 'all' | 'loaded'
   /** Do the task on one frame. Synchronous: the read and the write share a tick. */
   frame(canvasId: string, frameId: string, componentIds: string[], actor: Actor): FrameOutcome
   /** The canvas has no frame left waiting for this task. */
@@ -71,8 +84,9 @@ interface TaskState {
 interface Job {
   canvasId: string
   tasks: Map<FrameTask, TaskState>
-  release: () => void
-  /** set while the canvas's frame HTML is being read: it takes no turn until then */
+  /** lets the canvas go again, once a task that works on all of it has taken hold of it */
+  release?: () => void
+  /** set while frame HTML the job needs is being read: it takes no turn until then */
   loading: boolean
   waiters: ((reports: DrainReports) => void)[]
   /** what tasks that have already drained reported, for whoever waits on the canvas */
@@ -107,40 +121,37 @@ export function registerFrameTask(task: FrameTask, handler: FrameTaskHandler) {
 function jobFor(canvasId: string): Job {
   const existing = jobs.get(canvasId)
   if (existing) return existing
-  const job: Job = {
-    canvasId,
-    tasks: new Map(),
-    release: store.hold(canvasId),
-    loading: false,
-    waiters: [],
-    reports: {},
-  }
+  const job: Job = { canvasId, tasks: new Map(), loading: false, waiters: [], reports: {} }
   jobs.set(canvasId, job)
   ring.push(canvasId)
   return job
 }
 
-/** Frame HTML is loaded per canvas: a job never reads a frame of one that is not. */
-function ensureLoaded(job: Job): boolean {
-  if (store.isLoaded(job.canvasId)) return true
+/** May the job take its turn? Not while a read it waits on is in flight, and a job that
+ *  works on the whole canvas never reads a frame of one that is not loaded. */
+function ready(job: Job): boolean {
   if (job.loading) return false
-  job.loading = true
-  store
-    .load(job.canvasId)
-    .catch((error: unknown) => console.error('[propagation] loading a canvas failed', job.canvasId, error))
-    .finally(() => {
-      job.loading = false
-      /* a canvas that could not be read has nothing a job may touch */
-      if (!store.isLoaded(job.canvasId)) finish(job)
-      schedule()
-    })
+  if (!job.release || store.isLoaded(job.canvasId)) return true
+  /* a canvas that could not be read has nothing a job may touch */
+  read(job, () => store.load(job.canvasId), true)
   return false
 }
 
+function read(job: Job, load: () => Promise<unknown>, whole: boolean) {
+  job.loading = true
+  load()
+    .catch((error: unknown) => console.error('[propagation] reading frames failed', job.canvasId, error))
+    .finally(() => {
+      job.loading = false
+      if (whole && !store.isLoaded(job.canvasId)) finish(job)
+      schedule()
+    })
+}
+
 /**
- * Ask for `task` on every frame of the canvas, for these components. Returns at
- * once: nothing is read or written here. `exceptFrameId` is the frame whose own
- * write caused this, which is already up to date.
+ * Ask for `task` on the frames of the canvas its handler's scope takes in, for these
+ * components. Returns at once: nothing is read or written here. `exceptFrameId` is the
+ * frame whose own write caused this, which is already up to date.
  */
 export function enqueue(
   task: FrameTask,
@@ -151,7 +162,9 @@ export function enqueue(
 ) {
   const canvas = store.getCanvas(canvasId)
   if (!canvas || !componentIds.length) return
+  const whole = (handlers.get(task)?.scope?.(canvasId) ?? 'all') === 'all'
   const job = jobFor(canvasId)
+  if (whole) job.release ??= store.hold(canvasId)
   let state = job.tasks.get(task)
   if (!state) {
     state = { todo: new Map(), attempts: new Map(), components: new Set(), touched: new Map(), count: 0, actor }
@@ -162,6 +175,8 @@ export function enqueue(
   for (const frame of canvas.frames) {
     if (frame.id === options.exceptFrameId) continue
     if (options.onlyFrameIds && !options.onlyFrameIds.includes(frame.id)) continue
+    /* not in memory: it is rendered from its components as they are when its page is read */
+    if (!whole && !htmlLoaded(frame)) continue
     const waiting = state.todo.get(frame.id)
     if (waiting) for (const id of componentIds) waiting.add(id)
     else state.todo.set(frame.id, new Set(componentIds))
@@ -190,7 +205,7 @@ function tick() {
       finish(job)
       continue
     }
-    if (!ensureLoaded(job)) continue
+    if (!ready(job)) continue
     step(job)
     schedule()
     return
@@ -229,11 +244,24 @@ function step(job: Job) {
 function visit(job: Job, task: FrameTask, state: TaskState, frameId: string, componentIds: string[]) {
   /* its own operation: one frame's worth of budget, a name the stall watchdog can report,
      and one write boundary, so a frame is brought up to date whole or left as it was */
-  const outcome = guarded(`${task} of frame ${frameId}`, job.canvasId, () =>
-    runOperation(`queue ${task} frame ${frameId}`, job.canvasId, () =>
-      handlers.get(task)?.frame(job.canvasId, frameId, componentIds, state.actor),
-    ),
-  )
+  let unread = false
+  const outcome = guarded(`${task} of frame ${frameId}`, job.canvasId, () => {
+    try {
+      return runOperation(`queue ${task} frame ${frameId}`, job.canvasId, () =>
+        handlers.get(task)?.frame(job.canvasId, frameId, componentIds, state.actor),
+      )
+    } catch (error) {
+      if (!(error instanceof FrameHtmlNotLoadedError)) throw error
+      unread = true
+      return undefined
+    }
+  })
+  /* the frame's write reads a frame that is not in memory (a main it holds a copy of): read
+     what a write to it may read, then its turn comes again */
+  if (unread) {
+    if (!again(state, frameId, componentIds)) return
+    return read(job, () => store.loadForFrames(job.canvasId, [frameId]), false)
+  }
   if (!outcome) return
   if (outcome.defer) return defer(job.canvasId, task, frameId, componentIds, state.actor)
   if (outcome.count) state.count += outcome.count
@@ -244,16 +272,19 @@ function visit(job: Job, task: FrameTask, state: TaskState, frameId: string, com
       approvalLost: outcome.touched.approvalLost || !!before?.approvalLost,
     })
   }
-  if (!outcome.requeue) return
-  const attempts = (state.attempts.get(frameId) ?? 0) + 1
-  if (attempts >= MAX_ATTEMPTS) {
+  if (outcome.requeue && !again(state, frameId, componentIds))
     console.error(`[propagation] frame ${frameId} kept changing; left for its own next write`, job.canvasId)
-    return
-  }
+}
+
+/** Put the frame back in the queue for another try; false once it has had its tries. */
+function again(state: TaskState, frameId: string, componentIds: string[]): boolean {
+  const attempts = (state.attempts.get(frameId) ?? 0) + 1
+  if (attempts >= MAX_ATTEMPTS) return false
   state.attempts.set(frameId, attempts)
   const waiting = state.todo.get(frameId)
   if (waiting) for (const id of componentIds) waiting.add(id)
   else state.todo.set(frameId, new Set(componentIds))
+  return true
 }
 
 function defer(canvasId: string, task: FrameTask, frameId: string, componentIds: string[], actor: Actor) {
@@ -283,8 +314,8 @@ export function deferredFrames(): string[] {
 }
 
 /** A frame that throws is skipped and said so: the queue, and the process, outlive it. One
- *  over its work budget is left as it is (still materialized, at the revision it had) and
- *  catches up on its own next write, if that fits. */
+ *  over its work budget is left as it is in memory (at the revision it had) and catches up
+ *  on its own next write, or when its page is next read. */
 function guarded<T>(what: string, canvasId: string, run: () => T): T | undefined {
   try {
     return run()
@@ -312,7 +343,7 @@ function finish(job: Job) {
   jobs.delete(job.canvasId)
   const at = ring.indexOf(job.canvasId)
   if (at !== -1) ring.splice(at, 1)
-  job.release()
+  job.release?.()
   for (const waiter of job.waiters) waiter(job.reports)
   if (jobs.size) return
   const waiting = idleWaiters

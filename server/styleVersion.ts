@@ -3,7 +3,8 @@ import type { Frame } from '../shared/types.ts'
 /*
  * Whether a render of a frame is still current. A frame's own version is its
  * `updatedAt`; what the canvas supplies to it (token values, its components'
- * stylesheets) changes without the frame being written, so a render also
+ * stylesheets, and their markup: a frame stores a reference to a component,
+ * not its markup) changes without the frame being written, so a render also
  * records what it was supplied: the tokens the document names and the
  * components it uses, with the version each had. Versions are counters per
  * canvas, moved by the store when a token or a component's rules change. A
@@ -41,12 +42,15 @@ function versionsOf(canvasId: string, dependencies: readonly string[]): string {
  *  frame's HTML (`stampDependencies`); until then only the frame's own version is known. */
 export interface RenderStamp {
   updatedAt: number
+  /** the frame's `rendered` mark: it was rendered again in memory, with no write, when a
+   *  component it uses changed its markup (store.rerenderFrame) */
+  rendered?: number
   dependencies?: readonly string[]
   versions?: string
 }
 
-export function renderStamp(frame: Pick<Frame, 'updatedAt'>): RenderStamp {
-  return { updatedAt: frame.updatedAt }
+export function renderStamp(frame: Pick<Frame, 'updatedAt' | 'rendered'>): RenderStamp {
+  return { updatedAt: frame.updatedAt, ...(frame.rendered !== undefined ? { rendered: frame.rendered } : {}) }
 }
 
 /** Record what the render was supplied, as it stands now. */
@@ -57,7 +61,10 @@ export function stampDependencies(canvasId: string, stamp: RenderStamp, dependen
 }
 
 /** Is a render with this stamp what the frame would render to now? */
-export function stampCurrent(frame: Pick<Frame, 'canvasId' | 'updatedAt'>, stamp: RenderStamp | undefined): boolean {
-  if (!stamp || stamp.updatedAt !== frame.updatedAt) return false
+export function stampCurrent(
+  frame: Pick<Frame, 'canvasId' | 'updatedAt' | 'rendered'>,
+  stamp: RenderStamp | undefined,
+): boolean {
+  if (!stamp || stamp.updatedAt !== frame.updatedAt || stamp.rendered !== frame.rendered) return false
   return !stamp.dependencies || versionsOf(frame.canvasId, stamp.dependencies) === stamp.versions
 }

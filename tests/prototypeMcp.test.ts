@@ -8,6 +8,7 @@ import type { Canvas, Frame } from '../shared/types.ts'
 /* persistence is mocked: the tools' effect on the in-memory canvas is the contract */
 vi.mock('../server/db/persist.ts', () => ({
   saveCanvas: () => {},
+  refreshAssetRefs: () => {},
   saveFrame: () => {},
   saveActivity: () => {},
 }))

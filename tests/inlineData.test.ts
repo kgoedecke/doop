@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { CustomFont } from '../shared/fonts'
 
 vi.mock('../server/db/persist.ts', () => ({
+  refreshAssetRefs: () => {},
   saveFrame: () => {},
   saveFrameNow: async () => {},
   saveCanvas: () => {},

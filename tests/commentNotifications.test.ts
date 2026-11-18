@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   workspaceMembers: vi.fn((_id: string): string[] => []),
 }))
 vi.mock('../server/db/persist.ts', () => ({
+  refreshAssetRefs: () => {},
   saveFrame: () => {},
   saveFrameNow: async () => {},
   saveCanvas: () => {},

@@ -16,6 +16,9 @@ import {
 import { byStack, frontOf, stackOf } from '../shared/frameStack.ts'
 import { htmlLoaded, setHtml, setHtmlMissHandler, unloadHtml, withHtml } from './frameHtml.ts'
 import { afterCommit, inTransaction, recordUndo, requireBoundary } from './journal.ts'
+import { needsWaking, placeheldHtml, wakingHtml, type WakeReport } from './frameRest.ts'
+import { forgetCounts } from './componentUsage.ts'
+import { runOperation } from './workBudget.ts'
 import type { DesignToken } from '../shared/designTokens.ts'
 import type {
   Canvas,
@@ -337,7 +340,42 @@ class Store {
       if (!frame || htmlLoaded(frame)) continue
       const html = stored.get(id)
       if (html === undefined) console.error('[store] frame has no stored html', id)
-      setHtml(frame, html ?? '')
+      /* rendered and taken in within one turn: from here on the frame is in memory, where a
+         change to a component it uses finds it (server/propagation.ts) */
+      const report: WakeReport = { lost: 0, revived: [] }
+      const awake = this.wakeHtml(canvasId, html ?? '', id, report)
+      setHtml(frame, awake)
+      /* a row stored written out and behind its components was brought up to date: stored
+         again as it now is, so the next read of it has nothing to do */
+      if (report.upgraded) persist.saveFrame(frame)
+      const canvas = this.canvases.get(canvasId)
+      if (canvas && awake !== html) forgetCounts(canvas, id)
+      /* a page of frames to render is not one turn of the event loop */
+      if (awake !== html) await new Promise<void>((resolve) => setImmediate(resolve))
+    }
+  }
+
+  /** Stored HTML as memory holds it: its component references written out, and instances
+   *  stored written out brought up to their components (server/frameRest.ts). Each frame is
+   *  an operation of its own, so a page of many frames is not one work budget. A frame that
+   *  cannot be rendered (over its budget, markup the engine trips on) never fails the read
+   *  of its page: its references are shown as placeholders, which the next save stores as
+   *  the references again. */
+  wakeHtml(canvasId: string, stored: string, frameId: string, report?: WakeReport): string {
+    const canvas = this.canvases.get(canvasId)
+    const defs = canvas?.components ?? []
+    if (!canvas || !needsWaking(stored, defs)) return stored
+    const where = `canvas ${canvasId} frame ${frameId}`
+    try {
+      return runOperation(`read frame ${frameId}`, canvasId, () => wakingHtml(stored, defs, where, report))
+    } catch (error) {
+      console.error(`[frames] ${where}: reading it failed`, error)
+      try {
+        return runOperation(`read frame ${frameId} as placeholders`, canvasId, () => placeheldHtml(stored, where))
+      } catch (again) {
+        console.error(`[frames] ${where}: placeholders failed too; read as stored`, again)
+        return stored
+      }
     }
   }
 
@@ -501,7 +539,8 @@ class Store {
     const html = await persist.loadOneFrameHtml(frameId)
     const current = this.getFrame(frameId)
     if (!current) return undefined
-    return withHtml(current, htmlLoaded(current) ? current.html : (html ?? ''))
+    if (htmlLoaded(current)) return withHtml(current, current.html)
+    return withHtml(current, this.wakeHtml(current.canvasId, html ?? '', frameId))
   }
 
   /** The renderable copy of `frame`, for a render that was handed the
@@ -1075,8 +1114,9 @@ class Store {
     markRenderRev(def, replaced)
     if (at === -1) list.push(def)
     else list[at] = def
-    /* its stylesheet is part of every render of a frame using it (server/styleVersion.ts) */
-    if (replaced?.css !== def.css || replaced.head.join('\n') !== def.head.join('\n'))
+    /* its stylesheet is part of every render of a frame using it, and so is its markup: a
+       frame stores a reference to it, not the markup (server/styleVersion.ts, frameRest.ts) */
+    if (replaced?.css !== def.css || replaced.head.join('\n') !== def.head.join('\n') || !rendersSame(replaced, def))
       bumpStyle(canvasId, componentDependency(def.id))
     recordUndo(() => {
       /* saved again since by someone else: theirs stands */
@@ -1515,6 +1555,32 @@ class Store {
     this.touchCanvas(c, stamp)
     this.saveFrameLater(frame) // debounced: streaming appends land as one write per burst
     this.saveCanvasLater(c)
+    return frame
+  }
+
+  /** A loaded frame rendered again from the source it has: a component it uses changed its
+   *  markup, and what the frame stores (a reference to that component) did not. Memory
+   *  only: no row is written and `updatedAt` stays, since nothing a save could conflict
+   *  with moved. `rendered` moves instead, so a browser can tell this rendering from an
+   *  older one of the same version (src/lib/store.ts `upsertFrame`), and a cached image of
+   *  the older one is retired (server/styleVersion.ts). */
+  rerenderFrame(frameId: string, html: string): Frame | undefined {
+    const frame = this.getFrame(frameId)
+    if (!frame || !htmlLoaded(frame)) return undefined
+    requireBoundary('store.rerenderFrame')
+    const before = { html: frame.html, rendered: frame.rendered }
+    const stamp = frame.updatedAt
+    const mark = Math.max(Date.now(), (frame.rendered ?? 0) + 1)
+    frame.html = html
+    frame.rendered = mark
+    recordUndo(() => {
+      /* written or rendered again since, dropped from memory, or gone: that state stands */
+      if (this.getFrame(frame.id) !== frame || !htmlLoaded(frame)) return
+      if (frame.updatedAt !== stamp || frame.rendered !== mark) return
+      frame.html = before.html
+      if (before.rendered === undefined) delete frame.rendered
+      else frame.rendered = before.rendered
+    })
     return frame
   }
 

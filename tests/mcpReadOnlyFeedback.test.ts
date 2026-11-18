@@ -10,6 +10,7 @@ import type { Canvas, Frame, TaskFeedback } from '../shared/types.ts'
  * writes (deliveredAt, claimedBy, a broadcast), so reads only announce it and
  * the tools that change the canvas keep claiming. */
 vi.mock('../server/db/persist.ts', () => ({
+  refreshAssetRefs: () => {},
   saveFrame: () => {},
   saveCanvas: () => {},
   saveTask: () => {},

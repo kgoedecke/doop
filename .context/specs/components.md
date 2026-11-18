@@ -23,9 +23,56 @@ through tools, and read them back in a short form.
 
 ## Model
 
-Instances are **materialized**: the frame's HTML holds the full markup. Everything that reads frame markup
-(comments, Layers, the engine) works unchanged, and a deleted component loses nothing visually: deleting
-writes no frame at all (see Deleting and restoring).
+Instances are **materialized in memory and on the wire**: the frame's HTML holds the full markup. Everything
+that reads frame markup (comments, Layers, the engine, the room, every client) works unchanged, and a
+deleted component loses nothing visually: deleting changes no frame's markup (see Deleting and restoring).
+
+**At rest an instance is a reference** (compact frame storage, `server/frameRest.ts`). The `frames.html`
+and `frame_versions.html` columns hold each outermost instance as
+`<doop-use component="<id>" id="<element id>" …>` with its props, part overrides and slot content, the
+form agents read, named by id so a rename cannot break it; an instance inside a main keeps its part key
+too. The rest of the document is stored byte for byte.
+
+- **Storing** (`restingHtml`, called by `server/db/persist.ts` where a frame row or a version is
+  written; the debounced row write reads the frame as it stands then, and a write that changed no HTML
+  reuses the last result. A canvas copy and a page copy are stored written out, each frame going compact
+  on its own first write, so no copy compacts a whole canvas in one turn). An instance is
+  reconciled (what was edited inside it becomes its overrides, as a write does), and becomes a reference
+  only if that reference, expanded there and then, gives exactly the markup the write pipeline would hold
+  for it at the component's current revision. Anything else stays written out: an instance of a component
+  that is unknown, deleted, hollow or whose row is not in the database yet (a frame row waits for the
+  canvas's queued component writes, and `storedDefs` knows which definitions have landed), one without an
+  element id, one holding a hollow component, one a component nested in it cannot render for, one whose
+  state the short form would not carry. What each instance becomes is kept by a hash of its markup and the
+  state of the definitions it renders from, so a frame saved again pays for the instances that changed.
+  A save never fails for this: over budget, the rendered HTML is stored.
+- **Reading** (`wakingHtml`, called by the store where frame HTML comes out of the database:
+  `fetchHtml` behind `loadPages` / `load` / `loadForFrames`, `renderableFrame`, the version preview and
+  restore). References are written out at their components' current markup, at string level, each frame
+  in an operation of its own and one frame per turn of the event loop. Instances stored written out (every
+  frame from before this, and the ones kept back above) that are marked older than their component's
+  `renderRev` are reconciled and rendered at the current revision, which is what the propagation queue used
+  to do by rewriting them, and such a row is stored again as read, once, with no version. A frame that
+  holds neither is taken as stored, unparsed. A frame that cannot be rendered within its budget does not
+  fail the read of its page: its references are read as placeholders (`placeholdUses`, nothing parsed),
+  logged, and the next save stores them as the references again.
+- **A reference is never dropped.** A deleted component still renders (the frame was stored before the
+  delete), frozen as it is. A hollow one renders from its newest kept revision that has markup, logged.
+  One that cannot render at all, or whose template nests a component that cannot, stays in the frame as a
+  visible placeholder (`data-doop-lost-use`, the reference's source text in it as base64url, logged as
+  `[frames] … could not be rendered`); the next save stores it as the reference again, and a read or a
+  write after the definition is repaired renders it. A write makes a placeholder a reference again only
+  once the whole reference renders (`rendersWhole`): with a nested component still missing it would
+  render the rest and record the missing part as hidden for good.
+- **Asset references follow a re-render.** A frame rendered again in memory with no row write has its
+  `asset_refs` brought up to date (`persist.refreshAssetRefs`); a frame out of memory keeps the ones of
+  its last write until it is written again.
+- **Both forms are read, always.** Existing frames are stored written out and go compact on their next
+  write; there is no backfill. `DOOP_COMPACT_FRAME_STORAGE=false` is the temporary switch back to storing
+  instances written out; reading is the same under either setting.
+- **Rolling the code back** past this needs the compact rows written out first (switch the setting off and
+  write each frame once): older code shows a `<doop-use>` it finds in a row as nothing until that frame's
+  next write expands it.
 
 A component's **stylesheet and head tags are not stored in the frames using it** (lean frame storage,
 `shared/frameCompose.ts`). A frame's stored HTML is its source; `composeFrameHtml` puts each used
@@ -109,23 +156,41 @@ style properties to a part override; a deleted element to `hidden`; moved or add
 override on that one element, which stays linked above and beside. Setting something back to the
 template's value removes the override.
 
-A changed main is then carried to the frames using it **in the background** (`server/propagation.ts`): the
-write that changed it only queues the component (`actions.queuePropagation`) and returns. The queue is per
-canvas and per frame, visits ONE frame per event-loop tick (`setImmediate` between frames) and lets canvases
-take turns, so no request rewrites a canvas synchronously; a frame waits once however many components ask
-for it, and a canvas with work pending stays loaded and held. Each visit is an ordinary write: history is
-filed, sign-off stands (the frame itself was not edited; decided 2026-11-12), the room sees `frame:updated` (the `component`
-message goes out when the change is queued), and one activity line names the frames when the canvas's queue
-drains. A visit whose prepared source equals the stored one is nothing: no row, no version, no message.
-That is every frame after a change to the component's rules alone (CSS, head tags), which the room shows
-from the `component` message: instances are marked with `renderRev`, which such a revision does not move,
-so the visit renders them to the bytes they have, and `componentsBehind` (the boot catch-up) compares
-marks with `render_rev` and so never queues them. A frame written while it was being prepared is queued again rather than overwritten. A frame
-mid-stream catches up when its stream ends, including one whose agent went silent. `update_component`
-reports `propagation: { status: 'queued' | 'deferred' | 'none', frames }`; `update_library_everywhere` waits
-for each canvas's queue and reports what it changed. Queued work is in memory: after a restart, a frame not
-reached yet catches up on its own next write. `DOOP_DEFER_COMPONENT_PROPAGATION` still skips the queue for
-frame writes.
+A changed main reaches the frames using it **without writing them**. A frame at rest holds references, so
+one that is not in memory needs nothing: it is rendered from the component as it then is when its page is
+read. The frames that are in memory are rendered again **in the background** (`server/propagation.ts`): the
+write that changed the main only queues the component (`actions.queuePropagation`) and returns. The queue is
+per canvas and per frame, visits ONE frame per event-loop tick (`setImmediate` between frames) and lets
+canvases take turns; a frame waits once however many components ask for it. For a changed main it takes in
+the frames whose HTML is in memory when the work is asked for (the handler's `scope` is `loaded`), reads
+nothing and holds no canvas; a frame that leaves memory before its turn is passed over. A visit prepares the
+frame as a write would and then:
+
+- the prepared source equals the one in memory: nothing (every frame after a change to the component's
+  rules alone, which the room shows from the `component` message, since `renderRev` does not move);
+- what the frame stores is unchanged (`sameAtRest`: its instances are references, and the component is what
+  moved): `store.rerenderFrame` puts the new rendering in memory. No row, no version, and `updatedAt` stays
+  (it is the version a save is checked against, `expectedUpdatedAt`); `frame.rendered` moves instead. The room
+  is sent `frame:updated` with `rerender: true` and the frame, which is how a browser gets markup it cannot
+  render itself. A browser keeps the newest rendering of a version (`newestRendering` in `src/lib/store.ts`:
+  of two copies with one `updatedAt`, the greater `rendered`), so a save's response that left the server
+  before the re-render cannot put the old rendering back. Render caches follow: a markup change bumps the
+  component's style version (`store.saveComponent`), which retires images of every frame using it, loaded
+  or not, and `rendered` is part of a render's stamp (`server/styleVersion.ts`) and of the usage index's;
+- what the frame stores changed too (an instance kept written out, a main built from what changed, compact
+  storage switched off): an ordinary write, as before. History is filed and the room sees `frame:updated`.
+
+Sign-off stands either way (the frame itself was not edited; decided 2026-11-12), and one activity line
+names the frames when the canvas's queue drains. A frame written while it was being prepared is queued again
+rather than overwritten; one whose write reads a frame that is not in memory (a copy of a main elsewhere)
+has what a write to it reads loaded first. A frame mid-stream catches up when its stream ends, including one
+whose agent went silent. `update_component` reports `propagation: { status: 'queued' | 'deferred' | 'none',
+frames }`; `update_library_everywhere` loads each canvas, waits for its queue and reports the frames that
+now show the update. Queued work is in memory and needs no catch-up after a restart: a frame is current when
+it is read (the boot sweep `catchUpComponentsBehind` and its query are gone). `DOOP_DEFER_COMPONENT_PROPAGATION`
+still skips the queue for frame writes: frames in memory then follow on their own next write, or the next
+read of their page. The `detach` task, and a changed main on a canvas whose frames live on an actor, still
+take in every frame: the canvas is loaded and held until the queue drains.
 
 ## Deleting and restoring
 
@@ -133,7 +198,12 @@ Delete is **soft** (`status: 'deleted'`, `deletedAt`, `deletedBy` on the definit
 `0058_component_soft_delete`). `deleteComponent` marks the definition and writes **no frame**: it used to
 detach every instance on every frame in one synchronous request.
 
-- **Instances** of a deleted component keep their stored markup byte for byte and are left out of
+- **Instances** of a deleted component keep their markup byte for byte. At rest too: `deleteComponent`
+  stores each loaded frame using it again, its instances of the deleted component written out (an
+  instance holding one in a slot stays written out with it), so a later change to a component nested in
+  it cannot reach them; a reference a row still holds from before the delete renders as the component
+  was. A reference is likewise kept written out until every definition it names, the ones placed in its
+  slots included, is in the database. They are left out of
   everything that follows a main: `prepareInstances` skips them (no reconcile, no upgrade), the propagation
   queue drops deleted ids, and their stylesheet is still composed in (`componentClosure` finds the
   definition, deleted or not).
@@ -176,6 +246,15 @@ detach every instance on every frame in one synchronous request.
 Tests: `componentSoftDelete.test.ts`, `componentSoftDeleteRoutes.test.ts`,
 `componentSectionDeleted.test.tsx`.
 
+Compact storage tests: `frameRest.test.ts` (the round trip and its idempotence, overrides of every kind,
+element ids, a main's nested instances, a property-style run over frames made at random through the real
+write paths, the damaged-definition cases, cost, a changed main with pages in and out of memory),
+`compactFramesHttp.test.ts` (the real server and database under both settings: restarts, an inline edit
+kept as an override, versions, copies, a missing definition, a database holding both forms),
+`frameRerenderStore.test.ts` (the browser's side of a re-render), `componentsBehind.test.ts` and
+`componentsCatchUp.test.ts` (instances stored behind are current when read), `workBudgetCommit.test.ts`
+(its modelled database holds frames at rest).
+
 ## Work budget
 
 The engine is synchronous, and what it costs is parsing. Every engine parse goes through `parse` /
@@ -186,7 +265,10 @@ idle stream's settling pass. An operation may hand the parser `DOOP_WORK_BUDGET_
 spend `DOOP_WORK_BUDGET_MS` (2000) inside it; the time is parser time, not wall time, so a tool call that
 awaits a render is not charged for the wait. Past either limit the parse throws `WorkBudgetError`, which
 names the operation and the canvas: REST answers 422 `work_budget_exceeded`, MCP and the resident agent
-return it as the tool's error, and the queue skips that frame and leaves it materialized as it was.
+return it as the tool's error, and the queue skips that frame and leaves it in memory as it was (its row,
+which holds references, reads back current). A page read gives each frame an operation of its own, so
+expanding a page's references is not one budget; a kept template is parsed once, not once per instance
+(`keptTemplate` in the engine), and costs nothing after that.
 `prepareFrameHtml` puts back any definition it had already saved (a main folded in, a library component
 taken up), and `updateComponent` its own, so a refused write leaves nothing behind. The budget is
 checked before a parse (bytes that do not fit are never parsed) and again after it, so the parse that took
@@ -208,7 +290,7 @@ Tests: `workBudget.test.ts`, `workBudgetHttp.test.ts`.
 
 `server/componentUsage.ts` answers "where is each component used" for a whole canvas from one pass over
 its frames: a string scan for instance markers, never a parse, kept per frame until that frame is written
-again (its `updatedAt` moves). `catalog(canvas)` (the list in `get_canvas`, `list_components` and the
+(its `updatedAt` moves) or rendered again (its `rendered` moves). `catalog(canvas)` (the list in `get_canvas`, `list_components` and the
 resident prompt) takes every component's count from that one pass instead of splitting every frame once per
 component. `update_component`'s impact report reads the same index, and looks for orphaned overrides only
 in frames that can hold one (an overrides marker, or a slot / nested component at a part the new template
@@ -246,6 +328,13 @@ instance; description and make-a-prop / make-a-slot on a main. Right-click and �
 - `@scope` is not used, so a host frame's own rules for the same class still apply to an instance.
 - A definition that goes hollow (its row lost its markup and rules) has no stylesheet to compose: a frame
   stored lean shows its instances unstyled until the main is written again. A frame stored before lean
-  storage keeps the copy it holds.
+  storage keeps the copy it holds. A reference to it renders from its newest kept revision; with none
+  kept it is a placeholder until the main is written again.
+- A reference renders with the component as it is when the frame is read, so a version preview shows a
+  version's instances at today's markup, not the markup of the day it was filed (its props, overrides and
+  slot content are the version's own).
+- A save parses the frame once more than before (to find its instances; about 2 ms for a 115 KB frame),
+  on the debounced row write. `tests/frameRestBench.test.ts` prints what a heavy page costs to read and
+  store.
 - Workspace libraries (publish once, use on every canvas of the workspace) are their own spec:
   [workspace-component-library.md](workspace-component-library.md).

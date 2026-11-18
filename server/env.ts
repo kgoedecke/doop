@@ -173,6 +173,12 @@ const schema = {
      Reads compose either way (server/frameCompose.ts). To be removed once lean storage
      has run in production */
   DOOP_LEAN_FRAME_STORAGE: bool({ default: true }),
+  /* temporary kill switch: false stores every frame with its component instances written
+     out in full again, as before compact storage, so a change to a component's markup
+     rewrites the loaded frames using it. Reads expand either way, whatever mix of the two
+     forms the database holds (server/frameRest.ts). To be removed once compact storage
+     has run in production */
+  DOOP_COMPACT_FRAME_STORAGE: bool({ default: true }),
   /* what one operation (a request, a tool call, one frame of the propagation queue) may
      hand the component engine's HTML parser, and how long it may spend in it
      (server/workBudget.ts); 0 lifts a limit */

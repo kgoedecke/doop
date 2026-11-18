@@ -1,17 +1,23 @@
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import type { Frame } from '../shared/types.ts'
 
-const behind = vi.hoisted(() => ({ list: [] as { canvasId: string; componentId: string }[] }))
+/* what the database holds for each frame: set by hand here, to stand for rows a
+   propagation never reached */
+const rows = vi.hoisted(() => ({ frames: new Map<string, string>(), saved: [] as string[] }))
 
 vi.mock('../server/db/persist.ts', () => ({
   saveCanvas: () => {},
-  saveFrame: () => {},
+  refreshAssetRefs: () => {},
+  saveFrame: (f: Frame) => void rows.saved.push(f.id),
   saveFrameNow: async () => {},
   saveActivity: () => {},
   saveFrameVersion: () => {},
   saveTask: () => {},
   saveComponent: () => {},
   deleteComponent: () => {},
-  componentsBehind: async () => behind.list,
+  frameWritePending: () => false,
+  loadFrameHtml: async (ids: readonly string[]) =>
+    new Map(ids.flatMap((id) => (rows.frames.has(id) ? [[id, rows.frames.get(id)!] as const] : []))),
 }))
 
 import * as actions from '../server/actions.ts'
@@ -21,79 +27,78 @@ import { store } from '../server/store.ts'
 import type { Actor } from '../shared/types.ts'
 import { stubEnv, unstubAllEnvs } from './envStub.ts'
 
-/* instances a propagation never reached (a restart mid-drain) are brought up to their component */
+/*
+ * Instances a propagation never reached (the queue lives in memory, so a restart
+ * mid-drain dropped it) used to be found by a query over every stored frame at boot
+ * and rewritten, a canvas at a time (`catchUpComponentsBehind`). Nothing is left for
+ * that to do: a frame is brought up to its components when it is read
+ * (server/frameRest.ts), whichever form it was stored in, and no frame is written
+ * for it. What these cases keep from the old ones: such a frame ends up current, and
+ * its sign-off stands. What went with the catch-up itself: its count of what it
+ * queued, and its taking one canvas at a time (it loads no canvas now).
+ */
 const actor = { name: 'Tester', kind: 'agent', color: '#000', clientId: 'x' } as unknown as Actor
 const doc = (body: string) => `<!doctype html><html><head></head><body>${body}</body></html>`
 
-describe('catching up instances behind', () => {
-  it('rewrites the frames still on an older revision, and keeps their sign-off', async () => {
-    const canvas = store.createCanvas('catch-up', 'owner-catch-up')
-    const def = createComponentFromHtml(
-      canvas.id,
-      { name: 'Badge', html: '<span class="b">New</span>' },
-      actor,
-    ).component
-    const page = actions.createFrame(
-      canvas.id,
-      { name: 'Page', html: doc('<doop-use component="Badge"></doop-use>') },
-      actor,
-    )!
-    actions.setFrameApproval(page.id, true, { id: 'u', name: 'Reviewer' })
-    const stale = store.getFrame(page.id)!.html
-    /* the component moves on while its propagation is lost: the frame keeps the old markup */
-    const main = store.getFrame(def.mainFrameId!)!
-    actions.updateFrame(main.id, { html: main.html.replace('>New<', '>Fresh<') }, actor)
-    store.updateFrame(page.id, { html: stale }, 'Tester', { annotation: true })
-    await propagation.whenIdle()
-    store.updateFrame(page.id, { html: stale }, 'Tester', { annotation: true })
-    expect(store.getFrame(page.id)!.html).toContain('New')
+/** A page using a Badge, stored with the Badge's first markup, and a Badge that has moved on. */
+async function leftBehind() {
+  const canvas = store.createCanvas('catch-up', 'owner-catch-up')
+  const def = createComponentFromHtml(canvas.id, { name: 'Badge', html: '<span class="b">New</span>' }, actor).component
+  const page = actions.createFrame(
+    canvas.id,
+    { name: 'Page', html: doc('<doop-use component="Badge"></doop-use>') },
+    actor,
+  )!
+  actions.setFrameApproval(page.id, true, { id: 'u', name: 'Reviewer' })
+  const stale = store.getFrame(page.id)!.html
+  const main = store.getFrame(def.mainFrameId!)!
+  for (const frame of store.getCanvas(canvas.id)!.frames) rows.frames.set(frame.id, frame.html)
+  /* the server stops here: the row holds the old markup, written out */
+  rows.frames.set(page.id, stale)
+  rows.frames.set(main.id, main.html.replace('>New<', '>Fresh<'))
+  actions.updateFrame(main.id, { html: main.html.replace('>New<', '>Fresh<') }, actor)
+  await propagation.whenIdle()
+  store.evictIdle(0, Date.now() + 1)
+  expect(store.isLoaded(canvas.id)).toBe(false)
+  rows.saved.length = 0
+  return { canvas, page, stale }
+}
 
-    behind.list = [{ canvasId: canvas.id, componentId: def.id }]
-    expect(await actions.catchUpComponentsBehind()).toEqual({ components: 1, canvases: 1 })
-    await propagation.whenIdle()
+afterEach(async () => {
+  unstubAllEnvs()
+  await propagation.whenIdle()
+})
+
+describe('instances left behind in the database', () => {
+  it('are current when their frame is read, and keep the frame’s sign-off and version', async () => {
+    const { canvas, page, stale } = await leftBehind()
+    expect(stale).toContain('New')
+    const version = store.getFrame(page.id)!.updatedAt
+
+    await store.load(canvas.id)
     expect(store.getFrame(page.id)!.html).toContain('Fresh')
+    expect(store.getFrame(page.id)!.html).not.toContain('New')
     expect(store.getFrame(page.id)!.approval?.status).toBe('ready_for_dev')
-  })
-
-  it('does nothing when every instance is current', async () => {
-    behind.list = []
-    expect(await actions.catchUpComponentsBehind()).toEqual({ components: 0, canvases: 0 })
-  })
-
-  it('leaves frames alone while propagation is switched off', async () => {
-    behind.list = [{ canvasId: 'any', componentId: 'any' }]
-    stubEnv('DOOP_DEFER_COMPONENT_PROPAGATION', 'true')
-    try {
-      expect(await actions.catchUpComponentsBehind()).toEqual({ components: 0, canvases: 0 })
-    } finally {
-      unstubAllEnvs()
-    }
-  })
-
-  it('finishes one canvas before it starts the next', async () => {
-    const first = store.createCanvas('first', 'owner-catch-up')
-    const second = store.createCanvas('second', 'owner-catch-up')
-    const a = createComponentFromHtml(first.id, { name: 'A', html: '<span class="a">a</span>' }, actor).component
-    const b = createComponentFromHtml(second.id, { name: 'B', html: '<span class="b">b</span>' }, actor).component
+    expect(store.getFrame(page.id)!.updatedAt).toBe(version)
+    /* the row is stored again as read, once, so the next read of it has nothing to do */
     await propagation.whenIdle()
-    const order: string[] = []
-    const waited = propagation.whenCanvasIdle
-    const spy = vi.spyOn(propagation, 'whenCanvasIdle').mockImplementation(async (canvasId) => {
-      order.push(`wait ${canvasId}`)
-      return waited(canvasId)
-    })
-    const enqueue = propagation.enqueue
-    const queued = vi.spyOn(propagation, 'enqueue').mockImplementation((...args: Parameters<typeof enqueue>) => {
-      order.push(`queue ${args[1]}`)
-      return enqueue(...args)
-    })
-    behind.list = [
-      { canvasId: first.id, componentId: a.id },
-      { canvasId: second.id, componentId: b.id },
-    ]
-    await actions.catchUpComponentsBehind()
-    expect(order).toEqual([`queue ${first.id}`, `wait ${first.id}`, `queue ${second.id}`, `wait ${second.id}`])
-    spy.mockRestore()
-    queued.mockRestore()
+    expect(rows.saved).toEqual([page.id])
+  })
+
+  it('takes a frame whose instances are current exactly as stored', async () => {
+    const { canvas, page } = await leftBehind()
+    await store.load(canvas.id)
+    const current = store.getFrame(page.id)!.html
+    rows.frames.set(page.id, current)
+    store.evictIdle(0, Date.now() + 1)
+    await store.load(canvas.id)
+    expect(store.getFrame(page.id)!.html).toBe(current)
+  })
+
+  it('are current when read while propagation is switched off too: the switch holds back the queue, not a read', async () => {
+    const { canvas, page } = await leftBehind()
+    stubEnv('DOOP_DEFER_COMPONENT_PROPAGATION', 'true')
+    await store.load(canvas.id)
+    expect(store.getFrame(page.id)!.html).toContain('Fresh')
   })
 })

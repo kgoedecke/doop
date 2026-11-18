@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 /* persistence is not under test: the in-memory order is */
 vi.mock('../server/db/persist.ts', () => ({
   saveCanvas: () => {},
+  refreshAssetRefs: () => {},
   saveFrame: () => {},
   savePageCopy: () => Promise.resolve(),
   saveCanvasCopy: () => Promise.resolve(),

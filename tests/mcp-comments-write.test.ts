@@ -12,6 +12,7 @@ import type { Canvas, ElementComment, Frame } from '../shared/types.ts'
  * action layer run and mock only persistence, so they can read the stored
  * comment/activity/decision logs back. */
 vi.mock('../server/db/persist.ts', () => ({
+  refreshAssetRefs: () => {},
   saveFrame: () => {},
   saveFrameNow: async () => {},
   saveCanvas: () => {},
