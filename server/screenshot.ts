@@ -427,6 +427,60 @@ async function inspectOn(page: Page, frame: Frame): Promise<FrameInspection> {
   }
 }
 
+/** How tall the frame's content is, in design px, laid out at the frame's
+ *  width: what `fit_height` sets the frame to (server/frameFit.ts). */
+export function measureContentHeight(frame: Frame): Promise<number> {
+  return renderer.withPage('measuring the frame', RENDER_TIMEOUT_MS, async (page) => {
+    await loadFrameInto(page, frame)
+    /* the viewport is the frame as the canvas shows it, so 100vh and height
+       media queries resolve to what the design has now */
+    await page.setViewport({
+      width: Math.max(1, Math.round(frame.width)),
+      height: Math.max(1, Math.round(frame.height)),
+      deviceScaleFactor: 1,
+    })
+    await page.evaluate('globalThis.__name = (target) => target')
+    return page.evaluate(contentBottom)
+  })
+}
+
+/** Runs in the frame's page. The document's height with the root and body
+ *  let go of any viewport size (a body at 100vh or 100% would hold the frame
+ *  at its current height), taken as the lowest box anything paints: the
+ *  root's own box covers what flows, a walk adds what is positioned or
+ *  overflows. Boxes a scroller or clipper hides are left out, and so are
+ *  fixed elements, which sit on the viewport rather than the content. */
+async function contentBottom(): Promise<number> {
+  const MAX_ELEMENTS = 20_000
+  await document.fonts.ready
+  /* mid-animation boxes (an entrance sliding up) measure where they will not stay */
+  for (const animation of document.getAnimations()) {
+    try {
+      animation.finish()
+    } catch {
+      animation.cancel()
+    }
+  }
+  const release = document.createElement('style')
+  release.textContent = 'html,body{height:auto!important;min-height:0!important;max-height:none!important}'
+  document.head.append(release)
+  const root = document.documentElement
+  let bottom = root.getBoundingClientRect().bottom
+  let seen = 0
+  const walk = (el: Element) => {
+    for (const child of Array.from(el.children)) {
+      if (++seen > MAX_ELEMENTS) return
+      const style = getComputedStyle(child)
+      if (style.display === 'none' || style.position === 'fixed') continue
+      const rect = child.getBoundingClientRect()
+      if (rect.width > 0 || rect.height > 0) bottom = Math.max(bottom, rect.bottom)
+      if (style.overflowY === 'visible' && style.overflowX === 'visible') walk(child)
+    }
+  }
+  walk(document.body)
+  return Math.ceil(bottom + window.scrollY)
+}
+
 export interface RenderOptions extends PageOptions {
   type?: 'png' | 'jpeg'
   quality?: number

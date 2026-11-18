@@ -231,6 +231,17 @@
   and returns it for `create_frame`'s `pageId`; `set_canvas_pages` stays the whole-list call for
   rename, reorder and delete; `update_frame` moves a frame between pages. The guide's "Frames
   and HTML" section says when a page beats a frame. Tests: the page cases in `mcp-tools.test.ts`.
+- Fitting a frame to its content (`server/frameFit.ts`, `measureContentHeight` in
+  `server/screenshot.ts`): `fit_height: true` on MCP `update_frame` (at the new `width` when the
+  call passes one), `create_frame` and `set_frame_html`, and on the resident's `update_frame`, sets
+  the height to the content's as the server's Chromium lays it out, so agents stop guessing heights
+  between screenshots (#532). The frame loads at its current size (vh resolves as on the canvas);
+  the root and body let go of any viewport height, then the measure is the lowest painted box: the
+  root's own box for what flows, plus positioned and overflowing descendants, leaving out fixed
+  elements and what a scroller or clipper hides. Animations are finished first and fonts awaited.
+  Capped at `FIT_HEIGHT_MAX` (16,384, the export limit); refused with `height`, and on a
+  `create_frame` with no HTML (a stream is fitted afterwards with `update_frame`). Tests:
+  `frameFit.test.ts`.
 - Feature usage events: a feature an agent can reach reports from the server through
   `captureFeature` (`server/featureEvents.ts`) at the REST route, MCP tool and resident tool, on the
   signed-in user, the agent's connecting user or the resident run's requester, with `via` (`ui`,
