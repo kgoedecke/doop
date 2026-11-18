@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 /* Page and frame writes persist and broadcast like any canvas change; these
    tests only care about the canvas the tools leave behind, so both are stubbed. */
 vi.mock('../server/db/persist.ts', () => ({
+  refreshAssetRefs: () => {},
   saveFrame: () => {},
   saveFrameNow: async () => {},
   saveCanvas: () => {},

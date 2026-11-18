@@ -6,6 +6,7 @@ import type { Frame } from '../shared/types.ts'
 
 vi.mock('../server/db/persist.ts', () => ({
   saveCanvas: () => {},
+  refreshAssetRefs: () => {},
   saveFrame: () => {},
   saveFrameNow: async () => {},
   saveActivity: () => {},

@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 /* Approval writes persist and broadcast like any frame change; these tests only care
    about the approval the tool leaves behind, so both are stubbed, and so is the name lookup. */
 vi.mock('../server/db/persist.ts', () => ({
+  refreshAssetRefs: () => {},
   saveFrame: () => {},
   saveFrameNow: async () => {},
   saveCanvas: () => {},

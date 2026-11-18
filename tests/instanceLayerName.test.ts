@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('../server/db/persist.ts', () => ({
   saveCanvas: () => {},
+  refreshAssetRefs: () => {},
   saveFrame: () => {},
   saveActivity: () => {},
   saveFrameVersion: () => {},

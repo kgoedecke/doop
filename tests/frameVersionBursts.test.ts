@@ -7,6 +7,7 @@ import type { Canvas } from '../shared/types.ts'
 /* The burst rules live in the action layer; persistence is mocked so the
  * test can read which states were filed, in order. */
 vi.mock('../server/db/persist.ts', () => ({
+  refreshAssetRefs: () => {},
   saveFrame: () => {},
   saveCanvas: () => {},
   saveActivity: () => {},

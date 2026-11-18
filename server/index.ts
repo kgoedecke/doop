@@ -171,6 +171,7 @@ import type {
 } from '../shared/types.ts'
 import { carriesHtml, frameMeta, htmlLoaded } from './frameHtml.ts'
 import { composedFrame, composedHtml } from './frameCompose.ts'
+import { storesCompactly } from './frameRest.ts'
 import {
   forgetTokens,
   legacyFrame,
@@ -593,6 +594,11 @@ setInterval(() => {
 actions.wire(broadcast, agentTouch)
 /* asset_refs follow each frame as it renders, its components' stylesheets included */
 persist.viewAssetsThrough(composedHtml)
+/* frames rest as references into their canvas's components (server/frameRest.ts) */
+persist.restFramesThrough((canvasId) => {
+  const canvas = store.getCanvas(canvasId)
+  return storesCompactly(canvas) ? (canvas?.components ?? []) : undefined
+})
 /* after the room has been told: email for the people who were not in it */
 onCanvasEvent(commentNotifications.onCanvasEvent)
 onCanvasEvent(webhooks.onCanvasEvent)
@@ -3200,7 +3206,10 @@ app.get('/api/frames/:id/versions/:versionId', async (req, res) => {
   if (!version) return res.status(404).json({ error: 'version not found' })
   /* a preview is shown as a document of its own: the canvas's styles as they are now
      (a version keeps the frame's source, not what the canvas supplied then) */
-  res.json({ ...version, html: composedHtml(frame.canvasId, version.html) })
+  /* stored as a frame's row is, its instances as references: rendered from the components
+     as they are now, like the styles */
+  const html = store.wakeHtml(frame.canvasId, version.html, frame.id)
+  res.json({ ...version, html: composedHtml(frame.canvasId, html) })
 })
 
 app.post('/api/frames/:id/versions/:versionId/restore', async (req, res) => {
@@ -4002,15 +4011,6 @@ server.listen({ port: PORT, host: HOST }, () => {
         )
     })
     .catch((err) => console.error('[components] healing hollow definitions failed:', err))
-  /* instances a propagation never reached (a restart mid-drain): queued again, while serving */
-  outsideOperation('boot catch-up: each component is queued for propagation by itself', () =>
-    actions.catchUpComponentsBehind(),
-  )
-    .then(({ components, canvases }) => {
-      if (components)
-        console.log(`[components] ${components} component(s) on ${canvases} canvas(es) had instances behind: queued`)
-    })
-    .catch((err) => console.error('[components] catching up instances behind failed:', err))
   /* comments anchored before element ids: stamped now, while serving, so a
      slow or failing row can never keep the server from coming up */
   if (data.legacyCommentSelectors.size > 0) {

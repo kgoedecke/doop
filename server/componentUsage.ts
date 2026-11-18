@@ -6,8 +6,9 @@ import type { Canvas, Frame } from '../shared/types.ts'
  * The catalog in get_canvas used to split every frame's HTML once per
  * component: components × canvas bytes on each read. Here a frame's HTML is
  * scanned once for all instance markers (a string scan, never a parse) and the
- * counts are kept until that frame is written again: every frame write moves
- * the frame's `updatedAt`, which is what a kept count is checked against. So a
+ * counts are kept until that frame is written or rendered again: a frame write moves
+ * the frame's `updatedAt` and a re-render its `rendered`, which is what a kept count is
+ * checked against. So a
  * read after one frame changed scans that one frame, and a read after nothing
  * changed scans none.
  *
@@ -22,10 +23,15 @@ export interface ComponentUsage {
 }
 
 interface FrameCounts {
-  /** the frame's updatedAt when it was scanned */
-  stamp: number
+  /** the frame's version when it was scanned (`stampOf`) */
+  stamp: string
   counts: Map<string, number>
 }
+
+/** A frame's HTML as of now: its `updatedAt`, and `rendered`, which moves when a component
+ *  it uses changed its markup and the frame was rendered again with no write (a template
+ *  that gained a nested component changes the counts). */
+const stampOf = (frame: Frame) => `${frame.updatedAt}:${frame.rendered ?? 0}`
 
 const scanned = new WeakMap<Canvas, Map<string, FrameCounts>>()
 
@@ -52,12 +58,20 @@ function countMarkers(html: string): Map<string, number> {
   return counts
 }
 
+/** The frame's HTML was read from storage again: what it renders from may have changed while
+ *  it was out of memory (a component that gained a nested one), with neither `updatedAt` nor
+ *  `rendered` moving, so its kept counts are counted again. */
+export function forgetCounts(canvas: Canvas, frameId: string) {
+  scanned.get(canvas)?.delete(frameId)
+}
+
 function countsOf(kept: Map<string, FrameCounts>, frame: Frame): Map<string, number> {
   const known = kept.get(frame.id)
-  if (known?.stamp === frame.updatedAt) return known.counts
+  const stamp = stampOf(frame)
+  if (known?.stamp === stamp) return known.counts
   tally.framesScanned += 1
   const counts = countMarkers(frame.html)
-  kept.set(frame.id, { stamp: frame.updatedAt, counts })
+  kept.set(frame.id, { stamp, counts })
   return counts
 }
 

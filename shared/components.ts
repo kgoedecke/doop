@@ -4,7 +4,8 @@
  * written out in full in the frame that uses it, marked `data-doop-instance`, so
  * everything that reads frame HTML (the iframe, exports, screenshots, comments,
  * the Layers panel) needs no idea components exist. Agents read and write the
- * short form, `<doop-use component="Button" label="Buy"></doop-use>`.
+ * short form, `<doop-use component="Button" label="Buy"></doop-use>`, and it is
+ * also how a frame's row keeps an instance at rest (server/frameRest.ts).
  * Spec: .context/specs/components.md.
  */
 

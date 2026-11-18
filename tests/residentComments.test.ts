@@ -4,6 +4,7 @@ import type { Frame } from '../shared/types.ts'
 /* Replies are persisted and broadcast like any comment; these tests only
    care about what lands in the thread, so both sides are stubbed. */
 vi.mock('../server/db/persist.ts', () => ({
+  refreshAssetRefs: () => {},
   saveFrame: () => {},
   saveFrameNow: async () => {},
   saveCanvas: () => {},

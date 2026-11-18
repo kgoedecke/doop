@@ -91,6 +91,8 @@ import { resolveElement } from './elementIds.ts'
 import * as propagation from './propagation.ts'
 import { optional, parse, parseFragment, usage as workUsage, WorkBudgetError } from './workBudget.ts'
 import { afterCommit, atomic, checkpoint, transaction } from './journal.ts'
+import { htmlLoaded } from './frameHtml.ts'
+import * as persist from './db/persist.ts'
 import { usageByComponent, usageOf, type ComponentUsage } from './componentUsage.ts'
 import { store } from './store.ts'
 import { composedHtml, sourceHtml } from './frameCompose.ts'
@@ -699,9 +701,11 @@ export interface UpdateResult {
     overrides_unchecked_frames?: number
   }
   /** How the change reaches the instances in `impact.frames` (absent in a dry run):
-   *  `queued` rewrites them in the background, a frame per tick; `deferred` means the
-   *  server has propagation switched off and each frame follows on its own next write;
-   *  `none` means nothing instances render from changed. */
+   *  `queued` renders the frames in memory again in the background, a frame per tick (a
+   *  frame stores a reference to the component, so it is written only where what it stores
+   *  changed too; one not in memory is rendered from the component when it is read);
+   *  `deferred` means the server has propagation switched off and each frame in memory
+   *  follows on its own next write; `none` means nothing instances render from changed. */
   propagation?: { status: 'queued' | 'deferred' | 'none'; frames: number }
 }
 
@@ -1128,6 +1132,15 @@ export const deleteComponent = atomic(function deleteComponent(canvasId: string,
   const deleted: ComponentDef = { ...def, status: 'deleted', deletedAt: Date.now(), deletedBy: actor.name }
   store.saveComponent(canvasId, deleted)
   actions.broadcastComponent(canvasId, deleted, actor)
+  /* its instances keep the markup they have, and a row holding a reference to it would be
+     rendered from whatever its nested components are when next read: each frame using it
+     is stored again, its instances of a deleted component written out (server/frameRest.ts) */
+  afterCommit(() => {
+    for (const { id } of usage.frames) {
+      const frame = store.getFrame(id)
+      if (frame && htmlLoaded(frame)) persist.saveFrame(frame)
+    }
+  })
   const kept = usage.instances
   actions.logComponent(
     canvasId,
@@ -1953,7 +1966,9 @@ export interface LibraryConsumerUpdate {
   canvas_name: string
   /** the linked components brought up to the publication */
   updated: string[]
-  /** frames rewritten; in a dry run, the frames holding an instance of what would update */
+  /** frames that show the update: rendered again from their components, and written only
+   *  where what they store changed too; in a dry run, the frames holding an instance of
+   *  what would update */
   frames_changed: number
   /** always 0: a frame following its components keeps its sign-off (2026-11-12). Kept so
    *  readers of the report do not break */
@@ -2101,7 +2116,8 @@ export async function updateLibraryConsumers(
          a canvas that is done stays done if a later one is refused */
       checkpoint()
       if (update) {
-        /* the pull only queued its frames: wait here, canvas held, for what it really changed.
+        /* the pull only queued its frames (all of them: the canvas is loaded): wait here, canvas
+           held, for the ones it really changed.
            The wait blocks nothing (the queue works a frame per tick), and keeps the canvases
            this walks through in memory one at a time. */
         const drained = (await propagation.whenCanvasIdle(canvas.id)).propagate

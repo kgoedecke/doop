@@ -119,11 +119,11 @@ function propagationNote(result: { propagation?: { status: string; frames: numbe
   const count = `${frames} frame${frames === 1 ? '' : 's'}`
   if (status === 'queued')
     return [
-      `Instances are updating in the background: queued for ${count} (impact.frames). get_frame and get_frame_screenshot wait a moment for it; on a large canvas the last frames can take longer.`,
+      `Instances follow the component: the ${count} in impact.frames are being rendered again in the background, with no edit of the frames themselves. get_frame and get_frame_screenshot wait a moment for it; on a large canvas the last frames can take longer.`,
     ]
   if (status === 'deferred')
     return [
-      `This server has component propagation switched off for now: the ${count} in impact.frames keep the previous revision until each is next written.`,
+      `This server has component propagation switched off for now: the ${count} in impact.frames keep the previous revision until each is next written or its page is next read.`,
     ]
   return []
 }
@@ -729,7 +729,7 @@ export const COMPONENT_TOOLS: ComponentTool[] = [
             ? 'Every canvas using this library already has its latest publication. Changes made here since then reach nobody until publish_library.'
             : report.dry_run
               ? 'Dry run: nothing was changed. frames_changed counts the frames holding an instance of what would update; approved frames keep their sign-off. Tell the human before running it for real.'
-              : `Updated ${count} canvas${count === 1 ? '' : 'es'}. Tell the human which canvases changed${report.skipped.length ? ', and which were skipped and why' : ''}.`,
+              : `Updated ${count} canvas${count === 1 ? '' : 'es'}; frames_changed counts the frames on each that now show the update (they follow their components: no frame was edited). Tell the human which canvases changed${report.skipped.length ? ', and which were skipped and why' : ''}.`,
       }
     },
   },

@@ -39,6 +39,11 @@ export interface Frame {
   /** Human sign-off for implementation. Missing/null means draft. Design
    * edits retain the attribution but change the status to needs_review. */
   approval?: FrameApproval | null
+  /** When the server last rendered this frame again without a write of it: a component it
+   *  uses changed its markup, which the frame stores only a reference to, so `html` moved
+   *  and `updatedAt` did not. Of two copies with the same `updatedAt`, the one with the
+   *  greater `rendered` is the newer rendering. In memory and on the wire only. */
+  rendered?: number
 }
 
 export interface FrameApproval {
@@ -693,7 +698,9 @@ export type ServerMessage =
    *  kept current, so it reads the page again (`page:load`) before it shows it */
   | { type: 'page:dropped'; pageId: string }
   | { type: 'frame:created'; frame: WireFrame; actor: Actor }
-  | { type: 'frame:updated'; frame: WireFrame; actor: Actor }
+  /** `rerender`: the frame was not written. A component it uses changed its markup and the
+   *  server rendered it again (`frame.rendered` moved, `updatedAt` did not) */
+  | { type: 'frame:updated'; frame: WireFrame; actor: Actor; rerender?: true }
   | { type: 'frame:deleted'; frameId: string; actor: Actor }
   | { type: 'frame:streaming'; frameId: string; active: boolean; actor: Actor }
   | { type: 'canvas:renamed'; name: string; actor: Actor }

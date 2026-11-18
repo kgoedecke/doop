@@ -1,3 +1,4 @@
+import { rendersWhole } from './frameRest.ts'
 import { customAlphabet } from 'nanoid'
 import { serializeOuter } from 'parse5'
 import {
@@ -6,13 +7,9 @@ import {
   HEAD_ATTR,
   INSTANCE_ATTR,
   MAX_COMPONENT_HISTORY,
-  OVERRIDES_ATTR,
-  PART_ATTR,
-  PROPS_ATTR,
-  REV_ATTR,
   USE_TAG,
   isDeleted,
-  stateAtRev,
+  isHollow,
   type ComponentDef,
   type ComponentIssue,
   type ComponentProp,
@@ -21,12 +18,13 @@ import { componentClosure } from '../shared/frameCompose.ts'
 import { extractComponentCss, frameHeadTags, frameStylesheets } from './componentCss.ts'
 import {
   attrOf,
+  contextOfDefs,
   derivePropsAndSlots,
   expandUses,
   findMarked,
-  holdsHollow,
+  prepareInstances,
   renderInstance,
-  reconcileInstance,
+  reviveLostUses,
   setAttr,
   splice,
   stampParts,
@@ -75,28 +73,11 @@ function hostedForm<T extends Revision>(def: T | undefined): T | undefined {
 }
 
 export function contextFor(canvasId: string, adoption?: LibraryAdoption): EngineContext {
-  const defs = () => store.getComponents(canvasId)
-  const issues: ComponentIssue[] = []
-  /* an id is exact, deleted or not: markup already on the canvas points at it. A name means
-     the component in use; a deleted one answers to its name only when nothing else has it,
-     so that asking for it says "deleted" rather than "unknown" */
-  const local = (ref: string) => {
-    const wanted = ref.trim().toLowerCase()
-    const named = defs().filter((def) => def.name.toLowerCase() === wanted)
-    return defs().find((def) => def.id === ref) ?? named.find((def) => !isDeleted(def)) ?? named[0]
-  }
+  const local = contextOfDefs(() => store.getComponents(canvasId))
+  const issues = local.issues
   const find = (ref: string) =>
-    hostedForm(local(ref) ?? (adoption && ref ? fromLibrary(canvasId, ref, adoption, issues) : undefined))
-  return {
-    find,
-    atRev(id, rev) {
-      const def = defs().find((candidate) => candidate.id === id)
-      const state = def && stateAtRev(def, rev)
-      if (!def || !state) return undefined
-      return hostedForm(state === def ? def : { id, name: def.name, ...state })
-    },
-    issues,
-  }
+    hostedForm(local.find(ref) ?? (adoption && ref ? fromLibrary(canvasId, ref, adoption, issues) : undefined))
+  return { ...local, find, atRev: (id: string, rev: number) => hostedForm(local.atRev(id, rev)) }
 }
 
 /** Nothing on the canvas has this name: its workspace library may. A local
@@ -313,34 +294,6 @@ export function rederiveFromMains(
   return { html: mains.html, saved: [...mains.changed, ...mains.moved] }
 }
 
-function prepareInstances(html: string, ctx: EngineContext) {
-  const edits: { start: number; end: number; text: string }[] = []
-  for (const found of findMarked(html, INSTANCE_ATTR)) {
-    const id = attrOf(found.el, INSTANCE_ATTR) ?? ''
-    const def = ctx.find(id)
-    if (!def) {
-      /* its component was deleted, or this came from another canvas: plain markup */
-      for (const name of [INSTANCE_ATTR, REV_ATTR, PROPS_ATTR, OVERRIDES_ATTR]) setAttr(found.el, name, null)
-      edits.push({ start: found.start, end: found.end, text: serializeOuter(found.el) })
-      continue
-    }
-    /* its component was deleted: the instance keeps the markup it has, untouched. So does one
-       holding an instance of a hollow component: rendered again, that instance would be lost */
-    if (isDeleted(def) || holdsHollow(found.el, ctx)) continue
-    const before = serializeOuter(found.el)
-    const state = reconcileInstance(found.el, ctx)
-    if (!state) continue
-    /* only a whole write gets here: nothing more is coming for the content it holds */
-    const rendered = renderInstance(def, def, state.overrides, state.instanceId, { ctx, stack: [] })
-    if (!rendered) continue
-    /* the key it has is its place in what holds it (a main), not the component's own root key */
-    setAttr(rendered, PART_ATTR, attrOf(found.el, PART_ATTR) ?? null)
-    const after = serializeOuter(rendered)
-    if (after !== before) edits.push({ start: found.start, end: found.end, text: after })
-  }
-  return edits.length ? splice(html, edits) : html
-}
-
 export interface PreparedHtml {
   html: string
   issues: ComponentIssue[]
@@ -362,6 +315,15 @@ export function prepareFrameHtml(
   priorHtml = '',
   { refuseUnclosed = false }: { refuseUnclosed?: boolean } = {},
 ): PreparedHtml {
+  /* a reference kept as a placeholder (its component could not render when the frame was
+     read, server/frameRest.ts) is a reference again once that component can */
+  incoming = reviveLostUses(incoming, (ref, use) => {
+    const defs = store.getComponents(canvas.id)
+    const def = defs.find((candidate) => candidate.id === ref || candidate.name === ref)
+    /* whole, or not yet: with a nested component still missing, the write would render the
+       rest and record the missing part as hidden for good */
+    return !!def && !isDeleted(def) && !isHollow(def) && rendersWhole(use, defs)
+  })
   if (!touchesComponents(incoming)) {
     const lost = frameId && priorHtml.includes(`${COMPONENT_ATTR}="`)
     const moved = lost ? prepareMains(canvas, frameId, incoming, by, contextFor(canvas.id)).moved : []

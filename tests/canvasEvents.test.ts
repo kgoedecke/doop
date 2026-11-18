@@ -5,6 +5,7 @@ import type { AgentTask, Frame } from '../shared/types.ts'
    that every mutation that should be an event is one, after the room has
    been told, and that one bad listener never reaches the mutation. */
 vi.mock('../server/db/persist.ts', () => ({
+  refreshAssetRefs: () => {},
   saveFrame: () => {},
   saveFrameNow: async () => {},
   saveCanvas: () => {},

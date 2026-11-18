@@ -11,6 +11,7 @@ import { isCanvasComment } from '../shared/comments.ts'
  */
 
 vi.mock('../server/db/persist.ts', () => ({
+  refreshAssetRefs: () => {},
   saveFrame: () => {},
   saveFrameNow: async () => {},
   saveCanvas: () => {},

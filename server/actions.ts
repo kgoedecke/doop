@@ -57,6 +57,8 @@ import { decodeEscapedHtml, looksEscapedHtml, repairEscapedHtml } from './escape
 import { forgetLibrary } from './componentLibrary.ts'
 import { withCanvasFaces, withCanvasFacesMidStream, withCanvasStyles } from './canvasFaces.ts'
 import { resourcesOf, sameStored, storedHtml } from './frameCompose.ts'
+import { htmlLoaded } from './frameHtml.ts'
+import { sameAtRest, storesCompactly } from './frameRest.ts'
 import { componentsUsedBy, syncComponentHead } from '../shared/frameCompose.ts'
 import { withHostedIcons } from './iconProxy.ts'
 import { EMBEDDED_MIN_LENGTH } from './inlineData.ts'
@@ -1830,10 +1832,13 @@ export const restoreFrameVersion = atomic(async function restoreFrameVersion(
   const before = store.getFrame(frameId)
   if (!before) return undefined
   const replaced = { html: before.html, width: before.width, height: before.height }
-  if (before.html === version.html && before.width === version.width && before.height === version.height)
+  /* a version is stored as a frame's row is, its instances as references: rendered from the
+     components as they are now, then written like any other document */
+  const html = store.wakeHtml(before.canvasId, version.html, frameId)
+  if (before.html === html && before.width === version.width && before.height === version.height)
     return { frame: before, replaced }
   /* prepared first: a refusal (the work budget) must find the frame's stream as it was */
-  const prepared = prepareWrite(before.canvasId, frameId, version.html, before.html, actor.name)
+  const prepared = prepareWrite(before.canvasId, frameId, html, before.html, actor.name)
   /* whoever restores takes over: any live stream or playback ends */
   finishStream(frameId, false)
   finishReveal(frameId)
@@ -2027,6 +2032,11 @@ setInterval(() => {
     const frame = store.getFrame(frameId)
     if (!frame) {
       reveals.delete(frameId)
+      continue
+    }
+    /* its page left memory mid-playback: whoever reads it next gets it whole */
+    if (!htmlLoaded(frame)) {
+      finishReveal(frameId)
       continue
     }
     const total = frame.html.length
@@ -2268,9 +2278,10 @@ export function propagationPending(canvasId: string, componentId: string): boole
   return propagationAsked.has(`${canvasId}:${componentId}`) || propagation.isPending(canvasId, 'propagate', componentId)
 }
 
-/** A frame write that changed a main. Every other frame using it is brought up to date in
- *  the background (server/propagation.ts); with DOOP_DEFER_COMPONENT_PROPAGATION each
- *  catches up on its own next write instead (prepareFrameHtml upgrades instances). */
+/** A frame write that changed a main. Every other frame using it that is in memory is
+ *  rendered again in the background (server/propagation.ts); one that is not is rendered
+ *  from the component when its page is read. With DOOP_DEFER_COMPONENT_PROPAGATION the
+ *  frames in memory catch up on their own next write, or the next read of their page. */
 function propagateFromFrameWrite(canvasId: string, changed: ComponentDef[], actor: Actor, originFrameId: string) {
   if (env.DOOP_DEFER_COMPONENT_PROPAGATION) {
     for (const def of changed) broadcastComponent(canvasId, def, actor)
@@ -2279,14 +2290,17 @@ function propagateFromFrameWrite(canvasId: string, changed: ComponentDef[], acto
   queuePropagation(canvasId, changed, actor, originFrameId)
 }
 
-/** A main changed: tell the room now, and queue every frame using it to be brought up to
- *  date, one per tick. Returns at once; nothing is read or rewritten here. `originFrameId`
- *  is the frame whose write this came from, which already has the change. */
+/** A main changed: tell the room now, and queue the frames in memory to be rendered again,
+ *  one per tick (every frame, on a canvas whose frames live on an actor). Returns at once;
+ *  nothing is read or rewritten here. `originFrameId` is the frame whose write this came
+ *  from, which already has the change. */
 export function queuePropagation(canvasId: string, changed: ComponentDef[], actor: Actor, originFrameId?: string) {
   for (const def of changed) broadcastComponent(canvasId, def, actor)
   /* nothing follows a deleted component: its instances keep the markup they have */
   const followed = changed.filter((def) => !isDeleted(def)).map((def) => def.id)
-  const others = store.getCanvas(canvasId)?.frames.some((frame) => frame.id !== originFrameId) ?? false
+  const canvas = store.getCanvas(canvasId)
+  const whole = propagationScope(canvasId) === 'all'
+  const others = canvas?.frames.some((frame) => frame.id !== originFrameId && (whole || htmlLoaded(frame))) ?? false
   const asked = others ? followed.map((id) => `${canvasId}:${id}`) : []
   for (const key of asked) setKey(propagationAsked, key, true)
   /* queued with the commit: a refused write has asked for nothing */
@@ -2296,9 +2310,20 @@ export function queuePropagation(canvasId: string, changed: ComponentDef[], acto
   })
 }
 
-/** One frame's turn in the queue: what the synchronous sweep did per frame. History is filed
- *  and the room sees frame:updated; sign-off stands, since the frame itself was not edited.
- *  A frame mid-stream catches up when its stream ends. */
+/** Which frames follow a changed main through the queue: the ones in memory, since a frame
+ *  at rest holds references and is rendered from its components when read
+ *  (server/frameRest.ts). */
+function propagationScope(_canvasId: string): 'all' | 'loaded' {
+  return 'loaded'
+}
+
+/** One frame's turn in the queue. Where what the frame stores is unchanged (its instances are
+ *  references, and the component is what moved) it is rendered again in memory and the room
+ *  shown the new rendering: no row, no version, and `updatedAt` stays, so a save in flight
+ *  is not refused for it. Otherwise (an instance stored written out, a main built from
+ *  what changed, a canvas on an actor, compact storage switched off) it is an ordinary
+ *  write: history is filed and the room sees frame:updated. Sign-off stands either way,
+ *  since the frame itself was not edited. A frame mid-stream catches up when its stream ends. */
 function propagateIntoFrame(
   canvasId: string,
   frameId: string,
@@ -2308,6 +2333,8 @@ function propagateIntoFrame(
   const canvas = store.getCanvas(canvasId)
   const frame = store.getFrame(frameId)
   if (!canvas || !frame || frame.canvasId !== canvasId) return {}
+  /* left memory since it was queued: rendered from its components when its page is next read */
+  if (!htmlLoaded(frame)) return {}
   /* a one-shot reveal is only playback of what is already stored, so it updates like any frame */
   const followed = componentIds.filter((id) => !isDeleted(canvas.components?.find((def) => def.id === id)))
   if (streams.has(frame.id) || !followed.some((id) => referencesComponent(frame.html, id))) return {}
@@ -2326,6 +2353,17 @@ function propagateIntoFrame(
      are marked with the revision their markup last changed at, `renderRev`): no row, no
      version, no message. The room restyles from the `component` message */
   if (sameStored(canvasId, html, latest.html)) return {}
+  /* the comparison out of budget, or tripping on markup: the ordinary write below needs none */
+  const sameSource = storesCompactly(canvas) && sameAtRestOrNot(html, latest.html, canvas.components ?? [])
+  if (sameSource) {
+    const rendered = store.rerenderFrame(latest.id, html)
+    if (!rendered) return {}
+    /* no row is written, so the write's own asset bookkeeping does not run: the images the
+       frame shows are what agents are told it holds */
+    afterCommit(() => persist.refreshAssetRefs(rendered))
+    broadcast(canvasId, { type: 'frame:updated', frame: rendered, actor, rerender: true })
+    return { touched: { id: rendered.id, name: rendered.name, approvalLost: false } }
+  }
   const prior = priorState(latest)
   /* a component it uses changed, not the frame: sign-off stands (decided 2026-11-12) */
   const updated = store.updateFrame(latest.id, { html }, actor.name, { annotation: true })
@@ -2353,37 +2391,21 @@ function propagationDrained(canvasId: string, report: PropagationReport, actor: 
   touch(canvasId, actor)
 }
 
-propagation.registerFrameTask('propagate', { frame: propagateIntoFrame, drained: propagationDrained })
-
-/**
- * Bring instances left on an older revision up to their component: the frames a propagation
- * never reached, since the queue lives in memory and a restart mid-drain drops it. Queued as
- * an ordinary propagation per canvas, in the name of whoever last changed the component.
- */
-export async function catchUpComponentsBehind(): Promise<{ components: number; canvases: number }> {
-  /* propagation switched off: frames follow on their own next write, by choice */
-  if (env.DOOP_DEFER_COMPONENT_PROPAGATION) return { components: 0, canvases: 0 }
-  const behind = await persist.componentsBehind()
-  const byCanvas = new Map<string, Set<string>>()
-  for (const { canvasId, componentId } of behind)
-    byCanvas.set(canvasId, (byCanvas.get(canvasId) ?? new Set()).add(componentId))
-  let components = 0
-  let canvases = 0
-  for (const [canvasId, ids] of byCanvas) {
-    const defs = store.getComponents(canvasId).filter((def) => ids.has(def.id) && !isDeleted(def))
-    if (!defs.length) continue
-    components += defs.length
-    canvases += 1
-    for (const def of defs) {
-      const actor = resolveActor({ name: def.updatedBy, kind: 'user' })
-      transaction(() => queuePropagation(canvasId, [def], actor))
-    }
-    /* one canvas at a time: a queued canvas is loaded and held until it drains, so queueing
-       them all at once would hold every one of them in memory together */
-    await propagation.whenCanvasIdle(canvasId)
+/** `sameAtRest`, false when it cannot say: the frame is then written like any other. */
+function sameAtRestOrNot(a: string, b: string, defs: readonly ComponentDef[]): boolean {
+  try {
+    return sameAtRest(a, b, defs)
+  } catch (error) {
+    if (!(error instanceof WorkBudgetError)) console.error('[frames] comparing a frame at rest failed', error)
+    return false
   }
-  return { components, canvases }
 }
+
+propagation.registerFrameTask('propagate', {
+  scope: propagationScope,
+  frame: propagateIntoFrame,
+  drained: propagationDrained,
+})
 
 /**
  * Give hollow definitions their markup back from their mains, as the next write of each main

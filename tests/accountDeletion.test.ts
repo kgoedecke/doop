@@ -16,6 +16,7 @@ vi.mock('../server/db/persist.ts', () => {
     deleteReference: noop,
     saveCanvas: noop,
     saveCanvasCopy: noop,
+    refreshAssetRefs: () => {},
     saveFrame: noop,
     saveGuideline: noop,
     saveToken: noop,
