@@ -1,4 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { Client as McpClient } from '@modelcontextprotocol/sdk/client/index.js'
+import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 import { Client, startServer, type Server } from './harness.ts'
 
 /**
@@ -57,5 +59,36 @@ describe('escaped HTML never reaches a frame', () => {
     await client.post(`/api/frames/${id}/append`, { html_chunk: doc.slice(0, 30), start: true })
     await client.post(`/api/frames/${id}/append`, { html_chunk: doc.slice(30), done: true })
     expect(await htmlOf(id)).toBe(doc)
+  })
+})
+
+describe('edit_frame_html', () => {
+  it('inserts new_str literally, with no $ replacement patterns', async () => {
+    const client = await new Client(server).signUp('dollar@test.dev', 'Dollar')
+    const canvasId = (await (await client.post('/api/canvases', { name: 'Dollar' })).json()).id
+    const frameId = (
+      await (
+        await client.post(`/api/canvases/${canvasId}/frames`, { name: 'f', html: '<p>a</p><b>old</b><p>z</p>' })
+      ).json()
+    ).id
+    const { secret } = await (await client.post('/api/agent-keys', { name: 'Editor' })).json()
+    const agent = new McpClient({ name: 'dollar-test', version: '1.0.0' })
+    await agent.connect(
+      new StreamableHTTPClientTransport(new URL('/mcp', server.base), {
+        requestInit: { headers: { Authorization: `Bearer ${secret}` } },
+      }),
+    )
+    try {
+      const script = '<script>x = "$`" + "$\'" + "$&" + "$$"</script>'
+      const result = await agent.callTool({
+        name: 'edit_frame_html',
+        arguments: { frame_id: frameId, old_str: '<b>old</b>', new_str: script, agent_name: 'Editor' },
+      })
+      expect(result.isError).toBeFalsy()
+      const canvas = await (await client.get(`/api/canvases/${canvasId}`)).json()
+      expect(canvas.frames.find((f: { id: string }) => f.id === frameId).html).toBe(`<p>a</p>${script}<p>z</p>`)
+    } finally {
+      await agent.close()
+    }
   })
 })
