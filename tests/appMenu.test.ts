@@ -42,6 +42,25 @@ function stubHost(overrides: Partial<ActionHost> = {}): ActionHost {
 
 const items = (menu: { items: (NativeMenuItem | null)[] }) => menu.items.filter((i) => i !== null)
 
+describe('Reload Tab', () => {
+  it('offers ⌘R in View even when the canvas editor has not mounted', () => {
+    const view = nativeMenus().find((menu) => menu.id === 'view')!
+    expect(items(view)).toContainEqual({
+      id: 'reload-tab',
+      label: 'Reload Tab',
+      accelerator: 'Cmd+KeyR',
+      checkable: false,
+    })
+  })
+
+  it.each([false, true])('reloads the current URL on a menu event (key=%s)', (key) => {
+    const reload = vi.fn()
+    vi.stubGlobal('location', { reload })
+    runNativeItem('reload-tab', key)
+    expect(reload).toHaveBeenCalledOnce()
+  })
+})
+
 afterEach(() => {
   setActionHost(null)
   vi.unstubAllGlobals()
@@ -117,8 +136,10 @@ describe('nativeMenus', () => {
 })
 
 describe('nativeStates', () => {
-  it('disables everything while no canvas is open', () => {
-    expect(nativeStates().every(([, enabled, checked]) => !enabled && checked !== true)).toBe(true)
+  it('leaves only Reload Tab enabled while no canvas is open', () => {
+    expect(nativeStates().filter(([, enabled, checked]) => enabled || checked === true)).toEqual([
+      ['reload-tab', true, null],
+    ])
   })
 
   it('reports what a canvas allows and which toggles are on', () => {

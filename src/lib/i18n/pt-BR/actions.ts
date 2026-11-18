@@ -10,6 +10,7 @@ export const actions: Catalog['actions'] = {
   menuArrange: 'Organizar',
   menuHelp: 'Ajuda',
   mainMenu: 'Menu principal',
+  reloadTab: 'Recarregar aba',
 
   /* the palette */
   palette: 'Ações…',

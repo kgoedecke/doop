@@ -10,6 +10,7 @@ export const actions = {
   menuArrange: 'Arrange',
   menuHelp: 'Help',
   mainMenu: 'Main menu',
+  reloadTab: 'Reload Tab',
 
   /* the palette */
   palette: 'Actions…',

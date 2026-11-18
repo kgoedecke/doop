@@ -54,6 +54,9 @@ const SHELL_OWNED = new Set(['undo', 'redo'])
    its submenus */
 const HELP_LEAD = ['palette']
 
+/* Reload belongs to the desktop tab, not to a mounted canvas editor. */
+const RELOAD_TAB = 'reload-tab'
+
 const PUNCTUATION: Record<string, string> = {
   '[': 'BracketLeft',
   ']': 'BracketRight',
@@ -126,23 +129,33 @@ export function nativeMenus(): NativeMenu[] {
   return MENUS.map((menu) => {
     const own = ACTIONS.filter((a) => a.menu === menu.id && !SHELL_OWNED.has(a.id))
     const lead = menu.id === 'help' ? ACTIONS.filter((a) => HELP_LEAD.includes(a.id)).map(item) : []
-    return { id: menu.id, label: t(menu.label), items: lead.length ? [...lead, null, ...rows(own)] : rows(own) }
+    const items = rows(own)
+    if (menu.id === 'view') {
+      items.unshift({ id: RELOAD_TAB, label: t('actions.reloadTab'), accelerator: 'Cmd+KeyR', checkable: false }, null)
+    }
+    return { id: menu.id, label: t(menu.label), items: lead.length ? [...lead, null, ...items] : items }
   })
 }
 
 /** What each item in the bar shows now. */
 export function nativeStates(): NativeItemState[] {
   const inBar = (a: CanvasAction) => !SHELL_OWNED.has(a.id) && (a.menu !== 'general' || HELP_LEAD.includes(a.id))
-  return ACTIONS.filter(inBar).map((a) => {
+  const states = ACTIONS.filter(inBar).map((a): NativeItemState => {
     const enabled = isEnabled(a)
     return [a.id, enabled, a.checked ? enabled && a.checked() : null]
   })
+  states.push([RELOAD_TAB, true, null])
+  return states
 }
 
 /** Run what the menu bar picked. A key equivalent keeps the canvas
  *  keyboard's rules; a field in a frame counts as typing, since the page
  *  never saw that key. */
 export function runNativeItem(id: string, key: boolean) {
+  if (id === RELOAD_TAB) {
+    location.reload()
+    return
+  }
   const action = ACTIONS.find((a) => a.id === id)
   if (!action) return
   const focused = document.activeElement
