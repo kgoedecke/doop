@@ -325,7 +325,11 @@ export function Stage({
         const py = (((vp.y % vp.zoom) + vp.zoom) % vp.zoom) - vp.zoom
         pixels.style.transform = `translate(${px}px, ${py}px)`
       }
-      if (zoomLabelRef.current) zoomLabelRef.current.textContent = `${Math.round(vp.zoom * 100)}%`
+      /* only on a change: rewriting the text replaces its node on every pan
+         tick, and a node inserted anywhere re-runs `body:has(…)` rules */
+      const zoomText = `${Math.round(vp.zoom * 100)}%`
+      if (zoomLabelRef.current && zoomLabelRef.current.textContent !== zoomText)
+        zoomLabelRef.current.textContent = zoomText
     }
     apply(useStore.getState().viewport)
     let settle = 0
