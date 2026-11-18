@@ -1110,9 +1110,13 @@ function nextUse(html: string, from: number, opaque: [number, number][], lenient
   return undefined
 }
 
+/* the attribute itself, never the end of another's name (data-component) */
+const COMPONENT_REF = /\scomponent\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>/]+))/i
+
 /** The component an open tag names, as written. */
 function useRef(html: string, span: UseSpan): string {
-  return /\bcomponent\s*=\s*["']([^"']*)["']/i.exec(html.slice(span.start, span.openEnd))?.[1] ?? ''
+  const match = COMPONENT_REF.exec(html.slice(span.start, span.openEnd))
+  return match?.[1] ?? match?.[2] ?? match?.[3] ?? ''
 }
 
 /** The component of each `<doop-use>` the HTML opens and never closes, in document order:

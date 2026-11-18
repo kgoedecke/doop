@@ -182,6 +182,66 @@ describe('over MCP', () => {
     expect(closed.isError).toBe(false)
   })
 
+  it('refuses the #528 edit on a frame of real instances, and lets every balanced edit of it through', async () => {
+    const card = await call('create_component', {
+      canvas_id: canvasId,
+      name: 'Card',
+      html: '<article class="card"><div data-doop-slot="body"></div></article>',
+      auto_props: false,
+    })
+    expect(card.isError).toBe(false)
+    const screen =
+      '<!doctype html><html><head></head><body><doop-use component="Card"><p>One</p><doop-use component="Card"><p>Inner</p></doop-use></doop-use><table><tr><td><doop-use component="Card" /></td></tr></table></body></html>'
+    await call('create_frame', { canvas_id: canvasId, name: 'Screen', html: screen })
+    const frameId = frames().find((frame) => frame.name === 'Screen')!.id
+    const read = await call('get_frame', { frame_id: frameId })
+    /* the compact form is what an agent edits: instances as <doop-use>, slots as <template> */
+    expect(read.text).toContain('<p>Inner</p></template></doop-use>')
+
+    const before = store.getFrame(frameId)!.html
+    const dropped = await call('edit_frame_html', {
+      frame_id: frameId,
+      old_str: '<p>Inner</p></template></doop-use>',
+      new_str: '<p>Inner</p></template>',
+    })
+    expect(dropped.isError).toBe(true)
+    expect(dropped.text).toContain('never closed')
+    expect(store.getFrame(frameId)!.html).toBe(before)
+
+    const copy = await call('edit_frame_html', {
+      frame_id: frameId,
+      old_str: '<p>Inner</p>',
+      new_str: '<p>Inner, edited</p>',
+    })
+    expect(copy.isError).toBe(false)
+    expect(store.getFrame(frameId)!.html).toContain('Inner, edited')
+  })
+
+  it('refuses a stream’s last chunk while a <doop-use> is open, and takes it again with the close', async () => {
+    await call('create_frame', { canvas_id: canvasId, name: 'Stream', html: doc('') })
+    const frameId = frames()[0]!.id
+    await call('append_frame_html', {
+      frame_id: frameId,
+      html_chunk: '<html><head></head><body><doop-use component="Card"><p>slot</p>',
+      start: true,
+    })
+    const last = await call('append_frame_html', {
+      frame_id: frameId,
+      html_chunk: '<h4>after</h4></body></html>',
+      done: true,
+    })
+    expect(last.isError).toBe(true)
+    expect(last.text).toContain('<doop-use component="Card"> is opened')
+    expect(actions.isFrameMidStream(frameId)).toBe(true)
+    const again = await call('append_frame_html', {
+      frame_id: frameId,
+      html_chunk: '</doop-use><h4>after</h4></body></html>',
+      done: true,
+    })
+    expect(again.isError).toBe(false)
+    expect(actions.isFrameMidStream(frameId)).toBe(false)
+  })
+
   const imported = () =>
     actions.createFrame(
       canvasId,
