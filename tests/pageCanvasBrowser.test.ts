@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import type { Page } from 'puppeteer-core'
+import type { Frame as BrowserFrame, Page } from 'puppeteer-core'
 import { findBrowserPath } from '../server/screenshot'
 import { fixtureUrl, pagePerTest } from './browser'
 import { openCanvasPage, showCanvasPage } from './canvasPageFixture'
@@ -77,6 +77,67 @@ describe.skipIf(!findBrowserPath())('page camera and snapping', { timeout: 30_00
     await page.evaluate((data) => window.seedPages(data), data)
     await page.waitForSelector('iframe[data-doop-frame]')
   }
+
+  it('lets opted-in frames scroll a marked region without stealing canvas pan or zoom', async () => {
+    const controls = '<input id="search" style="width:90px"><input id="toggle" type="checkbox">'
+    const interactive = {
+      ...frame('interactive', 'first', 0),
+      html: `<!doctype html><html data-doop-interactive="true"><body>${controls}
+        <div data-doop-scroll style="height:60px;overflow:auto;overscroll-behavior:contain"><div style="height:300px">Rows</div></div>
+        </body></html>`,
+    }
+    const normal = { ...frame('normal', 'first', 360), html: controls }
+    await load(canvas([interactive, normal]))
+    const widget = (await (await page.waitForSelector('iframe[title="interactive"]'))!.contentFrame())!
+    const ordinary = (await (await page.waitForSelector('iframe[title="normal"]'))!.contentFrame())!
+    // The stage zooms CSS pixels; convert the iframe's local coordinates to screen coordinates.
+    const click = async (document: BrowserFrame, selector: string) => {
+      const { x, y } = await document.$eval(selector, (el) => {
+        const rect = el.getBoundingClientRect()
+        return { x: (rect.left + rect.width / 2) / innerWidth, y: (rect.top + rect.height / 2) / innerHeight }
+      })
+      const box = (await (await document.frameElement())?.boundingBox())!
+      await page.mouse.click(box.x + x * box.width, box.y + y * box.height)
+    }
+    await ordinary.waitForSelector('#toggle')
+    await click(ordinary, '#toggle')
+    expect(await ordinary.$eval('#toggle', (el) => (el as HTMLInputElement).checked)).toBe(false)
+
+    await widget.waitForSelector('#search')
+    await click(widget, '#search')
+    await page.keyboard.type('sample')
+    expect(await widget.$eval('input', (el) => el.value)).toBe('sample')
+    await click(widget, '#toggle')
+    expect(await widget.$eval('#toggle', (el) => (el as HTMLInputElement).checked)).toBe(true)
+    await page.keyboard.press('Space')
+    expect(await widget.$eval('#toggle', (el) => (el as HTMLInputElement).checked)).toBe(false)
+    await page.keyboard.press('Escape')
+    await page.waitForFunction(() => document.activeElement?.tagName !== 'IFRAME', { timeout: 3000 })
+    const startX = await page.evaluate(() => window.pageState().viewport.x)
+    await page.keyboard.down('Space')
+    const box = (await (await widget.frameElement()).boundingBox())!
+    await page.mouse.move(box.x + 40, box.y + 40)
+    await page.mouse.down()
+    await page.mouse.move(box.x + 80, box.y + 40, { steps: 3 })
+    await page.mouse.up()
+    await page.keyboard.up('Space')
+    await page.waitForFunction((x) => window.pageState().viewport.x > x, { timeout: 3000 }, startX)
+    const before = await page.evaluate(() => window.pageState().viewport)
+    await click(widget, '[data-doop-scroll]')
+    await page.mouse.wheel({ deltaY: 60 })
+    await widget.waitForFunction(() => document.querySelector('[data-doop-scroll]')!.scrollTop > 0, { timeout: 3000 })
+    expect(await page.evaluate(() => window.pageState().viewport)).toEqual(before)
+
+    await page.keyboard.down('Control')
+    await page.mouse.wheel({ deltaY: -10 })
+    await page.keyboard.up('Control')
+    await page.waitForFunction((zoom) => window.pageState().viewport.zoom !== zoom, { timeout: 3000 }, before.zoom)
+
+    await click(widget, '#toggle')
+    const y = await page.evaluate(() => window.pageState().viewport.y)
+    await page.mouse.wheel({ deltaY: 30 })
+    await page.waitForFunction((start) => window.pageState().viewport.y < start, { timeout: 3000 }, y)
+  })
 
   it('centers the linked frame on a different page instead of fitting its distant siblings', async () => {
     await load(

@@ -314,6 +314,16 @@ export const FrameView = memo(function FrameView({
   const [duping, setDuping] = useState(false)
   const dupKeyHeld = useDupModifier()
   const [editing, setEditing] = useState(false)
+  // Opt in from the saved root tag, not from a message sent by frame scripts.
+  const liveFrame = useMemo(() => {
+    if (!frame.html.includes('data-doop-interactive')) return false
+    const root = /^\s*(?:<!doctype\s+html\s*>\s*)?<html(?=\s|>)(?:[^'"<>]|"[^"]*"|'[^']*')*>/i.exec(frame.html)
+    if (!root) return false
+    return (
+      new DOMParser().parseFromString(root[0], 'text/html').documentElement.getAttribute('data-doop-interactive') ===
+      'true'
+    )
+  }, [frame.html])
   /* after exiting edit mode, hold renders until the final serialized HTML
      lands in the store — otherwise a stale post would morph the edit away */
   const [suspendPost, setSuspendPost] = useState(false)
@@ -818,6 +828,40 @@ export const FrameView = memo(function FrameView({
   const [bleed, setBleed] = useState(0)
   /* the port the runtime relays keys over; see `replayKey` */
   const keyPort = useRef<MessagePort | null>(null)
+  const liveInput = useRef<((data: MessageEvent['data']) => void) | null>(null)
+  useLayoutEffect(() => {
+    if (!liveFrame || editing || panMode || fileDragging || tool !== 'select') {
+      liveInput.current = null
+      return
+    }
+    liveInput.current = (data) => {
+      const iframe = iframeRef.current
+      if (!iframe || !data) return
+      if (data.event === 'leave') {
+        if (document.activeElement === iframe && document.hasFocus()) iframe.blur()
+      } else if (data.event === 'wheel') {
+        const { x, y, dx, dy } = data
+        if (![x, y, dx, dy].every(Number.isFinite)) return
+        const rect = iframe.getBoundingClientRect()
+        iframe.dispatchEvent(
+          new WheelEvent('wheel', {
+            clientX: rect.left + Math.max(0, Math.min(1, x)) * rect.width,
+            clientY: rect.top + Math.max(0, Math.min(1, y)) * rect.height,
+            deltaX: Math.max(-2000, Math.min(2000, dx)),
+            deltaY: Math.max(-2000, Math.min(2000, dy)),
+            ctrlKey: data.ctrlKey === true,
+            metaKey: data.metaKey === true,
+            shiftKey: data.shiftKey === true,
+            bubbles: true,
+            cancelable: true,
+          }),
+        )
+      }
+    }
+    return () => {
+      liveInput.current = null
+    }
+  }, [liveFrame, editing, panMode, fileDragging, tool])
   /* saves a document the runtime serialized after a text edit (set below) */
   const saveEditedRef = useRef<(html: string, discrete: boolean) => void>(() => {})
   useEffect(() => {
@@ -862,7 +906,11 @@ export const FrameView = memo(function FrameView({
            HTML, so only the runtime can be listening for the port */
         if (!keyPort.current) {
           const channel = new MessageChannel()
-          channel.port1.onmessage = replayKey
+          channel.port1.onmessage = (event) => {
+            const kind = event.data?.event
+            if (kind === 'wheel' || kind === 'leave') liveInput.current?.(event.data)
+            else replayKey(event)
+          }
           keyPort.current = channel.port1
           win.postMessage({ type: 'doop:key-port' }, '*', [channel.port2])
         }
@@ -1945,10 +1993,11 @@ export const FrameView = memo(function FrameView({
                 empty frame — add HTML
               </div>
             )}
-            {/* shield keeps pointer events on the canvas, not the iframe;
-            lifted while editing so clicks land in the editable document,
-            but not under a file drag, whose drop belongs to the canvas */}
-            {(!editing || panMode || fileDragging || tool !== 'select') && <div className="absolute inset-0" />}
+            {/* Live frames take ordinary input. Other tools and drag gestures
+                still belong to the canvas; the frame name stays selectable. */}
+            {((!editing && !liveFrame) || panMode || fileDragging || tool !== 'select') && (
+              <div className="absolute inset-0" />
+            )}
           </div>
           {/* everything drawn over the frame rather than in it: selection ring,
               element outlines, grips, comments and the element toolbar. While
