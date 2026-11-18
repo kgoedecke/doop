@@ -98,7 +98,7 @@
   agents are `AgentRole`s with `custom: true`: a fixed handle (its role id and its only @mention
   spelling) and name (its presence identity), editable colour, one-liner, instructions (up to 2,000
   characters) and reviewer flag, at most 20 per scope, in `custom_agents`. `scope` is `ws:<id>` or
-  `user:<id>` in both tables (migration 0057), mirrored in memory. Instructions a team wrote (a
+  `user:<id>` in both tables (migration 0057), mirrored in memory. A table keyed this way (agents, overrides, skills) is dropped in both `deleteWorkspace` and `purgeUserData`; `accountDeletion.test.ts` counts the drops. Instructions a team wrote (a
   custom agent's, a rewritten built-in's: `briefByTeam`) sit in the resident's system prompt inside
   `<role_instructions>`, under the shared rules. Every role lookup takes a `Roster`
   (`actions.canvasRoster` / `rosterFor` on the server, `useRoster` / `useCanvasRoster` in the
