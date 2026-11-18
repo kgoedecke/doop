@@ -29,6 +29,8 @@ import { customAgentsForCanvas } from './customAgents.ts'
 import { describeLibrary, libraryBrief, MAX_FONT_BYTES } from '../shared/fonts.ts'
 import { addCanvasFont, uploadedFontResult } from './canvasFontUpload.ts'
 import { inlineDataRefusal } from './inlineData.ts'
+import { unclosedUseRefusal } from './components.ts'
+import { frameWriteRefusal } from './frameWriteRefusal.ts'
 import {
   MAX_TOKEN_DESCRIPTION,
   TOKEN_TYPES,
@@ -1506,8 +1508,8 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
     async ({ canvas_id, pageId, name, html, x, y, width, height, fit_height, agent_name }) => {
       if (!canvasFor(canvas_id, 'edit')) return noCanvas(canvas_id)
       if (fit_height && !html.trim()) return err(FIT_NEEDS_HTML)
-      const inline = inlineDataRefusal(html)
-      if (inline) return err(inline)
+      const refused = frameWriteRefusal(html)
+      if (refused) return err(refused)
       const created = actions.createFrame(canvas_id, { name, pageId, html, x, y, width, height }, actorFrom(agent_name))
       if (!created) return noCanvas(canvas_id)
       const fit = fit_height ? await fitWrittenFrame(created, actorFrom(agent_name)) : undefined
@@ -1589,8 +1591,8 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
     async ({ frame_id, html, fit_height, agent_name }) => {
       const current = frameFor(frame_id, 'edit')
       if (!current) return noFrame(frame_id)
-      const inline = inlineDataRefusal(html, current.html)
-      if (inline) return err(inline)
+      const refused = frameWriteRefusal(html, { existing: current.html })
+      if (refused) return err(refused)
       const written = actions.updateFrame(frame_id, { html }, actorFrom(agent_name), { replace: true })
       if (!written) return noFrame(frame_id)
       const fit = fit_height ? await fitWrittenFrame(written, actorFrom(agent_name)) : undefined
@@ -2431,7 +2433,15 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
             (actions.streamTail(frame_id) ?? '') + html_chunk,
             actions.streamBase(frame_id) ?? current.html,
           )
-      if (inline) return err(inline)
+      /* the last chunk makes the document whole (mid-stream the stored HTML keeps a waiting
+         <doop-use> as written): one still open would be placed empty, so the chunk is refused.
+         A refused chunk keeps the stream from going idle while it comes again */
+      const refused =
+        inline ?? (done ? unclosedUseRefusal(actions.streamedDocument(frame_id, html_chunk, start) ?? '') : null)
+      if (refused) {
+        actions.markStreamActive(frame_id)
+        return err(refused)
+      }
       const frame = actions.appendFrameHtml(frame_id, html_chunk, actorFrom(agent_name), { start, done })
       if (!frame) return noFrame(frame_id)
       const result = withNotesFirst(
@@ -2476,9 +2486,12 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
       if (!f) return noFrame(frame_id)
       const edited = editFrameSource(f, old_str, new_str)
       if ('error' in edited) return err(edited.error)
-      /* the edited document, so a URI completed across the replacement's edges is caught too */
-      const inline = inlineDataRefusal(edited.html, `${f.html}\n${compactFrameHtml(f)}`)
-      if (inline) return err(inline)
+      /* the edited document, so a URI completed or a tag left open across the replacement's edges is caught too */
+      const refused = frameWriteRefusal(edited.html, {
+        existing: `${f.html}\n${compactFrameHtml(f)}`,
+        streamed: actions.isFrameMidStream(frame_id) ? f.html : '',
+      })
+      if (refused) return err(refused)
       const frame = actions.updateFrame(frame_id, { html: edited.html }, actorFrom(agent_name))!
       return withPreview(
         withStatusNudge(
