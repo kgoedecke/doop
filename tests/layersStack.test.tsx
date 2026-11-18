@@ -9,6 +9,7 @@ const restackFrames = vi.fn((_canvasId: string, _frames: StackWrite[]) => Promis
 const createFrame = vi.fn((canvasId: string, input: Partial<Frame> & { name: string }) =>
   Promise.resolve({ ...frameWith('new', 9), canvasId, ...input } as Frame),
 )
+const deleteFrame = vi.fn((_id: string) => Promise.resolve())
 vi.mock('../src/lib/api', () => ({
   api: {
     /* the Components tab's dot asks; nothing waits in these tests */
@@ -17,7 +18,7 @@ vi.mock('../src/lib/api', () => ({
     restackFrames: (canvasId: string, frames: StackWrite[]) => restackFrames(canvasId, frames),
     createFrame: (canvasId: string, input: Partial<Frame> & { name: string }) => createFrame(canvasId, input),
     updateFrame: () => Promise.resolve(),
-    deleteFrame: () => Promise.resolve(),
+    deleteFrame: (id: string) => deleteFrame(id),
   },
   ApiError: class extends Error {},
   errorMessage: (_err: unknown, fallback: string) => fallback,
@@ -120,6 +121,58 @@ describe('LayersPanel stacking', () => {
   afterEach(() => {
     act(() => root.unmount())
     container.remove()
+  })
+
+  it('adds a frame or a canvas shape to the selection with ⇧- or ⌘-click, and drops it again', () => {
+    const click = (key: string, init: MouseEventInit = {}) =>
+      act(() => {
+        row(key).dispatchEvent(new MouseEvent('click', { bubbles: true, ...init }))
+      })
+    const selected = () => [...useStore.getState().selectedIds].sort()
+    click('s1')
+    click('f1', { shiftKey: true })
+    expect(selected()).toEqual(['f1', 's1'])
+    expect(row('s1').getAttribute('aria-selected')).toBe('true')
+    expect(row('f1').getAttribute('aria-selected')).toBe('true')
+    click('f2', { metaKey: true })
+    expect(selected()).toEqual(['f1', 'f2', 's1'])
+    click('f1', { shiftKey: true })
+    expect(selected()).toEqual(['f2', 's1'])
+    /* a plain click narrows to the one row */
+    click('f2')
+    expect(selected()).toEqual(['f2'])
+  })
+
+  it('deletes every selected frame and shape with ⌫ in the tree', () => {
+    deleteFrame.mockClear()
+    act(() => useStore.getState().selectMany(['f1', 's1']))
+    const tree = container.querySelector<HTMLElement>('[role="tree"]')!
+    act(() => {
+      tree.dispatchEvent(new KeyboardEvent('keydown', { key: 'Delete', bubbles: true }))
+    })
+    expect(deleteFrame.mock.calls.map(([id]) => id).sort()).toEqual(['f1', 's1'])
+  })
+
+  it('keeps a shape locked on its own layer when ⌫ deletes the selection', () => {
+    deleteFrame.mockClear()
+    const lockedShape = shape.replace('data-doop-drawing="rect"', 'data-doop-drawing="rect" data-doop-locked=""')
+    act(() => useStore.getState().patchFrameLocal('s1', { html: lockedShape }))
+    act(() => useStore.getState().selectMany(['f1', 's1']))
+    const tree = container.querySelector<HTMLElement>('[role="tree"]')!
+    act(() => {
+      tree.dispatchEvent(new KeyboardEvent('keydown', { key: 'Delete', bubbles: true }))
+    })
+    expect(deleteFrame.mock.calls.map(([id]) => id)).toEqual(['f1'])
+  })
+
+  it('walks the rows from a canvas shape selected as a whole', () => {
+    act(() => useStore.getState().select('s1'))
+    const tree = container.querySelector<HTMLElement>('[role="tree"]')!
+    act(() => {
+      tree.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }))
+    })
+    /* the list runs s1, f2, f1: the row under the shape is f2 */
+    expect(useStore.getState().selectedIds).toEqual(['f2'])
   })
 
   it('lists the frame in front at the top', () => {

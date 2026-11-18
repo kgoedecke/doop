@@ -259,7 +259,8 @@ export function deleteSelection(): boolean {
     else s.pickElement(null)
     return true
   }
-  const selected = frames.filter((f) => s.selectedIds.includes(f.id) && !f.locked)
+  /* a shape locked on its own layer is as locked as a locked frame */
+  const selected = frames.filter((f) => s.selectedIds.includes(f.id) && !isStackLocked(f))
   if (!selected.length) return false
   deleteFramesTracked(selected)
   return true
