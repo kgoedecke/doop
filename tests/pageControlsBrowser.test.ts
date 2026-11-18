@@ -85,6 +85,7 @@ describe.skipIf(!findBrowserPath())('page list controls and keyboard history', (
     const canvasPath = new URL(page.url()).pathname
     await page.click('button[aria-label="Add page"]')
     await page.waitForFunction(() => document.querySelectorAll('[data-page-id]').length === 2)
+    await page.waitForSelector('button[aria-label="Add page"]:enabled')
     const source = '[data-page-id]:first-child button'
     const target = '[data-page-id]:last-child button'
     await page.click(source)
