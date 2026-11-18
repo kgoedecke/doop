@@ -1,4 +1,5 @@
 import type { Page } from 'puppeteer-core'
+import { installNameShim } from './pageShim.ts'
 
 /**
  * Drop the CSS a captured page does not use.
@@ -151,10 +152,7 @@ export function pruneCssInDocument(rawCss: string, deadlineMs: number): PrunedPa
  *  back to the unpruned sheet: an oversized import is still an import. */
 export async function pruneUnusedCss(page: Page, css: string): Promise<PrunedPage | null> {
   try {
-    /* tsx/esbuild annotates nested functions with __name; page.evaluate
-       serialises the function source, so the helper must exist in the page.
-       Same shim as inspectFrame in screenshot.ts. */
-    await page.evaluate('globalThis.__name = (target) => target')
+    await installNameShim(page)
     const pruned = await Promise.race([
       page.evaluate(pruneCssInDocument, css, PRUNE_DEADLINE_MS),
       new Promise<null>((resolve) => setTimeout(() => resolve(null), PRUNE_WAIT_MS).unref?.()),

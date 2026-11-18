@@ -8,6 +8,7 @@ import { withHostedIcons } from './iconProxy.ts'
 import { withHostedPhotos } from './photoProxy.ts'
 import { renderedHeight } from './renderLimits.ts'
 import { LayerNotFoundError } from './layerExport.ts'
+import { installNameShim } from './pageShim.ts'
 import {
   createRenderer,
   remoteConnectFailure,
@@ -189,7 +190,13 @@ async function loadFrameInto(page: Page, frame: Frame): Promise<void> {
   let html = withHostedPhotos(withHostedIcons(frame.html || '<!doctype html><html><body></body></html>'))
   if (!/<base\s/i.test(html)) {
     const baseTag = `<base href="${assetOrigin.replace(/"/g, '&quot;')}/">`
-    html = /<head[^>]*>/i.test(html) ? html.replace(/<head([^>]*)>/i, `<head$1>${baseTag}`) : baseTag + html
+    /* never ahead of the doctype, which would put the page in quirks mode
+       (a body stretched to the viewport, among others) */
+    html = /<head[^>]*>/i.test(html)
+      ? html.replace(/<head([^>]*)>/i, `<head$1>${baseTag}`)
+      : /<html[^>]*>/i.test(html)
+        ? html.replace(/<html([^>]*)>/i, `<html$1><head>${baseTag}</head>`)
+        : html.replace(/^\s*(<!doctype[^>]*>)?/i, (doctype) => doctype + baseTag)
   }
   try {
     await page.setContent(html, {
@@ -232,10 +239,7 @@ export function inspectFrame(frame: Frame): Promise<FrameInspection> {
 async function inspectOn(page: Page, frame: Frame): Promise<FrameInspection> {
   await loadFrameInto(page, frame)
   {
-    /* tsx/esbuild annotates nested functions with __name; page.evaluate
-       serializes the callback without that runtime helper. A tiny in-page
-       identity shim keeps the evaluated code independent of the loader. */
-    await page.evaluate('globalThis.__name = (target) => target')
+    await installNameShim(page)
     const inspection = await page.evaluate(() => {
       const MAX_ELEMENTS = 64
       const MAX_STYLE_SAMPLES = 500
@@ -427,29 +431,35 @@ async function inspectOn(page: Page, frame: Frame): Promise<FrameInspection> {
   }
 }
 
-/** How tall the frame's content is, in design px, laid out at the frame's
- *  width: what `fit_height` sets the frame to (server/frameFit.ts). */
-export function measureContentHeight(frame: Frame): Promise<number> {
+/** Measures the frame's content height, in design px, at the frame's width
+ *  with the viewport `viewportHeight` tall. A design sized in vh changes with
+ *  the viewport, so `settle` may measure at several heights on one loaded page
+ *  (server/frameFit.ts). */
+export type ContentMeasure = (viewportHeight: number) => Promise<number>
+
+/** Loads the frame once and hands `settle` a measure on it. */
+export function measureContentHeight<T>(frame: Frame, settle: (measure: ContentMeasure) => Promise<T>): Promise<T> {
   return renderer.withPage('measuring the frame', RENDER_TIMEOUT_MS, async (page) => {
     await loadFrameInto(page, frame)
-    /* the viewport is the frame as the canvas shows it, so 100vh and height
-       media queries resolve to what the design has now */
-    await page.setViewport({
-      width: Math.max(1, Math.round(frame.width)),
-      height: Math.max(1, Math.round(frame.height)),
-      deviceScaleFactor: 1,
+    await installNameShim(page)
+    return settle(async (viewportHeight) => {
+      await page.setViewport({
+        width: Math.max(1, Math.round(frame.width)),
+        height: Math.max(1, Math.round(viewportHeight)),
+        deviceScaleFactor: 1,
+      })
+      return page.evaluate(contentBottom)
     })
-    await page.evaluate('globalThis.__name = (target) => target')
-    return page.evaluate(contentBottom)
   })
 }
 
 /** Runs in the frame's page. The document's height with the root and body
  *  let go of any viewport size (a body at 100vh or 100% would hold the frame
- *  at its current height), taken as the lowest box anything paints: the
- *  root's own box covers what flows, a walk adds what is positioned or
- *  overflows. Boxes a scroller or clipper hides are left out, and so are
- *  fixed elements, which sit on the viewport rather than the content. */
+ *  at its current height), taken as the lowest thing it paints: the root's own
+ *  box covers what flows, a walk adds what is positioned or overflows its box,
+ *  text running past its element included. Left out: what a scroller or clipper hides, what is
+ *  invisible (a closed menu at visibility:hidden or opacity:0), and fixed
+ *  elements, which sit on the viewport rather than the content. */
 async function contentBottom(): Promise<number> {
   const MAX_ELEMENTS = 20_000
   await document.fonts.ready
@@ -461,20 +471,37 @@ async function contentBottom(): Promise<number> {
       animation.cancel()
     }
   }
-  const release = document.createElement('style')
-  release.textContent = 'html,body{height:auto!important;min-height:0!important;max-height:none!important}'
-  document.head.append(release)
+  if (!document.querySelector('style[data-doop-fit]')) {
+    const release = document.createElement('style')
+    release.setAttribute('data-doop-fit', '')
+    /* fit-content rather than auto: a fragment with no doctype is laid out in quirks
+       mode, where an auto-height body still stretches to the viewport */
+    release.textContent = 'html,body{height:fit-content!important;min-height:0!important;max-height:none!important}'
+    document.head.append(release)
+  }
   const root = document.documentElement
   let bottom = root.getBoundingClientRect().bottom
+  const text = document.createRange()
   let seen = 0
   const walk = (el: Element) => {
     for (const child of Array.from(el.children)) {
       if (++seen > MAX_ELEMENTS) return
       const style = getComputedStyle(child)
-      if (style.display === 'none' || style.position === 'fixed') continue
-      const rect = child.getBoundingClientRect()
-      if (rect.width > 0 || rect.height > 0) bottom = Math.max(bottom, rect.bottom)
-      if (style.overflowY === 'visible' && style.overflowX === 'visible') walk(child)
+      if (style.display === 'none' || style.position === 'fixed' || style.opacity === '0') continue
+      const clips = style.overflowY !== 'visible' || style.overflowX !== 'visible'
+      /* a hidden box takes no paint, though a child of it may opt back in with visibility:visible */
+      if (style.visibility !== 'hidden') {
+        const rect = child.getBoundingClientRect()
+        if (rect.width > 0 || rect.height > 0) bottom = Math.max(bottom, rect.bottom)
+        /* its own text, which may run past its box; elements inside are walked themselves */
+        if (!clips)
+          for (const node of Array.from(child.childNodes)) {
+            if (node.nodeType !== Node.TEXT_NODE || !node.textContent?.trim()) continue
+            text.selectNodeContents(node)
+            bottom = Math.max(bottom, text.getBoundingClientRect().bottom)
+          }
+      }
+      if (!clips) walk(child)
     }
   }
   walk(document.body)

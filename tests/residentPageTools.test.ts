@@ -16,25 +16,13 @@ vi.mock('../server/db/persist.ts', () => ({
 
 const actions = await import('../server/actions.ts')
 const { store } = await import('../server/store.ts')
-const { deliveredWork, execTool } = await import('../server/resident.ts')
+const { deliveredWork, execTool, newRunState } = await import('../server/resident.ts')
+const { findBrowserPath } = await import('../server/screenshot.ts')
 const { canvasPages, framePageId } = await import('../shared/pages.ts')
 const { DEFAULT_ROLE_ID, roleName } = await import('../shared/agents.ts')
 
 const actor = () => actions.resolveActor({ name: roleName(DEFAULT_ROLE_ID), kind: 'agent' })
-const run = () => ({
-  mutatedFrames: new Set<string>(),
-  sourceFrames: new Set<string>(),
-  verificationFrames: new Set<string>(),
-  verifiedFrames: new Set<string>(),
-  seenVerified: new Set<string>(),
-  rewriteDrafts: new Map<string, string>(),
-  vision: false,
-  imagesGenerated: 0,
-  repliedThreads: new Set<string>(),
-  awaitingThreads: new Set<string>(),
-  tokenWrites: 0,
-  arrangeWrites: 0,
-})
+const run = () => newRunState()
 const call = (name: string, input: unknown) => ({ type: 'tool_use' as const, id: 't1', name, input })
 const html = '<!doctype html><html><body>hi</body></html>'
 
@@ -154,4 +142,48 @@ describe('the resident agent reorganizes pages', () => {
     expect(String(result.content)).toContain('Home')
     expect(pages()).toHaveLength(2)
   })
+})
+
+describe.skipIf(!findBrowserPath())('fit_height', () => {
+  const tall = '<!doctype html><html><body style="margin:0"><div style="height:640px"></div></body></html>'
+
+  it('fits a frame from update_frame, and refuses it with height', async () => {
+    actions.updateFrame(frameId, { html: tall }, actor())
+    const refused = await execTool(
+      call('update_frame', { frame_id: frameId, height: 10, fit_height: true }),
+      canvasId,
+      actor(),
+      run(),
+    )
+    expect(refused.is_error).toBe(true)
+    const runState = run()
+    const result = await execTool(
+      call('update_frame', { frame_id: frameId, fit_height: true }),
+      canvasId,
+      actor(),
+      runState,
+    )
+    expect(result.is_error).toBeUndefined()
+    expect(store.getFrame(frameId)!.height).toBe(640)
+    expect(String(result.content)).toContain('now 640px tall')
+    expect(runState.mutatedFrames.has(frameId)).toBe(true)
+  }, 60_000)
+
+  it('fits what create_frame and set_frame_html write', async () => {
+    const created = await execTool(
+      call('create_frame', { name: 'Fitted', width: 390, height: 844, html: tall, fit_height: true }),
+      canvasId,
+      actor(),
+      run(),
+    )
+    expect(String(created.content)).toMatch(/390x640/)
+    const set = await execTool(
+      call('set_frame_html', { frame_id: frameId, html: tall.replace('640px', '420px'), fit_height: true }),
+      canvasId,
+      actor(),
+      run(),
+    )
+    expect(set.is_error).toBeUndefined()
+    expect(store.getFrame(frameId)!.height).toBe(420)
+  }, 60_000)
 })
