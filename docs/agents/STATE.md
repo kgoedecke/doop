@@ -1,6 +1,6 @@
 # Fork state (ArcticSlayy/doop)
 
-Last updated: 2026-11-14 (lead session)
+Last updated: 2026-11-18 (sync catch-up)
 
 ## Purpose
 
@@ -11,8 +11,11 @@ Arctic OKs the RAM (self-hosting on `localhost:4300` waits for that and for impr
 
 ## Sync
 
-- Synced to upstream SHA: `2b257e2b8ff64eb37f4835930ee6118052872c45` (2026-11-10, "fix(components): fix four
-  component review findings").
+- Synced to upstream SHA: `07a5f6a324e918a935a99e1d210801ae89f4d2b9` (2026-11-18, "fix(sync): resolve a
+  stylesheet's url()s against the sheet, so synced fonts load (#506)"). The daily sync was blocked on 2026-11-16 to
+  2026-11-18 by conflicts in `server/actions.ts`, `src/components/FrameView.tsx` and `.context/TECHSTACK.md` (issue #19);
+  it was caught up by hand with a merge commit. Upstream moved `withLibraryFaces` into `server/canvasFaces.ts` (#497),
+  where our frame-paper rule now lives.
 - Automation: `.github/workflows/sync-upstream.yml`, daily 09:23 UTC plus manual dispatch. It runs on GitHub, with no
   local scheduled task. Green: pushes to `main`. Red: parks the merge on `sync/upstream` and opens one PR.
   Conflict: opens one issue, pushes nothing. Nothing new: does nothing.
@@ -164,8 +167,14 @@ T3 integration. Logged only; do not build.
 
 ## Touched upstream files
 
-None so far. All additions are new files: `FORK.md`, `AGENTS.md`, `docs/agents/STATE.md`,
-`.github/workflows/sync-upstream.yml`.
+Our own additions are new files: `FORK.md`, `AGENTS.md`, `docs/agents/STATE.md`, `docs/agents/SECURITY.md`,
+`.github/workflows/sync-upstream.yml`. The upstream PRs we took (#3, #5 to #8) edit these upstream files, and they are
+where a sync conflicts when upstream refactors the same code (as it did on 2026-11-18): `server/canvasFaces.ts`
+(paper rule), `src/components/FrameView.tsx` (paper rule in `saveEdited`), `.context/TECHSTACK.md` (frame paper bullet),
+`server/contextDev.ts`, `server/github.ts`, `server/importer.ts`, `server/ingest.ts`, `server/index.ts`,
+`src/lib/drawing.ts`, `src/lib/drawingMove.ts` and their tests. When one of these PRs lands upstream, a sync
+replaces our copy and the entry can go. Also: `.github/workflows/` differs from upstream by design (`android.yml` is
+upstream's and is not taken).
 
 ## Hygiene log
 
