@@ -924,10 +924,26 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   `componentTools.test.ts`, `componentsRoutes.test.ts`, `componentsBrowser.test.ts`. A bare
   `data-doop-prop="name"` binds an element's text, except where there is none: on `img`, `source`,
   `video`, `audio`, `iframe` and `embed` it binds `src`, on `input` its `value` (`parseBindings`
-  takes the tag). A `<doop-use>` that renders nothing is reported, never dropped quietly: a main with
-  no markup (`empty_template`), and on a whole write one never closed (`unclosed_use`), which is
-  placed with no slot content so the ones after it still expand (mid-stream it waits for its
-  end). Tests: `componentDrops.test.ts`.
+  takes the tag). A `<doop-use>` that renders nothing is reported, never dropped quietly: a main
+  with no markup (`empty_template`), and on a whole write one never closed (`unclosed_use`), which
+  is placed with no slot content so the ones after it still expand (mid-stream it waits for its
+  end). A whole write that leaves one open is refused before anything is saved, naming each tag
+  (`unclosedUseRefusal` in `server/components.ts`, on the document as it would be saved, an escaped
+  one decoded): an agent's frame write (`frameWriteRefusal`: MCP `create_frame`, `set_frame_html`,
+  `edit_frame_html` on the edited document, the resident's create, set, edit and rewrite commit), an
+  MCP stream's `done` chunk (`streamedDocument`; a refused chunk keeps the stream from going idle,
+  `markStreamActive`, while it comes again with the close), and any caller's component template as
+  made or updated, find + replace and dry runs included (`createComponentFromHtml`,
+  `updateComponent`), and an instance override's `html` or `slot` (`changeInstances`, which
+  `update_instances` calls). One left waiting by an unfinished stream counts too, since the write
+  would place it: an edit on top of a stream is told the frame is still streaming. The engine's
+  reader (`nextTag`) skips a tag inside a script, style, textarea, title or comment, and a custom
+  element whose name starts the same, inside a use as well as before it; a tag whose end cannot be
+  read (a quote never closed) counts as open, since nothing after it is read either. The markup a
+  use's `overrides` attribute carries (`html`, `slot`, nested instances' parts; `overrideMarkup`) is
+  read the same way, since each piece expands on its own. Only an idle stream's settling and a
+  human's write (an inspector save, the REST `/append`) still place one and report it (#528). Tests:
+  `componentDrops.test.ts`, the `<doop-use>` cases in `inlineData.test.ts`.
 - Component system first (`SYSTEM_FIRST`, `COMPOSE_CHECK` in `server/guide.ts`): the guide opens
   with a must-do list (tokens, then a component system set up the way a designer sets up a Figma
   file, then screens composed from it; themes are tokens, never a copied frame), the brief creates

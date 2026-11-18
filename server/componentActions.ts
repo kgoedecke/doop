@@ -30,7 +30,14 @@ import type { Actor, Canvas, Frame } from '../shared/types.ts'
 import { decodeQuotes, familyKey, fontFaceRule, usesFamily, type CustomFont } from '../shared/fonts.ts'
 import { fontsForCanvas } from './fonts.ts'
 import * as actions from './actions.ts'
-import { blankComponent, bumpRevision, contextFor, referencesComponent, withinRevision } from './components.ts'
+import {
+  blankComponent,
+  bumpRevision,
+  contextFor,
+  referencesComponent,
+  unclosedUseRefusal,
+  withinRevision,
+} from './components.ts'
 import { unmatchedSelectors } from './componentCss.ts'
 import {
   alignParts,
@@ -45,6 +52,7 @@ import {
   isElement,
   kidsOf,
   measureTree,
+  overrideMarkup,
   parseTemplateRoot,
   fitsIn,
   isTableContext,
@@ -560,6 +568,7 @@ export const createComponentFromHtml = atomic(function createComponentFromHtml(
   actor: Actor,
 ): CreateResult {
   checkCapacity(canvasId)
+  refuseUnclosedUses(input.html)
   const name = validName(input.name, canvasId)
   const def = blankComponent({
     name,
@@ -715,7 +724,22 @@ function alignedRoot(html: string, def: ComponentDef): Element {
   return root
 }
 
+/** Markup that leaves a `<doop-use>` open is refused, for every caller. A template is parsed
+ *  first, which closes it at its parent's end, and every instance would inherit that guess; an
+ *  override's markup expands on its own, which places it empty. */
+function refuseUnclosedUses(html: string, target: 'template' | 'frame' = 'template') {
+  const unclosed = unclosedUseRefusal(html, target)
+  if (unclosed) fail(unclosed)
+}
+
+/** The template the update asks for, checked whole (a find + replace as it would stand). */
 function nextHtml(def: ComponentDef, input: UpdateInput): string | undefined {
+  const html = requestedHtml(def, input)
+  if (html !== undefined) refuseUnclosedUses(html)
+  return html
+}
+
+function requestedHtml(def: ComponentDef, input: UpdateInput): string | undefined {
   if (input.find !== undefined) {
     const count = def.template.split(input.find).length - 1
     if (count === 0)
@@ -989,6 +1013,8 @@ export const changeInstances = atomic(function changeInstances(
   actor: Actor,
 ): { frame: Frame; missing: string[] } {
   const frame = requireFrame(canvasId, frameId)
+  for (const change of changes)
+    for (const markup of overrideMarkup(change.overrides)) refuseUnclosedUses(markup, 'frame')
   const ctx = contextFor(canvasId)
   const pending = new Map(changes.map((change) => [change.instanceId, change]))
   const seen = new Set<string>()

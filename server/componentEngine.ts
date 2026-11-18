@@ -225,6 +225,19 @@ function asStringRecord(value: Record<string, unknown>): Record<string, string> 
   return record
 }
 
+/** The markup part overrides carry (an element's children, a slot's content), nested instances'
+ *  parts included: each piece expands on its own when the instance renders. Overrides can arrive
+ *  as an agent's JSON, so anything not shaped like markup is skipped. */
+export function overrideMarkup(parts: Record<string, PartOverride> | undefined): string[] {
+  return Object.values(parts ?? {}).flatMap((part) =>
+    part && typeof part === 'object'
+      ? [part.html, part.slot, ...overrideMarkup(part.use?.parts)].filter(
+          (markup): markup is string => typeof markup === 'string',
+        )
+      : [],
+  )
+}
+
 /** Part overrides from untrusted JSON: a part that is not an object (`null`, written to mean
  *  "remove it") is no override at all, rather than something to trip over later. */
 function asPartRecord(value: Record<string, unknown>): Record<string, PartOverride> {
@@ -1067,18 +1080,25 @@ interface UseSpan {
   unclosed?: boolean
 }
 
+/** The next `tag` (`<doop-use` or `</doop-use`) from `from` that is one: followed by the end of
+ *  its name, and outside a script, style, textarea, title or comment. */
+function nextTag(html: string, tag: string, from: number, opaque: [number, number][]): number {
+  let at = indexOfAscii(html, tag, from)
+  while (at !== -1) {
+    const following = html[at + tag.length]
+    const inOpaque = opaque.some(([a, b]) => at >= a && at < b)
+    if (following && /[\s/>]/.test(following) && !inOpaque) return at
+    at = indexOfAscii(html, tag, at + 1)
+  }
+  return -1
+}
+
 /** The next complete `<doop-use>` from `from`. `lenient` (a whole write, nothing more to come)
  *  takes an open tag whose end never came as empty, so the ones after it still expand. */
 function nextUse(html: string, from: number, opaque: [number, number][], lenient = false): UseSpan | undefined {
   const open = `<${USE_TAG}`
   const close = `</${USE_TAG}`
-  let start = indexOfAscii(html, open, from)
-  while (start !== -1) {
-    const at = start
-    const following = html[at + open.length]
-    if (following && /[\s/>]/.test(following) && !opaque.some(([a, b]) => at >= a && at < b)) break
-    start = indexOfAscii(html, open, at + 1)
-  }
+  const start = nextTag(html, open, from, opaque)
   if (start === -1) return undefined
   const openEnd = tagEnd(html, start)
   if (openEnd === -1) return undefined
@@ -1088,8 +1108,8 @@ function nextUse(html: string, from: number, opaque: [number, number][], lenient
   let depth = 1
   let cursor = openEnd + 1
   while (depth > 0) {
-    const nextOpen = indexOfAscii(html, open, cursor)
-    const nextClose = indexOfAscii(html, close, cursor)
+    const nextOpen = nextTag(html, open, cursor, opaque)
+    const nextClose = nextTag(html, close, cursor, opaque)
     if (nextClose === -1)
       return lenient
         ? { start, end: openEnd + 1, openEnd, closeStart: openEnd + 1, selfClosing: true, unclosed: true }
@@ -1110,6 +1130,57 @@ function nextUse(html: string, from: number, opaque: [number, number][], lenient
   return undefined
 }
 
+/* the attribute itself, never the end of another's name (data-component) */
+const COMPONENT_ATTR_VALUE = /\scomponent\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>/]+))/i
+
+/** The component an open tag names, as written. */
+function componentRefIn(openTag: string): string {
+  const match = COMPONENT_ATTR_VALUE.exec(openTag)
+  return match?.[1] ?? match?.[2] ?? match?.[3] ?? ''
+}
+
+function componentRefOf(html: string, span: UseSpan): string {
+  return componentRefIn(html.slice(span.start, span.openEnd))
+}
+
+/** The component of each `<doop-use>` the HTML opens and never closes, in document order:
+ *  what a whole write would place with no slot content (`unclosed_use`). */
+export function unclosedUses(html: string): string[] {
+  if (indexOfAscii(html, `<${USE_TAG}`) === -1) return []
+  const opaque = opaqueRanges(html)
+  const refs: string[] = []
+  let cursor = 0
+  for (let span = nextUse(html, 0, opaque, true); span; span = nextUse(html, cursor, opaque, true)) {
+    if (span.unclosed) refs.push(componentRefOf(html, span))
+    cursor = span.end
+  }
+  /* a tag whose end cannot be read (a quote never closed) stops the reader, and nothing after it
+     expands either: it counts as left open, so the write is refused rather than saved half read */
+  const stuck = nextTag(html, `<${USE_TAG}`, cursor, opaque)
+  if (stuck !== -1) refs.push(componentRefIn(html.slice(stuck, html.indexOf('>', stuck) + 1 || undefined)))
+  /* markup in a use's overrides attribute expands on its own too */
+  for (const markup of useOverrideMarkup(html, opaque)) refs.push(...unclosedUses(markup))
+  return refs
+}
+
+/** The markup the `overrides` attribute of every `<doop-use>` in the HTML carries, nested uses
+ *  included. Each open tag is parsed on its own, which decodes the attribute's entities. */
+function useOverrideMarkup(html: string, opaque: [number, number][]): string[] {
+  const markup: string[] = []
+  let at = nextTag(html, `<${USE_TAG}`, 0, opaque)
+  while (at !== -1) {
+    const end = tagEnd(html, at)
+    if (end === -1) break
+    const openTag = html.slice(at, end + 1)
+    if (/\soverrides\s*=/i.test(openTag)) {
+      const use = elementKids(parseFragment(`${openTag.replace(/\/>$/, '>')}</${USE_TAG}>`))[0]
+      if (use) markup.push(...overrideMarkup(asPartRecord(JSON_OBJECT(attrOf(use, 'overrides')))))
+    }
+    at = nextTag(html, `<${USE_TAG}`, end + 1, opaque)
+  }
+  return markup
+}
+
 /** Every complete `<doop-use>` in the HTML, written out in full. One still missing
  *  its end (mid-stream) stays as it is until a later pass; on a whole write (`final`)
  *  nothing more is coming, so it is taken as empty and reported. */
@@ -1127,7 +1198,7 @@ export function expandUses(
   for (let span = nextUse(html, 0, opaque, final); span; span = nextUse(html, cursor, opaque, final)) {
     out += html.slice(cursor, span.start)
     if (span.unclosed) {
-      const ref = /\bcomponent\s*=\s*["']([^"']*)["']/i.exec(html.slice(span.start, span.openEnd))?.[1] ?? ''
+      const ref = componentRefOf(html, span)
       ctx.issues.push({
         code: 'unclosed_use',
         message: `<${USE_TAG} component="${ref}"> was never closed with </${USE_TAG}>, so it was placed with no slot content. Close every <${USE_TAG}>, or write it self-closing.`,
