@@ -6,7 +6,11 @@ import type { Canvas, Frame } from '../shared/types'
 
 const updateFrame = vi.fn((_id: string, _patch: Partial<Frame>) => Promise.resolve())
 vi.mock('../src/lib/api', () => ({
-  api: { updateFrame: (id: string, patch: Partial<Frame>) => updateFrame(id, patch) },
+  api: {
+    /* the Components tab's dot asks; nothing waits in these tests */
+    canvasLibrary: () => new Promise(() => {}),
+    updateFrame: (id: string, patch: Partial<Frame>) => updateFrame(id, patch),
+  },
   errorMessage: (_err: unknown, fallback: string) => fallback,
 }))
 vi.mock('../src/lib/posthog', () => ({ posthog: { capture: vi.fn() } }))

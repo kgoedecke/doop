@@ -23,6 +23,10 @@ beforeAll(async () => {
   frame = await (
     await owner.post(`/api/canvases/${canvas.id}/frames`, { name: 'Card', html: '<p>stored card</p>' })
   ).json()
+  /* a second canvas holding a component, never opened again after the restart */
+  const kit: Canvas = await (await owner.post('/api/canvases', { name: 'Kit' })).json()
+  const made = await owner.post(`/api/canvases/${kit.id}/components`, { name: 'Chip', html: '<span>New</span>' })
+  expect(made.status).toBe(200)
   first.stop({ keepData: true })
   await first.stopped
   server = await startServer(env, first.dataDir)
@@ -81,4 +85,16 @@ it('reads and edits frame html over MCP', async () => {
     await agent.close()
   }
   expect(await storedHtml()).toBe('<p>edited card</p>')
+})
+
+it('lists components to import from a canvas whose frame HTML is not loaded', async () => {
+  const res = await owner.get(`/api/canvases/${canvas.id}/component-libraries`)
+  expect(res.status).toBe(200)
+  const libraries = (await res.json()) as { name: string; components: { name: string }[] }[]
+  /* every other canvas is listed, the one with no components too (the panel greys it) */
+  const listed = libraries.map((library) => [library.name, library.components.map((entry) => entry.name)] as const)
+  expect(listed.sort(([a], [b]) => a.localeCompare(b))).toEqual([
+    ['Kit', ['Chip']],
+    ["Lazy's first canvas", []],
+  ])
 })

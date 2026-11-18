@@ -37,11 +37,22 @@ the frame list and preview both follow the filter. Resident and local agents als
 receive approval in their initial frame list, inspection results, and HTML reads.
 Agent guidance says to re-read before implementation and treat only `ready_for_dev`
 as current approval. This feature exposes human sign-off; it does not queue or start
-implementation jobs and does not give agents an approval tool.
+implementation jobs.
+
+Agents set approval only when a person asks: MCP `set_frame_approval` (`frame_id`,
+`status: ready_for_dev | draft`) and the resident tool of the same name both run `actions.agentSetFrameApproval`.
+The approval stays the person's (`approvedBy` / `approvedByUserId`: the MCP connection's
+account, or the resident run's requester, who must be able to edit the canvas) and records
+the agent as `approvedVia`, shown in the tooltip as "Approved by Kevin via Claude Code".
+The agent is the actor of the broadcast and the activity line ("marked … ready for dev for
+Kevin"). A stream or reveal in progress, missing edit access
+and, for the resident, a run that holds automation-queued work (`isAutomationCard`) are
+refused, so an approval workflow cannot approve its own drafts and start itself again.
+Agent approvals start approval automations like any other.
 
 Coverage: `tests/frameApproval.test.ts` exercises access, attribution, revision
-conflicts, websocket activity, invalidation, MCP reads/filtering, copies, restores,
-and persistence. `tests/frameApprovalControl.test.tsx` covers pending/failed approval,
+conflicts, websocket activity, invalidation, MCP reads/filtering and agent approval,
+copies, restores, and persistence; `tests/residentApproval.test.ts` the resident tool. `tests/frameApprovalControl.test.tsx` covers pending/failed approval,
 re-review, streamed/unsaved changes, late responses, and partial batch failures.
 The browser pass exercises draft → ready → needs review → ready → draft with the
 Inspector, frame title, and Layers badges visible together.

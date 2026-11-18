@@ -12,14 +12,50 @@ export interface LayoutDrop {
   target: DropTarget
   styles: FlowPlacement
   container: ElementInfo['rect']
-  line: ElementInfo['rect']
+  /** the insertion mark; none for a box that places its layers by hand */
+  line: ElementInfo['rect'] | null
   /** the drop leaves the element's parent: only then is the container marked */
   reparent?: boolean
 }
 
-export async function elementMoveTarget(frameId: string, selector: string, x: number, y: number) {
-  const reply = await requestFrame(frameId, 'doop:move-target', { selector, x, y })
+/** Where a drop at (x, y) puts the layer. `at` is where the layer is drawn
+ *  when a drag shows a copy of it and leaves the layer itself in place. */
+export async function elementMoveTarget(
+  frameId: string,
+  selector: string,
+  x: number,
+  y: number,
+  at?: ElementInfo['rect'],
+) {
+  const reply = await requestFrame(frameId, 'doop:move-target', { selector, x, y, at })
   return reply?.result as { free: boolean; drop: LayoutDrop | null } | undefined
+}
+
+/** Where the frame's body places its absolute layers from, in design px
+ *  from the frame's corner (a positioned body with a margin moves it), and
+ *  the scale it draws them at; the corner itself when the frame is not
+ *  mounted. */
+export function bodyPlacementOrigin(frameId: string): PlacementOrigin | Promise<PlacementOrigin> {
+  /* nothing to ask, and no turn of the event loop spent, without a live frame */
+  if (!windows.has(frameId)) return FRAME_CORNER
+  return requestFrame(frameId, 'doop:placement-origin', {}).then(
+    (reply) => (reply?.origin as PlacementOrigin | undefined) ?? FRAME_CORNER,
+  )
+}
+
+export interface PlacementOrigin {
+  x: number
+  y: number
+  scale: { x: number; y: number }
+}
+const FRAME_CORNER: PlacementOrigin = { x: 0, y: 0, scale: { x: 1, y: 1 } }
+
+/** How the element sits once the Layers panel moves it to `target`: the
+ *  placement a canvas drag there would give it, or undefined to keep its
+ *  styles as authored (and when the frame is not mounted). */
+export async function layerPlacement(frameId: string, selector: string, target: DropTarget) {
+  const reply = await requestFrame(frameId, 'doop:layer-placement', { selector, target })
+  return (reply?.styles ?? undefined) as FlowPlacement | undefined
 }
 
 /** The runtime's summary of one element: computed styles resolved to what
@@ -92,6 +128,17 @@ export interface ElementInfo {
   borderStyle: string
   borderColor: string
   borderRadius: number | null
+  /** A vector layer's SVG paint (an `<svg>` of shapes, or a shape), read
+   *  from its first shape: Fill and Stroke edit these instead of the box's
+   *  background and border. `inline` is that shape's inline paint. */
+  vector?: {
+    fill: string
+    /** `fill-opacity`, which the panel folds into the fill's alpha */
+    fillOpacity: number | null
+    stroke: string
+    strokeWidth: number | null
+    inline: Record<string, string>
+  } | null
   color: string
   fontSize: number | null
   fontWeight: string

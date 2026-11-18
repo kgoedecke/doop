@@ -12,54 +12,53 @@ export type WorkspaceStatus = 'inactive' | 'trialing' | 'active' | 'past_due' | 
 export type BillingInterval = 'month' | 'year'
 export type PlanId = 'free' | 'team' | 'enterprise'
 
+/** A plan's id and price. What each plan offers is copy, kept in the
+ *  client's `plans` catalog (src/lib/i18n) so it can be translated and can
+ *  name hosted-only features without this file doing so. */
 export interface Plan {
   id: PlanId
   name: string
-  tagline: string
   /** USD cents per seat per interval; absent on plans that are not self-serve */
   seatPrice?: Record<BillingInterval, number>
-  features: string[]
 }
 
 /** $20 a seat a month, or $192 a seat a year (two months free). */
 export const TEAM_SEAT_PRICE: Record<BillingInterval, number> = { month: 2000, year: 19200 }
 
+/** The most seats one checkout or seat change asks for; past that is Enterprise. */
+export const MAX_SEATS = 500
+
+/** A seat count someone asked for, or null when it is not one. */
+export function parseSeats(value: unknown): number | null {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= MAX_SEATS ? value : null
+}
+
+/** What Stripe bills: the seats bought, or the people in the workspace when
+ *  there are more of them. Invites fill bought seats first. */
+export function billedSeats(seatsBought: number, memberCount: number): number {
+  return Math.max(1, seatsBought, memberCount)
+}
+
+/* The paid plan is sold as Pro; its id stays 'team', which Stripe metadata,
+   the workspaces table and /api/me already carry. */
 export const PLANS: readonly Plan[] = [
-  {
-    id: 'free',
-    name: 'Personal',
-    tagline: 'For you and your agents.',
-    features: [
-      'Unlimited personal canvases',
-      'Invite collaborators per canvas',
-      'AI agents over MCP and the Doop Agent',
-      'Community gallery, imports, design memory',
-    ],
-  },
-  {
-    id: 'team',
-    name: 'Team',
-    tagline: 'A shared workspace for your whole org.',
-    seatPrice: TEAM_SEAT_PRICE,
-    features: [
-      'Shared workspaces — every member opens every canvas',
-      'Roles: owner, admin, member',
-      'Invite by email, seats billed as people join',
-      'Move canvases between personal and workspace',
-      'Everything in Personal',
-    ],
-  },
-  {
-    id: 'enterprise',
-    name: 'Enterprise',
-    tagline: 'Self-host it, or let us run it for you.',
-    features: ['SSO (OIDC), Google and Microsoft sign-in', 'Dedicated support', 'Custom terms and invoicing'],
-  },
+  { id: 'free', name: 'Free' },
+  { id: 'team', name: 'Pro', seatPrice: TEAM_SEAT_PRICE },
+  { id: 'enterprise', name: 'Enterprise' },
 ]
 
-export const TEAM_PLAN = PLANS.find((p) => p.id === 'team')!
+/** The largest image upload on Free, and on Pro (or with billing off). */
+export const FREE_UPLOAD_BYTES = 5 * 1024 * 1024
+export const PRO_UPLOAD_BYTES = 100 * 1024 * 1024
 
-export const ENTERPRISE_CONTACT = 'mailto:hello@doop.design?subject=Doop%20Enterprise'
+/** Font families a library holds on Free; Pro has no limit. */
+export const FREE_FONT_FAMILIES = 2
+
+/** Where paying customers write for priority support. */
+export const PRIORITY_SUPPORT = 'mailto:hello@doop.design?subject=Doop%20Pro%20support'
+
+/** Enterprise and "Talk to us": a 15-minute call on Kevin's calendar, as on doop.design/pricing. */
+export const ENTERPRISE_CONTACT = 'https://cal.com/kevin-goedecke-claogi/15min'
 
 /** A workspace whose members may grow it: create canvases in it, invite
  *  people, move canvases in. past_due counts — Stripe is retrying the card,

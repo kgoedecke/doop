@@ -16,8 +16,11 @@
       /* the canvas page as an editor has it open, with all its chrome; the
          test hands it the canvas the room would have sent */
       window.canvasPageHarness = {
-        seed: (frames) =>
-          useStore.getState().setCanvas({ id: 'c', name: 'Canvas', frames, role: 'edit', createdAt: 0, updatedAt: 0 }),
+        seed: (frames, canvas) =>
+          useStore
+            .getState()
+            .setCanvas({ id: 'c', name: 'Canvas', frames, role: 'edit', createdAt: 0, updatedAt: 0, ...canvas }),
+        setPages: (pages) => useStore.getState().setPages(pages, 'c'),
       }
       createRoot(document.getElementById('root')).render(
         React.createElement(TooltipProvider, null, React.createElement(CanvasPage, { canvasId: 'c' })),

@@ -15,6 +15,7 @@ import { ChoiceList, ChoiceRow } from './ui/choice-list'
 import { ImportIcon } from './ui/icons'
 import { Modal, ModalActions, ModalLede, ModalTitle } from './ui/modal'
 import { useT } from '@/lib/i18n'
+import { trackExport } from '../lib/exportEvents'
 
 /** A frame's own export, or one element's: the scale to render at, then
  *  its formats as a list, each row downloads. */
@@ -39,12 +40,14 @@ export function FrameExportModal({
      starts from it too */
   function download(format: FrameExportFormat) {
     setExportSettings({ format })
+    trackExport(format, 1, element ? 'element_menu' : 'frame_menu', element ? 'element' : 'frame')
     if (element) void downloadElementExport(frame, element, format, settings.scale)
     else void downloadFrameExport(frame, format, settings.scale)
     onClose()
   }
 
   function downloadPdf() {
+    trackExport('pdf', groupFrames.length, 'frame_menu')
     void downloadFramesPdf(frame.canvasId, readingOrder(groupFrames))
     onClose()
   }

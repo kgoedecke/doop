@@ -1,6 +1,6 @@
 # Fork state (ArcticSlayy/doop)
 
-Last updated: 2026-11-14 (lead session)
+Last updated: 2026-11-18 (sync catch-up)
 
 ## Purpose
 
@@ -11,8 +11,11 @@ Arctic OKs the RAM (self-hosting on `localhost:4300` waits for that and for impr
 
 ## Sync
 
-- Synced to upstream SHA: `2b257e2b8ff64eb37f4835930ee6118052872c45` (2026-11-10, "fix(components): fix four
-  component review findings").
+- Synced to upstream SHA: `07a5f6a324e918a935a99e1d210801ae89f4d2b9` (2026-11-18, "fix(sync): resolve a
+  stylesheet's url()s against the sheet, so synced fonts load (#506)"). The daily sync was blocked on 2026-11-16 to
+  2026-11-18 by conflicts in `server/actions.ts`, `src/components/FrameView.tsx` and `.context/TECHSTACK.md` (issue #19);
+  it was caught up by hand with a merge commit. Upstream moved `withLibraryFaces` into `server/canvasFaces.ts` (#497),
+  where our frame-paper rule now lives.
 - Automation: `.github/workflows/sync-upstream.yml`, daily 09:23 UTC plus manual dispatch. It runs on GitHub, with no
   local scheduled task. Green: pushes to `main`. Red: parks the merge on `sync/upstream` and opens one PR.
   Conflict: opens one issue, pushes nothing. Nothing new: does nothing.
@@ -30,7 +33,9 @@ Arctic OKs the RAM (self-hosting on `localhost:4300` waits for that and for impr
 3. Before each merge, check that main is green; if main is red, fix main first.
 
 Known flaky tests: the browser tests in `elementPanelBrowser.test.ts` and `canvasClipboardBrowser.test.ts` fail
-intermittently on the fork's runners with 5 s waits (see the Flaky tests section).
+intermittently on the fork's runners with 5 s waits (see the Flaky tests section). One is skipped: "keeps multiple
+copied elements together and selects the pasted set" (`canvasClipboardBrowser.test.ts`) failed 3 of 3 on sync PR #20
+and is red on upstream's own main CI too; drop the `it.skip` when upstream fixes it (issue #12).
 
 ## Inherited workflows (GitHub Actions on the fork)
 
@@ -38,14 +43,15 @@ Managed with `gh workflow disable` only; no upstream workflow file is edited or 
 conflict-free. GitHub registers a workflow only when it first triggers, and it re-enabled CLA once after a merge,
 so re-check `gh workflow list -R ArcticSlayy/doop --all` after merges.
 
-| Workflow                 | State                  | Reason                                                                   |
-| ------------------------ | ---------------------- | ------------------------------------------------------------------------ |
-| CI                       | kept                   | typecheck, lint, build, sharded tests on every PR; passes                |
-| Sync upstream (ours)     | kept                   | daily upstream sync, runs on GitHub                                      |
-| CLA                      | disabled               | upstream's contributor agreement (cla-assistant); fails and emails       |
-| Release Please           | disabled               | upstream release bookkeeping; opens release PRs on every push to main    |
-| desktop, desktop-release | not registered, unused | macOS/Windows builds and signed releases need Apple secrets we lack      |
-| ios, ios-release         | not registered, unused | macOS runners and App Store secrets we lack; disable on first appearance |
+| Workflow                     | State                  | Reason                                                                |
+| ---------------------------- | ---------------------- | --------------------------------------------------------------------- |
+| CI                           | kept                   | typecheck, lint, build, sharded tests on every PR; passes             |
+| Sync upstream (ours)         | kept                   | daily upstream sync, runs on GitHub                                   |
+| CLA                          | disabled               | upstream's contributor agreement (cla-assistant); fails and emails    |
+| Release Please               | disabled               | upstream release bookkeeping; opens release PRs on every push to main |
+| Desktop                      | disabled (2026-11-18)  | first ran on the sync PR #20; macOS/Windows builds need Apple secrets |
+| iOS                          | disabled (2026-11-18)  | first ran on the sync PR #20; macOS runners and App Store secrets     |
+| desktop-release, ios-release | not registered, unused | signed releases; disable on first appearance                          |
 
 CI failure emails come from the account's Actions notification setting (no API): github.com/settings/notifications.
 
@@ -164,8 +170,15 @@ T3 integration. Logged only; do not build.
 
 ## Touched upstream files
 
-None so far. All additions are new files: `FORK.md`, `AGENTS.md`, `docs/agents/STATE.md`,
-`.github/workflows/sync-upstream.yml`.
+Our own additions are new files: `FORK.md`, `AGENTS.md`, `docs/agents/STATE.md`, `docs/agents/SECURITY.md`,
+`.github/workflows/sync-upstream.yml`. The upstream PRs we took (#3, #5 to #8) edit these upstream files, and they are
+where a sync conflicts when upstream refactors the same code (as it did on 2026-11-18): `server/canvasFaces.ts`
+(paper rule), `src/components/FrameView.tsx` (paper rule in `saveEdited`), `.context/TECHSTACK.md` (frame paper bullet),
+`server/contextDev.ts`, `server/github.ts`, `server/importer.ts`, `server/ingest.ts`, `server/index.ts`,
+`src/lib/drawing.ts`, `src/lib/drawingMove.ts` and their tests, plus `tests/canvasClipboardBrowser.test.ts` (one
+`it.skip`, see Flaky tests). When one of these PRs lands upstream, a sync
+replaces our copy and the entry can go. Also: `.github/workflows/` differs from upstream by design (`android.yml` is
+upstream's and is not taken).
 
 ## Hygiene log
 

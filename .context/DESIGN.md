@@ -111,7 +111,8 @@ stock Tailwind type sizes and radii, `leading-[…]` / `tracking-[…]`, weights
 and hex colours; only the not-yet-migrated editor chrome, listed in `LEGACY_CHROME`, is exempt).
 Each has a story.
 
-- `Button` - the ring button, one black `primary` per screen (`size="bar"` is the 32px header
+- `Button` - the ring button, one black `primary` per screen (`variant="brand"` is the accent
+  fill for the one action a live signal asks for, such as unpublished library changes; `size="bar"` is the 32px header
   and toolbar action with a leading glyph: Import, New canvas; `size="inline"` is a boxless text
   action at the caption step, `bare` in a selection bar, `link` in a card or callout);
   `IconButton` - a glyph in a quiet square (sm 24px / md 32px / lg 34px, `round` for row actions,
@@ -187,7 +188,7 @@ density="rail"` (the group caption with its chevron) and `DashNavItem density="r
   disc), `tone="ink"` (the account's own face: initials on an ink disc, no collar), `initials()`
   (the one first-and-last-letter rule), `BrandMark` - every third-party logo (`<BrandMark brand="figma" size={16} />`; figma, github,
   canva, photoshop, meta, claude, openai, cursor, gemini, google, apple, microsoft, slack, linear, openrouter,
-  deepseek, kimi);
+  deepseek, kimi, grok, opencode, pi);
   `AppIcon` is a model provider, import source or export format as doop.design's "Works with" row draws it:
   the brand tile (23% corners, inset edge and soft drop) with its glyph at 56% (`claude`, `claude-code`, `openai`,
   `gemini`, `openrouter`, `deepseek`, `kimi`, `seedream`, `codex`, `cursor`, `mcp`, `headless`, `github`, `figma`, `photoshop`, `canva`, `website`, `live-app`, `pdf`, `png`, `svg`,

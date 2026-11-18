@@ -11,10 +11,18 @@ import { buildLayerTree, elementHtml, findLayer, isElementHidden, isElementLocke
 import { MOD_KEY } from '../lib/keys'
 import { useT } from '../lib/i18n'
 import { useStore } from '../lib/store'
-import { changeInstance, componentContextOf, goToMain, promptMakeComponent } from '../lib/components'
+import {
+  changeInstance,
+  componentContextOf,
+  goToMain,
+  promptMakeComponent,
+  restoreDeletedComponent,
+} from '../lib/components'
+import { isDeleted } from '../../shared/components'
 import { ContextMenuContent, ContextMenuItem, ContextMenuSeparator } from './ui/context-menu'
 import { MenuHint } from './ui/menu'
 import { FrameExportModal } from './FrameExportModal'
+import { trackPngCopy } from '../lib/exportEvents'
 
 /** What the live document said about a right-clicked element; a Layers row
  *  has none, its selector comes from the saved HTML itself. */
@@ -127,9 +135,14 @@ function ElementMenuItems({ frame, selector, hit, onRename, onExport }: ElementI
               <MenuHint>{MOD_KEY}⌥K</MenuHint>
             </ContextMenuItem>
           )}
-          {component && (
+          {component && !isDeleted(component.def) && (
             <ContextMenuItem onSelect={() => goToMain(component.def)}>
               {t('components.goToMainComponent')}
+            </ContextMenuItem>
+          )}
+          {component && isDeleted(component.def) && (
+            <ContextMenuItem onSelect={() => void restoreDeletedComponent(component.def)}>
+              {t('components.restoreComponent')}
             </ContextMenuItem>
           )}
           {component?.kind === 'instance' && (
@@ -145,7 +158,7 @@ function ElementMenuItems({ frame, selector, hit, onRename, onExport }: ElementI
                 </ContextMenuItem>
               )}
               <ContextMenuItem
-                disabled={locked}
+                disabled={locked || isDeleted(component.def)}
                 onSelect={() => void changeInstance(frame, { instanceId: component.instanceId, reset: true })}
               >
                 {t('components.resetOverrides')}
@@ -177,7 +190,12 @@ function ElementMenuItems({ frame, selector, hit, onRename, onExport }: ElementI
           <ContextMenuItem onSelect={() => onExport(exportTarget(frame, selector))}>
             {t('stage.exportEllipsis')}
           </ContextMenuItem>
-          <ContextMenuItem onSelect={() => void copyElementPng(frame, exportTarget(frame, selector), scale)}>
+          <ContextMenuItem
+            onSelect={() => {
+              trackPngCopy('element', 'element_menu')
+              void copyElementPng(frame, exportTarget(frame, selector), scale)
+            }}
+          >
             {t('stage.copyAsPng')}
           </ContextMenuItem>
           <ContextMenuSeparator />

@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import type { Page } from 'puppeteer-core'
 import { findBrowserPath } from '../server/screenshot'
 import { fixtureUrl, pagePerTest } from './browser'
+import { openCanvasPage, showCanvasPage } from './canvasPageFixture'
 import type { Canvas, Frame } from '../shared/types'
 
 declare global {
@@ -293,5 +294,146 @@ describe.skipIf(!findBrowserPath())('page camera and snapping', { timeout: 30_00
       page.off('request', onRequest)
       await page.setRequestInterception(false)
     }
+  })
+})
+
+/* The real canvas page (tests/canvasPageFixture.ts): which page a URL opens,
+   and the URL following the page. The room's canvas is seeded by the test, so
+   a library canvas is one whose canvas carries the server's `landingPageId`. */
+describe.skipIf(!findBrowserPath())('pages in the URL', { timeout: 30_000 }, () => {
+  const pages = pagePerTest({ permissions: ['clipboard-read', 'clipboard-sanitized-write'] })
+  let page: Page
+  beforeEach(async () => {
+    page = await pages.open()
+    await page.setViewport({ width: 1200, height: 800 })
+    /* every frame the stage ever mounts, so a page shown for a moment is seen */
+    await page.evaluateOnNewDocument(() => {
+      const seen = new Set<string>()
+      Object.assign(window, { mountedFrames: () => [...seen] })
+      new MutationObserver(() => {
+        for (const frame of document.querySelectorAll('iframe[data-doop-frame][title]'))
+          seen.add((frame as HTMLIFrameElement).title)
+      }).observe(document, { childList: true, subtree: true })
+    })
+  })
+
+  const board: Partial<Canvas> = {
+    pages: [
+      { id: 'first', name: 'Main' },
+      { id: 'second', name: 'Exploration' },
+      { id: 'parts', name: 'Components' },
+    ],
+  }
+  const frames = [frame('home', 'first', 0), frame('draft', 'second', 0), frame('button', 'parts', 0)]
+  const open = (search = '', canvas = board) => openCanvasPage(page, frames, search, canvas)
+  const activePage = () =>
+    page.$eval('[data-page-id]:has(button[aria-current="page"])', (row) => row.getAttribute('data-page-id'))
+  const mounted = () => page.evaluate(() => (window as unknown as { mountedFrames: () => string[] }).mountedFrames())
+  const search = () => page.evaluate(() => location.search)
+  async function switchTo(pageId: string) {
+    await page.locator(`[data-page-id="${pageId}"] button`).click()
+    await page.waitForSelector(`[data-page-id="${pageId}"] button[aria-current="page"]`)
+  }
+
+  it('opens the page the URL names, without showing the first page on the way', async () => {
+    await open('?page=second')
+    expect(await activePage()).toBe('second')
+    expect(await mounted()).toEqual(['draft'])
+    expect(await search()).toBe('?page=second')
+  })
+
+  it('keeps the URL on the open page, in place, and a reload stays there', async () => {
+    await open()
+    expect(await activePage()).toBe('first')
+    expect(await search()).toBe('')
+    const entries = await page.evaluate(() => history.length)
+    await switchTo('second')
+    expect(await search()).toBe('?page=second')
+    await switchTo('parts')
+    expect(await search()).toBe('?page=parts')
+    /* a page switch is not a step Back walks through */
+    expect(await page.evaluate(() => history.length)).toBe(entries)
+
+    await showCanvasPage(page, frames, await search(), board)
+    expect(await activePage()).toBe('parts')
+
+    /* the default page needs no parameter */
+    await switchTo('first')
+    expect(await search()).toBe('')
+  })
+
+  it('opens the page a history entry names when the browser moves to it', async () => {
+    await open()
+    await page.evaluate(() => {
+      history.pushState(null, '', '?page=second')
+      window.dispatchEvent(new PopStateEvent('popstate'))
+    })
+    await page.waitForSelector('[data-page-id="second"] button[aria-current="page"]')
+    await page.evaluate(() => history.back())
+    await page.waitForSelector('[data-page-id="first"] button[aria-current="page"]')
+    expect(await search()).toBe('')
+  })
+
+  it('falls back to the first page for a page that is not there, and drops it from the URL', async () => {
+    await open('?page=deleted')
+    expect(await activePage()).toBe('first')
+    expect(await mounted()).toEqual(['home'])
+    expect(await search()).toBe('')
+  })
+
+  it("opens a frame link's page over the page the URL also names", async () => {
+    await open('?page=first&frame=draft')
+    expect(await activePage()).toBe('second')
+    expect(await mounted()).toEqual(['draft'])
+    expect(await search()).toBe('?frame=draft')
+    /* leaving the page leaves the frame link too: it would win on a reload */
+    await switchTo('parts')
+    expect(await search()).toBe('?page=parts')
+  })
+
+  it('opens a library canvas on its components page and a plain canvas on its first', async () => {
+    const library = { ...board, landingPageId: 'parts' }
+    await open('', library)
+    expect(await activePage()).toBe('parts')
+    expect(await mounted()).toEqual(['button'])
+    expect(await search()).toBe('')
+    /* the person's pick holds, and the URL says so, since a bare link opens the components */
+    await switchTo('first')
+    expect(await search()).toBe('?page=first')
+    await showCanvasPage(page, frames, await search(), library)
+    expect(await activePage()).toBe('first')
+
+    await showCanvasPage(page, frames, '', board)
+    expect(await activePage()).toBe('first')
+  })
+
+  it('stays on the open page when someone else changes the pages, unless that page is deleted', async () => {
+    await open('?page=second')
+    const setPages = (list: { id: string; name: string }[]) =>
+      page.evaluate((list) => window.canvasPageHarness.setPages(list), list)
+    await setPages([
+      { id: 'parts', name: 'Components' },
+      { id: 'second', name: 'Renamed' },
+      { id: 'first', name: 'Main' },
+    ])
+    expect(await activePage()).toBe('second')
+    expect(await search()).toBe('?page=second')
+    /* the open page is deleted: the first page in the list, and a URL that names nothing */
+    await setPages([
+      { id: 'parts', name: 'Components' },
+      { id: 'first', name: 'Main' },
+    ])
+    await page.waitForSelector('[data-page-id="parts"] button[aria-current="page"]')
+    expect(await search()).toBe('')
+  })
+
+  it('copies a link to a page from its row menu', async () => {
+    await open()
+    await page.locator('[data-page-id="second"] button').click({ button: 'right' })
+    await page.locator('[role="menuitem"]::-p-text(Copy link to page)').click()
+    await page.waitForFunction(() => document.body.textContent?.includes('Page link copied'))
+    const url = new URL(await page.evaluate(() => navigator.clipboard.readText()))
+    expect(url.pathname).toBe('/c/c')
+    expect(url.search).toBe('?page=second')
   })
 })

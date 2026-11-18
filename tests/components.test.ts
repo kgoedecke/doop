@@ -12,6 +12,7 @@ vi.mock('../server/db/persist.ts', () => ({
 
 import { store } from '../server/store.ts'
 import * as actions from '../server/actions.ts'
+import * as propagation from '../server/propagation.ts'
 import { blankComponent, contextFor } from '../server/components.ts'
 import { compactDocument } from '../server/componentEngine.ts'
 import { findComponentCandidates, lookalikesIn } from '../server/componentActions.ts'
@@ -164,7 +165,7 @@ describe('<doop-use>', () => {
 })
 
 describe('propagation', () => {
-  it('reaches every instance and keeps props and overrides', () => {
+  it('reaches every instance and keeps props and overrides', async () => {
     const { canvas, def, mainFrame, page } = setup()
     actions.updateFrame(
       page.id,
@@ -179,6 +180,7 @@ describe('propagation', () => {
       .replace('<span class="label"', '<em class="new">new</em><span class="label"')
       .replace('background: var(--accent)', 'background: rebeccapurple')
     actions.updateFrame(mainFrame.id, { html: newMain }, actor)
+    await propagation.whenIdle()
 
     expect(current(canvas.id, def.id).rev).toBe(2)
     const html = framed(page.id)
@@ -189,12 +191,14 @@ describe('propagation', () => {
     expect(html).toContain('data-doop-rev="2"')
   })
 
-  it('withdraws sign-off on a frame that changed', () => {
+  it('keeps sign-off on a frame that follows a component change', async () => {
     const { mainFrame, page } = setup()
     actions.updateFrame(page.id, { html: doc(`<doop-use component="Button"></doop-use>`) }, actor)
     actions.setFrameApproval(page.id, true, { id: 'u', name: 'Reviewer' })
     actions.updateFrame(mainFrame.id, { html: framed(mainFrame.id).replace('Buy now', 'Buy today') }, actor)
-    expect(store.getFrame(page.id)!.approval?.status).toBe('needs_review')
+    await propagation.whenIdle()
+    expect(framed(page.id)).toContain('Buy today')
+    expect(store.getFrame(page.id)!.approval?.status).toBe('ready_for_dev')
   })
 
   it('does not treat a stale save as overrides: it merges', () => {
@@ -217,7 +221,7 @@ describe('propagation', () => {
     expect(html).not.toContain('data-doop-overrides')
   })
 
-  it('catches instances up when a nested component changes', () => {
+  it('catches instances up when a nested component changes', async () => {
     const { canvas, mainFrame, page } = setup()
     const card = blankComponent({ name: 'Card', by: 'Tester' })
     store.saveComponent(canvas.id, card)
@@ -238,6 +242,7 @@ describe('propagation', () => {
       { html: framed(mainFrame.id).replace('<button class="btn"', '<button class="btn nested-fresh"') },
       actor,
     )
+    await propagation.whenIdle()
     expect(framed(page.id)).toContain('nested-fresh')
     expect(framed(page.id)).toContain('Inside')
   })
@@ -285,7 +290,7 @@ describe('edits inside an instance', () => {
     expect(framed(page.id)).not.toContain('☆')
   })
 
-  it('keep a structural change on that element alone, still linked', () => {
+  it('keep a structural change on that element alone, still linked', async () => {
     const { def, mainFrame, page } = placed()
     actions.updateFrame(
       page.id,
@@ -299,6 +304,7 @@ describe('edits inside an instance', () => {
       { html: framed(mainFrame.id).replace('<button class="btn"', '<button class="btn outer-fresh"') },
       actor,
     )
+    await propagation.whenIdle()
     expect(framed(page.id)).toContain('outer-fresh')
     expect(framed(page.id)).toContain('<b>extra</b>')
   })
@@ -312,7 +318,7 @@ describe('edits inside an instance', () => {
 })
 
 describe('slots', () => {
-  it('hold instance content through updates, nested instances included', () => {
+  it('hold instance content through updates, nested instances included', async () => {
     const { canvas, page } = setup()
     const card = blankComponent({ name: 'Card', by: 'Tester' })
     store.saveComponent(canvas.id, card)
@@ -344,6 +350,7 @@ describe('slots', () => {
     expect(compact).toContain('label="In slot"')
 
     actions.updateFrame(cardFrame.id, { html: framed(cardFrame.id).replace('<h2 ', '<h2 class="fresh" ') }, actor)
+    await propagation.whenIdle()
     const after = framed(page.id)
     expect(after).toContain('class="fresh"')
     expect(after).toContain('In slot')

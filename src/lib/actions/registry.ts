@@ -5,6 +5,8 @@
 
 import type { PlainMessageKey } from '../i18n'
 import { useStore } from '../store'
+import { currentMe, offersUpgrade } from '../me'
+import { openUpgrade } from '../upgrade'
 import { currentPageCanvas } from '../pages'
 import { readingOrder } from '../../../shared/frameOrder'
 import { redo, undo } from '../history'
@@ -129,6 +131,9 @@ export interface CanvasAction {
    *  the canvas page claims with rules of their own) */
   hintOnly?: boolean
   enabled?: () => boolean
+  /** left out of the canvas menu while it is not enabled, instead of greyed
+   *  (the palette always leaves out what is not enabled) */
+  hideWhenDisabled?: boolean
   /** a toggle's state, for the check a menu row wears */
   checked?: () => boolean
   /** false when there was nothing to act on: the key is left to the browser */
@@ -1062,6 +1067,17 @@ export const ACTIONS: readonly CanvasAction[] = [
     menu: 'help',
     section: 1,
     run: () => h()?.contactSupport(),
+  },
+  {
+    /* the plans, from the editor's menu and the ⌘K palette */
+    id: 'upgrade',
+    label: 'actions.upgradeToPro',
+    menu: 'help',
+    section: 2,
+    /* only where an upgrade can be bought and is not already had */
+    enabled: () => !h()?.guest && offersUpgrade(currentMe()),
+    hideWhenDisabled: true,
+    run: () => openUpgrade({ source: 'canvas-menu' }),
   },
 ]
 

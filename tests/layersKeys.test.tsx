@@ -7,7 +7,12 @@ import type { Canvas, Frame } from '../shared/types'
 const updateFrame = vi.fn(() => Promise.resolve())
 const deleteFrame = vi.fn(() => Promise.resolve())
 vi.mock('../src/lib/api', () => ({
-  api: { updateFrame: () => updateFrame(), deleteFrame: () => deleteFrame() },
+  api: {
+    /* the Components tab's dot asks; nothing waits in these tests */
+    canvasLibrary: () => new Promise(() => {}),
+    updateFrame: () => updateFrame(),
+    deleteFrame: () => deleteFrame(),
+  },
 }))
 vi.mock('../src/lib/posthog', () => ({ posthog: { capture: vi.fn() } }))
 

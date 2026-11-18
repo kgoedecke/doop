@@ -191,8 +191,6 @@ private struct LibraryView: View {
     @State private var deleting: CanvasSummary?
     @State private var renaming: CanvasSummary?
     @State private var busy = false
-    /// A Live Activity tapped before the library loaded; opened after the first reload.
-    @State private var pendingLink: (canvasID: String, serverOrigin: String)?
     #if DEBUG
     /// `.task` restarts every time the library reappears, so `-openCanvas` must fire only once.
     @State private var openedLaunchCanvas = false
@@ -219,14 +217,12 @@ private struct LibraryView: View {
                             .font(.custom("HankenGrotesk-Regular_Light", size: 34, relativeTo: .largeTitle))
                         Text("Pick up an idea. Or start something new.").foregroundStyle(.secondary)
                     }.padding(.top, 12)
-                    // The count sits beside the scope it counts, not at the far edge.
                     HStack(spacing: 4) {
                         Picker("Workspace", selection: $workspace) {
                             Text("All canvases").tag("all")
                             Text("Personal").tag("personal")
                             ForEach(app.workspaces) { Text($0.name).tag($0.id) }
                         }.pickerStyle(.menu)
-                        Text("\(filtered.count) \(filtered.count == 1 ? "canvas" : "canvases")").font(.caption).foregroundStyle(.secondary)
                         Spacer(minLength: 0)
                     }
                     if let error = app.error { Text(error).foregroundStyle(.red).font(.callout) }
@@ -274,7 +270,6 @@ private struct LibraryView: View {
             .refreshable { await app.reload() }
             .task {
                 await app.reload()
-                if let link = pendingLink { pendingLink = nil; open(link) }
                 #if DEBUG
                 // -openCanvas <id> jumps straight to a canvas (simulator automation).
                 if !openedLaunchCanvas, path.isEmpty, let id = UserDefaults.standard.string(forKey: "openCanvas"), let canvas = app.canvases.first(where: { $0.id == id }) {
@@ -284,10 +279,16 @@ private struct LibraryView: View {
                 #endif
             }
 
-            .navigationDestination(for: CanvasSummary.self) { canvas in NativeCanvasView(summary: canvas, client: app.client, currentUser: app.user) }
+            // `.id` gives each canvas its own view: replacing the open canvas (a Live Activity tap)
+            // would otherwise reuse the destination and keep the old canvas's `@StateObject` model.
+            .navigationDestination(for: CanvasSummary.self) { canvas in
+                NativeCanvasView(summary: canvas, client: app.client, currentUser: app.user).id(canvas.id)
+            }
             .onOpenURL { url in
+                // `open` reloads the list when the canvas is not in it yet, so a link that
+                // arrives before the first load, or into an empty library, still opens.
                 guard let link = CanvasLink.parse(url) else { return }
-                if app.canvases.isEmpty { pendingLink = link } else { open(link) }
+                open(link)
             }
             .alert("New canvas", isPresented: $creating) {
                 TextField("Canvas name", text: $title)
@@ -338,10 +339,14 @@ private struct LibraryView: View {
 
     /// Opens the canvas a Live Activity links to, if it lives on this app's server.
     private func open(_ link: (canvasID: String, serverOrigin: String)) {
-        guard link.serverOrigin == app.client.server.origin.absoluteString,
-              let canvas = app.canvases.first(where: { $0.id == link.canvasID }) else { return }
-        showingAgents = false
-        path = [canvas]
+        guard link.serverOrigin == app.client.server.origin.absoluteString else { return }
+        Task {
+            // A canvas made since the last reload (an agent's new canvas) is not listed yet.
+            if !app.canvases.contains(where: { $0.id == link.canvasID }) { await app.reload() }
+            guard let canvas = app.canvases.first(where: { $0.id == link.canvasID }) else { return }
+            showingAgents = false
+            path = [canvas]
+        }
     }
 
     private func create() {
@@ -387,8 +392,11 @@ private struct CanvasCard: View {
                 if let frameID = canvas.previewFrameId {
                     GeometryReader { geometry in
                         AsyncImage(url: origin.appendingPathComponent("i/\(frameID).jpg").appending(queryItems: [URLQueryItem(name: "preview", value: "")])) { image in
+                            // `clipped()` hides the overflow but does not shrink the hit area: a tall
+                            // page filled to the card's width reached over the cards above it.
                             image.resizable().scaledToFill()
                                 .frame(width: geometry.size.width, height: geometry.size.height).clipped()
+                                .allowsHitTesting(false)
                         } placeholder: {
                             placeholder.frame(width: geometry.size.width, height: geometry.size.height)
                         }
@@ -408,6 +416,8 @@ private struct CanvasCard: View {
         .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 20))
         .clipShape(RoundedRectangle(cornerRadius: 20))
         .overlay(RoundedRectangle(cornerRadius: 20).strokeBorder(.primary.opacity(0.06)))
+        // Taps and the long-press preview are the card as drawn, never anything spilling past it.
+        .contentShape([.interaction, .contextMenuPreview], RoundedRectangle(cornerRadius: 20))
     }
     private var placeholder: some View { Image(systemName: "square.stack.3d.up").font(.system(size: 42, weight: .ultraLight)).foregroundStyle(.tertiary) }
 }

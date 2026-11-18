@@ -246,7 +246,10 @@ describe.skipIf(!findBrowserPath() || !CLIPBOARD_IS_RELIABLE)('canvas clipboard 
     expect(await page.evaluate(() => document.activeElement?.id)).toBe('other-field')
   })
 
-  it('keeps multiple copied elements together and selects the pasted set', async () => {
+  /* Fork: known flaky, also red on upstream's own main CI (the picked set is read
+     before the paste's selection lands). Skipped alone; see ArcticSlayy/doop#12.
+     Drop the skip once upstream fixes it. */
+  it.skip('keeps multiple copied elements together and selects the pasted set', async () => {
     await page.evaluate(() => window.canvasClipboardHarness.pick('#card', '#other'))
     await chord('c')
     await chord('v')

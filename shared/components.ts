@@ -100,14 +100,69 @@ export interface ComponentDef {
   /** the frame whose element is the main; null once that element is gone */
   mainFrameId: string | null
   code?: ComponentCode
-  /** imported from a library canvas: pulled on request, never pushed */
-  source?: { canvasId: string; componentId: string; rev: number }
+  /** imported from a library canvas: pulled on request, never pushed. `library`
+   *  marks a link to a workspace library's published snapshot: such a component
+   *  has no main here, and is changed on its library canvas. */
+  source?: { canvasId: string; componentId: string; rev: number; library?: true }
   /** recent earlier states, newest last: rollback and three-way merge of stale saves */
   history: ComponentSnapshot[]
+  /** `deleted` is a soft delete: the definition is kept and frozen, its instances keep
+   *  their markup and stop following it, new uses are refused, and it can be restored.
+   *  Absent means active. */
+  status?: 'active' | 'deleted'
+  deletedAt?: number
+  deletedBy?: string
   createdAt: number
   updatedAt: number
   updatedBy: string
 }
+
+export function isDeleted(def: Pick<ComponentDef, 'status'> | undefined): boolean {
+  return def?.status === 'deleted'
+}
+
+/** A definition with no markup: a row that lost its content (an older write landing last,
+ *  2026-11-11). Nothing can be rendered from it, so its instances are left exactly as they
+ *  are, stylesheet included, until its main is written again and gives it back its markup. */
+export function isHollow(def: Pick<ComponentDef, 'template'> | undefined): boolean {
+  return def !== undefined && !def.template.trim()
+}
+
+/** The components of a canvas that are in use: everything but the soft-deleted. */
+export function activeComponents<T extends Pick<ComponentDef, 'status'>>(defs: readonly T[] | undefined): T[] {
+  return (defs ?? []).filter((def) => !isDeleted(def))
+}
+
+/** A component as its workspace library last published it. Canvases in the
+ *  workspace use this snapshot, never the library canvas's live definition, so
+ *  work in progress there reaches nobody until it is published. */
+export interface LibraryComponent {
+  /** the library canvas */
+  canvasId: string
+  id: string
+  name: string
+  description: string
+  template: string
+  css: string
+  rawCss: string
+  head: string[]
+  props: ComponentProp[]
+  slots: ComponentSlot[]
+  code?: ComponentCode
+  /** nested components this one is built from that come from ANOTHER library,
+   *  by component id → that library's canvas: recorded at publish time, so a
+   *  canvas taking this up follows the same library the publisher did. Ones
+   *  from this same library are not listed. */
+  nested?: Record<string, string>
+  /** this publication's version: the library canvas's revision when taken, raised
+   *  past the last publication's when a change left that revision alone */
+  rev: number
+  publishedAt: number
+  publishedBy: string
+}
+
+/** What publishing would do to one component of a library canvas. */
+export type LibraryChange = 'new' | 'changed' | 'unchanged' | 'removed'
 
 /** One template element's overrides on one instance. A value of null removes what the template set. */
 export interface PartOverride {
@@ -132,12 +187,18 @@ export interface InstanceOverrides {
 
 export type ComponentIssueCode =
   | 'unknown_component'
+  | 'deleted_component'
   | 'unknown_prop'
   | 'invalid_prop_value'
   | 'nesting_cycle'
   | 'unknown_main'
   | 'instance_removed'
   | 'too_deep'
+  | 'library_ambiguous'
+  | 'ignored_attribute'
+  | 'css_not_kept'
+  | 'empty_template'
+  | 'unclosed_use'
 
 /** Something an agent should hear about instead of finding out from a screenshot. */
 export interface ComponentIssue {
@@ -200,7 +261,22 @@ export interface Binding {
   prop: string
 }
 
-export function parseBindings(value: string): Binding[] {
+/** What a bare binding (`data-doop-prop="photo"`) fills on an element that holds no text:
+ *  an image's source, a field's value. Elsewhere a bare binding is the text. */
+const BARE_TARGET = new Map([
+  ['img', 'src'],
+  ['source', 'src'],
+  ['video', 'src'],
+  ['audio', 'src'],
+  ['iframe', 'src'],
+  ['embed', 'src'],
+  ['input', 'value'],
+])
+
+/** The bindings in a data-doop-prop value. Pass the element's tag so a bare name on an <img>
+ *  binds its src: as text it would fill nothing, and the prop would silently do nothing. */
+export function parseBindings(value: string, tagName?: string): Binding[] {
+  const bare = (tagName && BARE_TARGET.get(tagName.toLowerCase())) ?? null
   const bindings: Binding[] = []
   for (const piece of value.split(',')) {
     const text = piece.trim()
@@ -208,7 +284,7 @@ export function parseBindings(value: string): Binding[] {
     const at = text.lastIndexOf(':')
     const prop = (at === -1 ? text : text.slice(at + 1)).trim()
     if (!isPropName(prop)) continue
-    bindings.push({ target: at === -1 ? null : text.slice(0, at).trim().toLowerCase(), prop })
+    bindings.push({ target: at === -1 ? bare : text.slice(0, at).trim().toLowerCase(), prop })
   }
   return bindings
 }

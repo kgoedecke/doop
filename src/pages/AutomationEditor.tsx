@@ -2,6 +2,7 @@ import { clientIntegrations } from '../integrations'
 import { useEffect, useRef, useState } from 'react'
 import type { CanvasMeta } from '../../shared/types'
 import { AGENT_ROLES, roleById, roleName } from '../../shared/agents'
+import { useCanvasRoster } from '../hooks/use-roster'
 import {
   AUTOMATION_EXAMPLES,
   MAX_NAME,
@@ -1003,14 +1004,16 @@ function AgentNode({
   onRemove: () => void
 }) {
   const t = useT()
-  /* one agent per task: a pill picks that role, nothing to un-pick */
+  /* one agent per task: a pill picks that role, nothing to un-pick. The
+     step's canvas decides which custom agents there are */
   const roles = step.roles
+  const roster = useCanvasRoster(step.canvasId || undefined)
   return (
     <div data-pan-node className={nodeCls}>
       <Port side="in" />
       <Port side="out" />
       <div className="flex items-center gap-[9px]">
-        <RoleMark role={roleById(roles[0])} size={24} />
+        <RoleMark role={roleById(roles[0], roster)} size={24} />
         <div className="min-w-0 flex-1">
           <div className={kCls}>{t('automations.agentTask')}</div>
           <Input
@@ -1034,7 +1037,7 @@ function AgentNode({
         onChange={(e) => onChange({ prompt: e.target.value })}
       />
       <div className="mt-2.5 flex flex-wrap gap-1">
-        {AGENT_ROLES.map((role) => {
+        {roster.map((role) => {
           const on = roles[0] === role.id
           return (
             <Button
@@ -1056,7 +1059,9 @@ function AgentNode({
           )
         })}
       </div>
-      <p className="mt-2 text-caption text-ink-faint">{t('automations.picksUp', { role: roleName(roles[0]) })}</p>
+      <p className="mt-2 text-caption text-ink-faint">
+        {t('automations.picksUp', { role: roleName(roles[0], roster) })}
+      </p>
       <CanvasPicker
         word={t('automations.canvasOn')}
         value={step.canvasId}
@@ -1099,7 +1104,7 @@ function StepPicker({ onPick, onCancel }: { onPick: (kind: string) => void; onCa
       <div className="mt-3 grid grid-cols-2 gap-2">
         {AUTOMATION_EXAMPLES.filter((e) => e.trigger === 'approval').map((e) => (
           <button type="button" key={e.id} className={tile} onClick={() => onPick(e.id)}>
-            <RoleMark role={roleById('doop')} size={22} />
+            <RoleMark role={roleById('doop', AGENT_ROLES)} size={22} />
             <b className="text-body font-medium">{exampleName(t, e)}</b>
             <span className="text-caption text-ink-soft">{exampleBlurb(t, e)}</span>
           </button>

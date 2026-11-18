@@ -34,17 +34,26 @@ export const settings = {
 
   imageDescriptionsTitle: 'Image descriptions',
   imageDescriptionsDescription:
-    'A short description helps agents understand uploaded images. My account uses your account for your uploads, then the canvas owner’s eligible account, then this server. It also allows your account to cover uploads on canvases you own when the uploader has no eligible model. This server uses only server credentials for your uploads and excludes your account from fallback. Off stops descriptions for your uploads and canvases. Your provider’s charges apply.',
+    'Agents get a short description of every image you upload, so they know what is in it without opening it.',
+  imageDescriptionsRow: 'Describe with',
   imageDescriptionsAria: 'Image descriptions',
   imageDescriptionsOff: 'Off',
-  imageDescriptionsAccount: 'My account',
-  imageDescriptionsServer: 'This server',
-  imageDescriptionsRunsOn: 'Available model: {label}. Retries keep the original payer.',
+  imageDescriptionsAccount: 'My model',
+  imageDescriptionsServer: 'Server model',
+  imageDescriptionsRunsOn: 'Ready: {label}',
+  imageDescriptionsAccountNote:
+    'Runs on your connected account, and also covers uploads to canvases you own when the uploader has no model. Your provider’s charges apply.',
+  imageDescriptionsServerNote: 'Runs on this server’s model. Your account is never charged.',
+  imageDescriptionsFallbackNote:
+    'None of your connected accounts can see images, so your uploads run on this server’s model and your account is not charged. Connect one to use it instead.',
   imageDescriptionsReasonOff: 'Your uploads and images on canvases you own are not described.',
   imageDescriptionsReasonTextOnly:
-    'Your account has no eligible vision model and this server has no model. Another canvas owner’s eligible account can describe your uploads; otherwise they stay undescribed.',
+    'Your account has no model that can see images, and this server has none. An owner of a canvas you upload to can still cover it; otherwise images stay undescribed.',
   imageDescriptionsReasonNoModel:
-    'No upload model is available here. In My account mode, another canvas owner’s eligible account can still describe your uploads.',
+    'No model is available for this. With My model, an owner of a canvas you upload to can still cover it.',
+  imageDescriptionsHowTitle: 'Who pays for a description',
+  imageDescriptionsHow:
+    'With My model, an upload is described on the uploader’s account, else the canvas owner’s, else this server’s. Server model uses only this server and keeps your account out of that order. Off stops descriptions for your uploads and for canvases you own. A retry is charged to whoever paid the first attempt.',
 
   themeTitle: 'Theme',
   themeDescription:

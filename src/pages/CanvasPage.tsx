@@ -1,6 +1,7 @@
 import { CAPTURE_PREFIX, pasteWebCapture } from '../lib/webCapture'
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { canEditOpenCanvas, pickedSelectors, roleOf, useStore } from '../lib/store'
+import { followPageInUrl } from '../lib/pageUrl'
 import { MOD_KEY, PRESENT_SHORTCUT_HINT, isControlTarget, isTypingTarget } from '../lib/keys'
 import { enterSelection, exitSelection, selectSibling } from '../lib/selectionKeys'
 import { dispatchActionKey, setActionHost, type ActionHost } from '../lib/actions/registry'
@@ -33,7 +34,13 @@ import {
 import { LivePresence } from '../components/LivePresence'
 import { ensureTab, openExternal } from '../lib/desktop'
 import { Stage } from '../components/Stage'
-import { COMPONENT_DRAG_TYPE, dropComponent } from '../lib/components'
+import {
+  COMPONENT_DRAG_TYPE,
+  LIBRARY_COMPONENT_DRAG_TYPE,
+  dropComponent,
+  dropLibraryComponent,
+  parseLibraryDrag,
+} from '../lib/components'
 import { Inspector } from '../components/Inspector'
 import { PagePanel } from '../components/PagePanel'
 import { ElementPanel } from '../components/ElementPanel'
@@ -43,6 +50,7 @@ import { LimitWall, isResidentLimit } from '../components/TeamAllowance'
 import { WorkingNow } from '../components/WorkingNow'
 import { MobilePanelTabs, SideRail } from '../components/SideRail'
 import { LayersPanel, LayersRailToggle } from '../components/LayersPanel'
+import { IosAppPrompt } from '../components/NativeAppPromo'
 import { Onboarding } from '../components/Onboarding'
 import { AccessBanner } from '../components/AccessBanner'
 import { ShareModal } from '../components/ShareModal'
@@ -72,6 +80,7 @@ import {
 } from '../lib/frameClipboard'
 import { clearHistory } from '../lib/history'
 import { deleteSelection, nudgeSelection } from '../lib/layerEdits'
+import { libraryResumeWaits } from '../lib/libraryResume'
 import { copyPicked, hasElementClip, pasteLayer } from '../lib/elementClipboard'
 import { isCanvasClipboard, writeCanvasClipboard } from '../lib/canvasClipboard'
 import { authClient } from '../lib/auth'
@@ -346,6 +355,17 @@ export function CanvasPage({
     if (canvas?.id === canvasId) ensureTab(canvas.id, canvas.name)
   }, [canvas, canvasId])
 
+  /* back from checkout on the way to a component library: open the Components
+     tab, whose panel holds the note and takes it from here */
+  useEffect(() => {
+    if (guest || !libraryResumeWaits(canvasId)) return
+    useStore.getState().setLayersOpen(true)
+    useStore.getState().setLayersTab('components')
+  }, [canvasId, guest])
+
+  /* the open page rides in the URL (?page=), so a reload or a shared link lands on it */
+  useEffect(() => followPageInUrl(canvasId), [canvasId])
+
   useEffect(() => {
     connect(canvasId, guest)
     return () => {
@@ -499,7 +519,8 @@ export function CanvasPage({
   useEffect(() => {
     /* files from outside, or a component card from the Components panel; both
        need the frames' shields up so the drop reaches the window */
-    const carriesComponent = (e: DragEvent) => e.dataTransfer?.types.includes(COMPONENT_DRAG_TYPE) ?? false
+    const carriesComponent = (e: DragEvent) =>
+      [COMPONENT_DRAG_TYPE, LIBRARY_COMPONENT_DRAG_TYPE].some((type) => e.dataTransfer?.types.includes(type))
     const carriesFiles = (e: DragEvent) => (e.dataTransfer?.types.includes('Files') ?? false) || carriesComponent(e)
     let depth = 0
     const setDragging = useStore.getState().setFileDragging
@@ -530,6 +551,13 @@ export function CanvasPage({
       const componentId = e.dataTransfer?.getData(COMPONENT_DRAG_TYPE)
       if (componentId) {
         void dropComponent(componentId, { x: e.clientX, y: e.clientY })
+        return
+      }
+      /* a library's card: this canvas takes the component up on the drop, then places it */
+      const libraryData = e.dataTransfer?.getData(LIBRARY_COMPONENT_DRAG_TYPE)
+      if (libraryData) {
+        const drag = parseLibraryDrag(libraryData)
+        if (drag) void dropLibraryComponent(drag, { x: e.clientX, y: e.clientY })
         return
       }
       const incoming = splitIncoming([...(e.dataTransfer?.files ?? [])])
@@ -1044,6 +1072,7 @@ export function CanvasPage({
               line; this per-agent stack is only for windows too narrow for it */}
           <WorkingNow style={{ left: chrome.left }} className="min-[1180px]:hidden" />
           {!readOnly && <Onboarding canvasId={canvasId} />}
+          <IosAppPrompt />
           <AccessBanner guest={guest} onSignUp={onSignUp} onSignIn={onSignIn} />
           {!isMobile &&
             (layersOpen ? (
@@ -1075,9 +1104,8 @@ export function CanvasPage({
           )}
           {!isMobile && !readOnly && selectedFrame && panelElement && !deferPanel && (
             <ElementPanel
-              /* keyed by frame, not element: picking the next element swaps
-                 the values in place instead of remounting the panel blank */
-              key={selectedFrame.id}
+              /* never keyed: picking the next element, in this frame or
+                 another, swaps the values in place instead of remounting */
               frame={selectedFrame}
               selector={panelElement.selector}
               surface={panelSurface}

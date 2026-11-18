@@ -11,6 +11,8 @@ export const inspector: Catalog['inspector'] = {
   groupMemory: 'Memória',
   exportImageTitle: 'Baixar o frame na escala e no formato escolhidos acima',
   copyPngTitle: 'Copiar a imagem ({scale}) para colar em qualquer lugar',
+  exportLayer: 'Exportar {name}',
+  exportLayerTitle: 'Baixar esta camada na escala e no formato escolhidos acima, recortada do frame como você a vê',
   copyPng: 'Copiar como PNG',
   copyImageUrlTitle:
     'URL pública da imagem — sempre mostra o design atual; cole como og:image ou imagem de destaque de um blog',
@@ -187,7 +189,7 @@ export const inspector: Catalog['inspector'] = {
   imageUrlProtocol: 'Use uma URL de imagem http ou https.',
   imageUrlTimeout: 'A imagem demorou demais para carregar. Tente outra URL.',
   imageUrlLoadFailed: 'Não foi possível carregar essa imagem. Verifique a URL e tente novamente.',
-  imageTooLarge: 'Escolha uma imagem menor que 5 MB.',
+  imageTooLarge: 'Escolha uma imagem menor que 100 MB.',
   imageDesignChanged: 'O design mudou. Selecione a imagem e tente novamente.',
   imageNotEditable: 'A imagem não pode mais ser editada. Selecione-a e tente novamente.',
   imageReplaceFailed: 'Não foi possível substituir a imagem. Tente novamente.',
@@ -200,6 +202,7 @@ export const inspector: Catalog['inspector'] = {
   imageUrl: 'URL da imagem',
   applyImageUrl: 'Aplicar URL da imagem',
   uploadImage: 'Enviar imagem',
+  removeImage: 'Remover imagem',
   currentImage: 'Imagem atual',
   uploading: 'Enviando…',
   loading: 'Carregando…',
@@ -260,9 +263,6 @@ export const inspector: Catalog['inspector'] = {
   durationN: 'Duração {n}',
 
   // element code view
-  codeCopied: 'Código copiado',
-  copyCode: 'Copiar código',
-  codeCopiedStatus: 'Código copiado para a área de transferência',
 
   // property fields
   scrubHint: 'Arraste para ajustar · Shift: ×10 · Alt/Option: ×0,1 · Esc: cancelar',

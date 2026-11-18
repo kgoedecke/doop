@@ -1,6 +1,6 @@
 import express, { Router, type Request, type Response } from 'express'
 import { MAX_FONT_BYTES, type FontScope } from '../shared/fonts.ts'
-import { FontInputError, addFont, canUseScope, deleteFont, listFonts } from './fonts.ts'
+import { FontInputError, FontLimitError, addFont, canUseScope, deleteFont, listFonts } from './fonts.ts'
 
 /** /api/fonts: the font libraries Settings and Workspace manage. `?workspace=`
  *  names a workspace's library (members only); without it the library is the
@@ -36,7 +36,8 @@ fontsRouter.post('/', express.raw({ type: () => true, limit: MAX_FONT_BYTES + 10
     const font = await addFont(scope, req.user!, Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0), fileName)
     res.json(font)
   } catch (e) {
-    if (e instanceof FontInputError) res.status(400).json({ error: e.message })
+    if (e instanceof FontLimitError) res.status(402).json({ error: e.message, upgrade: 'fonts' })
+    else if (e instanceof FontInputError) res.status(400).json({ error: e.message })
     else {
       console.error('[fonts] upload failed', e)
       res.status(500).json({ error: 'the font could not be saved — try again' })

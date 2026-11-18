@@ -104,6 +104,8 @@ describe('nativeMenus', () => {
       null,
       'docs',
       'customer-support',
+      null,
+      'upgrade',
     ])
   })
 

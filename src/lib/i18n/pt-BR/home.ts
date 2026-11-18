@@ -23,8 +23,8 @@ export const home: Catalog['home'] = {
   movedToPersonal: 'Movido para Pessoal',
 
   /* upgrade reasons */
-  reasonAddCanvas: 'Adicionar um canvas a um workspace exige um plano Team.',
-  reasonMoveCanvas: 'Mover um canvas para um workspace exige um plano Team.',
+  reasonAddCanvas: 'Adicionar um canvas a um workspace exige um plano Pro.',
+  reasonMoveCanvas: 'Mover um canvas para um workspace exige um plano Pro.',
   reasonWorkspaceReady: '"{name}" está pronto — escolha um plano para começar a usá-lo.',
 
   /* scopes */
@@ -35,12 +35,12 @@ export const home: Catalog['home'] = {
   /* a workspace without a plan */
   noPlanTitle: '{name} ainda não tem plano.',
   noPlanAskOwner: 'Peça ao dono para escolher um — até lá, nenhum canvas pode ser adicionado aqui.',
-  noPlanChoose: 'Escolha um plano Team para adicionar canvases e convidar sua equipe.',
+  noPlanChoose: 'Escolha um plano Pro para adicionar canvases e convidar sua equipe.',
   choosePlan: 'Escolher um plano',
 
   /* list header */
   people: { one: '{count} pessoa', other: '{count} pessoas' },
-  teamPlan: 'Plano Team',
+  teamPlan: 'Plano Pro',
   sharedWorkspace: 'Workspace compartilhado',
   noPlanYet: 'Ainda sem plano',
   sortAria: 'Ordenar: {label}',
@@ -99,6 +99,11 @@ export const home: Catalog['home'] = {
   drafts: { one: '{count} rascunho', other: '{count} rascunhos' },
   draftsCaption: 'Rascunhos por prompt',
   draftsDescription: { one: 'Uma versão do briefing', other: '{count} versões, lado a lado, para escolher' },
+  draftsCustom: 'Personalizado',
+  draftsCustomDescription: 'Qualquer número',
+  draftsFewer: 'Menos rascunhos',
+  draftsMore: 'Mais rascunhos',
+  draftsCustomAria: 'Número personalizado de rascunhos',
   send: 'Enviar',
   connectDesigns: 'Conecte seus designs existentes para resultados melhores',
 
@@ -140,7 +145,6 @@ export const home: Catalog['home'] = {
   createWorkspaceFailed: 'Não foi possível criar o workspace',
 
   /* the upgrade wall */
-  upgradeEyebrow: 'Plano Team · {price} por assento por mês',
   plansFor: 'Planos para {name}',
   unlock: 'Desbloquear {name}',
   plans: 'Planos',
@@ -153,10 +157,9 @@ export const home: Catalog['home'] = {
   yearly: 'Anual',
   yearlyPrice: '{perMonth} por assento por mês, cobrado {perYear} por ano',
   monthlyPrice: '{price} por assento, cobrado mensalmente',
-  seats: { one: '{count} assento × {price}', other: '{count} assentos × {price}' },
   totalPerMonth: '= {total} por mês',
   totalPerYear: '= {total} por ano',
-  alreadyOnTeam: ' — já está no Team; gerencie em Cobrança.',
+  alreadyOnTeam: ' — já está no Pro; gerencie em Cobrança.',
   countingSeats: 'Contando assentos…',
   stripeNote:
     'Você vai configurar o pagamento no checkout seguro do Stripe. Cancele quando quiser pelo portal de cobrança.',
@@ -166,9 +169,6 @@ export const home: Catalog['home'] = {
   openingStripe: 'Abrindo o Stripe…',
   continueCheckout: 'Continuar para o checkout',
   checkoutFailed: 'Não foi possível iniciar o checkout',
-  receipts: 'Os recibos vão para {email}. Precisa de faturamento, SSO ou uma equipe maior?',
-  talkToUs: 'Fale com a gente',
-  receiptsEnd: '.',
   popular: 'Popular',
   current: 'Atual',
   letsTalk: 'Vamos conversar',

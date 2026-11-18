@@ -6,7 +6,7 @@ const shell = vi.hoisted(() => ({ desktop: false }))
 vi.mock('../src/lib/auth', () => ({
   authClient: { useSession: () => ({ data: { user: { id: 'alice', name: 'Alice Doe' } } }), signOut: vi.fn() },
 }))
-vi.mock('../src/lib/me', () => ({ useMe: () => null }))
+vi.mock('../src/lib/me', () => ({ useMe: () => null, offersUpgrade: () => false }))
 vi.mock('../src/lib/shell', () => ({ isDesktopShell: () => shell.desktop }))
 import { AccountMenu } from '../src/components/DashShell'
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
