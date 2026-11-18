@@ -165,3 +165,22 @@ it('keeps a page shown outside the editor wanted and in the room while it is up,
   hide()
   expect(sent('pages:shown').at(-1)?.pageIds).toEqual(['first'])
 })
+
+it('pins every shown page and never reads back a page dropped while nothing shows it', async () => {
+  await join([home, card], ['first'])
+  /* a prototype moves from the editor's page to a screen on the second page */
+  const hide = showFrames(['card'])
+  deliver({ type: 'page:frames', pageId: 'second', frames: [card] })
+  expect(sent('pages:shown').at(-1)?.pageIds).toEqual(['first', 'second'])
+  const loads = sent('page:load').length
+  const announcements = sent('pages:shown').length
+
+  /* the screen leaves; the room lets the second page go: it stays unread here */
+  hide()
+  expect(sent('pages:shown').at(-1)?.pageIds).toEqual(['first'])
+  deliver({ type: 'page:dropped', pageId: 'second' })
+  await Promise.resolve()
+  expect(useStore.getState().stalePages.second).toBeTruthy()
+  expect(sent('page:load')).toHaveLength(loads)
+  expect(sent('pages:shown')).toHaveLength(announcements + 1)
+})
