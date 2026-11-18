@@ -1067,18 +1067,25 @@ interface UseSpan {
   unclosed?: boolean
 }
 
+/** The next `tag` (`<doop-use` or `</doop-use`) from `from` that is one: followed by the end of
+ *  its name, and outside a script, style, textarea, title or comment. */
+function nextTag(html: string, tag: string, from: number, opaque: [number, number][]): number {
+  let at = indexOfAscii(html, tag, from)
+  while (at !== -1) {
+    const following = html[at + tag.length]
+    const inOpaque = opaque.some(([a, b]) => at >= a && at < b)
+    if (following && /[\s/>]/.test(following) && !inOpaque) return at
+    at = indexOfAscii(html, tag, at + 1)
+  }
+  return -1
+}
+
 /** The next complete `<doop-use>` from `from`. `lenient` (a whole write, nothing more to come)
  *  takes an open tag whose end never came as empty, so the ones after it still expand. */
 function nextUse(html: string, from: number, opaque: [number, number][], lenient = false): UseSpan | undefined {
   const open = `<${USE_TAG}`
   const close = `</${USE_TAG}`
-  let start = indexOfAscii(html, open, from)
-  while (start !== -1) {
-    const at = start
-    const following = html[at + open.length]
-    if (following && /[\s/>]/.test(following) && !opaque.some(([a, b]) => at >= a && at < b)) break
-    start = indexOfAscii(html, open, at + 1)
-  }
+  const start = nextTag(html, open, from, opaque)
   if (start === -1) return undefined
   const openEnd = tagEnd(html, start)
   if (openEnd === -1) return undefined
@@ -1088,8 +1095,8 @@ function nextUse(html: string, from: number, opaque: [number, number][], lenient
   let depth = 1
   let cursor = openEnd + 1
   while (depth > 0) {
-    const nextOpen = indexOfAscii(html, open, cursor)
-    const nextClose = indexOfAscii(html, close, cursor)
+    const nextOpen = nextTag(html, open, cursor, opaque)
+    const nextClose = nextTag(html, close, cursor, opaque)
     if (nextClose === -1)
       return lenient
         ? { start, end: openEnd + 1, openEnd, closeStart: openEnd + 1, selfClosing: true, unclosed: true }

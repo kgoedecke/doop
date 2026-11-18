@@ -170,7 +170,7 @@ describe('over MCP', () => {
     expect(set.isError).toBe(true)
     const edit = await call('edit_frame_html', { frame_id: frameId, old_str: '<h1>Hi</h1>', new_str: OPEN_CARD })
     expect(edit.isError).toBe(true)
-    expect(edit.text).toContain('Card')
+    expect(edit.text).toContain('<doop-use component="Card"> is opened and never closed')
     expect(store.getFrame(frameId)!.html).toBe(before)
 
     /* closed or self-closing, the same edit goes through */
@@ -265,6 +265,7 @@ describe('over MCP', () => {
     await makeCard()
     await call('create_frame', { canvas_id: canvasId, name: 'Stream', html: doc('') })
     const frameId = frames().find((frame) => frame.name === 'Stream')!.id
+    const designed = store.getFrame(frameId)!.html
     const whole = await call('append_frame_html', {
       frame_id: frameId,
       html_chunk: openCardDoc,
@@ -272,6 +273,8 @@ describe('over MCP', () => {
       done: true,
     })
     expect(whole.isError).toBe(true)
+    expect(actions.isFrameMidStream(frameId)).toBe(false)
+    expect(store.getFrame(frameId)!.html).toBe(designed)
 
     /* an escaped stream is decoded as it is written, so its close counts */
     const escape = (html: string) => html.replaceAll('<', '&lt;').replaceAll('>', '&gt;')
@@ -286,27 +289,35 @@ describe('over MCP', () => {
       done: true,
     })
     expect(closed.isError).toBe(false)
+    const decoded = store.getFrame(frameId)!.html
+    expect(decoded.indexOf('<p>slot</p>')).toBeGreaterThan(decoded.indexOf('<article'))
+    expect(decoded.indexOf('<p>slot</p>')).toBeLessThan(decoded.indexOf('</article>'))
     /* and an escaped whole write that leaves one open is refused like a raw one */
     const escaped = await call('create_frame', { canvas_id: canvasId, name: 'Escaped', html: escape(openCardDoc) })
     expect(escaped.isError).toBe(true)
     expect(frames().some((frame) => frame.name === 'Escaped')).toBe(false)
 
-    /* a frame mid-stream holds its waiting tag: an edit or a set that leaves it open would place it */
+    /* a frame mid-stream holds its waiting tag: an edit, even one that leaves it alone, would place
+       it, so the editor is told the stream is still going rather than to close the stream's tag */
     await call('append_frame_html', {
       frame_id: frameId,
-      html_chunk: '<html><head></head><body><doop-use component="Card"><p>slot</p>',
+      html_chunk: '<html><head></head><body><h1>Top</h1><doop-use component="Card"><p>slot</p>',
       start: true,
     })
     const streamed = store.getFrame(frameId)!.html
     const edit = await call('edit_frame_html', {
       frame_id: frameId,
-      old_str: '<p>slot</p>',
-      new_str: '<p>slot</p><h4>after</h4>',
+      old_str: '<h1>Top</h1>',
+      new_str: '<h1>Top!</h1>',
     })
     expect(edit.isError).toBe(true)
-    const set = await call('set_frame_html', { frame_id: frameId, html: openCardDoc })
-    expect(set.isError).toBe(true)
+    expect(edit.text).toContain('still streaming')
     expect(store.getFrame(frameId)!.html).toBe(streamed)
+    expect(actions.isFrameMidStream(frameId)).toBe(true)
+    /* a set replaces the whole document, waiting tag and all: a balanced one goes through */
+    const set = await call('set_frame_html', { frame_id: frameId, html: doc('') })
+    expect(set.isError).toBe(false)
+    expect(actions.isFrameMidStream(frameId)).toBe(false)
   })
 
   const imported = () =>

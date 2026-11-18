@@ -2019,7 +2019,12 @@ async function runResidentTool(
         const replace = input.replace
         const edited = source.replace(input.find, () => replace)
         /* the edited document, so a URI completed or a tag left open across the replacement's edges is caught too */
-        const refused = frameWriteRefusal(edited, `${f.html}\n${compact}`, 'resident')
+        const refused = frameWriteRefusal(
+          edited,
+          `${f.html}\n${compact}`,
+          'resident',
+          actions.isFrameMidStream(input.frame_id) ? f.html : '',
+        )
         if (refused) return fail(refused)
         actions.updateFrame(input.frame_id, { html: edited }, actor)
         runState.mutatedFrames.add(input.frame_id)

@@ -2398,14 +2398,14 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
             (actions.streamTail(frame_id) ?? '') + html_chunk,
             actions.streamBase(frame_id) ?? current.html,
           )
-      if (inline) return err(inline)
       /* the last chunk makes the document whole (mid-stream the stored HTML keeps a waiting
-         <doop-use> as written): one still open would be placed empty, so the chunk is refused
-         and the stream stays open, not idle, for it to come again with the close */
-      const unclosed = done ? unclosedUseRefusal(actions.streamedDocument(frame_id, html_chunk, start) ?? '') : null
-      if (unclosed) {
-        actions.keepStreamOpen(frame_id)
-        return err(unclosed)
+         <doop-use> as written): one still open would be placed empty, so the chunk is refused.
+         A refused chunk keeps the stream from going idle while it comes again */
+      const refused =
+        inline ?? (done ? unclosedUseRefusal(actions.streamedDocument(frame_id, html_chunk, start) ?? '') : null)
+      if (refused) {
+        actions.markStreamActive(frame_id)
+        return err(refused)
       }
       const frame = actions.appendFrameHtml(frame_id, html_chunk, actorFrom(agent_name), { start, done })
       if (!frame) return noFrame(frame_id)
@@ -2452,7 +2452,12 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
       const edited = editFrameSource(f, old_str, new_str)
       if ('error' in edited) return err(edited.error)
       /* the edited document, so a URI completed or a tag left open across the replacement's edges is caught too */
-      const refused = frameWriteRefusal(edited.html, `${f.html}\n${compactFrameHtml(f)}`)
+      const refused = frameWriteRefusal(
+        edited.html,
+        `${f.html}\n${compactFrameHtml(f)}`,
+        'mcp',
+        actions.isFrameMidStream(frame_id) ? f.html : '',
+      )
       if (refused) return err(refused)
       const frame = actions.updateFrame(frame_id, { html: edited.html }, actorFrom(agent_name))!
       return withPreview(

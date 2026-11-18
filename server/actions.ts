@@ -2367,7 +2367,7 @@ export function streamedDocument(frameId: string, chunk: string, start = false):
 
 /** A chunk refused before it was written still counts as the agent at work: its stream is not
  *  idle, so it is not settled under the agent while the agent sends the chunk again. */
-export function keepStreamOpen(frameId: string) {
+export function markStreamActive(frameId: string) {
   const s = streams.get(frameId)
   if (s) edit(s).lastActivity = Date.now()
 }
