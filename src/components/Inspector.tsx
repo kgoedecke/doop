@@ -77,6 +77,8 @@ export function Inspector({
      or stale copy, which is neither shown nor edited (a draft of it would be
      saved over the real document once that arrives) */
   const htmlReady = useStore((s) => frameHtmlReady(s, frame.id))
+  /* whether the draft was last synced from a ready copy */
+  const draftReady = useRef(htmlReady)
   const queuedSave = useRef<{ timer: number; finish: () => void } | null>(null)
   const copyTimer = useRef<number | null>(null)
   const frameId = useRef(frame.id)
@@ -88,7 +90,9 @@ export function Inspector({
      updates unless the user is typing. The editor is always on screen, and
      rewriting it costs the browser ~25ms for a 300KB frame, so an agent
      streaming into the selected frame is pulled in at most every
-     HTML_PULL_MS, the last chunk always landing */
+     HTML_PULL_MS, the last chunk always landing. The page arriving always
+     resets it: focus in the field while it loaded was not typing, and a
+     draft of the blank copy must never be what the next keystroke saves */
   const lastPull = useRef(0)
   /* focus is state, not a check of document.activeElement, so leaving the
      editor re-runs the pull below: an update that arrived while it had focus
@@ -99,15 +103,17 @@ export function Inspector({
   useEffect(() => {
     const switched = frameId.current !== frame.id
     frameId.current = frame.id
+    const arrived = htmlReady && !draftReady.current
+    draftReady.current = htmlReady
     const pull = () => {
       lastPull.current = performance.now()
       setDraft(frame.html)
       setSaveState('idle')
     }
-    if (switched) {
+    if (switched || arrived) {
       pull()
       /* a copy confirmation belongs to the frame it was copied from */
-      setHtmlCopy('idle')
+      if (switched) setHtmlCopy('idle')
       return
     }
     if (editing || saveState === 'dirty' || frame.html === draft) return
@@ -115,7 +121,7 @@ export function Inspector({
     if (wait <= 0) return pull()
     const timer = window.setTimeout(pull, wait)
     return () => window.clearTimeout(timer)
-  }, [frame.id, frame.html, draft, editing, saveState])
+  }, [frame.id, frame.html, draft, editing, saveState, htmlReady])
 
   /* the confirmation timer must not fire after the panel is gone */
   useEffect(

@@ -90,3 +90,24 @@ it('keeps the HTML of a frame whose page is loading out of reach, and saves no d
   expect(ready.readOnly).toBe(false)
   expect(ready.value).toBe('<h1>The actual design</h1>')
 })
+
+it('shows the real HTML when the page arrives while the field has focus, and saves no placeholder', async () => {
+  const update = vi.spyOn(api, 'updateFrame').mockImplementation(async (id, patch) => ({ ...frame, ...patch, id }))
+  const textarea = container.querySelector('textarea')!
+  act(() => textarea.focus())
+  expect(document.activeElement).toBe(textarea)
+
+  act(() => useStore.getState().setPageFrames('second', [frame]))
+  const ready = container.querySelector('textarea')!
+  expect(ready.value).toBe('<h1>The actual design</h1>')
+
+  /* a keystroke now edits the real design, never the blank copy */
+  act(() => {
+    const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!
+    setter.call(ready, '<h1>The actual design!</h1>')
+    ready.dispatchEvent(new Event('input', { bubbles: true }))
+  })
+  await act(async () => vi.advanceTimersByTime(2000))
+  expect(update).toHaveBeenCalledTimes(1)
+  expect(update).toHaveBeenCalledWith('f', { html: '<h1>The actual design!</h1>' })
+})
