@@ -470,10 +470,11 @@ export function blankComponent(input: {
   }
 }
 
-/** What to tell an agent whose whole write leaves a `<doop-use>` open, or null when it leaves
- *  none. Saved, the engine would read the tag as self-closing: the instance placed with no slot
- *  content and the markup meant for its slots landing after it, a breakage that only shows in a
- *  screenshot. Only what the write adds is refused, as with inline data. */
+/** What to tell an agent whose whole write (a frame's, or a component's template) leaves a
+ *  `<doop-use>` open, or null when it leaves none. Saved, the engine would read the tag as
+ *  self-closing: the instance placed with no slot content and the markup meant for its slots
+ *  landing after it, a breakage that only shows in a screenshot. Only what the write adds is
+ *  refused, as with inline data. */
 export function unclosedUseRefusal(submitted: string, existing = ''): string | null {
   const left = unclosedUses(existing)
   const added = unclosedUses(submitted).filter((ref) => {
@@ -483,16 +484,17 @@ export function unclosedUseRefusal(submitted: string, existing = ''): string | n
     return false
   })
   if (!added.length) return null
-  const tags = added.map((ref) => `<${USE_TAG} component="${ref}">`)
+  const tags = added.map((ref) => (ref ? `<${USE_TAG} component="${ref}">` : `a <${USE_TAG}>`))
   return [
-    `Refused, nothing was written: ${tags.join(', ')} ${added.length === 1 ? 'is' : 'are'} opened and never closed with </${USE_TAG}>.`,
+    `Refused, nothing was written: ${tags.join(', ')} ${added.length === 1 ? 'is' : 'are'} opened and never closed with </${USE_TAG}> (or one nested inside it is: the tags are counted in pairs).`,
     `Saved, each would be placed with no slot content, and the markup meant for its slots would land after it.`,
     `Close each with </${USE_TAG}> where its content ends, or write it self-closing (<${USE_TAG} component="…" />) when it has none, then send the HTML again.`,
   ].join('\n')
 }
 
 /** The checks every whole-frame agent write passes before anything is saved (create, set and
- *  edit; a stream's chunks are partial by design and take only the inline-data check). */
+ *  edit; a stream's chunks are partial by design and take only the inline-data check, until the
+ *  last makes the document whole). */
 export function frameWriteRefusal(submitted: string, existing = '', surface: Surface = 'mcp'): string | null {
   return inlineDataRefusal(submitted, existing, surface) ?? unclosedUseRefusal(submitted, existing)
 }

@@ -156,6 +156,62 @@ describe('a <doop-use> that would render nothing', () => {
     ).toContain('<doop-use component="Card"> is opened')
   })
 
+  it('names the component attribute itself, quoted or not, and a tag that names none', async () => {
+    const { unclosedUses } = await import('../server/componentEngine.ts')
+    const { unclosedUseRefusal } = await import('../server/components.ts')
+    expect(unclosedUses('<doop-use data-component="x" component="Card">')).toEqual(['Card'])
+    expect(unclosedUses('<doop-use component=Card>')).toEqual(['Card'])
+    expect(unclosedUseRefusal('<doop-use>')).toContain('a <doop-use> is opened')
+  })
+
+  it('refuses a component whose template leaves a <doop-use> open, made or updated', async () => {
+    const canvasId = await canvasWith({ Card: '<article class="card"><div data-doop-slot="body"></div></article>' })
+    const context = {
+      canvas: store.getCanvas(canvasId)!,
+      actor: agent,
+      canRead: () => true,
+      canEdit: () => true,
+      userId: undefined,
+      readableCanvases: () => [],
+    }
+    const made = await runComponentTool(
+      'create_component',
+      { name: 'Panel', html: '<section><doop-use component="Card"><p>slot</p><h3>after</h3></section>', css: '' },
+      context,
+    )
+    expect(made.ok || made.error).toContain('<doop-use component="Card"> is opened and never closed')
+    expect(store.getComponents(canvasId).map((component) => component.name)).toEqual(['Card'])
+
+    /* each entry of a batch stands alone: the open one is refused, the closed one is made */
+    const batch = await runComponentTool(
+      'create_components',
+      {
+        components: [
+          { name: 'Open', html: '<div><doop-use component="Card"><p>x</p></div>' },
+          { name: 'Closed', html: '<div><doop-use component="Card"><p>x</p></doop-use></div>' },
+        ],
+      },
+      context,
+    )
+    expect(batch.ok).toBe(true)
+    expect(JSON.stringify(batch)).toContain('never closed')
+    expect(store.getComponents(canvasId).map((component) => component.name)).toEqual(['Card', 'Closed'])
+
+    const closed = store.getComponents(canvasId).find((component) => component.name === 'Closed')!
+    const close = closed.template.lastIndexOf('</doop-use>')
+    expect(close).toBeGreaterThan(-1)
+    const updated = await runComponentTool(
+      'update_component',
+      /* the edit drops the close: checked on the template as it would stand */
+      { component: 'Closed', find: closed.template.slice(close), replace: closed.template.slice(close + 11) },
+      context,
+    )
+    expect(updated.ok || updated.error).toContain('never closed')
+    expect(store.getComponents(canvasId).find((component) => component.name === 'Closed')!.template).toBe(
+      closed.template,
+    )
+  })
+
   it('reports an empty main that a stream chunk expanded before the stream ended', async () => {
     const canvasId = await canvasWith({ Badge: '<span class="badge" data-doop-prop="label">New</span>' })
     const def = store.getComponents(canvasId).find((component) => component.name === 'Badge')!

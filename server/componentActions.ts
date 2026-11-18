@@ -30,7 +30,14 @@ import type { Actor, Canvas, Frame } from '../shared/types.ts'
 import { decodeQuotes, familyKey, fontFaceRule, usesFamily, type CustomFont } from '../shared/fonts.ts'
 import { fontsForCanvas } from './fonts.ts'
 import * as actions from './actions.ts'
-import { blankComponent, bumpRevision, contextFor, referencesComponent, withinRevision } from './components.ts'
+import {
+  blankComponent,
+  bumpRevision,
+  contextFor,
+  referencesComponent,
+  unclosedUseRefusal,
+  withinRevision,
+} from './components.ts'
 import { unmatchedSelectors } from './componentCss.ts'
 import {
   alignParts,
@@ -560,6 +567,7 @@ export const createComponentFromHtml = atomic(function createComponentFromHtml(
   actor: Actor,
 ): CreateResult {
   checkCapacity(canvasId)
+  refuseUnclosedUses(input.html)
   const name = validName(input.name, canvasId)
   const def = blankComponent({
     name,
@@ -715,7 +723,20 @@ function alignedRoot(html: string, def: ComponentDef): Element {
   return root
 }
 
+/** A template that leaves a `<doop-use>` open is refused: every instance would inherit it. */
+function refuseUnclosedUses(html: string, existing?: string) {
+  const unclosed = unclosedUseRefusal(html, existing)
+  if (unclosed) fail(unclosed)
+}
+
+/** The template the update asks for, checked whole (a find + replace as it would stand). */
 function nextHtml(def: ComponentDef, input: UpdateInput): string | undefined {
+  const html = requestedHtml(def, input)
+  if (html !== undefined) refuseUnclosedUses(html, def.template)
+  return html
+}
+
+function requestedHtml(def: ComponentDef, input: UpdateInput): string | undefined {
   if (input.find !== undefined) {
     const count = def.template.split(input.find).length - 1
     if (count === 0)
