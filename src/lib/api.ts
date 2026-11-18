@@ -1,4 +1,5 @@
 import { useStore } from './store'
+import { frameHtmlReady } from './pages'
 import type { InstanceSettings, InstanceSettingsPatch } from '../../shared/instanceSettings'
 import { beginFrameSave } from './frameSaves'
 import type { StackWrite } from '../../shared/frameStack'
@@ -696,6 +697,10 @@ export const api = {
       }),
     }),
   updateFrame: async (frameId: string, patch: Partial<Frame>, expectedUpdatedAt?: number) => {
+    /* HTML made from a frame whose page this browser has not read (or holds
+       stale) would save a blank or old design over the real one */
+    if (patch.html !== undefined && !frameHtmlReady(useStore.getState(), frameId))
+      throw new Error('This page is still loading; try again in a moment.')
     const finish = ['html', 'width', 'height'].some((key) => key in patch) ? beginFrameSave(frameId) : () => {}
     try {
       return await req<Frame>('/api/frames/' + frameId, {

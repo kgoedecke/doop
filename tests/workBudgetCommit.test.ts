@@ -259,7 +259,7 @@ function replay(before: Viewed, messages: ServerMessage[]): Viewed {
   const view = structuredClone(before)
   for (const message of messages) {
     if (message.type === 'frame:created' || message.type === 'frame:updated')
-      view.frames[message.frame.id] = message.frame.html
+      view.frames[message.frame.id] = message.frame.html ?? ''
     else if (message.type === 'frame:deleted') delete view.frames[message.frameId]
     else if (message.type === 'component') {
       if (message.component) view.components[message.id] = componentKey(message.component)

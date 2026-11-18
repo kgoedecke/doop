@@ -1,7 +1,9 @@
 import type { ClientMessage, ServerMessage } from '../../shared/types'
 import { isPeerViewport } from '../../shared/viewport'
 import { roleAllows } from '../../shared/canvasRole'
+import { canvasPages, framePageId } from '../../shared/pages'
 import { getIdentity } from './identity'
+import { pageReady } from './pages'
 import { useStore } from './store'
 import { noteTheirSave } from './theirSaves'
 
@@ -12,6 +14,21 @@ let joinedAsGuest = false
 let retryTimer: number | null = null
 /* the server build this page first connected under; survives reconnects */
 let loadedBuild: string | null = null
+/* the socket has had its `init`: pages may be asked for on it */
+let joined = false
+/* pages asked for with `page:load` on this socket and not answered yet */
+const requested = new Set<string>()
+/* pages something waits on (`loadPages`), counted: asked for again on a new socket */
+const awaited = new Map<string, number>()
+/* frames on screen besides the editor's page (a prototype's screens), per `showFrames` */
+const shownFrames = new Map<number, readonly string[]>()
+let showCount = 0
+/* the shown pages last told to the room (`pages:shown`) on this socket */
+let announcedShown: string | null = null
+/* how long a page that could not be read waits before it is asked for again */
+const PAGE_RETRY_MS = 2000
+/* how long `loadPages` waits for the room before it gives up */
+const PAGE_WAIT_MS = 30_000
 
 export function connect(canvasId: string, guest = false) {
   currentCanvasId = canvasId
@@ -43,9 +60,12 @@ function open() {
   s.onopen = () => {
     if (socket !== s) return
     const { clientId, name } = getIdentity()
+    joined = false
+    announcedShown = null
+    requested.clear()
     /* join first: flipping `connected` makes the Stage announce its camera,
        and the server drops anything sent before the socket has a canvas */
-    sendWs({ type: 'join', canvasId, clientId, name, kind: 'user' })
+    sendWs({ type: 'join', canvasId, clientId, name, kind: 'user', pagesOnDemand: true, ...openingPage(canvasId) })
     useStore.getState().setConnected(true)
   }
 
@@ -97,6 +117,157 @@ function open() {
   }
 }
 
+/** What the join names for the server to send whole: the page shown, on a
+ *  rejoin, else the frame or page the URL links (the server picks the page the
+ *  way the store's `setCanvas` does). */
+function openingPage(canvasId: string): { pageId?: string; frameId?: string } {
+  const s = useStore.getState()
+  if (s.canvas?.id === canvasId && s.activePageId) return { pageId: s.activePageId }
+  const params = new URLSearchParams(location.search)
+  const pageId = params.get('page')
+  const frameId = params.get('frame')
+  return { ...(pageId ? { pageId } : {}), ...(frameId ? { frameId } : {}) }
+}
+
+/** Ask the room for a page whose frames' HTML is not here (or is stale). */
+function requestPage(pageId: string) {
+  const s = useStore.getState()
+  if (!joined || !s.canvas || !s.stalePages[pageId] || requested.has(pageId)) return
+  requested.add(pageId)
+  sendWs({ type: 'page:load', pageId })
+}
+
+/** The pages on screen: the editor's page, and the pages of the frames shown
+ *  elsewhere (`showFrames`). The room keeps their HTML in memory. */
+function shownPageIds(): string[] {
+  const { canvas, activePageId } = useStore.getState()
+  if (!canvas) return []
+  const pages = new Set<string>(activePageId ? [activePageId] : [])
+  for (const frameIds of shownFrames.values()) {
+    for (const frameId of frameIds) {
+      const frame = canvas.frames.find((candidate) => candidate.id === frameId)
+      if (frame) pages.add(framePageId(canvas, frame))
+    }
+  }
+  return [...pages].sort()
+}
+
+/** Tell the room which pages are on screen, when that changed. */
+function announceShown(pageIds: readonly string[]) {
+  const key = pageIds.join('\n')
+  if (!joined || key === announcedShown) return
+  announcedShown = key
+  sendWs({ type: 'pages:shown', pageIds: [...pageIds] })
+}
+
+/** The pages on screen, and the ones something waits on. */
+function requestWantedPages() {
+  const shown = shownPageIds()
+  announceShown(shown)
+  for (const pageId of shown) requestPage(pageId)
+  for (const pageId of awaited.keys()) requestPage(pageId)
+}
+
+useStore.subscribe((state, previous) => {
+  /* a shown frame may move to another page */
+  const moved = shownFrames.size > 0 && state.canvas !== previous.canvas
+  if (moved || state.activePageId !== previous.activePageId || state.stalePages !== previous.stalePages)
+    requestWantedPages()
+})
+
+/** Keep these frames' pages here and current while they are on screen outside
+ *  the editor's page (a prototype's screens): asked for whenever they are not
+ *  here, again after a failed read, and kept in the room's memory. Returns the
+ *  function that takes them off screen. */
+export function showFrames(frameIds: readonly string[]): () => void {
+  const id = ++showCount
+  shownFrames.set(id, frameIds)
+  requestWantedPages()
+  return () => {
+    shownFrames.delete(id)
+    requestWantedPages()
+  }
+}
+
+/** Resolve once every one of these pages has its frames' HTML here, asking
+ *  the room for the ones that do not; rejects if the room does not answer in
+ *  time. For work on frames that may be on a page this browser has not
+ *  opened: an export, an undo. */
+export function loadPages(pageIds: readonly string[]): Promise<void> {
+  return waitForPages(() => pageIds)
+}
+
+/** `loadPages` for the pages these frames are on, followed as they move: it
+ *  resolves once each frame's current page is here, and rejects if one is
+ *  deleted or the canvas changes meanwhile. A frame not on the canvas is left out. */
+export function loadFramePages(frameIds: readonly string[]): Promise<void> {
+  const { canvas } = useStore.getState()
+  if (!canvas) return Promise.resolve()
+  const ids = frameIds.filter((id) => canvas.frames.some((frame) => frame.id === id))
+  return waitForPages(() => {
+    const current = useStore.getState().canvas
+    if (current?.id !== canvas.id) return new Error('The canvas changed.')
+    const pages = new Set<string>()
+    for (const id of ids) {
+      const frame = current.frames.find((candidate) => candidate.id === id)
+      if (!frame) return new Error('The frame was deleted.')
+      pages.add(framePageId(current, frame))
+    }
+    return [...pages]
+  })
+}
+
+/** Wait until the pages `wanted` names (asked again on every store change)
+ *  are all here, asking the room for them meanwhile; an Error from `wanted`
+ *  ends the wait with it. */
+function waitForPages(wanted: () => readonly string[] | Error): Promise<void> {
+  let held: readonly string[] = []
+  const hold = (pageIds: readonly string[]) => {
+    for (const pageId of pageIds) awaited.set(pageId, (awaited.get(pageId) ?? 0) + 1)
+    for (const pageId of held) {
+      const left = (awaited.get(pageId) ?? 1) - 1
+      if (left > 0) awaited.set(pageId, left)
+      else awaited.delete(pageId)
+    }
+    held = pageIds
+  }
+  /* 'ready', the reason waiting stopped, or the pages still waited on */
+  const check = (): 'ready' | Error | readonly string[] => {
+    const pageIds = wanted()
+    if (pageIds instanceof Error) return pageIds
+    return pageIds.every((pageId) => pageReady(useStore.getState(), pageId)) ? 'ready' : pageIds
+  }
+  const first = check()
+  if (first === 'ready') return Promise.resolve()
+  if (first instanceof Error) return Promise.reject(first)
+  hold(first)
+  requestWantedPages()
+  return new Promise<void>((resolve, reject) => {
+    const done = () => {
+      window.clearTimeout(timer)
+      unsubscribe()
+      hold([])
+    }
+    const timer = window.setTimeout(() => {
+      done()
+      reject(new Error('The page did not load.'))
+    }, PAGE_WAIT_MS)
+    const unsubscribe = useStore.subscribe(() => {
+      const state = check()
+      if (state === 'ready') {
+        done()
+        resolve()
+      } else if (state instanceof Error) {
+        done()
+        reject(state)
+      } else if (state.join('\n') !== held.join('\n')) {
+        hold(state)
+        requestWantedPages()
+      }
+    })
+  })
+}
+
 function handle(msg: ServerMessage) {
   const s = useStore.getState()
   const me = getIdentity().clientId
@@ -111,7 +282,8 @@ function handle(msg: ServerMessage) {
       }
       {
         const firstJoin = s.canvas?.id !== msg.canvas.id
-        s.setCanvas(msg.canvas)
+        /* a server from before page loading sends every page whole */
+        s.setCanvas(msg.canvas, msg.loadedPageIds ?? canvasPages(msg.canvas).map((page) => page.id))
         /* drops a tool the role does not allow, e.g. on a rejoin after the
          owner turned the link to view-only */
         s.setRole(msg.canvas.role ?? 'edit')
@@ -126,6 +298,22 @@ function handle(msg: ServerMessage) {
       s.setComments(msg.comments)
       s.setDecisions(msg.decisions)
       s.setProposals(msg.proposals)
+      joined = true
+      requestWantedPages()
+      break
+    case 'page:frames':
+      requested.delete(msg.pageId)
+      s.setPageFrames(msg.pageId, msg.frames)
+      break
+    case 'page:dropped':
+      s.setPageStale(msg.pageId)
+      break
+    case 'page:failed':
+      /* its storage is away for now: asked again while it is still the one shown */
+      window.setTimeout(() => {
+        requested.delete(msg.pageId)
+        requestWantedPages()
+      }, PAGE_RETRY_MS)
       break
     case 'role':
       s.setRole(msg.role)

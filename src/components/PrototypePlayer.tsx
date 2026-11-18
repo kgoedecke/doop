@@ -2,6 +2,8 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProp
 import type { Frame } from '../../shared/types'
 import type { Interaction, ProtoTransition } from '../../shared/prototype'
 import { useStore } from '../lib/store'
+import { frameHtmlReady } from '../lib/pages'
+import { showFrames } from '../lib/ws'
 import { posthog } from '../lib/posthog'
 import { FRAME_BOOTSTRAP } from '../lib/frameRuntime'
 import {
@@ -700,10 +702,16 @@ function ProtoScreen({
     }
   }, [entry.key])
 
+  /* a screen on a page this browser has not read waits for that page, so it
+     never shows a blank or old copy of the frame; the page is kept here and in
+     the room's memory for as long as the screen is up */
+  const frameId = frame?.id
+  const ready = useStore((s) => !frameId || frameHtmlReady(s, frameId))
+  useEffect(() => (frameId ? showFrames([frameId]) : undefined), [frameId])
   const html = frame?.html ?? ''
   useEffect(() => {
-    if (booted) iframeRef.current?.contentWindow?.postMessage({ type: 'doop:html', html, reqId: 'proto' }, '*')
-  }, [booted, html])
+    if (booted && ready) iframeRef.current?.contentWindow?.postMessage({ type: 'doop:html', html, reqId: 'proto' }, '*')
+  }, [booted, ready, html])
 
   useEffect(() => {
     const iframe = iframeRef.current

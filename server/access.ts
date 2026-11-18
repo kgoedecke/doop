@@ -90,6 +90,7 @@ export function canManageCanvas(userId: string | undefined, canvas: Canvas): boo
 export function roomMessageNeeds(msg: ClientMessage): CanvasRole {
   switch (msg.type) {
     case 'join':
+    case 'page:load':
     case 'cursor':
     case 'viewport':
       return 'view'

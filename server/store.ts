@@ -1,5 +1,5 @@
 import { nanoid } from 'nanoid'
-import { canvasPages, copyPageName, pageFrames, samePages } from '../shared/pages.ts'
+import { canvasPages, copyPageName, framePageId, pageFrames, samePages } from '../shared/pages.ts'
 import * as persist from './db/persist.ts'
 import type { LinkAccess } from '../shared/canvasRole.ts'
 import { MAX_GUIDES } from '../shared/guides.ts'
@@ -20,6 +20,15 @@ import type {
 } from '../shared/types.ts'
 
 export const MAX_PAGES = 100
+
+/** Pages, and frames wherever they are: what a write or a drawing reads. */
+export type PageScope = { pages: readonly string[]; frames: readonly string[] }
+
+/** What `store.hold` keeps in memory: the whole canvas, or a scope's pages. */
+export type HoldScope = 'all' | PageScope
+
+/** reads a load makes at most while frames keep moving onto its pages */
+const MAX_LOAD_PASSES = 3
 
 export class PageLimitError extends Error {
   constructor() {
@@ -73,24 +82,31 @@ function restoreFrame(frame: Frame, state: ReturnType<typeof frameState>) {
  * they are durable before memory changes, and are not undone.
  *
  * Every canvas and frame is in memory except frame HTML, which is most of
- * the data: boot leaves it out and `load` reads one canvas's when something
- * needs it (frameHtml.ts). Entry points (a REST route, the room join, an MCP
- * tool, an agent run, a job) await `load`; everything past them reads the
- * store synchronously as before. `evictIdle` drops the HTML of a canvas
- * nobody has used for a while, never one that is held or in use.
+ * the data: boot leaves it out and it is read per page when something needs
+ * it (frameHtml.ts). Entry points (a REST route, the room join, an MCP tool,
+ * an agent run, a job) await `loadPages` for the pages they work on, or
+ * `load` for the whole canvas; everything past them reads the store
+ * synchronously as before. `evictIdle` drops the HTML of a page nobody has
+ * used for a while, never one that is held, in use or waiting on a write.
  */
 class Store {
   canvases = new Map<string, Canvas>()
   private frameIndex = new Map<string, string>() // frameId -> canvasId
   /** the page copy in flight per canvas, so the next one waits for it */
   private pageCopies = new Map<string, Promise<unknown>>()
-  /** canvases whose frame HTML is in memory -> when they were last used */
-  private loaded = new Map<string, number>()
-  private loading = new Map<string, Promise<void>>()
-  /** canvases an agent run or job is working on, counted */
-  private holds = new Map<string, number>()
-  /** rooms, agents and streams the store cannot see (wired by index.ts) */
-  private inUse: (canvasId: string) => boolean = () => false
+  /** canvases with frame HTML in memory -> each page read -> when it was last used */
+  private pagesUsed = new Map<string, Map<string, number>>()
+  /** frames whose HTML is being read -> that read, so a second load waits for it */
+  private reading = new Map<string, Promise<void>>()
+  /** loads in flight per canvas: a canvas being read is never dropped meanwhile */
+  private loads = new Map<string, number>()
+  /** what agent runs, jobs and requests are working on, per canvas */
+  private holds = new Map<string, HoldScope[]>()
+  /** rooms, agents and streams the store cannot see (wired by index.ts): true
+   *  when the whole canvas is in use, else the pages people are looking at */
+  private inUse: (canvasId: string) => boolean | ReadonlySet<string> = () => false
+  /** told when a page's frame HTML leaves memory (wired by index.ts: the room) */
+  private pageDropped: (canvasId: string, pageId: string) => void = () => {}
 
   /** Put these fields of the canvas back if the transaction is undone. `deep` for the ones
    *  whose items are changed in place (tokens, guideline docs). */
@@ -133,9 +149,9 @@ class Store {
   }
 
   constructor() {
-    /* a missed load still fails, but the canvas is on its way for a retry */
-    setHtmlMissHandler((canvasId) => {
-      this.load(canvasId).catch((error: unknown) =>
+    /* a missed load still fails, but the frame's page is on its way for a retry */
+    setHtmlMissHandler((canvasId, frameId) => {
+      this.loadForFrames(canvasId, [frameId]).catch((error: unknown) =>
         console.error('[store] loading after a miss failed', canvasId, error),
       )
     })
@@ -156,75 +172,209 @@ class Store {
         }
         this.frameIndex.set(f.id, c.id)
       }
-      if (c.frames.every(htmlLoaded)) this.loaded.set(c.id, Date.now())
-      else this.loaded.delete(c.id)
+      if (c.frames.length && c.frames.every(htmlLoaded))
+        this.touchPages(
+          c.id,
+          c.pages.map((page) => page.id),
+        )
+      else this.pagesUsed.delete(c.id)
     }
   }
 
-  /** The canvas with every frame's HTML in memory, read from the database
-   *  the first time and kept until `evictIdle`. Concurrent calls share one
-   *  read. Undefined for a canvas that does not exist. */
-  async load(canvasId: string): Promise<Canvas | undefined> {
+  /** The canvas with every frame's HTML in memory (`loadPages` of every
+   *  page), for work on the whole canvas. Undefined for a canvas that does
+   *  not exist. */
+  load(canvasId: string): Promise<Canvas | undefined> {
+    return this.loadPages(canvasId, 'all')
+  }
+
+  /** The canvas with the HTML of every frame on these pages, and of
+   *  `frameIds` wherever they are, in memory: read from the database the first time, shared by concurrent calls, and kept
+   *  until `evictIdle` drops the page. Undefined for a canvas that does not
+   *  exist. */
+  async loadPages(
+    canvasId: string,
+    pageIds: readonly string[] | 'all',
+    frameIds: readonly string[] = [],
+  ): Promise<Canvas | undefined> {
     if (!this.canvases.has(canvasId)) return undefined
-    if (this.loaded.has(canvasId)) {
-      this.loaded.set(canvasId, Date.now())
-      return this.canvases.get(canvasId)
+    this.loads.set(canvasId, (this.loads.get(canvasId) ?? 0) + 1)
+    try {
+      /* a frame moved onto these pages while their HTML was read is read in turn */
+      for (let pass = 0; pass < MAX_LOAD_PASSES; pass++) {
+        const canvas = this.canvases.get(canvasId)
+        if (!canvas) return undefined
+        const missing = this.framesOf(canvas, pageIds, frameIds).filter((frame) => !htmlLoaded(frame))
+        if (!missing.length) break
+        await this.readHtml(
+          canvasId,
+          missing.map((frame) => frame.id),
+        )
+      }
+      const canvas = this.canvases.get(canvasId)
+      if (!canvas) return undefined
+      this.touchPages(canvasId, this.pagesOf(canvas, pageIds, frameIds))
+      return canvas
+    } finally {
+      const left = (this.loads.get(canvasId) ?? 1) - 1
+      if (left > 0) this.loads.set(canvasId, left)
+      else this.loads.delete(canvasId)
     }
-    let pending = this.loading.get(canvasId)
-    if (!pending) {
-      pending = this.fill(canvasId).finally(() => this.loading.delete(canvasId))
-      this.loading.set(canvasId, pending)
-    }
-    await pending
-    return this.canvases.get(canvasId)
   }
 
-  /** The canvas of a frame, loaded; undefined when the frame is gone. */
+  /** What a write to these frames may read: their pages, and every component
+   *  main on the canvas (a write that carries a main asks whether that main
+   *  lives in another frame, and a deleted one's component looks for it). */
+  loadForFrames(canvasId: string, frameIds: readonly string[]): Promise<Canvas | undefined> {
+    const canvas = this.canvases.get(canvasId)
+    if (!canvas) return Promise.resolve(undefined)
+    const { pages, frames } = this.framesScope(canvasId, frameIds)
+    return this.loadPages(canvasId, pages, frames)
+  }
+
+  /** What drawing on a page may read: its frames and the component mains. */
+  loadForPage(canvasId: string, pageId: string): Promise<Canvas | undefined> {
+    const { pages, frames } = this.pageScope(canvasId, pageId)
+    return this.loadPages(canvasId, pages, frames)
+  }
+
+  /** What a write to these frames reads (`loadForFrames`), for `hold`. */
+  framesScope(canvasId: string, frameIds: readonly string[]): PageScope {
+    const canvas = this.canvases.get(canvasId)
+    const pages = frameIds.flatMap((id) => {
+      const frame = this.getFrame(id)
+      return canvas && frame && frame.canvasId === canvasId ? [framePageId(canvas, frame)] : []
+    })
+    return { pages, frames: [...frameIds, ...this.mainFrameIds(canvasId)] }
+  }
+
+  /** What drawing on a page reads (`loadForPage`), for `hold`. */
+  pageScope(canvasId: string, pageId: string): PageScope {
+    return { pages: [pageId], frames: this.mainFrameIds(canvasId) }
+  }
+
+  private mainFrameIds(canvasId: string): string[] {
+    return this.getComponents(canvasId).flatMap((def) => (def.mainFrameId ? [def.mainFrameId] : []))
+  }
+
+  /** The frame with what a write to it may read in memory (`loadForFrames`);
+   *  undefined when the frame is gone. */
   async loadFrame(frameId: string): Promise<Frame | undefined> {
     const canvasId = this.frameIndex.get(frameId)
-    if (canvasId) await this.load(canvasId)
+    if (canvasId) await this.loadForFrames(canvasId, [frameId])
     return this.getFrame(frameId)
   }
 
-  private async fill(canvasId: string) {
-    /* a canvas whose every frame was written since boot needs no read */
-    if (this.canvases.get(canvasId)?.frames.every(htmlLoaded)) {
-      this.loaded.set(canvasId, Date.now())
-      return
-    }
-    const rows = await persist.loadFrameHtml(canvasId)
-    const canvas = this.canvases.get(canvasId)
-    if (!canvas) return
-    const stored = new Map(rows.map((row) => [row.id, row.html]))
-    /* a frame written while the read was in flight already holds newer html */
-    for (const frame of canvas.frames) {
-      if (htmlLoaded(frame)) continue
-      const html = stored.get(frame.id)
-      if (html === undefined) console.error('[store] frame has no stored html', frame.id)
-      setHtml(frame, html ?? '')
-    }
-    this.loaded.set(canvasId, Date.now())
+  /** The frames a load asks for: every frame on `pageIds`, and `frameIds`. */
+  private framesOf(canvas: Canvas, pageIds: readonly string[] | 'all', frameIds: readonly string[]): Frame[] {
+    if (pageIds === 'all') return canvas.frames
+    const pages = new Set(pageIds)
+    const ids = new Set(frameIds)
+    return canvas.frames.filter((frame) => ids.has(frame.id) || pages.has(framePageId(canvas, frame)))
   }
 
-  /** Keep a canvas loaded while an agent run or job works on it; call the
-   *  returned function when done. Load it first. */
-  hold(canvasId: string): () => void {
-    this.holds.set(canvasId, (this.holds.get(canvasId) ?? 0) + 1)
+  /** The pages a load counts as used: the ones it names and the ones its frames are on. */
+  private pagesOf(canvas: Canvas, pageIds: readonly string[] | 'all', frameIds: readonly string[]): string[] {
+    if (pageIds === 'all') return canvasPages(canvas).map((page) => page.id)
+    const pages = new Set(pageIds)
+    for (const id of frameIds) {
+      const frame = this.getFrame(id)
+      if (frame?.canvasId === canvas.id) pages.add(framePageId(canvas, frame))
+    }
+    return [...pages]
+  }
+
+  private touchPages(canvasId: string, pageIds: readonly string[], at = Date.now()) {
+    let used = this.pagesUsed.get(canvasId)
+    if (!used) this.pagesUsed.set(canvasId, (used = new Map()))
+    for (const pageId of pageIds) used.set(pageId, at)
+  }
+
+  /** Read these frames' HTML, once: a frame another load is reading already is waited for. */
+  private async readHtml(canvasId: string, frameIds: readonly string[]) {
+    const waits: Promise<void>[] = []
+    const fresh: string[] = []
+    for (const id of frameIds) {
+      const pending = this.reading.get(id)
+      if (pending) waits.push(pending)
+      else fresh.push(id)
+    }
+    if (fresh.length) {
+      const read = this.fetchHtml(canvasId, fresh)
+      for (const id of fresh) this.reading.set(id, read)
+      const done = () => {
+        for (const id of fresh) if (this.reading.get(id) === read) this.reading.delete(id)
+      }
+      void read.then(done, done)
+      waits.push(read)
+    }
+    await Promise.all(waits)
+  }
+
+  private async fetchHtml(canvasId: string, frameIds: readonly string[]) {
+    const stored = await persist.loadFrameHtml(frameIds)
+    for (const id of frameIds) {
+      const frame = this.getFrame(id)
+      /* gone, or written while the read was in flight: that html is newer */
+      if (!frame || htmlLoaded(frame)) continue
+      const html = stored.get(id)
+      if (html === undefined) console.error('[store] frame has no stored html', id)
+      setHtml(frame, html ?? '')
+    }
+  }
+
+  /** Keep what an agent run, job or request works on in memory: the whole
+   *  canvas, or the pages (and the pages of the frames) `scope` names. Call the
+   *  returned function when done: those pages count as used then, and only
+   *  those, so work on one page never keeps the others. Load what it needs first. */
+  hold(canvasId: string, scope: HoldScope = 'all'): () => void {
+    const held = this.holds.get(canvasId) ?? []
+    held.push(scope)
+    this.holds.set(canvasId, held)
     let released = false
     return () => {
       if (released) return
       released = true
-      const count = (this.holds.get(canvasId) ?? 1) - 1
-      if (count > 0) this.holds.set(canvasId, count)
-      else this.holds.delete(canvasId)
-      if (this.loaded.has(canvasId)) this.loaded.set(canvasId, Date.now())
+      const left = this.holds.get(canvasId) ?? []
+      const at = left.indexOf(scope)
+      if (at >= 0) left.splice(at, 1)
+      if (!left.length) this.holds.delete(canvasId)
+      const used = this.pagesUsed.get(canvasId)
+      const canvas = this.canvases.get(canvasId)
+      if (!used || !canvas) return
+      this.touchPages(
+        canvasId,
+        this.scopePages(canvas, scope).filter((pageId) => used.has(pageId)),
+      )
     }
   }
 
-  /** Load, hold for the length of `work`, release. */
+  /** The pages a hold keeps. */
+  private scopePages(canvas: Canvas, scope: HoldScope): string[] {
+    return scope === 'all'
+      ? canvasPages(canvas).map((page) => page.id)
+      : this.pagesOf(canvas, scope.pages, scope.frames)
+  }
+
+  /** The pages of a canvas nothing may drop now: true for all of them (a load
+   *  in flight, a hold on the whole canvas, an agent or a stream on it), else
+   *  the ones held or looked at. */
+  private pinnedPages(canvas: Canvas): true | Set<string> {
+    if (this.loads.has(canvas.id)) return true
+    const inUse = this.inUse(canvas.id)
+    if (inUse === true) return true
+    const pinned = new Set(inUse || [])
+    for (const scope of this.holds.get(canvas.id) ?? []) {
+      if (scope === 'all') return true
+      for (const pageId of this.scopePages(canvas, scope)) pinned.add(pageId)
+    }
+    return pinned
+  }
+
+  /** Load the whole canvas, hold it for the length of `work`, release. */
   async withCanvas<T>(canvasId: string, work: (canvas: Canvas | undefined) => Promise<T>): Promise<T> {
     const canvas = await this.load(canvasId)
-    const release = this.hold(canvasId)
+    const release = this.hold(canvasId, 'all')
     try {
       return await work(canvas)
     } finally {
@@ -232,43 +382,99 @@ class Store {
     }
   }
 
-  setInUse(check: (canvasId: string) => boolean) {
+  /** Load what a write to these frames may read (`loadForFrames`), hold it
+   *  for the length of `work`, release. */
+  async withFrames<T>(canvasId: string, frameIds: readonly string[], work: () => Promise<T>): Promise<T> {
+    await this.loadForFrames(canvasId, frameIds)
+    const release = this.hold(canvasId, this.framesScope(canvasId, frameIds))
+    try {
+      return await work()
+    } finally {
+      release()
+    }
+  }
+
+  setInUse(check: (canvasId: string) => boolean | ReadonlySet<string>) {
     this.inUse = check
   }
 
-  isLoaded(canvasId: string): boolean {
-    return this.loaded.has(canvasId)
+  onPageDropped(listener: (canvasId: string, pageId: string) => void) {
+    this.pageDropped = listener
   }
 
-  /** Drop the frame HTML of canvases unused for `idleMs`: never one that is
-   *  held, in use (a room, an agent, a stream) or waiting on a frame write.
-   *  Returns how many were dropped. */
+  /** Every frame of the canvas has its HTML in memory. */
+  isLoaded(canvasId: string): boolean {
+    const canvas = this.canvases.get(canvasId)
+    if (!canvas) return false
+    return canvas.frames.every(htmlLoaded)
+  }
+
+  /** Every frame on the page has its HTML in memory. */
+  isPageLoaded(canvasId: string, pageId: string): boolean {
+    const canvas = this.canvases.get(canvasId)
+    if (!canvas) return false
+    return pageFrames(canvas, pageId).every(htmlLoaded)
+  }
+
+  /** Drop the frame HTML of pages unused for `idleMs`: never one of a canvas
+   *  that is held or being read, one in use (a room looking at it; an agent or
+   *  a stream on the canvas) or one waiting on a frame write. Returns how many
+   *  pages were dropped. */
   evictIdle(idleMs: number, now = Date.now()): number {
     let evicted = 0
-    for (const [canvasId, usedAt] of this.loaded) {
-      if (now - usedAt < idleMs) continue
-      /* in use counts as used: the idle wait starts when the last one leaves */
-      if (this.holds.has(canvasId) || this.inUse(canvasId)) {
-        this.loaded.set(canvasId, now)
-        continue
-      }
-      const canvas = this.canvases.get(canvasId)
-      const unsaved = canvas?.frames.filter((frame) => persist.frameWritePending(frame.id)) ?? []
-      if (unsaved.length) {
-        /* idle with unsaved frames means a write failed: try it again */
-        for (const frame of unsaved) persist.retryFrameWrite(frame)
-        continue
-      }
-      for (const frame of canvas?.frames ?? []) unloadHtml(frame)
-      this.loaded.delete(canvasId)
-      evicted++
-    }
+    for (const canvasId of [...this.pagesUsed.keys()])
+      evicted += this.evictPages(canvasId, (usedAt) => now - usedAt >= idleMs, now)
     return evicted
   }
 
+  /** Drop the pages of a canvas `idle` picks, unless held, in use or waiting
+   *  on a frame write; returns how many were dropped. */
+  private evictPages(canvasId: string, idle: (usedAt: number) => boolean, now: number): number {
+    const canvas = this.canvases.get(canvasId)
+    const used = this.pagesUsed.get(canvasId)
+    if (!canvas || !used) {
+      this.pagesUsed.delete(canvasId)
+      return 0
+    }
+    /* frames that came into memory some other way (a frame moved onto a page,
+       a component's main read with a write) count their page as used now */
+    for (const frame of canvas.frames) {
+      const pageId = framePageId(canvas, frame)
+      if (!used.has(pageId) && htmlLoaded(frame)) used.set(pageId, now)
+    }
+    const pinned = this.pinnedPages(canvas)
+    let dropped = 0
+    for (const [pageId, usedAt] of used) {
+      /* in use counts as used: the idle wait starts when the last one leaves */
+      if (pinned === true || pinned.has(pageId)) {
+        used.set(pageId, now)
+        continue
+      }
+      if (!idle(usedAt) || !this.dropPage(canvas, pageId)) continue
+      used.delete(pageId)
+      dropped++
+      this.pageDropped(canvasId, pageId)
+    }
+    if (!used.size) this.pagesUsed.delete(canvasId)
+    return dropped
+  }
+
+  /** Unload one page's frame HTML, unless a frame on it waits on a write; true if it was dropped. */
+  private dropPage(canvas: Canvas, pageId: string): boolean {
+    const frames = pageFrames(canvas, pageId).filter(htmlLoaded)
+    const unsaved = frames.filter((frame) => persist.frameWritePending(frame.id))
+    if (unsaved.length) {
+      /* idle with unsaved frames means a write failed: try it again */
+      for (const frame of unsaved) persist.retryFrameWrite(frame)
+      return false
+    }
+    for (const frame of frames) unloadHtml(frame)
+    return true
+  }
+
   /** A standalone copy of a frame with its HTML, for a render: from memory
-   *  when its canvas is loaded, else read from the database, so one
-   *  thumbnail never pulls a whole canvas into memory. A copy, so a canvas
+   *  when its page is loaded, else read from the database, so one
+   *  thumbnail never pulls a whole page into memory. A copy, so a page
    *  dropped while the render waits for a slot cannot take the html away. */
   async renderableFrame(frameId: string): Promise<Frame | undefined> {
     const frame = this.getFrame(frameId)
@@ -291,10 +497,13 @@ class Store {
   }
 
   stats() {
+    let pages = 0
+    for (const used of this.pagesUsed.values()) pages += used.size
     return {
       canvases: this.canvases.size,
-      loaded: this.loaded.size,
-      loading: this.loading.size,
+      loaded: this.pagesUsed.size,
+      pages,
+      loading: this.loads.size,
       held: this.holds.size,
     }
   }
@@ -376,13 +585,17 @@ class Store {
     if (workspaceId) canvas.workspaceId = workspaceId
     requireBoundary('store.createCanvas')
     this.canvases.set(canvas.id, canvas)
-    this.loaded.set(canvas.id, now)
     canvas.pages = canvasPages(canvas)
+    this.touchPages(
+      canvas.id,
+      canvas.pages.map((page) => page.id),
+      now,
+    )
     recordUndo(() => {
       if (this.canvases.get(canvas.id) !== canvas) return
       for (const frame of canvas.frames) this.frameIndex.delete(frame.id)
       this.canvases.delete(canvas.id)
-      this.loaded.delete(canvas.id)
+      this.pagesUsed.delete(canvas.id)
     })
     this.saveCanvasLater(canvas)
     return canvas
@@ -458,7 +671,10 @@ class Store {
     }
     await persist.saveCanvasCopy(canvas)
     this.canvases.set(canvas.id, canvas)
-    this.loaded.set(canvas.id, Date.now())
+    this.touchPages(
+      canvas.id,
+      canvasPages(canvas).map((page) => page.id),
+    )
     for (const frame of frames) this.frameIndex.set(frame.id, canvas.id)
     return canvas
   }
@@ -484,7 +700,7 @@ class Store {
   }
 
   private async copyPage(canvasId: string, pageId: string, by: string): Promise<PageCopy | undefined> {
-    const canvas = await this.load(canvasId)
+    const canvas = await this.loadPages(canvasId, [pageId])
     if (!canvas) return undefined
     const pages = canvasPages(canvas)
     const source = pages.find((page) => page.id === pageId)
@@ -660,15 +876,15 @@ class Store {
     const c = this.canvases.get(id)
     if (!c) return undefined
     requireBoundary('store.deleteCanvas')
-    const loadedAt = this.loaded.get(id)
+    const used = this.pagesUsed.get(id)
     for (const f of c.frames) this.frameIndex.delete(f.id)
     this.canvases.delete(id)
-    this.loaded.delete(id)
+    this.pagesUsed.delete(id)
     recordUndo(() => {
       if (this.canvases.has(id)) return
       this.canvases.set(id, c)
       for (const f of c.frames) this.frameIndex.set(f.id, id)
-      if (loadedAt !== undefined) this.loaded.set(id, loadedAt)
+      if (used) this.pagesUsed.set(id, used)
     })
     afterCommit(() => {
       if (!this.canvases.has(id)) persist.deleteCanvas(id)

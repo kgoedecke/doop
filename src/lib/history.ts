@@ -7,6 +7,8 @@ import { requestFrame, settleFrames } from './frameBridge'
 import { clearElementId, elementIdAt, elementName, setElementName } from './layers'
 import { elementIdSelector } from '../../shared/elementId'
 import { useStore } from './store'
+import { frameHtmlReady } from './pages'
+import { loadFramePages } from './ws'
 import { savedByOthersSince } from './theirSaves'
 import { posthog } from './posthog'
 
@@ -589,8 +591,20 @@ export function deleteFrameTracked(frame: Frame) {
   deleteFramesTracked([frame])
 }
 
-/** Delete several frames as one undo step. */
+/** Delete several frames as one undo step. A frame whose page is still on its
+ *  way holds a blank or stale copy here, which undo would bring back: the page
+ *  is read first, and the frames as they are then are deleted. */
 export function deleteFramesTracked(frames: Frame[]) {
+  if (!frames.every((frame) => frameHtmlReady(useStore.getState(), frame.id))) {
+    const ids = new Set(frames.map((frame) => frame.id))
+    loadFramePages([...ids])
+      .then(() => {
+        const current = (useStore.getState().canvas?.frames ?? []).filter((frame) => ids.has(frame.id))
+        if (current.length) deleteFramesTracked(current)
+      })
+      .catch(console.error)
+    return
+  }
   const entries: Entry[] = frames.map((f) => ({ type: 'delete', frameId: f.id, snapshot: snapshot(f) }))
   const [first, ...rest] = entries
   if (!first) return
@@ -797,6 +811,8 @@ async function apply(e: Entry, direction: 'undo' | 'redo', guarded = false): Pro
     if (useStore.getState().canvas?.id !== e.canvasId) throw new Error('Canvas changed')
     await saveStack(e.canvasId, forward ? e.before : e.after, forward ? e.after : e.before)
   } else if (e.type === 'layer-name') {
+    /* the name is written into the frame's HTML: its page is read first if this browser has not */
+    await loadFramePages([e.frameId])
     await saveLayerName(
       e.frameId,
       e.elementId ? elementIdSelector(e.elementId) : e.selector,
@@ -804,6 +820,9 @@ async function apply(e: Entry, direction: 'undo' | 'redo', guarded = false): Pro
     )
   } else if (e.type === 'update') {
     const patch = { ...(forward ? e.after : e.before) }
+    /* an HTML step on a frame whose page this browser has not read: read it
+       first, so the save is not refused and the page shows the result */
+    if ('html' in patch) await loadFramePages([e.frameId])
     /* a frame that was straight has no rotation to go back to: JSON drops
        an undefined field, so the server is told 0 to clear the turn */
     if ('rotation' in patch && patch.rotation === undefined) patch.rotation = 0

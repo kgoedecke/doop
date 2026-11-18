@@ -12,6 +12,29 @@ export function pageFrames(canvas: Canvas, pageId: string): Frame[] {
   return canvas.frames.filter((frame) => framePageId(canvas, frame) === pageId)
 }
 
+/** What deciding the page a canvas opens on reads: no frame HTML. */
+export type LinkedCanvas = Pick<Canvas, 'id' | 'pages' | 'frames' | 'landingPageId'>
+
+/** The page a link naming none opens: a library canvas's components page
+ *  (the server says which, as `landingPageId`), else the first page. */
+export function defaultPageId(canvas: LinkedCanvas): string {
+  const pages = canvasPages(canvas)
+  return pages.find((page) => page.id === canvas.landingPageId)?.id ?? pages[0]!.id
+}
+
+/** The page a canvas URL's query asks for: the page of the frame it links,
+ *  else the page it names, else the default. A frame or page that is not on
+ *  the canvas (deleted, mistyped) counts as not named. */
+export function openingPageId(canvas: LinkedCanvas, search: string): string {
+  const params = new URLSearchParams(search)
+  const frameId = params.get('frame')
+  const frame = frameId ? canvas.frames.find((candidate) => candidate.id === frameId) : undefined
+  if (frame) return framePageId(canvas, frame)
+  const pageId = params.get('page')
+  if (pageId && canvasPages(canvas).some((page) => page.id === pageId)) return pageId
+  return defaultPageId(canvas)
+}
+
 export const MAX_PAGE_NAME = 100
 /** The longest canvas name an agent may give, the page limit's twin. */
 export const MAX_CANVAS_NAME = 100

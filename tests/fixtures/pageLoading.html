@@ -1,0 +1,67 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <style>
+      html,
+      body,
+      #root {
+        margin: 0;
+        width: 100%;
+        height: 100%;
+      }
+    </style>
+    <script>
+      /* the room's socket, played by the test: what the page sends is kept in
+         `room.sent`, and `room.deliver` hands it a message as the server would */
+      window.room = { sent: [], socket: null }
+      window.room.deliver = (message) => window.room.socket?.onmessage?.({ data: JSON.stringify(message) })
+      window.WebSocket = class {
+        static OPEN = 1
+        readyState = 0
+        constructor() {
+          window.room.socket = this
+          setTimeout(() => {
+            this.readyState = 1
+            this.onopen?.()
+          })
+        }
+        send(data) {
+          window.room.sent.push(JSON.parse(data))
+        }
+        close() {
+          this.readyState = 3
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module">
+      import React from 'react'
+      import { createRoot } from 'react-dom/client'
+      import { Stage } from '/src/components/Stage.tsx'
+      import { useStore } from '/src/lib/store.ts'
+      import { connect } from '/src/lib/ws.ts'
+      import { TooltipProvider } from '/src/components/ui/tooltip.tsx'
+      import '/src/styles.css'
+      window.openPage = (pageId) => useStore.getState().setActivePage(pageId)
+      window.flyTo = (frameId) => useStore.getState().requestFlyTo(frameId)
+      window.camera = () => useStore.getState().viewport
+      window.loadingState = () => {
+        const s = useStore.getState()
+        return {
+          activePageId: s.activePageId,
+          stalePages: Object.keys(s.stalePages),
+          selectedId: s.selectedId,
+          selectedElement: s.selectedElement,
+          frames: Object.fromEntries((s.canvas?.frames ?? []).map((f) => [f.id, f.html])),
+        }
+      }
+      connect('c')
+      createRoot(document.getElementById('root')).render(
+        React.createElement(TooltipProvider, null, React.createElement(Stage, { onAddFrame: () => {} })),
+      )
+    </script>
+  </body>
+</html>
