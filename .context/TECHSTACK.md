@@ -568,7 +568,9 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   (`store.pickElements`), and ⌘] / ⌘[ step the picked elements, together, or the selected frame
   forward or backward, ⌘⌥] / ⌘⌥[ to the front or back (`reorderElements` / `reorderLayers`,
   `restackFrame`), one undo step each. A picked standalone shape is its page's row: Tab, ⌘A and
-  the brackets treat it as a frame, and ⌘A skips stack-locked shapes (`isStackLocked`). ↩ and Tab act only when no control has the keyboard (`isControlTarget`) and
+  the brackets treat it as a frame, and ⌘A skips stack-locked shapes (`isStackLocked`). In the Layers panel ⇧/⌘-click on a
+  top-level row (frame or canvas shape) adds it to the selection or drops it, as ⇧-click does on the canvas,
+  and ⌫ in the tree deletes every selected one. ↩ and Tab act only when no control has the keyboard (`isControlTarget`) and
   something is selected, so buttons, menus and the Layers tree keep theirs. The bracket chords are
   read by `code` too, since ⌥ changes the typed character on macOS. Tests: `selectionKeys.test.ts`.
 - Canvas commands (`src/lib/actions/`): every editor command is one entry in `registry.ts` (id,
