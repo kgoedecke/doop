@@ -13,11 +13,15 @@ vi.mock('../server/db/persist.ts', () => ({
   saveDecision: () => {},
   saveProposal: () => {},
 }))
+vi.mock('../server/screenshot.ts', async (importOriginal) =>
+  (await import('./measureGate.ts')).gatedScreenshot(await importOriginal()),
+)
 
 const actions = await import('../server/actions.ts')
 const { store } = await import('../server/store.ts')
 const { deliveredWork, execTool, newRunState } = await import('../server/resident.ts')
 const { findBrowserPath } = await import('../server/screenshot.ts')
+const { holdNextMeasure } = await import('./measureGate.ts')
 const { canvasPages, framePageId } = await import('../shared/pages.ts')
 const { DEFAULT_ROLE_ID, roleName } = await import('../shared/agents.ts')
 
@@ -188,15 +192,16 @@ describe.skipIf(!findBrowserPath())('fit_height', () => {
   }, 60_000)
 
   it('answers a set_frame_html whose frame is deleted while it is measured', async () => {
+    const measuring = holdNextMeasure()
     const pending = execTool(
       call('set_frame_html', { frame_id: frameId, html: tall, fit_height: true }),
       canvasId,
       actor(),
       run(),
     )
-    /* the page takes longer than this to load */
-    await new Promise((resolve) => setTimeout(resolve, 30))
+    await measuring.reached
     actions.deleteFrame(frameId, actor())
+    measuring.release()
     const result = await pending
     expect(String(result.content)).toContain('fit_height was not applied')
   }, 60_000)

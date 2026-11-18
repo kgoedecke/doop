@@ -6,7 +6,7 @@ import type { Frame } from '../shared/types.ts'
 import { guardPublicPageRequests } from './publicUrl.ts'
 import { withHostedIcons } from './iconProxy.ts'
 import { withHostedPhotos } from './photoProxy.ts'
-import { renderedHeight } from './renderLimits.ts'
+import { designPx, renderedHeight } from './renderLimits.ts'
 import { LayerNotFoundError } from './layerExport.ts'
 import { installNameShim } from './pageShim.ts'
 import {
@@ -168,7 +168,7 @@ export async function loadFramePage(frame: Frame, options?: PageOptions): Promis
 
 /** A viewport of the frame's design px, whole and at least 1 each way. */
 export function frameViewport(width: number, height: number, deviceScaleFactor = 1) {
-  return { width: Math.max(1, Math.round(width)), height: Math.max(1, Math.round(height)), deviceScaleFactor }
+  return { width: designPx(width), height: designPx(height), deviceScaleFactor }
 }
 
 async function loadFrameInto(page: Page, frame: Frame): Promise<void> {
@@ -437,10 +437,12 @@ async function inspectOn(page: Page, frame: Frame): Promise<FrameInspection> {
 
 /** A frame's content height in design px, at the frame's width: `painted`
  *  is the lowest thing it paints, `flow` the bottom of the root's own box (what
- *  flows, overflow left out). */
+ *  flows, overflow left out). `shell` says the design, as loaded, is an app
+ *  shell: it fits its viewport and a large part of it scrolls inside. */
 export interface ContentHeight {
   painted: number
   flow: number
+  shell: boolean
 }
 
 /** Measures the frame with the viewport `viewportHeight` tall. A design sized
@@ -481,12 +483,26 @@ async function contentBottom(): Promise<ContentHeight> {
       animation.cancel()
     }
   }
-  if (!document.querySelector('style[data-doop-fit]')) {
-    const release = document.createElement('style')
-    release.setAttribute('data-doop-fit', '')
+  let release = document.querySelector('style[data-doop-fit]')
+  if (!release) {
+    /* judged as loaded, before the root and body are released: an app shell on the body (or on
+       html,body{height:100%}) would otherwise unroll its scroller into the frame */
+    const scrolls = (el: Element) => {
+      const style = getComputedStyle(el)
+      return (
+        (style.overflowY === 'auto' || style.overflowY === 'scroll') &&
+        el.scrollHeight > el.clientHeight + 1 &&
+        el.clientHeight >= innerHeight / 2
+      )
+    }
+    const fitsViewport = document.documentElement.scrollHeight <= innerHeight + 1
+    const shell = fitsViewport && Array.from(document.body.querySelectorAll('*')).slice(0, MAX_ELEMENTS).some(scrolls)
+    release = document.createElement('style')
+    release.setAttribute('data-doop-fit', shell ? 'shell' : '')
     release.textContent = 'html,body{height:auto!important;min-height:0!important;max-height:none!important}'
     document.head.append(release)
   }
+  const shell = release.getAttribute('data-doop-fit') === 'shell'
   const flow = document.documentElement.getBoundingClientRect().bottom
   let bottom = flow
   const text = document.createRange()
@@ -514,7 +530,7 @@ async function contentBottom(): Promise<ContentHeight> {
     }
   }
   walk(document.body)
-  return { painted: Math.ceil(bottom + window.scrollY), flow: Math.ceil(flow + window.scrollY) }
+  return { painted: Math.ceil(bottom + window.scrollY), flow: Math.ceil(flow + window.scrollY), shell }
 }
 
 export interface RenderOptions extends PageOptions {
@@ -574,8 +590,8 @@ async function layerClip(page: Page, selector: string, frame: Frame, scale: numb
   }, selector)
   if (box === 'invalid') throw new LayerNotFoundError(`"${selector}" is not a valid CSS selector`)
   if (!box) throw new LayerNotFoundError(`no element matches ${selector}`)
-  const width = Math.max(1, Math.round(frame.width))
-  const height = Math.max(1, Math.round(frame.height))
+  const width = designPx(frame.width)
+  const height = designPx(frame.height)
   /* judged before rounding outward, which would give an empty box a pixel */
   const visible =
     Math.min(width, box.right) - Math.max(0, box.left) > 0 && Math.min(height, box.bottom) - Math.max(0, box.top) > 0
@@ -588,8 +604,8 @@ async function layerClip(page: Page, selector: string, frame: Frame, scale: numb
 }
 
 async function screenshotOn(page: Page, frame: Frame, scale: number, opts: RenderOptions): Promise<Buffer> {
-  const width = Math.max(1, Math.round(frame.width))
-  const fullHeight = Math.max(1, Math.round(frame.height))
+  const width = designPx(frame.width)
+  const fullHeight = designPx(frame.height)
   const height = renderedHeight(frame, scale, opts.maxHeight)
   /* the viewport always spans the whole frame, so 100vh, height media
      queries and bottom-fixed elements lay out as they do on the canvas; the

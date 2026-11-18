@@ -234,29 +234,36 @@
 - Fitting a frame to its content (`server/frameFit.ts`, `measureContentHeight` in
   `server/screenshot.ts`): `fit_height: true` on `update_frame` (at the new `width` when the call
   passes one), `create_frame` and `set_frame_html`, for MCP agents and the resident alike
-  (`updateFrameMetaWithFit`, `fitWrittenFrame`), sets the height to the content's as the server's
-  Chromium lays it out, so agents stop guessing heights between screenshots (#532). Each measure
-  waits two animation frames (the frame's own resize, ResizeObserver and matchMedia handlers run
-  first), awaits fonts and finishes animations, lets the root and body go of any viewport height,
-  then reports `flow` (the root's own box) and `painted` (the lowest thing painted: positioned
-  descendants and text running past its element too, leaving out fixed elements, invisible ones at
-  `visibility:hidden` or `opacity:0`, and what a scroller or clipper hides). `settleHeight`
-  iterates a design sized in vh, plain or inside `clamp()`, `max()` or `min-height`, each measure
-  feeding the next and sped up along the line through the last two, at most 8 measures on one page;
-  it refuses one that keeps outgrowing the frame (a 100vh hero with more below) or only holds where
-  it grows by more than half the frame's height (`STEEPEST_FIT`). Content filling the frame exactly
-  is measured at a 1px viewport: a `min-height:100vh` wrapper still flows to its content there and
-  shrinks to it, an app shell at `height:100vh` collapses to its overflow and keeps its height.
-  Capped at `FIT_HEIGHT_MAX` (`MAX_EXPORT_SIDE`). The patch is checked (`checkFrameMeta`) before
-  the browser is asked; a fit is refused with `height`, while an agent streams into the frame, and
-  when the design changed during the measurement, and a refused fit applies none of the call. After
-  `create_frame` / `set_frame_html` the write is committed before the browser wait (`checkpoint`)
-  and a failed fit leaves it standing with a note. A broadcast that does not change a frame's design
-  (rename, resize, restack, sign-off) sends viewers what they have been shown mid-playback
-  (`frameForViewers`). Server renders (`loadFrameInto`) add `<!doctype html>` to a design without
-  one, since the editor morphs every design into a standards-mode document (`FRAME_BOOTSTRAP`), and
-  put the asset `<base>` in the document's `<head>`, never ahead of its doctype or inside a
-  `<header>`. Tests: `frameFit.test.ts`, the fit cases in `residentPageTools.test.ts`.
+  (`updateFrameMetaWithFit`, `fitWrittenFrame`, the shared wording in `FIT_HEIGHT_ON`), sets the
+  height to the content's as the server's Chromium lays it out, so agents stop guessing heights
+  between screenshots (#532). Each measure waits two animation frames (the frame's own resize,
+  ResizeObserver and matchMedia handlers run first), awaits fonts and finishes animations, lets the
+  root and body go of any viewport height, then reports `flow` (the root's own box), `painted` (the
+  lowest thing painted: positioned descendants and text running past its element too, leaving out
+  fixed elements, invisible ones at `visibility:hidden` or `opacity:0`, and what a scroller or
+  clipper hides) and `shell` (judged as loaded: the page fits its viewport while a part at least
+  half its height scrolls inside, an app shell on a div, the body or `html,body{height:100%}`,
+  which keeps its height). `settleHeight` iterates a design sized in vh, plain or inside `clamp()`,
+  `max()` or `min-height`, each measure feeding the next and sped up along the line through the
+  last two, at most 9 measures on one page, uncapped so growth past the cap shows. A height holds
+  when the content fits it with a px to spare at most; the growth there is then measured over a
+  wide span below (a few px would read rounding as slope), and a design that keeps outgrowing the
+  frame (a 100vh hero with more below) or grows by more than 0.6 of it (`STEEPEST_FIT`) is
+  refused. Content filling the frame exactly is measured at a 1px viewport: a `min-height:100vh`
+  wrapper still flows to its content there and shrinks to it, a `height:100vh` one collapses to
+  its overflow and keeps its height. Capped at `FIT_HEIGHT_MAX` (`MAX_EXPORT_SIDE`). The patch is
+  checked (`checkFrameMeta`) before the browser is asked; a fit is refused with `height`, while an
+  agent streams into the frame, and when the design changed during the measurement, and a refused
+  fit applies none of the call. After `create_frame` / `set_frame_html` the write is committed
+  before the browser wait (`checkpoint`) and a failed fit leaves it standing with a note. A
+  broadcast that does not change a frame's design (rename, resize, restack, sign-off) sends viewers
+  what they have (`frameForViewers`): the revealed part mid-playback, the healed stream mid-stream.
+  Server renders (`loadFrameInto`) add `<!doctype html>` to a design without one, since the editor
+  morphs every design into a standards-mode document (`FRAME_BOOTSTRAP`), and put the asset
+  `<base>` in the document's `<head>`, never ahead of its doctype or inside a `<header>`; every
+  render sizes its viewport through `frameViewport` / `designPx`. Tests: `frameFit.test.ts`, the
+  fit cases in `residentPageTools.test.ts` (`tests/measureGate.ts` holds a measure so a test can
+  change the frame mid-fit without a timer).
 - Feature usage events: a feature an agent can reach reports from the server through
   `captureFeature` (`server/featureEvents.ts`) at the REST route, MCP tool and resident tool, on the
   signed-in user, the agent's connecting user or the resident run's requester, with `via` (`ui`,

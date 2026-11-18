@@ -17,7 +17,7 @@ import { z } from 'zod'
 import { store } from './store.ts'
 import { addPage, savePages } from './pageTools.ts'
 import {
-  FIT_HEIGHT_DESCRIPTION,
+  FIT_HEIGHT_ON,
   FIT_NEEDS_HTML,
   type FittedFrame,
   fitNotes,
@@ -1498,7 +1498,7 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
           .boolean()
           .optional()
           .describe(
-            `${FIT_HEIGHT_DESCRIPTION} height, when given, is where the measuring starts. Needs the whole design in html: after streaming with append_frame_html, call update_frame with fit_height instead. If the fit cannot be made, the frame is still created and the result says why.`,
+            `${FIT_HEIGHT_ON.create} Needs the whole design in html: after streaming with append_frame_html, call update_frame with fit_height instead.`,
           ),
         agent_name: agentName,
       },
@@ -1582,12 +1582,7 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
       inputSchema: {
         frame_id: z.string(),
         html: z.string(),
-        fit_height: z
-          .boolean()
-          .optional()
-          .describe(
-            `${FIT_HEIGHT_DESCRIPTION} If the fit cannot be made, the new HTML still stands and the result says why.`,
-          ),
+        fit_height: z.boolean().optional().describe(FIT_HEIGHT_ON.set),
         agent_name: agentName,
       },
     },
@@ -2517,12 +2512,7 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
         y: z.number().optional(),
         width: z.number().optional(),
         height: z.number().optional(),
-        fit_height: z
-          .boolean()
-          .optional()
-          .describe(
-            `${FIT_HEIGHT_DESCRIPTION} Measured at the new width when you pass one. If the fit cannot be made, nothing else in the call is applied either.`,
-          ),
+        fit_height: z.boolean().optional().describe(FIT_HEIGHT_ON.update),
         locked: z.boolean().optional(),
         rotation: z.number().optional(),
         agent_name: agentName,

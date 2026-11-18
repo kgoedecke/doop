@@ -18,12 +18,16 @@ vi.mock('../server/db/persist.ts', () => ({
   saveProposal: () => {},
   saveFrameVersion: async () => {},
 }))
+vi.mock('../server/screenshot.ts', async (importOriginal) =>
+  (await import('./measureGate.ts')).gatedScreenshot(await importOriginal()),
+)
 
 const actions = await import('../server/actions.ts')
 const { store } = await import('../server/store.ts')
 const { buildMcpServer } = await import('../server/mcp.ts')
 const { findBrowserPath, loadFramePage } = await import('../server/screenshot.ts')
 const { FIT_HEIGHT_MAX, settleHeight } = await import('../server/frameFit.ts')
+const { holdNextMeasure } = await import('./measureGate.ts')
 
 const OWNER = 'fit-owner'
 const doc = (body: string, bodyStyle = 'margin:0') =>
@@ -82,17 +86,17 @@ const fit = (frame: Frame, args: Record<string, unknown> = {}) =>
   callTool('update_frame', { frame_id: frame.id, fit_height: true, ...args })
 
 describe('settleHeight', () => {
-  /** content of `fixed` px plus `share` of the viewport, as a vh-sized part makes it, all of it in flow */
-  const design = (fixed: number, share = 0) =>
-    vi.fn(async (viewport: number) => {
-      const height = fixed + share * viewport
-      return { painted: height, flow: height }
-    })
+  /** a measure of content that `content` gives for a viewport, all of it in flow */
+  const curve = (content: (viewport: number) => number) =>
+    vi.fn(async (viewport: number) => ({ painted: content(viewport), flow: content(viewport), shell: false }))
+  /** content of `fixed` px plus `share` of the viewport, as a vh-sized part makes it */
+  const design = (fixed: number, share = 0) => curve((viewport) => fixed + share * viewport)
 
   it('takes a measure that holds at the height it gives', async () => {
     const measure = design(640)
     expect(await settleHeight(300, measure)).toEqual({ kind: 'fits', height: 640 })
-    expect(measure).toHaveBeenCalledTimes(2)
+    /* the measure, the one that confirms it, and the slope below */
+    expect(measure).toHaveBeenCalledTimes(3)
     expect(await settleHeight(640, design(640))).toEqual({ kind: 'fits', height: 640 })
   })
 
@@ -101,11 +105,17 @@ describe('settleHeight', () => {
     expect(await settleHeight(800, design(300, 0.5))).toEqual({ kind: 'fits', height: 600 })
   })
 
+  it('fits the same design from every start, through the rounding a browser does', async () => {
+    /* ceil, as contentBottom rounds: the fit may sit a px or two above the exact 600, never below it */
+    const half = curve((h) => Math.ceil(0.5 * h + 300))
+    for (let start = 100; start <= 3000; start += 1) {
+      const settled = await settleHeight(start, half)
+      expect(settled.kind === 'fits' && settled.height >= 600 && settled.height <= 602, `from ${start}`).toBe(true)
+    }
+  })
+
   it('shrinks a frame to a min-height:100vh wrapper’s content, from either side', async () => {
-    const floor = vi.fn(async (viewport: number) => {
-      const height = Math.max(800, viewport)
-      return { painted: height, flow: height }
-    })
+    const floor = curve((viewport) => Math.max(800, viewport))
     expect(await settleHeight(2000, floor)).toEqual({ kind: 'fits', height: 800 })
     expect(await settleHeight(400, floor)).toEqual({ kind: 'fits', height: 800 })
   })
@@ -113,13 +123,18 @@ describe('settleHeight', () => {
   it('keeps the height of a design sized by its viewport alone', async () => {
     expect(await settleHeight(900, design(0, 1))).toEqual({ kind: 'fits', height: 900 })
     /* an app shell at 100vh: at a 1px viewport only its overflow is left, which is no floor */
-    const shell = vi.fn(async (viewport: number) => ({ painted: Math.max(122, viewport), flow: viewport }))
-    expect(await settleHeight(900, shell)).toEqual({ kind: 'fits', height: 900 })
+    const collapsing = vi.fn(async (viewport: number) => ({
+      painted: Math.max(122, viewport),
+      flow: viewport,
+      shell: false,
+    }))
+    expect(await settleHeight(900, collapsing)).toEqual({ kind: 'fits', height: 900 })
+    /* one whose content scrolls inside it, as loaded */
+    const scrolling = vi.fn(async () => ({ painted: 2120, flow: 2120, shell: true }))
+    expect(await settleHeight(844, scrolling)).toEqual({ kind: 'fits', height: 844 })
   })
 
   it('settles vh inside clamp(), max() and min-height, whose growth stops partway', async () => {
-    const curve = (content: (viewport: number) => number) =>
-      vi.fn(async (viewport: number) => ({ painted: content(viewport), flow: content(viewport) }))
     /* a clamp(480px, 60vh, 720px) hero over 1200px */
     const hero = curve((h) => Math.min(Math.max(480, 0.6 * h), 720) + 1200)
     expect(await settleHeight(800, hero)).toEqual({ kind: 'fits', height: 1920 })
@@ -147,6 +162,8 @@ describe('settleHeight', () => {
   it('refuses a design that outgrows any viewport', async () => {
     /* a 100vh hero over 300px: always 300px past the frame */
     expect(await settleHeight(800, design(300, 1))).toEqual({ kind: 'outgrows' })
+    /* and with so much below that the frame reaches the export limit first */
+    expect(await settleHeight(800, design(3000, 1))).toEqual({ kind: 'outgrows' })
   })
 
   it('stops at the export limit', async () => {
@@ -260,6 +277,22 @@ describe.skipIf(!findBrowserPath())('fit_height in a browser', () => {
     await fit(shell)
     expect(shell.height).toBe(900)
 
+    /* a mobile screen whose shell is the body itself, or html and body at 100% */
+    const screen = (bodyStyle: string, shellStyle = '') =>
+      doc(
+        `<div style="${shellStyle}display:flex;flex-direction:column;height:100%"><header style="height:56px"></header><main style="flex:1;overflow:auto">${block(2000)}</main><nav style="height:64px"></nav></div>`,
+        bodyStyle,
+      )
+    const bodyShell = frameWith(screen('margin:0;height:100vh'), { width: 390, height: 844 })
+    await fit(bodyShell)
+    expect(bodyShell.height).toBe(844)
+    const fullShell = frameWith(screen('margin:0;height:100%').replace('<html>', '<html style="height:100%">'), {
+      width: 390,
+      height: 844,
+    })
+    await fit(fullShell)
+    expect(fullShell.height).toBe(844)
+
     const scroller = frameWith(doc(`<div style="height:100vh;overflow:auto">${block(3000)}</div>`), { height: 700 })
     await fit(scroller)
     expect(scroller.height).toBe(700)
@@ -292,10 +325,11 @@ describe.skipIf(!findBrowserPath())('fit_height in a browser', () => {
 
   it('refuses a fit when the design changed while it was measured', async () => {
     const frame = frameWith(doc(block(500)))
+    const measuring = holdNextMeasure()
     const pending = fit(frame)
-    /* the page takes longer than this to load */
-    await new Promise((resolve) => setTimeout(resolve, 30))
+    await measuring.reached
     actions.updateFrame(frame.id, { html: doc(block(900)) }, agent())
+    measuring.release()
     const result = await pending
     expect(result.isError).toBe(true)
     expect(texts(result)).toContain('changed while it was measured')
@@ -346,6 +380,23 @@ describe.skipIf(!findBrowserPath())('fit_height in a browser', () => {
     actions.setFrameApproval(sent[resized]!.frame!.id, true, { id: OWNER, name: 'Fit Owner' })
     const approved = sent.slice(before).find((message) => message.type === 'frame:updated')
     expect(approved?.frame?.html.length).toBeLessThan(stored.length)
+    /* nor does a restack */
+    const restacking = sent.length
+    actions.restackFrames(canvasId, [{ id: sent[resized]!.frame!.id, z: 99 }], agent())
+    const restacked = sent.slice(restacking).find((message) => message.type === 'frame:updated')
+    expect(restacked?.frame?.html.length).toBeLessThan(stored.length)
+  }, 60_000)
+
+  it('sends a frame mid-stream healed when only its details change', async () => {
+    const frame = frameWith('')
+    actions.appendFrameHtml(frame.id, doc(block(100)).replace('</body>', '<script>let half ='), agent(), {
+      start: true,
+    })
+    const renaming = sent.length
+    actions.updateFrame(frame.id, { name: 'Renamed' }, agent())
+    const renamed = sent.slice(renaming).find((message) => message.type === 'frame:updated')
+    expect(renamed?.frame?.name).toBe('Renamed')
+    expect(renamed?.frame?.html).not.toContain('<script')
   }, 60_000)
 })
 
