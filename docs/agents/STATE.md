@@ -41,14 +41,15 @@ Managed with `gh workflow disable` only; no upstream workflow file is edited or 
 conflict-free. GitHub registers a workflow only when it first triggers, and it re-enabled CLA once after a merge,
 so re-check `gh workflow list -R ArcticSlayy/doop --all` after merges.
 
-| Workflow                 | State                  | Reason                                                                   |
-| ------------------------ | ---------------------- | ------------------------------------------------------------------------ |
-| CI                       | kept                   | typecheck, lint, build, sharded tests on every PR; passes                |
-| Sync upstream (ours)     | kept                   | daily upstream sync, runs on GitHub                                      |
-| CLA                      | disabled               | upstream's contributor agreement (cla-assistant); fails and emails       |
-| Release Please           | disabled               | upstream release bookkeeping; opens release PRs on every push to main    |
-| desktop, desktop-release | not registered, unused | macOS/Windows builds and signed releases need Apple secrets we lack      |
-| ios, ios-release         | not registered, unused | macOS runners and App Store secrets we lack; disable on first appearance |
+| Workflow                     | State                  | Reason                                                                |
+| ---------------------------- | ---------------------- | --------------------------------------------------------------------- |
+| CI                           | kept                   | typecheck, lint, build, sharded tests on every PR; passes             |
+| Sync upstream (ours)         | kept                   | daily upstream sync, runs on GitHub                                   |
+| CLA                          | disabled               | upstream's contributor agreement (cla-assistant); fails and emails    |
+| Release Please               | disabled               | upstream release bookkeeping; opens release PRs on every push to main |
+| Desktop                      | disabled (2026-11-18)  | first ran on the sync PR #20; macOS/Windows builds need Apple secrets |
+| iOS                          | disabled (2026-11-18)  | first ran on the sync PR #20; macOS runners and App Store secrets     |
+| desktop-release, ios-release | not registered, unused | signed releases; disable on first appearance                          |
 
 CI failure emails come from the account's Actions notification setting (no API): github.com/settings/notifications.
 
