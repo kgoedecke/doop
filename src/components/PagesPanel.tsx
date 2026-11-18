@@ -9,7 +9,15 @@ import { ApiError } from '../lib/api'
 import { Button } from './ui/button'
 import { PageIcon, PlusIcon } from './ui/icons'
 import { cn } from '../lib/utils'
-import { clampPagesPx, pagesMaxHeightCss, pagesMaxPx, pagesMinPx, pagesPctOf, pagesPxAfterKey } from '../lib/pagesSplit'
+import {
+  clampPagesPx,
+  pagesHeightCss,
+  pagesMaxPx,
+  pagesMinPx,
+  pagesPctOf,
+  pagesPxAfterKey,
+  usePagesPct,
+} from '../lib/pagesSplit'
 import { ContextMenu, ContextMenuTrigger, ContextMenuContent, ContextMenuItem } from './ui/context-menu'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select'
 import { useT } from '@/lib/i18n'
@@ -20,15 +28,8 @@ import { useT } from '@/lib/i18n'
 export const sectionHeading = 'text-[11px] font-normal text-ink-faint'
 const sectionBtn = 'size-5 rounded-[5px] text-ink-faint hover:bg-paper-deep hover:text-ink'
 
-export function PagesPanel({
-  pagesPct = null,
-  onPagesPctChange,
-}: {
-  /** the most of the rail's height the section takes once dragged, as a share of it; null keeps the default cap */
-  pagesPct?: number | null
-  /** given in the Layers rail: the section's bottom edge is the handle that sets the share */
-  onPagesPctChange?: (pct: number) => void
-}) {
+export function PagesPanel({ canvasId }: { canvasId: string }) {
+  const [pagesPct, setPagesPct] = usePagesPct(canvasId)
   const canvas = useStore((s) => s.canvas)
   const activePageId = useStore((s) => s.activePageId)
   const selectedIds = useStore((s) => s.selectedIds)
@@ -52,6 +53,7 @@ export function PagesPanel({
   const movableIds = canvas.frames.filter((f) => selectedIds.includes(f.id) && !f.locked).map((f) => f.id)
   /* the picker is there to move the selection somewhere else, so it needs a second page */
   const showMovePicker = !readOnly && selectedIds.length > 0 && pages.length > 1
+  const minPx = pagesMinPx(showMovePicker)
 
   async function moveSelection(pageId: string) {
     if (!canvas || busy || !movableIds.length) return
@@ -326,7 +328,9 @@ export function PagesPanel({
     <div
       data-slot="pages-panel"
       className="relative flex flex-none flex-col border-b border-line-soft"
-      style={pagesPct === null ? undefined : { maxHeight: pagesMaxHeightCss(pagesPct, pagesMinPx(showMovePicker)) }}
+      style={
+        pagesPct === null ? { maxHeight: pagesHeightCss(100, minPx) } : { height: pagesHeightCss(pagesPct, minPx) }
+      }
     >
       <div className={cn('mt-1.5 flex h-6 flex-none items-center justify-between pr-2.5 pl-3.5', sectionHeading)}>
         <span data-slot="page-section-heading" className={sectionHeading}>
@@ -334,7 +338,7 @@ export function PagesPanel({
         </span>
         {!readOnly && addPage}
       </div>
-      <div className={cn('overflow-y-auto px-2 pb-1', pagesPct === null ? 'max-h-[30vh]' : 'min-h-0')}>{list}</div>
+      <div className={cn('min-h-0 overflow-y-auto px-2 pb-1', pagesPct === null && 'max-h-[30vh]')}>{list}</div>
       {showMovePicker && (
         /* the canvas shortcuts listen on window: ⌫ would delete the frames
            being moved and typed letters would switch tools, so the picker's
@@ -357,7 +361,7 @@ export function PagesPanel({
           </Select>
         </div>
       )}
-      {onPagesPctChange && <PagesSplitHandle minPx={pagesMinPx(showMovePicker)} onChange={onPagesPctChange} />}
+      <PagesSplitHandle minPx={minPx} onChange={setPagesPct} />
     </div>
   )
 }

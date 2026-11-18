@@ -1,8 +1,6 @@
 /* The split between the Pages list and the Layers tree in the canvas rail.
-   It is kept as a percentage of the rail's height, so one split fits any
-   window. The Pages section is as tall as its content, up to the limit this
-   split sets: `pagesMaxHeightCss` clamps that limit again in CSS, so a window
-   that shrinks below the size the split was dragged in still shows both lists. */
+   A canvas starts with a content-sized Pages section. After a resize its
+   height is a share of the rail, clamped to keep both lists usable. */
 import { useEffect, useState } from 'react'
 
 /** the least the Pages section gets with no move picker: its heading, one page row,
@@ -11,9 +9,8 @@ import { useEffect, useState } from 'react'
 export const PAGES_BASE_MIN_PX = 62
 /** what the move picker adds while it is shown (its 32px trigger and 8px of padding) */
 export const PAGES_MOVE_PICKER_PX = 40
-/** what the Layers tree always keeps: the rail's header, the Layers heading
- *  and search footer, and room for a few rows */
-export const LAYERS_MIN_PX = 240
+/** Room for the rail header, Layers heading, one row and the search footer. */
+export const LAYERS_MIN_PX = 144
 /** how far one arrow press moves the split */
 export const PAGES_KEY_STEP_PX = 10
 
@@ -39,8 +36,8 @@ export function pagesPctOf(px: number, railPx: number): number {
   return (px / railPx) * 100
 }
 
-/** the CSS height limit of the Pages section for a stored percentage, with the limits `clampPagesPx` applies */
-export function pagesMaxHeightCss(pct: number, minPx: number): string {
+/** The same height bounds as `clampPagesPx`, applied during layout. */
+export function pagesHeightCss(pct: number, minPx: number): string {
   return `clamp(${minPx}px, ${pct}%, calc(100% - ${LAYERS_MIN_PX}px))`
 }
 
@@ -68,23 +65,23 @@ export function readPagesPct(raw: string | null): number | null {
   return Number.isFinite(pct) && pct > 0 && pct < 100 ? pct : null
 }
 
-/** The split as the user last left it, kept per browser; null until it is dragged. */
-export function usePagesPct(): [number | null, (pct: number | null) => void] {
-  const [pct, setPct] = useState<number | null>(readStoredPct)
+/** The split as last set for this canvas. The caller is keyed by canvas ID. */
+export function usePagesPct(canvasId: string): [number | null, (pct: number) => void] {
+  const key = `${STORAGE_KEY}:${canvasId}`
+  const [pct, setPct] = useState<number | null>(() => readStoredPct(key))
   useEffect(() => {
     try {
-      if (pct === null) localStorage.removeItem(STORAGE_KEY)
-      else localStorage.setItem(STORAGE_KEY, String(pct))
+      if (pct !== null) localStorage.setItem(key, String(pct))
     } catch {
       /* the split still works when it cannot be saved */
     }
-  }, [pct])
+  }, [key, pct])
   return [pct, setPct]
 }
 
-function readStoredPct(): number | null {
+function readStoredPct(key: string): number | null {
   try {
-    return readPagesPct(localStorage.getItem(STORAGE_KEY))
+    return readPagesPct(localStorage.getItem(key))
   } catch {
     return null
   }

@@ -171,8 +171,8 @@ layers of that frame, so agents read and edit them like any other markup.
   300%. The zoom menu has 50/100/200% presets and the rulers toggle.
 - **Panels** — the right side panel has **Agents**, **Comments**, **Activity** and **Memory** tabs;
   Layers and the side panel can be resized. Drag the divider between Pages and Layers to change
-  their split; arrow keys move it, Home and End reach its limits, and the split is remembered.
-  Short page lists stay compact. ⌘. hides all UI.
+  their split; arrow keys move it, Home and End reach its limits, and Doop remembers it per canvas.
+  Pages starts compact until you resize it. ⌘. hides all UI.
 - **Themes** — Light, Dark or System under Settings → Appearance.
 - **Phones** — the canvas works on a phone: one-finger pan, pinch zoom, tap to comment, and bottom
   sheets for canvas actions, Layers and the Inspector.

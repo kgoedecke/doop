@@ -76,11 +76,16 @@ describe.skipIf(!findBrowserPath())('the Pages and Layers split', () => {
     await page.mouse.up()
   }
 
-  /** the split a long list took to its largest, as a person leaves it, then the page loaded on `canvas` */
-  async function reloadAfterLargestSplit(frames: typeof FRAMES, canvas: Parameters<typeof showCanvasPage>[3]) {
+  /** Leave a large split on the current canvas, then open a different canvas. */
+  async function openAnotherCanvas(frames: typeof FRAMES, canvas: Parameters<typeof showCanvasPage>[3]) {
     await focusSplit()
     await page.keyboard.press('End')
-    await showCanvasPage(page, frames, '', canvas)
+    await showCanvasPage(
+      page,
+      frames.map((frame) => ({ ...frame, canvasId: 'small' })),
+      '?fixtureCanvasId=small',
+      canvas,
+    )
   }
 
   /** the edges of a section's parts, for what must stay inside it */
@@ -135,6 +140,22 @@ describe.skipIf(!findBrowserPath())('the Pages and Layers split', () => {
     expect((await sizes()).pages).toBeCloseTo(dragged.pages, 0)
   })
 
+  it('drags past the last page row and still leaves a visible Layers row at the bottom', async () => {
+    await showCanvasPage(page, FRAMES, '', { pages: PAGES.slice(0, 12) })
+    const before = await fit()
+    await dragSplit(500)
+    const after = await sizes()
+    expect(after.pages).toBeGreaterThanOrEqual(after.rail - 150)
+    expect((await fit()).pages.bottom - before.lastRow.bottom).toBeGreaterThan(100)
+    const rowVisible = await page.$eval(FRAME_ROW, (row) => {
+      const tree = row.closest('[role="tree"]')!
+      return row.getBoundingClientRect().bottom <= tree.getBoundingClientRect().bottom
+    })
+    expect(rowVisible).toBe(true)
+    await showCanvasPage(page, FRAMES, '', { pages: PAGES.slice(0, 12) })
+    expect((await sizes()).pages).toBeCloseTo(after.pages, 0)
+  })
+
   it('reports where the split is and the range it can move in, as the keys, a drag and the window move it', async () => {
     const start = await liveSeparator()
     expect(start.min).toBe(pagesMinPx(false))
@@ -184,7 +205,7 @@ describe.skipIf(!findBrowserPath())('the Pages and Layers split', () => {
     expect(withPicker.picker!.bottom).toBeLessThanOrEqual(withPicker.pages.bottom + 0.5)
   })
 
-  describe('with few pages after a large split was saved', () => {
+  describe('on another canvas after a large split was saved', () => {
     /** the divider as the section draws it, the panel's own outline color, and the room under it */
     const divider = () =>
       page.evaluate(() => {
@@ -209,7 +230,7 @@ describe.skipIf(!findBrowserPath())('the Pages and Layers split', () => {
       })
 
     it('sizes a single page to its row on an empty canvas, with a full-width divider in the panel outline color', async () => {
-      await reloadAfterLargestSplit([], { pages: [PAGES[0]!] })
+      await openAnotherCanvas([], { pages: [PAGES[0]!] })
       const section = await fit()
       /* the list's bottom padding and the divider are all that is left under the row */
       expect(section.pages.bottom - section.firstRow.bottom).toBeLessThanOrEqual(6)
@@ -227,7 +248,7 @@ describe.skipIf(!findBrowserPath())('the Pages and Layers split', () => {
     })
 
     it('grows by the move picker while a frame is selected, keeping the row and the picker inside', async () => {
-      await reloadAfterLargestSplit(FRAMES, { pages: PAGES.slice(0, 2) })
+      await openAnotherCanvas(FRAMES, { pages: PAGES.slice(0, 2) })
       const before = await fit()
       expect(before.picker).toBeNull()
       expect(before.pages.bottom - before.lastRow.bottom).toBeLessThanOrEqual(6)
