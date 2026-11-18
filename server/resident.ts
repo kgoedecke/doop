@@ -8,7 +8,7 @@ import { fontsForCanvas } from './fonts.ts'
 import { libraryBrief, MAX_FONT_BYTES } from '../shared/fonts.ts'
 import { addCanvasFont, uploadedFontResult } from './canvasFontUpload.ts'
 import { inlineDataRefusal } from './inlineData.ts'
-import { frameWriteRefusal } from './components.ts'
+import { frameWriteRefusal } from './frameWriteRefusal.ts'
 import { webFontsBrief } from '../shared/webFonts.ts'
 import {
   TOKEN_TYPES,

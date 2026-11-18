@@ -2348,6 +2348,30 @@ function healFromMain(canvas: Canvas, frame: Frame, ids: ReadonlySet<string>) {
   if (next) broadcast(canvas.id, { type: 'frame:updated', frame: next, actor })
 }
 
+/** A chunk as its stream reads it. An agent that escapes its opening chunk escapes the whole
+ *  stream, so the verdict is latched there: a chunk mid-design can hold a legitimate `&lt;` (a
+ *  code sample) and must never be sniffed on its own. */
+function streamPiece(frameId: string, chunk: string, starting: boolean): { escaped: boolean; piece: string } {
+  const escaped = starting ? looksEscapedHtml(chunk) : (streams.get(frameId)?.escaped ?? false)
+  return { escaped, piece: escaped ? decodeEscapedHtml(chunk) : chunk }
+}
+
+/** The document appendFrameHtml would make of this chunk, before its component pass: decoded
+ *  as its stream reads it, after what the stream has written so far. */
+export function streamedDocument(frameId: string, chunk: string, start = false): string | undefined {
+  const before = store.getFrame(frameId)
+  if (!before) return undefined
+  const { piece } = streamPiece(frameId, chunk, start || !streams.has(frameId))
+  return start ? piece : before.html + piece
+}
+
+/** A chunk refused before it was written still counts as the agent at work: its stream is not
+ *  idle, so it is not settled under the agent while the agent sends the chunk again. */
+export function keepStreamOpen(frameId: string) {
+  const s = streams.get(frameId)
+  if (s) edit(s).lastActivity = Date.now()
+}
+
 export const appendFrameHtml = atomic(function appendFrameHtml(
   frameId: string,
   chunk: string,
@@ -2360,11 +2384,7 @@ export const appendFrameHtml = atomic(function appendFrameHtml(
   const starting = opts.start || !streams.has(frameId)
   /* read now: the store updates `before` in place below */
   const base = before.html
-  /* an agent that escapes its opening chunk escapes the whole stream, so latch
-     the verdict there: a chunk mid-design can hold a legitimate `&lt;` (a code
-     sample) and must never be sniffed on its own */
-  const escaped = starting ? looksEscapedHtml(chunk) : (streams.get(frameId)?.escaped ?? false)
-  const piece = escaped ? decodeEscapedHtml(chunk) : chunk
+  const { escaped, piece } = streamPiece(frameId, chunk, starting)
   const canvas = store.getCanvas(before.canvasId)
   /* the chunk's own pass can take up a library component, and the last chunk's whole-frame
      pass below can still be refused (the work budget): the write boundary undoes it then */
