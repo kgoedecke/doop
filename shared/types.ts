@@ -595,8 +595,38 @@ export interface PeerViewport {
 
 /* ---- websocket protocol ---- */
 
+/** A frame as the room sends it: without `html` when the receiver has not
+ *  loaded the frame's page. Its metadata (page, box, name, version) is current
+ *  either way; the page's HTML comes with `page:load`. */
+export type WireFrame = Omit<Frame, 'html'> & { html?: string }
+
+/** A canvas as `init` sends it: every frame's metadata, HTML only for the
+ *  frames on the pages in `loadedPageIds`. */
+export type WireCanvas = Omit<Canvas, 'frames'> & { frames: WireFrame[] }
+
 export type ClientMessage =
-  | { type: 'join'; canvasId: string; clientId: string; name: string; kind: ActorKind }
+  /** `pagesOnDemand`: the browser reads pages as it opens them (`page:load`),
+   *  so the server sends the HTML of the page the canvas opens on alone: the
+   *  page of `frameId` (a frame the URL links), else `pageId` (the page the
+   *  browser shows on a rejoin, or the URL names), else the default
+   *  (shared/pages.ts openingPageId). A join without it (the native apps, a tab
+   *  on an older bundle) is sent the whole canvas, as before. */
+  | {
+      type: 'join'
+      canvasId: string
+      clientId: string
+      name: string
+      kind: ActorKind
+      pagesOnDemand?: boolean
+      pageId?: string
+      frameId?: string
+    }
+  /** the browser opens a page whose frames' HTML it does not hold (or holds stale) */
+  | { type: 'page:load'; pageId: string }
+  /** the pages the browser shows (the editor's page, a prototype's screens):
+   *  their HTML stays in memory while it does. A page read with `page:load`
+   *  and not shown (an export, an undo) is left to go idle */
+  | { type: 'pages:shown'; pageIds: string[] }
   | { type: 'cursor'; x: number; y: number }
   | { type: 'viewport'; viewport: PeerViewport }
   | { type: 'editing'; frameId: string | null }
@@ -605,7 +635,10 @@ export type ClientMessage =
 export type ServerMessage =
   | {
       type: 'init'
-      canvas: Canvas
+      canvas: WireCanvas
+      /** the pages whose frames carry their HTML in `canvas`: the page it opens
+       *  on. A server from before page loading leaves it out: every page, then */
+      loadedPageIds?: string[]
       presences: Presence[]
       activity: ActivityItem[]
       tasks: AgentTask[]
@@ -638,8 +671,16 @@ export type ServerMessage =
       height: number
       rotation?: number
     }
-  | { type: 'frame:created'; frame: Frame; actor: Actor }
-  | { type: 'frame:updated'; frame: Frame; actor: Actor }
+  /** a page's frames, HTML included, answering `page:load`; from now on the
+   *  room sends this page's frames to this browser with their HTML */
+  | { type: 'page:frames'; pageId: string; frames: Frame[] }
+  /** the page could not be read (its storage is away for now): ask again later */
+  | { type: 'page:failed'; pageId: string }
+  /** the server let the page's frame HTML go: this browser's copy is no longer
+   *  kept current, so it reads the page again (`page:load`) before it shows it */
+  | { type: 'page:dropped'; pageId: string }
+  | { type: 'frame:created'; frame: WireFrame; actor: Actor }
+  | { type: 'frame:updated'; frame: WireFrame; actor: Actor }
   | { type: 'frame:deleted'; frameId: string; actor: Actor }
   | { type: 'frame:streaming'; frameId: string; active: boolean; actor: Actor }
   | { type: 'canvas:renamed'; name: string; actor: Actor }

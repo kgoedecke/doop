@@ -48,7 +48,7 @@ const HOSTED = `${env.BETTER_AUTH_URL}/icons/iconify/mdi/home.svg?color=%23ff000
 const sent: { frameId: string; html: string }[] = []
 actions.wire(
   (_canvasId, msg) => {
-    if (msg.type === 'frame:updated') sent.push({ frameId: msg.frame.id, html: msg.frame.html })
+    if (msg.type === 'frame:updated') sent.push({ frameId: msg.frame.id, html: msg.frame.html ?? '' })
   },
   () => {},
 )

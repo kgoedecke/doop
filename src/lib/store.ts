@@ -18,6 +18,8 @@ import type {
   PeerViewport,
   Presence,
   TaskFeedback,
+  WireCanvas,
+  WireFrame,
 } from '../../shared/types'
 import { roleAllows, type CanvasRole } from '../../shared/canvasRole'
 import type { SnapGuide } from './snap'
@@ -44,7 +46,7 @@ export type ComposerSend =
 /** Who is streaming into a frame: enough to name, colour and identify them. */
 export type StreamActor = { name: string; color: string; agentKey?: string }
 
-interface State {
+export interface State {
   canvas: Canvas | null
   presences: Record<string, Presence>
   cursors: Record<string, { x: number; y: number }>
@@ -184,11 +186,24 @@ interface State {
   activePageId: string | null
   /** `keepFollow`: the follow loop itself moving to its leader's page, so the
    *  follow stays on (any other page switch lets go, as a camera move does) */
+  /** pages whose frames' HTML is not here, or not current: the room's `init`
+   *  left them out, or sent one of their frames without its HTML since. Their
+   *  frames carry their metadata, and their HTML is '' or an old copy, until
+   *  `page:frames` brings the page (pageReady, src/lib/pages.ts). Every other
+   *  page, one made after the join included, the room keeps current here */
+  stalePages: Record<string, true>
   setActivePage(id: string, opts?: { keepFollow?: boolean }): void
   setPages(pages: import('../../shared/types').CanvasPageInfo[], canvasId?: string): void
   /** paint one page locally (this client's own edit, before or after its save) */
   setPageBackgroundLocal(pageId: string, background: string | null): void
-  setCanvas(c: Canvas | null): void
+  /** `loadedPageIds`: the pages whose frames carry their HTML (every other
+   *  page is stale). Left out, a new canvas counts as whole and the same canvas
+   *  keeps the pages it had. A frame without `html` keeps the copy here, or ''. */
+  setCanvas(c: Canvas | WireCanvas | null, loadedPageIds?: readonly string[]): void
+  /** a page's frames whole, answering `page:load`: the page is loaded from now on */
+  setPageFrames(pageId: string, frames: Frame[]): void
+  /** the room stopped keeping this page current here (`page:dropped`): read it again before it shows */
+  setPageStale(pageId: string): void
   setConnected(v: boolean): void
   setCanvasNotFound(v: boolean): void
   setSignInRequired(v: boolean): void
@@ -212,7 +227,9 @@ interface State {
   upsertFeedback(fb: TaskFeedback): void
   setComments(comments: ElementComment[]): void
   upsertComment(c: ElementComment): void
-  upsertFrame(f: Frame): void
+  /** a frame from the room; one without `html` keeps what is here, and a
+   *  loaded page it lands on is loaded no more until it is read again */
+  upsertFrame(f: Frame | WireFrame): void
   patchFrameLocal(frameId: string, patch: Partial<Frame>): void
   removeFrame(frameId: string): void
   renameCanvasLocal(name: string): void
@@ -327,6 +344,7 @@ const UNFOLLOW = { following: null, followedAgent: null }
 export const useStore = create<State>((set, get) => ({
   canvas: null,
   activePageId: null,
+  stalePages: {},
   presences: {},
   cursors: {},
   peerViewports: {},
@@ -378,24 +396,54 @@ export const useStore = create<State>((set, get) => ({
   flashes: {},
   streams: {},
 
-  setCanvas: (canvas) =>
-    set((s) => ({
-      /* the stage paints frames in array order: back to front */
-      canvas: canvas && { ...canvas, frames: sortByStack(canvas.frames) },
-      /* leaving a canvas (CanvasPage unmounts or its id changes) ends ⌘.
+  setCanvas: (wire, loadedPageIds) =>
+    set((s) => {
+      const canvas: Canvas | null = wire && { ...wire, frames: wire.frames.map((f) => withHtml(f, s.canvas)) }
+      return {
+        /* the stage paints frames in array order: back to front */
+        canvas: canvas && { ...canvas, frames: sortByStack(canvas.frames) },
+        stalePages: !canvas
+          ? {}
+          : loadedPageIds
+            ? Object.fromEntries(
+                canvasPages(canvas)
+                  .filter((page) => !loadedPageIds.includes(page.id))
+                  .map((page) => [page.id, true as const]),
+              )
+            : canvas.id === s.canvas?.id
+              ? s.stalePages
+              : {},
+        /* leaving a canvas (CanvasPage unmounts or its id changes) ends ⌘.
          hide-UI, so the next canvas never opens with its chrome gone; a
          re-join of the same canvas keeps it */
-      uiHidden: canvas ? s.uiHidden : false,
-      /* an agent follow outlives the agent's presence, not the canvas */
-      ...(s.following && canvas?.id !== s.canvas?.id ? UNFOLLOW : {}),
-      activePageId: canvas
-        ? canvas.id === s.canvas?.id && canvasPages(canvas).some((p) => p.id === s.activePageId)
-          ? s.activePageId
-          : /* a canvas being opened starts on the page its URL asks for, so
+        uiHidden: canvas ? s.uiHidden : false,
+        /* an agent follow outlives the agent's presence, not the canvas */
+        ...(s.following && canvas?.id !== s.canvas?.id ? UNFOLLOW : {}),
+        activePageId: canvas
+          ? canvas.id === s.canvas?.id && canvasPages(canvas).some((p) => p.id === s.activePageId)
+            ? s.activePageId
+            : /* a canvas being opened starts on the page its URL asks for, so
                the first paint is already that page */
-            openingPageId(canvas, typeof location === 'undefined' ? '' : location.search)
-        : null,
-    })),
+              openingPageId(canvas, typeof location === 'undefined' ? '' : location.search)
+          : null,
+      }
+    }),
+  setPageFrames: (pageId, frames) =>
+    set((s) => {
+      if (!s.canvas) return {}
+      const fresh = new Map(frames.filter((f) => f.canvasId === s.canvas!.id).map((f) => [f.id, f]))
+      const merged = s.canvas.frames.map((f) => fresh.get(f.id) ?? f)
+      for (const f of s.canvas.frames) fresh.delete(f.id)
+      return {
+        canvas: { ...s.canvas, frames: sortByStack([...merged, ...fresh.values()]) },
+        stalePages: withoutPage(s.stalePages, pageId),
+      }
+    }),
+  setPageStale: (pageId) =>
+    set((s) => {
+      if (!s.canvas || s.stalePages[pageId] || !canvasPages(s.canvas).some((p) => p.id === pageId)) return {}
+      return { stalePages: { ...s.stalePages, [pageId]: true as const } }
+    }),
   setActivePage: (id, opts) =>
     set((s) => {
       if (!s.canvas || !canvasPages(s.canvas).some((p) => p.id === id) || s.activePageId === id) return {}
@@ -539,17 +587,23 @@ export const useStore = create<State>((set, get) => ({
         : [fb, ...s.feedback].slice(0, 100)
       return { feedback }
     }),
-  upsertFrame: (f) =>
+  upsertFrame: (wire) =>
     set((s) => {
-      if (!s.canvas || f.canvasId !== s.canvas.id) return {}
+      if (!s.canvas || wire.canvasId !== s.canvas.id) return {}
+      const f = withHtml(wire, s.canvas)
       const frames = sortByStack(
         s.canvas.frames.some((x) => x.id === f.id)
           ? s.canvas.frames.map((x) => (x.id === f.id ? f : x))
           : [...s.canvas.frames, f],
       )
-      const hidden = s.selectedIds.includes(f.id) && framePageId(s.canvas, f) !== s.activePageId
+      const pageId = framePageId(s.canvas, f)
+      /* the room left the HTML out: this page's copy of the frame may be stale,
+         so the page is read again before it shows */
+      const stale = wire.html === undefined && !s.stalePages[pageId]
+      const hidden = s.selectedIds.includes(f.id) && pageId !== s.activePageId
       return {
         canvas: { ...s.canvas, frames },
+        ...(stale ? { stalePages: { ...s.stalePages, [pageId]: true as const } } : {}),
         ...(hidden
           ? {
               selectedIds: s.selectedIds.filter((id) => id !== f.id),
@@ -875,4 +929,17 @@ export function toolAllowed(tool: Tool, role: CanvasRole): boolean {
   if (isDrawingTool(tool)) return roleAllows(role, 'edit')
   if (tool === 'comment') return roleAllows(role, 'comment')
   return true
+}
+
+/** A frame from the room as the store keeps it: one sent without its HTML
+ *  keeps the copy here (stale, its page not loaded) or ''. */
+function withHtml(frame: Frame | WireFrame, canvas: Canvas | null): Frame {
+  if (typeof frame.html === 'string') return frame as Frame
+  const kept = canvas?.id === frame.canvasId ? canvas.frames.find((f) => f.id === frame.id)?.html : undefined
+  return { ...frame, html: kept ?? '' }
+}
+
+function withoutPage(pages: Record<string, true>, pageId: string): Record<string, true> {
+  const { [pageId]: _dropped, ...rest } = pages
+  return rest
 }

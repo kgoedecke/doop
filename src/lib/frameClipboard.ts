@@ -1,6 +1,8 @@
 import type { Frame } from '../../shared/types'
 import { api } from './api'
 import { useStore } from './store'
+import { frameHtmlReady } from './pages'
+import { t } from './i18n'
 import { posthog } from './posthog'
 import { historyEpoch, recordCreates, replaceFramesTracked } from './history'
 import { ELEMENT_CLIP_KEY, FRAME_CLIP_KEY as CLIP_KEY } from './clipboardKeys'
@@ -25,8 +27,14 @@ interface FrameClip {
   frames: ClipFrame[]
 }
 
-export function copyFrames(frames: Frame[]) {
-  if (!frames.length) return
+/** Put these frames on the canvas clipboard; false (nothing copied) for none,
+ *  or while one's page is on its way, its HTML here a blank or stale copy. */
+export function copyFrames(frames: Frame[]): boolean {
+  if (!frames.length) return false
+  if (!frames.every((frame) => frameHtmlReady(useStore.getState(), frame.id))) {
+    useStore.getState().pushNotice(t('stage.pageLoading'))
+    return false
+  }
   const left = Math.min(...frames.map((f) => f.x))
   const top = Math.min(...frames.map((f) => f.y))
   const clip: FrameClip = {
@@ -42,6 +50,7 @@ export function copyFrames(frames: Frame[]) {
   }
   localStorage.setItem(CLIP_KEY, JSON.stringify(clip))
   localStorage.removeItem(ELEMENT_CLIP_KEY)
+  return true
 }
 
 function readClip(): ClipFrame[] {

@@ -2676,19 +2676,19 @@ export const updateFrame = atomic(function updateFrame(
 ): Frame | undefined {
   const before = store.getFrame(frameId)
   if (!before) return undefined
+  const prevHtml = before.html
   let changedComponents: ComponentDef[] = []
   if (patch.html !== undefined) {
-    const prepared = prepareWrite(before.canvasId, frameId, repairEscapedHtml(patch.html), before.html, actor.name, {
+    const prepared = prepareWrite(before.canvasId, frameId, repairEscapedHtml(patch.html), prevHtml, actor.name, {
       refuseUnclosed: refusesUnclosed(frameId, actor, opts.replace === true),
     })
     patch = { ...patch, html: prepared.html }
     changedComponents = prepared.changed
   }
   const prevName = before.name
-  const prevHtml = before.html
   const prevHidden = !!before.hidden
   const prevLocked = !!before.locked
-  const prior = priorState(before)
+  const prior = { ...priorState(before), html: prevHtml }
   const frame = store.updateFrame(frameId, patch, actor.name)
   if (!frame) return undefined
 

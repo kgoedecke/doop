@@ -668,9 +668,21 @@ async function writeFramePage(frameId: string, pageId: string) {
   await db.update(t.frames).set({ pageId }).where(eq(t.frames.id, frameId))
 }
 
-/** The html of every frame on a canvas, for store.load. */
-export function loadFrameHtml(canvasId: string): Promise<{ id: string; html: string }[]> {
-  return db.select({ id: t.frames.id, html: t.frames.html }).from(t.frames).where(eq(t.frames.canvasId, canvasId))
+/** ids per query when frame html is read by id */
+const HTML_READ_BATCH = 200
+
+/** The html of these frames, for store.loadPages; a frame with no row is left out. */
+export async function loadFrameHtml(frameIds: readonly string[]): Promise<Map<string, string>> {
+  const html = new Map<string, string>()
+  for (let at = 0; at < frameIds.length; at += HTML_READ_BATCH) {
+    const ids = frameIds.slice(at, at + HTML_READ_BATCH)
+    const rows = await db
+      .select({ id: t.frames.id, html: t.frames.html })
+      .from(t.frames)
+      .where(inArray(t.frames.id, ids))
+    for (const row of rows) html.set(row.id, row.html)
+  }
+  return html
 }
 
 /** One frame's html, for a render of a frame whose canvas is not loaded. */

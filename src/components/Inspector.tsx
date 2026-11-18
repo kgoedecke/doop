@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import type { Frame } from '../../shared/types'
 import { useStore } from '../lib/store'
+import { frameHtmlReady } from '../lib/pages'
 import { api, errorMessage } from '../lib/api'
 import { beginFrameSave } from '../lib/frameSaves'
 import { copyFramePng, downloadFrameExport, downloadFrameHtml, downloadFramesPdf } from '../lib/frameExport'
@@ -72,6 +73,10 @@ export function Inspector({
   const [historyOpen, setHistoryOpen] = useState(false)
   const [htmlCopy, setHtmlCopy] = useState<'idle' | 'copied' | 'failed'>('idle')
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  /* the frame's page is here and current: until then its HTML here is a blank
+     or stale copy, which is neither shown nor edited (a draft of it would be
+     saved over the real document once that arrives) */
+  const htmlReady = useStore((s) => frameHtmlReady(s, frame.id))
   const queuedSave = useRef<{ timer: number; finish: () => void } | null>(null)
   const copyTimer = useRef<number | null>(null)
   const frameId = useRef(frame.id)
@@ -124,6 +129,7 @@ export function Inspector({
      an older save finishing late never marks a newer edit as saved */
   const editSeq = useRef(0)
   function onHtmlChange(value: string) {
+    if (!frameHtmlReady(useStore.getState(), frame.id)) return
     const seq = ++editSeq.current
     setDraft(value)
     setSaveState('dirty')
@@ -379,6 +385,7 @@ export function Inspector({
                 variant="bare"
                 className={cn(fillBtn, 'gap-1.5')}
                 title={t('inspector.copyHtmlTitle')}
+                disabled={!htmlReady}
                 onClick={copyHtml}
               >
                 <CopyIcon className="size-3.5" />
@@ -404,9 +411,10 @@ export function Inspector({
               aria-label={t('inspector.editHtml')}
               variant="code"
               className="h-[320px] flex-none max-md:h-auto max-md:min-h-[160px] max-md:flex-1"
-              value={draft}
+              value={htmlReady ? draft : ''}
+              readOnly={!htmlReady}
               spellCheck={false}
-              placeholder="<!doctype html>…"
+              placeholder={htmlReady ? '<!doctype html>…' : t('stage.pageLoading')}
               onChange={(e) => onHtmlChange(e.target.value)}
               onFocus={() => setEditing(true)}
               onBlur={() => setEditing(false)}

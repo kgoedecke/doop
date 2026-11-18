@@ -1,9 +1,10 @@
 import { beforeAll, beforeEach, expect, it, vi } from 'vitest'
 import type { drizzle as pgliteDrizzle } from 'drizzle-orm/pglite'
 import { db } from '../server/db/index.ts'
+import type { ComponentDef } from '../shared/components.ts'
 
 /* Boot keeps every canvas and frame in memory but not frame HTML, which
-   loads per canvas (store.load) and is dropped again when the canvas goes
+   loads per page (store.loadPages) and is dropped again when the page goes
    idle (store.evictIdle). */
 vi.mock('../server/db/index.ts', async () => {
   const { PGlite } = await import('@electric-sql/pglite')
@@ -150,4 +151,95 @@ it('leaves a canvas unloaded when the resident agent is woken with no work on it
   onFeedback(canvasId)
   await new Promise((resolve) => setTimeout(resolve, 50))
   expect(store.isLoaded(canvasId)).toBe(false)
+})
+
+/** A canvas with a frame on each of two pages (and a component's main on the
+ *  second), written to the database and booted again. */
+async function bootedPages(name: string) {
+  const canvas = store.createCanvas(name, 'owner')
+  const home = canvas.pages![0]!
+  const second = { id: `${canvas.id}-second`, name: 'Second' }
+  store.setPages(canvas.id, [home, second])
+  const onHome = store.createFrame(canvas.id, { name: 'Home', html: '<p>home</p>' }, 'owner')!
+  const onSecond = store.createFrame(canvas.id, { name: 'Second', pageId: second.id, html: '<p>2</p>' }, 'owner')!
+  const main = store.createFrame(canvas.id, { name: 'Main', pageId: second.id, html: '<p>main</p>' }, 'owner')!
+  for (const frame of [onHome, onSecond, main]) await persist.saveFrameNow(frame)
+  persist.saveCanvas(store.getCanvas(canvas.id)!)
+  const stored = async () => (await persist.hydrate()).canvases.filter((c) => c.id === canvas.id)
+  await expect.poll(async () => (await stored())[0]?.pages?.length).toBe(2)
+  store.init(await stored())
+  store.getCanvas(canvas.id)!.components = [{ id: 'kit', mainFrameId: main.id } as ComponentDef]
+  return { canvasId: canvas.id, home: home.id, second: second.id, onHome, onSecond, main }
+}
+
+it('loads one page without the others, and the whole canvas only when asked', async () => {
+  const { canvasId, home, second, onHome, onSecond } = await bootedPages('Pages')
+  await store.loadPages(canvasId, [home])
+  expect(store.getFrame(onHome.id)!.html).toBe('<p>home</p>')
+  expect(htmlLoaded(store.getFrame(onSecond.id)!)).toBe(false)
+  expect(store.isPageLoaded(canvasId, home)).toBe(true)
+  expect(store.isPageLoaded(canvasId, second)).toBe(false)
+  expect(store.isLoaded(canvasId)).toBe(false)
+
+  await store.load(canvasId)
+  expect(store.getFrame(onSecond.id)!.html).toBe('<p>2</p>')
+  expect(store.isLoaded(canvasId)).toBe(true)
+})
+
+it('loads a frame with its page and the component mains, wherever they are', async () => {
+  const { canvasId, onHome, onSecond, main } = await bootedPages('Frame write')
+  await store.loadFrame(onHome.id)
+  expect(htmlLoaded(store.getFrame(onHome.id)!)).toBe(true)
+  expect(store.getFrame(main.id)!.html).toBe('<p>main</p>')
+  expect(htmlLoaded(store.getFrame(onSecond.id)!)).toBe(false)
+  expect(store.isLoaded(canvasId)).toBe(false)
+})
+
+it('drops idle pages one by one, never one someone is looking at', async () => {
+  const { canvasId, home, second, onHome, onSecond } = await bootedPages('Page evict')
+  await store.load(canvasId)
+  const at = (hours: number) => Date.now() + hours * HOUR
+
+  store.setInUse((id) => (id === canvasId ? new Set([home]) : false))
+  store.evictIdle(HOUR / 2, at(1))
+  expect(store.isPageLoaded(canvasId, home)).toBe(true)
+  expect(htmlLoaded(store.getFrame(onSecond.id)!)).toBe(false)
+  expect(store.stats().pages).toBeGreaterThan(0)
+
+  /* nobody on it any more: the page the room pinned waits its idle time from now */
+  store.setInUse(() => false)
+  store.evictIdle(HOUR / 2, at(1.25))
+  expect(store.isPageLoaded(canvasId, home)).toBe(true)
+  store.evictIdle(HOUR / 2, at(2))
+  expect(htmlLoaded(store.getFrame(onHome.id)!)).toBe(false)
+
+  await store.loadPages(canvasId, [second])
+  expect(store.getFrame(onSecond.id)!.html).toBe('<p>2</p>')
+  expect(htmlLoaded(store.getFrame(onHome.id)!)).toBe(false)
+})
+
+it('keeps only the pages a write works on while it runs, and counts only those as used', async () => {
+  const { canvasId, onHome, onSecond } = await bootedPages('Page holds')
+  store.getCanvas(canvasId)!.components = []
+  const start = Date.now()
+  const now = vi.spyOn(Date, 'now').mockReturnValue(start)
+  try {
+    await store.load(canvasId)
+    /* a write on the home page, under way through an idle sweep: the other page is not its to keep */
+    await store.withFrames(canvasId, [onHome.id], async () => {
+      store.evictIdle(HOUR / 2, start + HOUR)
+    })
+    expect(htmlLoaded(store.getFrame(onHome.id)!)).toBe(true)
+    expect(htmlLoaded(store.getFrame(onSecond.id)!)).toBe(false)
+
+    /* writes on home go on for a while: releasing them never makes the other page recent */
+    await store.load(canvasId)
+    now.mockReturnValue(start + HOUR)
+    await store.withFrames(canvasId, [onHome.id], async () => {})
+    store.evictIdle(HOUR / 2, start + HOUR + HOUR / 4)
+    expect(htmlLoaded(store.getFrame(onHome.id)!)).toBe(true)
+    expect(htmlLoaded(store.getFrame(onSecond.id)!)).toBe(false)
+  } finally {
+    now.mockRestore()
+  }
 })

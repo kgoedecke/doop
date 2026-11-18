@@ -1,5 +1,7 @@
 import type { Frame } from '../../shared/types'
 import { snapshotFrame } from './frameBridge'
+import { useStore } from './store'
+import { loadFramePages } from './ws'
 
 /**
  * Render a frame to an image in this browser: the document is inlined into
@@ -45,9 +47,16 @@ export async function rasterizeFrame(frame: Frame, opts: RasterOptions): Promise
   /* an unmounted frame renders from its saved HTML; a mounted one whose
      pixels cannot all be read is for the server */
   if (snapshot && snapshot.html === null) throw new Error('the frame cannot be drawn here')
-  const html = snapshot?.html ?? frame.html
+  const html = snapshot?.html ?? (await savedHtml(frame))
   const svg = await inlineDocument(html, { width: frame.width, height: frame.height, signal })
   return drawSvg(svg, { width: frame.width, height: frame.height, ...opts })
+}
+
+/** The HTML of a frame that is not on screen: read with its page first when
+ *  this browser has not loaded that page, so it never draws a blank or old copy. */
+async function savedHtml(frame: Frame): Promise<string> {
+  await loadFramePages([frame.id])
+  return useStore.getState().canvas?.frames.find((f) => f.id === frame.id)?.html ?? frame.html
 }
 
 /** The frame as an SVG file: the same self-contained document the raster
@@ -58,7 +67,7 @@ export async function frameSvg(frame: Frame, opts: { clip?: ClipRect; signal?: A
   const signal = opts.signal ?? AbortSignal.timeout(RESOURCE_FETCH_MS)
   const snapshot = await snapshotFrame(frame.id)
   if (snapshot && snapshot.html === null) throw new Error('the frame cannot be drawn here')
-  const svg = await inlineDocument(snapshot?.html ?? frame.html, {
+  const svg = await inlineDocument(snapshot?.html ?? (await savedHtml(frame)), {
     width: frame.width,
     height: frame.height,
     signal,

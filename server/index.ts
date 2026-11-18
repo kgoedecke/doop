@@ -40,7 +40,7 @@ import { previewDocument } from './componentPreview.ts'
 import { codeSchema, propSchema } from './componentTools.ts'
 import { activeComponents } from '../shared/components.ts'
 import { PRO_UPLOAD_BYTES } from '../shared/billing.ts'
-import { canvasPages, framePageId, samePages } from '../shared/pages.ts'
+import { canvasPages, framePageId, openingPageId, pageFrames, samePages } from '../shared/pages.ts'
 import { normalizePageBackground } from '../shared/pageBackground.ts'
 import { MAX_STACK_WRITES, type StackWrite } from '../shared/frameStack.ts'
 import { normalizeRotation } from '../shared/frameRotation.ts'
@@ -60,7 +60,7 @@ import { eq, inArray } from 'drizzle-orm'
 import { toNodeHandler, fromNodeHeaders } from 'better-auth/node'
 import { oAuthDiscoveryMetadata } from 'better-auth/plugins'
 import { WebSocketServer, WebSocket } from 'ws'
-import { GuideLimitError, PageLimitError, store } from './store.ts'
+import { GuideLimitError, PageLimitError, store, type HoldScope } from './store.ts'
 import { parseGuide } from '../shared/guides.ts'
 import { getImage } from './previews.ts'
 import { LayerNotFoundError, layerRefFromQuery, layerSelector } from './layerExport.ts'
@@ -158,7 +158,8 @@ import { isPeerViewport } from '../shared/viewport.ts'
 import { exportScaleSuffix, fitExportScale, fullFrameRenderScale, parseExportScale } from '../shared/exportScale.ts'
 import { emailShare } from './canvasShares.ts'
 import * as userEvents from './userEvents.ts'
-import type { Actor, Canvas, ClientMessage, Presence, ServerMessage } from '../shared/types.ts'
+import type { Actor, Canvas, ClientMessage, Frame, Presence, ServerMessage, WireCanvas } from '../shared/types.ts'
+import { carriesHtml, frameMeta, htmlLoaded } from './frameHtml.ts'
 
 const PORT = env.PORT
 const HOST = env.HOST
@@ -262,6 +263,20 @@ interface Conn {
    *  Showing their borrowed identity as a live cursor would tell the room
    *  the owner is here when they aren't. */
   silent?: boolean
+  /** the pages whose frames this browser was sent with their HTML (`init`,
+   *  `page:frames`): it gets their frames' HTML from then on */
+  pages: Set<string>
+  /** the canvas's pages when it joined: of these, only `pages` come with HTML.
+   *  A page made since holds nothing the browser was not sent, so it comes whole */
+  joinedPages: Set<string>
+  /** the pages this browser shows (`pages:shown`; the page it joined on until
+   *  it says): their HTML stays in memory (store.evictIdle). A page it only
+   *  read (`page:load` for an export or an undo) is not one of them */
+  shown: Set<string>
+  /** the browser reads pages as it opens them (its join said `pagesOnDemand`).
+   *  One from before (an open tab on an older bundle, the native apps) is sent
+   *  the whole canvas and every frame's HTML, as it always was */
+  onDemand: boolean
 }
 
 /* What a signed-out guest is not sent: the team's conversation (comments,
@@ -344,8 +359,83 @@ function broadcast(canvasId: string, msg: ServerMessage, excludeClientId?: strin
   for (const c of room(canvasId)) {
     if (excludeClientId && c.presence.clientId === excludeClientId) continue
     const shown = c.userId ? msg : forGuest(msg)
-    if (shown) send(c.ws, shown)
+    if (shown) send(c.ws, forPages(c, shown))
   }
+}
+
+/** A frame on a page this browser has not loaded goes to it without its HTML
+ *  (and so does one whose HTML the server does not hold): the browser reads
+ *  that page whole when it opens it. */
+function forPages(conn: Conn, msg: ServerMessage): ServerMessage {
+  if (msg.type !== 'frame:created' && msg.type !== 'frame:updated') return msg
+  const canvas = store.getCanvas(conn.canvasId)
+  const pageId = canvas && framePageId(canvas, msg.frame as Frame)
+  const sendsHtml = !conn.onDemand || (!!pageId && (conn.pages.has(pageId) || !conn.joinedPages.has(pageId)))
+  if (sendsHtml && carriesHtml(msg.frame)) return msg
+  return { ...msg, frame: frameMeta(msg.frame) }
+}
+
+/** The canvas as `init` sends it: every frame's metadata, and the HTML of the
+ *  frames on `pageId` (every page, for a join from before page loading) where
+ *  the whole page is in memory. Those pages are listed in `loadedPageIds`; the
+ *  browser asks for any other with `page:load`. */
+function canvasForInit(canvas: Canvas, pageId: string | 'all'): { canvas: WireCanvas; loadedPageIds: string[] } {
+  const asked = pageId === 'all' ? canvasPages(canvas).map((page) => page.id) : [pageId]
+  const loaded = new Set(asked.filter((id) => store.isPageLoaded(canvas.id, id)))
+  const frames = canvas.frames.map((frame) => (loaded.has(framePageId(canvas, frame)) ? frame : frameMeta(frame)))
+  return { canvas: { ...canvas, frames }, loadedPageIds: [...loaded] }
+}
+
+/** The page a join opens on: the page of the frame the browser's URL links,
+ *  else the page it names (or shows, on a rejoin), else the canvas's default
+ *  (shared/pages.ts, the same rule the browser follows). */
+function joinPage(canvas: Canvas, msg: { pageId?: unknown; frameId?: unknown }): string {
+  const search = new URLSearchParams()
+  if (typeof msg.frameId === 'string') search.set('frame', msg.frameId)
+  if (typeof msg.pageId === 'string') search.set('page', msg.pageId)
+  return openingPageId({ ...canvas, landingPageId: landingPageOf(canvas) }, search.toString())
+}
+
+/** most pages one browser keeps in memory by showing them (a prototype's
+ *  screens across pages, the editor's page) */
+const MAX_SHOWN_PAGES = 20
+
+/** The canvas's pages among those a `pages:shown` names. */
+function shownPages(canvasId: string, pageIds: unknown): Set<string> {
+  const canvas = store.getCanvas(canvasId)
+  if (!canvas || !Array.isArray(pageIds)) return new Set()
+  const known = new Set(canvasPages(canvas).map((page) => page.id))
+  return new Set(
+    pageIds.filter((id): id is string => typeof id === 'string' && known.has(id)).slice(0, MAX_SHOWN_PAGES),
+  )
+}
+
+/** `page:load`: read the page and send its frames whole. From the moment they
+ *  are sent this browser gets the page's frames with their HTML, so nothing
+ *  written after the read is missed: the room sends in order on one socket. */
+async function sendPage(conn: Conn, pageId: string, attempt = 0): Promise<void> {
+  const canvas = store.getCanvas(conn.canvasId)
+  if (!canvas || !canvasPages(canvas).some((page) => page.id === pageId)) return
+  try {
+    await store.loadPages(conn.canvasId, [pageId])
+  } catch (error) {
+    console.error('[room] could not load a page', conn.canvasId, pageId, error)
+    send(conn.ws, { type: 'page:failed', pageId })
+    return
+  }
+  /* closed, or no longer allowed in, while the page was read */
+  if (conns.get(conn.ws) !== conn || !connRole(conn)) return
+  const current = store.getCanvas(conn.canvasId)
+  if (!current) return
+  const frames = pageFrames(current, pageId)
+  /* a frame moved onto the page meanwhile: read again */
+  if (!frames.every(htmlLoaded)) {
+    if (attempt < 3) return sendPage(conn, pageId, attempt + 1)
+    send(conn.ws, { type: 'page:failed', pageId })
+    return
+  }
+  conn.pages.add(pageId)
+  send(conn.ws, { type: 'page:frames', pageId, frames })
 }
 
 /* Agents show up in presence while they are actively calling tools. */
@@ -916,34 +1006,105 @@ app.use('/api', async (req, res, next) => {
   }
 })
 
-/* Every route naming a canvas, frame or comment gets that canvas's frame
-   HTML loaded before its handler runs (store.load), so handlers keep
-   reading the store synchronously, and held until the response is done, so
-   a handler awaiting something slow (an import, a render) keeps it.
+/* Every route naming a canvas, frame or comment gets the frame HTML its
+   handler reads loaded before it runs (store.loadPages), so handlers keep
+   reading the store synchronously, and the canvas held until the response is
+   done, so a handler awaiting something slow (an import, a render) keeps it.
+   A frame's routes load the frame's page and the canvas's component mains
+   (store.loadForFrames); a canvas's routes load the whole canvas, except the
+   ones below that read no frame HTML or name the frames they work on, so
+   opening and editing one page of a large canvas never reads the others.
    Behind the session gate, so only a signed-in request can bring a canvas
    into memory. */
-function loadFirst(canvasOf: (id: string) => string | undefined): express.RequestHandler {
+/** What a route reads: loaded before it runs, and held (`scope`) until its response is done. */
+type LoadTarget = { canvasId: string; load: () => Promise<unknown>; scope: HoldScope }
+
+const wholeCanvas = (canvasId: string): LoadTarget => ({ canvasId, load: () => store.load(canvasId), scope: 'all' })
+
+const framesOfCanvas = (canvasId: string, frameIds: readonly string[]): LoadTarget => ({
+  canvasId,
+  load: () => store.loadForFrames(canvasId, frameIds),
+  scope: store.framesScope(canvasId, frameIds),
+})
+
+function loadFirst(target: (req: express.Request) => LoadTarget | undefined): express.RequestHandler {
   return (req, res, next) => {
-    const canvasId = canvasOf(String(req.params.id))
-    if (!canvasId) return next()
-    store.load(canvasId).then(() => {
-      res.once('close', store.hold(canvasId))
+    const found = target(req)
+    if (!found) return next()
+    found.load().then(() => {
+      res.once('close', store.hold(found.canvasId, found.scope))
       next()
     }, next)
   }
 }
-app.use(
-  '/api/canvases/:id',
-  loadFirst((id) => id),
-)
-app.use(
-  '/api/frames/:id',
-  loadFirst((id) => store.getFrame(id)?.canvasId),
-)
-app.use(
-  '/api/comments/:id',
-  loadFirst((id) => actions.findComment(id)?.canvasId),
-)
+
+/** Canvas routes that read no frame HTML: the canvas is not loaded for them. */
+const HTML_FREE_CANVAS_ROUTES: readonly [method: string, path: RegExp][] = [
+  ['GET', /^\/(agents|fonts|members|component-libraries)$/],
+  ['PUT', /^\/(thumbnail|guides\/[^/]+|pages\/[^/]+\/(background|flow-start))$/],
+  ['DELETE', /^\/guides\/[^/]+$/],
+  /* a canvas comment is pinned to a page point; a copy reads its own page (store.duplicatePage) */
+  ['POST', /^\/(comments|pages\/[^/]+\/duplicate)$/],
+]
+
+/** What a canvas route reads: nothing, the frames it names, the page it draws
+ *  on, or (any other route) the whole canvas. */
+function canvasRouteTarget(req: express.Request): LoadTarget | undefined {
+  const canvasId = String(req.params.id)
+  const canvas = store.getCanvas(canvasId)
+  if (!canvas) return undefined
+  if (HTML_FREE_CANVAS_ROUTES.some(([method, path]) => req.method === method && path.test(req.path))) return undefined
+  const body: unknown = req.body
+  /* a ticket for the actor: the frame the browser is about to edit there, so
+     the server follows the actor with that frame known (store.loadForFrames).
+     A request naming no frame (a browser from before) loads the canvas whole */
+  const ticketFrame = req.query.frameId
+  if (req.method === 'GET' && req.path === '/actor' && typeof ticketFrame === 'string') {
+    if (store.getFrame(ticketFrame)?.canvasId === canvasId) return framesOfCanvas(canvasId, [ticketFrame])
+  }
+  if (req.method === 'POST' && req.path === '/frames') {
+    const named = (body as { pageId?: unknown } | undefined)?.pageId
+    const pageId = typeof named === 'string' ? named : canvasPages(canvas)[0]!.id
+    return { canvasId, load: () => store.loadForPage(canvasId, pageId), scope: store.pageScope(canvasId, pageId) }
+  }
+  if (req.method === 'PUT' && req.path === '/stack') {
+    const writes = (body as { frames?: unknown } | undefined)?.frames
+    const ids = Array.isArray(writes)
+      ? writes.flatMap((w: { id?: unknown }) => (typeof w?.id === 'string' ? [w.id] : []))
+      : []
+    return framesOfCanvas(canvasId, ids)
+  }
+  return wholeCanvas(canvasId)
+}
+
+/** What a frame route reads: the frame's page and the component mains, except
+ *  a deletion (a deleted main's component looks for it in every frame) and the
+ *  instance routes (they work across the canvas), which load it whole. */
+function frameRouteTarget(req: express.Request): LoadTarget | undefined {
+  const frameId = String(req.params.id)
+  const canvasId = store.getFrame(frameId)?.canvasId
+  if (!canvasId) return undefined
+  if ((req.method === 'DELETE' && req.path === '/') || req.path.startsWith('/instances')) return wholeCanvas(canvasId)
+  return framesOfCanvas(canvasId, [frameId])
+}
+
+/** What a comment route reads: the frame it is pinned to and the frame a
+ *  move takes it to (an element's id is stamped there). A canvas comment reads none. */
+function commentRouteTarget(req: express.Request): LoadTarget | undefined {
+  const comment = actions.findComment(String(req.params.id))
+  if (!comment) return undefined
+  const canvasId = comment.canvasId
+  const moveTo = (req.body as { frameId?: unknown } | undefined)?.frameId
+  const frameIds = [comment.frameId, moveTo].filter(
+    (id): id is string => typeof id === 'string' && store.getFrame(id)?.canvasId === canvasId,
+  )
+  if (!frameIds.length) return undefined
+  return framesOfCanvas(canvasId, frameIds)
+}
+
+app.use('/api/canvases/:id', loadFirst(canvasRouteTarget))
+app.use('/api/frames/:id', loadFirst(frameRouteTarget))
+app.use('/api/comments/:id', loadFirst(commentRouteTarget))
 
 /* Home's push channel: tells an open dashboard its canvas list changed */
 app.get('/api/me/events', userEvents.subscribe)
@@ -3400,18 +3561,51 @@ const wss = new WebSocketServer({
    no cursor, nothing it sends is relayed) and without the team's
    conversation (GUEST_HIDDEN). Anything else — a private canvas, a missing
    one — is the same 4401, so the sign-in screen does not reveal which. */
-function joinAsGuest(ws: WebSocket, canvasId: string, clientId: string, canvas: Canvas | undefined) {
+/** Load a canvas for a join; false (and the socket closed) when it cannot be
+ *  read. The browser retries on any close it does not know, so a canvas whose
+ *  storage is briefly away opens once it answers, instead of the socket
+ *  staying open with no `init` and the person looking at an empty canvas. */
+async function loadForJoin(ws: WebSocket, canvasId: string, pageId: string, onDemand: boolean): Promise<boolean> {
+  try {
+    await (onDemand ? store.loadPages(canvasId, [pageId]) : store.load(canvasId))
+    return true
+  } catch (error) {
+    console.error('[room] could not load canvas for a join', canvasId, error)
+    if (ws.readyState === WebSocket.OPEN) ws.close(1011, 'canvas could not be loaded')
+    return false
+  }
+}
+
+function joinAsGuest(
+  ws: WebSocket,
+  canvasId: string,
+  clientId: string,
+  canvas: Canvas | undefined,
+  pageId: string | undefined,
+  onDemand: boolean,
+) {
   const role = canvas && guestCanvasRole(canvas)
-  if (!canvas || !role) {
+  if (!canvas || !role || !pageId) {
     ws.close(4401, 'unauthorized')
     return
   }
   const presence: Presence = { clientId, name: '', color: colorFor(clientId), kind: 'user', activeFrameId: null }
-  conns.set(ws, { ws, canvasId, presence, silent: true })
-  const { guidelines: _guidelines, references: _references, memberIds: _memberIds, ...shown } = canvas
+  const opened = canvasForInit(canvas, onDemand ? pageId : 'all')
+  conns.set(ws, {
+    ws,
+    canvasId,
+    presence,
+    silent: true,
+    pages: new Set(opened.loadedPageIds),
+    joinedPages: new Set(canvasPages(canvas).map((page) => page.id)),
+    shown: new Set([pageId]),
+    onDemand,
+  })
+  const { guidelines: _guidelines, references: _references, memberIds: _memberIds, ...shown } = opened.canvas
   send(ws, {
     type: 'init',
     canvas: { ...shown, role, landingPageId: landingPageOf(canvas), team: teamOfCanvas(canvas) },
+    loadedPageIds: opened.loadedPageIds,
     presences: [
       ...room(canvasId)
         .filter((c) => c.ws !== ws && !c.silent)
@@ -3445,11 +3639,17 @@ wss.on('connection', (ws, upgradeReq) => {
     if (msg.type === 'join') {
       const session = await sessionPromise
       let canvas = store.getCanvas(msg.canvasId)
+      const onDemand = msg.pagesOnDemand === true
       if (!session) {
-        /* only a canvas the guest may open is loaded for them */
-        if (canvas && guestCanvasRole(canvas)) canvas = await store.load(msg.canvasId)
+        /* only a canvas the guest may open is loaded for them, and only the page it opens on */
+        let pageId: string | undefined
+        if (canvas && guestCanvasRole(canvas)) {
+          pageId = joinPage(canvas, msg)
+          if (!(await loadForJoin(ws, msg.canvasId, pageId, onDemand))) return
+          canvas = store.getCanvas(msg.canvasId)
+        }
         if (ws.readyState !== WebSocket.OPEN) return
-        joinAsGuest(ws, msg.canvasId, msg.clientId, canvas)
+        joinAsGuest(ws, msg.canvasId, msg.clientId, canvas, pageId, onDemand)
         return
       }
       if (!canvas) {
@@ -3465,7 +3665,9 @@ wss.on('connection', (ws, upgradeReq) => {
         ws.close(4403, 'no access')
         return
       }
-      await store.load(msg.canvasId)
+      /* only the page the browser opens on is read; it asks for others as it opens them */
+      const pageId = joinPage(canvas, msg)
+      if (!(await loadForJoin(ws, msg.canvasId, pageId, onDemand))) return
       /* a socket that closed while it waited must not join: its close
          already ran, so it would sit in the room and pin the canvas */
       if (ws.readyState !== WebSocket.OPEN) return
@@ -3491,14 +3693,26 @@ wss.on('connection', (ws, upgradeReq) => {
         activeFrameId: null,
       }
       const silent = !!(session.session as { impersonatedBy?: string | null }).impersonatedBy
-      conns.set(ws, { ws, canvasId: msg.canvasId, userId: session.user.id, presence, silent })
+      const opened = canvasForInit(canvas, onDemand ? pageId : 'all')
+      conns.set(ws, {
+        ws,
+        canvasId: msg.canvasId,
+        userId: session.user.id,
+        presence,
+        silent,
+        pages: new Set(opened.loadedPageIds),
+        joinedPages: new Set(canvasPages(canvas).map((page) => page.id)),
+        shown: new Set([pageId]),
+        onDemand,
+      })
       const others = room(msg.canvasId)
         .filter((c) => c.ws !== ws && !c.silent)
         .map((c) => c.presence)
       const agents = [...(agentPresences.get(msg.canvasId)?.values() ?? [])]
       send(ws, {
         type: 'init',
-        canvas: { ...canvas, role, landingPageId: landingPageOf(canvas), team: teamOfCanvas(canvas) },
+        canvas: { ...opened.canvas, role, landingPageId: landingPageOf(canvas), team: teamOfCanvas(canvas) },
+        loadedPageIds: opened.loadedPageIds,
         presences: [...others, ...agents],
         activity: actions.getActivity(msg.canvasId),
         tasks: actions.getTasks(msg.canvasId),
@@ -3528,6 +3742,15 @@ wss.on('connection', (ws, upgradeReq) => {
     }
 
     if (!conn) return
+    /* every visitor reads the pages it opens, view-as and guests included */
+    if (msg.type === 'page:load') {
+      if (typeof msg.pageId === 'string' && connRole(conn)) void sendPage(conn, msg.pageId)
+      return
+    }
+    if (msg.type === 'pages:shown') {
+      conn.shown = shownPages(conn.canvasId, msg.pageIds)
+      return
+    }
     if (conn.silent) return // view-as connections receive updates but never emit
     const { canvasId, presence } = conn
     /* view and comment visitors share cursors and viewports; claiming a
@@ -3591,14 +3814,28 @@ server.listen({ port: PORT, host: HOST }, () => {
   /* frame HTML is loaded per canvas; a canvas nobody has used for
      CANVAS_IDLE_MS gives it back, unless a room, agent or stream is on it.
      Started here, once the room state it asks about exists. */
-  store.setInUse(
-    (canvasId) =>
-      room(canvasId).length > 0 || (agentPresences.get(canvasId)?.size ?? 0) > 0 || actions.isCanvasStreaming(canvasId),
-  )
+  store.setInUse((canvasId) => {
+    /* an agent or a stream may touch any page; people pin the pages they look at */
+    if ((agentPresences.get(canvasId)?.size ?? 0) > 0 || actions.isCanvasStreaming(canvasId)) return true
+    const people = room(canvasId)
+    /* a browser from before page loading holds the whole canvas */
+    if (people.some((conn) => !conn.onDemand)) return true
+    const pages = new Set(people.flatMap((conn) => [...conn.shown]))
+    return pages.size > 0 && pages
+  })
+  /* a browser keeps the pages it read; one the server let go is no longer kept
+     current there (on an actor canvas, its browser edits would not be taken in),
+     so the browser reads it again before it shows it */
+  store.onPageDropped((canvasId, pageId) => {
+    for (const conn of room(canvasId)) {
+      if (!conn.onDemand || !conn.pages.delete(pageId)) continue
+      send(conn.ws, { type: 'page:dropped', pageId })
+    }
+  })
   setInterval(
     () => {
       const dropped = store.evictIdle(env.CANVAS_IDLE_MS)
-      if (dropped) console.log(`[store] dropped the frame HTML of ${dropped} idle canvas(es)`)
+      if (dropped) console.log(`[store] dropped the frame HTML of ${dropped} idle page(s)`)
     },
     Math.min(60_000, Math.max(1_000, env.CANVAS_IDLE_MS / 2)),
   ).unref()

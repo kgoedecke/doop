@@ -16,8 +16,7 @@ export function copyLayer(frame: Frame, selector: string): boolean {
  *  a second shape inside the original's shell. */
 export function copyPicked(frame: Frame, selectors: string[]): boolean {
   if (isStandalonePick(frame, selectors)) {
-    copyFrames([frame])
-    return true
+    return copyFrames([frame])
   }
   return copyLayers(frame, selectors)
 }

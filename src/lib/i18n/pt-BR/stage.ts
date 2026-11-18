@@ -14,6 +14,7 @@ export const stage: Catalog['stage'] = {
   hintShape: 'Arraste para desenhar · Shift para um quadrado · Esc para cancelar',
   finishPath: 'Concluir caminho',
   newFrame: 'Novo frame',
+  pageLoading: 'Carregando página…',
 
   /* drawing, path editing, moving and resizing */
   textInputLabel: 'Texto a adicionar ao canvas',

@@ -4,7 +4,7 @@ import { usePaper, type Paper } from '../lib/paper'
 import { roleAllows } from '../../shared/canvasRole'
 import { onViewCommand } from '../lib/viewMenu'
 import type { Frame } from '../../shared/types'
-import { usePageCanvas, currentPageCanvas } from '../lib/pages'
+import { usePageCanvas, currentPageCanvas, usePageLoading } from '../lib/pages'
 import { sendWs } from '../lib/ws'
 import { throttle } from '../lib/throttle'
 import { FrameView, HiddenFrameView } from './FrameView'
@@ -251,6 +251,8 @@ export function Stage({
   const setViewport = useStore((s) => s.setViewport)
   const canvas = usePageCanvas()
   const activePageId = useStore((s) => s.activePageId)
+  /* the page's frames are on their way from the room: it is fitted once they are here */
+  const pageLoading = usePageLoading()
   /* a page with a colour of its own paints the stage, dots in its contrast */
   const paper = usePaper()
   const select = useStore((s) => s.select)
@@ -495,7 +497,8 @@ export function Stage({
         zoom: from.zoom,
       }
     }
-    const f = currentPageCanvas()?.frames.find((x) => x.id === req.frameId)
+    /* the frame's box, even while its page's HTML is on its way */
+    const f = useStore.getState().canvas?.frames.find((x) => x.id === req.frameId)
     if (!f) return undefined
     return fitView(el, f, 1)
   }
@@ -511,6 +514,9 @@ export function Stage({
     const from = useStore.getState().viewport
     const target = flyTargetFor(flyTo, el, from)
     if (!target) return
+    /* the page it flies to is focused on the frame: fitting the whole page when
+       it arrives would take the camera off it */
+    if ('frameId' in flyTo) cameraPage.current = useStore.getState().activePageId
     const start = performance.now()
     const DURATION = 700
     const ease = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2)
@@ -648,9 +654,11 @@ export function Stage({
   }, [fitFrames])
 
   /* On page entry a link wins over the saved camera, which wins over the
-     first-visit view. Lay it out before the new page paints. */
+     first-visit view. Lay it out before the new page paints, and not before
+     the page's frames have arrived from the room. */
   useLayoutEffect(() => {
-    if (!canvas || !activePageId || (deepLinkHandled.current && cameraPage.current === activePageId)) return
+    if (!canvas || !activePageId || pageLoading) return
+    if (deepLinkHandled.current && cameraPage.current === activePageId) return
     const state = useStore.getState()
     if (state.following) {
       cameraPage.current = activePageId
@@ -689,7 +697,7 @@ export function Stage({
     const saved = pageCameras.current.get(activePageId)
     if (saved) setViewport(saved)
     else fitFrames(canvas.frames, true)
-  }, [canvas, activePageId, fitFrames, focusFrame, focusPoint, linkSearch, setViewport])
+  }, [canvas, activePageId, pageLoading, fitFrames, focusFrame, focusPoint, linkSearch, setViewport])
 
   /* wheel: pan / pinch-zoom — needs a non-passive listener. Trackpads fire
      wheel events faster than the display refreshes, so deltas accumulate and
@@ -1297,6 +1305,15 @@ export function Stage({
         </ContextMenuTrigger>
         <FollowFrame />
 
+        {pageLoading && (
+          <div
+            role="status"
+            data-page-loading
+            className="pointer-events-none absolute top-[calc(var(--chrome-top,0px)+16px)] left-1/2 z-[35] -translate-x-1/2 rounded-pill bg-surface px-3 py-1.5 text-label text-ink-soft shadow-pop"
+          >
+            {t('stage.pageLoading')}
+          </div>
+        )}
         {/* the tool rail: a vertical island beside the Layers panel on desktop
             (the page sets --rail-left and --chrome-top), a centred strip at
             the bottom on phones */}

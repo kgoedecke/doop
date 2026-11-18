@@ -52,7 +52,7 @@ const HEADLESS = `<!doctype html><html lang="en">${FRAGMENT}`
 const sent: { frameId: string; html: string }[] = []
 actions.wire(
   (_canvasId, msg) => {
-    if (msg.type === 'frame:updated') sent.push({ frameId: msg.frame.id, html: msg.frame.html })
+    if (msg.type === 'frame:updated') sent.push({ frameId: msg.frame.id, html: msg.frame.html ?? '' })
   },
   () => {},
 )

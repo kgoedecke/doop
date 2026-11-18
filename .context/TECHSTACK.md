@@ -590,25 +590,64 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   rebooted on its database).
 - `pg` 8.22.0 - Postgres driver for the real-database path.
 - Frame HTML in memory (`server/store.ts`, `server/frameHtml.ts`): the store keeps every canvas
-  and frame, but frame HTML (most of the data) loads per canvas. Boot reads `frames` without `html`;
-  `store.load(canvasId)` reads one canvas's (concurrent calls share the read) and `evictIdle` drops
-  it after `CANVAS_IDLE_MS` (10 min) unused, never while a room, an MCP agent's presence, a stream,
-  a `store.hold` or an unsaved frame is on it (`persist.frameWritePending`: dirty from a save until
-  a write at that state succeeds, so a debounce, a write in flight and a failed write all count; the
-  sweep retries a failed one). Entry points load and hold for their length, and the rest stays
-  synchronous: the REST middleware for `/api/canvases/:id`, `/api/frames/:id` and
-  `/api/comments/:id` (behind the session gate, held until the response closes), the room `join`,
-  every MCP tool naming `canvas_id`, `frame_id` or `frame_ids` (`server/toolLoads.ts` wraps
-  `registerTool`), resident sweeps and automation pulls, ingest, the local and Gemini agent
-  endpoints. `/i/` renders
-  read the one frame's HTML (`store.renderableFrame`) instead of loading its canvas. Reading an
-  unloaded frame's `html` throws `FrameHtmlNotLoadedError` and starts loading that canvas, so a
-  missed entry point fails loudly rather than seeing an empty design; assigning it always works. The
-  boot asset-ref reconcile pages through Postgres. Context: by 2026-11-09 frame HTML was 6.4 GB on
-  disk and ~11.7 GB of V8 heap (60% of frames hold a non-Latin-1 character, which makes V8 store
-  the whole string at two bytes a character), against a 12 GB heap cap. Tests:
-  `lazyFrameHtml.test.ts`, `lazyFrameHtmlHttp.test.ts` (a restart, then REST, the room, MCP and an
-  idle drop).
+  and frame, but frame HTML (most of the data) loads per page. Boot reads `frames` without `html`;
+  `store.loadPages(canvasId, pageIds, frameIds?)` reads the HTML of the frames on those pages (and of
+  `frameIds` wherever they are) by id, 200 ids a query, concurrent loads
+  sharing each frame's read; `store.load(canvasId)` is every page, for work on the whole canvas;
+  `store.loadForFrames` is a frame write's: its page plus every component main (a write that carries a main
+  asks whether it lives in another frame). `evictIdle` drops a page after `CANVAS_IDLE_MS` (10 min) unused,
+  never while a load is on its canvas, a `store.hold` keeps it (a hold names a scope: `'all'` for an agent run,
+  a job or a whole-canvas route, else the pages and frames a write or a drawing reads, `framesScope` /
+  `pageScope`; releasing it counts only those pages as used), an MCP agent's presence or a stream is on the
+  canvas (`inUse` true: every page), a browser in the room shows that page (`inUse` names the pages: the
+  join's page until the browser says, then the ones its `pages:shown` lists; a page it only read with
+  `page:load` is not one), or a frame on it is unsaved
+  (`persist.frameWritePending`: dirty from a save until a write at that state succeeds, so a debounce, a write
+  in flight and a failed write all count; the sweep retries a failed one); a frame loaded some other way counts
+  its page as used from the sweep that sees it. `isLoaded` means every frame's HTML is in memory. Entry points load and hold for their length, and the rest stays synchronous: the REST
+  middleware (behind the session gate, held until the response closes) loads a frame's routes with
+  `loadForFrames` (deleting a frame and the instance routes, whole), a comment's with its frame's, a canvas's
+  whole except the ones that read no frame HTML (`HTML_FREE_CANVAS_ROUTES`: guides, page colour and flow start, thumbnail, members, agents, fonts, canvas comments, page copies,
+  which read their own page) and `POST /frames` (the page drawn on) and `PUT /stack` (the frames named); the
+  room `join` and `page:load` (the page); every MCP tool naming `canvas_id`, `frame_id` or `frame_ids`
+  (`server/toolLoads.ts` wraps `registerTool`; the whole canvas), resident sweeps and automation pulls, ingest,
+  the local and Gemini agent endpoints (whole). `/i/` renders read the one frame's HTML
+  (`store.renderableFrame`) instead of loading its page. Reading an unloaded frame's `html` throws
+  `FrameHtmlNotLoadedError` and starts loading that frame's page, so a missed entry point fails loudly rather
+  than seeing an empty design; assigning it always works. `asset_refs` is kept per write only; there is no full
+  rebuild (it read all frame HTML on every boot), and a ref a failed write left behind is put right by the
+  frame's next save. Context: by 2026-11-09 frame HTML was 6.4 GB on disk and ~11.7 GB of V8 heap (60% of
+  frames hold a non-Latin-1 character, which makes V8 store the whole string at two bytes a character), against
+  a 12 GB heap cap; on 2026-11-16 a canvas of 804 frames on 31 pages (163 MB of HTML, its heaviest page 33
+  frames and 19 MB) could not open, since its init carried every page. Tests: `lazyFrameHtml.test.ts`,
+  `lazyFrameHtmlHttp.test.ts` (a restart, then REST, the room, MCP and an idle drop), `pageLoadingHttp.test.ts`.
+- Pages over the room (`server/index.ts`, `src/lib/ws.ts`, `src/lib/pages.ts`): a browser's `join` says
+  `pagesOnDemand` and names the page it opens on (`pageId`: the page it shows on a rejoin or the URL names;
+  `frameId`: a frame the URL links), which the server resolves with the browser's own rule (`openingPageId`,
+  now in `shared/pages.ts`). `init` carries every frame's metadata (`WireCanvas`, `WireFrame`: a frame
+  without `html`) and the HTML of that page alone, listed in `loadedPageIds`. Opening another page sends
+  `page:load`; the server reads it and answers `page:frames` (or `page:failed`, asked again after 2 s), and from
+  that answer on the room sends that browser the page's frames with their HTML (`Conn.pages`), since the room
+  sends in order on one socket and nothing written after the read is missed; frames on the other pages it knew
+  at the join come as metadata (`forPages`), and a page made since comes whole (`Conn.joinedPages`). A room
+  message rather than a REST route for that reason. The browser keeps the pages it read; `stalePages` are the
+  ones `init` left out and any a frame arrived on without its HTML, and a rejoin marks every page but the one
+  `init` sent stale, so a page is never shown from an old copy; an `init` without `loadedPageIds` (a server from
+  before page loading) is every page whole. The browser tells the room the pages on screen (`pages:shown`:
+  the editor's page and the pages of frames `showFrames` registers, a prototype's screens), which it asks
+  for whenever they are not here, after a failed read too, and the room keeps in memory while they are up. `usePageCanvas` /
+  `currentPageCanvas` leave a page's frames out until it is ready (`pageReady`), the Stage says "Loading page…"
+  and fits the page once it is there (a fly-to a frame there glides to its box at once and keeps it). Work on
+  frames that may be elsewhere waits for their pages (`loadPages`; `loadFramePages` follows each frame to the
+  page it is on, and rejects if one is deleted or the canvas changes): a client-drawn export of a frame not on
+  screen (`frameRaster.ts`), undo and redo of an HTML or layer-name step and deleting a frame (`history.ts`, so
+  undo brings back the real design); `copyFrames` copies nothing while one's page is on its way, the Inspector's
+  HTML field is read-only and empty until then, and `api.updateFrame` refuses HTML for a frame whose page is
+  not ready, so a blank or stale copy is never saved.
+  A join without `pagesOnDemand` (the native apps, a tab on an older bundle) is sent the whole canvas and every
+  frame's HTML, and pins every page while it is in the room. Tests: `pageLoadingHttp.test.ts`,
+  `pageLoadingBrowser.test.ts` (fixture `tests/fixtures/pageLoading.html`, the room played by the test), `pageWaits.test.ts`, `deletePageLoading.test.ts`,
+  `inspectorPageLoading.test.tsx`.
 - Automations (`shared/automations.ts`, `server/automations.ts`) support schedules and
   approval triggers scoped to one canvas. The five-second worker groups up to ten signed-off
   frames per run. `automation_approvals` retains dispatch receipts independently of the
