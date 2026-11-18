@@ -85,6 +85,7 @@ import { normalizeImportUrl } from './importer.ts'
 import { extensions, type McpToolHelpers } from './extensions.ts'
 import { websiteAccessErrorMessage } from './websiteAccess.ts'
 import { mentionedRole } from '../shared/agents.ts'
+import { resolveCommentMentions, threadAuthorIds } from './canvasPeople.ts'
 import * as allowance from './allowance.ts'
 import { embedsPreview, previewOf, previewToolMeta, registerFramePreview, type CanvasPreview } from './chatgptApp.ts'
 import * as persist from './db/persist.ts'
@@ -1142,7 +1143,7 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
     {
       title: 'Reply to a comment',
       description:
-        'Reply inside an element-comment thread on a canvas. The reply inherits the root comment’s element anchor, so an @mention in it gives the resident agent the same anchor the conversation is about. Writing does not resolve the thread — read the request with get_comments, make the change, then close it with resolve_comment. If the text @mentions a resident role (e.g. "@Doop"), it counts as a new resident task against the account’s meter, exactly like a comment left in the browser.',
+        'Reply inside an element-comment thread on a canvas. The reply inherits the root comment’s element anchor, so an @mention in it gives the resident agent the same anchor the conversation is about. Writing does not resolve the thread — read the request with get_comments, make the change, then close it with resolve_comment. If the text @mentions a resident role (e.g. "@Doop"), it counts as a new resident task against the account’s meter, exactly like a comment left in the browser. To tag a person, write @ and their name exactly as a comment\'s `from` spells it (e.g. "@Ana Souza"): someone the canvas is shared with, or already in the thread, is emailed at once.',
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
       inputSchema: {
         canvas_id: z.string(),
@@ -1155,10 +1156,13 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
       if (!canvasFor(canvas_id, 'comment')) return noCanvas(canvas_id)
       const found = actions.findComment(comment_id)
       if (!found || found.canvasId !== canvas_id) return noComment(comment_id)
-      if (!body.trim() || !actions.openThread(comment_id)) return err('thread resolved or empty text')
+      const canvas = store.getCanvas(canvas_id)
+      if (!body.trim() || !canvas || !actions.openThread(comment_id)) return err('thread resolved or empty text')
+      /* people it tags are emailed; a person's name is never an agent's */
+      const mentions = await resolveCommentMentions(canvas, body.trim(), { authorIds: threadAuthorIds(found) })
       /* an @mention commands the resident agent to change frames — the REST
          reply route holds comment-only visitors to the same rule */
-      const mentioned = mentionedRole(body, actions.canvasRoster(canvas_id))
+      const mentioned = mentionedRole(mentions.roleText, actions.canvasRoster(canvas_id))
       if (mentioned && !canvasFor(canvas_id, 'edit'))
         return err('asking an agent to change the canvas needs edit access')
       const actor = actorFrom(agent_name)
@@ -1177,7 +1181,7 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
       /* attributed to the agent, billed to the connecting user: the resident
          picks whose model account pays from the requester id, and without one
          it falls back to the canvas owner's — wrong on a shared canvas */
-      const reply = actions.replyToComment(comment_id, body, actor.name, ownerId, 'agent')
+      const reply = actions.replyToComment(comment_id, body, actor.name, ownerId, 'agent', mentions)
       if (!reply) {
         /* the thread closed while the meter was being written: give the task back */
         if (gate && ownerId) {

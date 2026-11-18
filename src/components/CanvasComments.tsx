@@ -113,10 +113,10 @@ export function CanvasComments({
     }
   }, [anyOpen, close])
 
-  function post(text: string) {
+  function post(text: string, mentions: string[]) {
     if (!canvasId || !pageId || !composeAt) return
     api
-      .addCanvasComment(canvasId, { pageId, x: composeAt.x, y: composeAt.y, text })
+      .addCanvasComment(canvasId, { pageId, x: composeAt.x, y: composeAt.y, text, mentions })
       .then(() => posthog.capture('canvas_comment_created'))
       .catch(reportLimit)
     onComposeDone()
@@ -146,9 +146,9 @@ export function CanvasComments({
           >
             <CommentThread
               thread={thread}
-              onReply={(text) =>
+              onReply={(text, mentions) =>
                 api
-                  .replyComment(c.id, text)
+                  .replyComment(c.id, text, mentions)
                   .then(() => posthog.capture('element_comment_replied'))
                   .catch((err) => {
                     /* the wall explains a hit limit; anything else surfaces

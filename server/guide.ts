@@ -783,8 +783,9 @@ reply inherits the root's element anchor, so an @mention reaches the resident ag
 the same context the conversation is about. Close the thread with resolve_comment once the
 request is carried out; resolving an @mention thread also records the exchange in the
 canvas Memory. Writing is metered only when a reply @mentions a resident role, exactly
-like a comment left in the browser. Reading does not claim work or resolve it; task
-feedback is separate (get_feedback).
+like a comment left in the browser. To tag a person, write @ and their name as a comment's
+\`from\` spells it ("@Ana Souza"): they are emailed at once. Reading does not claim work or
+resolve it; task feedback is separate (get_feedback).
 `,
   export: `# Exporting frames (images, PDF)
 

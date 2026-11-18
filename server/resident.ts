@@ -23,7 +23,9 @@ import { RESIDENT_TASK_LIMIT } from './allowance.ts'
 import * as actions from './actions.ts'
 import { captureFeature, captureTokenResults } from './featureEvents.ts'
 import { inspectFrame, renderFrame } from './screenshot.ts'
-import { AGENT_ROLES, DEFAULT_ROLE_ID, roleById, roleByAgentName, roleName, withoutMentions } from '../shared/agents.ts'
+import { AGENT_ROLES, DEFAULT_ROLE_ID, roleById, roleByAgentName, roleName } from '../shared/agents.ts'
+import { resolvePersonMentions, withoutAgentMentions, type Mentionable } from '../shared/personMentions.ts'
+import { commentPeople, threadAuthorIds } from './canvasPeople.ts'
 import type { AgentRole, Roster } from '../shared/agents.ts'
 import { runnerKey } from '../shared/agentRunner.ts'
 import * as imageSearch from './imageSearch.ts'
@@ -1133,14 +1135,24 @@ export function replyInThread(
   actor: Actor,
   runState: Pick<RunState, 'repliedThreads' | 'awaitingThreads'>,
   awaiting = false,
+  /** the people it may tag (server/canvasPeople.ts commentPeople) */
+  people: readonly Mentionable[] = [],
 ): { ok: true; reply: ElementComment } | { ok: false; error: string } {
-  const clean = withoutMentions(text, actions.canvasRoster(canvasId)).trim()
+  /* agents' @mentions become plain names; people's stay, and are emailed */
+  const clean = withoutAgentMentions(text, actions.canvasRoster(canvasId), people).trim()
   if (!clean) return { ok: false, error: 'empty reply' }
   const found = actions.findComment(commentId)
   if (!found || found.canvasId !== canvasId) return { ok: false, error: 'no such comment on this canvas' }
   const open = actions.openThread(commentId)
   if (!open) return { ok: false, error: 'thread resolved, or its frame is gone' }
-  const reply = actions.replyToComment(commentId, clean, actor.name, undefined, 'agent')
+  const reply = actions.replyToComment(
+    commentId,
+    clean,
+    actor.name,
+    undefined,
+    'agent',
+    resolvePersonMentions(clean, people),
+  )
   if (!reply) return { ok: false, error: 'thread resolved meanwhile' }
   runState.repliedThreads.add(open.root.id)
   if (awaiting) runState.awaitingThreads.add(open.root.id)
@@ -1497,7 +1509,7 @@ const TOOLS: Anthropic.Tool[] = [
   {
     name: 'reply_to_comment',
     description:
-      'Answer inside a comment thread on this canvas — the person who left the comment sees it under their pin. Use it when a request needs a decision only they can make, or deserves a word mid-task; your final message is posted into every thread you worked on automatically, so do not repeat it here. Plain prose, no @mentions. Replying does not resolve the thread.',
+      'Answer inside a comment thread on this canvas — the person who left the comment sees it under their pin. Use it when a request needs a decision only they can make, or deserves a word mid-task; your final message is posted into every thread you worked on automatically, so do not repeat it here. Plain prose and no agent @mentions; to bring a person in, write @ and their name as the thread spells it ("@Ana Souza") and they are emailed. Replying does not resolve the thread.',
     input_schema: {
       type: 'object',
       properties: {
@@ -2420,14 +2432,11 @@ async function runResidentTool(
       }
       case 'reply_to_comment': {
         const awaiting = (block.input as { awaiting_answer?: unknown }).awaiting_answer === true
-        const posted = replyInThread(
-          canvasId,
-          String(input.comment_id ?? ''),
-          String(input.text ?? ''),
-          actor,
-          runState,
-          awaiting,
-        )
+        const commentId = String(input.comment_id ?? '')
+        const thread = actions.findComment(commentId)
+        const canvas = store.getCanvas(canvasId)
+        const people = canvas && thread ? await commentPeople(canvas, threadAuthorIds(thread)) : []
+        const posted = replyInThread(canvasId, commentId, String(input.text ?? ''), actor, runState, awaiting, people)
         if (!posted.ok) return fail(posted.error)
         return ok(
           awaiting
