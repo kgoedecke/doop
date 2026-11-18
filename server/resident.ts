@@ -24,6 +24,7 @@ import { RESIDENT_TASK_LIMIT } from './allowance.ts'
 import * as actions from './actions.ts'
 import { captureFeature, captureTokenResults } from './featureEvents.ts'
 import { inspectFrame, renderFrame } from './screenshot.ts'
+import { FIT_HEIGHT_ON, fitNotes, fitWrittenFrame, updateFrameMetaWithFit } from './frameFit.ts'
 import { AGENT_ROLES, DEFAULT_ROLE_ID, roleById, roleByAgentName, roleName, withoutMentions } from '../shared/agents.ts'
 import type { AgentRole, Roster } from '../shared/agents.ts'
 import { runnerKey } from '../shared/agentRunner.ts'
@@ -78,7 +79,7 @@ import {
 } from './inspiration.ts'
 import type { Actor, AgentTask, Canvas, ElementComment, Frame } from '../shared/types.ts'
 import { canvasPages, framePageId, MAX_PAGE_NAME, pageFrames, samePages } from '../shared/pages.ts'
-import { addPage, pageList, parsePageList, savePages, updateFrameMeta } from './pageTools.ts'
+import { addPage, pageList, parsePageList, savePages } from './pageTools.ts'
 import { isCanvasComment, isFrameComment } from '../shared/comments.ts'
 import { websiteAccessErrorMessage } from './websiteAccess.ts'
 import { executeGuardedBatch } from './guardedBatch.ts'
@@ -293,6 +294,25 @@ interface RunState {
   /** some of the run's work was queued by an automation: such a run never sets approval,
    *  which would sign off its own output and could start the automation again */
   automated?: boolean
+}
+
+/** A run's state before its first tool call; tests start one the same way. */
+export function newRunState(start: Partial<RunState> = {}): RunState {
+  return {
+    mutatedFrames: new Set(),
+    sourceFrames: new Set(),
+    verificationFrames: new Set(),
+    verifiedFrames: new Set(),
+    seenVerified: new Set(),
+    rewriteDrafts: new Map(),
+    vision: false,
+    imagesGenerated: 0,
+    repliedThreads: new Set(),
+    awaitingThreads: new Set(),
+    tokenWrites: 0,
+    arrangeWrites: 0,
+    ...start,
+  }
 }
 
 export interface FramePlacement {
@@ -692,25 +712,14 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
        originating pass that changed nothing has not delivered its card */
     const requireMutation = cards.length > 0 && !role.reviewer
     const messages: Anthropic.MessageParam[] = [{ role: 'user', content: kickoff }]
-    const runState: RunState = {
-      mutatedFrames: new Set(),
-      sourceFrames: new Set(),
-      verificationFrames: new Set(),
-      verifiedFrames: new Set(),
-      seenVerified: new Set(),
-      rewriteDrafts: new Map(),
+    const runState = newRunState({
       vision: model.vision !== false,
       ...(model.userId ? { payerId: model.userId } : {}),
       ...(payer ? { requesterId: payer } : {}),
-      imagesGenerated: 0,
       /* a run about a comment delivers on that comment's page */
       ...(comments[0] ? { placement: placementFor(comments[0], canvas) } : {}),
-      repliedThreads: new Set(),
-      awaitingThreads: new Set(),
-      tokenWrites: 0,
-      arrangeWrites: 0,
       automated: cards.some(isAutomationCard),
-    }
+    })
     let refused = false
     let crashed = false
     let staleAccount = false
@@ -1218,6 +1227,10 @@ const TOOLS: Anthropic.Tool[] = [
             'Canvas position in px. Optional: left out, the frame lands on the page the request is about — beside the pin of a canvas comment, else to the right of the existing frames.',
         },
         y: { type: 'number', description: 'Canvas position in px. Optional, see x.' },
+        fit_height: {
+          type: 'boolean',
+          description: FIT_HEIGHT_ON.create,
+        },
       },
       required: ['name', 'width', 'height', 'html'],
     },
@@ -1274,6 +1287,10 @@ const TOOLS: Anthropic.Tool[] = [
       properties: {
         frame_id: { type: 'string' },
         html: { type: 'string', description: 'Complete, self-contained HTML document' },
+        fit_height: {
+          type: 'boolean',
+          description: FIT_HEIGHT_ON.set,
+        },
       },
       required: ['frame_id', 'html'],
     },
@@ -1687,6 +1704,10 @@ const TOOLS: Anthropic.Tool[] = [
         y: { type: 'number', description: 'Canvas position in px' },
         width: { type: 'number', description: 'px; the design is not rescaled' },
         height: { type: 'number', description: 'px; the design is not rescaled' },
+        fit_height: {
+          type: 'boolean',
+          description: FIT_HEIGHT_ON.update,
+        },
         locked: { type: 'boolean', description: 'true keeps humans from selecting, moving or deleting it' },
       },
       required: ['frame_id'],
@@ -1930,6 +1951,7 @@ async function runResidentTool(
           html?: string
           x?: number
           y?: number
+          fit_height?: boolean
         }
         const html = completeHtml(raw.html)
         if (!html) return fail('create_frame requires a complete non-empty HTML document ending in </html>')
@@ -1938,17 +1960,20 @@ async function runResidentTool(
         if (html.length > MAX_REWRITE_CHUNK_CHARS) {
           return fail(`create_frame HTML must be compact (at most ${MAX_REWRITE_CHUNK_CHARS} characters)`)
         }
-        const f = actions.createFrame(
+        const created = actions.createFrame(
           canvasId,
           createFrameInput({ ...raw, html }, runState.placement, store.getCanvas(canvasId)),
           actor,
         )
-        if (!f) return fail('canvas not found')
+        if (!created) return fail('canvas not found')
+        const fit = raw.fit_height === true ? await fitWrittenFrame(created, actor) : undefined
+        const f = fit?.frame ?? created
         runState.mutatedFrames.add(f.id)
         unverify(runState, f.id)
         return ok(
           [
             `created frame ${f.id} ("${f.name}", ${Math.round(f.width)}x${Math.round(f.height)}) — it is revealing to viewers now`,
+            ...fitNotes(fit),
             ...componentWriteNotes(f, { review: true }),
           ].join('\n'),
         )
@@ -2047,13 +2072,19 @@ async function runResidentTool(
         }
         const refused = frameWriteRefusal(html, { existing: existingHtml(f), surface: 'resident' })
         if (refused) return fail(refused)
-        actions.updateFrame(input.frame_id, { html }, actor)
+        const written = actions.updateFrame(input.frame_id, { html }, actor)
+        if (!written) return fail('frame not found on this canvas')
+        const fit =
+          (block.input as { fit_height?: unknown }).fit_height === true
+            ? await fitWrittenFrame(written, actor)
+            : undefined
         runState.mutatedFrames.add(input.frame_id)
         unverify(runState, input.frame_id)
         return ok(
           [
             'applied — the new design is revealing to viewers now',
-            ...componentWriteNotes(store.getFrame(input.frame_id)!, { review: true }),
+            ...fitNotes(fit),
+            ...componentWriteNotes(fit?.frame ?? written, { review: true }),
           ].join('\n'),
         )
       }
@@ -2558,7 +2589,7 @@ async function runResidentTool(
         const before = { width: f.width, height: f.height, arrangement: arrangement(f) }
         const text = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim() : undefined)
         const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : undefined)
-        const updated = updateFrameMeta(
+        const updated = await updateFrameMetaWithFit(
           canvas,
           f.id,
           {
@@ -2570,10 +2601,11 @@ async function runResidentTool(
             height: num(raw.height),
             locked: typeof raw.locked === 'boolean' ? raw.locked : undefined,
           },
+          raw.fit_height === true,
           actor,
         )
         if (!updated.ok) return fail(updated.error)
-        const frame = updated.value
+        const { frame, note } = updated.value
         /* a new size changes what renders, so it is a design change to verify */
         if (frame.width !== before.width || frame.height !== before.height) {
           runState.mutatedFrames.add(frame.id)
@@ -2582,7 +2614,7 @@ async function runResidentTool(
         /* a save that changed nothing has not delivered anything */
         if (arrangement(frame) !== before.arrangement) runState.arrangeWrites += 1
         return ok(
-          `frame ${frame.id} is now "${frame.name}" on page ${framePageId(canvas, frame)} at (${Math.round(frame.x)}, ${Math.round(frame.y)}), ${Math.round(frame.width)}x${Math.round(frame.height)}${frame.locked ? ', locked' : ''}`,
+          `frame ${frame.id} is now "${frame.name}" on page ${framePageId(canvas, frame)} at (${Math.round(frame.x)}, ${Math.round(frame.y)}), ${Math.round(frame.width)}x${Math.round(frame.height)}${frame.locked ? ', locked' : ''}${note ? `\n${note}` : ''}`,
         )
       }
       case 'create_canvas_page': {

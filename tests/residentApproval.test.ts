@@ -20,25 +20,11 @@ vi.mock('../server/auth.ts', async (importOriginal) => ({
 
 const actions = await import('../server/actions.ts')
 const { store } = await import('../server/store.ts')
-const { deliveredWork, execTool } = await import('../server/resident.ts')
+const { deliveredWork, execTool, newRunState } = await import('../server/resident.ts')
 const { DEFAULT_ROLE_ID, roleName } = await import('../shared/agents.ts')
 
 const actor = () => actions.resolveActor({ name: roleName(DEFAULT_ROLE_ID), kind: 'agent' })
-const run = (extra: { requesterId?: string; automated?: boolean } = {}) => ({
-  mutatedFrames: new Set<string>(),
-  sourceFrames: new Set<string>(),
-  verificationFrames: new Set<string>(),
-  verifiedFrames: new Set<string>(),
-  seenVerified: new Set<string>(),
-  rewriteDrafts: new Map<string, string>(),
-  vision: false,
-  imagesGenerated: 0,
-  repliedThreads: new Set<string>(),
-  awaitingThreads: new Set<string>(),
-  tokenWrites: 0,
-  arrangeWrites: 0,
-  ...extra,
-})
+const run = (extra: { requesterId?: string; automated?: boolean } = {}) => newRunState(extra)
 const call = (input: unknown) => ({ type: 'tool_use' as const, id: 't1', name: 'set_frame_approval', input })
 const html = '<!doctype html><html><body>hi</body></html>'
 
