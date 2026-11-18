@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { activeComponents, type ComponentDef } from '../../shared/components'
+import { activeComponents, type WireComponentDef } from '../../shared/components'
 import type { WorkspaceSummary } from '../../shared/types'
 import { api, errorMessage, type CanvasLibrary, type ComponentLibrary, type LibraryChangeEntry } from '../lib/api'
 import { LIBRARY_COMPONENT_DRAG_TYPE, libraryDragData, placeComponent } from '../lib/components'
@@ -477,7 +477,7 @@ export function LibrarySection({
 
   const wanted = query.trim().toLowerCase()
   const linked = new Set(
-    (components ?? []).flatMap((def: ComponentDef) =>
+    (components ?? []).flatMap((def: WireComponentDef) =>
       def.source?.library ? [`${def.source.canvasId}:${def.id}`] : [],
     ),
   )

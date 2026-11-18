@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { COMMUNITY_CATEGORIES, type Canvas, type CommunityCategory } from '../../shared/types'
+import { COMMUNITY_CATEGORIES, type ClientCanvas, type CommunityCategory } from '../../shared/types'
 import { toLinkAccess, type LinkAccess } from '../../shared/canvasRole'
 import { navigate } from '../App'
 import type { WorkspaceSummary } from '../../shared/types'
@@ -21,7 +21,7 @@ import { ToggleChipGroup, ToggleChipItem } from './ui/toggle-chip'
 import { useT, type PlainMessageKey } from '@/lib/i18n'
 
 type ShareableCanvas = Pick<
-  Canvas,
+  ClientCanvas,
   'id' | 'name' | 'ownerId' | 'linkAccess' | 'memberIds' | 'workspaceId' | 'publishedAt' | 'description' | 'category'
 >
 type SharePatch = Partial<

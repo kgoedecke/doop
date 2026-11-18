@@ -1155,7 +1155,14 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   or a double-click on its name in that tab, or from its main's Layers row (`renameComponent`; instances are
   linked by id, so they follow). As in Figma, renaming an instance's row names that layer
   alone (`data-doop-name`, kept as an override of that instance, still linked). Stored in `components`
-  (migration `0052_components`). Tests: `components.test.ts`, `componentsEdgeCases.test.ts`,
+  (migration `0052_components`), one small row per definition; its earlier revisions are rows of
+  `component_revisions` (migration `0062_component_revisions`, backfilled from the retired inline
+  `components.history` column, which a later migration drops): inserted once, never updated, the
+  newest 20 kept, written by `persist.saveComponent` inside the component's write queue and loaded
+  at boot into `ComponentDef.history` for the stale-save merge. Browsers get a `WireComponentDef`
+  (no `history`) in `init`, `component` messages and REST;
+  `GET /api/canvases/:id/components/:componentId/revisions` lists them. Tests:
+  `componentRevisions.test.ts`, `componentRevisionsHttp.test.ts`. Tests: `components.test.ts`, `componentsEdgeCases.test.ts`,
   `componentTools.test.ts`, `componentsRoutes.test.ts`, `componentsBrowser.test.ts`. A bare
   `data-doop-prop="name"` binds an element's text, except where there is none: on `img`, `source`,
   `video`, `audio`, `iframe` and `embed` it binds `src`, on `input` its `value` (`parseBindings`

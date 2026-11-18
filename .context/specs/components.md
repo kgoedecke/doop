@@ -32,7 +32,16 @@ component loses nothing visually: deleting writes no frame at all (see Deleting 
   a marker coming back (undo, restore) reclaims the role, and an update writes a new main.
 - **Definition** (`components` table, mirrored on `canvas.components`, keyed per canvas so a copied
   canvas's markers stay valid): `template`, scoped `css`, `rawCss`, `head`, `props`, `slots`, `rev`,
-  `mainFrameId`, `code`, `source`, and the last 20 revisions inline.
+  `mainFrameId`, `code`, `source`.
+- **Revisions** (`component_revisions`, key `canvas_id, component_id, rev`): what a definition was
+  before each change (`template`, `rawCss`, `head`, `props`, who and when). A row is inserted once
+  and never updated; the newest 20 per component are kept and older ones pruned in the same write.
+  Memory keeps them as `ComponentDef.history`, loaded at boot, because the three-way merge of a
+  stale save reads them synchronously. A save sends the small `components` row plus only the
+  revisions not yet filed, inside the component's write queue. Browsers do not get them: `init`,
+  `component` messages and REST answers carry a `WireComponentDef` (no `history`), and
+  `GET /api/canvases/:id/components/:componentId/revisions` lists them. The old inline
+  `components.history` column is no longer read or written; a later migration drops it.
 - **Instance**: root attributes `data-doop-instance`, `data-doop-rev`, `data-doop-id`, and when needed
   `data-doop-props` / `data-doop-overrides` as JSON. Every element keeps its `data-doop-part` key.
   Slot content and nested instances are read from the DOM, not repeated in the marker.

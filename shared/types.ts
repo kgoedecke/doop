@@ -1,7 +1,7 @@
 import type { AgentBrand } from './agentBrand.ts'
 import type { BillingInterval, WorkspaceStatus } from './billing.ts'
 import type { CanvasRole, LinkAccess } from './canvasRole.ts'
-import type { ComponentDef } from './components.ts'
+import type { ComponentDef, WireComponentDef } from './components.ts'
 import type { AgentRole } from './agents.ts'
 import type { DesignToken } from './designTokens.ts'
 import type { RunnerPick } from './agentRunner.ts'
@@ -601,8 +601,16 @@ export interface PeerViewport {
 export type WireFrame = Omit<Frame, 'html'> & { html?: string }
 
 /** A canvas as `init` sends it: every frame's metadata, HTML only for the
- *  frames on the pages in `loadedPageIds`. */
-export type WireCanvas = Omit<Canvas, 'frames'> & { frames: WireFrame[] }
+ *  frames on the pages in `loadedPageIds`, and its components without their
+ *  earlier revisions. */
+export type WireCanvas = Omit<Canvas, 'frames' | 'components'> & {
+  frames: WireFrame[]
+  components?: WireComponentDef[]
+}
+
+/** A canvas as a REST response hands it to a browser: whole frames, components
+ *  without their earlier revisions. */
+export type ClientCanvas = Omit<Canvas, 'components'> & { components?: WireComponentDef[] }
 
 export type ClientMessage =
   /** `pagesOnDemand`: the browser reads pages as it opens them (`page:load`),
@@ -688,7 +696,7 @@ export type ServerMessage =
   /** a ruler guide was added or moved (guide set) or removed (null) */
   | { type: 'guide'; id: string; guide: CanvasGuide | null; actor: Actor }
   /** a component changed, or was deleted (`component` null) */
-  | { type: 'component'; id: string; component: ComponentDef | null; actor: Actor }
+  | { type: 'component'; id: string; component: WireComponentDef | null; actor: Actor }
   /** a workspace library this canvas can use published or withdrew components:
    *  what the Components panel offers, and which updates wait, should be read again */
   | { type: 'library'; actor: Actor }

@@ -10,7 +10,7 @@ import {
   type ReactNode,
 } from 'react'
 import type { Frame } from '../../shared/types'
-import type { ComponentDef } from '../../shared/components'
+import type { WireComponentDef } from '../../shared/components'
 import { canEditOpenCanvas, pickedSelectors, useStore } from '../lib/store'
 import { layerPlacement } from '../lib/frameBridge'
 import { currentPageCanvas, usePageCanvas } from '../lib/pages'
@@ -1013,7 +1013,7 @@ function ItemNameInput({
    frame with the component only while the two names agree, so otherwise the
    frame takes the saved name here, in turn with its other renames and without
    an undo step, since the component rename it follows has none. */
-async function renameMain(def: ComponentDef, frame: Frame, standalone: boolean, value: string) {
+async function renameMain(def: WireComponentDef, frame: Frame, standalone: boolean, value: string) {
   const saved = await renameComponent(def, value)
   if (saved && standalone) renameFrame(frame.id, saved, { record: false })
 }

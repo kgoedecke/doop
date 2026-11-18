@@ -323,7 +323,7 @@ export function scanInteractions(html: string): ScannedInteractive[] {
 
 /** The frame a page's prototype starts on: its flow start when that frame is
  *  still on the page, otherwise its first frame (top-left reading order). */
-export function flowStartFrame(canvas: Canvas, pageId: string): Frame | null {
+export function flowStartFrame(canvas: Pick<Canvas, 'id' | 'pages' | 'frames'>, pageId: string): Frame | null {
   const frames = pageFrames(canvas, pageId).filter((f) => !f.hidden)
   const page = canvasPages(canvas).find((p) => p.id === pageId)
   const start = page?.startFrameId ? frames.find((f) => f.id === page.startFrameId) : undefined

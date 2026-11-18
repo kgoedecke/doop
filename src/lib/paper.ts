@@ -1,6 +1,6 @@
 import { backgroundTone, pageBackground } from '../../shared/pageBackground'
 import { canvasPages } from '../../shared/pages'
-import type { Canvas } from '../../shared/types'
+import type { ClientCanvas } from '../../shared/types'
 import { useStore } from './store'
 import { getTheme, resolveTheme, useTheme, type ResolvedTheme } from './theme'
 
@@ -13,7 +13,7 @@ export interface Paper {
 }
 
 export function paperOf(
-  canvas: Pick<Canvas, 'id' | 'pages'> | null,
+  canvas: Pick<ClientCanvas, 'id' | 'pages'> | null,
   pageId: string | null,
   theme: ResolvedTheme,
 ): Paper {

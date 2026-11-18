@@ -37,6 +37,8 @@ vi.mock('../server/db/index.ts', () => {
       }),
     }),
     delete: () => ({ where: () => send(() => pool.landed.clear()) }),
+    /* a delete takes the row and its revisions together */
+    transaction: (run: (tx: unknown) => Promise<unknown>) => run(db),
   }
   return { db }
 })

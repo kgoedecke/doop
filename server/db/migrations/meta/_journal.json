@@ -428,6 +428,13 @@
       "when": 1795256823668,
       "tag": "0061_agent_key",
       "breakpoints": true
+    },
+    {
+      "idx": 62,
+      "version": "7",
+      "when": 1795571531317,
+      "tag": "0062_component_revisions",
+      "breakpoints": true
     }
   ]
 }

@@ -1,7 +1,7 @@
 import { canvasPages, COMPONENTS_PAGE, framePageId } from '../../shared/pages'
-import type { Canvas, Frame } from '../../shared/types'
+import type { ClientCanvas, Frame } from '../../shared/types'
 
-type FlightCanvas = Pick<Canvas, 'id' | 'pages' | 'frames' | 'components'>
+type FlightCanvas = Pick<ClientCanvas, 'id' | 'pages' | 'frames' | 'components'>
 
 /** A component's main is a building block the agent files away, not what the
  *  person asked for: one made from markup lands on the Components page, and

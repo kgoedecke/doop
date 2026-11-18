@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { Canvas, CanvasMeta, WorkspaceSummary } from '../../shared/types'
+import type { ClientCanvas, CanvasMeta, WorkspaceSummary } from '../../shared/types'
 import { colorFor } from '../../shared/types'
 import { api, errorMessage, paywalledWorkspace } from '../lib/api'
 import { authClient } from '../lib/auth'
@@ -88,7 +88,7 @@ export function Home() {
   })
   const [sort, setSort] = useState<Sort>('updated')
   const [view, setView] = useState<'grid' | 'list'>('grid')
-  const [shareCanvas, setShareCanvas] = useState<Canvas | null>(null)
+  const [shareCanvas, setShareCanvas] = useState<ClientCanvas | null>(null)
   const [deleteCanvas, setDeleteCanvas] = useState<CanvasMeta | null>(null)
   const [moveCanvas, setMoveCanvas] = useState<CanvasMeta | null>(null)
   const [creatingWorkspace, setCreatingWorkspace] = useState(

@@ -10,7 +10,7 @@ import {
   activeComponents,
   isDeleted,
   toPropName,
-  type ComponentDef,
+  type WireComponentDef,
 } from '../../shared/components'
 import { ELEMENT_ID_ATTR, elementIdSelector } from '../../shared/elementId'
 import type { Frame } from '../../shared/types'
@@ -32,7 +32,7 @@ import { clientToWorld, frameAtPoint } from './commentMove'
 export type ComponentContext =
   | {
       kind: 'main'
-      def: ComponentDef
+      def: WireComponentDef
       /** the selection is the main's root, not an element inside it */
       isRoot: boolean
       selector: string
@@ -40,7 +40,7 @@ export type ComponentContext =
     }
   | {
       kind: 'instance'
-      def: ComponentDef
+      def: WireComponentDef
       isRoot: boolean
       selector: string
       rootSelector: string
@@ -63,7 +63,7 @@ function parseRecord(value: string | null): Record<string, unknown> {
 
 /** What the selected element is to the component system, if anything. An instance wins
  *  over the main around it: that is the thing whose edits go where the person expects. */
-export function componentContextOf(html: string, selector: string, defs: ComponentDef[]): ComponentContext | null {
+export function componentContextOf(html: string, selector: string, defs: WireComponentDef[]): ComponentContext | null {
   if (!defs.length || (!html.includes(INSTANCE_ATTR) && !html.includes(COMPONENT_ATTR))) return null
   let el: Element | null
   try {
@@ -100,7 +100,7 @@ export function componentContextOf(html: string, selector: string, defs: Compone
 }
 
 /** The value a text-like prop shows when an instance has not set it: the template's own. */
-export function templateValue(def: ComponentDef, prop: string): string {
+export function templateValue(def: WireComponentDef, prop: string): string {
   const root = new DOMParser()
     .parseFromString(`<template>${def.template}</template>`, 'text/html')
     .querySelector('template')
@@ -194,7 +194,7 @@ export async function changeInstance(frame: Frame, change: InstanceChangeInput) 
 
 /** Into the selected element when there is one, else at the end of the selected frame,
  *  else onto the canvas in a frame of its own. */
-export async function placeComponent(def: ComponentDef) {
+export async function placeComponent(def: WireComponentDef) {
   const s = useStore.getState()
   const frame = s.selectedId ? s.canvas?.frames.find((candidate) => candidate.id === s.selectedId) : undefined
   try {
@@ -268,7 +268,7 @@ export async function dropLibraryComponent(drag: LibraryComponentDrag, client: C
     s.pushNotice(t('components.locked'))
     return
   }
-  let def: ComponentDef
+  let def: WireComponentDef
   try {
     def = await api.importComponent(canvasId, drag.libraryCanvasId, drag.componentId)
   } catch (error) {
@@ -320,7 +320,7 @@ export async function dropComponent(componentId: string, client: ClientPoint) {
 
 /** Delete a component. Nothing on the canvas changes: its instances keep their markup and
  *  stop following it, and it can be restored from any of them (restoreDeletedComponent). */
-export async function removeComponent(def: ComponentDef) {
+export async function removeComponent(def: WireComponentDef) {
   const s = useStore.getState()
   if (!s.canvas) return
   try {
@@ -338,7 +338,7 @@ export async function removeComponent(def: ComponentDef) {
 }
 
 /** Bring a deleted component back: its instances, never changed, follow it again. */
-export async function restoreDeletedComponent(def: ComponentDef) {
+export async function restoreDeletedComponent(def: WireComponentDef) {
   const s = useStore.getState()
   if (!s.canvas) return
   try {
@@ -353,7 +353,7 @@ export async function restoreDeletedComponent(def: ComponentDef) {
 /** The part key of a component's root. Its instances' overrides of the root sit
  *  under it, even on a nested instance, whose own part attribute names its
  *  place in the outer component instead. */
-export function rootPartKey(def: ComponentDef): string | undefined {
+export function rootPartKey(def: WireComponentDef): string | undefined {
   const holder = document.createElement('template')
   holder.innerHTML = def.template
   return holder.content.firstElementChild?.getAttribute(PART_ATTR) ?? undefined
@@ -363,7 +363,7 @@ export function rootPartKey(def: ComponentDef): string | undefined {
  *  refuses a name another component here has, and that reason is what the person sees.
  *  Not undoable, like its description. Resolves to the name the component now has (the
  *  server cleans what it is given), or null when it could not be saved. */
-export async function renameComponent(def: ComponentDef, value: string): Promise<string | null> {
+export async function renameComponent(def: WireComponentDef, value: string): Promise<string | null> {
   const name = value.trim()
   const s = useStore.getState()
   if (!s.canvas || !name) return null
@@ -378,7 +378,7 @@ export async function renameComponent(def: ComponentDef, value: string): Promise
   }
 }
 
-export function goToMain(def: ComponentDef) {
+export function goToMain(def: WireComponentDef) {
   const s = useStore.getState()
   /* a library component's main lives on its library canvas */
   if (def.source?.library) {

@@ -2,6 +2,7 @@ import express from 'express'
 import { store } from './store.ts'
 import { getUserName } from './auth.ts'
 import { isCommunityCategory, type Canvas, type CommunityItem } from '../shared/types.ts'
+import { withWireComponents } from '../shared/components.ts'
 
 /**
  * The community gallery, mounted at /api/community (behind the session gate
@@ -76,7 +77,7 @@ communityRouter.post('/:id/copy', async (req, res) => {
     })
     if (!copy) return res.status(404).json({ error: 'not in the gallery' })
     store.recordCommunityCopy(source.id)
-    res.json(copy)
+    res.json(withWireComponents(copy))
   } catch (error) {
     console.error('[community] copy failed', error)
     res.status(500).json({ error: 'could not copy this design' })

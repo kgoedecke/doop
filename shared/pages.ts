@@ -8,7 +8,7 @@ export function framePageId(canvas: Pick<Canvas, 'id' | 'pages'>, frame: Frame):
   return frame.pageId ?? canvasPages(canvas)[0]!.id
 }
 
-export function pageFrames(canvas: Canvas, pageId: string): Frame[] {
+export function pageFrames(canvas: Pick<Canvas, 'id' | 'pages' | 'frames'>, pageId: string): Frame[] {
   return canvas.frames.filter((frame) => framePageId(canvas, frame) === pageId)
 }
 

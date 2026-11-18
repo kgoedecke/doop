@@ -7,7 +7,7 @@ import type { AgentRole } from '../../shared/agents'
 import type {
   ActivityItem,
   AgentTask,
-  Canvas,
+  ClientCanvas,
   CanvasGuide,
   DesignDecision,
   ElementComment,
@@ -47,7 +47,7 @@ export type ComposerSend =
 export type StreamActor = { name: string; color: string; agentKey?: string }
 
 export interface State {
-  canvas: Canvas | null
+  canvas: ClientCanvas | null
   presences: Record<string, Presence>
   cursors: Record<string, { x: number; y: number }>
   /** peers' cameras, keyed by clientId. Kept out of `presences` on purpose:
@@ -199,7 +199,7 @@ export interface State {
   /** `loadedPageIds`: the pages whose frames carry their HTML (every other
    *  page is stale). Left out, a new canvas counts as whole and the same canvas
    *  keeps the pages it had. A frame without `html` keeps the copy here, or ''. */
-  setCanvas(c: Canvas | WireCanvas | null, loadedPageIds?: readonly string[]): void
+  setCanvas(c: ClientCanvas | WireCanvas | null, loadedPageIds?: readonly string[]): void
   /** a page's frames whole, answering `page:load`: the page is loaded from now on */
   setPageFrames(pageId: string, frames: Frame[]): void
   /** the room stopped keeping this page current here (`page:dropped`): read it again before it shows */
@@ -236,7 +236,7 @@ export interface State {
   /** upsert (doc set) or remove (doc null) a style guide on the open canvas */
   setGuidelineLocal(name: string, doc: GuidelineDoc | null): void
   /** a component changed in the room, or was deleted (null) */
-  setComponentLocal(id: string, component: import('../../shared/components').ComponentDef | null): void
+  setComponentLocal(id: string, component: import('../../shared/components').WireComponentDef | null): void
   /** counts what the workspace's libraries have published or withdrawn since this
    *  page loaded: the Components panel reads its library again when it moves */
   libraryTick: number
@@ -398,7 +398,7 @@ export const useStore = create<State>((set, get) => ({
 
   setCanvas: (wire, loadedPageIds) =>
     set((s) => {
-      const canvas: Canvas | null = wire && { ...wire, frames: wire.frames.map((f) => withHtml(f, s.canvas)) }
+      const canvas: ClientCanvas | null = wire && { ...wire, frames: wire.frames.map((f) => withHtml(f, s.canvas)) }
       return {
         /* the stage paints frames in array order: back to front */
         canvas: canvas && { ...canvas, frames: sortByStack(canvas.frames) },
@@ -933,7 +933,7 @@ export function toolAllowed(tool: Tool, role: CanvasRole): boolean {
 
 /** A frame from the room as the store keeps it: one sent without its HTML
  *  keeps the copy here (stale, its page not loaded) or ''. */
-function withHtml(frame: Frame | WireFrame, canvas: Canvas | null): Frame {
+function withHtml(frame: Frame | WireFrame, canvas: ClientCanvas | null): Frame {
   if (typeof frame.html === 'string') return frame as Frame
   const kept = canvas?.id === frame.canvasId ? canvas.frames.find((f) => f.id === frame.id)?.html : undefined
   return { ...frame, html: kept ?? '' }
