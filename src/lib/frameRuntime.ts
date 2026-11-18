@@ -564,6 +564,66 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
   var readNodeType = getter(Node.prototype, 'nodeType')
   var readEditable = getter(HTMLElement.prototype, 'isContentEditable')
   var elementMatches = Element.prototype.matches
+  var elementClosest = Element.prototype.closest
+  var elementAttr = Element.prototype.getAttribute
+  var root = document.documentElement
+  function liveInput(ev) {
+    return keyPort && !editing && !protoOn &&
+      (readTrusted ? apply(readTrusted, ev, []) : ev.isTrusted) &&
+      apply(elementAttr, root, ['data-doop-interactive']) === 'true'
+  }
+  var wheelFields = ['clientX', 'clientY', 'deltaX', 'deltaY', 'deltaMode', 'ctrlKey', 'metaKey', 'shiftKey']
+  var wheelGetters = {}
+  for (var wi = 0; wi < wheelFields.length; wi++) {
+    var field = wheelFields[wi]
+    wheelGetters[field] = getter(WheelEvent.prototype, field) || getter(MouseEvent.prototype, field)
+  }
+  document.addEventListener('wheel', function (ev) {
+    if (!liveInput(ev)) return
+    var w = {}
+    for (var i = 0; i < wheelFields.length; i++) w[wheelFields[i]] = apply(wheelGetters[wheelFields[i]], ev, [])
+    // Native scrolling only inside explicitly marked regions; canvas zoom still wins.
+    if (!w.ctrlKey && !w.metaKey) {
+      var t = apply(readTarget, ev, [])
+      if (t instanceof Element && apply(elementClosest, t, ['[data-doop-scroll]'])) return
+    }
+    var unit = w.deltaMode === 1 ? 16 : w.deltaMode === 2 ? root.clientHeight : 1
+    ev.preventDefault()
+    apply(portSend, keyPort, [{
+      event: 'wheel', x: w.clientX / Math.max(1, root.clientWidth), y: w.clientY / Math.max(1, root.clientHeight),
+      dx: w.deltaX * unit, dy: w.deltaY * unit, ctrlKey: w.ctrlKey, metaKey: w.metaKey, shiftKey: w.shiftKey
+    }])
+  }, { capture: true, passive: false })
+  // Capture the middle pointer inside the document; screen-space deltas stay
+  // stable while the canvas (and therefore the iframe) moves underneath it.
+  var middleDrag = null
+  var readButton = getter(MouseEvent.prototype, 'button')
+  var readButtons = getter(MouseEvent.prototype, 'buttons')
+  var readScreenX = getter(MouseEvent.prototype, 'screenX')
+  var readScreenY = getter(MouseEvent.prototype, 'screenY')
+  var readPointerId = getter(PointerEvent.prototype, 'pointerId')
+  var capturePointer = Element.prototype.setPointerCapture
+  document.addEventListener('pointerdown', function (ev) {
+    if (!liveInput(ev) || apply(readButton, ev, []) !== 1) return
+    var id = apply(readPointerId, ev, [])
+    apply(capturePointer, root, [id])
+    middleDrag = { id: id, x: apply(readScreenX, ev, []), y: apply(readScreenY, ev, []) }
+    ev.preventDefault()
+  }, true)
+  document.addEventListener('pointermove', function (ev) {
+    if (!middleDrag || !liveInput(ev) || apply(readPointerId, ev, []) !== middleDrag.id) return
+    if (!(apply(readButtons, ev, []) & 4)) { middleDrag = null; return }
+    var x = apply(readScreenX, ev, []), y = apply(readScreenY, ev, [])
+    apply(portSend, keyPort, [{ event: 'wheel', x: 0, y: 0, dx: middleDrag.x - x, dy: middleDrag.y - y }])
+    middleDrag.x = x
+    middleDrag.y = y
+  }, true)
+  function endMiddleDrag(ev) {
+    if (middleDrag && apply(readPointerId, ev, []) === middleDrag.id) middleDrag = null
+  }
+  document.addEventListener('pointerup', endMiddleDrag, true)
+  document.addEventListener('pointercancel', endMiddleDrag, true)
+  document.addEventListener('lostpointercapture', endMiddleDrag, true)
   var keyGetters = {}
   var KEY_FIELDS = ['key', 'code', 'ctrlKey', 'metaKey', 'shiftKey', 'altKey', 'repeat']
   for (var kf = 0; kf < KEY_FIELDS.length; kf++) keyGetters[KEY_FIELDS[kf]] = getter(KeyboardEvent.prototype, KEY_FIELDS[kf])
@@ -589,10 +649,15 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
     }
     if (!tabChord) {
       if (editing || protoOn) return
+      if (k.key === 'Escape' && liveInput(ev)) {
+        if (!ev.defaultPrevented && apply(readType, ev, []) === 'keydown') apply(portSend, keyPort, [{ event: 'leave' }])
+        return
+      }
       var t = apply(readTarget, ev, [])
       if (t && apply(readNodeType, t, []) === 1) {
         if (apply(elementMatches, t, ['input, textarea, select'])) return
         if (t instanceof HTMLElement && apply(readEditable, t, [])) return
+        if (apply(elementAttr, root, ['data-doop-interactive']) === 'true' && apply(elementMatches, t, ['button,a[href],summary'])) return
       }
     }
     var type = apply(readType, ev, [])

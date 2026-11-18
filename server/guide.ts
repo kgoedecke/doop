@@ -420,6 +420,12 @@ Viewers watch designs assemble live. Stream with append_frame_html:
   work. Hosted fonts: name a family get_canvas lists under \`webFonts\` in CSS and nothing
   more — Doop adds one <link data-doop-webfonts> for the families the frame uses (keep it,
   never add your own for those). Another Google Fonts family works with your own <link>.
+- For a tool whose controls should work directly on the canvas, set
+  \`<html data-doop-interactive="true">\`. Its document receives ordinary clicks
+  and typing in Select; press Escape to return keyboard focus to the canvas. Use its frame name to select or move it. Wheel gestures
+  pan the canvas by default. For native scrolling, put \`data-doop-scroll\` on a
+  scroll container with \`overflow: auto; overscroll-behavior: contain\`. Canvas
+  zoom still works over that region.
 - Imported frames: a frame from a GitHub repo or synced from a team's live app has rules of
   its own (get_guide imported-frames).
 ${FRAME_STYLES}

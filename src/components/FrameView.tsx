@@ -314,6 +314,23 @@ export const FrameView = memo(function FrameView({
   const [duping, setDuping] = useState(false)
   const dupKeyHeld = useDupModifier()
   const [editing, setEditing] = useState(false)
+  // Opt in from the saved root tag, not from a message sent by frame scripts.
+  const liveFrame = useMemo(() => {
+    if (!frame.html.includes('data-doop-interactive')) return false
+    // Skip only leading comments and the doctype. Never match an opt-in
+    // inside a comment or parse the frame's potentially large body.
+    const preamble = /(?:\s+|<!--[\s\S]*?-->|<!doctype\s+html\s*>)/iy
+    let offset = 0
+    while (preamble.exec(frame.html)) offset = preamble.lastIndex
+    const tag = /<html(?=\s|>)(?:[^'"<>]|"[^"]*"|'[^']*')*>/iy
+    tag.lastIndex = offset
+    const root = tag.exec(frame.html)
+    if (!root) return false
+    return (
+      new DOMParser().parseFromString(root[0], 'text/html').documentElement.getAttribute('data-doop-interactive') ===
+      'true'
+    )
+  }, [frame.html])
   /* after exiting edit mode, hold renders until the final serialized HTML
      lands in the store — otherwise a stale post would morph the edit away */
   const [suspendPost, setSuspendPost] = useState(false)
@@ -818,6 +835,51 @@ export const FrameView = memo(function FrameView({
   const [bleed, setBleed] = useState(0)
   /* the port the runtime relays keys over; see `replayKey` */
   const keyPort = useRef<MessagePort | null>(null)
+  const liveInput = useRef<((data: MessageEvent['data']) => void) | null>(null)
+  useLayoutEffect(() => {
+    if (!liveFrame || editing) {
+      liveInput.current = null
+      return
+    }
+    liveInput.current = (data) => {
+      const iframe = iframeRef.current
+      if (!iframe || !data) return
+      if (data.event === 'leave') {
+        if (document.activeElement === iframe && document.hasFocus()) {
+          iframe.blur()
+          if (tool !== 'select') useStore.getState().setTool('select')
+        }
+      } else if (data.event === 'wheel' && !panMode && !fileDragging && tool === 'select') {
+        const { x, y, dx, dy } = data
+        if (![x, y, dx, dy].every(Number.isFinite)) return
+        const rect = iframe.getBoundingClientRect()
+        const angle = ((frame.rotation ?? 0) * Math.PI) / 180
+        const cos = Math.cos(angle)
+        const sin = Math.sin(angle)
+        const width = iframe.offsetWidth
+        const height = iframe.offsetHeight
+        const scale = rect.width / (Math.abs(cos) * width + Math.abs(sin) * height)
+        const localX = (Math.max(0, Math.min(1, x)) - 0.5) * width
+        const localY = (Math.max(0, Math.min(1, y)) - 0.5) * height
+        iframe.dispatchEvent(
+          new WheelEvent('wheel', {
+            clientX: rect.left + rect.width / 2 + scale * (localX * cos - localY * sin),
+            clientY: rect.top + rect.height / 2 + scale * (localX * sin + localY * cos),
+            deltaX: Math.max(-2000, Math.min(2000, dx)),
+            deltaY: Math.max(-2000, Math.min(2000, dy)),
+            ctrlKey: data.ctrlKey === true,
+            metaKey: data.metaKey === true,
+            shiftKey: data.shiftKey === true,
+            bubbles: true,
+            cancelable: true,
+          }),
+        )
+      }
+    }
+    return () => {
+      liveInput.current = null
+    }
+  }, [liveFrame, editing, panMode, fileDragging, tool, frame.rotation])
   /* saves a document the runtime serialized after a text edit (set below) */
   const saveEditedRef = useRef<(html: string, discrete: boolean) => void>(() => {})
   useEffect(() => {
@@ -862,7 +924,11 @@ export const FrameView = memo(function FrameView({
            HTML, so only the runtime can be listening for the port */
         if (!keyPort.current) {
           const channel = new MessageChannel()
-          channel.port1.onmessage = replayKey
+          channel.port1.onmessage = (event) => {
+            const kind = event.data?.event
+            if (kind === 'wheel' || kind === 'leave') liveInput.current?.(event.data)
+            else replayKey(event)
+          }
           keyPort.current = channel.port1
           win.postMessage({ type: 'doop:key-port' }, '*', [channel.port2])
         }
@@ -1945,10 +2011,11 @@ export const FrameView = memo(function FrameView({
                 empty frame — add HTML
               </div>
             )}
-            {/* shield keeps pointer events on the canvas, not the iframe;
-            lifted while editing so clicks land in the editable document,
-            but not under a file drag, whose drop belongs to the canvas */}
-            {(!editing || panMode || fileDragging || tool !== 'select') && <div className="absolute inset-0" />}
+            {/* Live frames take ordinary input. Other tools and drag gestures
+                still belong to the canvas; the frame name stays selectable. */}
+            {((!editing && !liveFrame) || panMode || fileDragging || tool !== 'select') && (
+              <div className="absolute inset-0" />
+            )}
           </div>
           {/* everything drawn over the frame rather than in it: selection ring,
               element outlines, grips, comments and the element toolbar. While
