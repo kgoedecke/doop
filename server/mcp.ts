@@ -16,6 +16,7 @@ import { fromNodeHeaders } from 'better-auth/node'
 import { z } from 'zod'
 import { store } from './store.ts'
 import { addPage, savePages, updateFrameMeta } from './pageTools.ts'
+import { fitNote, fittedHeight } from './frameFit.ts'
 import { fontsForCanvas } from './fonts.ts'
 import { customAgentsForCanvas } from './customAgents.ts'
 import { describeLibrary, libraryBrief, MAX_FONT_BYTES } from '../shared/fonts.ts'
@@ -225,6 +226,17 @@ function croppedNote(frame: Frame, scale: number): string {
 
 function err(message: string) {
   return { content: [{ type: 'text' as const, text: `Error: ${message}` }], isError: true }
+}
+
+const FIT_HEIGHT_DESCRIPTION =
+  "true = set the frame's height to its content's, measured in a browser at the frame's width, instead of guessing a height and checking screenshots. Parts sized in vh keep the frame's current height."
+
+/** fit_height after a write: the frame's height set to its content's, and the note that says so. */
+async function fitAfterWrite(frame: Frame, actor: Actor): Promise<{ frame: Frame; note: string }> {
+  const fit = await fittedHeight({ ...frame })
+  if (!fit.ok) return { frame, note: `fit_height was not applied: ${fit.error}` }
+  const resized = actions.updateFrame(frame.id, { height: fit.value.height }, actor)
+  return resized ? { frame: resized, note: fitNote(fit.value) } : { frame, note: 'fit_height: the frame is gone' }
 }
 
 /** Reaches agents that start designing without having read the canvas's style guides. */
@@ -1481,15 +1493,26 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
         y: z.number().optional(),
         width: z.number().optional().describe('Default 640'),
         height: z.number().optional().describe('Default 480'),
+        fit_height: z
+          .boolean()
+          .optional()
+          .describe(
+            `${FIT_HEIGHT_DESCRIPTION} Needs the whole design in html; after streaming with append_frame_html, call update_frame with fit_height instead.`,
+          ),
         agent_name: agentName,
       },
     },
-    async ({ canvas_id, pageId, name, html, x, y, width, height, agent_name }) => {
+    async ({ canvas_id, pageId, name, html, x, y, width, height, fit_height, agent_name }) => {
       if (!canvasFor(canvas_id, 'edit')) return noCanvas(canvas_id)
+      if (fit_height && height !== undefined) return err('pass either height or fit_height, not both')
+      if (fit_height && !html.trim())
+        return err('fit_height needs the design in html: stream it in, then call update_frame with fit_height')
       const inline = inlineDataRefusal(html)
       if (inline) return err(inline)
-      const frame = actions.createFrame(canvas_id, { name, pageId, html, x, y, width, height }, actorFrom(agent_name))
-      if (!frame) return noCanvas(canvas_id)
+      const created = actions.createFrame(canvas_id, { name, pageId, html, x, y, width, height }, actorFrom(agent_name))
+      if (!created) return noCanvas(canvas_id)
+      const fit = fit_height ? await fitAfterWrite(created, actorFrom(agent_name)) : undefined
+      const frame = fit?.frame ?? created
       const canvas = store.getCanvas(canvas_id)
       const result = withComponentNotes(
         withEscapeNote(
@@ -1503,6 +1526,7 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
         frame,
         { review: frame.html.length > 0 },
       )
+      if (fit) withNotesFirst(result, [fit.note])
       return withGuidelinesNudge(
         withStatusNudge(withFeedback(result, canvas_id, actorFrom(agent_name)), canvas_id, actorFrom(agent_name)),
         canvas_id,
@@ -1554,21 +1578,31 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
         'Replace the HTML design of a frame in one shot. The change renders live for everyone viewing the canvas. For new or heavily reworked designs, prefer append_frame_html so viewers can watch the design stream in. Keep data-doop-* attributes on elements you carry over: comments and links point at data-doop-id, prototype wiring and locks ride on the others. ' +
         COMPOSE_CHECK,
       annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
-      inputSchema: { frame_id: z.string(), html: z.string(), agent_name: agentName },
+      inputSchema: {
+        frame_id: z.string(),
+        html: z.string(),
+        fit_height: z.boolean().optional().describe(FIT_HEIGHT_DESCRIPTION),
+        agent_name: agentName,
+      },
     },
-    async ({ frame_id, html, agent_name }) => {
+    async ({ frame_id, html, fit_height, agent_name }) => {
       const current = frameFor(frame_id, 'edit')
       if (!current) return noFrame(frame_id)
       const inline = inlineDataRefusal(html, current.html)
       if (inline) return err(inline)
-      const frame = actions.updateFrame(frame_id, { html }, actorFrom(agent_name), { replace: true })
-      if (!frame) return noFrame(frame_id)
+      const written = actions.updateFrame(frame_id, { html }, actorFrom(agent_name), { replace: true })
+      if (!written) return noFrame(frame_id)
+      const fit = fit_height ? await fitAfterWrite(written, actorFrom(agent_name)) : undefined
+      const frame = fit?.frame ?? written
       return withPreview(
         withGuidelinesNudge(
           withStatusNudge(
             withFeedback(
               withComponentNotes(
-                withEscapeNote(textWithNudge({ ok: true, frame: frameSummary(frame) }, REVIEW_NUDGE), html),
+                withNotesFirst(
+                  withEscapeNote(textWithNudge({ ok: true, frame: frameSummary(frame) }, REVIEW_NUDGE), html),
+                  fit ? [fit.note] : [],
+                ),
                 frame,
                 { review: true },
               ),
@@ -2467,7 +2501,7 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
       title: 'Rename, move or resize a frame',
       _meta: previewToolMeta('Updating the frame…', 'Frame updated'),
       description:
-        "Update frame metadata in one call: rename it (name), move it on its page (x, y), resize it (width, height), turn it (rotation: degrees clockwise about its centre; 0 straightens it), or move it to another page (pageId from get_canvas; it keeps its x/y unless you pass new ones and lands in front of that page's frames). Set locked to true to lock the frame on the canvas (humans cannot select, move, resize or delete it from the stage until it is unlocked) or false to unlock it.",
+        "Update frame metadata in one call: rename it (name), move it on its page (x, y), resize it (width, height, or fit_height to make it as tall as its content), turn it (rotation: degrees clockwise about its centre; 0 straightens it), or move it to another page (pageId from get_canvas; it keeps its x/y unless you pass new ones and lands in front of that page's frames). Set locked to true to lock the frame on the canvas (humans cannot select, move, resize or delete it from the stage until it is unlocked) or false to unlock it.",
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
       inputSchema: {
         frame_id: z.string(),
@@ -2477,23 +2511,33 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
         y: z.number().optional(),
         width: z.number().optional(),
         height: z.number().optional(),
+        fit_height: z
+          .boolean()
+          .optional()
+          .describe(`${FIT_HEIGHT_DESCRIPTION} Measured at the new width when you pass one.`),
         locked: z.boolean().optional(),
         rotation: z.number().optional(),
         agent_name: agentName,
       },
     },
-    async ({ frame_id, agent_name, ...patch }) => {
+    async ({ frame_id, agent_name, fit_height, ...patch }) => {
       const found = frameFor(frame_id, 'edit')
       const canvas = found && store.getCanvas(found.canvasId)
       if (!canvas) return noFrame(frame_id)
-      const updated = updateFrameMeta(canvas, frame_id, patch, actorFrom(agent_name))
+      if (fit_height && patch.height !== undefined) return err('pass either height or fit_height, not both')
+      const fit = fit_height ? await fittedHeight({ ...found }, patch.width ?? found.width) : undefined
+      if (fit && !fit.ok) return err(fit.error)
+      const updated = updateFrameMeta(
+        canvas,
+        frame_id,
+        fit ? { ...patch, height: fit.value.height } : patch,
+        actorFrom(agent_name),
+      )
       if (!updated.ok) return err(updated.error)
       const frame = updated.value
-      return withPreview(
-        withFeedback(text({ ok: true, frame: frameSummary(frame) }), frame.canvasId, actorFrom(agent_name)),
-        frame.canvasId,
-        [frame],
-      )
+      const result = text({ ok: true, frame: frameSummary(frame) })
+      if (fit) withNotesFirst(result, [fitNote(fit.value)])
+      return withPreview(withFeedback(result, frame.canvasId, actorFrom(agent_name)), frame.canvasId, [frame])
     },
   )
 

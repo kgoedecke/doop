@@ -23,6 +23,7 @@ import { RESIDENT_TASK_LIMIT } from './allowance.ts'
 import * as actions from './actions.ts'
 import { captureFeature, captureTokenResults } from './featureEvents.ts'
 import { inspectFrame, renderFrame } from './screenshot.ts'
+import { fitNote, fittedHeight } from './frameFit.ts'
 import { AGENT_ROLES, DEFAULT_ROLE_ID, roleById, roleByAgentName, roleName, withoutMentions } from '../shared/agents.ts'
 import type { AgentRole, Roster } from '../shared/agents.ts'
 import { runnerKey } from '../shared/agentRunner.ts'
@@ -1686,6 +1687,11 @@ const TOOLS: Anthropic.Tool[] = [
         y: { type: 'number', description: 'Canvas position in px' },
         width: { type: 'number', description: 'px; the design is not rescaled' },
         height: { type: 'number', description: 'px; the design is not rescaled' },
+        fit_height: {
+          type: 'boolean',
+          description:
+            "true sets the height to the content's, measured at the frame's width (the new one, if you pass width), instead of guessing and checking screenshots. Not with height.",
+        },
         locked: { type: 'boolean', description: 'true keeps humans from selecting, moving or deleting it' },
       },
       required: ['frame_id'],
@@ -2552,6 +2558,10 @@ async function runResidentTool(
         const before = { width: f.width, height: f.height, arrangement: arrangement(f) }
         const text = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim() : undefined)
         const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : undefined)
+        const fitHeight = raw.fit_height === true
+        if (fitHeight && num(raw.height) !== undefined) return fail('pass either height or fit_height, not both')
+        const fit = fitHeight ? await fittedHeight({ ...f }, num(raw.width) ?? f.width) : undefined
+        if (fit && !fit.ok) return fail(fit.error)
         const updated = updateFrameMeta(
           canvas,
           f.id,
@@ -2561,7 +2571,7 @@ async function runResidentTool(
             x: num(raw.x),
             y: num(raw.y),
             width: num(raw.width),
-            height: num(raw.height),
+            height: fit ? fit.value.height : num(raw.height),
             locked: typeof raw.locked === 'boolean' ? raw.locked : undefined,
           },
           actor,
@@ -2576,7 +2586,7 @@ async function runResidentTool(
         /* a save that changed nothing has not delivered anything */
         if (arrangement(frame) !== before.arrangement) runState.arrangeWrites += 1
         return ok(
-          `frame ${frame.id} is now "${frame.name}" on page ${framePageId(canvas, frame)} at (${Math.round(frame.x)}, ${Math.round(frame.y)}), ${Math.round(frame.width)}x${Math.round(frame.height)}${frame.locked ? ', locked' : ''}`,
+          `frame ${frame.id} is now "${frame.name}" on page ${framePageId(canvas, frame)} at (${Math.round(frame.x)}, ${Math.round(frame.y)}), ${Math.round(frame.width)}x${Math.round(frame.height)}${frame.locked ? ', locked' : ''}${fit ? `. ${fitNote(fit.value)}` : ''}`,
         )
       }
       case 'create_canvas_page': {
