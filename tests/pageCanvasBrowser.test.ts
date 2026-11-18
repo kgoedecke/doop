@@ -8,6 +8,7 @@ import type { Canvas, Frame } from '../shared/types'
 declare global {
   interface Window {
     seedPages: (canvas: Canvas) => void
+    openPage: (id: string) => void
     pickElement: (frameId: string, selector: string) => void
     frameHtml: (frameId: string) => string | undefined
     trace: unknown[]
@@ -77,6 +78,55 @@ describe.skipIf(!findBrowserPath())('page camera and snapping', { timeout: 30_00
     await page.evaluate((data) => window.seedPages(data), data)
     await page.waitForSelector('iframe[data-doop-frame]')
   }
+
+  it('restores pan and zoom when returning to a page', async () => {
+    await load(canvas([frame('directory', 'first', 0), frame('target', 'second', 3000)]))
+    const initial = await page.evaluate(() => window.pageState().viewport)
+    await page.mouse.move(1100, 400)
+    await page.keyboard.down('Control')
+    await page.mouse.wheel({ deltaY: 30 })
+    await page.keyboard.up('Control')
+    await page.waitForFunction((zoom) => window.pageState().viewport.zoom !== zoom, {}, initial.zoom)
+    const zoomed = await page.evaluate(() => window.pageState().viewport)
+    await page.mouse.wheel({ deltaY: 200 })
+    await page.waitForFunction((y) => window.pageState().viewport.y !== y, {}, zoomed.y)
+    const before = await page.evaluate(() => window.pageState().viewport)
+
+    await page.evaluate(() => window.openPage('second'))
+    await page.waitForSelector('iframe[title="target"]')
+    await page.evaluate(() => window.openPage('first'))
+    await page.waitForSelector('iframe[title="directory"]')
+    expect(await page.evaluate(() => window.pageState().viewport)).toEqual(before)
+
+    // A link to the already visited second page must override its saved fit.
+    await page.mouse.wheel({ deltaY: -75 })
+    await page.waitForFunction((y) => window.pageState().viewport.y !== y, {}, before.y)
+    const fromLink = await page.evaluate(() => {
+      const viewport = window.pageState().viewport
+      history.pushState(null, '', '?frame=target')
+      window.dispatchEvent(new PopStateEvent('popstate'))
+      return viewport
+    })
+    await waitState('the direct link overrides the saved view', () => window.pageState().selectedId === 'target')
+    expect(await page.evaluate(() => window.pageState().viewport)).toMatchObject({ x: -2500, zoom: 1 })
+    await page.evaluate(() => window.openPage('first'))
+    await page.waitForSelector('iframe[title="directory"]')
+    expect(await page.evaluate(() => window.pageState().viewport)).toEqual(fromLink)
+  })
+
+  it('starts at the top of a tall single-column page on first visit', async () => {
+    await load(
+      canvas([
+        { ...frame('directory', 'first', 0), width: 900, height: 4000 },
+        { ...frame('continued', 'first', 0), width: 900, y: 4100 },
+      ]),
+    )
+    const top = await page.$eval('iframe[title="directory"]', (el) => el.getBoundingClientRect().top)
+    const { zoom } = await page.evaluate(() => window.pageState().viewport)
+    expect(top).toBeGreaterThanOrEqual(0)
+    expect(top).toBeLessThan(200)
+    expect(zoom).toBeGreaterThanOrEqual(0.9)
+  })
 
   it('centers the linked frame on a different page instead of fitting its distant siblings', async () => {
     await load(
