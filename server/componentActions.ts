@@ -723,16 +723,17 @@ function alignedRoot(html: string, def: ComponentDef): Element {
   return root
 }
 
-/** A template that leaves a `<doop-use>` open is refused: every instance would inherit it. */
-function refuseUnclosedUses(html: string, existing?: string) {
-  const unclosed = unclosedUseRefusal(html, existing)
+/** A template that leaves a `<doop-use>` open is refused, for every caller: parsing would close
+ *  it at its parent's end, and every instance would inherit what that guessed. */
+function refuseUnclosedUses(html: string) {
+  const unclosed = unclosedUseRefusal(html, 'template')
   if (unclosed) fail(unclosed)
 }
 
 /** The template the update asks for, checked whole (a find + replace as it would stand). */
 function nextHtml(def: ComponentDef, input: UpdateInput): string | undefined {
   const html = requestedHtml(def, input)
-  if (html !== undefined) refuseUnclosedUses(html, def.template)
+  if (html !== undefined) refuseUnclosedUses(html)
   return html
 }
 

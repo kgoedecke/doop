@@ -134,7 +134,7 @@ describe('a <doop-use> that would render nothing', () => {
     expect(ctx.issues.some((issue) => issue.code === 'unclosed_use')).toBe(true)
   })
 
-  it('names each <doop-use> a whole write would leave open, counting only what the write adds', async () => {
+  it('names each <doop-use> a whole write would leave open', async () => {
     const { unclosedUses } = await import('../server/componentEngine.ts')
     const { unclosedUseRefusal } = await import('../server/components.ts')
     expect(
@@ -149,11 +149,11 @@ describe('a <doop-use> that would render nothing', () => {
     expect(unclosedUseRefusal('<doop-use component="Card"></doop-use><doop-use component="Badge" />')).toBeNull()
     const refusal = unclosedUseRefusal('<doop-use component="Card"><doop-use component="Hero">')
     expect(refusal).toContain('<doop-use component="Card">, <doop-use component="Hero"> are opened and never closed')
-    /* one the frame already holds may be carried over; a second one is the write's own */
-    expect(unclosedUseRefusal('<doop-use component="Card"> edited', '<doop-use component="Card">')).toBeNull()
-    expect(
-      unclosedUseRefusal('<doop-use component="Card"><doop-use component="Card">', '<doop-use component="Card">'),
-    ).toContain('<doop-use component="Card"> is opened')
+    expect(refusal).toContain('placed with no slot content')
+    /* a template is parsed before it is kept, which closes the tag at its parent's end */
+    expect(unclosedUseRefusal('<div><doop-use component="Card"></div>', 'template')).toContain(
+      'closed where its parent ends',
+    )
   })
 
   it('names the component attribute itself, quoted or not, and a tag that names none', async () => {
@@ -179,7 +179,10 @@ describe('a <doop-use> that would render nothing', () => {
       { name: 'Panel', html: '<section><doop-use component="Card"><p>slot</p><h3>after</h3></section>', css: '' },
       context,
     )
-    expect(made.ok || made.error).toContain('<doop-use component="Card"> is opened and never closed')
+    expect(made).toMatchObject({
+      ok: false,
+      error: expect.stringContaining('<doop-use component="Card"> is opened and never closed'),
+    })
     expect(store.getComponents(canvasId).map((component) => component.name)).toEqual(['Card'])
 
     /* each entry of a batch stands alone: the open one is refused, the closed one is made */
@@ -200,13 +203,17 @@ describe('a <doop-use> that would render nothing', () => {
     const closed = store.getComponents(canvasId).find((component) => component.name === 'Closed')!
     const close = closed.template.lastIndexOf('</doop-use>')
     expect(close).toBeGreaterThan(-1)
-    const updated = await runComponentTool(
-      'update_component',
-      /* the edit drops the close: checked on the template as it would stand */
-      { component: 'Closed', find: closed.template.slice(close), replace: closed.template.slice(close + 11) },
-      context,
-    )
-    expect(updated.ok || updated.error).toContain('never closed')
+    /* the edit drops the close: checked on the template as it would stand, a dry run included,
+       as a find that does not match fails one */
+    const dropClose = {
+      component: 'Closed',
+      find: closed.template.slice(close),
+      replace: closed.template.slice(close + '</doop-use>'.length),
+    }
+    for (const input of [{ ...dropClose, dry_run: true }, dropClose]) {
+      const updated = await runComponentTool('update_component', input, context)
+      expect(updated).toMatchObject({ ok: false, error: expect.stringContaining('closed where its parent ends') })
+    }
     expect(store.getComponents(canvasId).find((component) => component.name === 'Closed')!.template).toBe(
       closed.template,
     )

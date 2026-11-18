@@ -21,7 +21,8 @@ import { customAgentsForCanvas } from './customAgents.ts'
 import { describeLibrary, libraryBrief, MAX_FONT_BYTES } from '../shared/fonts.ts'
 import { addCanvasFont, uploadedFontResult } from './canvasFontUpload.ts'
 import { inlineDataRefusal } from './inlineData.ts'
-import { frameWriteRefusal, unclosedUseRefusal } from './components.ts'
+import { unclosedUseRefusal } from './components.ts'
+import { frameWriteRefusal } from './frameWriteRefusal.ts'
 import {
   MAX_TOKEN_DESCRIPTION,
   TOKEN_TYPES,
@@ -2391,14 +2392,21 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
          past it, the earlier chunk already held the prefix and was refused). Never the stored
          HTML, where a component's image expanded mid-stream would read as an upload. Compared
          with the design the stream replaced: a rework may carry over what the frame had. */
-      const base = start ? current.html : (actions.streamBase(frame_id) ?? current.html)
-      const inline = inlineDataRefusal(start ? html_chunk : (actions.streamTail(frame_id) ?? '') + html_chunk, base)
+      const inline = start
+        ? inlineDataRefusal(html_chunk, current.html)
+        : inlineDataRefusal(
+            (actions.streamTail(frame_id) ?? '') + html_chunk,
+            actions.streamBase(frame_id) ?? current.html,
+          )
       if (inline) return err(inline)
       /* the last chunk makes the document whole (mid-stream the stored HTML keeps a waiting
          <doop-use> as written): one still open would be placed empty, so the chunk is refused
-         and the stream stays open for it to come again with the close */
-      const unclosed = done ? unclosedUseRefusal(start ? html_chunk : current.html + html_chunk, base) : null
-      if (unclosed) return err(unclosed)
+         and the stream stays open, not idle, for it to come again with the close */
+      const unclosed = done ? unclosedUseRefusal(actions.streamedDocument(frame_id, html_chunk, start) ?? '') : null
+      if (unclosed) {
+        actions.keepStreamOpen(frame_id)
+        return err(unclosed)
+      }
       const frame = actions.appendFrameHtml(frame_id, html_chunk, actorFrom(agent_name), { start, done })
       if (!frame) return noFrame(frame_id)
       const result = withNotesFirst(

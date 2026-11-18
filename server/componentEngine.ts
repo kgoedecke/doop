@@ -1111,11 +1111,11 @@ function nextUse(html: string, from: number, opaque: [number, number][], lenient
 }
 
 /* the attribute itself, never the end of another's name (data-component) */
-const COMPONENT_REF = /\scomponent\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>/]+))/i
+const COMPONENT_ATTR_VALUE = /\scomponent\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>/]+))/i
 
 /** The component an open tag names, as written. */
-function useRef(html: string, span: UseSpan): string {
-  const match = COMPONENT_REF.exec(html.slice(span.start, span.openEnd))
+function componentRefOf(html: string, span: UseSpan): string {
+  const match = COMPONENT_ATTR_VALUE.exec(html.slice(span.start, span.openEnd))
   return match?.[1] ?? match?.[2] ?? match?.[3] ?? ''
 }
 
@@ -1126,7 +1126,7 @@ export function unclosedUses(html: string): string[] {
   const opaque = opaqueRanges(html)
   const refs: string[] = []
   for (let span = nextUse(html, 0, opaque, true); span; span = nextUse(html, span.end, opaque, true))
-    if (span.unclosed) refs.push(useRef(html, span))
+    if (span.unclosed) refs.push(componentRefOf(html, span))
   return refs
 }
 
@@ -1147,7 +1147,7 @@ export function expandUses(
   for (let span = nextUse(html, 0, opaque, final); span; span = nextUse(html, cursor, opaque, final)) {
     out += html.slice(cursor, span.start)
     if (span.unclosed) {
-      const ref = useRef(html, span)
+      const ref = componentRefOf(html, span)
       ctx.issues.push({
         code: 'unclosed_use',
         message: `<${USE_TAG} component="${ref}"> was never closed with </${USE_TAG}>, so it was placed with no slot content. Close every <${USE_TAG}>, or write it self-closing.`,

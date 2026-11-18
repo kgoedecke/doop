@@ -924,17 +924,19 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   `componentTools.test.ts`, `componentsRoutes.test.ts`, `componentsBrowser.test.ts`. A bare
   `data-doop-prop="name"` binds an element's text, except where there is none: on `img`, `source`,
   `video`, `audio`, `iframe` and `embed` it binds `src`, on `input` its `value` (`parseBindings`
-  takes the tag). A `<doop-use>` that renders nothing is reported, never dropped quietly: a main with
-  no markup (`empty_template`), and on a whole write one never closed (`unclosed_use`), which is
-  placed with no slot content so the ones after it still expand (mid-stream it waits for its
-  end). An agent's whole write that leaves one open is refused before anything is saved, naming each
-  tag left open (`unclosedUseRefusal` in `server/components.ts`; only what the write adds counts):
-  MCP `create_frame`, `set_frame_html` and `edit_frame_html` (on the edited document) and the
-  resident's create, set, edit and rewrite commit (`frameWriteRefusal`), an MCP stream's `done`
-  chunk (the stream stays open for it to come again with the close), and a component's template
-  as made or updated, find + replace included (`createComponentFromHtml`, `updateComponent`).
-  Middle stream chunks and human frame saves still place and report it (#528). Tests: `componentDrops.test.ts`, the `<doop-use>` cases
-  in `inlineData.test.ts`.
+  takes the tag). A `<doop-use>` that renders nothing is reported, never dropped quietly: a main
+  with no markup (`empty_template`), and on a whole write one never closed (`unclosed_use`), which
+  is placed with no slot content so the ones after it still expand (mid-stream it waits for its
+  end). A whole write that leaves one open is refused before anything is saved, naming each tag
+  (`unclosedUseRefusal` in `server/components.ts`, on the document as it would be saved, an escaped
+  one decoded): an agent's frame write (`frameWriteRefusal`: MCP `create_frame`, `set_frame_html`,
+  `edit_frame_html` on the edited document, the resident's create, set, edit and rewrite commit), an
+  MCP stream's `done` chunk (`streamedDocument`; the stream stays open and is not idle,
+  `keepStreamOpen`, for the chunk to come again with the close), and any caller's component template
+  as made or updated, find + replace and dry runs included (`createComponentFromHtml`,
+  `updateComponent`). One left waiting by an unfinished stream counts too, since the write would
+  place it. Only an idle stream's settling and a human's frame save still place one and report it
+  (#528). Tests: `componentDrops.test.ts`, the `<doop-use>` cases in `inlineData.test.ts`.
 - Component system first (`SYSTEM_FIRST`, `COMPOSE_CHECK` in `server/guide.ts`): the guide opens
   with a must-do list (tokens, then a component system set up the way a designer sets up a Figma
   file, then screens composed from it; themes are tokens, never a copied frame), the brief creates

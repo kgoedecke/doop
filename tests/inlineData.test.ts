@@ -182,7 +182,7 @@ describe('over MCP', () => {
     expect(closed.isError).toBe(false)
   })
 
-  it('refuses the #528 edit on a frame of real instances, and lets every balanced edit of it through', async () => {
+  const makeCard = async () => {
     const card = await call('create_component', {
       canvas_id: canvasId,
       name: 'Card',
@@ -190,6 +190,10 @@ describe('over MCP', () => {
       auto_props: false,
     })
     expect(card.isError).toBe(false)
+  }
+
+  it('refuses the #528 edit on a frame of real instances, and lets every balanced edit of it through', async () => {
+    await makeCard()
     const screen =
       '<!doctype html><html><head></head><body><doop-use component="Card"><p>One</p><doop-use component="Card"><p>Inner</p></doop-use></doop-use><table><tr><td><doop-use component="Card" /></td></tr></table></body></html>'
     await call('create_frame', { canvas_id: canvasId, name: 'Screen', html: screen })
@@ -217,29 +221,92 @@ describe('over MCP', () => {
     expect(store.getFrame(frameId)!.html).toContain('Inner, edited')
   })
 
-  it('refuses a stream’s last chunk while a <doop-use> is open, and takes it again with the close', async () => {
+  it('refuses a stream’s last chunk while a <doop-use> is open, keeps the stream open, and takes it again with the close', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    try {
+      await makeCard()
+      await call('create_frame', { canvas_id: canvasId, name: 'Stream', html: doc('') })
+      const frameId = frames().find((frame) => frame.name === 'Stream')!.id
+      await call('append_frame_html', {
+        frame_id: frameId,
+        html_chunk: '<html><head></head><body><doop-use component="Card"><p>slot</p>',
+        start: true,
+      })
+      const streamed = store.getFrame(frameId)!.html
+      vi.setSystemTime(Date.now() + 25_000)
+      const last = await call('append_frame_html', {
+        frame_id: frameId,
+        html_chunk: '<h4>after</h4></body></html>',
+        done: true,
+      })
+      expect(last.isError).toBe(true)
+      expect(last.text).toContain('<doop-use component="Card"> is opened')
+      expect(store.getFrame(frameId)!.html).toBe(streamed)
+      /* the refusal counts as the agent at work: the idle sweep 15s on leaves the stream open */
+      actions.expireIdleStreams(Date.now() + 15_000)
+      expect(actions.isFrameMidStream(frameId)).toBe(true)
+
+      const again = await call('append_frame_html', {
+        frame_id: frameId,
+        html_chunk: '</doop-use><h4>after</h4></body></html>',
+        done: true,
+      })
+      expect(again.isError).toBe(false)
+      expect(actions.isFrameMidStream(frameId)).toBe(false)
+      const html = store.getFrame(frameId)!.html
+      expect(html.indexOf('<p>slot</p>')).toBeGreaterThan(html.indexOf('<article'))
+      expect(html.indexOf('<p>slot</p>')).toBeLessThan(html.indexOf('</article>'))
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('reads a write as it would be saved: one whole chunk, an escaped one, or onto a frame mid-stream', async () => {
+    await makeCard()
     await call('create_frame', { canvas_id: canvasId, name: 'Stream', html: doc('') })
-    const frameId = frames()[0]!.id
+    const frameId = frames().find((frame) => frame.name === 'Stream')!.id
+    const whole = await call('append_frame_html', {
+      frame_id: frameId,
+      html_chunk: openCardDoc,
+      start: true,
+      done: true,
+    })
+    expect(whole.isError).toBe(true)
+
+    /* an escaped stream is decoded as it is written, so its close counts */
+    const escape = (html: string) => html.replaceAll('<', '&lt;').replaceAll('>', '&gt;')
+    await call('append_frame_html', {
+      frame_id: frameId,
+      html_chunk: escape('<html><head></head><body><doop-use component="Card"><p>slot</p>'),
+      start: true,
+    })
+    const closed = await call('append_frame_html', {
+      frame_id: frameId,
+      html_chunk: escape('</doop-use></body></html>'),
+      done: true,
+    })
+    expect(closed.isError).toBe(false)
+    /* and an escaped whole write that leaves one open is refused like a raw one */
+    const escaped = await call('create_frame', { canvas_id: canvasId, name: 'Escaped', html: escape(openCardDoc) })
+    expect(escaped.isError).toBe(true)
+    expect(frames().some((frame) => frame.name === 'Escaped')).toBe(false)
+
+    /* a frame mid-stream holds its waiting tag: an edit or a set that leaves it open would place it */
     await call('append_frame_html', {
       frame_id: frameId,
       html_chunk: '<html><head></head><body><doop-use component="Card"><p>slot</p>',
       start: true,
     })
-    const last = await call('append_frame_html', {
+    const streamed = store.getFrame(frameId)!.html
+    const edit = await call('edit_frame_html', {
       frame_id: frameId,
-      html_chunk: '<h4>after</h4></body></html>',
-      done: true,
+      old_str: '<p>slot</p>',
+      new_str: '<p>slot</p><h4>after</h4>',
     })
-    expect(last.isError).toBe(true)
-    expect(last.text).toContain('<doop-use component="Card"> is opened')
-    expect(actions.isFrameMidStream(frameId)).toBe(true)
-    const again = await call('append_frame_html', {
-      frame_id: frameId,
-      html_chunk: '</doop-use><h4>after</h4></body></html>',
-      done: true,
-    })
-    expect(again.isError).toBe(false)
-    expect(actions.isFrameMidStream(frameId)).toBe(false)
+    expect(edit.isError).toBe(true)
+    const set = await call('set_frame_html', { frame_id: frameId, html: openCardDoc })
+    expect(set.isError).toBe(true)
+    expect(store.getFrame(frameId)!.html).toBe(streamed)
   })
 
   const imported = () =>
@@ -457,6 +524,7 @@ describe('the resident agent', () => {
     )
     expect(created.is_error).toBe(true)
     expect(String(created.content)).toContain('never closed')
+    expect(store.getCanvas(canvasId)!.frames).toHaveLength(0)
 
     const frameId = actions.createFrame(canvasId, { name: 'Hero', html: doc(''), width: 400, height: 300 }, actor())!.id
     const before = store.getFrame(frameId)!.html
