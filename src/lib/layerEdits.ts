@@ -910,9 +910,12 @@ function dropCreated(created: Frame): Promise<void> {
   )
 }
 
-/* a transparent document the size of its one element: the markup fills the
-   frame, so resizing the frame resizes the element as it does a drawing */
-function standaloneDocument(markup: string): string {
+/** A transparent document the size of its one element: the markup fills the
+ *  frame, so resizing the frame resizes the element as it does a drawing.
+ *  `measured`: the frame is the element's rendered box, transforms included,
+ *  so its own transform is switched off; otherwise the frame is its layout
+ *  box and the transform stays. */
+export function standaloneDocument(markup: string, { measured = true }: { measured?: boolean } = {}): string {
   const doc = new DOMParser().parseFromString('<!doctype html><html><head></head><body></body></html>', 'text/html')
   doc.documentElement.style.cssText = 'width:100%;height:100%;margin:0;'
   doc.body.style.cssText = 'width:100%;height:100%;margin:0;'
@@ -923,7 +926,8 @@ function standaloneDocument(markup: string): string {
   /* the element is measured as rendered, transforms included, and that box
      becomes the frame: a transform, inline or from a carried rule, would
      apply a second time on top */
-  for (const name of ['transform', 'translate', 'scale', 'rotate']) el.style.setProperty(name, 'none', 'important')
+  if (measured)
+    for (const name of ['transform', 'translate', 'scale', 'rotate']) el.style.setProperty(name, 'none', 'important')
   for (const [name, value] of [
     ['position', 'absolute'],
     ['left', '0'],

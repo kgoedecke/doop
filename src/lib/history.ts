@@ -7,6 +7,7 @@ import { requestFrame, settleFrames } from './frameBridge'
 import { clearElementId, elementIdAt, elementName, setElementName } from './layers'
 import { elementIdSelector } from '../../shared/elementId'
 import { useStore } from './store'
+import { savedByOthersSince } from './theirSaves'
 import { posthog } from './posthog'
 
 /** Local undo/redo for this client's own frame edits. Undo re-issues the
@@ -33,7 +34,9 @@ type Entry =
          takes its guides with it, so undo/redo puts them back with it */
       guides?: CanvasGuide[]
     }
-  | { type: 'update'; frameId: string; before: Patch; after: Patch; at: number; discrete?: boolean }
+  /* `version`: the frame's `updatedAt` as this history last saved it, what a
+     guarded transfer checks before writing over the frame again */
+  | { type: 'update'; frameId: string; before: Patch; after: Patch; at: number; discrete?: boolean; version?: number }
   /* a layer's caption: `elementId` is the `data-doop-id` the rename stamped,
      what undo and redo find the element by once a sibling moves it */
   | {
@@ -44,7 +47,7 @@ type Entry =
       before: string | null
       after: string | null
     }
-  | { type: 'create'; frameId: string; snapshot: Snapshot }
+  | { type: 'create'; frameId: string; snapshot: Snapshot; version?: number }
   /* frames restacked together (the Layers panel renumbering a page): saved
      as one request, so undo and redo change the order whole or not at all */
   | { type: 'stack'; canvasId: string; before: StackWrite[]; after: StackWrite[] }
@@ -52,10 +55,12 @@ type Entry =
   | { type: 'guide'; canvasId: string; before: CanvasGuide | null; after: CanvasGuide | null }
   /* a page's canvas colour set (after), changed or cleared (after null) */
   | { type: 'page-background'; canvasId: string; pageId: string; before: string | null; after: string | null }
-  | { type: 'delete'; frameId: string; snapshot: Snapshot }
+  | { type: 'delete'; frameId: string; snapshot: Snapshot; version?: number }
   /* Destination first, then source removal; reverse that order on undo so
      a failed request can never remove the only copy of a drawing. */
-  | { type: 'transfer'; canvasId: string; entries: Entry[] }
+  /* `guarded`: undo and redo refuse once a frame they would overwrite or
+     delete was saved by someone else since this history last wrote it */
+  | { type: 'transfer'; canvasId: string; entries: Entry[]; guarded?: boolean }
   /* one multi-frame action (a group move, a group delete): undone and
      redone as a unit. An `ordered` group's members depend on each other (a
      page and the frames on it), so they run one after another: forward on
@@ -402,6 +407,58 @@ export function recordDrawingTransfer(
   return entry
 }
 
+/** A canvas shape's shell rewritten in place (shapes grouped into it, or
+ *  its group split back into shapes) as one undo step: the shells made for
+ *  it, the host's new document and box, then the shells it took in, deleted.
+ *  Undo runs it backwards, so every shape is back before the host gives
+ *  its group up, and the host has its group again before any shell made
+ *  from it goes. */
+export function recordShellRewrite(
+  host: { before: Frame; after: Frame },
+  created: Frame[],
+  removed: Frame[],
+): HistoryEntry {
+  const pick = (f: Frame): Patch => ({
+    html: f.html,
+    name: f.name,
+    x: f.x,
+    y: f.y,
+    width: f.width,
+    height: f.height,
+    hidden: f.hidden,
+  })
+  const update = updateEntry(host.before.id, pick(host.before), pick(host.after))
+  const entry: Entry = {
+    type: 'transfer',
+    canvasId: host.before.canvasId,
+    guarded: true,
+    entries: [
+      ...created.map((f): Entry => ({ type: 'create', frameId: f.id, snapshot: snapshot(f), version: f.updatedAt })),
+      ...(update ? [update] : []),
+      ...removed.map((f): Entry => ({ type: 'delete', frameId: f.id, snapshot: snapshot(f) })),
+    ],
+  }
+  push(entry)
+  return entry
+}
+
+/** The frame as a step's own save left it: what a guarded step expects to
+ *  find before undo or redo writes over it. */
+export function noteSaved(entry: HistoryEntry, frame: Frame) {
+  for (const e of entry.type === 'transfer' ? entry.entries : [entry]) {
+    if ((e.type === 'update' || e.type === 'create') && e.frameId === frame.id) e.version = frame.updatedAt
+  }
+}
+
+/** A shell a rewrite could not delete (a save to it won): the step no
+ *  longer deletes it, and redoes the host as it was saved without it. */
+export function keepShell(entry: HistoryEntry, frameId: string, hostAfter: Patch) {
+  if (entry.type !== 'transfer') return
+  entry.entries = entry.entries.filter((e) => e.type !== 'delete' || e.frameId !== frameId)
+  const update = entry.entries.find((e) => e.type === 'update')
+  if (update?.type === 'update') update.after = { ...update.after, ...hostAfter }
+}
+
 /** A page duplicated together with its frames: one undo step that removes
  *  the frames before the page (a page with frames cannot be deleted) and
  *  brings the page back before the frames on redo. */
@@ -497,7 +554,7 @@ function remapId(oldId: string, newId: string) {
   for (const e of [...undoStack, ...redoStack]) visit(e)
 }
 
-async function recreate(e: { frameId: string; snapshot: Snapshot }) {
+async function recreate(e: { frameId: string; snapshot: Snapshot; version?: number }) {
   const { canvasId, ...rest } = e.snapshot
   const canvas = useStore.getState().canvas
   if (!canvas || canvas.id !== canvasId) throw new Error('Canvas changed')
@@ -507,7 +564,38 @@ async function recreate(e: { frameId: string; snapshot: Snapshot }) {
   useStore.getState().upsertFrame(f)
   remapId(e.frameId, f.id)
   e.frameId = f.id
+  e.version = f.updatedAt
 }
+
+/* A frame a guarded transfer would write over or delete in `direction`,
+   saved by someone else since this history's last write to it, or gone.
+   This browser's own later saves (a move, and its undo) do not count. */
+function childChanged(child: Entry, direction: 'undo' | 'redo'): boolean {
+  const removing = direction === 'redo' ? 'delete' : 'create'
+  if ((child.type !== 'update' && child.type !== removing) || child.version === undefined) return false
+  const frame = useStore.getState().canvas?.frames.find((f) => f.id === child.frameId)
+  return !frame || savedByOthersSince(child.frameId, child.version)
+}
+
+function changedSince(e: Extract<Entry, { type: 'transfer' }>, direction: 'undo' | 'redo'): boolean {
+  return e.entries.some((child) => childChanged(child, direction))
+}
+
+/* The version a guarded write expects the server to hold: the newest this
+   browser knows of, its own saves included, so a save by someone else that
+   lands meanwhile makes the write a conflict rather than overwrite it. */
+function expectedVersion(e: { frameId: string; version?: number }, guarded: boolean): number | undefined {
+  if (!guarded || e.version === undefined) return undefined
+  const frame = useStore.getState().canvas?.frames.find((f) => f.id === e.frameId)
+  return Math.max(e.version, frame?.updatedAt ?? 0)
+}
+
+const isConflict = (err: unknown) => (err as { status?: unknown } | null)?.status === 409
+
+const changedNotice = (direction: 'undo' | 'redo') =>
+  useStore
+    .getState()
+    .pushNotice(`A shape changed since, so this step can’t be ${direction === 'undo' ? 'undone' : 'redone'}`)
 
 /* Recreated frames and frames moved between pages become the selection,
    so undo/redo displays the page where the affected designs now live. */
@@ -589,15 +677,23 @@ async function applyOrdered(entries: Entry[], direction: 'undo' | 'redo'): Promi
    the survivors are what the opposite stack gets, so a partially failed
    group can still be reversed. Failed members are dropped, exactly as a
    failed single entry is: the frame is gone or the canvas moved on. */
-async function apply(e: Entry, direction: 'undo' | 'redo'): Promise<Entry | null> {
+async function apply(e: Entry, direction: 'undo' | 'redo', guarded = false): Promise<Entry | null> {
   if (e.type === 'transfer') {
+    if (e.guarded && changedSince(e, direction)) {
+      changedNotice(direction)
+      throw new Error('Changed since')
+    }
     const entries = direction === 'redo' ? e.entries : [...e.entries].reverse()
     const applied: Entry[] = []
     for (const child of entries) {
       try {
-        await apply(child, direction)
+        /* checked again before each write: a save can land between them */
+        if (e.guarded && childChanged(child, direction)) throw new Error('Changed since')
+        await apply(child, direction, e.guarded)
         applied.push(child)
       } catch (err) {
+        if (e.guarded && (isConflict(err) || (err instanceof Error && err.message === 'Changed since')))
+          changedNotice(direction)
         // Leave a partially applied transfer reversible and retryable. Never
         // remove the source when saving/recreating its destination failed.
         const remaining = { ...e, entries: e.entries.filter((entry) => !applied.includes(entry)) }
@@ -667,20 +763,34 @@ async function apply(e: Entry, direction: 'undo' | 'redo'): Promise<Entry | null
         : e.after
     useStore.getState().patchFrameLocal(e.frameId, patch)
     try {
-      await api.updateFrame(e.frameId, patch)
+      /* a save that answers with no frame leaves the step unguarded */
+      const expected = expectedVersion(e, guarded)
+      const saved: Frame | undefined = await (expected === undefined
+        ? api.updateFrame(e.frameId, patch)
+        : api.updateFrame(e.frameId, patch, expected))
+      e.version = saved?.updatedAt
       // Remember the actual fallback so the opposite operation stays reversible.
       if (forward) e.after = patch
       else e.before = patch
     } catch (err) {
       /* the server kept the old value — put the local copy back in step
-         with it rather than leave a client-only position behind */
-      useStore.getState().patchFrameLocal(e.frameId, rollback)
+         with it rather than leave a client-only position behind. A
+         conflict brings the server's frame; a newer one already here (the
+         save that caused it) stays as it is. */
+      const s = useStore.getState()
+      const remote = isConflict(err) ? ((err as { body?: { frame?: Frame } }).body?.frame ?? null) : null
+      const current = s.canvas?.frames.find((f) => f.id === e.frameId)
+      const newer = (than: Frame | undefined) => !!current && !!than && current.updatedAt > than.updatedAt
+      if (remote?.id === e.frameId) {
+        if (!newer(remote)) s.upsertFrame(remote)
+      } else if (!newer(frame)) s.patchFrameLocal(e.frameId, rollback)
       throw err
     }
   } else if ((e.type === 'create') === forward) {
     await recreate(e)
   } else {
-    await api.deleteFrame(e.frameId)
+    const expected = expectedVersion(e, guarded)
+    await (expected === undefined ? api.deleteFrame(e.frameId) : api.deleteFrame(e.frameId, expected))
     useStore.getState().removeFrame(e.frameId)
   }
   return e
