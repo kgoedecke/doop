@@ -142,9 +142,15 @@ describe('a <doop-use> that would render nothing', () => {
         '<doop-use component="Card"><p>a</p><doop-use component="Badge" label="x"></doop-use><doop-use component="Nav" />',
       ),
     ).toEqual(['Card'])
-    /* a tag in a script, a style or a comment is not a tag */
+    /* a tag in a script, a style or a comment is not a tag, nor is one inside a closed use's slot,
+       nor a custom element whose name starts the same */
     expect(
       unclosedUses('<script>const t = "<doop-use component=\'Card\'>"</script><!-- <doop-use component="Nav"> -->'),
+    ).toEqual([])
+    expect(
+      unclosedUses(
+        '<doop-use component="Card"><p>x</p><!-- <doop-use component="Nav"> --><textarea><doop-use component="Nav"></textarea><doop-user-chip></doop-user-chip></doop-use>',
+      ),
     ).toEqual([])
     expect(unclosedUseRefusal('<doop-use component="Card"></doop-use><doop-use component="Badge" />')).toBeNull()
     const refusal = unclosedUseRefusal('<doop-use component="Card"><doop-use component="Hero">')

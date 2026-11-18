@@ -931,12 +931,15 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   (`unclosedUseRefusal` in `server/components.ts`, on the document as it would be saved, an escaped
   one decoded): an agent's frame write (`frameWriteRefusal`: MCP `create_frame`, `set_frame_html`,
   `edit_frame_html` on the edited document, the resident's create, set, edit and rewrite commit), an
-  MCP stream's `done` chunk (`streamedDocument`; the stream stays open and is not idle,
-  `keepStreamOpen`, for the chunk to come again with the close), and any caller's component template
-  as made or updated, find + replace and dry runs included (`createComponentFromHtml`,
+  MCP stream's `done` chunk (`streamedDocument`; a refused chunk keeps the stream from going idle,
+  `markStreamActive`, while it comes again with the close), and any caller's component template as
+  made or updated, find + replace and dry runs included (`createComponentFromHtml`,
   `updateComponent`). One left waiting by an unfinished stream counts too, since the write would
-  place it. Only an idle stream's settling and a human's frame save still place one and report it
-  (#528). Tests: `componentDrops.test.ts`, the `<doop-use>` cases in `inlineData.test.ts`.
+  place it: an edit on top of a stream is told the frame is still streaming. The engine's reader
+  (`nextTag`) skips a tag inside a script, style, textarea, title or comment, and a custom element
+  whose name starts the same, inside a use as well as before it. Only an idle stream's settling and
+  a human's write (an inspector save, the REST `/append`) still place one and report it (#528).
+  Tests: `componentDrops.test.ts`, the `<doop-use>` cases in `inlineData.test.ts`.
 - Component system first (`SYSTEM_FIRST`, `COMPOSE_CHECK` in `server/guide.ts`): the guide opens
   with a must-do list (tokens, then a component system set up the way a designer sets up a Figma
   file, then screens composed from it; themes are tokens, never a copied frame), the brief creates
