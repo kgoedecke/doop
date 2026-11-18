@@ -110,6 +110,19 @@
   is checked again when it runs) and `get_canvas` (`customAgents`) read it. Work left for an agent
   that is deleted or off goes to Doop. Routes: `/api/agents` and `/api/agents/builtin`
   (`?workspace=`, members only). Tests: `customAgents.test.ts`, `customAgentsHttp.test.ts`.
+- Skills (`.context/specs/skills.md`, `shared/skills.ts`, `server/skills.ts`, `server/skillRoutes.ts`,
+  `src/components/Skills.tsx`): named instructions a workspace (Workspace → Agents) or a person
+  (Settings → Doop Agent, for their personal canvases) writes once, at most 50 per scope, in
+  `skills` (migration 0060, `scope` as in `custom_agents`, mirrored in memory). A handle
+  (`brand-check`) is fixed once created. `/handle` in a request asks for one: `skillHandlesIn`
+  finds a `/handle` that starts the text or follows whitespace or `(` and ends at whitespace or
+  punctuation, so paths and URLs are never skills. The resident run scans its cards, comments,
+  feedback, each feedback's task and what came before each comment in its thread
+  (`requestedSkillsPrompt` in `server/resident.ts`), and `skillsBlock` adds the bodies of the
+  first five the canvas's scope has as a cached system block after the guidelines, on both the API
+  and harness paths; a handle with no skill changes nothing. Skill text never reaches canvas
+  viewers. Route: `/api/skills` (`?workspace=`, members only). Tests: `skills.test.ts`,
+  `skillsHttp.test.ts`, `residentSkills.test.ts`.
 - Agent feedback (`server/agentFeedback.ts`, `shared/agentFeedback.ts`): agents talk to the Doop
   team through two MCP tools, which the resident agent has under the same names. `report_issue`
   (kind `issue`: `bug`, `tool_error`, `confusing`, `missing_capability`, `other`) is for where Doop

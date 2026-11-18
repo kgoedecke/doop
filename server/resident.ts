@@ -5,6 +5,8 @@ import { store } from './store.ts'
 import { layerExport } from './layerExport.ts'
 import { MAX_EXPORT_SCALE, MIN_EXPORT_SCALE } from '../shared/exportScale.ts'
 import { fontsForCanvas } from './fonts.ts'
+import { skillsForCanvas } from './skills.ts'
+import { skillsBlock } from '../shared/skills.ts'
 import { libraryBrief, MAX_FONT_BYTES } from '../shared/fonts.ts'
 import { addCanvasFont, uploadedFontResult } from './canvasFontUpload.ts'
 import { inlineDataRefusal } from './inlineData.ts'
@@ -250,6 +252,31 @@ interface FeedbackItem {
   from: string
   text: string
   about: string
+}
+
+/** What came before a comment in its thread, oldest first: a reply reads against it. */
+function earlierInThread(comment: ElementComment): ElementComment[] {
+  const thread = actions.commentThread(comment)
+  return thread.slice(
+    0,
+    thread.findIndex((x) => x.id === comment.id),
+  )
+}
+
+/** The system block for the skills a run's requests name with `/handle`
+ *  (shared/skills.ts), from the canvas's scope. A follow-up keeps the skill
+ *  its task named and a reply the one named earlier in its thread, so "make it
+ *  bigger" after /brand-check still gets it. */
+export function requestedSkillsPrompt(
+  canvas: { workspaceId?: string | null; ownerId?: string | null },
+  work: { items: FeedbackItem[]; cards: AgentTask[]; comments: ElementComment[] },
+): string | undefined {
+  const text = [
+    ...work.items.flatMap((item) => [item.text, item.about]),
+    ...work.cards.map((card) => card.status),
+    ...work.comments.flatMap((comment) => [comment.text, ...earlierInThread(comment).map((x) => x.text)]),
+  ].join('\n')
+  return skillsBlock(skillsForCanvas(canvas), text)
 }
 
 interface RunState {
@@ -638,12 +665,7 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
             .map((c) => {
               /* a reply carries the conversation it answers, so "make it
                  bigger" reads against what was said before */
-              const history = actions.commentThread(c)
-              const earlier = history
-                .slice(
-                  0,
-                  history.findIndex((x) => x.id === c.id),
-                )
+              const earlier = earlierInThread(c)
                 .map((x) => `    ${x.from}: "${x.text}"`)
                 .join('\n')
               const thread = earlier ? `\n  earlier in this thread:\n${earlier}` : ''
@@ -739,6 +761,10 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
       /* the canvas's custom fonts: which families exist, and that naming one
          is enough (the server adds the @font-face) */
       const canvas = store.getCanvas(canvasId)
+      /* read when the run starts, so a skill edited while the work waited
+         runs as edited; cached with its own breakpoint like the guidelines */
+      const skillsPrompt = canvas && requestedSkillsPrompt(canvas, { items, cards, comments })
+      const skillsBlocks = skillsPrompt ? [{ text: skillsPrompt, cache: true }] : []
       const fontsText = [canvas ? libraryBrief(fontsForCanvas(canvas)) : '', webFontsBrief()]
         .filter(Boolean)
         .join('\n\n')
@@ -815,6 +841,7 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
           system: [
             systemFor(role, roster),
             ...guidelinesBlock.map((b) => b.text),
+            ...skillsBlocks.map((b) => b.text),
             ...fontsBlock.map((b) => b.text),
             ...tokensBlock.map((b) => b.text),
             ...existingStyleBlock.map((b) => b.text),
@@ -864,6 +891,7 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
                 system: [
                   { text: systemFor(role, roster), cache: true },
                   ...guidelinesBlock,
+                  ...skillsBlocks,
                   ...fontsBlock,
                   ...tokensBlock,
                   ...existingStyleBlock,

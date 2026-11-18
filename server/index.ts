@@ -144,6 +144,8 @@ import { modelCatalogFor } from './modelCatalog.ts'
 import { mentionedRole } from '../shared/agents.ts'
 import { hydrateCustomAgents, rosterFor, teamOfCanvas } from './customAgents.ts'
 import { customAgentsRouter } from './customAgentRoutes.ts'
+import { hydrateSkills } from './skills.ts'
+import { skillsRouter } from './skillRoutes.ts'
 import { activeAgentTasks } from '../shared/agentActivity.ts'
 import { colorFor } from '../shared/types.ts'
 import { isPeerViewport } from '../shared/viewport.ts'
@@ -176,6 +178,7 @@ await backgrounds.initBackgrounds()
 initAuth()
 await syncAdmins() // ADMIN_EMAILS -> user.role, for accounts that already exist
 await hydrateCustomAgents() // before the logs: an interrupted claim is told apart by its agent's name
+await hydrateSkills()
 let data = await persist.hydrate()
 if (data.canvases.length === 0 && (await persist.importLegacyJson())) {
   data = await persist.hydrate()
@@ -1117,6 +1120,7 @@ app.use('/api/notifications', notificationsRouter)
 app.use('/api/webhooks', webhooksRouter)
 app.use('/api/fonts', fontsRouter)
 app.use('/api/agents', customAgentsRouter)
+app.use('/api/skills', skillsRouter)
 
 /* the custom agents a canvas's team has: its workspace's, or its owner's (the
    automation editor asks for a step's canvas) */
