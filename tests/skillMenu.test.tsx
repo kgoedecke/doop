@@ -177,13 +177,58 @@ it('shows nothing where the list is refused, and drops an answer for a canvas it
   expect(host.querySelector('[data-pan-stop]')).toBeNull()
 
   /* an automation step switches canvas while the first answer is still out */
+  await type('')
   let answerFirst: (value: unknown) => void = () => {}
   mocks.canvasSkills.mockReturnValueOnce(new Promise((resolve) => (answerFirst = resolve)))
   mocks.canvasSkills.mockResolvedValueOnce({ skills: [{ handle: 'second', description: 'B' }], addIn: null })
   act(() => root.render(<Field from={{ canvasId: 'c-a' }} />))
   await type('x /')
-  act(() => root.render(<Field from={{ canvasId: 'c-b' }} />))
-  await type('x / /')
+  /* the switch reads the new canvas's list by itself */
+  await act(async () => root.render(<Field from={{ canvasId: 'c-b' }} />))
   await act(async () => answerFirst({ skills: [{ handle: 'first', description: 'A' }], addIn: null }))
   expect(options()).toEqual(['/secondB'])
+})
+
+it('closes only the current menu on Esc: a "/" typed again opens it', async () => {
+  act(() => root.render(<Field />))
+  await type('/')
+  await press('Escape')
+  expect(options()).toEqual([])
+  await type('')
+  await type('/')
+  expect(options()).toEqual(['/brand-checkBrand voice', '/release-notesRelease notes tone'])
+})
+
+it('reads the list again for every new "/", even at the same spot', async () => {
+  act(() => root.render(<Field />))
+  await type('/')
+  expect(options()).toHaveLength(2)
+  mocks.canvasSkills.mockResolvedValue({ skills: [{ handle: 'added', description: 'New one' }], addIn: null })
+  await type('')
+  await type('/')
+  expect(options()).toEqual(['/addedNew one'])
+})
+
+it('stops offering a canvas’s skills once the field moves to another canvas', async () => {
+  act(() => root.render(<Field from={{ canvasId: 'c-a' }} />))
+  await type('x /')
+  expect(options()).toHaveLength(2)
+  let answer: (value: unknown) => void = () => {}
+  mocks.canvasSkills.mockReturnValueOnce(new Promise((resolve) => (answer = resolve)))
+  await act(async () => root.render(<Field from={{ canvasId: 'c-b' }} />))
+  expect(options()).toEqual([])
+  await act(async () => answer({ skills: [{ handle: 'b-only', description: 'B' }], addIn: null }))
+  expect(options()).toEqual(['/b-onlyB'])
+})
+
+it('scrolls the row the arrows pick into view', async () => {
+  const scrolled: string[] = []
+  const spy = vi.spyOn(HTMLElement.prototype, 'scrollIntoView').mockImplementation(function (this: HTMLElement) {
+    scrolled.push(this.textContent ?? '')
+  })
+  act(() => root.render(<Field />))
+  await type('/')
+  await press('ArrowDown')
+  expect(scrolled.at(-1)).toContain('/release-notes')
+  spy.mockRestore()
 })

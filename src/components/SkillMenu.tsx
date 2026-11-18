@@ -1,6 +1,6 @@
 import {
+  useEffect,
   useId,
-  useRef,
   useState,
   type ChangeEvent,
   type KeyboardEvent,
@@ -69,15 +69,20 @@ export function useSkillMenu({
   const t = useT()
   const id = useId()
   const [caret, setCaret] = useState(0)
-  const [skills, setSkills] = useState<OfferedSkill[]>()
-  const [addIn, setAddIn] = useState<AgentScope | null>(null)
-  /* the last list asked for; an answer to an older ask is dropped */
-  const loadedFor = useRef<string>(undefined)
+  /* the last list read, and the source it came from: another source's is never shown */
+  const [offered, setOffered] = useState<{ source: string; skills: OfferedSkill[]; addIn: AgentScope | null }>()
   const [dismissed, setDismissed] = useState<number>()
   const [active, setActive] = useState(0)
 
+  const source = from && JSON.stringify(from)
   const partial = from ? partialHandleAt(text, caret) : undefined
-  const live = !!partial && partial.start !== dismissed
+  const at = partial?.start
+  /* Esc closes the menu of this "/" only: once it is gone, the next one opens */
+  if (dismissed !== undefined && at !== dismissed) setDismissed(undefined)
+  const shown = offered?.source === source ? offered : undefined
+  const skills = shown?.skills
+  const addIn = shown?.addIn ?? null
+  const live = !!partial && at !== dismissed
   const matches = live && skills ? skills.filter((skill) => skill.handle.includes(partial.query)) : []
   /* "New skill" is the last row while any skill matches, and the only row on a bare "/" */
   const addTo = offerNew && live && skills && (matches.length > 0 || partial.query === '') ? addIn : null
@@ -87,31 +92,24 @@ export function useSkillMenu({
   const empty = live && skills?.length === 0 && partial.query === ''
   const index = Math.min(active, count - 1)
 
-  function load(at: number) {
-    /* keyed on the source too: an automation step can change canvas, Home its scope */
-    if (!from) return
-    const key = `${JSON.stringify(from)}:${at}`
-    if (key === loadedFor.current) return
-    loadedFor.current = key
-    fetchSkills(from).then(
-      (offered) => {
-        if (loadedFor.current !== key) return
-        setSkills(offered.skills)
-        setAddIn(offered.addIn)
-      },
+  /* read again for each new "/" and each source (an automation step can change
+     canvas, Home its scope), so a skill added meanwhile shows; an answer to an
+     older ask is dropped */
+  useEffect(() => {
+    if (!source || at === undefined) return
+    let current = true
+    fetchSkills(JSON.parse(source) as SkillSource).then(
+      (list) => current && setOffered({ source, ...list }),
       /* refused (a viewer who may not ask an agent for work): no menu at all */
-      () => {
-        if (loadedFor.current === key) setSkills(undefined)
-      },
+      () => current && setOffered(undefined),
     )
-  }
+    return () => {
+      current = false
+    }
+  }, [source, at])
 
-  /* the list is read again for each new "/", so a skill added meanwhile shows */
   function follow(el: HTMLTextAreaElement) {
-    const at = el.selectionStart
-    setCaret(at)
-    const found = from ? partialHandleAt(el.value, at) : undefined
-    if (found) load(found.start)
+    setCaret(el.selectionStart)
   }
 
   function place(at: number) {
@@ -138,14 +136,10 @@ export function useSkillMenu({
     const already = partialHandleAt(text, at)
     setDismissed(undefined)
     setActive(0)
-    if (already && at === to) {
-      load(already.start)
-      return place(at)
-    }
+    if (already && at === to) return place(at)
     const lead = at > 0 && !/[\s(]/.test(text[at - 1] ?? '') ? ' ' : ''
     const start = at + lead.length
     setText(`${text.slice(0, at)}${lead}/${text.slice(to)}`)
-    load(start)
     place(start + 1)
   }
 
@@ -168,12 +162,11 @@ export function useSkillMenu({
       return take()
     }
     if (!open) return false
-    if (e.key === 'ArrowDown') {
-      setActive((index + 1) % count)
-      return take()
-    }
-    if (e.key === 'ArrowUp') {
-      setActive((index - 1 + count) % count)
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      const next = (index + (e.key === 'ArrowDown' ? 1 : count - 1)) % count
+      setActive(next)
+      /* the list scrolls past 220px; keep the picked row in sight */
+      document.getElementById(optionId(next))?.scrollIntoView({ block: 'nearest' })
       return take()
     }
     /* a lone "New skill" row (no skills yet, bare "/") takes Enter too, rather than sending "/" */
