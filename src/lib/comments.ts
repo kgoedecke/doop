@@ -1,4 +1,4 @@
-import type { Canvas, ElementComment, Frame } from '../../shared/types'
+import type { ClientCanvas, ElementComment, Frame } from '../../shared/types'
 import { canvasPages, framePageId } from '../../shared/pages'
 import { isCanvasComment } from '../../shared/comments'
 import { useStore } from './store'
@@ -25,7 +25,7 @@ export function threadState(thread: Pick<CommentThreadGroup, 'root'>): ThreadSta
  *  keeps a bounded window) are dropped rather than shown as headless threads. */
 export function pageThreads(
   comments: ElementComment[],
-  canvas: Pick<Canvas, 'id' | 'pages' | 'frames'> | null,
+  canvas: Pick<ClientCanvas, 'id' | 'pages' | 'frames'> | null,
   pageId: string | null,
 ): CommentThreadGroup[] {
   if (!canvas) return []
@@ -58,7 +58,7 @@ export function pageThreads(
 /** How many threads on the page are still open — the rail badge. */
 export function openThreadCount(
   comments: ElementComment[],
-  canvas: Pick<Canvas, 'id' | 'pages' | 'frames'> | null,
+  canvas: Pick<ClientCanvas, 'id' | 'pages' | 'frames'> | null,
   pageId: string | null,
 ): number {
   return pageThreads(comments, canvas, pageId).filter((t) => threadState(t) === 'open').length

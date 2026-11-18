@@ -593,8 +593,7 @@ export const guidelines = pgTable(
 
 /** Reusable designs. Keyed per canvas: a copied canvas keeps its ids, so the
  *  instance markers in its copied frames still point at the right rows. Mirrored
- *  in memory like guidelines. `history` holds recent revisions inline because
- *  merging a stale save needs them synchronously. */
+ *  in memory like guidelines. Earlier revisions are rows of `component_revisions`. */
 export const components = pgTable(
   'components',
   {
@@ -612,7 +611,9 @@ export const components = pgTable(
     mainFrameId: text('main_frame_id'),
     code: jsonb('code').$type<ComponentCode>(),
     source: jsonb('source').$type<NonNullable<ComponentDef['source']>>(),
-    history: jsonb('history').$type<ComponentSnapshot[]>().notNull(),
+    /** Retired: revisions live in `component_revisions`. Neither read nor written; kept, with
+     *  a default, so the release before this one still runs on the table. A later migration drops it. */
+    legacyHistory: jsonb('history').$type<ComponentSnapshot[]>().notNull().default([]),
     /** 'deleted' is a soft delete: the row stays, so instances keep what they were
      *  rendered from and the component can be restored */
     status: text('status').$type<'active' | 'deleted'>().notNull().default('active'),
@@ -623,6 +624,25 @@ export const components = pgTable(
     updatedBy: text('updated_by').notNull(),
   },
   (t) => [primaryKey({ columns: [t.canvasId, t.id] })],
+)
+
+/** A component's earlier states, one row per revision: inserted once, never updated, and
+ *  pruned to the newest `MAX_COMPONENT_HISTORY` per component. Mirrored in memory as
+ *  `ComponentDef.history`, because merging a stale save needs them synchronously. */
+export const componentRevisions = pgTable(
+  'component_revisions',
+  {
+    canvasId: text('canvas_id').notNull(),
+    componentId: text('component_id').notNull(),
+    rev: integer('rev').notNull(),
+    template: text('template').notNull(),
+    rawCss: text('raw_css').notNull(),
+    head: jsonb('head').$type<string[]>().notNull(),
+    props: jsonb('props').$type<ComponentProp[]>().notNull(),
+    savedAt: bigint('saved_at', { mode: 'number' }).notNull(),
+    savedBy: text('saved_by').notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.canvasId, t.componentId, t.rev] })],
 )
 
 /** What a workspace library has published: one snapshot per component of a

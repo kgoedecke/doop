@@ -1,4 +1,4 @@
-import type { Canvas, CanvasPageInfo } from '../../shared/types'
+import type { ClientCanvas, CanvasPageInfo } from '../../shared/types'
 import { canvasPages, framePageId, samePages } from '../../shared/pages'
 import { stackOf } from '../../shared/frameStack'
 import { api, ApiError } from './api'
@@ -14,13 +14,13 @@ import {
   trackSave,
 } from './history'
 
-export function savePages(canvas: Canvas, next: CanvasPageInfo[], selectId?: string) {
+export function savePages(canvas: ClientCanvas, next: CanvasPageInfo[], selectId?: string) {
   const task = savePagesAndRecord(canvas, next, selectId)
   trackSave(task)
   return task
 }
 
-async function savePagesAndRecord(canvas: Canvas, next: CanvasPageInfo[], selectId?: string) {
+async function savePagesAndRecord(canvas: ClientCanvas, next: CanvasPageInfo[], selectId?: string) {
   const expected = canvasPages(canvas)
   const activeBefore = useStore.getState().activePageId
   /* the guides a deleted page takes with it, for undo to bring back */
@@ -51,7 +51,7 @@ async function savePagesAndRecord(canvas: Canvas, next: CanvasPageInfo[], select
 }
 
 /** Copy a page and its frames in one server call, then show the copy. */
-export function duplicatePage(canvas: Canvas, pageId: string) {
+export function duplicatePage(canvas: ClientCanvas, pageId: string) {
   const task = (async () => {
     const expected = canvasPages(canvas)
     const activeBefore = useStore.getState().activePageId
@@ -77,7 +77,7 @@ export function duplicatePage(canvas: Canvas, pageId: string) {
   return task
 }
 
-export function moveFramesToPage(canvas: Canvas, ids: string[], pageId: string) {
+export function moveFramesToPage(canvas: ClientCanvas, ids: string[], pageId: string) {
   const task = (async () => {
     const moved: Parameters<typeof recordUpdates>[0] = []
     try {
@@ -123,7 +123,7 @@ const backgroundWrites = new Map<string, BackgroundWrites>()
  *  A failed save puts back what the server holds, unless the page has been
  *  painted again since; a save finishing after the canvas was left (or
  *  revisited, under a fresh history) touches nothing. */
-export function setPageBackground(canvas: Canvas, pageId: string, color: string | null) {
+export function setPageBackground(canvas: ClientCanvas, pageId: string, color: string | null) {
   const state = useStore.getState()
   if (state.canvas?.id !== canvas.id) return Promise.resolve()
   const before = pageBackground(canvasPages(state.canvas).find((page) => page.id === pageId))

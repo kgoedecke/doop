@@ -13,7 +13,7 @@ import type { AgentFeedbackKind, AgentFeedbackReport } from '../../shared/agentF
 import type { ProductFeedbackInput } from '../../shared/productFeedback'
 import type {
   ActivityItem,
-  Canvas,
+  ClientCanvas,
   CanvasMeta,
   CardScope,
   CommunityCategory,
@@ -33,7 +33,13 @@ import type { Automation, AutomationRun, AutomationTrigger, Schedule, Step } fro
 import type { BillingInterval, Plan } from '../../shared/billing'
 import type { LinkAccess } from '../../shared/canvasRole'
 import type { CommentAnchorInput } from '../../shared/comments'
-import type { ComponentCode, ComponentDef, ComponentProp, PartOverride } from '../../shared/components'
+import type {
+  ComponentCode,
+  ComponentProp,
+  ComponentSnapshot,
+  PartOverride,
+  WireComponentDef,
+} from '../../shared/components'
 
 /** What the server says about a component beyond the definition itself. */
 export interface ComponentInfo {
@@ -111,7 +117,7 @@ export interface LibraryUpdateReport {
 }
 
 export interface ComponentImpact {
-  component: ComponentDef
+  component: WireComponentDef
   dry_run: boolean
   impact: {
     instances: number
@@ -534,15 +540,15 @@ export const api = {
     }),
   stopLocalAgent: () => req<{ ok: boolean }>('/api/local-agent/stop', { method: 'POST' }),
   listCanvases: () => req<CanvasMeta[]>('/api/canvases'),
-  getCanvas: (id: string) => req<Canvas>(`/api/canvases/${id}`),
+  getCanvas: (id: string) => req<ClientCanvas>(`/api/canvases/${id}`),
   deleteCanvas: (id: string) => req(`/api/canvases/${id}`, { method: 'DELETE' }),
   homeActivity: () => req<HomeActivity[]>('/api/home/activity'),
   createCanvas: (name: string, workspaceId?: string) =>
-    req<Canvas>('/api/canvases', { method: 'POST', body: JSON.stringify({ name, workspaceId }) }),
+    req<ClientCanvas>('/api/canvases', { method: 'POST', body: JSON.stringify({ name, workspaceId }) }),
   /* file a canvas in a workspace, or back in its owner's personal space (null) */
   moveCanvas: (id: string, workspaceId: string | null) =>
     req(`/api/canvases/${id}/workspace`, { method: 'PUT', body: JSON.stringify({ workspaceId }) }),
-  duplicateCanvas: (id: string) => req<Canvas>(`/api/canvases/${id}/duplicate`, { method: 'POST' }),
+  duplicateCanvas: (id: string) => req<ClientCanvas>(`/api/canvases/${id}/duplicate`, { method: 'POST' }),
   claimCanvas: (id: string) => req(`/api/canvases/${id}/claim`, { method: 'POST' }),
   renameCanvas: (id: string, name: string) =>
     req('/api/canvases/' + id, { method: 'PATCH', body: JSON.stringify({ name, actor: actor() }) }),
@@ -551,13 +557,13 @@ export const api = {
     req('/api/canvases/' + id, { method: 'PATCH', body: JSON.stringify({ linkAccess }) }),
   /* community gallery: owner-only listing, open browsing and copying */
   publishCanvas: (id: string, listing: { description: string; category: CommunityCategory }) =>
-    req<Pick<Canvas, 'publishedAt' | 'description' | 'category'>>(`/api/canvases/${id}/publish`, {
+    req<Pick<ClientCanvas, 'publishedAt' | 'description' | 'category'>>(`/api/canvases/${id}/publish`, {
       method: 'PUT',
       body: JSON.stringify(listing),
     }),
   unpublishCanvas: (id: string) => req(`/api/canvases/${id}/publish`, { method: 'DELETE' }),
   listCommunity: () => req<CommunityItem[]>('/api/community'),
-  copyCommunityCanvas: (id: string) => req<Canvas>(`/api/community/${id}/copy`, { method: 'POST' }),
+  copyCommunityCanvas: (id: string) => req<ClientCanvas>(`/api/community/${id}/copy`, { method: 'POST' }),
   /* collaborators: the owner plus invited members */
   listMembers: (canvasId: string) => req<CanvasMember[]>(`/api/canvases/${canvasId}/members`),
   inviteMember: (canvasId: string, email: string) =>
@@ -744,7 +750,7 @@ export const api = {
       `/api/workspaces/${workspaceId}/libraries`,
     ),
   createComponent: (canvasId: string, body: { name: string; frameId: string; element: string; description?: string }) =>
-    req<{ component: ComponentDef; frames: Frame[] }>(`/api/canvases/${canvasId}/components`, {
+    req<{ component: WireComponentDef; frames: Frame[] }>(`/api/canvases/${canvasId}/components`, {
       method: 'POST',
       body: JSON.stringify(body),
     }),
@@ -771,7 +777,7 @@ export const api = {
     ),
   /** bring a deleted component back (`restoreComponent` below puts one back to an earlier revision) */
   undeleteComponent: (canvasId: string, componentId: string) =>
-    req<{ component: ComponentDef; main: 'kept' | 'written' | 'none' }>(
+    req<{ component: WireComponentDef; main: 'kept' | 'written' | 'none' }>(
       `/api/canvases/${canvasId}/components/${componentId}/undelete`,
       { method: 'POST' },
     ),
@@ -781,12 +787,17 @@ export const api = {
       body: JSON.stringify({ rev }),
     }),
   importComponent: (canvasId: string, sourceCanvasId: string, component: string) =>
-    req<ComponentDef>(`/api/canvases/${canvasId}/components/import`, {
+    req<WireComponentDef>(`/api/canvases/${canvasId}/components/import`, {
       method: 'POST',
       body: JSON.stringify({ sourceCanvasId, component }),
     }),
+  /** a component's kept earlier revisions, oldest first: not part of the canvas the room sends */
+  componentRevisions: (canvasId: string, componentId: string) =>
+    req<{ rev: number; revisions: ComponentSnapshot[] }>(
+      `/api/canvases/${canvasId}/components/${componentId}/revisions`,
+    ),
   syncComponent: (canvasId: string, componentId: string) =>
-    req<{ component: ComponentDef; updated: boolean }>(`/api/canvases/${canvasId}/components/${componentId}/sync`, {
+    req<{ component: WireComponentDef; updated: boolean }>(`/api/canvases/${canvasId}/components/${componentId}/sync`, {
       method: 'POST',
     }),
   insertInstance: (

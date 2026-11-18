@@ -117,6 +117,24 @@ export interface ComponentDef {
   updatedBy: string
 }
 
+/** A definition as browsers and the native apps get it (room `init`, `component` messages,
+ *  REST): without its earlier revisions, which only the server merges against. The editor
+ *  reads them on request: `GET /api/canvases/:id/components/:componentId/revisions`. */
+export type WireComponentDef = Omit<ComponentDef, 'history'>
+
+export function wireComponent(def: ComponentDef): WireComponentDef {
+  const { history: _history, ...wire } = def
+  return wire
+}
+
+/** A canvas as a browser gets it: its components without their earlier revisions. */
+export function withWireComponents<C extends { components?: ComponentDef[] }>(
+  canvas: C,
+): Omit<C, 'components'> & { components?: WireComponentDef[] } {
+  const { components, ...rest } = canvas
+  return components ? { ...rest, components: components.map(wireComponent) } : rest
+}
+
 export function isDeleted(def: Pick<ComponentDef, 'status'> | undefined): boolean {
   return def?.status === 'deleted'
 }

@@ -37,7 +37,7 @@ const OPENABLE = new Set(['http:', 'https:', 'mailto:', 'tel:'])
  *  opens its default page), and so does a scheme that is
  *  not `OPENABLE`. A relative path resolves against Doop's own address, as
  *  it would on a page served from there. */
-export function resolveFrameLink(canvas: Canvas, href: string): FrameLinkTarget | null {
+export function resolveFrameLink(canvas: Omit<Canvas, 'components'>, href: string): FrameLinkTarget | null {
   const raw = href.trim()
   if (raw.startsWith('#')) return { kind: 'anchor', id: raw.slice(1) }
   const url = URL.parse(raw, location.origin)

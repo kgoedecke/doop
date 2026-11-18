@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState } from 'react'
-import { activeComponents, type ComponentDef } from '../../shared/components'
+import { activeComponents, type WireComponentDef } from '../../shared/components'
 import { api, type ComponentLibrary } from '../lib/api'
 import { COMPONENT_DRAG_TYPE, goToMain, placeComponent, removeComponent, renameComponent } from '../lib/components'
 import { useT } from '../lib/i18n'
@@ -25,7 +25,7 @@ import { Input } from './ui/input'
 import { PanelSearch } from './ui/panel'
 
 /** The card's name as a field: Enter or a blur saves, Escape puts it back. */
-function ComponentNameInput({ def, onDone }: { def: ComponentDef; onDone: () => void }) {
+function ComponentNameInput({ def, onDone }: { def: WireComponentDef; onDone: () => void }) {
   const t = useT()
   const finished = useRef(false)
   function finish(input: HTMLInputElement, save: boolean) {
@@ -80,7 +80,7 @@ export function ComponentsPanel() {
   const [browsing, setBrowsing] = useState(false)
   const [libraries, setLibraries] = useState<ComponentLibrary[] | null>(null)
   const [picking, setPicking] = useState<ComponentLibrary | null>(null)
-  const [confirmDelete, setConfirmDelete] = useState<ComponentDef | null>(null)
+  const [confirmDelete, setConfirmDelete] = useState<WireComponentDef | null>(null)
   const [renaming, setRenaming] = useState<string | null>(null)
   /* Rename picked from the menu opens the field once the menu has closed, in
      place of the focus it would hand back to its trigger, which would blur the
@@ -98,7 +98,7 @@ export function ComponentsPanel() {
   const status = shared.status
   const updates = new Set(status?.updates.map((update) => update.id))
   /* publish this component: the dialog where the canvas may have a library, else the way to one */
-  const share = (def?: ComponentDef) => {
+  const share = (def?: WireComponentDef) => {
     if (!status) return
     if (status.entitled) return setPublishing(def ? { only: def.id } : {})
     setWall({

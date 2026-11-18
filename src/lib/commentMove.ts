@@ -1,4 +1,4 @@
-import type { Canvas, ElementComment, Frame } from '../../shared/types'
+import type { ClientCanvas, ElementComment, Frame } from '../../shared/types'
 import { canvasPages, framePageId } from '../../shared/pages'
 import { frameDesignPoint } from '../../shared/frameRotation'
 import { FRAME_COMMENT_SELECTOR, sameCommentAnchor, type CommentAnchorInput } from '../../shared/comments'
@@ -45,7 +45,7 @@ export function clientToWorld(clientX: number, clientY: number): Point {
 /** The topmost visible frame on the page under a world point. Locked
  *  frames count: they can be commented on, only not edited. */
 export function frameAtPoint(
-  canvas: Pick<Canvas, 'id' | 'pages' | 'frames'>,
+  canvas: Pick<ClientCanvas, 'id' | 'pages' | 'frames'>,
   pageId: string | null,
   point: Point,
 ): Frame | undefined {
@@ -61,7 +61,7 @@ export function frameAtPoint(
  *  document what sits at a design point; it answers null for the frame's
  *  own background, or when the frame cannot be asked. */
 export async function resolveCommentDrop(
-  canvas: Pick<Canvas, 'id' | 'pages' | 'frames'>,
+  canvas: Pick<ClientCanvas, 'id' | 'pages' | 'frames'>,
   pageId: string,
   point: Point,
   probe: (frameId: string, x: number, y: number) => Promise<CommentDropHit | null>,

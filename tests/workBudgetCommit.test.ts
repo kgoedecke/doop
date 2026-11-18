@@ -235,7 +235,8 @@ function storedFrom(canvas: Canvas): ReturnType<typeof stored> {
   }
 }
 
-const componentKey = (def: ComponentDef) => `${def.rev}:${def.status ?? 'active'}:${def.name}`
+const componentKey = (def: Pick<ComponentDef, 'rev' | 'status' | 'name'>) =>
+  `${def.rev}:${def.status ?? 'active'}:${def.name}`
 
 interface Viewed {
   frames: Record<string, string>

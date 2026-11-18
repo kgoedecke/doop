@@ -1,7 +1,7 @@
 import { stackOf, type StackWrite } from '../../shared/frameStack'
 import { applyPageChanges, canvasPages, samePages } from '../../shared/pages'
 import { pageBackground } from '../../shared/pageBackground'
-import type { Canvas, CanvasGuide, CanvasPageInfo, Frame } from '../../shared/types'
+import type { ClientCanvas, CanvasGuide, CanvasPageInfo, Frame } from '../../shared/types'
 import { api } from './api'
 import { requestFrame, settleFrames } from './frameBridge'
 import { clearElementId, elementIdAt, elementName, setElementName } from './layers'
@@ -267,7 +267,7 @@ export function recordPages(
 
 /** The guides on `canvas` that a page list of `next` would remove with
  *  their pages. */
-export function guidesLeaving(canvas: Canvas, next: CanvasPageInfo[]): CanvasGuide[] {
+export function guidesLeaving(canvas: ClientCanvas, next: CanvasPageInfo[]): CanvasGuide[] {
   return (canvas.guides ?? []).filter((g) => !next.some((page) => page.id === g.pageId)).map((g) => ({ ...g }))
 }
 
@@ -628,7 +628,7 @@ function remapId(oldId: string, newId: string) {
 async function recreate(e: { frameId: string; snapshot: Snapshot; version?: number }) {
   const { canvasId, ...rest } = e.snapshot
   const canvas = useStore.getState().canvas
-  if (!canvas || canvas.id !== canvasId) throw new Error('Canvas changed')
+  if (!canvas || canvas.id !== canvasId) throw new Error('ClientCanvas changed')
   const pages = canvasPages(canvas)
   if (!rest.pageId || !pages.some((p) => p.id === rest.pageId)) rest.pageId = pages[0]!.id
   const f = await api.createFrame(canvasId, rest)
@@ -781,7 +781,7 @@ async function apply(e: Entry, direction: 'undo' | 'redo', guarded = false): Pro
   if (e.type === 'pages') {
     const state = useStore.getState()
     const canvas = state.canvas
-    if (!canvas || canvas.id !== e.canvasId) throw new Error('Canvas changed')
+    if (!canvas || canvas.id !== e.canvasId) throw new Error('ClientCanvas changed')
     const expected = canvasPages(canvas)
     const next = applyPageChanges(expected, forward ? e.before : e.after, forward ? e.after : e.before)
     const leaving = guidesLeaving(canvas, next)
@@ -792,7 +792,7 @@ async function apply(e: Entry, direction: 'undo' | 'redo', guarded = false): Pro
     const departing = expected.filter((page) => !next.some((p) => p.id === page.id)).map((page) => page.id)
     if (departing.length) e.guides = rememberGuides(e.guides, departing, leaving)
     const current = useStore.getState()
-    if (current.canvas?.id !== e.canvasId) throw new Error('Canvas changed')
+    if (current.canvas?.id !== e.canvasId) throw new Error('ClientCanvas changed')
     if (samePages(canvasPages(current.canvas), expected) || samePages(canvasPages(current.canvas), saved)) {
       current.setPages(saved, canvas.id)
       const active = forward ? e.activeAfter : e.activeBefore
@@ -808,7 +808,7 @@ async function apply(e: Entry, direction: 'undo' | 'redo', guarded = false): Pro
   } else if (e.type === 'page-background') {
     await applyPageBackground(e, forward ? e.after : e.before)
   } else if (e.type === 'stack') {
-    if (useStore.getState().canvas?.id !== e.canvasId) throw new Error('Canvas changed')
+    if (useStore.getState().canvas?.id !== e.canvasId) throw new Error('ClientCanvas changed')
     await saveStack(e.canvasId, forward ? e.before : e.after, forward ? e.after : e.before)
   } else if (e.type === 'layer-name') {
     /* the name is written into the frame's HTML: its page is read first if this browser has not */
@@ -877,7 +877,7 @@ async function apply(e: Entry, direction: 'undo' | 'redo', guarded = false): Pro
    nowhere to go back to. */
 async function applyGuide(e: Extract<Entry, { type: 'guide' }>, target: CanvasGuide | null) {
   const canvas = useStore.getState().canvas
-  if (!canvas || canvas.id !== e.canvasId) throw new Error('Canvas changed')
+  if (!canvas || canvas.id !== e.canvasId) throw new Error('ClientCanvas changed')
   const id = (e.after ?? e.before)!.id
   if (target && !canvasPages(canvas).some((page) => page.id === target.pageId)) throw new Error('Page removed')
   const current = canvas.guides?.find((guide) => guide.id === id) ?? null
@@ -897,7 +897,7 @@ async function applyGuide(e: Extract<Entry, { type: 'guide' }>, target: CanvasGu
    with the server either way. A page that is gone has nothing to paint. */
 async function applyPageBackground(e: Extract<Entry, { type: 'page-background' }>, target: string | null) {
   const canvas = useStore.getState().canvas
-  if (!canvas || canvas.id !== e.canvasId) throw new Error('Canvas changed')
+  if (!canvas || canvas.id !== e.canvasId) throw new Error('ClientCanvas changed')
   if (!canvasPages(canvas).some((page) => page.id === e.pageId)) throw new Error('Page removed')
   const current = pageBackground(canvasPages(canvas).find((page) => page.id === e.pageId))
   useStore.getState().setPageBackgroundLocal(e.pageId, target)

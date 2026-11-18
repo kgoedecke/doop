@@ -1,14 +1,15 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { nanoid } from 'nanoid'
-import { and, desc, eq, inArray, sql } from 'drizzle-orm'
+import { and, desc, eq, getTableColumns, inArray, lt, sql } from 'drizzle-orm'
 import { db } from './index.ts'
 import * as t from './schema.ts'
 import { extractAssetIds } from '../assets.ts'
 import { AGENT_ROLES, roleByAgentName } from '../../shared/agents.ts'
 import { isCommunityCategory } from '../../shared/types.ts'
 import { storedLinkAccess } from '../../shared/canvasRole.ts'
-import type { ComponentDef, LibraryComponent } from '../../shared/components.ts'
+import { MAX_COMPONENT_HISTORY } from '../../shared/components.ts'
+import type { ComponentDef, ComponentSnapshot, LibraryComponent } from '../../shared/components.ts'
 import type { DesignToken, TokenType } from '../../shared/designTokens.ts'
 import { parseRunnerPick } from '../../shared/agentRunner.ts'
 import { byStack } from '../../shared/frameStack.ts'
@@ -116,6 +117,13 @@ export async function saveCanvasCopy(c: Canvas): Promise<void> {
 
     if (c.components?.length) {
       await tx.insert(t.components).values(c.components.map((def) => componentRow(c.id, def)))
+      const revisions = c.components.flatMap((def) => revisionRows(c.id, def.id, def.history))
+      for (let at = 0; at < revisions.length; at += REVISION_INSERT_BATCH) {
+        await tx
+          .insert(t.componentRevisions)
+          .values(revisions.slice(at, at + REVISION_INSERT_BATCH))
+          .onConflictDoNothing()
+      }
     }
     if (c.tokens?.length) {
       await tx.insert(t.designTokens).values(c.tokens.map((token) => tokenRow(c.id, token)))
@@ -142,6 +150,7 @@ export async function saveCanvasCopy(c: Canvas): Promise<void> {
     )
     if (refs.length) await tx.insert(t.assetRefs).values(refs)
   })
+  for (const def of c.components ?? []) noteRevisionsFiled(c.id, def.id, def.history)
 }
 
 export function saveMember(canvasId: string, userId: string, addedBy: string, addedAt: number) {
@@ -170,7 +179,6 @@ function componentRow(canvasId: string, def: ComponentDef) {
     mainFrameId: def.mainFrameId,
     code: def.code ?? null,
     source: def.source ?? null,
-    history: def.history,
     status: def.status ?? ('active' as const),
     deletedAt: def.deletedAt ?? null,
     deletedBy: def.deletedBy ?? null,
@@ -266,15 +274,81 @@ export function pendingComponentWrites(canvasId?: string): Promise<unknown> {
   )
 }
 
+/*
+ * A component's earlier revisions are rows of component_revisions, written once each: a
+ * save sends the small `components` row and only the revisions not yet filed, where the
+ * row used to carry all twenty and was rewritten whole on every change (2026-11: 1 GB of
+ * table for 135 MB of content). `revisionsFiled` is the newest revision of each component
+ * known to be a row (what boot loaded, then every write that landed); the inserts are
+ * ON CONFLICT DO NOTHING besides, so a revision is never written over.
+ */
+const revisionsFiled = new Map<string, number>()
+
+/** most revision rows in one insert: nine parameters each, well under the protocol's 65,535 */
+const REVISION_INSERT_BATCH = 500
+
+const componentKey = (canvasId: string, id: string) => `${canvasId}\0${id}`
+
+function revisionRows(canvasId: string, componentId: string, history: readonly ComponentSnapshot[]) {
+  return history.map((entry) => ({
+    canvasId,
+    componentId,
+    rev: entry.rev,
+    template: entry.template,
+    rawCss: entry.rawCss,
+    head: entry.head,
+    props: entry.props,
+    savedAt: entry.savedAt,
+    savedBy: entry.savedBy,
+  }))
+}
+
+function noteRevisionsFiled(canvasId: string, id: string, history: readonly ComponentSnapshot[]) {
+  const newest = history.at(-1)
+  if (newest) revisionsFiled.set(componentKey(canvasId, id), newest.rev)
+  else revisionsFiled.delete(componentKey(canvasId, id))
+}
+
+const ofComponent = (canvasId: string, id: string) =>
+  and(eq(t.componentRevisions.canvasId, canvasId), eq(t.componentRevisions.componentId, id))
+
 export function saveComponent(canvasId: string, def: ComponentDef) {
   const row = componentRow(canvasId, def)
   const { canvasId: _canvasId, id: _id, createdAt: _createdAt, ...set } = row
-  queueComponentWrite(canvasId, def.id, () =>
-    db
-      .insert(t.components)
-      .values(row)
-      .onConflictDoUpdate({ target: [t.components.canvasId, t.components.id], set }),
-  )
+  const { history } = def
+  const key = componentKey(canvasId, def.id)
+  /* inside the row's queue, so revisions are filed in the order their saves were made */
+  queueComponentWrite(canvasId, def.id, async () => {
+    const filed = revisionsFiled.get(key)
+    /* at or behind a revision already filed: this is not the definition those rows were
+       kept for (one made again under its id), so they go rather than answer for it */
+    const restarted = filed !== undefined && def.rev <= filed
+    const added = restarted || filed === undefined ? history : history.filter((entry) => entry.rev > filed)
+    const upsert = (on: Pick<typeof db, 'insert'>) =>
+      on
+        .insert(t.components)
+        .values(row)
+        .onConflictDoUpdate({ target: [t.components.canvasId, t.components.id], set })
+    if (!added.length && !restarted) {
+      await upsert(db)
+      return
+    }
+    await db.transaction(async (tx) => {
+      await upsert(tx)
+      if (restarted) await tx.delete(t.componentRevisions).where(ofComponent(canvasId, def.id))
+      if (!added.length) return
+      await tx
+        .insert(t.componentRevisions)
+        .values(revisionRows(canvasId, def.id, added))
+        .onConflictDoNothing()
+      /* memory keeps the newest MAX_COMPONENT_HISTORY: the table keeps the same ones */
+      const oldest = history[0]!.rev
+      await tx
+        .delete(t.componentRevisions)
+        .where(and(ofComponent(canvasId, def.id), lt(t.componentRevisions.rev, oldest)))
+    })
+    noteRevisionsFiled(canvasId, def.id, history)
+  })
 }
 
 /**
@@ -295,9 +369,13 @@ export async function componentsBehind(): Promise<{ canvasId: string; componentI
 }
 
 export function deleteComponent(canvasId: string, id: string) {
-  queueComponentWrite(canvasId, id, () =>
-    db.delete(t.components).where(and(eq(t.components.canvasId, canvasId), eq(t.components.id, id))),
-  )
+  queueComponentWrite(canvasId, id, async () => {
+    await db.transaction(async (tx) => {
+      await tx.delete(t.components).where(and(eq(t.components.canvasId, canvasId), eq(t.components.id, id)))
+      await tx.delete(t.componentRevisions).where(ofComponent(canvasId, id))
+    })
+    revisionsFiled.delete(componentKey(canvasId, id))
+  })
 }
 
 export function saveLibraryComponent(snapshot: LibraryComponent) {
@@ -878,7 +956,12 @@ export function deleteCanvas(canvasId: string) {
   swallow(db.delete(t.activity).where(eq(t.activity.canvasId, canvasId)))
   swallow(db.delete(t.guidelines).where(eq(t.guidelines.canvasId, canvasId)))
   swallow(
-    pendingComponentWrites(canvasId).then(() => db.delete(t.components).where(eq(t.components.canvasId, canvasId))),
+    pendingComponentWrites(canvasId).then(async () => {
+      await db.delete(t.components).where(eq(t.components.canvasId, canvasId))
+      await db.delete(t.componentRevisions).where(eq(t.componentRevisions.canvasId, canvasId))
+      const prefix = componentKey(canvasId, '')
+      for (const key of revisionsFiled.keys()) if (key.startsWith(prefix)) revisionsFiled.delete(key)
+    }),
   )
   swallow(db.delete(t.libraryComponents).where(eq(t.libraryComponents.canvasId, canvasId)))
   swallow(db.delete(t.guidelineVersions).where(eq(t.guidelineVersions.canvasId, canvasId)))
@@ -1181,6 +1264,9 @@ export interface Hydrated {
 
 const LOG_CAP = 100
 
+/* every column but the retired inline history, which is most of the table's bytes */
+const { legacyHistory: _legacyHistory, ...componentColumns } = getTableColumns(t.components)
+
 export async function hydrate(): Promise<Hydrated> {
   const [
     canvasRows,
@@ -1191,6 +1277,7 @@ export async function hydrate(): Promise<Hydrated> {
     activityRows,
     guidelineRows,
     componentRows,
+    revisionRowsStored,
     tokenRows,
     referenceRows,
     decisionRows,
@@ -1206,7 +1293,8 @@ export async function hydrate(): Promise<Hydrated> {
     db.select().from(t.comments).orderBy(desc(t.comments.at)),
     db.select().from(t.activity).orderBy(desc(t.activity.at)),
     db.select().from(t.guidelines).orderBy(t.guidelines.name),
-    db.select().from(t.components).orderBy(t.components.name),
+    db.select(componentColumns).from(t.components).orderBy(t.components.name),
+    db.select().from(t.componentRevisions).orderBy(t.componentRevisions.rev),
     db.select().from(t.designTokens).orderBy(t.designTokens.order, t.designTokens.name),
     db.select().from(t.memoryReferences).orderBy(desc(t.memoryReferences.pinnedAt)),
     db.select().from(t.decisions).orderBy(desc(t.decisions.at)),
@@ -1265,12 +1353,24 @@ export async function hydrate(): Promise<Hydrated> {
       pinnedAt: r.pinnedAt,
     })
   }
+  /* oldest first, as bumpRevision keeps them */
+  const histories = new Map<string, ComponentSnapshot[]>()
+  for (const { canvasId, componentId, ...entry } of revisionRowsStored) {
+    const key = componentKey(canvasId, componentId)
+    const history = histories.get(key)
+    if (history) history.push(entry)
+    else histories.set(key, [entry])
+  }
+  revisionsFiled.clear()
   for (const row of componentRows) {
     const c = byId.get(row.canvasId)
     if (!c) continue
     const { canvasId: _canvasId, code, source, status, deletedAt, deletedBy, ...def } = row
+    const history = (histories.get(componentKey(row.canvasId, row.id)) ?? []).slice(-MAX_COMPONENT_HISTORY)
+    noteRevisionsFiled(row.canvasId, row.id, history)
     ;(c.components ??= []).push({
       ...def,
+      history,
       ...(code ? { code } : {}),
       ...(source ? { source } : {}),
       ...(status === 'deleted' ? { status, deletedAt: deletedAt ?? def.updatedAt, deletedBy: deletedBy ?? '' } : {}),

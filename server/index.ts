@@ -38,7 +38,8 @@ import {
 import { z } from 'zod'
 import { previewDocument } from './componentPreview.ts'
 import { codeSchema, propSchema } from './componentTools.ts'
-import { activeComponents } from '../shared/components.ts'
+import { activeComponents, wireComponent, withWireComponents } from '../shared/components.ts'
+import type { ComponentDef } from '../shared/components.ts'
 import { PRO_UPLOAD_BYTES } from '../shared/billing.ts'
 import { canvasPages, framePageId, openingPageId, pageFrames, samePages } from '../shared/pages.ts'
 import { normalizePageBackground } from '../shared/pageBackground.ts'
@@ -383,7 +384,7 @@ function canvasForInit(canvas: Canvas, pageId: string | 'all'): { canvas: WireCa
   const asked = pageId === 'all' ? canvasPages(canvas).map((page) => page.id) : [pageId]
   const loaded = new Set(asked.filter((id) => store.isPageLoaded(canvas.id, id)))
   const frames = canvas.frames.map((frame) => (loaded.has(framePageId(canvas, frame)) ? frame : frameMeta(frame)))
-  return { canvas: { ...canvas, frames }, loadedPageIds: [...loaded] }
+  return { canvas: { ...withWireComponents(canvas), frames }, loadedPageIds: [...loaded] }
 }
 
 /** The page a join opens on: the page of the frame the browser's URL links,
@@ -1040,7 +1041,7 @@ function loadFirst(target: (req: express.Request) => LoadTarget | undefined): ex
 
 /** Canvas routes that read no frame HTML: the canvas is not loaded for them. */
 const HTML_FREE_CANVAS_ROUTES: readonly [method: string, path: RegExp][] = [
-  ['GET', /^\/(agents|fonts|members|component-libraries)$/],
+  ['GET', /^\/(agents|fonts|members|component-libraries|components\/[^/]+\/revisions)$/],
   ['PUT', /^\/(thumbnail|guides\/[^/]+|pages\/[^/]+\/(background|flow-start))$/],
   ['DELETE', /^\/guides\/[^/]+$/],
   /* a canvas comment is pinned to a page point; a copy reads its own page (store.duplicatePage) */
@@ -1746,7 +1747,7 @@ app.post('/api/canvases', (req, res) => {
   const name = String(req.body?.name || 'Untitled canvas')
   const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : undefined
   if (workspaceId && !requireGrowableWorkspace(req, res, workspaceId)) return
-  res.json(store.createCanvas(name, req.user!.id, workspaceId))
+  res.json(withWireComponents(store.createCanvas(name, req.user!.id, workspaceId)))
 })
 
 app.post('/api/canvases/:id/duplicate', async (req, res) => {
@@ -1762,7 +1763,7 @@ app.post('/api/canvases/:id/duplicate', async (req, res) => {
       : undefined
   try {
     const copy = await store.duplicateCanvas(source.id, req.user!.id, req.user!.name, { workspaceId })
-    res.json(copy)
+    res.json(copy && withWireComponents(copy))
   } catch (error) {
     console.error('[canvas] duplicate failed', error)
     res.status(500).json({ error: 'could not duplicate canvas' })
@@ -1774,7 +1775,7 @@ app.get('/api/canvases/:id', (req, res) => {
   /* the caller's own role rides along, so the editor knows to go read-only */
   if (c)
     res.json({
-      ...c,
+      ...withWireComponents(c),
       role: canvasRole(req.user!.id, c),
       landingPageId: landingPageOf(c),
       team: teamOfCanvas(c),
@@ -2668,10 +2669,21 @@ function canvasOfPath(path: string): string | undefined {
   return kind === 'canvases' ? id : store.getFrame(id)?.canvasId
 }
 
+const isDefinition = (value: unknown): value is ComponentDef =>
+  typeof value === 'object' && value !== null && 'template' in value && 'history' in value
+
+/** A component route's answer as a browser gets it: the definition it hands back, itself or
+ *  as `component`, without its earlier revisions (the revisions route lists those). */
+function withoutRevisions(result: unknown): unknown {
+  if (isDefinition(result)) return wireComponent(result)
+  if (typeof result !== 'object' || result === null || !('component' in result)) return result
+  return isDefinition(result.component) ? { ...result, component: wireComponent(result.component) } : result
+}
+
 function componentRoute(res: express.Response, run: () => unknown) {
   try {
     /* one unit: a refusal answered below (a 400, a 402) leaves nothing of the call behind */
-    res.json(transaction(run))
+    res.json(withoutRevisions(transaction(run)))
   } catch (error) {
     /* the 402 every client turns into the upgrade prompt: for the workspace
        that needs a plan, or for making one when the canvas is personal */
@@ -2955,6 +2967,16 @@ app.post('/api/canvases/:id/components/:componentId/restore', (req, res) => {
   componentRoute(res, () =>
     restoreComponentVersion(canvas.id, req.params.componentId, Number(req.body?.rev), userActor(req)),
   )
+})
+
+/* the revisions a component can be put back to, oldest first: what `init` and the
+   `component` messages leave out, read when something shows them */
+app.get('/api/canvases/:id/components/:componentId/revisions', (req, res) => {
+  const canvas = requireCanvas(req, res, req.params.id, 'view')
+  if (!canvas) return
+  const def = canvas.components?.find((candidate) => candidate.id === req.params.componentId)
+  if (!def) return res.status(404).json({ error: 'component not found' })
+  res.json({ rev: def.rev, revisions: def.history })
 })
 
 app.post('/api/canvases/:id/components/:componentId/sync', (req, res) => {

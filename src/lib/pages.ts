@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
 import { useStore, type State } from './store'
 import { canvasPages, framePageId, pageFrames } from '../../shared/pages'
-import type { Canvas } from '../../shared/types'
+import type { ClientCanvas } from '../../shared/types'
 
 /** The page's frames hold their current HTML here: the page is not stale (the
  *  room keeps it current), or it has no frames. A stale page is not shown, so a
@@ -21,7 +21,7 @@ export function frameHtmlReady(state: Pick<State, 'canvas' | 'stalePages'>, fram
 
 /** The open canvas with the active page's frames, once that page is ready
  *  (its frames are left out while its HTML is on its way). */
-function pageCanvas(state: Pick<State, 'canvas' | 'stalePages' | 'activePageId'>): Canvas | null {
+function pageCanvas(state: Pick<State, 'canvas' | 'stalePages' | 'activePageId'>): ClientCanvas | null {
   const { canvas, activePageId } = state
   if (!canvas) return null
   const pageId = activePageId ?? canvasPages(canvas)[0]!.id

@@ -22,7 +22,14 @@ import {
   rederiveFromMains,
   refuseUnclosedUses,
 } from './components.ts'
-import { COMPONENT_ATTR, isDeleted, isHollow, type ComponentDef, type ComponentIssue } from '../shared/components.ts'
+import {
+  COMPONENT_ATTR,
+  isDeleted,
+  isHollow,
+  wireComponent,
+  type ComponentDef,
+  type ComponentIssue,
+} from '../shared/components.ts'
 import { MAX_DECISION_CHARS } from '../shared/designDecisions.ts'
 import { MAX_PAGES, PageLimitError, store } from './store.ts'
 import * as persist from './db/persist.ts'
@@ -2214,7 +2221,7 @@ export function logComponent(canvasId: string, actor: Actor, line: string) {
 }
 
 export function broadcastComponent(canvasId: string, component: ComponentDef, actor: Actor) {
-  broadcast(canvasId, { type: 'component', id: component.id, component, actor })
+  broadcast(canvasId, { type: 'component', id: component.id, component: wireComponent(component), actor })
 }
 
 /** A library published or withdrew something: every canvas of its workspace hears,
@@ -2262,7 +2269,7 @@ export function propagationPending(canvasId: string, componentId: string): boole
  *  catches up on its own next write instead (prepareFrameHtml upgrades instances). */
 function propagateFromFrameWrite(canvasId: string, changed: ComponentDef[], actor: Actor, originFrameId: string) {
   if (env.DOOP_DEFER_COMPONENT_PROPAGATION) {
-    for (const def of changed) broadcast(canvasId, { type: 'component', id: def.id, component: def, actor })
+    for (const def of changed) broadcastComponent(canvasId, def, actor)
     return
   }
   queuePropagation(canvasId, changed, actor, originFrameId)
@@ -2272,7 +2279,7 @@ function propagateFromFrameWrite(canvasId: string, changed: ComponentDef[], acto
  *  date, one per tick. Returns at once; nothing is read or rewritten here. `originFrameId`
  *  is the frame whose write this came from, which already has the change. */
 export function queuePropagation(canvasId: string, changed: ComponentDef[], actor: Actor, originFrameId?: string) {
-  for (const def of changed) broadcast(canvasId, { type: 'component', id: def.id, component: def, actor })
+  for (const def of changed) broadcastComponent(canvasId, def, actor)
   /* nothing follows a deleted component: its instances keep the markup they have */
   const followed = changed.filter((def) => !isDeleted(def)).map((def) => def.id)
   const others = store.getCanvas(canvasId)?.frames.some((frame) => frame.id !== originFrameId) ?? false
