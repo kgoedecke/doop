@@ -205,7 +205,6 @@ export function PagesPanel({ fill = false }: { fill?: boolean }) {
           <ContextMenuTrigger asChild>
             <div
               data-page-id={page.id}
-              onContextMenu={() => useStore.getState().setActivePage(page.id)}
               className={cn(
                 'group relative flex h-[27px] items-center gap-1 rounded-[7px] pr-2.5 text-[12px] text-ink-soft hover:bg-sub',
                 page.id === activePageId && 'bg-paper-deep text-ink hover:bg-paper-deep',
