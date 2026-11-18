@@ -2399,6 +2399,7 @@ export const appendFrameHtml = atomic(function appendFrameHtml(
      canvas's tokens and fonts, so a mid-stream screenshot shows them. A
      token renamed mid-stream waits for the stream to close (pendingRenames):
      until then the block stays as written, under the names the frame uses. */
+  /* the same joining as streamedDocument, which append_frame_html checks before this runs */
   const joined = opts.start ? expanded : before.html + expanded
   const prepared = opts.done
     ? prepareWrite(before.canvasId, before.id, joined, before.html, actor.name, carried)

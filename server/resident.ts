@@ -1933,7 +1933,7 @@ async function runResidentTool(
         }
         const html = completeHtml(raw.html)
         if (!html) return fail('create_frame requires a complete non-empty HTML document ending in </html>')
-        const refused = frameWriteRefusal(html, '', 'resident')
+        const refused = frameWriteRefusal(html, { surface: 'resident' })
         if (refused) return fail(refused)
         if (html.length > MAX_REWRITE_CHUNK_CHARS) {
           return fail(`create_frame HTML must be compact (at most ${MAX_REWRITE_CHUNK_CHARS} characters)`)
@@ -2019,12 +2019,11 @@ async function runResidentTool(
         const replace = input.replace
         const edited = source.replace(input.find, () => replace)
         /* the edited document, so a URI completed or a tag left open across the replacement's edges is caught too */
-        const refused = frameWriteRefusal(
-          edited,
-          `${f.html}\n${compact}`,
-          'resident',
-          actions.isFrameMidStream(input.frame_id) ? f.html : '',
-        )
+        const refused = frameWriteRefusal(edited, {
+          existing: `${f.html}\n${compact}`,
+          surface: 'resident',
+          streamed: actions.isFrameMidStream(input.frame_id) ? f.html : '',
+        })
         if (refused) return fail(refused)
         actions.updateFrame(input.frame_id, { html: edited }, actor)
         runState.mutatedFrames.add(input.frame_id)
@@ -2046,7 +2045,7 @@ async function runResidentTool(
             `set_frame_html is limited to ${MAX_REWRITE_CHUNK_CHARS} characters. Use begin_frame_rewrite, append_frame_rewrite chunks, and commit_frame_rewrite.`,
           )
         }
-        const refused = frameWriteRefusal(html, existingHtml(f), 'resident')
+        const refused = frameWriteRefusal(html, { existing: existingHtml(f), surface: 'resident' })
         if (refused) return fail(refused)
         actions.updateFrame(input.frame_id, { html }, actor)
         runState.mutatedFrames.add(input.frame_id)
@@ -2096,7 +2095,7 @@ async function runResidentTool(
           return fail('rewrite draft is not a complete HTML document ending in </html>; append the missing content')
         /* again at the commit: the frame may have changed since the chunks were checked, and the
            draft is whole only now, so a <doop-use> left open is caught here */
-        const refused = frameWriteRefusal(html, existingHtml(f), 'resident')
+        const refused = frameWriteRefusal(html, { existing: existingHtml(f), surface: 'resident' })
         if (refused) return fail(refused)
         actions.updateFrame(input.frame_id, { html }, actor)
         runState.rewriteDrafts.delete(input.frame_id)

@@ -8,19 +8,28 @@ import { inlineDataRefusal, type Surface } from './inlineData.ts'
 const STILL_STREAMING =
   'Refused, nothing was written: this frame is still streaming, and the stream has a <doop-use> open that its next chunks will close. Saved now, it would be placed with no slot content. Wait for the stream to finish, or replace the whole design with set_frame_html.'
 
+export interface FrameWriteContext {
+  /** the frame's design before the write: inline data it holds may be carried over */
+  existing?: string
+  surface?: Surface
+  /** the frame's HTML while an agent streams into it, for an edit made on top of it */
+  streamed?: string
+}
+
 /** The checks every whole-frame agent write passes before anything is saved: create, set and
  *  edit. A stream's chunks are partial by design and take only the inline-data check; its last
  *  chunk is checked in append_frame_html, on `streamedDocument`. The component check reads the
- *  document as it would be saved, an escaped one decoded. `streamed` is a frame's HTML while an
- *  agent streams into it, for an edit made on top of it. */
+ *  document as it would be saved, an escaped one decoded. */
 export function frameWriteRefusal(
   submitted: string,
-  existing = '',
-  surface: Surface = 'mcp',
-  streamed = '',
+  { existing = '', surface = 'mcp', streamed = '' }: FrameWriteContext = {},
 ): string | null {
   const inline = inlineDataRefusal(submitted, existing, surface)
   if (inline) return inline
-  const unclosed = unclosedUseRefusal(repairEscapedHtml(submitted))
-  return unclosed && unclosedUses(streamed).length ? STILL_STREAMING : unclosed
+  const decoded = repairEscapedHtml(submitted)
+  const unclosed = unclosedUseRefusal(decoded)
+  if (!unclosed) return null
+  /* only the stream's own tags left open: the editor waits; one more of its own, it closes it */
+  const waiting = unclosedUses(streamed).length
+  return waiting && unclosedUses(decoded).length <= waiting ? STILL_STREAMING : unclosed
 }

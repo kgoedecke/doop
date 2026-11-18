@@ -155,11 +155,33 @@ describe('a <doop-use> that would render nothing', () => {
     expect(unclosedUseRefusal('<doop-use component="Card"></doop-use><doop-use component="Badge" />')).toBeNull()
     const refusal = unclosedUseRefusal('<doop-use component="Card"><doop-use component="Hero">')
     expect(refusal).toContain('<doop-use component="Card">, <doop-use component="Hero"> are opened and never closed')
-    expect(refusal).toContain('placed with no slot content')
+    expect(refusal).toContain('Saved, each would be placed with no slot content')
+    expect(unclosedUseRefusal('<doop-use component="Card">')).toContain('Saved, it would be placed')
     /* a template is parsed before it is kept, which closes the tag at its parent's end */
     expect(unclosedUseRefusal('<div><doop-use component="Card"></div>', 'template')).toContain(
-      'closed where its parent ends',
+      'Saved, it would be closed where its parent ends',
     )
+    /* a tag whose end cannot be read (a quote never closed) stops the reader at the use around it:
+       that use and what follows are not saved as written, so the write counts as leaving it open */
+    expect(
+      unclosedUses(
+        '<doop-use component="A"><doop-use component=B label=it\'s>x</doop-use><doop-use component="C"><p>y</p>',
+      ),
+    ).toEqual(['A'])
+  })
+
+  it('expands a use whose slot holds a tag that only looks like one, its content inside it', async () => {
+    const canvasId = await canvasWith({ Card: '<article class="card"><div data-doop-slot="body"></div></article>' })
+    const { html, notes } = write(
+      canvasId,
+      '<doop-use component="Card"><p>One</p><!-- </doop-use> --><script>const t = "</doop-use>"</script><doop-user-chip>Two</doop-user-chip></doop-use><h4>after</h4>',
+    )
+    expect(notes).toEqual([])
+    const card = html.slice(html.indexOf('<article'), html.indexOf('</article>'))
+    expect(card).toContain('<p>One</p>')
+    expect(card).toContain('<doop-user-chip>Two</doop-user-chip>')
+    expect(html.indexOf('<h4>after</h4>')).toBeGreaterThan(html.indexOf('</article>'))
+    expect(html).not.toMatch(/<doop-use[\s/>]/)
   })
 
   it('names the component attribute itself, quoted or not, and a tag that names none', async () => {
@@ -220,6 +242,38 @@ describe('a <doop-use> that would render nothing', () => {
       const updated = await runComponentTool('update_component', input, context)
       expect(updated).toMatchObject({ ok: false, error: expect.stringContaining('closed where its parent ends') })
     }
+
+    /* an instance override's markup expands on its own: a slot left open is refused too */
+    const frame = actions.createFrame(
+      canvasId,
+      { name: 'Screen', html: page('<doop-use component="Card"><p>x</p></doop-use>') },
+      agent,
+    )!
+    const card = store.getComponents(canvasId).find((component) => component.name === 'Card')!
+    const slotPart =
+      /data-doop-slot="body"[^>]*data-doop-part="([^"]+)"|data-doop-part="([^"]+)"[^>]*data-doop-slot="body"/.exec(
+        card.template,
+      )!
+    const instanceId =
+      /data-doop-instance="[^"]+"[^>]*data-doop-id="([^"]+)"|data-doop-id="([^"]+)"[^>]*data-doop-instance=/.exec(
+        store.getFrame(frame.id)!.html,
+      )!
+    const before = store.getFrame(frame.id)!.html
+    const changed = await runComponentTool(
+      'update_instances',
+      {
+        frame_id: frame.id,
+        instances: [
+          {
+            instance_id: instanceId[1] ?? instanceId[2],
+            overrides: { [slotPart[1] ?? slotPart[2]!]: { slot: '<doop-use component="Card"><p>nested</p>' } },
+          },
+        ],
+      },
+      context,
+    )
+    expect(changed).toMatchObject({ ok: false, error: expect.stringContaining('Saved, it would be placed') })
+    expect(store.getFrame(frame.id)!.html).toBe(before)
     expect(store.getComponents(canvasId).find((component) => component.name === 'Closed')!.template).toBe(
       closed.template,
     )

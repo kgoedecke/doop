@@ -922,12 +922,14 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   MCP stream's `done` chunk (`streamedDocument`; a refused chunk keeps the stream from going idle,
   `markStreamActive`, while it comes again with the close), and any caller's component template as
   made or updated, find + replace and dry runs included (`createComponentFromHtml`,
-  `updateComponent`). One left waiting by an unfinished stream counts too, since the write would
-  place it: an edit on top of a stream is told the frame is still streaming. The engine's reader
-  (`nextTag`) skips a tag inside a script, style, textarea, title or comment, and a custom element
-  whose name starts the same, inside a use as well as before it. Only an idle stream's settling and
-  a human's write (an inspector save, the REST `/append`) still place one and report it (#528).
-  Tests: `componentDrops.test.ts`, the `<doop-use>` cases in `inlineData.test.ts`.
+  `updateComponent`), and an instance override's `html` or `slot` (`changeInstances`, which
+  `update_instances` calls). One left waiting by an unfinished stream counts too, since the write
+  would place it: an edit on top of a stream is told the frame is still streaming. The engine's
+  reader (`nextTag`) skips a tag inside a script, style, textarea, title or comment, and a custom
+  element whose name starts the same, inside a use as well as before it; a tag whose end cannot be
+  read (a quote never closed) counts as open, since nothing after it is read either. Only an idle
+  stream's settling and a human's write (an inspector save, the REST `/append`) still place one and
+  report it (#528). Tests: `componentDrops.test.ts`, the `<doop-use>` cases in `inlineData.test.ts`.
 - Component system first (`SYSTEM_FIRST`, `COMPOSE_CHECK` in `server/guide.ts`): the guide opens
   with a must-do list (tokens, then a component system set up the way a designer sets up a Figma
   file, then screens composed from it; themes are tokens, never a copied frame), the brief creates

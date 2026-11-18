@@ -1121,9 +1121,13 @@ function nextUse(html: string, from: number, opaque: [number, number][], lenient
 const COMPONENT_ATTR_VALUE = /\scomponent\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>/]+))/i
 
 /** The component an open tag names, as written. */
-function componentRefOf(html: string, span: UseSpan): string {
-  const match = COMPONENT_ATTR_VALUE.exec(html.slice(span.start, span.openEnd))
+function componentRefIn(openTag: string): string {
+  const match = COMPONENT_ATTR_VALUE.exec(openTag)
   return match?.[1] ?? match?.[2] ?? match?.[3] ?? ''
+}
+
+function componentRefOf(html: string, span: UseSpan): string {
+  return componentRefIn(html.slice(span.start, span.openEnd))
 }
 
 /** The component of each `<doop-use>` the HTML opens and never closes, in document order:
@@ -1132,8 +1136,15 @@ export function unclosedUses(html: string): string[] {
   if (indexOfAscii(html, `<${USE_TAG}`) === -1) return []
   const opaque = opaqueRanges(html)
   const refs: string[] = []
-  for (let span = nextUse(html, 0, opaque, true); span; span = nextUse(html, span.end, opaque, true))
+  let cursor = 0
+  for (let span = nextUse(html, 0, opaque, true); span; span = nextUse(html, cursor, opaque, true)) {
     if (span.unclosed) refs.push(componentRefOf(html, span))
+    cursor = span.end
+  }
+  /* a tag whose end cannot be read (a quote never closed) stops the reader, and nothing after it
+     expands either: it counts as left open, so the write is refused rather than saved half read */
+  const stuck = nextTag(html, `<${USE_TAG}`, cursor, opaque)
+  if (stuck !== -1) refs.push(componentRefIn(html.slice(stuck, html.indexOf('>', stuck) + 1 || undefined)))
   return refs
 }
 

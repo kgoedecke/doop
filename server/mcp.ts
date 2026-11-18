@@ -1561,7 +1561,7 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
     async ({ frame_id, html, agent_name }) => {
       const current = frameFor(frame_id, 'edit')
       if (!current) return noFrame(frame_id)
-      const refused = frameWriteRefusal(html, current.html)
+      const refused = frameWriteRefusal(html, { existing: current.html })
       if (refused) return err(refused)
       const frame = actions.updateFrame(frame_id, { html }, actorFrom(agent_name), { replace: true })
       if (!frame) return noFrame(frame_id)
@@ -2452,12 +2452,10 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
       const edited = editFrameSource(f, old_str, new_str)
       if ('error' in edited) return err(edited.error)
       /* the edited document, so a URI completed or a tag left open across the replacement's edges is caught too */
-      const refused = frameWriteRefusal(
-        edited.html,
-        `${f.html}\n${compactFrameHtml(f)}`,
-        'mcp',
-        actions.isFrameMidStream(frame_id) ? f.html : '',
-      )
+      const refused = frameWriteRefusal(edited.html, {
+        existing: `${f.html}\n${compactFrameHtml(f)}`,
+        streamed: actions.isFrameMidStream(frame_id) ? f.html : '',
+      })
       if (refused) return err(refused)
       const frame = actions.updateFrame(frame_id, { html: edited.html }, actorFrom(agent_name))!
       return withPreview(

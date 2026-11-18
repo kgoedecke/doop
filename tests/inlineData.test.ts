@@ -241,6 +241,10 @@ describe('over MCP', () => {
       })
       expect(last.isError).toBe(true)
       expect(last.text).toContain('<doop-use component="Card"> is opened')
+      /* a chunk refused for inline data counts as the agent at work as well */
+      vi.setSystemTime(Date.now() + 25_000)
+      const inline = await call('append_frame_html', { frame_id: frameId, html_chunk: `<img src="${PNG}">` })
+      expect(inline.isError).toBe(true)
       expect(store.getFrame(frameId)!.html).toBe(streamed)
       /* the refusal counts as the agent at work: the idle sweep 15s on leaves the stream open */
       actions.expireIdleStreams(Date.now() + 15_000)
@@ -312,6 +316,13 @@ describe('over MCP', () => {
     })
     expect(edit.isError).toBe(true)
     expect(edit.text).toContain('still streaming')
+    /* an edit that leaves a tag of its own open is told to close it, not to wait */
+    const own = await call('edit_frame_html', {
+      frame_id: frameId,
+      old_str: '<h1>Top</h1>',
+      new_str: '<h1>Top</h1><doop-use component="Card">',
+    })
+    expect(own.text).toContain('opened and never closed')
     expect(store.getFrame(frameId)!.html).toBe(streamed)
     expect(actions.isFrameMidStream(frameId)).toBe(true)
     /* a set replaces the whole document, waiting tag and all: a balanced one goes through */
