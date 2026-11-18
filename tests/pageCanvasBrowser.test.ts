@@ -159,6 +159,70 @@ describe.skipIf(!findBrowserPath())('page camera and snapping', { timeout: 30_00
     expect(await page.$('iframe[title="original"]')).toBeNull()
   })
 
+  it('follows a same-canvas frame link on modifier-click without taking over ordinary selection', async () => {
+    const source = {
+      ...frame('directory', 'first', 0),
+      width: 1200,
+      height: 3500,
+      html: `<style>body{padding:160px 100px;font-size:32px}a{display:inline-block;min-width:380px}</style>
+        <p><a href="/c/c?frame=target&element=h1h1h1"><strong id="app">App research</strong></a></p>
+        <p><a id="external" href="https://example.com/c/c?frame=target">External site</a></p>
+        <p><a id="missing" href="/c/c?frame=missing">Missing frame</a></p>`,
+    }
+    const target = { ...frame('target', 'second', 3000), html: '<h1 data-doop-id="h1h1h1">Research</h1>' }
+    await load(canvas([source, target, frame('distant', 'second', 12000)]), '?frame=directory')
+    const host = (await page.waitForSelector('iframe[title="directory"]'))!
+    const directory = (await host.contentFrame())!
+    await page.waitForSelector('[data-frame-selection]')
+    const point = async (selector: string) => {
+      const node = (await directory.waitForSelector(selector))!
+      const rect = await node.evaluate((el) => {
+        const box = el.getBoundingClientRect()
+        return { x: box.x + box.width / 2, y: box.y + box.height / 2, width: innerWidth, height: innerHeight }
+      })
+      return host.evaluate((el, { x, y, width, height }) => {
+        const box = el.getBoundingClientRect()
+        return { x: box.left + (x * box.width) / width, y: box.top + (y * box.height) / height }
+      }, rect)
+    }
+    const app = await point('#app')
+    await page.mouse.move(app.x, app.y)
+    await waitState('the app link gets a pointer cursor', () => {
+      const surface = document.querySelector('[data-frame-surface]')
+      return !!surface && getComputedStyle(surface).cursor === 'pointer'
+    })
+    await page.mouse.click(app.x, app.y)
+    await waitState(
+      'ordinary click stays in selection',
+      () => window.pageState().selectedElement?.frameId === 'directory',
+    )
+    await page.mouse.click(80, 600)
+    await waitState('the canvas is deselected before trying the jump', () => !window.pageState().selectedId)
+    const url = page.url()
+    const mod = (await page.evaluate(() => /mac/i.test(navigator.platform))) ? 'Meta' : 'Control'
+    await page.keyboard.down(mod)
+    for (const selector of ['#external', '#missing']) {
+      const at = await point(selector)
+      await page.mouse.click(at.x, at.y)
+    }
+    await page.mouse.move(app.x, app.y)
+    await page.mouse.down()
+    await page.mouse.move(app.x + 20, app.y)
+    await page.mouse.up()
+    expect(await page.evaluate(() => window.pageState().activePageId)).toBe('first')
+    await page.mouse.click(app.x, app.y)
+    await page.keyboard.up(mod)
+    await waitState(
+      'modifier-click picks the linked element on the destination page',
+      () => window.pageState().activePageId === 'second' && window.pageState().selectedElement?.frameId === 'target',
+    )
+    expect(await page.evaluate(() => window.pageState())).toMatchObject({
+      selectedId: 'target',
+      viewport: { x: -2500, y: 300, zoom: 1 },
+    })
+    expect(new URL(page.url()).pathname).toBe(new URL(url).pathname)
+  })
+
   it.each(['first', 'second'])('selects a linked element after its frame mounts on the %s page', async (pageId) => {
     const target = {
       ...frame('target', pageId, 3000),
