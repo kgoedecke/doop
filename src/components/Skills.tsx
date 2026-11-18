@@ -179,7 +179,9 @@ function SkillForm({
 }) {
   const t = useT()
   const ids = useId()
-  const [handle, setHandle] = useState(skill?.handle ?? '')
+  /* the field's text: empty, or "/" and the handle, so a typed "/" stays and a missing one is added */
+  const [handleText, setHandleText] = useState(skill ? `/${skill.handle}` : '')
+  const handle = handleText.slice(1)
   const [description, setDescription] = useState(skill?.description ?? '')
   const [body, setBody] = useState(skill?.body ?? '')
   const [saving, setSaving] = useState(false)
@@ -216,18 +218,14 @@ function SkillForm({
             id={`${ids}-handle`}
             variant="well"
             className="font-mono"
-            value={handle ? `/${handle}` : ''}
+            value={handleText}
             disabled={!!skill}
             placeholder="/brand-check"
             autoFocus={!skill}
-            onChange={(e) =>
-              setHandle(
-                e.target.value
-                  .replace(/^\/+/, '')
-                  .toLowerCase()
-                  .replace(/[^a-z0-9-]/g, ''),
-              )
-            }
+            onChange={(e) => {
+              const typed = e.target.value
+              setHandleText(typed && `/${typed.toLowerCase().replace(/[^a-z0-9-]/g, '')}`)
+            }}
           />
         </Field>
         <Field label={t('skills.description')} labelVariant="form" htmlFor={`${ids}-description`}>

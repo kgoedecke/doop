@@ -50,3 +50,21 @@ it('keeps the form shut on a full scope and says why', async () => {
   expect(formOpen()).toBe(false)
   expect(host.textContent).toContain(`There is room for ${MAX_SKILLS} skills`)
 })
+
+it('keeps a typed "/" in the handle and adds one when it is left out', async () => {
+  mocks.listSkills.mockResolvedValue([])
+  await act(async () => root.render(<Skills workspaceId="ws1" />))
+  const field = document.querySelector<HTMLInputElement>('input[placeholder="/brand-check"]')!
+  const type = (value: string) =>
+    act(() => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(field, value)
+      field.dispatchEvent(new Event('input', { bubbles: true }))
+    })
+  type('/')
+  expect(field.value).toBe('/')
+  type('/Brand check')
+  expect(field.value).toBe('/brandcheck')
+  type('')
+  type('brand-check')
+  expect(field.value).toBe('/brand-check')
+})
