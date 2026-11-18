@@ -1854,6 +1854,14 @@ function revealedHtml(frame: Frame, shown: number): string {
   return shown >= frame.html.length ? frame.html : healPartialHtml(frame.html.slice(0, shown))
 }
 
+/** The frame as viewers have it, for a broadcast that does not change its design (a
+ *  rename, resize, restack or sign-off): mid-playback that is the part revealed so far, or
+ *  the finished design would flash in before the playback goes on from where it was. */
+function frameForViewers(frame: Frame): Frame {
+  const playing = reveals.get(frame.id)
+  return playing ? { ...frame, html: revealedHtml(frame, playing.shown) } : frame
+}
+
 function commonPrefixLen(a: string, b: string): number {
   const n = Math.min(a.length, b.length)
   let i = 0
@@ -2598,14 +2606,7 @@ export const updateFrame = atomic(function updateFrame(
       finishStream(frameId, false)
       finishReveal(frameId)
     }
-    /* a rename or resize mid-playback carries what viewers have been shown so far, or the
-       finished design would flash in before the playback goes on from where it was */
-    const playing = htmlChanged ? undefined : reveals.get(frameId)
-    broadcast(frame.canvasId, {
-      type: 'frame:updated',
-      frame: playing ? { ...frame, html: revealedHtml(frame, playing.shown) } : frame,
-      actor,
-    })
+    broadcast(frame.canvasId, { type: 'frame:updated', frame: htmlChanged ? frame : frameForViewers(frame), actor })
     if (htmlChanged) {
       logActivity(frame.canvasId, actor, `updated the design of “${frame.name}”`, frame.id)
     } else if (patch.name !== undefined && patch.name !== prevName) {
@@ -2635,7 +2636,7 @@ export const restackFrames = atomic(function restackFrames(
 ): Frame[] | undefined {
   if (writes.some((w) => store.getFrame(w.id)?.canvasId !== canvasId)) return undefined
   const frames = writes.map((w) => store.updateFrame(w.id, { z: w.z }, actor.name)!)
-  for (const frame of frames) broadcast(canvasId, { type: 'frame:updated', frame, actor })
+  for (const frame of frames) broadcast(canvasId, { type: 'frame:updated', frame: frameForViewers(frame), actor })
   touch(canvasId, actor, frames[0]?.id)
   return frames
 })
@@ -2664,7 +2665,7 @@ export const setFrameApproval = atomic(function setFrameApproval(
       }
     : null
   const frame = store.updateFrame(frameId, { approval }, actor.name)!
-  broadcast(frame.canvasId, { type: 'frame:updated', frame, actor })
+  broadcast(frame.canvasId, { type: 'frame:updated', frame: frameForViewers(frame), actor })
   logActivity(
     frame.canvasId,
     actor,

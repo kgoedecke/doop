@@ -23,7 +23,7 @@ import { RESIDENT_TASK_LIMIT } from './allowance.ts'
 import * as actions from './actions.ts'
 import { captureFeature, captureTokenResults } from './featureEvents.ts'
 import { inspectFrame, renderFrame } from './screenshot.ts'
-import { FIT_HEIGHT_DESCRIPTION, fitWrittenFrame, updateFrameMetaWithFit } from './frameFit.ts'
+import { FIT_HEIGHT_DESCRIPTION, fitNotes, fitWrittenFrame, updateFrameMetaWithFit } from './frameFit.ts'
 import { AGENT_ROLES, DEFAULT_ROLE_ID, roleById, roleByAgentName, roleName, withoutMentions } from '../shared/agents.ts'
 import type { AgentRole, Roster } from '../shared/agents.ts'
 import { runnerKey } from '../shared/agentRunner.ts'
@@ -1972,7 +1972,7 @@ async function runResidentTool(
         return ok(
           [
             `created frame ${f.id} ("${f.name}", ${Math.round(f.width)}x${Math.round(f.height)}) — it is revealing to viewers now`,
-            ...(fit?.note ? [fit.note] : []),
+            ...fitNotes(fit),
             ...componentWriteNotes(f, { review: true }),
           ].join('\n'),
         )
@@ -2078,7 +2078,7 @@ async function runResidentTool(
         return ok(
           [
             'applied — the new design is revealing to viewers now',
-            ...(fit?.note ? [fit.note] : []),
+            ...fitNotes(fit),
             ...componentWriteNotes(fit?.frame ?? written, { review: true }),
           ].join('\n'),
         )
