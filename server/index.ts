@@ -69,6 +69,7 @@ import { liveActivitiesRouter, logLiveActivityRequests, startLiveActivityDeliver
 import { onCanvasEvent } from './events.ts'
 import * as imageDescriptions from './imageDescriptions.ts'
 import * as commentNotifications from './commentNotifications.ts'
+import { mentionablePeople, resolveCommentMentions, threadAuthorIds } from './canvasPeople.ts'
 import { notificationsRouter } from './notifications.ts'
 import * as webhooks from './webhooks.ts'
 import { webhooksRouter } from './webhookRoutes.ts'
@@ -1702,6 +1703,19 @@ app.get('/api/canvases/:id/members', async (req, res) => {
   )
 })
 
+/* the people a comment may @mention (owner, members, workspace members),
+   names and faces only, for the comment field's picker */
+app.get('/api/canvases/:id/people', async (req, res) => {
+  const c = requireCanvas(req, res, req.params.id, 'comment')
+  if (!c) return
+  mentionablePeople(c)
+    .then((people) => res.json(people))
+    .catch((err: unknown) => {
+      console.error(`[comments] could not list the people on ${c.id}`, err)
+      res.status(500).json({ error: 'could not list the people on this canvas' })
+    })
+})
+
 app.post('/api/canvases/:id/members', async (req, res) => {
   const c = requireCanvas(req, res, req.params.id, 'edit')
   if (!c) return
@@ -2855,11 +2869,16 @@ app.post('/api/frames/:id/versions/:versionId/restore', async (req, res) => {
 app.post('/api/frames/:id/comments', async (req, res) => {
   const frame = requireFrame(req, res, req.params.id, 'comment')
   if (!frame) return
-  const { selector, elementId, snippet, text, x, y, elementOrigin } = req.body ?? {}
-  if (refuseAgentMention(req, res, frame.canvasId, String(text ?? ''))) return
+  const { selector, elementId, snippet, x, y, elementOrigin } = req.body ?? {}
+  const text = String(req.body?.text ?? '').trim()
+  const canvas = store.getCanvas(frame.canvasId)
+  const mentions = canvas
+    ? await resolveCommentMentions(canvas, text, { picked: req.body?.mentions })
+    : { ids: [], roleText: text }
+  if (refuseAgentMention(req, res, frame.canvasId, mentions.roleText)) return
   /* a comment that @mentions a resident agent is a new command to the team,
      so it's metered like a card; plain comments and replies stay free */
-  if (mentionedRole(String(text ?? ''), actions.canvasRoster(frame.canvasId))) {
+  if (mentionedRole(mentions.roleText, actions.canvasRoster(frame.canvasId))) {
     const gate = await allowance.consumeResidentTask(req.user!.id)
     if (!gate.ok) {
       return res.status(403).json({ error: 'resident_limit', used: gate.used, limit: gate.limit })
@@ -2867,7 +2886,7 @@ app.post('/api/frames/:id/comments', async (req, res) => {
   }
   const comment = await actions.addElementComment(
     req.params.id,
-    { selector, elementId, snippet, text: String(text ?? ''), x, y, elementOrigin },
+    { selector, elementId, snippet, text, x, y, elementOrigin, mentions },
     req.user!.name,
     req.user!.id,
   )
@@ -2902,11 +2921,12 @@ app.post('/api/canvases/:id/comments', async (req, res) => {
     return res.status(400).json({ error: 'page not found' })
   }
   if (!Number.isFinite(x) || !Number.isFinite(y)) return res.status(400).json({ error: 'x and y must be numbers' })
-  const body = String(text ?? '')
-  if (!body.trim()) return res.status(400).json({ error: 'empty text' })
-  if (refuseAgentMention(req, res, canvas.id, body)) return
+  const body = String(text ?? '').trim()
+  if (!body) return res.status(400).json({ error: 'empty text' })
+  const mentions = await resolveCommentMentions(canvas, body, { picked: req.body?.mentions })
+  if (refuseAgentMention(req, res, canvas.id, mentions.roleText)) return
   let gate: Awaited<ReturnType<typeof allowance.consumeResidentTask>> | undefined
-  if (mentionedRole(body, actions.canvasRoster(canvas.id))) {
+  if (mentionedRole(mentions.roleText, actions.canvasRoster(canvas.id))) {
     gate = await allowance.consumeResidentTask(req.user!.id)
     if (!gate.ok) {
       return res.status(403).json({ error: 'resident_limit', used: gate.used, limit: gate.limit })
@@ -2914,7 +2934,7 @@ app.post('/api/canvases/:id/comments', async (req, res) => {
   }
   const comment = actions.addCanvasComment(
     canvas.id,
-    { pageId, x: Number(x), y: Number(y), text: body },
+    { pageId, x: Number(x), y: Number(y), text: body, mentions },
     req.user!.name,
     req.user!.id,
   )
@@ -2935,20 +2955,25 @@ app.post('/api/comments/:id/replies', async (req, res) => {
   const found = actions.findComment(req.params.id)
   if (!found) return res.status(404).json({ error: 'comment not found' })
   if (!requireCanvas(req, res, found.canvasId, 'comment')) return
-  const text = String(req.body?.text ?? '')
-  if (!text.trim() || !actions.openThread(req.params.id)) {
+  const text = String(req.body?.text ?? '').trim()
+  const canvas = store.getCanvas(found.canvasId)
+  if (!text || !canvas || !actions.openThread(req.params.id)) {
     return res.status(404).json({ error: 'thread resolved or empty text' })
   }
-  if (refuseAgentMention(req, res, found.canvasId, text)) return
+  const mentions = await resolveCommentMentions(canvas, text, {
+    authorIds: threadAuthorIds(found),
+    picked: req.body?.mentions,
+  })
+  if (refuseAgentMention(req, res, found.canvasId, mentions.roleText)) return
   /* same rule as a fresh comment: only an @mention costs a resident task */
   let gate: Awaited<ReturnType<typeof allowance.consumeResidentTask>> | undefined
-  if (mentionedRole(text, actions.canvasRoster(found.canvasId))) {
+  if (mentionedRole(mentions.roleText, actions.canvasRoster(found.canvasId))) {
     gate = await allowance.consumeResidentTask(req.user!.id)
     if (!gate.ok) {
       return res.status(403).json({ error: 'resident_limit', used: gate.used, limit: gate.limit })
     }
   }
-  const reply = actions.replyToComment(req.params.id, text, req.user!.name, req.user!.id)
+  const reply = actions.replyToComment(req.params.id, text, req.user!.name, req.user!.id, 'user', mentions)
   if (!reply) {
     /* the thread closed while the meter was being written: give the task
        back — a failed refund is logged, never turned into a 500 */

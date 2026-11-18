@@ -598,11 +598,18 @@ export function Stage({
     }
     const params = deepLinkHandled.current ? null : new URLSearchParams(linkSearch)
     deepLinkHandled.current = true
-    const focusId = params?.get('frame')
+    /* a thread moved since its link was made is where it is now: the
+       linked root's own frame wins over the one the link names */
+    const linkedId = params?.get('comment')
+    const linked = linkedId ? state.comments.find((c) => c.id === linkedId && !c.parentId) : undefined
+    const focusId = linked ? linked.frameId : params?.get('frame')
     const target = focusId ? state.canvas?.frames.find((f) => f.id === focusId) : null
     if (target) {
       const element = params?.get('element')
       focusFrame(target, isElementId(element) ? elementIdSelector(element) : null)
+      /* the frame may be on another page, mounting already selected and
+         with the page switch's URL: ask its view to open the thread */
+      if (linked) useStore.getState().requestOpenThread(linked.id)
       return
     }
     const pinned = params ? linkedCanvasComment(params.get('comment')) : null

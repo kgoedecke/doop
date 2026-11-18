@@ -878,6 +878,30 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   (`actions.handBackComment`: unclaimed, no longer an agent item in memory and in its row, the thread open), so the
   person's `@mention` answer queues fresh work carrying the whole conversation. MCP agents have
   had the same two tools all along. Tests: `residentComments.test.ts`, `agentToolParity.test.ts`.
+- People in comments (`shared/personMentions.ts`, `server/canvasPeople.ts`, `src/components/MentionPicker.tsx`):
+  a mention is `@` plus the person's account name in the text (`@Ana Souza`, longest name first,
+  no case, a name ends where no letter, combining mark, digit or `_` follows). Typing `@` in the
+  composer, a thread reply or the Comments panel's reply lists the canvas's people (owner,
+  members, workspace members, from `GET /api/canvases/:id/people`, comment role, names and faces
+  only, asked again whenever a field mounts) and, for editors, its agents; the thread draws
+  mentions in brand. Names are not unique, so the picker sends the ids it picked as `mentions`
+  beside the text (the latest pick of a name in the draft; an agent picked over a person
+  named like its handle rides as `agent:<id>`, so the agent gets it). The routes, MCP `reply_to_comment` and the resident's reply resolve the text
+  once (`resolveCommentMentions` → `resolvePersonMentions`) against everyone eligible (those
+  people plus the thread's authors) before any filtering: a name several people share reaches
+  only the picked ones, and nobody when none was picked. The result's `roleText` (people
+  blanked out) is what the agent matcher, the edit-access check and the meter read, so
+  `@Doop Fan` is not `@doop`; the resident strips agent mentions only outside people's
+  (`withoutAgentMentions`). The ids ride the `comment.created` / `comment.replied` event, and
+  `commentNotifications.ts` emails each at once (`mentionEmail`) and leaves them out of that
+  comment's digest. The author, someone who switched comment emails off, a banned account or
+  someone who lost access is not written to. Comment links (`src/lib/commentLink.ts`, the shape
+  of `server/links.ts`'s `commentLink`): "Copy link to comment" on a pin's right-click menu, an
+  open Comments panel row's, and the link button on a thread's first message. Opening one,
+  `Stage` follows the root to its current frame, not the one the link names. Tests:
+  `personMentions.test.ts`, `commentLink.test.ts`, the `@mentions` cases in
+  `commentNotifications.test.ts`, the picker cases in `commentsPanel.test.tsx`, the mention and
+  `/people` cases in `canvasCommentsRoute.test.ts`, the person case in `residentComments.test.ts`.
 - Chat in the Agents tab (`src/components/AgentChat.tsx`, `src/lib/agentChat.ts`): under Recent
   tasks, each composer prompt (a board card without a `kind`) and any feedback left on it is a
   turn, oldest first, with the agent's answer under it: waiting, working, the run's closing words,

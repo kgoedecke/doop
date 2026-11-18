@@ -2136,9 +2136,9 @@ export const FrameView = memo(function FrameView({
                       >
                         <CommentThread
                           thread={thread}
-                          onReply={(text) =>
+                          onReply={(text, mentions) =>
                             api
-                              .replyComment(c.id, text)
+                              .replyComment(c.id, text, mentions)
                               .then(() => posthog.capture('element_comment_replied'))
                               .catch((err) => {
                                 /* the wall explains a hit limit; anything else
@@ -2199,7 +2199,7 @@ export const FrameView = memo(function FrameView({
                             placeholder={
                               anchor.selector === FRAME_COMMENT_SELECTOR ? t('stage.commentOnFrame') : undefined
                             }
-                            onSubmit={(text) => {
+                            onSubmit={(text, mentions) => {
                               /* Keep the clicked point until the element moves. If the
                              element cannot be found in saved HTML, use a frame pin. */
                               api
@@ -2208,6 +2208,7 @@ export const FrameView = memo(function FrameView({
                                   ...(anchor.elementId ? { elementId: anchor.elementId } : {}),
                                   snippet: anchor.snippet,
                                   text,
+                                  mentions,
                                   x: anchor.point?.x ?? anchor.rect.x,
                                   y: anchor.point?.y ?? anchor.rect.y,
                                   elementOrigin: { x: anchor.rect.x, y: anchor.rect.y },
