@@ -2590,7 +2590,14 @@ export const updateFrame = atomic(function updateFrame(
       finishStream(frameId, false)
       finishReveal(frameId)
     }
-    broadcast(frame.canvasId, { type: 'frame:updated', frame, actor })
+    /* a rename or resize mid-playback carries what viewers have been shown so far, or the
+       finished design would flash in before the playback goes on from where it was */
+    const playing = htmlChanged ? undefined : reveals.get(frameId)
+    broadcast(frame.canvasId, {
+      type: 'frame:updated',
+      frame: playing ? { ...frame, html: healPartialHtml(frame.html.slice(0, playing.shown)) } : frame,
+      actor,
+    })
     if (htmlChanged) {
       logActivity(frame.canvasId, actor, `updated the design of “${frame.name}”`, frame.id)
     } else if (patch.name !== undefined && patch.name !== prevName) {

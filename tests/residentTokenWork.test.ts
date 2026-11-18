@@ -18,24 +18,11 @@ vi.mock('../server/db/persist.ts', () => ({
 
 const actions = await import('../server/actions.ts')
 const { store } = await import('../server/store.ts')
-const { deliveredWork, execTool, tokenWritesIn } = await import('../server/resident.ts')
+const { deliveredWork, execTool, newRunState, tokenWritesIn } = await import('../server/resident.ts')
 const { DEFAULT_ROLE_ID, roleName } = await import('../shared/agents.ts')
 
 const actor = () => actions.resolveActor({ name: roleName(DEFAULT_ROLE_ID), kind: 'agent' })
-const run = () => ({
-  mutatedFrames: new Set<string>(),
-  sourceFrames: new Set<string>(),
-  verificationFrames: new Set<string>(),
-  verifiedFrames: new Set<string>(),
-  seenVerified: new Set<string>(),
-  rewriteDrafts: new Map<string, string>(),
-  vision: false,
-  imagesGenerated: 0,
-  repliedThreads: new Set<string>(),
-  awaitingThreads: new Set<string>(),
-  tokenWrites: 0,
-  arrangeWrites: 0,
-})
+const run = () => newRunState()
 const call = (name: string, input: unknown) => ({ type: 'tool_use' as const, id: 't1', name, input })
 
 let canvasId: string

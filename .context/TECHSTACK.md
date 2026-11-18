@@ -232,16 +232,26 @@
   rename, reorder and delete; `update_frame` moves a frame between pages. The guide's "Frames
   and HTML" section says when a page beats a frame. Tests: the page cases in `mcp-tools.test.ts`.
 - Fitting a frame to its content (`server/frameFit.ts`, `measureContentHeight` in
-  `server/screenshot.ts`): `fit_height: true` on MCP `update_frame` (at the new `width` when the
-  call passes one), `create_frame` and `set_frame_html`, and on the resident's `update_frame`, sets
-  the height to the content's as the server's Chromium lays it out, so agents stop guessing heights
-  between screenshots (#532). The frame loads at its current size (vh resolves as on the canvas);
-  the root and body let go of any viewport height, then the measure is the lowest painted box: the
-  root's own box for what flows, plus positioned and overflowing descendants, leaving out fixed
-  elements and what a scroller or clipper hides. Animations are finished first and fonts awaited.
-  Capped at `FIT_HEIGHT_MAX` (16,384, the export limit); refused with `height`, and on a
-  `create_frame` with no HTML (a stream is fitted afterwards with `update_frame`). Tests:
-  `frameFit.test.ts`.
+  `server/screenshot.ts`): `fit_height: true` on `update_frame` (at the new `width` when the call
+  passes one), `create_frame` and `set_frame_html`, for MCP agents and the resident alike
+  (`updateFrameMetaWithFit`, `fitWrittenFrame`), sets the height to the content's as the server's
+  Chromium lays it out, so agents stop guessing heights between screenshots (#532). The root and
+  body let go of any viewport height (`fit-content`, which also beats the quirks-mode body), then
+  the measure is the lowest thing painted: the root's box for what flows, plus positioned
+  descendants and text running past its element, leaving out fixed elements, invisible ones
+  (`visibility:hidden`, `opacity:0`) and what a scroller or clipper hides. Animations are finished
+  and fonts awaited first. A design sized in vh is solved on one page (`settleHeight`): content =
+  a + b x height is solved from two measures and confirmed by a third, a design that outgrows every
+  viewport (a 100vh hero with more below) is refused, content filling the frame exactly is probed
+  at a 1px viewport so a `min-height:100vh` wrapper shrinks to what it holds while an app shell at
+  `height:100vh` keeps its height. Capped at `FIT_HEIGHT_MAX` (`MAX_EXPORT_SIDE`). A fit is refused
+  with `height`, while an agent streams into the frame, and when the design changed during the
+  measurement; after `create_frame` / `set_frame_html` the write is committed before the browser
+  wait (`checkpoint`) and a failed fit leaves it standing with a note. A rename or resize
+  mid-playback sends viewers the revealed part (`actions.updateFrame`), not the whole design.
+  Server renders put the asset `<base>` inside the document, never ahead of its doctype (that put
+  every frame without a `<head>` in quirks mode). Tests: `frameFit.test.ts`, the fit cases in
+  `residentPageTools.test.ts`.
 - Feature usage events: a feature an agent can reach reports from the server through
   `captureFeature` (`server/featureEvents.ts`) at the REST route, MCP tool and resident tool, on the
   signed-in user, the agent's connecting user or the resident run's requester, with `via` (`ui`,

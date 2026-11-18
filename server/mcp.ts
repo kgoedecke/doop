@@ -15,8 +15,14 @@ import type { Request, Response } from 'express'
 import { fromNodeHeaders } from 'better-auth/node'
 import { z } from 'zod'
 import { store } from './store.ts'
-import { addPage, savePages, updateFrameMeta } from './pageTools.ts'
-import { fitNote, fittedHeight } from './frameFit.ts'
+import { addPage, savePages } from './pageTools.ts'
+import {
+  FIT_HEIGHT_DESCRIPTION,
+  FIT_NEEDS_HTML,
+  type FittedFrame,
+  fitWrittenFrame,
+  updateFrameMetaWithFit,
+} from './frameFit.ts'
 import { fontsForCanvas } from './fonts.ts'
 import { customAgentsForCanvas } from './customAgents.ts'
 import { describeLibrary, libraryBrief, MAX_FONT_BYTES } from '../shared/fonts.ts'
@@ -196,6 +202,11 @@ function withComponentNotes<T extends ToolContent>(result: T, frame: Frame, opti
   return withNotesFirst(result, componentWriteNotes(frame, options))
 }
 
+/** What fit_height did, right after the result's data: it says what the frame's height now is. */
+function withFitNote<T extends ToolContent>(result: T, fit: FittedFrame | undefined): T {
+  return fit?.note ? withNotesFirst(result, [fit.note]) : result
+}
+
 /** Notes right after the result's data, ahead of the generic nudges: they name the call to make. */
 function withNotesFirst<T extends ToolContent>(result: T, notes: string[]): T {
   result.content.splice(1, 0, ...notes.map((note) => ({ type: 'text' as const, text: note })))
@@ -226,17 +237,6 @@ function croppedNote(frame: Frame, scale: number): string {
 
 function err(message: string) {
   return { content: [{ type: 'text' as const, text: `Error: ${message}` }], isError: true }
-}
-
-const FIT_HEIGHT_DESCRIPTION =
-  "true = set the frame's height to its content's, measured in a browser at the frame's width, instead of guessing a height and checking screenshots. Parts sized in vh keep the frame's current height."
-
-/** fit_height after a write: the frame's height set to its content's, and the note that says so. */
-async function fitAfterWrite(frame: Frame, actor: Actor): Promise<{ frame: Frame; note: string }> {
-  const fit = await fittedHeight({ ...frame })
-  if (!fit.ok) return { frame, note: `fit_height was not applied: ${fit.error}` }
-  const resized = actions.updateFrame(frame.id, { height: fit.value.height }, actor)
-  return resized ? { frame: resized, note: fitNote(fit.value) } : { frame, note: 'fit_height: the frame is gone' }
 }
 
 /** Reaches agents that start designing without having read the canvas's style guides. */
@@ -1497,36 +1497,36 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
           .boolean()
           .optional()
           .describe(
-            `${FIT_HEIGHT_DESCRIPTION} Needs the whole design in html; after streaming with append_frame_html, call update_frame with fit_height instead.`,
+            `${FIT_HEIGHT_DESCRIPTION} height, when given, is where the measuring starts. Needs the whole design in html: after streaming with append_frame_html, call update_frame with fit_height instead. If the fit cannot be made, the frame is still created and the result says why.`,
           ),
         agent_name: agentName,
       },
     },
     async ({ canvas_id, pageId, name, html, x, y, width, height, fit_height, agent_name }) => {
       if (!canvasFor(canvas_id, 'edit')) return noCanvas(canvas_id)
-      if (fit_height && height !== undefined) return err('pass either height or fit_height, not both')
-      if (fit_height && !html.trim())
-        return err('fit_height needs the design in html: stream it in, then call update_frame with fit_height')
+      if (fit_height && !html.trim()) return err(FIT_NEEDS_HTML)
       const inline = inlineDataRefusal(html)
       if (inline) return err(inline)
       const created = actions.createFrame(canvas_id, { name, pageId, html, x, y, width, height }, actorFrom(agent_name))
       if (!created) return noCanvas(canvas_id)
-      const fit = fit_height ? await fitAfterWrite(created, actorFrom(agent_name)) : undefined
+      const fit = fit_height ? await fitWrittenFrame(created, actorFrom(agent_name)) : undefined
       const frame = fit?.frame ?? created
       const canvas = store.getCanvas(canvas_id)
-      const result = withComponentNotes(
-        withEscapeNote(
-          frame.html.length > 0
-            ? textWithNudge({ ok: true, frame: frameSummary(frame) }, REVIEW_NUDGE)
-            : canvas
-              ? textWithNudge({ ok: true, frame: frameSummary(frame) }, componentSystemPlan(canvas))
-              : text({ ok: true, frame: frameSummary(frame) }),
-          html,
+      const result = withFitNote(
+        withComponentNotes(
+          withEscapeNote(
+            frame.html.length > 0
+              ? textWithNudge({ ok: true, frame: frameSummary(frame) }, REVIEW_NUDGE)
+              : canvas
+                ? textWithNudge({ ok: true, frame: frameSummary(frame) }, componentSystemPlan(canvas))
+                : text({ ok: true, frame: frameSummary(frame) }),
+            html,
+          ),
+          frame,
+          { review: frame.html.length > 0 },
         ),
-        frame,
-        { review: frame.html.length > 0 },
+        fit,
       )
-      if (fit) withNotesFirst(result, [fit.note])
       return withGuidelinesNudge(
         withStatusNudge(withFeedback(result, canvas_id, actorFrom(agent_name)), canvas_id, actorFrom(agent_name)),
         canvas_id,
@@ -1581,7 +1581,12 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
       inputSchema: {
         frame_id: z.string(),
         html: z.string(),
-        fit_height: z.boolean().optional().describe(FIT_HEIGHT_DESCRIPTION),
+        fit_height: z
+          .boolean()
+          .optional()
+          .describe(
+            `${FIT_HEIGHT_DESCRIPTION} If the fit cannot be made, the new HTML still stands and the result says why.`,
+          ),
         agent_name: agentName,
       },
     },
@@ -1592,19 +1597,19 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
       if (inline) return err(inline)
       const written = actions.updateFrame(frame_id, { html }, actorFrom(agent_name), { replace: true })
       if (!written) return noFrame(frame_id)
-      const fit = fit_height ? await fitAfterWrite(written, actorFrom(agent_name)) : undefined
+      const fit = fit_height ? await fitWrittenFrame(written, actorFrom(agent_name)) : undefined
       const frame = fit?.frame ?? written
       return withPreview(
         withGuidelinesNudge(
           withStatusNudge(
             withFeedback(
-              withComponentNotes(
-                withNotesFirst(
+              withFitNote(
+                withComponentNotes(
                   withEscapeNote(textWithNudge({ ok: true, frame: frameSummary(frame) }, REVIEW_NUDGE), html),
-                  fit ? [fit.note] : [],
+                  frame,
+                  { review: true },
                 ),
-                frame,
-                { review: true },
+                fit,
               ),
               frame.canvasId,
               actorFrom(agent_name),
@@ -2524,19 +2529,10 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
       const found = frameFor(frame_id, 'edit')
       const canvas = found && store.getCanvas(found.canvasId)
       if (!canvas) return noFrame(frame_id)
-      if (fit_height && patch.height !== undefined) return err('pass either height or fit_height, not both')
-      const fit = fit_height ? await fittedHeight({ ...found }, patch.width ?? found.width) : undefined
-      if (fit && !fit.ok) return err(fit.error)
-      const updated = updateFrameMeta(
-        canvas,
-        frame_id,
-        fit ? { ...patch, height: fit.value.height } : patch,
-        actorFrom(agent_name),
-      )
+      const updated = await updateFrameMetaWithFit(canvas, frame_id, patch, fit_height === true, actorFrom(agent_name))
       if (!updated.ok) return err(updated.error)
-      const frame = updated.value
-      const result = text({ ok: true, frame: frameSummary(frame) })
-      if (fit) withNotesFirst(result, [fitNote(fit.value)])
+      const { frame } = updated.value
+      const result = withFitNote(text({ ok: true, frame: frameSummary(frame) }), updated.value)
       return withPreview(withFeedback(result, frame.canvasId, actorFrom(agent_name)), frame.canvasId, [frame])
     },
   )
