@@ -135,7 +135,7 @@ as with custom agents. No realtime broadcast: the `/` menu reads the list again 
   `shared/skills.ts`, the same rule as `skillHandlesIn`) lists the canvas's skills above the
   field; letters narrow it, ↑↓ move, Enter or Tab writes `/handle `, Esc closes. With nothing
   matching it closes, so Enter keeps doing what the field does. A canvas with no skills says
-  where they come from on a bare `/`; Enter still sends there, even when "New skill" shows.
+  where they come from on a bare `/`; where "New skill" shows there, Enter goes to the create form.
 - Each field passes a `SkillSource`. `{ canvasId }` reads the canvas route below.
   Home's box has no canvas yet, so it passes `{ scope }`, the scope Home will make the canvas in
   (the picked workspace, else the person's own), and reads `/api/skills` for it. The prompt

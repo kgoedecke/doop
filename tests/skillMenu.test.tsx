@@ -133,11 +133,9 @@ it('offers to add the first skill, in the person’s own settings on a personal 
   act(() => root.render(<Field offerNew />))
   await type('/')
   expect(options()).toEqual(['New skill'])
-  /* with no skill to pick, Enter still sends: only a click takes the shortcut */
+  /* Enter takes the only row instead of sending a bare "/" */
   await press('Enter')
-  expect(sent).toEqual(['/'])
-  expect(mocks.navigate).not.toHaveBeenCalled()
-  await act(async () => (host.querySelector('[role=option]') as HTMLElement).click())
+  expect(sent).toEqual([])
   expect(mocks.navigate).toHaveBeenCalledWith('/settings?pane=agent&skill=new')
 })
 

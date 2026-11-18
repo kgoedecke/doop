@@ -176,8 +176,8 @@ export function useSkillMenu({
       setActive((index - 1 + count) % count)
       return take()
     }
-    /* with no skill to pick, Enter and Tab stay the field's; "New skill" alone takes a click */
-    if ((e.key === 'Enter' || e.key === 'Tab') && !e.shiftKey && !e.metaKey && !e.ctrlKey && matches.length > 0) {
+    /* a lone "New skill" row (no skills yet, bare "/") takes Enter too, rather than sending "/" */
+    if ((e.key === 'Enter' || e.key === 'Tab') && !e.shiftKey && !e.metaKey && !e.ctrlKey) {
       choose(index)
       return take()
     }
