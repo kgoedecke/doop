@@ -161,6 +161,15 @@ describe('over MCP', () => {
     const created = await call('create_frame', { canvas_id: canvasId, name: 'Hero', html: openCardDoc })
     expect(created.isError).toBe(true)
     expect(created.text).toContain('<doop-use component="Card"> is opened and never closed')
+    /* a closed use whose overrides carry markup that leaves one open, which renders on its own */
+    const overrides = JSON.stringify({ k: { html: '<doop-use component="Badge"><p>slot</p>' } })
+    const carried = await call('create_frame', {
+      canvas_id: canvasId,
+      name: 'Hero',
+      html: doc(`<doop-use component="Card" overrides='${overrides}'></doop-use>`),
+    })
+    expect(carried.isError).toBe(true)
+    expect(carried.text).toContain('<doop-use component="Badge"> is opened and never closed')
     expect(frames()).toHaveLength(0)
 
     await call('create_frame', { canvas_id: canvasId, name: 'Hero', html: doc('') })

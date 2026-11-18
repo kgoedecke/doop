@@ -225,6 +225,19 @@ function asStringRecord(value: Record<string, unknown>): Record<string, string> 
   return record
 }
 
+/** The markup part overrides carry (an element's children, a slot's content), nested instances'
+ *  parts included: each piece expands on its own when the instance renders. Overrides can arrive
+ *  as an agent's JSON, so anything not shaped like markup is skipped. */
+export function overrideMarkup(parts: Record<string, PartOverride> | undefined): string[] {
+  return Object.values(parts ?? {}).flatMap((part) =>
+    part && typeof part === 'object'
+      ? [part.html, part.slot, ...overrideMarkup(part.use?.parts)].filter(
+          (markup): markup is string => typeof markup === 'string',
+        )
+      : [],
+  )
+}
+
 /** Part overrides from untrusted JSON: a part that is not an object (`null`, written to mean
  *  "remove it") is no override at all, rather than something to trip over later. */
 function asPartRecord(value: Record<string, unknown>): Record<string, PartOverride> {
@@ -1145,7 +1158,27 @@ export function unclosedUses(html: string): string[] {
      expands either: it counts as left open, so the write is refused rather than saved half read */
   const stuck = nextTag(html, `<${USE_TAG}`, cursor, opaque)
   if (stuck !== -1) refs.push(componentRefIn(html.slice(stuck, html.indexOf('>', stuck) + 1 || undefined)))
+  /* markup in a use's overrides attribute expands on its own too */
+  for (const markup of useOverrideMarkup(html, opaque)) refs.push(...unclosedUses(markup))
   return refs
+}
+
+/** The markup the `overrides` attribute of every `<doop-use>` in the HTML carries, nested uses
+ *  included. Each open tag is parsed on its own, which decodes the attribute's entities. */
+function useOverrideMarkup(html: string, opaque: [number, number][]): string[] {
+  const markup: string[] = []
+  let at = nextTag(html, `<${USE_TAG}`, 0, opaque)
+  while (at !== -1) {
+    const end = tagEnd(html, at)
+    if (end === -1) break
+    const openTag = html.slice(at, end + 1)
+    if (/\soverrides\s*=/i.test(openTag)) {
+      const use = elementKids(parseFragment(`${openTag.replace(/\/>$/, '>')}</${USE_TAG}>`))[0]
+      if (use) markup.push(...overrideMarkup(asPartRecord(JSON_OBJECT(attrOf(use, 'overrides')))))
+    }
+    at = nextTag(html, `<${USE_TAG}`, end + 1, opaque)
+  }
+  return markup
 }
 
 /** Every complete `<doop-use>` in the HTML, written out in full. One still missing
