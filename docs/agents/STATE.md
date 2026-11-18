@@ -33,7 +33,9 @@ Arctic OKs the RAM (self-hosting on `localhost:4300` waits for that and for impr
 3. Before each merge, check that main is green; if main is red, fix main first.
 
 Known flaky tests: the browser tests in `elementPanelBrowser.test.ts` and `canvasClipboardBrowser.test.ts` fail
-intermittently on the fork's runners with 5 s waits (see the Flaky tests section).
+intermittently on the fork's runners with 5 s waits (see the Flaky tests section). One is skipped: "keeps multiple
+copied elements together and selects the pasted set" (`canvasClipboardBrowser.test.ts`) failed 3 of 3 on sync PR #20
+and is red on upstream's own main CI too; drop the `it.skip` when upstream fixes it (issue #12).
 
 ## Inherited workflows (GitHub Actions on the fork)
 
@@ -173,7 +175,8 @@ Our own additions are new files: `FORK.md`, `AGENTS.md`, `docs/agents/STATE.md`,
 where a sync conflicts when upstream refactors the same code (as it did on 2026-11-18): `server/canvasFaces.ts`
 (paper rule), `src/components/FrameView.tsx` (paper rule in `saveEdited`), `.context/TECHSTACK.md` (frame paper bullet),
 `server/contextDev.ts`, `server/github.ts`, `server/importer.ts`, `server/ingest.ts`, `server/index.ts`,
-`src/lib/drawing.ts`, `src/lib/drawingMove.ts` and their tests. When one of these PRs lands upstream, a sync
+`src/lib/drawing.ts`, `src/lib/drawingMove.ts` and their tests, plus `tests/canvasClipboardBrowser.test.ts` (one
+`it.skip`, see Flaky tests). When one of these PRs lands upstream, a sync
 replaces our copy and the entry can go. Also: `.github/workflows/` differs from upstream by design (`android.yml` is
 upstream's and is not taken).
 
