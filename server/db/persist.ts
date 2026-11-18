@@ -176,6 +176,7 @@ function componentRow(canvasId: string, def: ComponentDef) {
     props: def.props,
     slots: def.slots,
     rev: def.rev,
+    renderRev: def.renderRev ?? null,
     mainFrameId: def.mainFrameId,
     code: def.code ?? null,
     source: def.source ?? null,
@@ -294,6 +295,7 @@ function revisionRows(canvasId: string, componentId: string, history: readonly C
     canvasId,
     componentId,
     rev: entry.rev,
+    renderRev: entry.renderRev ?? null,
     template: entry.template,
     rawCss: entry.rawCss,
     head: entry.head,
@@ -352,10 +354,11 @@ export function saveComponent(canvasId: string, def: ComponentDef) {
 }
 
 /**
- * The components with an instance stored at an older revision than the component: the
- * frames a propagation never reached (the queue lives in memory, so a restart mid-drain
- * drops it; the kill switch of 2026-11-11 deferred it). Read in the database, where matching
- * every frame's HTML costs the server nothing.
+ * The components with an instance behind them: one marked with a revision older than the
+ * one the component last changed its markup at (`render_rev`; revisions of its rules alone
+ * leave instances as they are). These are the frames a propagation never reached (the queue
+ * lives in memory, so a restart mid-drain drops it; the kill switch of 2026-11-11 deferred
+ * it). Read in the database, where matching every frame's HTML costs the server nothing.
  */
 export async function componentsBehind(): Promise<{ canvasId: string; componentId: string }[]> {
   const result = await db.execute(sql`
@@ -364,7 +367,7 @@ export async function componentsBehind(): Promise<{ canvasId: string; componentI
     join frames f on f.canvas_id = c.canvas_id
       and position('data-doop-instance="' || c.id || '"' in f.html) > 0
     cross join lateral regexp_matches(f.html, 'data-doop-instance="' || c.id || '" data-doop-rev="(\\d+)"', 'g') as m
-    where coalesce(c.status, 'active') = 'active' and c.rev > 1 and m[1]::int < c.rev`)
+    where coalesce(c.status, 'active') = 'active' and c.rev > 1 and m[1]::int < coalesce(c.render_rev, c.rev)`)
   return (result as unknown as { rows: { canvasId: string; componentId: string }[] }).rows
 }
 
@@ -696,7 +699,16 @@ async function writeFrame(f: Frame) {
 async function writeFrameRow(f: Frame) {
   const generation = dirtyFrames.get(f.id)
   const html = f.html
-  const row = {
+  const row = frameRowOf(f)
+  const { id, createdAt, ...set } = row
+  await db.insert(t.frames).values(row).onConflictDoUpdate({ target: t.frames.id, set })
+  /* a save made while this one was in flight keeps the frame dirty */
+  if (dirtyFrames.get(f.id) === generation) dirtyFrames.delete(f.id)
+  await syncAssetRefs(f, html)
+}
+
+function frameRowOf(f: Frame) {
+  return {
     id: f.id,
     canvasId: f.canvasId,
     pageId: f.pageId ?? null,
@@ -705,7 +717,7 @@ async function writeFrameRow(f: Frame) {
     y: f.y,
     width: f.width,
     height: f.height,
-    html,
+    html: f.html,
     createdAt: f.createdAt,
     updatedAt: f.updatedAt,
     updatedBy: f.updatedBy,
@@ -716,11 +728,6 @@ async function writeFrameRow(f: Frame) {
     rotation: f.rotation ?? null,
     approval: f.approval ?? null,
   }
-  const { id, createdAt, ...set } = row
-  await db.insert(t.frames).values(row).onConflictDoUpdate({ target: t.frames.id, set })
-  /* a save made while this one was in flight keeps the frame dirty */
-  if (dirtyFrames.get(f.id) === generation) dirtyFrames.delete(f.id)
-  await syncAssetRefs(f.id, html)
 }
 
 /** A frame whose latest state is not yet stored: waiting on its debounce,
@@ -917,11 +924,23 @@ export async function getFrameVersion(frameId: string, versionId: string): Promi
   }
 }
 
-/* asset_refs is a projection of frame HTML: recompute this frame's full ref
-   set on every durable write (never increment/decrement — nothing to drift).
-   Boot reconciles the whole table, so a lost write here self-heals. */
-async function syncAssetRefs(frameId: string, html: string) {
-  const ids = [...extractAssetIds(html)]
+/* A frame's stored HTML is its source: an asset only a component's stylesheet names (a
+   background image) is in what the canvas composes into the frame, not in the row. The
+   server hands over that view (server/index.ts, `composedHtml`); without one, the HTML as
+   stored is read. */
+let assetView: (canvasId: string, html: string) => string = (_canvasId, html) => html
+
+export function viewAssetsThrough(view: (canvasId: string, html: string) => string) {
+  assetView = view
+}
+
+/* asset_refs is a projection of the frame as it renders: recompute this frame's full ref
+   set on every durable write (never increment/decrement — nothing to drift). A change to
+   a component's stylesheet writes no frame, so an asset it starts to name joins a frame's
+   refs with that frame's own next write. */
+async function syncAssetRefs(frame: Pick<Frame, 'id' | 'canvasId'>, html: string) {
+  const frameId = frame.id
+  const ids = [...extractAssetIds(assetView(frame.canvasId, html))]
   await db.delete(t.assetRefs).where(eq(t.assetRefs.frameId, frameId))
   if (ids.length) {
     await db
@@ -1355,7 +1374,8 @@ export async function hydrate(): Promise<Hydrated> {
   }
   /* oldest first, as bumpRevision keeps them */
   const histories = new Map<string, ComponentSnapshot[]>()
-  for (const { canvasId, componentId, ...entry } of revisionRowsStored) {
+  for (const { canvasId, componentId, renderRev, ...kept } of revisionRowsStored) {
+    const entry: ComponentSnapshot = renderRev == null ? kept : { ...kept, renderRev }
     const key = componentKey(canvasId, componentId)
     const history = histories.get(key)
     if (history) history.push(entry)
@@ -1365,11 +1385,12 @@ export async function hydrate(): Promise<Hydrated> {
   for (const row of componentRows) {
     const c = byId.get(row.canvasId)
     if (!c) continue
-    const { canvasId: _canvasId, code, source, status, deletedAt, deletedBy, ...def } = row
+    const { canvasId: _canvasId, code, source, status, deletedAt, deletedBy, renderRev, ...def } = row
     const history = (histories.get(componentKey(row.canvasId, row.id)) ?? []).slice(-MAX_COMPONENT_HISTORY)
     noteRevisionsFiled(row.canvasId, row.id, history)
     ;(c.components ??= []).push({
       ...def,
+      ...(renderRev != null && renderRev < def.rev ? { renderRev } : {}),
       history,
       ...(code ? { code } : {}),
       ...(source ? { source } : {}),

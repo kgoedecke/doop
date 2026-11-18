@@ -159,8 +159,28 @@ import { isPeerViewport } from '../shared/viewport.ts'
 import { exportScaleSuffix, fitExportScale, fullFrameRenderScale, parseExportScale } from '../shared/exportScale.ts'
 import { emailShare } from './canvasShares.ts'
 import * as userEvents from './userEvents.ts'
-import type { Actor, Canvas, ClientMessage, Frame, Presence, ServerMessage, WireCanvas } from '../shared/types.ts'
+import type {
+  Actor,
+  Canvas,
+  ClientMessage,
+  Frame,
+  Presence,
+  ServerMessage,
+  WireCanvas,
+  WireFrame,
+} from '../shared/types.ts'
 import { carriesHtml, frameMeta, htmlLoaded } from './frameHtml.ts'
+import { composedFrame, composedHtml } from './frameCompose.ts'
+import {
+  forgetTokens,
+  legacyFrame,
+  rememberTokens,
+  restyledFrames,
+  type LegacyFrame,
+  type SentFrames,
+  type SharedChange,
+} from './legacyFrames.ts'
+import { COMPOSES_HEADER } from '../shared/frameCompose.ts'
 
 const PORT = env.PORT
 const HOST = env.HOST
@@ -278,6 +298,16 @@ interface Conn {
    *  One from before (an open tab on an older bundle, the native apps) is sent
    *  the whole canvas and every frame's HTML, as it always was */
   onDemand: boolean
+  /** the browser composes frames itself from the canvas's tokens and components
+   *  (its join said `composesFrames`), so it is sent each frame's source. One that
+   *  did not say so (the native apps, a tab on an older bundle) renders exactly the
+   *  HTML it is sent: it gets every frame composed, and again whenever the tokens or
+   *  a component's stylesheet change (`restyleForLegacy`) */
+  composes: boolean
+  /** legacy connections only: a key of what the canvas supplied to each frame's document
+   *  when it was last sent (server/legacyFrames.ts), so a shared-style change sends just
+   *  the frames it restyles */
+  sent: SentFrames
 }
 
 /* What a signed-out guest is not sent: the team's conversation (comments,
@@ -357,22 +387,61 @@ function send(ws: WebSocket, msg: ServerMessage) {
 }
 
 function broadcast(canvasId: string, msg: ServerMessage, excludeClientId?: string) {
+  /* composed once for the connections that cannot compose, however many they are */
+  let legacy: LegacyFrame | undefined
+  const composed = (frame: WireFrame) => (legacy ??= legacyFrameOf(canvasId, frame))
   for (const c of room(canvasId)) {
     if (excludeClientId && c.presence.clientId === excludeClientId) continue
     const shown = c.userId ? msg : forGuest(msg)
-    if (shown) send(c.ws, forPages(c, shown))
+    if (shown) send(c.ws, forPages(c, shown, composed))
   }
+  if (msg.type === 'tokens') restyleForLegacy(canvasId, { tokens: true }, msg.actor)
+  if (msg.type === 'component') restyleForLegacy(canvasId, { componentId: msg.id }, msg.actor)
+  if (msg.type === 'frame:deleted') for (const c of room(canvasId)) c.sent.delete(msg.frameId)
+}
+
+/** A frame's composed document for connections that cannot compose. Mid-stream or
+ *  mid-playback the document is a prefix: nothing goes into a half-written top. */
+function legacyFrameOf<F extends WireFrame>(canvasId: string, frame: F): LegacyFrame<F> {
+  return legacyFrame(store.getCanvas(canvasId), frame, { partial: actions.isFrameStreaming(frame.id) })
+}
+
+/** A frame as this connection is to get it: its source for a browser that composes,
+ *  the composed document for one that does not (what it was sent is remembered). */
+function frameFor<F extends WireFrame>(
+  conn: Pick<Conn, 'composes' | 'sent' | 'canvasId'>,
+  frame: F,
+  composed: (frame: F) => LegacyFrame<F> = (source) => legacyFrameOf(conn.canvasId, source),
+): F {
+  if (conn.composes || !carriesHtml(frame)) return frame
+  const legacy = composed(frame)
+  conn.sent.set(frame.id, legacy.key)
+  return legacy.frame
+}
+
+/** The canvas's tokens or a component's stylesheet changed, which writes no frame:
+ *  connections that cannot compose are sent each frame whose document it changed, as a
+ *  `frame:updated`. Only frames the change can reach are composed, once each
+ *  (server/legacyFrames.ts); one the change also rewrote has gone out already. */
+function restyleForLegacy(canvasId: string, change: SharedChange, actor: Actor) {
+  const legacy = room(canvasId).filter((c) => !c.composes)
+  const canvas = legacy.length ? store.getCanvas(canvasId) : undefined
+  if (!canvas) return
+  const streaming = (frame: Frame) => actions.isFrameStreaming(frame.id)
+  for (const { frame, to } of restyledFrames(canvas, change, legacy, streaming))
+    for (const conn of to) send(conn.ws, { type: 'frame:updated', frame, actor })
 }
 
 /** A frame on a page this browser has not loaded goes to it without its HTML
  *  (and so does one whose HTML the server does not hold): the browser reads
  *  that page whole when it opens it. */
-function forPages(conn: Conn, msg: ServerMessage): ServerMessage {
+function forPages(conn: Conn, msg: ServerMessage, composed?: (frame: WireFrame) => LegacyFrame): ServerMessage {
   if (msg.type !== 'frame:created' && msg.type !== 'frame:updated') return msg
   const canvas = store.getCanvas(conn.canvasId)
   const pageId = canvas && framePageId(canvas, msg.frame as Frame)
   const sendsHtml = !conn.onDemand || (!!pageId && (conn.pages.has(pageId) || !conn.joinedPages.has(pageId)))
-  if (sendsHtml && carriesHtml(msg.frame)) return msg
+  if (sendsHtml && carriesHtml(msg.frame))
+    return conn.composes ? msg : { ...msg, frame: frameFor(conn, msg.frame, composed) }
   return { ...msg, frame: frameMeta(msg.frame) }
 }
 
@@ -380,10 +449,16 @@ function forPages(conn: Conn, msg: ServerMessage): ServerMessage {
  *  frames on `pageId` (every page, for a join from before page loading) where
  *  the whole page is in memory. Those pages are listed in `loadedPageIds`; the
  *  browser asks for any other with `page:load`. */
-function canvasForInit(canvas: Canvas, pageId: string | 'all'): { canvas: WireCanvas; loadedPageIds: string[] } {
+function canvasForInit(
+  canvas: Canvas,
+  pageId: string | 'all',
+  conn: Pick<Conn, 'composes' | 'sent' | 'canvasId'>,
+): { canvas: WireCanvas; loadedPageIds: string[] } {
   const asked = pageId === 'all' ? canvasPages(canvas).map((page) => page.id) : [pageId]
   const loaded = new Set(asked.filter((id) => store.isPageLoaded(canvas.id, id)))
-  const frames = canvas.frames.map((frame) => (loaded.has(framePageId(canvas, frame)) ? frame : frameMeta(frame)))
+  const frames = canvas.frames.map((frame) =>
+    loaded.has(framePageId(canvas, frame)) ? frameFor(conn, frame) : frameMeta(frame),
+  )
   return { canvas: { ...withWireComponents(canvas), frames }, loadedPageIds: [...loaded] }
 }
 
@@ -436,7 +511,7 @@ async function sendPage(conn: Conn, pageId: string, attempt = 0): Promise<void> 
     return
   }
   conn.pages.add(pageId)
-  send(conn.ws, { type: 'page:frames', pageId, frames })
+  send(conn.ws, { type: 'page:frames', pageId, frames: frames.map((frame) => frameFor(conn, frame)) })
 }
 
 /* Agents show up in presence while they are actively calling tools. */
@@ -516,6 +591,8 @@ setInterval(() => {
 }, 5000)
 
 actions.wire(broadcast, agentTouch)
+/* asset_refs follow each frame as it renders, its components' stylesheets included */
+persist.viewAssetsThrough(composedHtml)
 /* after the room has been told: email for the people who were not in it */
 onCanvasEvent(commentNotifications.onCanvasEvent)
 onCanvasEvent(webhooks.onCanvasEvent)
@@ -1006,6 +1083,44 @@ app.use('/api', async (req, res, next) => {
     next(err)
   }
 })
+
+/* Frames in REST answers. A client that composes frames itself says so with a header
+   (shared/frameCompose.ts) and is answered with their source. Every other one (the
+   native apps, a tab on an older bundle, a script) renders exactly the HTML it is
+   given, so each frame in its answers carries the composed document: one place, for
+   every route that answers with a frame, a list of frames or a canvas. */
+app.use('/api', (req, res, next) => {
+  if (req.get(COMPOSES_HEADER)) return next()
+  const json = res.json.bind(res)
+  res.json = (body?: unknown) => json(withComposedFrames(body))
+  next()
+})
+
+const FRAME_HOLDERS = ['frame', 'frames', 'canvas'] as const
+
+function isFrameWithHtml(value: object): value is Frame {
+  const frame = value as Partial<Frame>
+  return typeof frame.id === 'string' && typeof frame.canvasId === 'string' && carriesHtml(value as Frame)
+}
+
+/** An answer with every frame in it composed: a frame, a list of frames, or an object
+ *  holding them under `frame`, `frames` or `canvas`. The answer itself when it has none. */
+function withComposedFrames(body: unknown, depth = 0): unknown {
+  if (Array.isArray(body)) {
+    const items: unknown[] = body.map((item) => withComposedFrames(item, depth + 1))
+    return items.some((item, i) => item !== body[i]) ? items : body
+  }
+  if (!body || typeof body !== 'object' || depth > 3) return body
+  if (isFrameWithHtml(body)) return composedFrame(body, { partial: actions.isFrameStreaming(body.id) })
+  let next: Record<string, unknown> | undefined
+  for (const key of FRAME_HOLDERS) {
+    const held = (body as Record<string, unknown>)[key]
+    if (held === undefined) continue
+    const composed = withComposedFrames(held, depth + 1)
+    if (composed !== held) next = { ...(next ?? (body as Record<string, unknown>)), [key]: composed }
+  }
+  return next ?? body
+}
 
 /* Every route naming a canvas, frame or comment gets the frame HTML its
    handler reads loaded before it runs (store.loadPages), so handlers keep
@@ -3079,10 +3194,13 @@ app.get('/api/frames/:id/versions', async (req, res) => {
 })
 
 app.get('/api/frames/:id/versions/:versionId', async (req, res) => {
-  if (!requireFrame(req, res, req.params.id, 'view')) return
+  const frame = requireFrame(req, res, req.params.id, 'view')
+  if (!frame) return
   const version = await persist.getFrameVersion(req.params.id, req.params.versionId)
   if (!version) return res.status(404).json({ error: 'version not found' })
-  res.json(version)
+  /* a preview is shown as a document of its own: the canvas's styles as they are now
+     (a version keeps the frame's source, not what the canvas supplied then) */
+  res.json({ ...version, html: composedHtml(frame.canvasId, version.html) })
 })
 
 app.post('/api/frames/:id/versions/:versionId/restore', async (req, res) => {
@@ -3605,6 +3723,7 @@ function joinAsGuest(
   canvas: Canvas | undefined,
   pageId: string | undefined,
   onDemand: boolean,
+  composes: boolean,
 ) {
   const role = canvas && guestCanvasRole(canvas)
   if (!canvas || !role || !pageId) {
@@ -3612,7 +3731,9 @@ function joinAsGuest(
     return
   }
   const presence: Presence = { clientId, name: '', color: colorFor(clientId), kind: 'user', activeFrameId: null }
-  const opened = canvasForInit(canvas, onDemand ? pageId : 'all')
+  const sent: SentFrames = new Map()
+  if (!composes) rememberTokens(canvas)
+  const opened = canvasForInit(canvas, onDemand ? pageId : 'all', { composes, sent, canvasId: canvas.id })
   conns.set(ws, {
     ws,
     canvasId,
@@ -3622,6 +3743,8 @@ function joinAsGuest(
     joinedPages: new Set(canvasPages(canvas).map((page) => page.id)),
     shown: new Set([pageId]),
     onDemand,
+    composes,
+    sent,
   })
   const { guidelines: _guidelines, references: _references, memberIds: _memberIds, ...shown } = opened.canvas
   send(ws, {
@@ -3662,6 +3785,7 @@ wss.on('connection', (ws, upgradeReq) => {
       const session = await sessionPromise
       let canvas = store.getCanvas(msg.canvasId)
       const onDemand = msg.pagesOnDemand === true
+      const composes = msg.composesFrames === true
       if (!session) {
         /* only a canvas the guest may open is loaded for them, and only the page it opens on */
         let pageId: string | undefined
@@ -3671,7 +3795,7 @@ wss.on('connection', (ws, upgradeReq) => {
           canvas = store.getCanvas(msg.canvasId)
         }
         if (ws.readyState !== WebSocket.OPEN) return
-        joinAsGuest(ws, msg.canvasId, msg.clientId, canvas, pageId, onDemand)
+        joinAsGuest(ws, msg.canvasId, msg.clientId, canvas, pageId, onDemand, composes)
         return
       }
       if (!canvas) {
@@ -3715,7 +3839,9 @@ wss.on('connection', (ws, upgradeReq) => {
         activeFrameId: null,
       }
       const silent = !!(session.session as { impersonatedBy?: string | null }).impersonatedBy
-      const opened = canvasForInit(canvas, onDemand ? pageId : 'all')
+      const sent: SentFrames = new Map()
+      if (!composes) rememberTokens(canvas)
+      const opened = canvasForInit(canvas, onDemand ? pageId : 'all', { composes, sent, canvasId: canvas.id })
       conns.set(ws, {
         ws,
         canvasId: msg.canvasId,
@@ -3726,6 +3852,8 @@ wss.on('connection', (ws, upgradeReq) => {
         joinedPages: new Set(canvasPages(canvas).map((page) => page.id)),
         shown: new Set([pageId]),
         onDemand,
+        composes,
+        sent,
       })
       const others = room(msg.canvasId)
         .filter((c) => c.ws !== ws && !c.silent)
@@ -3825,6 +3953,7 @@ wss.on('connection', (ws, upgradeReq) => {
     const conn = conns.get(ws)
     if (!conn) return
     conns.delete(ws)
+    if (!conn.composes && !room(conn.canvasId).some((c) => !c.composes)) forgetTokens(conn.canvasId)
     if (conn.silent) return // never announced a join, so nothing to leave
     broadcast(conn.canvasId, { type: 'presence:leave', clientId: conn.presence.clientId })
   })

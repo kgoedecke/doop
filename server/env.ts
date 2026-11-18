@@ -168,6 +168,11 @@ const schema = {
   /* incident kill switch: a frame write stops pushing a changed main into every
      other frame synchronously (each catches up on its own next write) */
   DOOP_DEFER_COMPONENT_PROPAGATION: bool({ default: false }),
+  /* temporary kill switch: false stores every frame with its component stylesheets and
+     token block written in, as before lean storage, and token changes rewrite frames again.
+     Reads compose either way (server/frameCompose.ts). To be removed once lean storage
+     has run in production */
+  DOOP_LEAN_FRAME_STORAGE: bool({ default: true }),
   /* what one operation (a request, a tool call, one frame of the propagation queue) may
      hand the component engine's HTML parser, and how long it may spend in it
      (server/workBudget.ts); 0 lifts a limit */

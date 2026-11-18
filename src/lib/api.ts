@@ -2,6 +2,8 @@ import { useStore } from './store'
 import { frameHtmlReady } from './pages'
 import type { InstanceSettings, InstanceSettingsPatch } from '../../shared/instanceSettings'
 import { beginFrameSave } from './frameSaves'
+import { COMPOSES_HEADER } from '../../shared/frameCompose'
+import { frameSource } from './frameCompose'
 import type { StackWrite } from '../../shared/frameStack'
 import type { LocalAgentPreference, LocalAgentJob, LocalAgentResult } from '../../shared/localAgent'
 import type { ImageDescriptionMode, ImageDescriptionPreference } from '../../shared/imageDescriptions'
@@ -445,7 +447,8 @@ export function errorMessage(err: unknown, fallback: string): string {
 
 export async function req<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, {
-    headers: { 'Content-Type': 'application/json' },
+    /* this client composes frames itself, so answers carry their source */
+    headers: { 'Content-Type': 'application/json', [COMPOSES_HEADER]: '1' },
     ...init,
   })
   if (!res.ok) throw new ApiError(res.status, await res.text())
@@ -699,6 +702,7 @@ export const api = {
         pageId:
           useStore.getState().canvas?.id === canvasId ? (useStore.getState().activePageId ?? undefined) : undefined,
         ...input,
+        ...(typeof input.html === 'string' ? { html: frameSource(input.html) } : {}),
         actor: actor(),
       }),
     }),
@@ -708,10 +712,13 @@ export const api = {
     if (patch.html !== undefined && !frameHtmlReady(useStore.getState(), frameId))
       throw new Error('This page is still loading; try again in a moment.')
     const finish = ['html', 'width', 'height'].some((key) => key in patch) ? beginFrameSave(frameId) : () => {}
+    /* only ever a frame's source leaves this browser: on a canvas on an actor the edit
+       is stored as sent, with no server pass to take composed blocks out again */
+    const sent = patch.html === undefined ? patch : { ...patch, html: frameSource(patch.html) }
     try {
       return await req<Frame>('/api/frames/' + frameId, {
         method: 'PATCH',
-        body: JSON.stringify({ ...patch, expectedUpdatedAt, actor: actor() }),
+        body: JSON.stringify({ ...sent, expectedUpdatedAt, actor: actor() }),
       })
     } finally {
       finish()

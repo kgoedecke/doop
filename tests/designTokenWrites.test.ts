@@ -1,4 +1,5 @@
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { stubEnv, unstubAllEnvs } from './envStub.ts'
 import type { Actor } from '../shared/types'
 import { TOKEN_BLOCK_ATTR } from '../shared/designTokens'
 
@@ -59,6 +60,12 @@ function setup() {
   expect(results.every((r) => r.result === 'created')).toBe(true)
   return canvasId
 }
+
+/* These cases follow the token block as it is written into the stored document, which
+   is what DOOP_LEAN_FRAME_STORAGE=false still does. With lean storage (the default) the
+   block is composed in on read and a value change writes no frame: leanFrameStorage.test.ts. */
+beforeEach(() => stubEnv('DOOP_LEAN_FRAME_STORAGE', 'false'))
+afterEach(() => unstubAllEnvs())
 
 describe('design tokens on frame writes', () => {
   it('writes the block on create and keeps it current on update', () => {

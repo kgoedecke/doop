@@ -23,6 +23,10 @@
             .getState()
             .setCanvas({ id: canvasId, name: 'Canvas', frames, role: 'edit', createdAt: 0, updatedAt: 0, ...canvas }),
         setPages: (pages) => useStore.getState().setPages(pages, canvasId),
+        /* the canvas's shared styles as the room would send them after a change */
+        setTokens: (tokens, themes) => useStore.getState().setTokensLocal(tokens, themes),
+        setComponent: (component) => useStore.getState().setComponentLocal(component.id, component),
+        frameHtml: (id) => useStore.getState().canvas.frames.find((frame) => frame.id === id).html,
       }
       createRoot(document.getElementById('root')).render(
         React.createElement(TooltipProvider, null, React.createElement(CanvasPage, { canvasId })),

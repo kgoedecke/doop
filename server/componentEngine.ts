@@ -8,6 +8,7 @@ import {
   type DefaultTreeAdapterTypes as Tree,
 } from 'parse5'
 import { parse, parseFragment } from './workBudget.ts'
+import { insertIntoHead, stripComponentHead, syncComponentHead, usedComponentIds } from '../shared/frameCompose.ts'
 import {
   BIND_ATTR,
   COMPONENT_ATTR,
@@ -15,7 +16,6 @@ import {
   DETACHED_ATTR,
   DETACHED_CSS_ATTR,
   IF_ATTR,
-  HEAD_ATTR,
   INSTANCE_ATTR,
   MAX_INSTANCE_DEPTH,
   MAX_NESTING_DEPTH,
@@ -30,6 +30,7 @@ import {
   isDeleted,
   isHollow,
   isPropName,
+  renderRevOf,
   parseBindings,
   parseCondition,
   parseStyle,
@@ -60,7 +61,8 @@ type Element = Tree.Element
 type ChildNode = Tree.ChildNode
 type ParentNode = Tree.ParentNode
 
-export type Revision = Pick<ComponentDef, 'id' | 'name' | 'template' | 'props' | 'rev'>
+/** `rev` with `renderRev`: the revision its instances are marked with (`renderRevOf`). */
+export type Revision = Pick<ComponentDef, 'id' | 'name' | 'template' | 'props' | 'rev' | 'renderRev'>
 
 export interface EngineContext {
   /** a component by id or name */
@@ -382,7 +384,8 @@ function renderUseElement(
 
 function markRoot(root: Element, def: Revision, instanceId: string, overrides: InstanceOverrides) {
   setAttr(root, INSTANCE_ATTR, def.id)
-  setAttr(root, REV_ATTR, String(def.rev))
+  /* where its markup last changed: a revision of the component's rules alone leaves it */
+  setAttr(root, REV_ATTR, String(renderRevOf(def)))
   setAttr(root, ELEMENT_ID_ATTR, instanceId)
   for (const prop of def.props) {
     if (prop.type !== 'enum') continue
@@ -1003,7 +1006,7 @@ export function stateFromUseAttrs(use: Element, def: Revision, ctx: EngineContex
   return {
     instanceId: isElementId(rawId) ? rawId : newElementId(),
     componentId: def.id,
-    rev: def.rev,
+    rev: renderRevOf(def),
     overrides: clean({ props, parts }),
   }
 }
@@ -1375,61 +1378,7 @@ function hollowIds(html: string, ctx: EngineContext): Set<string> {
   return new Set([...usedComponentIds(html)].filter((id) => isHollow(ctx.find(id))))
 }
 
-/** Everything a component put in the head: its stylesheet, and the links and scripts it brought.
- *  The stylesheets of the components in `keep` stay. */
-export function stripComponentHead(html: string, keep: ReadonlySet<string> = new Set()): string {
-  return html
-    .replace(
-      new RegExp(`<style[^>]*\\b${CSS_ATTR}="([^"]*)"[^>]*>[\\s\\S]*?</style>\\n?`, 'gi'),
-      (block, id: string) => (keep.has(id) ? block : ''),
-    )
-    .replace(new RegExp(`<script[^>]*\\s${HEAD_ATTR}(?:="[^"]*")?[\\s>][^>]*>[\\s\\S]*?</script>\\n?`, 'gi'), '')
-    .replace(new RegExp(`<link[^>]*\\s${HEAD_ATTR}(?:="[^"]*")?[\\s>/][^>]*>\\n?`, 'gi'), '')
-}
-
-/** A head tag with the mark that says a component brought it, so `frameHeadTags` and the next
- *  `syncComponentHead` can tell it from the frame's own. */
-function markedHeadTag(tag: string): string {
-  return tag.replace(/^<(link|script)\b/i, `<$1 ${HEAD_ATTR}`)
-}
-
-/** Every component an instance in this document uses, nested ones included. */
-export function usedComponentIds(html: string): Set<string> {
-  const ids = new Set<string>()
-  /* the leading space: an element's attribute, not a selector in a stylesheet */
-  for (const match of html.matchAll(new RegExp(`\\s${INSTANCE_ATTR}="([^"]+)"`, 'g'))) ids.add(match[1]!)
-  return ids
-}
-
-/** Put exactly the component stylesheets this document needs into its head. */
-export function syncComponentHead(html: string, defs: ComponentDef[]): string {
-  /* a hollow component has no stylesheet to put back: its instances keep the one they have */
-  const stripped = stripComponentHead(html, new Set(defs.filter(isHollow).map((def) => def.id)))
-  const blocks: string[] = []
-  for (const def of defs) {
-    /* a tag the frame has of its own, or one another component already brought, is not repeated */
-    for (const tag of def.head) {
-      const marked = markedHeadTag(tag)
-      if (!stripped.includes(tag) && !blocks.includes(marked)) blocks.push(marked)
-    }
-    if (def.css.trim()) blocks.push(`<style ${CSS_ATTR}="${def.id}">\n${def.css}\n</style>`)
-  }
-  if (!blocks.length) return stripped === html ? html : stripped
-  const next = insertIntoHead(stripped, blocks.join('\n'))
-  return next
-}
-
-function insertIntoHead(html: string, block: string): string {
-  const close = /<\/head\s*>/i.exec(html)
-  if (close) return `${html.slice(0, close.index)}${block}\n${html.slice(close.index)}`
-  const open = /<head\b[^>]*>/i.exec(html)
-  if (open) return `${html.slice(0, open.index + open[0].length)}\n${block}${html.slice(open.index + open[0].length)}`
-  const body = /<body\b[^>]*>/i.exec(html)
-  if (body) return `${html.slice(0, body.index)}<head>\n${block}\n</head>${html.slice(body.index)}`
-  const doctype = /^\s*<!doctype[^>]*>/i.exec(html)
-  const at = doctype ? doctype[0].length : 0
-  return `${html.slice(0, at)}${block}\n${html.slice(at)}`
-}
+export { stripComponentHead, syncComponentHead, usedComponentIds }
 
 /* ------------------------------------------------------------------ */
 /* Turning a main element into a template                              */

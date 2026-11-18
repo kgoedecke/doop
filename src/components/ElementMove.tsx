@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
+import { composeFrame, showFrameHtml } from '../lib/frameCompose'
 import { frameDesignPoint, frameWorldPoint, rotateVector, turnedDropRect } from '../../shared/frameRotation'
 import { createPortal } from 'react-dom'
 import type { Frame } from '../../shared/types'
@@ -72,6 +73,9 @@ export interface ElementMoveHit {
 export function useElementMove(frame: Frame, layoutZoom: number) {
   const t = useT()
   const [preview, setPreview] = useState<Preview | null>(null)
+  /* a document of its own: the canvas's token values and component styles go in */
+  const previewHtml = preview?.html
+  const previewDocument = useMemo(() => (previewHtml ? composeFrame(previewHtml) : ''), [previewHtml])
   /* the gesture under way: its element's outline, grips and size badge stay
      hidden until it lands, so only the element itself shows */
   const [movingOwner, setMovingOwner] = useState<object | null>(null)
@@ -266,7 +270,7 @@ export function useElementMove(frame: Frame, layoutZoom: number) {
       const planned = planCopy()
       if (!planned) return null
       noteFrameDocument(frame.id, null)
-      if (!(await requestFrame(frame.id, 'doop:html', { html: planned.html }))) return null
+      if (!(await showFrameHtml(frame.id, planned.html))) return null
       noteFrameDocument(frame.id, planned.html)
       return planned.selector
     }
@@ -283,7 +287,7 @@ export function useElementMove(frame: Frame, layoutZoom: number) {
       const html = useStore.getState().canvas?.frames.find((f) => f.id === frame.id)?.html
       if (html === undefined) return
       noteFrameDocument(frame.id, null)
-      if (await requestFrame(frame.id, 'doop:html', { html })) noteFrameDocument(frame.id, html)
+      if (await showFrameHtml(frame.id, html)) noteFrameDocument(frame.id, html)
     }
     /* where the pressed layer may go: a layout drop (a new place in the
        flow) is for one layer alone, so several picked layers always move
@@ -729,7 +733,7 @@ export function useElementMove(frame: Frame, layoutZoom: number) {
                 <iframe
                   title={t('stage.movingDrawing')}
                   sandbox=""
-                  srcDoc={preview.html}
+                  srcDoc={previewDocument}
                   onLoad={() => hideDrawing(preview.owner, preview.selector)}
                   className="block border-0 bg-transparent"
                   style={{

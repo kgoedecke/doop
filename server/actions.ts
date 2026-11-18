@@ -55,7 +55,9 @@ import { parseRunnerPick, runnerKey, type RunnerPick } from '../shared/agentRunn
 import { hasElementId, stampElementId } from './elementIds.ts'
 import { decodeEscapedHtml, looksEscapedHtml, repairEscapedHtml } from './escapedHtml.ts'
 import { forgetLibrary } from './componentLibrary.ts'
-import { withCanvasFaces, withCanvasFacesMidStream } from './canvasFaces.ts'
+import { withCanvasFaces, withCanvasFacesMidStream, withCanvasStyles } from './canvasFaces.ts'
+import { resourcesOf, sameStored, storedHtml } from './frameCompose.ts'
+import { componentsUsedBy, syncComponentHead } from '../shared/frameCompose.ts'
 import { withHostedIcons } from './iconProxy.ts'
 import { EMBEDDED_MIN_LENGTH } from './inlineData.ts'
 import { WriteRefusedError } from './writeRefusal.ts'
@@ -2001,9 +2003,9 @@ function finishStream(frameId: string, logDone: boolean) {
   let renamed = current.html
   for (const rename of pendingRenames.get(frameId) ?? []) renamed = applyRename(renamed, rename)
   dropKey(pendingRenames, frameId)
-  const html = withCanvasFaces(current.canvasId, renamed)
+  const html = storedHtml(current.canvasId, withCanvasStyles(current.canvasId, renamed))
   /* compare the HTML, not the objects: updateFrame edits the frame in place */
-  const htmlChanged = html !== current.html
+  const htmlChanged = !sameStored(current.canvasId, html, current.html)
   const frame = htmlChanged ? store.updateFrame(frameId, { html }, s.actor.name)! : current
   /* the store keeps what arrived; viewers get it healed, like every chunk,
      so a script cut off mid-way never runs in their frames */
@@ -2074,7 +2076,7 @@ export function expireIdleStreams(now = Date.now()) {
 function settleIdleStream(frameId: string, s: StreamState) {
   const before = store.getFrame(frameId)
   const prepared = before ? prepareWrite(before.canvasId, before.id, before.html, before.html, s.actor.name) : undefined
-  if (before && prepared && prepared.html !== before.html) {
+  if (before && prepared && !sameStored(before.canvasId, prepared.html, before.html)) {
     const prior = priorState(before)
     const frame = store.updateFrame(frameId, { html: prepared.html }, s.actor.name)!
     noteHtmlChange(prior, s.actor, true)
@@ -2146,8 +2148,10 @@ function prepareWrite(
   /* no new revision, so no propagation either: only "Go to main" needs to hear of it */
   for (const def of prepared.moved) broadcastComponent(canvasId, def, resolveActor({ name: by, kind: 'user' }))
   announceAdopted(canvasId, prepared.adopted, resolveActor({ name: by, kind: 'user' }), true)
-  /* faces after the components: an expanded <doop-use> may name a library family */
-  return { ...prepared, html: withCanvasFaces(canvasId, prepared.html) }
+  /* faces after the components: an expanded <doop-use> may name a library family. The
+     font scan reads the composed document (a component's rules, a font token's value);
+     what is stored is its source (server/frameCompose.ts) */
+  return { ...prepared, html: storedHtml(canvasId, withCanvasFaces(canvasId, prepared.html)) }
 }
 
 /** Components a canvas just took up from its workspace library: the room gets
@@ -2313,12 +2317,15 @@ function propagateIntoFrame(
   if (prepared.changed.length) queuePropagation(canvasId, prepared.changed, actor)
   /* the ordinary write's font pass too: a main that took up a library family
      brings its face along to every frame it reaches */
-  const html = withCanvasFaces(canvasId, prepared.html)
+  const html = storedHtml(canvasId, withCanvasFaces(canvasId, prepared.html))
   const latest = store.getFrame(frameId)
   if (!latest) return {}
   /* written underneath the preparation: what was prepared is of an older frame */
   if (latest.updatedAt !== stamp) return { requeue: true }
-  if (html === latest.html) return {}
+  /* a change to the component's rules alone leaves the frame's source as it is (instances
+     are marked with the revision their markup last changed at, `renderRev`): no row, no
+     version, no message. The room restyles from the `component` message */
+  if (sameStored(canvasId, html, latest.html)) return {}
   const prior = priorState(latest)
   /* a component it uses changed, not the frame: sign-off stands (decided 2026-11-12) */
   const updated = store.updateFrame(latest.id, { html }, actor.name, { annotation: true })
@@ -2504,7 +2511,9 @@ const appendChunk = atomic(function appendChunk(
         refuseUnclosed: actor.kind === 'agent',
       })
     : {
-        html: pendingRenames.has(frameId) ? joined : withCanvasFacesMidStream(before.canvasId, joined),
+        html: pendingRenames.has(frameId)
+          ? joined
+          : storedHtml(before.canvasId, withCanvasFacesMidStream(before.canvasId, joined)),
         changed: [] as ComponentDef[],
       }
   const html = prepared.html
@@ -3071,8 +3080,14 @@ export function tokenUsage(canvasId: string): Map<string, number> {
   const counts = new Map<string, number>()
   const canvas = store.getCanvas(canvasId)
   if (!canvas) return counts
-  for (const token of canvas.tokens ?? []) {
-    counts.set(token.name, canvas.frames.filter((f) => usesToken(f.html, token.name)).length)
+  const tokens = canvas.tokens ?? []
+  for (const token of tokens) counts.set(token.name, 0)
+  const { components } = resourcesOf(canvas)
+  for (const frame of canvas.frames) {
+    /* as the frame renders: what its components' rules name counts, and so does a token
+       another one it names is an alias of */
+    const rendered = syncComponentHead(frame.html, componentsUsedBy(frame.html, components))
+    for (const token of tokensUsedBy(rendered, tokens)) counts.set(token.name, (counts.get(token.name) ?? 0) + 1)
   }
   return counts
 }
@@ -3105,8 +3120,10 @@ function restyleTokenFrames(canvasId: string, actor: Actor, rename?: TokenRename
     }
     let html = frame.html
     if (rename) html = applyRename(html, rename)
-    html = withCanvasFaces(canvasId, html)
-    if (html === frame.html) continue
+    html = storedHtml(canvasId, withCanvasStyles(canvasId, html))
+    /* lean storage: a value is not in the frame, so only a rename, a theme attribute or
+       a font face that comes or goes with the change is a reason to write it */
+    if (sameStored(canvasId, html, frame.html)) continue
     const prevHtml = frame.html
     const updated = store.updateFrame(frame.id, { html }, actor.name, { annotation: true })
     if (!updated) continue

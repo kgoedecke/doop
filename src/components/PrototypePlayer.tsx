@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react'
+import { useComposedFrame } from '../lib/frameCompose'
 import type { Frame } from '../../shared/types'
 import type { Interaction, ProtoTransition } from '../../shared/prototype'
 import { useStore } from '../lib/store'
@@ -708,7 +709,8 @@ function ProtoScreen({
   const frameId = frame?.id
   const ready = useStore((s) => !frameId || frameHtmlReady(s, frameId))
   useEffect(() => (frameId ? showFrames([frameId]) : undefined), [frameId])
-  const html = frame?.html ?? ''
+  /* the store holds the frame's source: the canvas's styles are composed in here */
+  const { html } = useComposedFrame(frame?.html ?? '')
   useEffect(() => {
     if (booted && ready) iframeRef.current?.contentWindow?.postMessage({ type: 'doop:html', html, reqId: 'proto' }, '*')
   }, [booted, ready, html])

@@ -70,4 +70,33 @@ describe('components with instances behind', () => {
     ])
     expect(await persist.componentsBehind()).toEqual([{ canvasId: 'c1', componentId: 'behind' }])
   })
+
+  it('do not include instances behind only in revisions of the component’s rules', async () => {
+    /* 30 revisions, the markup last changed at the 4th: an instance marked 4 is current,
+       however many times the stylesheet was saved since and whatever history was kept */
+    persist.saveComponent('c3', { ...def('restyled', 30), renderRev: 4 })
+    persist.saveComponent('c4', { ...def('restyled', 30), renderRev: 4 })
+    await persist.pendingComponentWrites()
+    await db.insert(t.frames).values([
+      frame('f3', 'c3', use('restyled', 4) + use('restyled', 17)),
+      /* one from before the markup changed is behind */
+      frame('f4', 'c4', use('restyled', 4) + use('restyled', 3)),
+    ])
+    const behind = await persist.componentsBehind()
+    expect(behind).not.toContainEqual({ canvasId: 'c3', componentId: 'restyled' })
+    expect(behind).toContainEqual({ canvasId: 'c4', componentId: 'restyled' })
+  })
+
+  it('keep where a component last changed its markup, and each kept state’s span, across a load', async () => {
+    const history = [
+      { rev: 28, renderRev: 4, template: '<b></b>', rawCss: '', head: [], props: [], savedAt: 1, savedBy: 'Ada' },
+      { rev: 29, template: '<i></i>', rawCss: '', head: [], props: [], savedAt: 1, savedBy: 'Ada' },
+    ]
+    await db.insert(t.canvases).values({ id: 'c5', name: 'Loaded', createdAt: 1, updatedAt: 1 })
+    persist.saveComponent('c5', { ...def('spans', 31), renderRev: 30, history })
+    await persist.pendingComponentWrites()
+    const loaded = (await persist.hydrate()).canvases.find((canvas) => canvas.id === 'c5')!.components![0]!
+    expect(loaded.renderRev).toBe(30)
+    expect(loaded.history).toEqual(history)
+  })
 })

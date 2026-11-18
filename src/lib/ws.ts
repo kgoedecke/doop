@@ -65,7 +65,16 @@ function open() {
     requested.clear()
     /* join first: flipping `connected` makes the Stage announce its camera,
        and the server drops anything sent before the socket has a canvas */
-    sendWs({ type: 'join', canvasId, clientId, name, kind: 'user', pagesOnDemand: true, ...openingPage(canvasId) })
+    sendWs({
+      type: 'join',
+      canvasId,
+      clientId,
+      name,
+      kind: 'user',
+      pagesOnDemand: true,
+      composesFrames: true,
+      ...openingPage(canvasId),
+    })
     useStore.getState().setConnected(true)
   }
 

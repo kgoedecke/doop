@@ -23,18 +23,40 @@ through tools, and read them back in a short form.
 
 ## Model
 
-Instances are **materialized**: the frame's HTML holds the full markup. Everything that reads frame HTML
-(iframes, thumbnails, PDF and image export, comments, Layers) works unchanged, and a deleted
-component loses nothing visually: deleting writes no frame at all (see Deleting and restoring).
+Instances are **materialized**: the frame's HTML holds the full markup. Everything that reads frame markup
+(comments, Layers, the engine) works unchanged, and a deleted component loses nothing visually: deleting
+writes no frame at all (see Deleting and restoring).
+
+A component's **stylesheet and head tags are not stored in the frames using it** (lean frame storage,
+`shared/frameCompose.ts`). A frame's stored HTML is its source; `composeFrameHtml` puts each used
+component's `<style data-doop-component-css>` and marked head tags at the end of the head (and the token
+block first) wherever a document is rendered or handed on as self-contained: the browser before it posts a
+frame into its iframe, the server's renderer for every image and export, `get_frame` with
+`expand_components`, the version preview, a pinned reference, and everything sent to a client that does
+not compose (the native apps, older bundles). A frame stored before this still carries its blocks; they are
+replaced on compose and dropped on its next write. `DOOP_LEAN_FRAME_STORAGE=false` is the temporary switch
+back to storing them.
 
 - **Main**: an element with `data-doop-component="<id>"`. Editing it with any tool edits the component.
   A copy of a main elsewhere becomes an instance. If it disappears the component lives on with no main;
   a marker coming back (undo, restore) reclaims the role, and an update writes a new main.
 - **Definition** (`components` table, mirrored on `canvas.components`, keyed per canvas so a copied
   canvas's markers stay valid): `template`, scoped `css`, `rawCss`, `head`, `props`, `slots`, `rev`,
-  `mainFrameId`, `code`, `source`.
+  `renderRev`, `mainFrameId`, `code`, `source`.
+- **`renderRev`** (`components.render_rev`, null meaning `rev`): the newest revision at which what an
+  instance is rendered from (the template, the props) changed. A revision of the rules alone (CSS, head
+  tags) raises `rev` and leaves it, so every revision from `renderRev` to `rev` renders the same markup.
+  Instances are marked with `renderRev` (`data-doop-rev`), and an instance is behind only when its mark is
+  older. `store.saveComponent` sets it on every save, by comparing with the definition it replaces
+  (`rendersSame`): a revision is opened before its content is known, so no caller could. It rides wherever
+  a definition does (canvas copy, the wire type, soft delete and restore); a library pull, an adoption and
+  a restored version get theirs from the same rule. `rev` stays the version of everything else: history,
+  `expected_rev`, library publications, detached-CSS keys.
 - **Revisions** (`component_revisions`, key `canvas_id, component_id, rev`): what a definition was
-  before each change (`template`, `rawCss`, `head`, `props`, who and when). A row is inserted once
+  before each change (`template`, `rawCss`, `head`, `props`, its `renderRev`, who and when). The base for
+  merging a stale save is the kept state whose span `renderRev`..`rev` holds the instance's mark
+  (`stateAtRev`), the current definition when the mark is in its own span: twenty rules-only revisions
+  fill the kept history without putting an instance's base out of reach. A row is inserted once
   and never updated; the newest 20 per component are kept and older ones pruned in the same write.
   Memory keeps them as `ComponentDef.history`, loaded at boot, because the three-way merge of a
   stale save reads them synchronously. A save sends the small `components` row plus only the
@@ -78,7 +100,9 @@ component loses nothing visually: deleting writes no frame at all (see Deleting 
 3. Reconcile each outermost instance: render its own `rev` with its marker's state, diff against the
    incoming markup, record differences as overrides, render at the current revision. Unchanged input
    stays byte-identical. This three-way step is what stops a stale client's save being taken for edits.
-4. Put exactly the needed stylesheets in the head.
+4. Put exactly the needed stylesheets in the head (`syncComponentHead`), so the font and token passes
+   that follow read the composed document. What is stored is its source: `storedHtml` strips the
+   component blocks and the token block again (a hollow component's stylesheet stays).
 
 Edits map to the narrowest thing that holds them: a bound element to its prop; attributes and individual
 style properties to a part override; a deleted element to `hidden`; moved or added children to an `html`
@@ -92,7 +116,11 @@ take turns, so no request rewrites a canvas synchronously; a frame waits once ho
 for it, and a canvas with work pending stays loaded and held. Each visit is an ordinary write: history is
 filed, sign-off stands (the frame itself was not edited; decided 2026-11-12), the room sees `frame:updated` (the `component`
 message goes out when the change is queued), and one activity line names the frames when the canvas's queue
-drains. A frame written while it was being prepared is queued again rather than overwritten. A frame
+drains. A visit whose prepared source equals the stored one is nothing: no row, no version, no message.
+That is every frame after a change to the component's rules alone (CSS, head tags), which the room shows
+from the `component` message: instances are marked with `renderRev`, which such a revision does not move,
+so the visit renders them to the bytes they have, and `componentsBehind` (the boot catch-up) compares
+marks with `render_rev` and so never queues them. A frame written while it was being prepared is queued again rather than overwritten. A frame
 mid-stream catches up when its stream ends, including one whose agent went silent. `update_component`
 reports `propagation: { status: 'queued' | 'deferred' | 'none', frames }`; `update_library_everywhere` waits
 for each canvas's queue and reports what it changed. Queued work is in memory: after a restart, a frame not
@@ -107,7 +135,8 @@ detach every instance on every frame in one synchronous request.
 
 - **Instances** of a deleted component keep their stored markup byte for byte and are left out of
   everything that follows a main: `prepareInstances` skips them (no reconcile, no upgrade), the propagation
-  queue drops deleted ids, and their stylesheet stays in the head (`closureOf` still finds the definition).
+  queue drops deleted ids, and their stylesheet is still composed in (`componentClosure` finds the
+  definition, deleted or not).
   They read back in full, not as `<doop-use>` (`compactDocument`), and take no props or overrides
   (`changeInstances` refuses; detaching one still works).
 - **New uses** are refused: a `<doop-use>` naming a deleted component is left out with a
@@ -215,5 +244,8 @@ instance; description and make-a-prop / make-a-slot on a main. Right-click and â
 - A restored revision older than the 20 kept cannot be used for merging: its instance keeps its marker
   state and upgrades.
 - `@scope` is not used, so a host frame's own rules for the same class still apply to an instance.
+- A definition that goes hollow (its row lost its markup and rules) has no stylesheet to compose: a frame
+  stored lean shows its instances unstyled until the main is written again. A frame stored before lean
+  storage keeps the copy it holds.
 - Workspace libraries (publish once, use on every canvas of the workspace) are their own spec:
   [workspace-component-library.md](workspace-component-library.md).

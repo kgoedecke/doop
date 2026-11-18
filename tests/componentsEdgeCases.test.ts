@@ -33,6 +33,7 @@ import {
 } from '../server/componentActions.ts'
 import { COMPONENT_ATTR, HEAD_ATTR, INSTANCE_ATTR, MAX_COMPONENT_NAME, OVERRIDES_ATTR } from '../shared/components.ts'
 import type { CustomFont } from '../shared/fonts.ts'
+import { renderedHtml } from './rendered.ts'
 import type { Actor } from '../shared/types.ts'
 
 const actor = { name: 'Tester', kind: 'user', color: '#000', clientId: 'x' } as unknown as Actor
@@ -209,7 +210,7 @@ describe('components edge cases', () => {
   })
 
   const revOf = (id: string) => store.getComponents(canvasId).find((candidate) => candidate.id === id)!.rev
-  const html = (frameId: string) => store.getFrame(frameId)!.html
+  const html = renderedHtml
 
   it('a <style> inside the main does not turn an unchanged save into an override', async () => {
     const { def, frame } = makeComponent(

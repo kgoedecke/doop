@@ -75,7 +75,7 @@ import { framePageId } from '../../shared/pages'
 import { sizeLabel, type ResizeHandle } from '../lib/elementResize'
 import { withFontFaces } from '../../shared/fonts'
 import { withWebFontLinks } from '../../shared/webFonts'
-import { withTokenBlock } from '../../shared/designTokens'
+import { composeFrame, frameSource, useComposedFrame } from '@/lib/frameCompose'
 import { canvasFonts } from '../lib/customFonts'
 import { t as translate, useT } from '../lib/i18n'
 
@@ -913,12 +913,17 @@ export const FrameView = memo(function FrameView({
   }
 
   const html = useThrottledValue(frame.html, 150)
+  /* the store holds the frame's source: the canvas's component stylesheets and token
+     values are composed in here, so they follow the store with no frame update */
+  const { html: composed, shared } = useComposedFrame(html, { partial: !!stream })
   const remoteEditor = editors[0]
 
   /* The iframe loads a bootstrap once; HTML is posted in and DOM-morphed in
      place, so updates never white-flash the frame with a full reload. */
   const iframeRef = useRef<HTMLIFrameElement | null>(null)
   const localHtml = useRef<string | null>(null)
+  /* what the canvas supplied to the document the runtime shows (`shared` of its last post) */
+  const shownShared = useRef<string | null>(null)
   // A posted document is not ready for hit testing until the iframe has
   // acknowledged it. Inline edits already live there and set this on save.
   const htmlRequest = useRef(0)
@@ -1059,12 +1064,15 @@ export const FrameView = memo(function FrameView({
     return () => unregisterFrameWindow(frame.id, win)
   }, [runtimeReady, frame.id])
   useEffect(() => {
-    if (!runtimeReady || editing || suspendPost || html !== frame.html || html === localHtml.current) return
+    if (!runtimeReady || editing || suspendPost || html !== frame.html) return
+    /* the runtime made this document itself (an edit), and the canvas's styles in it are current */
+    if (html === localHtml.current && shared === shownShared.current) return
     localHtml.current = null
+    shownShared.current = shared
     const request = ++htmlRequest.current
     noteFrameDocument(frame.id, null)
     let cancelled = false
-    void requestFrame(frame.id, 'doop:html', { html }).then((reply) => {
+    void requestFrame(frame.id, 'doop:html', { html: composed }).then((reply) => {
       if (!reply || request !== htmlRequest.current) return
       /* the runtime shows it whether or not this effect is still current */
       noteFrameDocument(frame.id, html)
@@ -1073,7 +1081,7 @@ export const FrameView = memo(function FrameView({
     return () => {
       cancelled = true
     }
-  }, [runtimeReady, html, frame.html, frame.id, editing, suspendPost])
+  }, [runtimeReady, html, composed, shared, frame.html, frame.id, editing, suspendPost])
 
   /* ---- element comments ---- */
   const frameComments = useStore((s) => s.comments).filter((c) => c.frameId === frame.id)
@@ -1614,7 +1622,8 @@ export const FrameView = memo(function FrameView({
   }, [selected]) // eslint-disable-line react-hooks/exhaustive-deps
 
   /* ---- inline text editing ---- */
-  const canEdit = !!frame.html && !stream && !frame.locked && !readOnly && !/<script/i.test(frame.html)
+  /* a script in the document it shows, a component's framework script included */
+  const canEdit = !!frame.html && !stream && !frame.locked && !readOnly && !/<script/i.test(composed)
 
   async function enterGroup(at: { x: number; y: number }): Promise<boolean> {
     const selected = pickedHere()
@@ -1716,7 +1725,10 @@ export const FrameView = memo(function FrameView({
 
   /* serialized edits stream out of the iframe; save through the human path */
   useEffect(() => {
-    function saveEdited(edited: string, discrete: boolean) {
+    function saveEdited(serialized: string, discrete: boolean) {
+      /* the runtime's document carries what was composed into it (component stylesheets,
+         token values): the store, the undo history and the server get its source */
+      const edited = frameSource(serialized)
       // The runtime already has this document. Echoing it through the HTML
       // throttle can overwrite a newer style edit still waiting to save.
       localHtml.current = edited
@@ -1727,10 +1739,9 @@ export const FrameView = memo(function FrameView({
          document then differs from the runtime's, so the post effect sends
          it back in and the face loads at once */
       const library = canvasFonts()
-      const canvas = useStore.getState().canvas
-      /* tokens first, so a family named through a font token is seen by the font scan */
-      const withTokens = withTokenBlock(edited, canvas?.tokens ?? [], canvas?.tokenThemes ?? [])
-      const html = withWebFontLinks(withFontFaces(withTokens, library), library)
+      /* the font scan reads the composed document, so a family named through a font
+         token or a component's rules is seen; only the faces stay in the source */
+      const html = frameSource(withWebFontLinks(withFontFaces(composeFrame(edited), library), library))
       const before = useStore.getState().canvas?.frames.find((f) => f.id === frame.id)?.html
       useStore.getState().patchFrameLocal(frame.id, { html })
       trackSave(api.updateFrame(frame.id, { html }).catch(console.error))

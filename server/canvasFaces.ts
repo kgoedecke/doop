@@ -1,4 +1,5 @@
 import { withTokenBlock } from '../shared/designTokens.ts'
+import { componentsUsedBy, syncComponentHead, topSettled } from '../shared/frameCompose.ts'
 import { withFontFaces } from '../shared/fonts.ts'
 import { withWebFontLinks } from '../shared/webFonts.ts'
 import { fontsForCanvas } from './fonts.ts'
@@ -42,6 +43,15 @@ export function mayBeDocument(html: string): boolean {
  *  at its start from its first chunk; a document once its head or body tag is complete. */
 export function streamTopSettled(html: string): boolean {
   return SETTLED_TOP.test(html) || !mayBeDocument(html)
+}
+
+/** The same for a document that may be a frame's stored source: its components'
+ *  stylesheets go in first, so a token or a family only their rules name is found.
+ *  The result is the composed document with its faces; what is stored of it is
+ *  `storedHtml` (server/frameCompose.ts). */
+export function withCanvasStyles(canvasId: string, html: string): string {
+  const components = store.getCanvas(canvasId)?.components ?? []
+  return withCanvasFaces(canvasId, syncComponentHead(html, componentsUsedBy(html, components)))
 }
 
 /** The same for a document still streaming in, once its top is settled, so a

@@ -40,6 +40,7 @@ import {
 } from '../server/componentActions.ts'
 import { COMPONENT_ATTR, INSTANCE_ATTR } from '../shared/components.ts'
 import { DEFAULT_ROLE_ID, roleName } from '../shared/agents.ts'
+import { renderedHtml } from './rendered.ts'
 import type { Actor } from '../shared/types.ts'
 
 const OWNER = 'owner-soft-delete'
@@ -48,7 +49,7 @@ const actor = { name: 'Tester', kind: 'user', color: '#000', clientId: 'x' } as 
 const doc = (body: string, css = '') =>
   `<!doctype html><html><head><style>${css}</style></head><body>${body}</body></html>`
 
-const framed = (id: string) => store.getFrame(id)!.html
+const framed = renderedHtml
 const current = (canvasId: string, id: string) => store.getComponents(canvasId).find((d) => d.id === id)!
 
 /** A Button, a Card built from it, and pages using each. */
@@ -93,7 +94,7 @@ function setup(pages = 6) {
 }
 
 const allHtml = (canvasId: string) =>
-  Object.fromEntries(store.getCanvas(canvasId)!.frames.map((frame) => [frame.id, frame.html]))
+  Object.fromEntries(store.getCanvas(canvasId)!.frames.map((frame) => [frame.id, framed(frame.id)]))
 
 afterEach(async () => {
   vi.restoreAllMocks()

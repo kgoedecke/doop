@@ -390,16 +390,58 @@
   typed design values (Paper's eleven types: colour, opacity, radius, spacing, container,
   breakpoint, font family / weight / size, line height, letter spacing), each a CSS custom
   property frames use as `var(--name)`, with a value per theme (`canvas.tokenThemes`; a frame
-  switches with `data-doop-theme="dark"` on its `<html>`). `withTokenBlock` writes the values a
-  frame names into its own `<style data-doop-tokens>` block wherever `withFontFaces` runs (the
-  component preview sheet included), and a
-  token change rewrites that block in every frame naming it as an annotation (sign-off stands, no
-  version). Stored in `design_tokens` + `canvases.token_themes` (migration 0050); REST under
+  switches with `data-doop-theme="dark"` on its `<html>`). `withTokenBlock` makes the
+  `<style data-doop-tokens>` block of the values a document names; it is composed in where a frame
+  is rendered, not stored in it (Lean frame storage, below), so a value change writes no frame. A
+  rename (`var(--old)` in frames' source) or a theme rename still rewrites the frames naming it, as
+  an annotation (sign-off stands, no version). Stored in `design_tokens` + `canvases.token_themes` (migration 0050); REST under
   `/api/canvases/:id/tokens`, `/token-themes` and `/styleguide.md` (tokens + guidelines as one
   markdown); MCP `get_tokens` (json / css / tailwind / markdown), `create_tokens`, `set_tokens`,
   `set_token_themes`, mirrored on the resident agent; the Layers panel's Tokens tab
   (`TokensPanel.tsx`) and token menus on the Design panel's colour, radius and font-size fields.
   Tests: `designTokens.test.ts`, `designTokenWrites.test.ts`, `designTokensHttp.test.ts`.
+- Lean frame storage (`shared/frameCompose.ts`, `server/frameCompose.ts`, `src/lib/frameCompose.ts`): a
+  frame's stored HTML is its source. What the canvas supplies to every frame is not in it: the
+  stylesheet of each component it uses (`<style data-doop-component-css>`), the head tags those
+  brought (`data-doop-component-head`) and the token block. `composeFrameHtml(source, { tokens,
+themes, components })` puts them in (component blocks at the end of the head, token block first,
+  as writes always placed them) and `stripSharedBlocks` / `sourceOf` take them out, both string
+  level, idempotent, and the same for a frame stored before this with stale blocks in it, so
+  nothing is backfilled: such a frame goes lean on its own next write. Font faces, the hosted-font
+  link, `data-doop-detached-css` and a hollow component's stylesheet stay in the frame. Writes
+  prepare the composed document as before (the font scan reads it) and store `storedHtml` of it.
+  A token value change (`restyleTokenFrames`) and a revision of a component's rules alone
+  (`propagateIntoFrame`; an instance's `data-doop-rev` is its component's `renderRev`, which such
+  a revision leaves alone, see Components) write a frame only when its source changes. Composed on the way out: the renderer (`renderDocument` in
+  `server/screenshot.ts`, the one place every screenshot, `/i/` image, thumbnail, inspection and PDF
+  export passes; a print shell or preview sheet is marked
+  `wholeDocument`), MCP `get_frame` with `expand_components`, the version preview route (with the
+  canvas's styles as they are now) and a Memory reference at pin time. Agents' compact form is the
+  source, token block gone; `edit_frame_html` (`editFrameHtml` in `server/componentActions.ts`, MCP
+  and resident) matches its text in the compact form, the stored source or the composed document,
+  stores the result as source, and refuses an edit that only touched what the canvas supplies.
+  `asset_refs` are projected from the composed document (`persist.viewAssetsThrough`), so an asset
+  a component's stylesheet names counts, as of the frame's own last write. The browser composes too: its join says `composesFrames` and its REST
+  requests carry `x-doop-composes-frames`, so it is sent sources; the store keeps sources
+  (`asSource`), `FrameView`, the prototype player and the drag preview post
+  `useComposedFrame` / `composeFrame` output, re-posted when the tokens or a used component's
+  rules change (no `frame:updated` involved), and what the runtime serializes back is stripped
+  before the store, undo history or `api.updateFrame` see it. Every other client
+  (the native apps, a tab on an older bundle, a script) is sent composed frames in `init`,
+  `page:frames`, `frame:created` / `frame:updated` and REST answers (`withComposedFrames`), and a
+  `frame:updated` for each frame a `tokens` or `component` message restyled
+  (`server/legacyFrames.ts`: each connection keeps a key of `composeFrame(...).shared` per frame
+  it was sent; a change composes only the frames a string check says it can reach, the changed
+  component's instance marker or the changed token names with their dependents, once per frame
+  however many such connections there are). A render is stamped with what it was supplied
+  (`server/styleVersion.ts`, `stampRender`: the frame's `updatedAt`, plus the versions of the
+  tokens its document names and the components it uses, taken when the render reads its HTML),
+  so the `/i/` cache and thumbnails retire a render when one of those changes, not on any other
+  change to the canvas, and checking a stamp reads no frame HTML.
+  `DOOP_LEAN_FRAME_STORAGE=false` is the temporary switch back to storing composed documents and
+  rewriting frames on token changes; reads compose either way. Tests: `frameCompose.test.ts`,
+  `leanFrameStorage.test.ts`, `leanFramesHttp.test.ts` (both settings, legacy and composing
+  connections, renders), `legacyFrames.test.ts`, `sharedStylesBrowser.test.ts`.
 - Hosted fonts (`shared/webFonts.ts`): the Design panel's font menu offers the "Fonts" group, a
   curated roster of open families on Google Fonts (`WEB_FONTS`, each with its css2 axes), plus
   two "Device fonts" (system UI, system monospace) labelled as varying by viewer; the OS stacks
@@ -1146,7 +1188,15 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   becomes a revision, instances reconcile against the revision they were rendered from
   (`server/componentEngine.ts`) and upgrade. `actions.propagateComponents` carries a change across the
   canvas. The components pass runs first on every write, then `withLibraryFaces`, so an expanded
-  `<doop-use>` naming a library family gets its face. Agents read and write the short form
+  `<doop-use>` naming a library family gets its face. A component's stylesheet and head tags are
+  composed into a frame where it is rendered, not stored in it (Lean frame storage, under Design
+  tokens), so a change to its rules alone writes no frame using it. A definition's `renderRev`
+  (`components.render_rev`, migration `0063_component_render_rev`, null meaning `rev`; set by
+  `store.saveComponent`) is the revision its template or props last changed at: instances are
+  marked with it, a rules-only revision raises `rev` alone, "behind" everywhere (`componentsBehind`,
+  propagation) means a mark older than `renderRev`, and `stateAtRev` finds the base for a stale
+  save by the span of revisions (`renderRev`..`rev`) a kept state covers, so rules-only revisions
+  using up the 20 kept never strand an instance. Agents read and write the short form
   (`get_frame`, `edit_frame_html`); tools live once in `server/componentTools.ts` for MCP and the
   resident agent. `get_component_preview` and the resident's `screenshot_component` show the default
   instance, or compare selected prop values in one image (up to 12 combinations). Omitted props keep

@@ -32,6 +32,7 @@ import * as propagation from '../server/propagation.ts'
 import { blankComponent, prepareFrameHtml } from '../server/components.ts'
 import { updateComponent } from '../server/componentActions.ts'
 import { withCanvasFaces } from '../server/canvasFaces.ts'
+import { composedHtml } from '../server/frameCompose.ts'
 import { referencesComponent } from '../server/components.ts'
 import { COMPONENT_ATTR, type ComponentDef } from '../shared/components.ts'
 import type { Actor, Canvas } from '../shared/types.ts'
@@ -42,7 +43,8 @@ const actor = { name: 'Tester', kind: 'user', color: '#000', clientId: 'x' } as 
 const doc = (body: string, css = '') =>
   `<!doctype html><html><head><style>${css}</style></head><body>${body}</body></html>`
 
-const framed = (id: string) => store.getFrame(id)!.html
+/* as rendered: a frame stores its source, and these cases are about what it shows */
+const framed = (id: string) => composedHtml(store.getFrame(id)!.canvasId, store.getFrame(id)!.html)
 const current = (canvasId: string, id: string) => store.getComponents(canvasId).find((d) => d.id === id)!
 
 /** A Button main, a Card main built from it, and `pages` frames using one or both. */
@@ -119,7 +121,9 @@ function oldPropagateComponents(canvasId: string, changed: ComponentDef[], origi
   }
 }
 
-const htmlOf = (canvas: Canvas) => Object.fromEntries(canvas.frames.map((frame) => [frame.id, frame.html]))
+/* as rendered: the queue stores each frame's source, the old sweep the composed document */
+const htmlOf = (canvas: Canvas) =>
+  Object.fromEntries(canvas.frames.map((frame) => [frame.id, composedHtml(canvas.id, frame.html)]))
 const defsOf = (canvas: Canvas) =>
   (canvas.components ?? []).map(({ updatedAt: _at, history, ...def }) => ({
     ...def,

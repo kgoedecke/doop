@@ -5,6 +5,7 @@ import { and, desc, eq, inArray, sql } from 'drizzle-orm'
 import { db } from './db/index.ts'
 import { syncEdges, syncKeys, syncLinks } from './db/schema.ts'
 import { store } from './store.ts'
+import { sourceHtml } from './frameCompose.ts'
 import * as actions from './actions.ts'
 import type { Frame } from '../shared/types.ts'
 import { MAX_FRAME_HTML_BYTES } from './limits.ts'
@@ -348,7 +349,9 @@ export async function handleIngest(req: express.Request, res: express.Response) 
       res.set('X-Doop-Synced', '1')
       return res.json({ ok: true, frameId: existing.id, frozen: true })
     }
-    if (existing.html === wrapped) {
+    /* by source: what the canvas supplies to the frame (token values, under the older
+       storage form) is not the app's content */
+    if (sourceHtml(canvas.id, existing.html) === sourceHtml(canvas.id, wrapped)) {
       /* content matches, but this capture may still carry fresher hotspots —
          e.g. the first upload from a snippet version that reports links */
       await saveLinks(key.id, page, links)

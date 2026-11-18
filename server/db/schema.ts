@@ -608,6 +608,8 @@ export const components = pgTable(
     props: jsonb('props').$type<ComponentProp[]>().notNull(),
     slots: jsonb('slots').$type<ComponentSlot[]>().notNull(),
     rev: integer('rev').notNull(),
+    /** `ComponentDef.renderRev`: the revision instances are marked with. Null means `rev` */
+    renderRev: integer('render_rev'),
     mainFrameId: text('main_frame_id'),
     code: jsonb('code').$type<ComponentCode>(),
     source: jsonb('source').$type<NonNullable<ComponentDef['source']>>(),
@@ -635,6 +637,8 @@ export const componentRevisions = pgTable(
     canvasId: text('canvas_id').notNull(),
     componentId: text('component_id').notNull(),
     rev: integer('rev').notNull(),
+    /** `ComponentSnapshot.renderRev`; null means `rev` */
+    renderRev: integer('render_rev'),
     template: text('template').notNull(),
     rawCss: text('raw_css').notNull(),
     head: jsonb('head').$type<string[]>().notNull(),

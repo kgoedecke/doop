@@ -1,6 +1,8 @@
 import { PREVIEW_MAX_HEIGHT, type Frame } from '../shared/types.ts'
 import * as storage from './storage.ts'
 import { store } from './store.ts'
+import { stampRender } from './frameCompose.ts'
+import { renderStamp, stampCurrent, type RenderStamp } from './styleVersion.ts'
 
 /**
  * Persisted dashboard previews: `thumb/<frameId>.jpg` in byte storage,
@@ -10,14 +12,15 @@ import { store } from './store.ts'
  * cache — so a dashboard never shows blank tiles waiting on Chromium: a
  * possibly-stale thumbnail is served instantly and refreshed in the
  * background. The key is deliberately unversioned; freshness lives in the
- * in-memory `written` map (frameId → the frame.updatedAt the stored thumb
+ * in-memory `written` map (frameId → the render version the stored thumb
  * was rendered from). After a restart freshness is simply unknown, which
  * degrades to one background re-render per previewed frame — never to a
  * blank tile.
  */
 
-/** frame.updatedAt the stored thumb was rendered from; absent = unknown */
-const written = new Map<string, number>()
+/** what the stored thumb was rendered from: the frame's version and what its canvas
+ *  supplied to it (styleVersion.ts); absent = unknown */
+const written = new Map<string, RenderStamp>()
 /** in-flight render+persist per frame — concurrent callers share it */
 const pending = new Map<string, Promise<Buffer>>()
 /** background revalidation throttle: an agent saving every few seconds
@@ -44,13 +47,15 @@ const loadScreenshot = () => (screenshot ??= import('./screenshot.ts'))
 
 /** The preview render: card-sized, clipped, cheap — matches what /i/?preview
  *  serves, because this IS what /i/?preview serves. */
-async function render(frame: Frame): Promise<Buffer> {
+async function render(frame: Frame, stamp: RenderStamp): Promise<Buffer> {
   if (active >= MAX_CONCURRENT_RENDERS) await new Promise<void>((r) => waiting.push(r))
   active++
   try {
     const { renderFrame } = await loadScreenshot()
     /* the html is read when the render starts, not when it was queued */
-    return await renderFrame(await store.renderSource(frame), Math.min(1, 640 / frame.width), {
+    const source = await store.renderSource(frame)
+    stampRender(stamp, source)
+    return await renderFrame(source, Math.min(1, 640 / frame.width), {
       type: 'jpeg',
       quality: 70,
       maxHeight: PREVIEW_MAX_HEIGHT,
@@ -65,17 +70,19 @@ async function render(frame: Frame): Promise<Buffer> {
 
 /** Render now, persist, and return the bytes. Deduped per frame; rejects on
  *  render failure (the caller decides what a failed render means). */
-export function create(frame: Frame): Promise<Buffer> {
+export function create(frame: Frame, stamp = renderStamp(frame)): Promise<Buffer> {
   const inflight = pending.get(frame.id)
   if (inflight) return inflight
   lastAttempt.set(frame.id, Date.now())
-  const p = render(frame).then(async (buf) => {
+  /* the frame's version is read before the render, what it is supplied as the render reads
+     its HTML: a change landing while it runs leaves the thumb stale */
+  const p = render(frame, stamp).then(async (buf) => {
     /* persist is best-effort: a bucket hiccup must not fail the response
        that only needed the bytes */
     try {
       if (!dead.has(frame.id)) {
         await storage.putObject(keyFor(frame.id), buf, 'image/jpeg')
-        written.set(frame.id, frame.updatedAt)
+        written.set(frame.id, stamp)
         /* purge may have run during the put — its delete can land before
            our write finishes, so re-check and clean up our own orphan */
         if (dead.has(frame.id)) await storage.deleteObject(keyFor(frame.id))
@@ -109,11 +116,17 @@ export async function getStored(frame: Frame): Promise<Buffer | null> {
     written.delete(frame.id)
     return null
   }
-  const fresh = written.get(frame.id) === frame.updatedAt
+  const fresh = stampCurrent(frame, written.get(frame.id))
   const throttled = Date.now() - (lastAttempt.get(frame.id) ?? 0) < MIN_REVALIDATE_MS
   if (!fresh && !throttled && !pending.has(frame.id))
     create(frame).catch((e) => console.error(`thumb revalidate failed for ${frame.id}:`, e))
   return buf
+}
+
+/** What the stored thumb of this frame was rendered from, when that is known and still current. */
+export function stampOf(frame: Frame): RenderStamp | undefined {
+  const stamp = written.get(frame.id)
+  return stampCurrent(frame, stamp) ? stamp : undefined
 }
 
 /** Frame (or its whole canvas) is gone — drop the derived object too, so the

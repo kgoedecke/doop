@@ -12,6 +12,11 @@ const mocks = vi.hoisted(() => ({
 }))
 
 vi.mock('../server/screenshot.ts', () => ({ renderFrame: mocks.renderFrame }))
+/* what a render is supplied by its canvas is read off the store; here every frame names one token */
+vi.mock('../server/frameCompose.ts', () => ({
+  stampRender: (stamp: RenderStamp, source: Frame) =>
+    stampDependencies(source.canvasId, stamp, [tokenDependency('--ink')]),
+}))
 vi.mock('../server/storage.ts', () => ({
   putObject: mocks.putObject,
   getObject: mocks.getObject,
@@ -19,6 +24,7 @@ vi.mock('../server/storage.ts', () => ({
 }))
 
 import { getImage, primeImage } from '../server/previews.ts'
+import { bumpStyle, renderStamp, stampDependencies, tokenDependency, type RenderStamp } from '../server/styleVersion.ts'
 
 let seq = 0
 const frame = (over: Partial<Frame> = {}): Frame =>
@@ -87,6 +93,22 @@ describe('getImage', () => {
     expect(mocks.renderFrame).toHaveBeenCalledTimes(2)
   })
 
+  it('a change to what the canvas supplies the frame retires the image, though no frame was written', async () => {
+    const f = frame({ canvasId: 'restyled' })
+    const r = req()
+    await getImage(f, r)
+    /* the token it names changed value: the frame's updatedAt did not move */
+    bumpStyle('restyled', tokenDependency('--ink'))
+    await getImage(f, r)
+    expect(mocks.renderFrame).toHaveBeenCalledTimes(2)
+    await getImage(f, r)
+    /* a token it does not name, and another canvas's token of the same name, are not its */
+    bumpStyle('restyled', tokenDependency('--brand'))
+    bumpStyle('elsewhere', tokenDependency('--ink'))
+    await getImage(f, r)
+    expect(mocks.renderFrame).toHaveBeenCalledTimes(2)
+  })
+
   it('a failed render is not cached — the next request retries', async () => {
     mocks.renderFrame.mockRejectedValueOnce(new Error('chromium died'))
     const f = frame()
@@ -118,7 +140,7 @@ describe('getImage', () => {
     const ip = 'chatgpt-card-ip'
     for (let i = 0; i < 12; i++) await getImage(frame(), req({ ip }))
     const f = frame()
-    primeImage(f, 1, Buffer.from('from-the-tool'))
+    primeImage(f, 1, Buffer.from('from-the-tool'), renderStamp(f))
     const png = req({ ip, ext: 'png', scale: 1 })
     const r = await getImage(f, png)
     expect(r.status).toBe('ok')
