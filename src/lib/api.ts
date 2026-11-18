@@ -134,7 +134,7 @@ import type {
   CustomAgentInput,
   CustomAgentPatch,
 } from '../../shared/customAgents'
-import type { Skill, SkillInput, SkillPatch } from '../../shared/skills'
+import type { CanvasSkills, Skill, SkillInput, SkillPatch } from '../../shared/skills'
 import type { AgentRole } from '../../shared/agents'
 import type { DesignToken, DesignTokenInput, ThemeRename, TokenEdit, TokenResult } from '../../shared/designTokens'
 
@@ -476,6 +476,9 @@ export const api = {
     req<{ ok: true }>(`/api/agents/${encodeURIComponent(handle)}${agentScope(workspaceId)}`, { method: 'DELETE' }),
   /** skills: a workspace's, or without one the signed-in person's own */
   listSkills: (workspaceId?: string) => req<Skill[]>(`/api/skills${agentScope(workspaceId)}`),
+  /** The skills a request on this canvas can name (handle and description
+   *  only), and the scope this viewer may add one to. */
+  canvasSkills: (canvasId: string) => req<CanvasSkills>(`/api/canvases/${encodeURIComponent(canvasId)}/skills`),
   createSkill: (input: SkillInput, workspaceId?: string) =>
     req<Skill>(`/api/skills${agentScope(workspaceId)}`, { method: 'POST', body: JSON.stringify(input) }),
   updateSkill: (handle: string, patch: SkillPatch, workspaceId?: string) =>

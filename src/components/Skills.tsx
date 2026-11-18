@@ -22,14 +22,31 @@ export function Skills({ workspaceId }: { workspaceId?: string }) {
   const t = useT()
   const [skills, setSkills] = useState<Skill[] | null>(null)
   const [error, setError] = useState('')
-  /* null: closed; 'new': the create form; a skill: its edit form */
-  const [editing, setEditing] = useState<Skill | 'new' | null>(null)
+  /* null: closed; 'new': the create form; a skill: its edit form. The
+     composer's "New skill" arrives with ?skill=new, which opens the form once
+     the list shows there is room. */
+  const [editing, setEditing] = useState<Skill | 'new' | null>(() =>
+    new URLSearchParams(location.search).get('skill') === 'new' ? 'new' : null,
+  )
   const [removing, setRemoving] = useState<Skill | null>(null)
+
+  /* the form opened once; a reload or Back to this URL should not open it again */
+  useEffect(() => {
+    const url = new URL(location.href)
+    if (!url.searchParams.has('skill')) return
+    url.searchParams.delete('skill')
+    history.replaceState(history.state, '', url)
+  }, [])
 
   useEffect(() => {
     let live = true
     api.listSkills(workspaceId).then(
-      (list) => live && setSkills(list),
+      (list) => {
+        if (!live) return
+        setSkills(list)
+        /* a full scope keeps a ?skill=new form shut; the card says why */
+        if (list.length >= MAX_SKILLS) setEditing((open) => (open === 'new' ? null : open))
+      },
       (e: unknown) => {
         if (!live) return
         setSkills([])
@@ -122,7 +139,7 @@ export function Skills({ workspaceId }: { workspaceId?: string }) {
         </CardRow>
       ))}
 
-      {editing && (
+      {editing && skills !== null && (
         <SkillForm
           skill={editing === 'new' ? undefined : editing}
           workspaceId={workspaceId}

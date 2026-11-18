@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import { parseSkillInput, parseSkillPatch, skillHandlesIn, skillsBlock, type Skill } from '../shared/skills.ts'
+import {
+  parseSkillInput,
+  parseSkillPatch,
+  partialHandleAt,
+  skillHandlesIn,
+  skillsBlock,
+  type Skill,
+} from '../shared/skills.ts'
 
 const body = 'Check every heading against the brand voice guide.'
 
@@ -82,5 +89,28 @@ describe('skillsBlock', () => {
     const block = skillsBlock(many, many.map((s) => `/${s.handle}`).join(' '))
     expect(block!.match(/^## \//gm)).toHaveLength(5)
     expect(block).not.toContain('/s5:')
+  })
+})
+
+describe('partialHandleAt', () => {
+  const at = (text: string, caret = text.length) => partialHandleAt(text, caret)
+
+  it('finds the handle being typed where a request may name one', () => {
+    expect(at('/')).toEqual({ start: 0, query: '' })
+    expect(at('/br')).toEqual({ start: 0, query: 'br' })
+    expect(at('tighten it (/brand-c')).toEqual({ start: 12, query: 'brand-c' })
+    expect(at('first line\n/br')).toEqual({ start: 11, query: 'br' })
+  })
+
+  it('reads only up to the caret', () => {
+    expect(at('/br the hero', 3)).toEqual({ start: 0, query: 'br' })
+    expect(at('/br the hero', 8)).toBeUndefined()
+  })
+
+  it('stays quiet inside paths, URLs and words', () => {
+    expect(at('and/or')).toBeUndefined()
+    expect(at('see https://a.com/b')).toBeUndefined()
+    expect(at('open /c/abc')).toBeUndefined()
+    expect(at('/Brand')).toBeUndefined()
   })
 })

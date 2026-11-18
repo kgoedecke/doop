@@ -40,6 +40,7 @@ import {
   weekdayShort,
 } from '../components/AutomateShell'
 import { RoleMark } from '../components/RoleMark'
+import { useSkillMenu } from '../components/SkillMenu'
 import { Button } from '../components/ui/button'
 import { Input } from '../components/ui/input'
 import { Textarea } from '../components/ui/textarea'
@@ -1008,6 +1009,14 @@ function AgentNode({
      step's canvas decides which custom agents there are */
   const roles = step.roles
   const roster = useCanvasRoster(step.canvasId || undefined)
+  /* the step's request names skills like the composer's: the step's canvas has them */
+  const promptRef = useRef<HTMLTextAreaElement>(null)
+  const skillMenu = useSkillMenu({
+    from: step.canvasId ? { canvasId: step.canvasId } : undefined,
+    text: step.prompt,
+    setText: (prompt) => onChange({ prompt }),
+    inputRef: promptRef,
+  })
   return (
     <div data-pan-node className={nodeCls}>
       <Port side="in" />
@@ -1029,13 +1038,18 @@ function AgentNode({
         </div>
         <RemoveStep onRemove={onRemove} />
       </div>
-      <Textarea
-        className="mt-2.5 min-h-[74px] w-full rounded-lg px-[11px] py-2.5 text-copy leading-[1.5] md:text-copy"
-        value={step.prompt}
-        maxLength={MAX_PROMPT}
-        placeholder={t('automations.agentPromptPlaceholder')}
-        onChange={(e) => onChange({ prompt: e.target.value })}
-      />
+      <div className="relative mt-2.5">
+        {skillMenu.menu}
+        <Textarea
+          ref={promptRef}
+          className="min-h-[74px] w-full rounded-lg px-[11px] py-2.5 text-copy leading-[1.5] md:text-copy"
+          value={step.prompt}
+          maxLength={MAX_PROMPT}
+          placeholder={t('automations.agentPromptPlaceholder')}
+          {...skillMenu.inputProps}
+          onKeyDown={skillMenu.onKeyDown}
+        />
+      </div>
       <div className="mt-2.5 flex flex-wrap gap-1">
         {roster.map((role) => {
           const on = roles[0] === role.id

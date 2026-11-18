@@ -10,6 +10,7 @@ import { Button } from './ui/button'
 import { Textarea } from './ui/textarea'
 import { CheckIcon, CommentIcon, SparkIcon, SyncIcon } from './ui/icons'
 import { RoleMark } from './RoleMark'
+import { useSkillMenu } from './SkillMenu'
 import { useT, type Translate } from '../lib/i18n'
 
 /* The comment UI — pins, the composer, an open thread — is shared by the
@@ -167,20 +168,24 @@ export function CommentComposer({
   const taRef = useRef<HTMLTextAreaElement>(null)
   useEffect(() => taRef.current?.focus(), [])
   const send = () => text.trim() && onSubmit(text)
+  const canvasId = useStore((s) => s.canvas?.id)
+  const skillMenu = useSkillMenu({ from: canvasId ? { canvasId } : undefined, text, setText, inputRef: taRef })
   /* @mention a resident agent to route the comment to it; without one the
      comment is a note for the humans in the room */
   const roster = useRoster()
   const mentioned = mentionedRole(text, roster)
   return (
-    <div className="w-[240px] rounded-[10px] border border-line bg-surface p-2 shadow-pop animate-[chip-in_0.18s_ease]">
+    <div className="relative w-[240px] rounded-[10px] border border-line bg-surface p-2 shadow-pop animate-[chip-in_0.18s_ease]">
+      {skillMenu.menu}
       <Textarea
         ref={taRef}
         variant="bare"
         className="min-h-[58px] md:text-[13px]"
         value={text}
         placeholder={placeholder ?? t('stage.commentOnElement')}
-        onChange={(e) => setText(e.target.value)}
+        {...skillMenu.inputProps}
         onKeyDown={(e) => {
+          if (skillMenu.onKeyDown(e)) return
           if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) send()
           if (e.key === 'Escape') onCancel()
         }}
@@ -359,18 +364,31 @@ function ThreadReply({
   onResolve: () => void
 }) {
   const t = useT()
+  const replyRef = useRef<HTMLTextAreaElement>(null)
+  const canvasId = useStore((s) => s.canvas?.id)
+  const skillMenu = useSkillMenu({
+    from: canvasId ? { canvasId } : undefined,
+    text: reply,
+    setText: onChange,
+    inputRef: replyRef,
+  })
   return (
     <>
-      <Textarea
-        variant="bare"
-        className="mt-2 min-h-[38px] md:text-[13px]"
-        value={reply}
-        placeholder={placeholder}
-        onChange={(e) => onChange(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) onSend()
-        }}
-      />
+      <div className="relative">
+        {skillMenu.menu}
+        <Textarea
+          ref={replyRef}
+          variant="bare"
+          className="mt-2 min-h-[38px] md:text-[13px]"
+          value={reply}
+          placeholder={placeholder}
+          {...skillMenu.inputProps}
+          onKeyDown={(e) => {
+            if (skillMenu.onKeyDown(e)) return
+            if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) onSend()
+          }}
+        />
+      </div>
       {failed && <div className="mt-1 text-[11px] leading-[1.4] text-accent-ink">{t('stage.replyFailed')}</div>}
       <div className="mt-1.5 flex items-center gap-1.5">
         <Button

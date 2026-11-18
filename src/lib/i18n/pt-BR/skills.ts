@@ -33,4 +33,9 @@ export const skills: Catalog['skills'] = {
   loadFailed: 'Não foi possível carregar as skills.',
   saveFailed: 'Não foi possível salvar a skill.',
   removeFailed: 'Não foi possível remover a skill.',
+  menuLabel: 'Skills',
+  menuEmpty: 'Ainda não há skills aqui. Adicione em Configurações → Doop Agent, ou na página Agentes do workspace.',
+  menuEmptyShort: 'Nenhuma skill aqui ainda.',
+  menuNew: 'Nova skill',
+  menuButton: 'Skills (/)',
 }

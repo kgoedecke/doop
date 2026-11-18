@@ -90,3 +90,40 @@ describe('workspace skills', () => {
     expect(await handles(mate)).toEqual([])
   })
 })
+
+describe('the skills a canvas offers', () => {
+  it('lists handles and descriptions to whoever may ask an agent for work, never the instructions', async () => {
+    const q = `?workspace=${workspaceId}`
+    await mate.post(`/api/skills${q}`, { ...BRAND, handle: 'menu-check' })
+    const canvasId = (await (await owner.post('/api/canvases', { name: 'Menu', workspaceId })).json()).id
+    const list = async (client: Client) => client.get(`/api/canvases/${canvasId}/skills`)
+
+    const offered = (await (await list(mate)).json()) as { skills: Partial<Skill>[]; addIn: unknown }
+    expect(offered.skills.find((s) => s.handle === 'menu-check')).toEqual({
+      handle: 'menu-check',
+      description: BRAND.description,
+    })
+    /* a member may add to the workspace's skills */
+    expect(offered.addIn).toEqual({ workspaceId })
+
+    expect((await list(stranger)).status).toBe(403)
+    await owner.patch(`/api/canvases/${canvasId}`, { linkAccess: 'view' })
+    expect((await list(stranger)).status).toBe(403)
+    /* a commenter cannot @mention an agent (refuseAgentMention), so no skill would run */
+    await owner.patch(`/api/canvases/${canvasId}`, { linkAccess: 'comment' })
+    expect((await list(stranger)).status).toBe(403)
+    await owner.patch(`/api/canvases/${canvasId}`, { linkAccess: 'edit' })
+    const visitor = await list(stranger)
+    expect(visitor.status).toBe(200)
+    /* a link editor uses them, but adds nowhere */
+    expect((await visitor.json()).addIn).toBeNull()
+  })
+
+  it('offers a personal canvas’s owner their own skills to add to', async () => {
+    const canvasId = (await (await owner.post('/api/canvases', { name: 'Mine' })).json()).id
+    const own = await (await owner.get(`/api/canvases/${canvasId}/skills`)).json()
+    expect(own.addIn).toEqual({ personal: true })
+    await owner.patch(`/api/canvases/${canvasId}`, { linkAccess: 'edit' })
+    expect((await (await stranger.get(`/api/canvases/${canvasId}/skills`)).json()).addIn).toBeNull()
+  })
+})

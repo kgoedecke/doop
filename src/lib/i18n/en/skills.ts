@@ -32,4 +32,9 @@ export const skills = {
   loadFailed: 'Could not load the skills.',
   saveFailed: 'Could not save the skill.',
   removeFailed: 'Could not remove the skill.',
+  menuLabel: 'Skills',
+  menuEmpty: 'No skills here yet. Add them in Settings → Doop Agent, or in the workspace’s Agents page.',
+  menuEmptyShort: 'No skills here yet.',
+  menuNew: 'New skill',
+  menuButton: 'Skills (/)',
 } as const

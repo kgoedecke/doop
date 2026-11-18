@@ -35,7 +35,9 @@ afterEach(async () => {
 })
 
 async function render(busy = false) {
-  await act(async () => root.render(<HomeHero busy={busy} actions={actions} focusAt={0} />))
+  await act(async () =>
+    root.render(<HomeHero busy={busy} actions={actions} focusAt={0} skillScope={{ personal: true }} />),
+  )
 }
 
 async function click(selector: string, scope: ParentNode = document) {

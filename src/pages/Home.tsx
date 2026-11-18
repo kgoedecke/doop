@@ -352,6 +352,7 @@ export function Home() {
             firstName={first}
             busy={starting}
             focusAt={composerFocusAt}
+            skillScope={scopedWorkspace ? { workspaceId: scopedWorkspace } : { personal: true }}
             actions={{
               onPrompt: promptCanvas,
               onImport: () => setImporting(true),

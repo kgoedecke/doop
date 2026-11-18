@@ -6,7 +6,7 @@
  *
  * The handle is fixed once a skill exists: queued work may name it.
  */
-import type { Parsed } from './customAgents.ts'
+import type { AgentScope, Parsed } from './customAgents.ts'
 
 export const MAX_SKILLS = 50
 export const MAX_SKILLS_PER_RUN = 5
@@ -33,6 +33,16 @@ export type SkillInput = Pick<Skill, 'handle' | 'description' | 'body'>
 
 /** What it sends to change one; the handle stays. */
 export type SkillPatch = Partial<Pick<Skill, 'description' | 'body'>>
+
+/** A skill as a canvas's /handle menu lists it: never its body. */
+export type OfferedSkill = Pick<Skill, 'handle' | 'description'>
+
+/** `GET /api/canvases/:id/skills`: the skills a request there can name, and
+ *  the scope this viewer may add one to (null when they may not). */
+export interface CanvasSkills {
+  skills: OfferedSkill[]
+  addIn: AgentScope | null
+}
 
 function descriptionOf(raw: unknown): Parsed<string> {
   /* control characters are checked before whitespace is squashed, so a stray
@@ -91,6 +101,20 @@ const MENTION = new RegExp(`(?:^|[\\s(])/(${HANDLE})(?=$|[\\s.,;:!?)])`, 'g')
  *  candidates: the server keeps the ones the canvas's scope has. */
 export function skillHandlesIn(text: string): string[] {
   return [...new Set(Array.from(text.matchAll(MENTION), (match) => match[1] ?? ''))]
+}
+
+/* the same rule as MENTION, for a handle still being typed: the slash starts
+   the text or follows whitespace or "(", and only handle characters follow */
+const PARTIAL = /(?:^|[\s(])\/([a-z0-9-]*)$/
+
+/** The `/handle` being typed just before the caret, for the composer's skill
+ *  menu: where its slash is and what follows it. */
+export function partialHandleAt(text: string, caret: number): { start: number; query: string } | undefined {
+  const before = text.slice(0, caret)
+  const match = PARTIAL.exec(before)
+  if (!match) return undefined
+  const query = match[1] ?? ''
+  return { start: before.length - query.length - 1, query }
 }
 
 /** The system block for the skills a run's requests name with `/handle`, or
