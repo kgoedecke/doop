@@ -619,7 +619,18 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   (`planGroup`: direction from the wider run, gap the mean space, `align-items` the shared edge,
   children reordered to the flow and given `flex-shrink:0`) when they do not overlap along it, else
   pinned (an absolute box of their bounds, children re-based). Layers in flow keep the
-  flow-carrying group. ⇧⌘G on an absolute group puts its layers back absolute where they show. A
+  flow-carrying group. ⇧⌘G on an absolute group puts its layers back absolute where they show. Shapes on the canvas
+  (`src/lib/canvasGroups.ts`): ⌘G on two or more unlocked, unturned standalone shapes of one page keeps the
+  frontmost one's frame (its id, comments, versions and stack place) and moves the others' layers into it,
+  inside one `data-doop-drawing="group"` layer placed by percentages so the frame's grips scale them; the
+  others' frames go, all as one undo step (`recordShellRewrite`). A shape whose frame would go is refused
+  when it carries comments or a component main. ⇧⌘G on such a group gives each layer a frame of its own
+  just behind, the group's frame keeping the frontmost. Every write is conditional: a shape a teammate edited
+  meanwhile stays on the canvas and leaves the group (`keepShell`), and the step is `guarded`: undo or redo
+  refuses once someone else (as the room reports, `src/lib/theirSaves.ts`) has saved a frame it would overwrite or delete since its own save (`noteSaved`); this browser's later steps and their undo do not count. It checks again before each write, and each write is conditional on the newest version this browser knows, so a save landing meanwhile is a conflict, not overwritten. Refused
+  too: moving the frame's corner under comments pinned to the frame (they are frame-relative), splitting a
+  group turned or flipped as a whole, and splitting one whose wrapper has comments; a hidden group splits into hidden shapes. A split is tracked whole, so an undo pressed meanwhile waits for it, and
+  it selects the new shapes only if the selection and page are still the ones it started from. Tests: `canvasGroups.test.ts`. A
   click picks the outermost canvas group around the hit, a double-click on a picked group goes one
   level in, and with a layer inside picked clicks pick its siblings (`groupLevel`); comments still
   pin to the element under the pointer. Drops (`frameDropRuntime.ts`, canvas drags of layers and
