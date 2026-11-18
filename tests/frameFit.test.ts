@@ -117,6 +117,33 @@ describe('settleHeight', () => {
     expect(await settleHeight(900, shell)).toEqual({ kind: 'fits', height: 900 })
   })
 
+  it('settles vh inside clamp(), max() and min-height, whose growth stops partway', async () => {
+    const curve = (content: (viewport: number) => number) =>
+      vi.fn(async (viewport: number) => ({ painted: content(viewport), flow: content(viewport) }))
+    /* a clamp(480px, 60vh, 720px) hero over 1200px */
+    const hero = curve((h) => Math.min(Math.max(480, 0.6 * h), 720) + 1200)
+    expect(await settleHeight(800, hero)).toEqual({ kind: 'fits', height: 1920 })
+    /* a min-height:50vh main holding 300px */
+    expect(
+      await settleHeight(
+        800,
+        curve((h) => Math.max(300, 0.5 * h)),
+      ),
+    ).toEqual({ kind: 'fits', height: 300 })
+    /* a min-height:50vh section holding 600px, over a 200px footer, from a frame far too tall */
+    expect(
+      await settleHeight(
+        2000,
+        curve((h) => Math.max(600, 0.5 * h) + 200),
+      ),
+    ).toEqual({ kind: 'fits', height: 800 })
+  })
+
+  it('refuses a design that only holds where it grows steeply with its frame', async () => {
+    /* an 80vh hero over 1000px holds at 5000px, the hero 4000px tall */
+    expect(await settleHeight(800, design(1000, 0.8))).toEqual({ kind: 'outgrows' })
+  })
+
   it('refuses a design that outgrows any viewport', async () => {
     /* a 100vh hero over 300px: always 300px past the frame */
     expect(await settleHeight(800, design(300, 1))).toEqual({ kind: 'outgrows' })
@@ -237,11 +264,24 @@ describe.skipIf(!findBrowserPath())('fit_height in a browser', () => {
     await fit(scroller)
     expect(scroller.height).toBe(700)
 
+    const clamped = frameWith(doc(block(0, 'height:clamp(480px,60vh,720px)') + block(1200)), { height: 800 })
+    await fit(clamped)
+    expect(clamped.height).toBe(1920)
+
     const hero = frameWith(doc(block(0, 'height:100vh') + block(300)), { height: 800 })
     const result = await fit(hero)
     expect(result.isError).toBe(true)
     expect(texts(result)).toContain('grows with its frame')
     expect(hero.height).toBe(800)
+  }, 60_000)
+
+  it('reads a layout its own script builds from the viewport, after the script has run', async () => {
+    /* a screen sized from innerHeight on load and on resize, above 300px: it outgrows any frame */
+    const script = `<script>const size = () => { document.getElementById('h').style.height = innerHeight + 'px' }; size(); addEventListener('resize', size)</script>`
+    const frame = frameWith(doc(`<div id="h"></div>${block(300)}${script}`), { height: 800 })
+    const result = await fit(frame)
+    expect(result.isError).toBe(true)
+    expect(texts(result)).toContain('grows with its frame')
   }, 60_000)
 
   it('measures at the new width when the same call changes it', async () => {
@@ -301,6 +341,11 @@ describe.skipIf(!findBrowserPath())('fit_height in a browser', () => {
     /* the playback is still running: the resize carries what viewers have been shown, not the whole design */
     const stored = store.getFrame(sent[resized]!.frame!.id)!.html
     expect(sent[resized]!.frame!.html.length).toBeLessThan(stored.length)
+    /* a sign-off mid-playback does not jump it ahead either */
+    const before = sent.length
+    actions.setFrameApproval(sent[resized]!.frame!.id, true, { id: OWNER, name: 'Fit Owner' })
+    const approved = sent.slice(before).find((message) => message.type === 'frame:updated')
+    expect(approved?.frame?.html.length).toBeLessThan(stored.length)
   }, 60_000)
 })
 
@@ -308,6 +353,7 @@ describe.skipIf(!findBrowserPath())('server renders', () => {
   it('lay every design out in standards mode with the asset base inside the document', async () => {
     const shapes = {
       head: '<!doctype html><html><head><title>t</title></head><body>x</body></html>',
+      header: '<!doctype html><html><body><header>x</header></body></html>',
       html: '<!doctype html><html><body>x</body></html>',
       fragment: '<p>x</p>',
     }
@@ -316,7 +362,7 @@ describe.skipIf(!findBrowserPath())('server renders', () => {
       try {
         const seen = await loaded.page.evaluate(() => ({
           mode: document.compatMode,
-          base: document.head.querySelector('base') !== null,
+          base: document.head.querySelector('base') !== null && !document.querySelector('header base'),
         }))
         expect(seen, shape).toEqual({ mode: 'CSS1Compat', base: true })
       } finally {

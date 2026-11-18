@@ -167,7 +167,7 @@ export async function loadFramePage(frame: Frame, options?: PageOptions): Promis
 }
 
 /** A viewport of the frame's design px, whole and at least 1 each way. */
-function frameViewport(width: number, height: number, deviceScaleFactor = 1) {
+export function frameViewport(width: number, height: number, deviceScaleFactor = 1) {
   return { width: Math.max(1, Math.round(width)), height: Math.max(1, Math.round(height)), deviceScaleFactor }
 }
 
@@ -195,8 +195,9 @@ async function loadFrameInto(page: Page, frame: Frame): Promise<void> {
   if (!/<base\s/i.test(html)) {
     const baseTag = `<base href="${assetOrigin.replace(/"/g, '&quot;')}/">`
     /* never ahead of the doctype, which would put the page in quirks mode */
-    html = /<head[^>]*>/i.test(html)
-      ? html.replace(/<head([^>]*)>/i, `<head$1>${baseTag}`)
+    /* <head>, never <header> */
+    html = /<head(?=[\s>])[^>]*>/i.test(html)
+      ? html.replace(/<head(?=[\s>])([^>]*)>/i, `<head$1>${baseTag}`)
       : /<html[^>]*>/i.test(html)
         ? html.replace(/<html([^>]*)>/i, `<html$1><head>${baseTag}</head>`)
         : html.replace(/^\s*<!doctype[^>]*>/i, (doctype) => doctype + baseTag)
@@ -468,6 +469,9 @@ export function measureContentHeight<T>(frame: Frame, settle: (measure: ContentM
  *  elements, which sit on the viewport rather than the content. */
 async function contentBottom(): Promise<ContentHeight> {
   const MAX_ELEMENTS = 20_000
+  /* the frame's own resize, ResizeObserver and matchMedia handlers run in the frames after a
+     viewport change: a layout built from innerHeight is read once they have */
+  await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
   await document.fonts.ready
   /* mid-animation boxes (an entrance sliding up) measure where they will not stay */
   for (const animation of document.getAnimations()) {

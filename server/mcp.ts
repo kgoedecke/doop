@@ -20,6 +20,7 @@ import {
   FIT_HEIGHT_DESCRIPTION,
   FIT_NEEDS_HTML,
   type FittedFrame,
+  fitNotes,
   fitWrittenFrame,
   updateFrameMetaWithFit,
 } from './frameFit.ts'
@@ -204,7 +205,7 @@ function withComponentNotes<T extends ToolContent>(result: T, frame: Frame, opti
 
 /** What fit_height did, right after the result's data: it says what the frame's height now is. */
 function withFitNote<T extends ToolContent>(result: T, fit: FittedFrame | undefined): T {
-  return fit?.note ? withNotesFirst(result, [fit.note]) : result
+  return withNotesFirst(result, fitNotes(fit))
 }
 
 /** Notes right after the result's data, ahead of the generic nudges: they name the call to make. */

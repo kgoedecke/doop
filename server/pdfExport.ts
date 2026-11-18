@@ -4,7 +4,7 @@ import type { Canvas, Frame } from '../shared/types.ts'
 import { readingOrder } from '../shared/frameOrder.ts'
 import { canvasPages, pageFrames } from '../shared/pages.ts'
 import { MAX_PDF_FRAMES, PDF_RENDER_CONCURRENCY } from '../shared/pdfLimits.ts'
-import { loadFramePage, rendererAvailable } from './screenshot.ts'
+import { frameViewport, loadFramePage, rendererAvailable } from './screenshot.ts'
 
 /**
  * Vector PDF export: each frame prints through headless Chrome onto one page
@@ -91,11 +91,7 @@ export async function renderFramePdfPage(frame: Frame): Promise<Uint8Array> {
   const { page } = loaded
   try {
     const size = pageSizeFor(frame)
-    await page.setViewport({
-      width: Math.max(1, Math.round(frame.width)),
-      height: Math.max(1, Math.round(frame.height)),
-      deviceScaleFactor: 1,
-    })
+    await page.setViewport(frameViewport(frame.width, frame.height))
     await page.emulateMediaType('screen')
     await waitForFonts(page.mainFrame().childFrames()[0] ?? page.mainFrame())
     return await page.pdf({

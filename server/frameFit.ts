@@ -33,33 +33,65 @@ export interface FittedFrame {
 /** A fit's outcome before anything is written. */
 type Settled = { kind: 'fits'; height: number } | { kind: 'outgrows' }
 
-/** The height a design settles at: content that does not depend on the
- *  viewport is measured once and confirmed. A design sized in vh grows or
- *  shrinks with the frame (content = a + b × height), so its fixed point is
- *  solved from two measures and confirmed with a third; with b ≥ 1 (a
- *  100vh hero above anything else) no height holds all of it. Content that
- *  fills the frame exactly is either a floor or sized by the viewport alone,
- *  told apart at a 1px viewport: a min-height:100vh wrapper around less still
- *  flows to its content there and shrinks to it, while an app shell at
- *  height:100vh collapses and only its overflow is left, so it keeps its height. */
+/** Measures a design may take to settle: a few per pass of the loop, well inside one render's deadline. */
+const MAX_MEASURES = 8
+
+/** The steepest a design may grow with its frame at its fitted height and still fit: a 50vh
+ *  hero over 300px fits at 600, while an 80vh one over 1000px would only hold at 5000px, the hero
+ *  4000px tall, which is a design to size in px rather than a fit. */
+const STEEPEST_FIT = 0.5
+
+interface Probe {
+  /** the viewport height measured at */
+  at: number
+  /** the painted height measured */
+  content: number
+}
+
+/** Where the line through two probes meets content = height, when it does (slope below 1). */
+function secantStep(a: Probe, b: Probe): number | undefined {
+  const slope = (b.content - a.content) / (b.at - a.at)
+  if (!Number.isFinite(slope) || slope >= 1) return undefined
+  return Math.ceil((b.content - slope * b.at) / (1 - slope))
+}
+
+/** The height a design settles at, the frame's height that its content fills.
+ *  Content that does not depend on the viewport is measured once and confirmed.
+ *  A design sized in vh, plain or inside clamp(), max() or min-height, changes
+ *  with the frame, so the height is iterated (each measure feeding the next,
+ *  sped up along the line through the last two) until a measure holds; one
+ *  that keeps outgrowing the frame (a 100vh hero with more below) or only
+ *  holds where it grows steeply with it is refused. Content that fills the
+ *  frame exactly is either a floor or sized by the viewport alone, told apart
+ *  at a 1px viewport: a min-height:100vh wrapper around less still flows to
+ *  its content there and shrinks to it, while an app shell at height:100vh
+ *  collapses and only its overflow is left, so it keeps its height. */
 export async function settleHeight(start: number, measure: ContentMeasure): Promise<Settled> {
   const clamp = (height: number) => Math.min(Math.max(1, Math.round(height)), FIT_HEIGHT_MAX)
-  const painted = async (viewport: number) => clamp((await measure(viewport)).painted)
+  const probe = async (at: number): Promise<Probe> => ({ at, content: clamp((await measure(at)).painted) })
   const from = clamp(start)
-  const first = await painted(from)
-  if (first === from) {
+  let point = await probe(from)
+  if (point.content === from) {
     const tiny = await measure(1)
     const floor = clamp(tiny.painted)
-    const shrinks = floor > 1 && floor < from && clamp(tiny.flow) >= floor && (await painted(floor)) === floor
+    const shrinks = floor > 1 && floor < from && clamp(tiny.flow) >= floor && (await probe(floor)).content === floor
     return { kind: 'fits', height: shrinks ? floor : from }
   }
-  const second = await painted(first)
-  if (second === first) return { kind: 'fits', height: first }
-  const slope = (second - first) / (first - from)
-  if (slope >= 1) return { kind: 'outgrows' }
-  const solved = clamp(Math.ceil((first - slope * from) / (1 - slope)))
-  const check = await painted(solved)
-  return Math.abs(check - solved) <= 1 ? { kind: 'fits', height: Math.max(check, solved) } : { kind: 'outgrows' }
+  let previous: Probe | undefined
+  for (let measures = 1; measures < MAX_MEASURES; measures++) {
+    const step = previous && secantStep(previous, point)
+    const next = step !== undefined && step !== point.at ? clamp(step) : point.content
+    const reached = await probe(next)
+    if (Math.abs(reached.content - next) <= 1) {
+      const slope = (reached.content - point.content) / (reached.at - point.at)
+      return Number.isFinite(slope) && slope > STEEPEST_FIT
+        ? { kind: 'outgrows' }
+        : { kind: 'fits', height: Math.max(reached.content, next) }
+    }
+    previous = point
+    point = reached
+  }
+  return { kind: 'outgrows' }
 }
 
 async function measuredHeight(frame: Frame, width: number): Promise<PageToolResult<number>> {
@@ -76,6 +108,11 @@ async function measuredHeight(frame: Frame, width: number): Promise<PageToolResu
   } catch (e) {
     return { ok: false, error: `could not measure the frame: ${e instanceof Error ? e.message : String(e)}` }
   }
+}
+
+/** What a create or set result says about its fit, if one was asked for. */
+export function fitNotes(fit: FittedFrame | undefined): string[] {
+  return fit?.note ? [fit.note] : []
 }
 
 function fitNote(height: number): string {
