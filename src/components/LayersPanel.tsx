@@ -603,7 +603,7 @@ export function LayersPanel({
         <>
           {/* Figma's order: the pages at the top, the frames of the active page
           under them, the search at the bottom within thumb's reach */}
-          <PagesPanel />
+          {pageCanvas && <PagesPanel key={pageCanvas.id} canvasId={pageCanvas.id} />}
           <div className={cn('mt-1.5 flex h-6 flex-none items-center justify-between pr-2.5 pl-3.5', sectionHeading)}>
             <span data-slot="frame-section-heading" className={sectionHeading}>
               {t('panels.layersTitle')}
