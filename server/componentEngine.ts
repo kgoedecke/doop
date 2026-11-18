@@ -1110,6 +1110,22 @@ function nextUse(html: string, from: number, opaque: [number, number][], lenient
   return undefined
 }
 
+/** The component an open tag names, as written. */
+function useRef(html: string, span: UseSpan): string {
+  return /\bcomponent\s*=\s*["']([^"']*)["']/i.exec(html.slice(span.start, span.openEnd))?.[1] ?? ''
+}
+
+/** The component of each `<doop-use>` the HTML opens and never closes, in document order:
+ *  what a whole write would place with no slot content (`unclosed_use`). */
+export function unclosedUses(html: string): string[] {
+  if (indexOfAscii(html, `<${USE_TAG}`) === -1) return []
+  const opaque = opaqueRanges(html)
+  const refs: string[] = []
+  for (let span = nextUse(html, 0, opaque, true); span; span = nextUse(html, span.end, opaque, true))
+    if (span.unclosed) refs.push(useRef(html, span))
+  return refs
+}
+
 /** Every complete `<doop-use>` in the HTML, written out in full. One still missing
  *  its end (mid-stream) stays as it is until a later pass; on a whole write (`final`)
  *  nothing more is coming, so it is taken as empty and reported. */
@@ -1127,7 +1143,7 @@ export function expandUses(
   for (let span = nextUse(html, 0, opaque, final); span; span = nextUse(html, cursor, opaque, final)) {
     out += html.slice(cursor, span.start)
     if (span.unclosed) {
-      const ref = /\bcomponent\s*=\s*["']([^"']*)["']/i.exec(html.slice(span.start, span.openEnd))?.[1] ?? ''
+      const ref = useRef(html, span)
       ctx.issues.push({
         code: 'unclosed_use',
         message: `<${USE_TAG} component="${ref}"> was never closed with </${USE_TAG}>, so it was placed with no slot content. Close every <${USE_TAG}>, or write it self-closing.`,

@@ -8,6 +8,7 @@ import { fontsForCanvas } from './fonts.ts'
 import { libraryBrief, MAX_FONT_BYTES } from '../shared/fonts.ts'
 import { addCanvasFont, uploadedFontResult } from './canvasFontUpload.ts'
 import { inlineDataRefusal } from './inlineData.ts'
+import { frameWriteRefusal } from './components.ts'
 import { webFontsBrief } from '../shared/webFonts.ts'
 import {
   TOKEN_TYPES,
@@ -1932,8 +1933,8 @@ async function runResidentTool(
         }
         const html = completeHtml(raw.html)
         if (!html) return fail('create_frame requires a complete non-empty HTML document ending in </html>')
-        const inline = inlineDataRefusal(html, '', 'resident')
-        if (inline) return fail(inline)
+        const refused = frameWriteRefusal(html, '', 'resident')
+        if (refused) return fail(refused)
         if (html.length > MAX_REWRITE_CHUNK_CHARS) {
           return fail(`create_frame HTML must be compact (at most ${MAX_REWRITE_CHUNK_CHARS} characters)`)
         }
@@ -2017,9 +2018,9 @@ async function runResidentTool(
           return fail(`"find" text occurs ${count} times — include more surrounding context to make it unique`)
         const replace = input.replace
         const edited = source.replace(input.find, () => replace)
-        /* the edited document, so a URI completed across the replacement's edges is caught too */
-        const inline = inlineDataRefusal(edited, `${f.html}\n${compact}`, 'resident')
-        if (inline) return fail(inline)
+        /* the edited document, so a URI completed or a tag left open across the replacement's edges is caught too */
+        const refused = frameWriteRefusal(edited, `${f.html}\n${compact}`, 'resident')
+        if (refused) return fail(refused)
         actions.updateFrame(input.frame_id, { html: edited }, actor)
         runState.mutatedFrames.add(input.frame_id)
         unverify(runState, input.frame_id)
@@ -2040,8 +2041,8 @@ async function runResidentTool(
             `set_frame_html is limited to ${MAX_REWRITE_CHUNK_CHARS} characters. Use begin_frame_rewrite, append_frame_rewrite chunks, and commit_frame_rewrite.`,
           )
         }
-        const inline = inlineDataRefusal(html, existingHtml(f), 'resident')
-        if (inline) return fail(inline)
+        const refused = frameWriteRefusal(html, existingHtml(f), 'resident')
+        if (refused) return fail(refused)
         actions.updateFrame(input.frame_id, { html }, actor)
         runState.mutatedFrames.add(input.frame_id)
         unverify(runState, input.frame_id)
@@ -2088,9 +2089,10 @@ async function runResidentTool(
         const html = completeHtml(draft)
         if (!html)
           return fail('rewrite draft is not a complete HTML document ending in </html>; append the missing content')
-        /* again at the commit: the frame may have changed since the chunks were checked */
-        const inline = inlineDataRefusal(html, existingHtml(f), 'resident')
-        if (inline) return fail(inline)
+        /* again at the commit: the frame may have changed since the chunks were checked, and the
+           draft is whole only now, so a <doop-use> left open is caught here */
+        const refused = frameWriteRefusal(html, existingHtml(f), 'resident')
+        if (refused) return fail(refused)
         actions.updateFrame(input.frame_id, { html }, actor)
         runState.rewriteDrafts.delete(input.frame_id)
         runState.mutatedFrames.add(input.frame_id)

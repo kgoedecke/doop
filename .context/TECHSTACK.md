@@ -927,7 +927,12 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   takes the tag). A `<doop-use>` that renders nothing is reported, never dropped quietly: a main with
   no markup (`empty_template`), and on a whole write one never closed (`unclosed_use`), which is
   placed with no slot content so the ones after it still expand (mid-stream it waits for its
-  end). Tests: `componentDrops.test.ts`.
+  end). An agent's whole write that leaves one open is refused before anything is saved
+  (`frameWriteRefusal` in `server/components.ts`: MCP `create_frame`, `set_frame_html`,
+  `edit_frame_html` on the edited document, and the resident's create, set, edit and rewrite
+  commit), naming each tag left open; only what the write adds counts, and stream chunks and human
+  saves still place and report it (#528). Tests: `componentDrops.test.ts`, the `<doop-use>` cases
+  in `inlineData.test.ts`.
 - Component system first (`SYSTEM_FIRST`, `COMPOSE_CHECK` in `server/guide.ts`): the guide opens
   with a must-do list (tokens, then a component system set up the way a designer sets up a Figma
   file, then screens composed from it; themes are tokens, never a copied frame), the brief creates
