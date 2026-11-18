@@ -166,6 +166,11 @@ export async function loadFramePage(frame: Frame, options?: PageOptions): Promis
   }
 }
 
+/** A viewport of the frame's design px, whole and at least 1 each way. */
+function frameViewport(width: number, height: number, deviceScaleFactor = 1) {
+  return { width: Math.max(1, Math.round(width)), height: Math.max(1, Math.round(height)), deviceScaleFactor }
+}
+
 async function loadFrameInto(page: Page, frame: Frame): Promise<void> {
   const assetOrigin = new URL(env.BETTER_AUTH_URL).origin
   await guardPublicPageRequests(page, {
@@ -176,27 +181,25 @@ async function loadFrameInto(page: Page, frame: Frame): Promise<void> {
       url.origin === 'https://fonts.googleapis.com' ||
       url.origin === 'https://fonts.gstatic.com',
   })
-  await page.setViewport({
-    width: Math.max(1, Math.round(frame.width)),
-    /* A viewport does not need to span an entire imported landing page for
-       layout/computed-style inspection; full-page content remains in the DOM. */
-    height: Math.max(1, Math.min(Math.round(frame.height), 4000)),
-    deviceScaleFactor: 1,
-  })
+  /* A viewport does not need to span an entire imported landing page for
+     layout/computed-style inspection; full-page content remains in the DOM. */
+  await page.setViewport(frameViewport(frame.width, Math.min(frame.height, 4000)))
   /* setContent leaves the page on about:blank, where the relative /a/...
      asset URLs of imported frames resolve nowhere. In the app an iframe
      inherits the page origin; here a <base> stands in for it — unless the
      frame brought its own (website imports do). */
   let html = withHostedPhotos(withHostedIcons(frame.html || '<!doctype html><html><body></body></html>'))
+  /* the editor morphs every design into a standards-mode document (FRAME_BOOTSTRAP in
+     src/lib/frameRuntime.ts), so a design without a doctype renders the same way here */
+  if (!/^\s*<!doctype/i.test(html)) html = `<!doctype html>${html}`
   if (!/<base\s/i.test(html)) {
     const baseTag = `<base href="${assetOrigin.replace(/"/g, '&quot;')}/">`
-    /* never ahead of the doctype, which would put the page in quirks mode
-       (a body stretched to the viewport, among others) */
+    /* never ahead of the doctype, which would put the page in quirks mode */
     html = /<head[^>]*>/i.test(html)
       ? html.replace(/<head([^>]*)>/i, `<head$1>${baseTag}`)
       : /<html[^>]*>/i.test(html)
         ? html.replace(/<html([^>]*)>/i, `<html$1><head>${baseTag}</head>`)
-        : html.replace(/^\s*(<!doctype[^>]*>)?/i, (doctype) => doctype + baseTag)
+        : html.replace(/^\s*<!doctype[^>]*>/i, (doctype) => doctype + baseTag)
   }
   try {
     await page.setContent(html, {
@@ -431,11 +434,18 @@ async function inspectOn(page: Page, frame: Frame): Promise<FrameInspection> {
   }
 }
 
-/** Measures the frame's content height, in design px, at the frame's width
- *  with the viewport `viewportHeight` tall. A design sized in vh changes with
- *  the viewport, so `settle` may measure at several heights on one loaded page
- *  (server/frameFit.ts). */
-export type ContentMeasure = (viewportHeight: number) => Promise<number>
+/** A frame's content height in design px, at the frame's width: `painted`
+ *  is the lowest thing it paints, `flow` the bottom of the root's own box (what
+ *  flows, overflow left out). */
+export interface ContentHeight {
+  painted: number
+  flow: number
+}
+
+/** Measures the frame with the viewport `viewportHeight` tall. A design sized
+ *  in vh changes with the viewport, so `settle` may measure at several heights
+ *  on one loaded page (server/frameFit.ts). */
+export type ContentMeasure = (viewportHeight: number) => Promise<ContentHeight>
 
 /** Loads the frame once and hands `settle` a measure on it. */
 export function measureContentHeight<T>(frame: Frame, settle: (measure: ContentMeasure) => Promise<T>): Promise<T> {
@@ -443,11 +453,7 @@ export function measureContentHeight<T>(frame: Frame, settle: (measure: ContentM
     await loadFrameInto(page, frame)
     await installNameShim(page)
     return settle(async (viewportHeight) => {
-      await page.setViewport({
-        width: Math.max(1, Math.round(frame.width)),
-        height: Math.max(1, Math.round(viewportHeight)),
-        deviceScaleFactor: 1,
-      })
+      await page.setViewport(frameViewport(frame.width, viewportHeight))
       return page.evaluate(contentBottom)
     })
   })
@@ -460,7 +466,7 @@ export function measureContentHeight<T>(frame: Frame, settle: (measure: ContentM
  *  text running past its element included. Left out: what a scroller or clipper hides, what is
  *  invisible (a closed menu at visibility:hidden or opacity:0), and fixed
  *  elements, which sit on the viewport rather than the content. */
-async function contentBottom(): Promise<number> {
+async function contentBottom(): Promise<ContentHeight> {
   const MAX_ELEMENTS = 20_000
   await document.fonts.ready
   /* mid-animation boxes (an entrance sliding up) measure where they will not stay */
@@ -474,13 +480,11 @@ async function contentBottom(): Promise<number> {
   if (!document.querySelector('style[data-doop-fit]')) {
     const release = document.createElement('style')
     release.setAttribute('data-doop-fit', '')
-    /* fit-content rather than auto: a fragment with no doctype is laid out in quirks
-       mode, where an auto-height body still stretches to the viewport */
-    release.textContent = 'html,body{height:fit-content!important;min-height:0!important;max-height:none!important}'
+    release.textContent = 'html,body{height:auto!important;min-height:0!important;max-height:none!important}'
     document.head.append(release)
   }
-  const root = document.documentElement
-  let bottom = root.getBoundingClientRect().bottom
+  const flow = document.documentElement.getBoundingClientRect().bottom
+  let bottom = flow
   const text = document.createRange()
   let seen = 0
   const walk = (el: Element) => {
@@ -488,7 +492,8 @@ async function contentBottom(): Promise<number> {
       if (++seen > MAX_ELEMENTS) return
       const style = getComputedStyle(child)
       if (style.display === 'none' || style.position === 'fixed' || style.opacity === '0') continue
-      const clips = style.overflowY !== 'visible' || style.overflowX !== 'visible'
+      /* overflow-x hidden, auto or scroll compute overflow-y to auto; only clip leaves it visible */
+      const clips = style.overflowY !== 'visible'
       /* a hidden box takes no paint, though a child of it may opt back in with visibility:visible */
       if (style.visibility !== 'hidden') {
         const rect = child.getBoundingClientRect()
@@ -505,7 +510,7 @@ async function contentBottom(): Promise<number> {
     }
   }
   walk(document.body)
-  return Math.ceil(bottom + window.scrollY)
+  return { painted: Math.ceil(bottom + window.scrollY), flow: Math.ceil(flow + window.scrollY) }
 }
 
 export interface RenderOptions extends PageOptions {
@@ -585,7 +590,7 @@ async function screenshotOn(page: Page, frame: Frame, scale: number, opts: Rende
   /* the viewport always spans the whole frame, so 100vh, height media
      queries and bottom-fixed elements lay out as they do on the canvas; the
      pixel budget bounds only the captured image below */
-  await page.setViewport({ width, height: fullHeight, deviceScaleFactor: scale })
+  await page.setViewport(frameViewport(width, fullHeight, scale))
   const type = opts.type ?? 'png'
   const clip = opts.layer
     ? await layerClip(page, opts.layer, frame, scale)

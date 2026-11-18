@@ -22,7 +22,7 @@ vi.mock('../server/db/persist.ts', () => ({
 const actions = await import('../server/actions.ts')
 const { store } = await import('../server/store.ts')
 const { buildMcpServer } = await import('../server/mcp.ts')
-const { findBrowserPath } = await import('../server/screenshot.ts')
+const { findBrowserPath, loadFramePage } = await import('../server/screenshot.ts')
 const { FIT_HEIGHT_MAX, settleHeight } = await import('../server/frameFit.ts')
 
 const OWNER = 'fit-owner'
@@ -82,8 +82,12 @@ const fit = (frame: Frame, args: Record<string, unknown> = {}) =>
   callTool('update_frame', { frame_id: frame.id, fit_height: true, ...args })
 
 describe('settleHeight', () => {
-  /** content of `fixed` px plus `share` of the viewport, as a vh-sized part makes it */
-  const design = (fixed: number, share = 0) => vi.fn(async (viewport: number) => fixed + share * viewport)
+  /** content of `fixed` px plus `share` of the viewport, as a vh-sized part makes it, all of it in flow */
+  const design = (fixed: number, share = 0) =>
+    vi.fn(async (viewport: number) => {
+      const height = fixed + share * viewport
+      return { painted: height, flow: height }
+    })
 
   it('takes a measure that holds at the height it gives', async () => {
     const measure = design(640)
@@ -98,13 +102,19 @@ describe('settleHeight', () => {
   })
 
   it('shrinks a frame to a min-height:100vh wrapper’s content, from either side', async () => {
-    const floor = vi.fn(async (viewport: number) => Math.max(800, viewport))
+    const floor = vi.fn(async (viewport: number) => {
+      const height = Math.max(800, viewport)
+      return { painted: height, flow: height }
+    })
     expect(await settleHeight(2000, floor)).toEqual({ kind: 'fits', height: 800 })
     expect(await settleHeight(400, floor)).toEqual({ kind: 'fits', height: 800 })
   })
 
   it('keeps the height of a design sized by its viewport alone', async () => {
     expect(await settleHeight(900, design(0, 1))).toEqual({ kind: 'fits', height: 900 })
+    /* an app shell at 100vh: at a 1px viewport only its overflow is left, which is no floor */
+    const shell = vi.fn(async (viewport: number) => ({ painted: Math.max(122, viewport), flow: viewport }))
+    expect(await settleHeight(900, shell)).toEqual({ kind: 'fits', height: 900 })
   })
 
   it('refuses a design that outgrows any viewport', async () => {
@@ -159,10 +169,16 @@ describe.skipIf(!findBrowserPath())('fit_height in a browser', () => {
     const full = frameWith(doc(block(180), 'margin:0;height:100%'), { height: 900 })
     await fit(full)
     expect(full.height).toBe(180)
-    /* a bare fragment renders in quirks mode, where an auto-height body fills the viewport */
+    /* a bare fragment is laid out in standards mode, as the editor's frame document is */
     const fragment = frameWith(block(350), { height: 900 })
     await fit(fragment)
     expect(fragment.height).toBe(366)
+    const table = '<table style="font-size:40px"><tr><td>Row</td></tr><tr><td>Row</td></tr></table>'
+    const bare = frameWith(table)
+    const typed = frameWith(`<!doctype html>${table}`)
+    await fit(bare)
+    await fit(typed)
+    expect(bare.height).toBe(typed.height)
   }, 60_000)
 
   it('counts body margins, positioned layers and overflowing text, not fixed bars, hidden menus or clipped content', async () => {
@@ -182,6 +198,15 @@ describe.skipIf(!findBrowserPath())('fit_height in a browser', () => {
     /* the absolute layer ends at 400 + 50 from the root, past the 20+100+60+20 of flow */
     expect(frame.height).toBe(450)
 
+    const clipped = frameWith(
+      doc(
+        `<div style="height:100px;overflow-x:clip;position:relative">${block(700, 'position:absolute;width:10px')}</div>`,
+      ),
+    )
+    await fit(clipped)
+    /* overflow-x:clip leaves overflow-y visible */
+    expect(clipped.height).toBe(700)
+
     const words = 'Doop measures every line of text that spills past its box. '.repeat(40)
     const spill = frameWith(doc(`<p style="height:40px;margin:0;font:16px/20px sans-serif">${words}</p>`))
     await fit(spill)
@@ -198,6 +223,19 @@ describe.skipIf(!findBrowserPath())('fit_height in a browser', () => {
     const wrapped = frameWith(doc(`<main style="min-height:100vh">${block(500)}</main>`), { height: 2000 })
     await fit(wrapped)
     expect(wrapped.height).toBe(500)
+
+    const shell = frameWith(
+      doc(
+        `<div style="height:100vh;display:flex"><aside style="width:200px"></aside><main style="flex:1;padding:24px"><h1>Inbox</h1><p>Three new messages</p></main></div>`,
+      ),
+      { width: 1440, height: 900 },
+    )
+    await fit(shell)
+    expect(shell.height).toBe(900)
+
+    const scroller = frameWith(doc(`<div style="height:100vh;overflow:auto">${block(3000)}</div>`), { height: 700 })
+    await fit(scroller)
+    expect(scroller.height).toBe(700)
 
     const hero = frameWith(doc(block(0, 'height:100vh') + block(300)), { height: 800 })
     const result = await fit(hero)
@@ -263,5 +301,27 @@ describe.skipIf(!findBrowserPath())('fit_height in a browser', () => {
     /* the playback is still running: the resize carries what viewers have been shown, not the whole design */
     const stored = store.getFrame(sent[resized]!.frame!.id)!.html
     expect(sent[resized]!.frame!.html.length).toBeLessThan(stored.length)
+  }, 60_000)
+})
+
+describe.skipIf(!findBrowserPath())('server renders', () => {
+  it('lay every design out in standards mode with the asset base inside the document', async () => {
+    const shapes = {
+      head: '<!doctype html><html><head><title>t</title></head><body>x</body></html>',
+      html: '<!doctype html><html><body>x</body></html>',
+      fragment: '<p>x</p>',
+    }
+    for (const [shape, html] of Object.entries(shapes)) {
+      const loaded = await loadFramePage({ ...frameWith(html), html })
+      try {
+        const seen = await loaded.page.evaluate(() => ({
+          mode: document.compatMode,
+          base: document.head.querySelector('base') !== null,
+        }))
+        expect(seen, shape).toEqual({ mode: 'CSS1Compat', base: true })
+      } finally {
+        await loaded.close()
+      }
+    }
   }, 60_000)
 })
