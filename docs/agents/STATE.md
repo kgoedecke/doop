@@ -76,20 +76,20 @@ Initially picked for review (the outcome of each is in "Merged into our main" be
 
 Skipped:
 
-| PR                 | Reason                                                                                   |
-| ------------------ | ---------------------------------------------------------------------------------------- |
-| 505                | Security hardening: not taken; the fork-wide review is in `SECURITY.md`, not this PR     |
-| 439, 434           | Perf tweaks: out of scope for now (optimization dropped)                                 |
-| 515                | macOS WebKit launch panic: we are on Windows                                             |
-| 514                | Sends agent signals to a third-party service (Glassray): privacy, no value to us         |
-| 509, 437, 435      | Draft PRs                                                                                |
-| 500, 433           | 8-10k line canvas-actors rewrite for flagged hosted owners: huge, hosted-only, high risk |
-| 465, 447           | release-please version bump PRs: upstream release bookkeeping                            |
-| 450, 449           | Low value (Run shortcut hijacks reload; proxy IP header only matters when self-hosting)  |
-| 474, 457, 456, 433 | Conflict with upstream main (upstream author's own, will be rebased there)               |
-| 412, 339, 301, 299 | Conflict with upstream main                                                              |
-| 281, 277, 166, 141 | Conflict with upstream main, stale (older than a month or unmaintained)                  |
-| 436                | Conflicts with upstream main                                                             |
+| PR                 | Reason                                                                                                      |
+| ------------------ | ----------------------------------------------------------------------------------------------------------- |
+| 505                | Security hardening: not taken; the fork-wide review is in `SECURITY.md`, not this PR                        |
+| 434                | Perf tweak: out of scope for now (439 was taken later, see "Ported 2026-11-18")                             |
+| 515                | macOS WebKit launch panic: we are on Windows                                                                |
+| 514                | Sends agent signals to a third-party service (Glassray): privacy, no value to us                            |
+| 509, 437, 435      | Draft PRs                                                                                                   |
+| 500, 433           | 8-10k line canvas-actors rewrite for flagged hosted owners: huge, hosted-only, high risk                    |
+| 465, 447           | release-please version bump PRs: upstream release bookkeeping                                               |
+| 450, 449           | Low value (Run shortcut hijacks reload; proxy IP header only matters when self-hosting)                     |
+| 474, 457, 456, 433 | Conflict with upstream main (upstream author's own, will be rebased there)                                  |
+| 412, 339, 301, 299 | Conflict with upstream main                                                                                 |
+| 166, 141           | Conflict with upstream main, stale (older than a month or unmaintained); 281 and 277 were hand-ported later |
+| 436                | Conflicts with upstream main                                                                                |
 
 ## Merged into our main
 
@@ -101,6 +101,21 @@ Skipped:
 | 278         | #8     | approve                            | green             |
 | 280         | #6     | approve on 2nd review (after #279) | green             |
 | (fork)      | #1     | approve on 4th round               | green             |
+
+Ported 2026-11-18 (Arctic's batch of five; fresh-context review by a general subagent instead of Sol, Codex being out
+that week; merged as merge commits; PR titles are `type(scope): ... (upstream #N)` because CI lints titles with
+commitlint, which rejects a `port:` type):
+
+| Upstream PR | Our PR | Review  | Notes                                                                                                                        |
+| ----------- | ------ | ------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| 541         | #21    | approve | refuse an open `<doop-use>`; 6 commits, clean                                                                                |
+| 277         | #22    | approve | upstream main already had the fix; only the regression test ported                                                           |
+| 539         | #23    | approve | `fit_height`; 6 commits, clean, then main merged in (swapped to #541's `frameWriteRefusal`)                                  |
+| 439         | #24    | approve | no restyle per pan step; 2 commits, clean                                                                                    |
+| 281         | #25    | approve | hand-merged against `freeform`/`absoluteDrop`; tests moved to `drawingReorderBrowser.test.ts`, assert left/top not translate |
+
+Known gap found while porting: `server/componentActions.ts` still does `def.template.replace(input.find, ...)` without a
+replacer function (the `$`-pattern bug #277 fixed for frames). Not fixed here.
 
 Dropped after review (closed, branches deleted; leave to upstream):
 
@@ -177,7 +192,15 @@ where a sync conflicts when upstream refactors the same code (as it did on 2026-
 `server/contextDev.ts`, `server/github.ts`, `server/importer.ts`, `server/ingest.ts`, `server/index.ts`,
 `src/lib/drawing.ts`, `src/lib/drawingMove.ts` and their tests, plus `tests/canvasClipboardBrowser.test.ts` (one
 `it.skip`, see Flaky tests). When one of these PRs lands upstream, a sync
-replaces our copy and the entry can go. Also: `.github/workflows/` differs from upstream by design (`android.yml` is
+replaces our copy and the entry can go. The 2026-11-18 ports (#21 to #25) also edit: `server/actions.ts`,
+`server/componentActions.ts`, `server/componentEngine.ts`, `server/components.ts`, `server/componentTools.ts`,
+`server/cssPrune.ts`, `server/mcp.ts`, `server/resident.ts`, `server/screenshot.ts`, `server/pdfExport.ts`,
+`server/pageTools.ts`, `server/renderLimits.ts`, `.context/TECHSTACK.md` (fit_height, `<doop-use>` refusal);
+`src/components/Stage.tsx`, `src/components/ui/panel.tsx`, `src/styles.css` (pan restyle);
+`src/lib/frameDropRuntime.ts` (`freeSurface`); tests `frameHtml`, `inlineData`, `componentDrops`, `componentSoftDelete`,
+`residentApproval`, `residentPageTools`, `residentTokenWork`, `workBudgetCommit`, `drawingReorderBrowser`. New upstream
+files that came with them: `server/frameFit.ts`, `server/frameWriteRefusal.ts`, `server/pageShim.ts`,
+`tests/frameFit.test.ts`, `tests/measureGate.ts`, `tests/panelResizing.test.tsx`. Also: `.github/workflows/` differs from upstream by design (`android.yml` is
 upstream's and is not taken).
 
 ## Hygiene log
