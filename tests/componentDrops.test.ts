@@ -170,6 +170,28 @@ describe('a <doop-use> that would render nothing', () => {
     ).toEqual(['A'])
   })
 
+  it('reads the markup a use carries in its overrides attribute, nested instances’ parts included', async () => {
+    const { unclosedUses } = await import('../server/componentEngine.ts')
+    const open = '<doop-use component=\\"Badge\\"><p>x</p>'
+    /* single-quoted JSON, and the double-quoted form get_frame writes, its quotes as &quot; */
+    expect(unclosedUses(`<doop-use component="Card" overrides='{"k":{"slot":"${open}"}}'></doop-use>`)).toEqual([
+      'Badge',
+    ])
+    const encoded = JSON.stringify({ k: { html: '<doop-use component="Badge"><p>x</p>' } }).replaceAll('"', '&quot;')
+    expect(unclosedUses(`<p>a</p><doop-use component="Card" overrides="${encoded}" />`)).toEqual(['Badge'])
+    /* inside another use's slot, and in a nested instance's own parts */
+    const nested = JSON.stringify({ k: { use: { parts: { j: { slot: '<doop-use component="Nav">' } } } } })
+    expect(
+      unclosedUses(`<doop-use component="Card"><doop-use component="Row" overrides='${nested}'></doop-use></doop-use>`),
+    ).toEqual(['Nav'])
+    /* closed, or not markup at all, is fine */
+    const closed = JSON.stringify({
+      k: { html: '<doop-use component="Badge"></doop-use>', text: '<doop-use' },
+      n: null,
+    })
+    expect(unclosedUses(`<doop-use component="Card" overrides='${closed}'></doop-use>`)).toEqual([])
+  })
+
   it('expands a use whose slot holds a tag that only looks like one, its content inside it', async () => {
     const canvasId = await canvasWith({ Card: '<article class="card"><div data-doop-slot="body"></div></article>' })
     const { html, notes } = write(

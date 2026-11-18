@@ -52,6 +52,7 @@ import {
   isElement,
   kidsOf,
   measureTree,
+  overrideMarkup,
   parseTemplateRoot,
   fitsIn,
   isTableContext,
@@ -729,18 +730,6 @@ function alignedRoot(html: string, def: ComponentDef): Element {
 function refuseUnclosedUses(html: string, target: 'template' | 'frame' = 'template') {
   const unclosed = unclosedUseRefusal(html, target)
   if (unclosed) fail(unclosed)
-}
-
-/** The markup a change's part overrides carry (an element's children, a slot's content), nested
- *  instances' parts included. The overrides arrive as an agent's JSON, so anything else is skipped. */
-function overrideMarkup(parts: Record<string, PartOverride> | undefined): string[] {
-  return Object.values(parts ?? {}).flatMap((part) =>
-    part && typeof part === 'object'
-      ? [part.html, part.slot, ...overrideMarkup(part.use?.parts)].filter(
-          (markup): markup is string => typeof markup === 'string',
-        )
-      : [],
-  )
 }
 
 /** The template the update asks for, checked whole (a find + replace as it would stand). */
