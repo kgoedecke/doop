@@ -998,6 +998,12 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
     return el ? hitInfo(el) : null
   }
 
+  function linkHrefAt(x, y) {
+    var el = document.elementFromPoint(viewX(x), viewX(y))
+    var link = el && el.closest('a[href]')
+    return link && link.getAttribute('href')
+  }
+
   /* Right-click can reach a lock so the menu can unlock it. SVGs are one
      layer in the rail, and their paths share that same context menu. */
   function contextHit(x, y) {
@@ -1039,7 +1045,7 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
      whole, the way probe() picks it, so the hover and the pick agree */
   function hoverProbe(x, y, selected) {
     var el = probeTarget(x, y, true, selected, false)
-    return el ? { tag: el.tagName.toLowerCase(), selector: cssPath(el), rect: designRect(el) } : null
+    return el ? { tag: el.tagName.toLowerCase(), selector: cssPath(el), rect: designRect(el), href: linkHrefAt(x, y) } : null
   }
 
   /* ---- element properties (the Design panel) ----
@@ -1870,6 +1876,9 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
     }
     if (d.type === 'doop:probe') {
       parent.postMessage({ type: 'doop:probe-result', reqId: d.reqId, hit: probe(d.x, d.y, d.grouped === true, d.selected) }, '*')
+    }
+    if (d.type === 'doop:link-hit') {
+      parent.postMessage({ type: 'doop:link-hit-result', reqId: d.reqId, href: linkHrefAt(d.x, d.y) }, '*')
     }
     if (d.type === 'doop:enter-group') {
       /* a double-click: the layer one level into a picked group, or null

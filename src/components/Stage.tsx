@@ -12,7 +12,8 @@ import { CanvasComments, type CanvasComposeAt } from './CanvasComments'
 import { placeComposer } from '../lib/composerPlacement'
 import { isCanvasComment, type CanvasComment } from '../../shared/comments'
 import { elementIdSelector, isElementId } from '../../shared/elementId'
-import { canvasPages } from '../../shared/pages'
+import { resolveLocalFrameLink } from '../lib/elementLink'
+import { canvasPages, framePageId } from '../../shared/pages'
 import { FlowOverlay } from './FlowOverlay'
 import { PrototypeOverlay } from './PrototypeOverlay'
 import { GhostFrames } from './GhostFrames'
@@ -502,6 +503,17 @@ export function Stage({
       }
     },
     [setViewport, select, fitView],
+  )
+
+  const followFrameLink = useCallback(
+    (source: Frame, href: string) => {
+      const { canvas, activePageId } = useStore.getState()
+      if (!canvas || source.canvasId !== canvas.id || framePageId(canvas, source) !== activePageId) return
+      const target = resolveLocalFrameLink(canvas, href)
+      if (!target) return
+      focusFrame(target.frame, isElementId(target.element) ? elementIdSelector(target.element) : null)
+    },
+    [focusFrame],
   )
 
   /* centre a canvas comment's pin at 100% on its page and open its thread
@@ -1167,7 +1179,7 @@ export function Stage({
               ref={worldRef}
             >
               <FrameLabelLayer.Provider value={labelLayer}>
-                <FrameStack frames={canvas?.frames ?? []} layoutZoom={layoutZoom} />
+                <FrameStack frames={canvas?.frames ?? []} layoutZoom={layoutZoom} onFollowLink={followFrameLink} />
               </FrameLabelLayer.Provider>
               <GhostFrames />
               <FlowOverlay />
@@ -1371,7 +1383,15 @@ function byCreation(a: Frame, b: Frame) {
  *  an iframe in the DOM reloads it, so a restack must not move any. The
  *  layer isolates the stack, so the overlays after it (cursors, guides, the
  *  marquee) stay above every frame. */
-function FrameStack({ frames, layoutZoom }: { frames: Frame[]; layoutZoom: number }) {
+function FrameStack({
+  frames,
+  layoutZoom,
+  onFollowLink,
+}: {
+  frames: Frame[]
+  layoutZoom: number
+  onFollowLink: (source: Frame, href: string) => void
+}) {
   const mounted = useMemo(() => [...frames].sort(byCreation), [frames])
   const rank = useMemo(() => new Map(frames.map((f, i) => [f.id, i + 1])), [frames])
   return (
@@ -1380,7 +1400,7 @@ function FrameStack({ frames, layoutZoom }: { frames: Frame[]; layoutZoom: numbe
         f.hidden ? (
           <HiddenFrameView key={f.id} frame={f} stack={rank.get(f.id)} />
         ) : (
-          <FrameView key={f.id} frame={f} stack={rank.get(f.id)} layoutZoom={layoutZoom} />
+          <FrameView key={f.id} frame={f} stack={rank.get(f.id)} layoutZoom={layoutZoom} onFollowLink={onFollowLink} />
         ),
       )}
     </div>

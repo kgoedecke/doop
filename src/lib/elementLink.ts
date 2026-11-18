@@ -1,4 +1,4 @@
-import type { Frame } from '../../shared/types'
+import type { Canvas, Frame } from '../../shared/types'
 import { api } from './api'
 import { useStore } from './store'
 
@@ -10,6 +10,16 @@ export function elementLink(frame: Pick<Frame, 'id' | 'canvasId'>, elementId: st
   url.searchParams.set('frame', frame.id)
   url.searchParams.set('element', elementId)
   return url.href
+}
+
+/** An iframe can suggest a destination, but the editor never navigates to its
+ *  URL. Only frames in the open canvas are valid destinations. */
+export function resolveLocalFrameLink(canvas: Canvas, href: string): { frame: Frame; element: string | null } | null {
+  const url = URL.parse(href, location.origin)
+  if (!url || url.origin !== location.origin || url.pathname !== `/c/${encodeURIComponent(canvas.id)}`) return null
+  const id = url.searchParams.get('frame')
+  const frame = id && canvas.frames.find((candidate) => candidate.id === id && !candidate.hidden)
+  return frame ? { frame, element: url.searchParams.get('element') } : null
 }
 
 /** What the editor knows about the element to link: the positional selector

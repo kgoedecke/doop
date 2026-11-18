@@ -13,11 +13,12 @@ import { loadPathEdit, type PathEditSource } from '../lib/pathEditing'
 import { currentPageCanvas } from '../lib/pages'
 import { noteFrameDocument, registerFrameWindow, requestFrame, unregisterFrameWindow } from '../lib/frameBridge'
 import { api } from '../lib/api'
-import { copyElementLink } from '../lib/elementLink'
+import { copyElementLink, resolveLocalFrameLink } from '../lib/elementLink'
 import { sendWs } from '../lib/ws'
 import { throttle } from '../lib/throttle'
 import { getIdentity } from '../lib/identity'
 import { FRAME_BOOTSTRAP } from '../lib/frameRuntime'
+import { MOD_KEY } from '../lib/keys'
 import { FRAME_DOCUMENTS_TAKE_ZOOM_AS_DENSITY, counterZoom } from '../lib/layoutZoom'
 import { dropEntry, recordCreate, recordUpdate, recordUpdates, trackSave, type HistoryEntry } from '../lib/history'
 import { snapFrame } from '../lib/snap'
@@ -92,6 +93,10 @@ function designPoint(e: React.MouseEvent, el: Element, rotation = 0): { x: numbe
  *  itself counts zoomed px in Chromium under the world's CSS zoom. */
 function designOffset(e: React.PointerEvent<HTMLElement>, rotation = 0): { x: number; y: number } {
   return designPoint(e, e.target instanceof HTMLElement ? e.target : e.currentTarget, rotation)
+}
+
+function linkModifier(e: React.MouseEvent): boolean {
+  return (MOD_KEY === '⌘' ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey) && !e.altKey && !e.shiftKey
 }
 
 /* Counter-scale contract: chrome that keeps constant on-screen size divides
@@ -247,6 +252,7 @@ interface HoverHit {
   /** the runtime's positional path to the element, the same language the picked element's `probe` speaks */
   selector: string
   rect: { x: number; y: number; width: number; height: number }
+  href?: string | null
 }
 
 /* Counter-scaled overlays (labels, pins, popovers) get their scale from the
@@ -256,11 +262,13 @@ export const FrameView = memo(function FrameView({
   frame,
   stack,
   layoutZoom,
+  onFollowLink,
 }: {
   frame: Frame
   /** its place in the page's paint order (the Stage's z-index), front highest */
   stack?: number
   layoutZoom: number
+  onFollowLink?: (source: Frame, href: string) => void
 }) {
   const t = useT()
   const [menuTarget, setMenuTarget] = useState<
@@ -270,6 +278,7 @@ export const FrameView = memo(function FrameView({
   const menuKind = useRef<'frame' | 'element'>('frame')
   const menuRequest = useRef(0)
   const surfaceRef = useRef<HTMLDivElement>(null)
+  const linkPress = useRef<{ pointerId: number; x: number; y: number } | null>(null)
   const elementMove = useElementMove(frame, layoutZoom)
   const labelLayer = useContext(FrameLabelLayer)
   const [pathEdit, setPathEdit] = useState<PathEditSource | null>(null)
@@ -1353,7 +1362,7 @@ export const FrameView = memo(function FrameView({
       if (ev.data?.type === 'doop:hover-result' && ev.data.reqId === hoverReq.current) {
         const hit = (ev.data.hit ?? null) as HoverHit | null
         /* only re-render when the outlined element actually changes */
-        const key = hit ? hit.selector + JSON.stringify(hit.rect) : null
+        const key = hit ? JSON.stringify([hit.selector, hit.rect, hit.href]) : null
         if (key !== hoverKey.current) {
           hoverKey.current = key
           setHover(hit)
@@ -1618,6 +1627,19 @@ export const FrameView = memo(function FrameView({
     if ((frame.locked || readOnly) && editing) exitEdit()
   }, [frame.locked, readOnly]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  const linkCanvas = onFollowLink && hover?.href ? useStore.getState().canvas : null
+  const linkHovered =
+    linkCanvas &&
+    hover?.href &&
+    tool === 'select' &&
+    !editing &&
+    !panMode &&
+    !pathEdit &&
+    !dragging &&
+    !elementMove.moving &&
+    !resizing &&
+    resolveLocalFrameLink(linkCanvas, hover.href)
+
   return (
     <ContextMenu
       onOpenChange={(open) => {
@@ -1861,14 +1883,50 @@ export const FrameView = memo(function FrameView({
             style={{
               outlineWidth: 'calc(2px / var(--zoom, 1))',
               outlineOffset: 'calc(-1px / var(--zoom, 1))',
-              cursor: duping || (dupKeyHeld && !editing) ? DUP_CURSOR : undefined,
+              cursor: duping || (dupKeyHeld && !editing) ? DUP_CURSOR : linkHovered ? 'pointer' : undefined,
               /* only while selected, when the wrapper gives up its place: inside
                  an unselected frame's own stacking context a z-index here would
                  cover the frame's pins and hover outlines */
               zIndex: lifted ? stack : undefined,
             }}
-            onPointerDown={(e) => startDrag(e, 'move', true)}
+            onPointerDown={(e) => {
+              linkPress.current = null
+              if (
+                onFollowLink &&
+                !editing &&
+                !panMode &&
+                !pathEdit &&
+                tool === 'select' &&
+                e.button === 0 &&
+                e.isPrimary &&
+                linkModifier(e)
+              ) {
+                e.preventDefault()
+                e.stopPropagation()
+                linkPress.current = { pointerId: e.pointerId, x: e.clientX, y: e.clientY }
+                return
+              }
+              startDrag(e, 'move', true)
+            }}
+            onPointerCancel={() => {
+              linkPress.current = null
+            }}
+            onPointerUp={(e) => {
+              const press = linkPress.current
+              if (!press || e.pointerId !== press.pointerId) return
+              if (!linkModifier(e) || Math.abs(e.clientX - press.x) + Math.abs(e.clientY - press.y) > 4) {
+                linkPress.current = null
+                return
+              }
+              const at = designPoint(e, e.currentTarget, frame.rotation)
+              void requestFrame(frame.id, 'doop:link-hit', at).then((reply) => {
+                if (linkPress.current !== press) return
+                linkPress.current = null
+                if (typeof reply?.href === 'string') onFollowLink?.(frame, reply.href)
+              })
+            }}
             onDoubleClick={(e) => {
+              if (onFollowLink && linkModifier(e)) return
               void enterElementEdit(designPoint(e, e.currentTarget, frame.rotation))
             }}
             onPointerMove={(e) => {
@@ -1894,7 +1952,10 @@ export const FrameView = memo(function FrameView({
                 return
               sendHover(at.x, at.y)
             }}
-            onPointerLeave={leaveHover}
+            onPointerLeave={() => {
+              linkPress.current = null
+              leaveHover()
+            }}
           >
             {/* always there, so the iframe never moves in the DOM (that reloads
                 it): it carries the iframe out by the bleed margin */}
