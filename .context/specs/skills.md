@@ -26,7 +26,6 @@ any canvas, with any agent.
 
 - The agent choosing a skill by itself (a `use_skill` tool and a skills list in the system
   prompt). Next PR; this one's storage and settings are what it builds on.
-- Autocomplete or a picker for `/` in the composer. Follow-up; nothing here blocks it.
 - MCP access for external agents (`list_skills` / `get_skill`).
 - Files, scripts or assets inside a skill. A skill is markdown text only.
 - Sharing skills between workspaces, a public catalogue, versions.
@@ -37,10 +36,11 @@ any canvas, with any agent.
   and goes to the agent as it always has.
 - Paths and URLs in a request (`/c/abc`, `https://x.com/brand`) must not be read as skills.
 - A skill's text is never sent to a canvas's viewers (the canvas GET, the room), the same rule
-  `teamOfCanvas` keeps for agent briefs. Anyone who can queue work for an agent (share-link
-  commenters, Slack and Linear authors) can name a skill, exactly as they can already address a
-  custom agent whose brief shapes the reply; skills add no gate custom agents lack. (Builder's
-  call, matching the existing posture.)
+  `teamOfCanvas` keeps for agent briefs. Anyone who can queue work for an agent (editors, share-link
+  editors, Slack and Linear authors) can name a skill, exactly as they can already address a
+  custom agent whose brief shapes the reply; skills add no gate custom agents lack. A share-link
+  commenter cannot: `refuseAgentMention` turns their @mention away, so no run would read it.
+  (Builder's call, matching the existing posture.)
 
 ## Approaches considered
 
@@ -52,7 +52,7 @@ any canvas, with any agent.
   Explicit, but more layers to change, and comments and automations would not get it without the
   same work again.
 - C. A skill picker in the composer. Most discoverable, most UI, and still needs A or B under it.
-  Left as the follow-up to A.
+  Built on top of A as the `/` menu below.
 
 ## Model (`shared/skills.ts`)
 
@@ -87,7 +87,7 @@ any canvas, with any agent.
 `GET /`, `POST /`, `PATCH /:handle`, `DELETE /:handle`, `?workspace=<id>` for a workspace's
 skills (members only), without it the signed-in person's own. Same membership check, error
 shape and 400/403/500 messages as `customAgentRoutes.ts`. Any workspace member may change them,
-as with custom agents. No realtime broadcast: nothing on the canvas shows skills yet.
+as with custom agents. No realtime broadcast: the `/` menu reads the list again for each new `/`.
 
 ## The run (`server/resident.ts`)
 
@@ -127,6 +127,36 @@ as with custom agents. No realtime broadcast: nothing on the canvas shows skills
   against English, so a missing key fails typecheck).
 - `api.skills` / `createSkill` / `updateSkill` / `deleteSkill` in `src/lib/api.ts`.
 
+## The `/` menu (`src/components/SkillMenu.tsx`)
+
+- `useSkillMenu` is shared by every field whose text reaches a run: the composer (`PromptBar`),
+  a new comment and a reply (`CommentPopovers`), an automation's agent step
+  (`AutomationEditor`) and Home's prompt box (`HomeHero`). Typing `/` where a handle may start (`partialHandleAt` in
+  `shared/skills.ts`, the same rule as `skillHandlesIn`) lists the canvas's skills above the
+  field; letters narrow it, ↑↓ move, Enter or Tab writes `/handle `, Esc closes. With nothing
+  matching it closes, so Enter keeps doing what the field does. A canvas with no skills says
+  where they come from on a bare `/`; Enter still sends there, even when "New skill" shows.
+- Each field passes a `SkillSource`. `{ canvasId }` reads the canvas route below.
+  Home's box has no canvas yet, so it passes `{ scope }`, the scope Home will make the canvas in
+  (the picked workspace, else the person's own), and reads `/api/skills` for it. The prompt
+  becomes the new canvas's first card, so the run finds the same skills. Home offers no "New
+  skill", because the page holds its text and leaving the page loses it.
+- The composer has a Skills button (book icon, `title` "Skills (/)", like Attach) beside Attach. It writes
+  `/` at the caret (at the end when the field is not focused) and opens the menu, so people who
+  don't know the `/` key still find it. The composer's menu ends with "New skill" (`offerNew`),
+  which opens the skills card's create form (`?skill=new`) in the canvas's scope: the
+  workspace's Agents pane, or Settings → Doop Agent on a personal canvas. Only the composer
+  offers it, because the store keeps its draft per canvas. Leaving a comment loses its draft.
+  The card opens the form once its list has loaded and has room; a scope already at
+  `MAX_SKILLS` keeps it shut and shows the card's "full" note, so nobody writes a skill the
+  server would refuse. The card then drops `skill` from the URL, so a reload or Back does not
+  reopen it.
+- `GET /api/canvases/:id/skills` (edit role) answers `{ skills, addIn }`: skills as
+  `{ handle, description }` only, read again for each new `/`, and `addIn` the scope this viewer
+  may add to (a member's workspace, the owner's own on a personal canvas), else null, which hides
+  "New skill". The route never sends a skill's body. A view or comment link gets 403, and the
+  menu then stays closed, since nothing that viewer writes reaches a run.
+
 ## Tests
 
 - `tests/skills.test.ts`: `parseSkillInput` limits; `skillHandlesIn` finds `/brand-check` at the
@@ -135,6 +165,9 @@ as with custom agents. No realtime broadcast: nothing on the canvas shows skills
 - A follow-up whose `about` named `/brand-check` still gets the skill.
 - `tests/skillsHttp.test.ts`: CRUD per scope, a non-member gets 403, a duplicate handle 400,
   the 51st skill 400, deleting a workspace drops its skills.
+- `partialHandleAt` cases in `tests/skills.test.ts`; the canvas route's roles in
+  `tests/skillsHttp.test.ts`; the menu's keys in `tests/skillMenu.test.tsx`; `?skill=new` on the
+  card in `tests/skillsCard.test.tsx`.
 - A resident case: a run whose card says `/brand-check …` gets the skill's body in its system
   prompt, a run with an unknown `/nope` gets no skills block, and a skill from another workspace
   never reaches the run.
