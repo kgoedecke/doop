@@ -238,11 +238,12 @@
   height to the content's as the server's Chromium lays it out, so agents stop guessing heights
   between screenshots (#532). Each measure waits two animation frames (the frame's own resize,
   ResizeObserver and matchMedia handlers run first), awaits fonts and finishes animations, lets the
-  root and body go of any viewport height, then reports `flow` (the root's own box), `painted` (the
-  lowest thing painted: positioned descendants and text running past its element too, leaving out
-  fixed elements, invisible ones at `visibility:hidden` or `opacity:0`, and what a scroller or
-  clipper hides) and `shell` (judged as loaded: the page fits its viewport while a part at least
-  half its height scrolls inside, an app shell on a div, the body or `html,body{height:100%}`,
+  root and body go of their height (a `min-height` stays: one in px is the design's floor, one in vh
+  is found by the 1px probe), then reports `flow` (the root's own box), `painted` (the lowest thing
+  painted: positioned descendants, absolute `::before` / `::after` and text running past its
+  element too, leaving out fixed elements, invisible ones at `visibility:hidden` or `opacity:0`,
+  and what a scroller or clipper hides) and `shell` (judged as loaded: the page fills its viewport
+  and no more while a part at least half its height scrolls inside, an app shell on a div, the body or `html,body{height:100%}`,
   which keeps its height). `settleHeight` iterates a design sized in vh, plain or inside `clamp()`,
   `max()` or `min-height`, each measure feeding the next and sped up along the line through the
   last two, at most 9 measures on one page, uncapped so growth past the cap shows. A height holds

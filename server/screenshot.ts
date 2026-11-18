@@ -463,11 +463,13 @@ export function measureContentHeight<T>(frame: Frame, settle: (measure: ContentM
 }
 
 /** Runs in the frame's page. The document's height with the root and body
- *  let go of any viewport size (a body at 100vh or 100% would hold the frame
- *  at its current height), taken as the lowest thing it paints: the root's own
- *  box covers what flows, a walk adds what is positioned or overflows its box,
- *  text running past its element included. Left out: what a scroller or clipper hides, what is
- *  invisible (a closed menu at visibility:hidden or opacity:0), and fixed
+ *  let go of their height (a body at 100vh or 100% would hold the frame at its
+ *  current height; a min-height stays, since a px one is the design's own floor
+ *  and a vh one is found by settleHeight's 1px probe), taken as the lowest thing
+ *  it paints: the root's own box covers what flows, a walk adds what is
+ *  positioned or overflows its box, text running past its element and absolute
+ *  ::before / ::after included. Left out: what a scroller or clipper hides, what
+ *  is invisible (a closed menu at visibility:hidden or opacity:0), and fixed
  *  elements, which sit on the viewport rather than the content. */
 async function contentBottom(): Promise<ContentHeight> {
   const MAX_ELEMENTS = 20_000
@@ -495,17 +497,39 @@ async function contentBottom(): Promise<ContentHeight> {
         el.clientHeight >= innerHeight / 2
       )
     }
-    const fitsViewport = document.documentElement.scrollHeight <= innerHeight + 1
-    const shell = fitsViewport && Array.from(document.body.querySelectorAll('*')).slice(0, MAX_ELEMENTS).some(scrolls)
+    /* the page fills its viewport and no more: a fixed-size panel that scrolls inside a shorter
+       page is no shell, and the page can still shrink to it */
+    const root = document.documentElement
+    const fillsViewport = root.scrollHeight <= innerHeight + 1 && root.getBoundingClientRect().bottom >= innerHeight - 1
+    const shell = fillsViewport && Array.from(document.body.querySelectorAll('*')).slice(0, MAX_ELEMENTS).some(scrolls)
     release = document.createElement('style')
     release.setAttribute('data-doop-fit', shell ? 'shell' : '')
-    release.textContent = 'html,body{height:auto!important;min-height:0!important;max-height:none!important}'
+    release.textContent = 'html,body{height:auto!important;max-height:none!important}'
     document.head.append(release)
   }
   const shell = release.getAttribute('data-doop-fit') === 'shell'
   const flow = document.documentElement.getBoundingClientRect().bottom
   let bottom = flow
   const text = document.createRange()
+  /* an absolute ::before / ::after has no box of its own to read: its bottom is its containing
+     block's padding edge less its used bottom offset and margin; one placed by a clipper is cut */
+  const pseudoBottom = (el: Element, style: CSSStyleDeclaration, clips: boolean, which: '::before' | '::after') => {
+    const pseudo = getComputedStyle(el, which)
+    if (pseudo.content === 'none' || pseudo.content === 'normal' || pseudo.position !== 'absolute') return -Infinity
+    if (pseudo.display === 'none' || pseudo.visibility === 'hidden' || pseudo.opacity === '0') return -Infinity
+    let block: Element | null = el
+    let blockStyle = style
+    while (block && blockStyle.position === 'static' && blockStyle.transform === 'none') {
+      block = block.parentElement
+      if (block) blockStyle = getComputedStyle(block)
+    }
+    if (clips && block === el) return -Infinity
+    const edge = block
+      ? block.getBoundingClientRect().bottom - parseFloat(blockStyle.borderBottomWidth)
+      : innerHeight - window.scrollY
+    const end = edge - parseFloat(pseudo.bottom) - parseFloat(pseudo.marginBottom)
+    return Number.isFinite(end) ? end : -Infinity
+  }
   let seen = 0
   const walk = (el: Element) => {
     for (const child of Array.from(el.children)) {
@@ -518,6 +542,11 @@ async function contentBottom(): Promise<ContentHeight> {
       if (style.visibility !== 'hidden') {
         const rect = child.getBoundingClientRect()
         if (rect.width > 0 || rect.height > 0) bottom = Math.max(bottom, rect.bottom)
+        bottom = Math.max(
+          bottom,
+          pseudoBottom(child, style, clips, '::before'),
+          pseudoBottom(child, style, clips, '::after'),
+        )
         /* its own text, which may run past its box; elements inside are walked themselves */
         if (!clips)
           for (const node of Array.from(child.childNodes)) {
