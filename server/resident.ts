@@ -23,7 +23,7 @@ import { RESIDENT_TASK_LIMIT } from './allowance.ts'
 import * as actions from './actions.ts'
 import { captureFeature, captureTokenResults } from './featureEvents.ts'
 import { inspectFrame, renderFrame } from './screenshot.ts'
-import { FIT_HEIGHT_DESCRIPTION, fitNotes, fitWrittenFrame, updateFrameMetaWithFit } from './frameFit.ts'
+import { FIT_HEIGHT_ON, fitNotes, fitWrittenFrame, updateFrameMetaWithFit } from './frameFit.ts'
 import { AGENT_ROLES, DEFAULT_ROLE_ID, roleById, roleByAgentName, roleName, withoutMentions } from '../shared/agents.ts'
 import type { AgentRole, Roster } from '../shared/agents.ts'
 import { runnerKey } from '../shared/agentRunner.ts'
@@ -1228,7 +1228,7 @@ const TOOLS: Anthropic.Tool[] = [
         y: { type: 'number', description: 'Canvas position in px. Optional, see x.' },
         fit_height: {
           type: 'boolean',
-          description: `${FIT_HEIGHT_DESCRIPTION} height is where the measuring starts. If the fit cannot be made, the frame is still created and the result says why.`,
+          description: FIT_HEIGHT_ON.create,
         },
       },
       required: ['name', 'width', 'height', 'html'],
@@ -1288,7 +1288,7 @@ const TOOLS: Anthropic.Tool[] = [
         html: { type: 'string', description: 'Complete, self-contained HTML document' },
         fit_height: {
           type: 'boolean',
-          description: `${FIT_HEIGHT_DESCRIPTION} If the fit cannot be made, the new HTML still stands and the result says why.`,
+          description: FIT_HEIGHT_ON.set,
         },
       },
       required: ['frame_id', 'html'],
@@ -1705,7 +1705,7 @@ const TOOLS: Anthropic.Tool[] = [
         height: { type: 'number', description: 'px; the design is not rescaled' },
         fit_height: {
           type: 'boolean',
-          description: `${FIT_HEIGHT_DESCRIPTION} Measured at the new width when you pass one; not with height. If the fit cannot be made, nothing else in the call is applied either.`,
+          description: FIT_HEIGHT_ON.update,
         },
         locked: { type: 'boolean', description: 'true keeps humans from selecting, moving or deleting it' },
       },

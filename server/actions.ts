@@ -1855,11 +1855,13 @@ function revealedHtml(frame: Frame, shown: number): string {
 }
 
 /** The frame as viewers have it, for a broadcast that does not change its design (a
- *  rename, resize, restack or sign-off): mid-playback that is the part revealed so far, or
- *  the finished design would flash in before the playback goes on from where it was. */
+ *  rename, resize, restack or sign-off): mid-playback the part revealed so far, or the
+ *  finished design would flash in before the playback goes on from where it was; mid-stream
+ *  what arrived, healed like every chunk, so a script cut off mid-way never runs. */
 function frameForViewers(frame: Frame): Frame {
   const playing = reveals.get(frame.id)
-  return playing ? { ...frame, html: revealedHtml(frame, playing.shown) } : frame
+  if (playing) return { ...frame, html: revealedHtml(frame, playing.shown) }
+  return streams.has(frame.id) ? { ...frame, html: healPartialHtml(frame.html) } : frame
 }
 
 function commonPrefixLen(a: string, b: string): number {
