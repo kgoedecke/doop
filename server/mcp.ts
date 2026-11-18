@@ -21,6 +21,7 @@ import { customAgentsForCanvas } from './customAgents.ts'
 import { describeLibrary, libraryBrief, MAX_FONT_BYTES } from '../shared/fonts.ts'
 import { addCanvasFont, uploadedFontResult } from './canvasFontUpload.ts'
 import { inlineDataRefusal } from './inlineData.ts'
+import { frameWriteRefusal } from './components.ts'
 import {
   MAX_TOKEN_DESCRIPTION,
   TOKEN_TYPES,
@@ -1486,8 +1487,8 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
     },
     async ({ canvas_id, pageId, name, html, x, y, width, height, agent_name }) => {
       if (!canvasFor(canvas_id, 'edit')) return noCanvas(canvas_id)
-      const inline = inlineDataRefusal(html)
-      if (inline) return err(inline)
+      const refused = frameWriteRefusal(html)
+      if (refused) return err(refused)
       const frame = actions.createFrame(canvas_id, { name, pageId, html, x, y, width, height }, actorFrom(agent_name))
       if (!frame) return noCanvas(canvas_id)
       const canvas = store.getCanvas(canvas_id)
@@ -1559,8 +1560,8 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
     async ({ frame_id, html, agent_name }) => {
       const current = frameFor(frame_id, 'edit')
       if (!current) return noFrame(frame_id)
-      const inline = inlineDataRefusal(html, current.html)
-      if (inline) return err(inline)
+      const refused = frameWriteRefusal(html, current.html)
+      if (refused) return err(refused)
       const frame = actions.updateFrame(frame_id, { html }, actorFrom(agent_name), { replace: true })
       if (!frame) return noFrame(frame_id)
       return withPreview(
@@ -2441,9 +2442,9 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
       if (!f) return noFrame(frame_id)
       const edited = editFrameSource(f, old_str, new_str)
       if ('error' in edited) return err(edited.error)
-      /* the edited document, so a URI completed across the replacement's edges is caught too */
-      const inline = inlineDataRefusal(edited.html, `${f.html}\n${compactFrameHtml(f)}`)
-      if (inline) return err(inline)
+      /* the edited document, so a URI completed or a tag left open across the replacement's edges is caught too */
+      const refused = frameWriteRefusal(edited.html, `${f.html}\n${compactFrameHtml(f)}`)
+      if (refused) return err(refused)
       const frame = actions.updateFrame(frame_id, { html: edited.html }, actorFrom(agent_name))!
       return withPreview(
         withStatusNudge(

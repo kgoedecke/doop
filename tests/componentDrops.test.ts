@@ -134,6 +134,28 @@ describe('a <doop-use> that would render nothing', () => {
     expect(ctx.issues.some((issue) => issue.code === 'unclosed_use')).toBe(true)
   })
 
+  it('names each <doop-use> a whole write would leave open, counting only what the write adds', async () => {
+    const { unclosedUses } = await import('../server/componentEngine.ts')
+    const { unclosedUseRefusal } = await import('../server/components.ts')
+    expect(
+      unclosedUses(
+        '<doop-use component="Card"><p>a</p><doop-use component="Badge" label="x"></doop-use><doop-use component="Nav" />',
+      ),
+    ).toEqual(['Card'])
+    /* a tag in a script, a style or a comment is not a tag */
+    expect(
+      unclosedUses('<script>const t = "<doop-use component=\'Card\'>"</script><!-- <doop-use component="Nav"> -->'),
+    ).toEqual([])
+    expect(unclosedUseRefusal('<doop-use component="Card"></doop-use><doop-use component="Badge" />')).toBeNull()
+    const refusal = unclosedUseRefusal('<doop-use component="Card"><doop-use component="Hero">')
+    expect(refusal).toContain('<doop-use component="Card">, <doop-use component="Hero"> are opened and never closed')
+    /* one the frame already holds may be carried over; a second one is the write's own */
+    expect(unclosedUseRefusal('<doop-use component="Card"> edited', '<doop-use component="Card">')).toBeNull()
+    expect(
+      unclosedUseRefusal('<doop-use component="Card"><doop-use component="Card">', '<doop-use component="Card">'),
+    ).toContain('<doop-use component="Card"> is opened')
+  })
+
   it('reports an empty main that a stream chunk expanded before the stream ended', async () => {
     const canvasId = await canvasWith({ Badge: '<span class="badge" data-doop-prop="label">New</span>' })
     const def = store.getComponents(canvasId).find((component) => component.name === 'Badge')!

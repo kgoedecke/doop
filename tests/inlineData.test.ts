@@ -51,12 +51,15 @@ const { execTool } = await import('../server/resident.ts')
 /**
  * Agent writes that add a base64 data: URI are refused with what to do
  * instead, and a font file goes into the canvas's library through upload_font.
+ * Whole writes that leave a <doop-use> open are refused the same way (#528).
  */
 
 const FONT = `data:font/ttf;base64,${'A'.repeat(4000)}`
 const PNG = `data:image/png;base64,${'iVBORw0KGgo'.repeat(10)}`
 const faceCss = `<style>@font-face{font-family:Oxanium;src:url('${FONT}') format('truetype')}</style>`
 const doc = (body: string) => `<!doctype html><html><head>${body}</head><body><h1>Hi</h1></body></html>`
+const OPEN_CARD = '<doop-use component="Card"><p>Slot copy</p>'
+const openCardDoc = `<!doctype html><html><head></head><body>${OPEN_CARD}</body></html>`
 
 describe('newInlineData', () => {
   it('finds base64 data: URIs of every kind and sizes them', () => {
@@ -152,6 +155,31 @@ describe('over MCP', () => {
     })
     expect(chunk.isError).toBe(true)
     expect(store.getFrame(frameId)!.html).not.toContain('base64')
+  })
+
+  it('refuses a create, set or edit that leaves a <doop-use> open, and writes nothing', async () => {
+    const created = await call('create_frame', { canvas_id: canvasId, name: 'Hero', html: openCardDoc })
+    expect(created.isError).toBe(true)
+    expect(created.text).toContain('<doop-use component="Card"> is opened and never closed')
+    expect(frames()).toHaveLength(0)
+
+    await call('create_frame', { canvas_id: canvasId, name: 'Hero', html: doc('') })
+    const frameId = frames()[0]!.id
+    const before = store.getFrame(frameId)!.html
+    const set = await call('set_frame_html', { frame_id: frameId, html: openCardDoc })
+    expect(set.isError).toBe(true)
+    const edit = await call('edit_frame_html', { frame_id: frameId, old_str: '<h1>Hi</h1>', new_str: OPEN_CARD })
+    expect(edit.isError).toBe(true)
+    expect(edit.text).toContain('Card')
+    expect(store.getFrame(frameId)!.html).toBe(before)
+
+    /* closed or self-closing, the same edit goes through */
+    const closed = await call('edit_frame_html', {
+      frame_id: frameId,
+      old_str: '<h1>Hi</h1>',
+      new_str: `${OPEN_CARD}</doop-use><doop-use component="Card" />`,
+    })
+    expect(closed.isError).toBe(false)
   })
 
   const imported = () =>
@@ -356,5 +384,40 @@ describe('the resident agent', () => {
       state,
     )
     expect(second.is_error).toBe(true)
+  })
+
+  it('is refused on create, set, edit and a rewrite commit that leave a <doop-use> open', async () => {
+    const canvasId = store.createCanvas('resident', 'owner').id
+    const state = run()
+    const created = await execTool(
+      call('create_frame', { name: 'Hero', width: 400, height: 300, html: openCardDoc }),
+      canvasId,
+      actor(),
+      state,
+    )
+    expect(created.is_error).toBe(true)
+    expect(String(created.content)).toContain('never closed')
+
+    const frameId = actions.createFrame(canvasId, { name: 'Hero', html: doc(''), width: 400, height: 300 }, actor())!.id
+    const before = store.getFrame(frameId)!.html
+    for (const [name, input] of [
+      ['set_frame_html', { frame_id: frameId, html: openCardDoc }],
+      ['edit_frame_html', { frame_id: frameId, find: '<h1>Hi</h1>', replace: OPEN_CARD }],
+    ] as const) {
+      const result = await execTool(call(name, input), canvasId, actor(), state)
+      expect(result.is_error, name).toBe(true)
+    }
+    /* a chunk is partial by design: the open tag is refused at the commit, once the draft is whole */
+    await execTool(call('begin_frame_rewrite', { frame_id: frameId }), canvasId, actor(), state)
+    const chunk = await execTool(
+      call('append_frame_rewrite', { frame_id: frameId, chunk: openCardDoc }),
+      canvasId,
+      actor(),
+      state,
+    )
+    expect(chunk.is_error).toBeUndefined()
+    const commit = await execTool(call('commit_frame_rewrite', { frame_id: frameId }), canvasId, actor(), state)
+    expect(commit.is_error).toBe(true)
+    expect(store.getFrame(frameId)!.html).toBe(before)
   })
 })
