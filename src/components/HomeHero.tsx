@@ -313,8 +313,10 @@ export function HomeHero({
               className="gap-[7px] rounded-row text-ink-soft transition-colors hover:text-ink"
               onClick={actions.onImport}
               title={t('home.attachTitle')}
+              aria-label={t('home.files')}
             >
-              <AttachmentIcon width={14} height={14} /> {t('home.files')}
+              {/* icon only on a phone, so the row keeps room for the model's name and the send button */}
+              <AttachmentIcon width={14} height={14} /> <span className="hidden md:inline">{t('home.files')}</span>
             </Pressable>
             <span className="flex-1" />
             <DraftsMenu drafts={drafts} onPick={pickDrafts} />
@@ -346,10 +348,10 @@ export function HomeHero({
           {/* the marks rest a little faded and desaturated; the bar's hover wakes the
               row, and the mark under the pointer comes fully to life and lifts */}
           <span
-            className="marks ml-auto flex items-center gap-[9px] [&>*]:opacity-75 [&>*]:saturate-[.8] [&>*]:transition-[opacity,filter,transform] [&>*]:duration-fast [&>*]:ease-out-quad group-hover:[&>*]:opacity-90 group-hover:[&>*]:saturate-[.95] [&>*:hover]:-translate-y-px [&>*:hover]:!opacity-100 [&>*:hover]:!saturate-100 motion-reduce:[&>*]:transition-none"
+            className="marks ml-auto flex flex-none items-center gap-[9px] [&>*]:opacity-75 [&>*]:saturate-[.8] [&>*]:transition-[opacity,filter,transform] [&>*]:duration-fast [&>*]:ease-out-quad group-hover:[&>*]:opacity-90 group-hover:[&>*]:saturate-[.95] [&>*:hover]:-translate-y-px [&>*:hover]:!opacity-100 [&>*:hover]:!saturate-100 motion-reduce:[&>*]:transition-none"
             aria-hidden
           >
-            <span className="grid size-4 place-items-center rounded-tag bg-surface shadow-ring">
+            <span className="grid size-4 flex-none place-items-center rounded-tag bg-surface shadow-ring">
               <BrandMark brand="figma" size={12} />
             </span>
             <BrandMark brand="github" size={16} className="text-ink" />

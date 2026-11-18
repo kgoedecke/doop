@@ -136,7 +136,7 @@ function path(d: string, defaultColor = 'currentColor') {
         height={size}
         viewBox="0 0 24 24"
         fill={color ?? defaultColor}
-        className={className}
+        className={cn('flex-none', className)}
         aria-hidden
       >
         <path d={d} />
