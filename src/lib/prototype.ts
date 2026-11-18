@@ -4,6 +4,7 @@ import { interactionAttributes, parseInteractions, PROTO_ATTRS, type Interaction
 import { api, errorMessage } from './api'
 import { saveFrameHtml, isLayerLocked } from './layerEdits'
 import { useStore } from './store'
+import { posthog } from './posthog'
 import { trackSave } from './history'
 
 /* ---- reading and writing an element's interactions in frame HTML ---- */
@@ -52,6 +53,7 @@ export function saveInteractions(frame: Frame, selector: string, list: Interacti
   const html = withElementInteractions(frame.html, selector, list)
   if (html === null || html === frame.html) return html !== null
   saveFrameHtml(frame, html)
+  posthog.capture('prototype_interactions_saved', { count: list.length })
   return true
 }
 

@@ -313,6 +313,125 @@ describe.skipIf(!findBrowserPath())('components in the editor', { timeout: 60_00
     await until(async () => (await name()) === 'Tag', 'the rename from the layers row')
   })
 
+  it('names an instance’s layer on its own from its Layers row, as Figma does', async () => {
+    const component = async () => (await canvas()).components!.find((def) => def.name === 'Tag')!
+    const { id } = await component()
+    await switchTab('Components')
+    await page.click('[data-component-card="Tag"] [data-component-menu]')
+    await clickByText('Insert instance')
+    await until(async () => (await frameHtml()).includes(` data-doop-instance="${id}"`), 'the instance')
+    await switchTab('Layers')
+    const instanceRow = await page.waitForFunction(
+      (frame) =>
+        [...document.querySelectorAll<HTMLElement>(`[data-row-key^="${frame}|"]`)].find((row) =>
+          row.querySelector('.text-brand.opacity-70'),
+        )?.dataset.rowKey,
+      {},
+      frameId,
+    )
+    const rowKey = (await instanceRow.jsonValue()) as string
+    /* unnamed, the row shows the component's name */
+    expect(await page.$eval(`[data-row-key="${rowKey}"]`, (row) => row.textContent)).toContain('Tag')
+    await page.click(`[data-row-key="${rowKey}"] > span:nth-of-type(3)`, { count: 2 })
+    await page.waitForSelector('input[aria-label="Item name"]')
+    await page.keyboard.type('Hero CTA')
+    await page.keyboard.press('Enter')
+    const named = (html: string) =>
+      new RegExp(
+        `data-doop-instance="${id}"[^>]*data-doop-name="Hero CTA"|data-doop-name="Hero CTA"[^>]*data-doop-instance="${id}"`,
+      ).test(html)
+    await until(async () => named(await frameHtml()), 'the instance to carry its own name')
+    expect((await component()).name).toBe('Tag')
+    await page.waitForFunction(
+      (key) => document.querySelector(`[data-row-key="${key}"]`)?.textContent?.includes('Hero CTA'),
+      {},
+      rowKey,
+    )
+
+    /* a change to the main reaches the instance and leaves its name alone */
+    await page.evaluate(
+      async (canvas, ref) => {
+        const res = await fetch(`/api/canvases/${canvas}/components/${ref}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ find: 'class="pill live-update"', replace: 'class="pill live-update renamed-check"' }),
+        })
+        if (!res.ok) throw new Error(await res.text())
+      },
+      canvasId,
+      id,
+    )
+    await until(async () => {
+      const html = await frameHtml()
+      return html.includes('renamed-check') && named(html)
+    }, 'the main’s change to arrive with the name kept')
+
+    /* a layer name the main carries is inherited, not the instance's own: an
+       unnamed instance still shows the component's name */
+    await page.evaluate(
+      async (canvas, ref) => {
+        const res = await fetch(`/api/canvases/${canvas}/components/${ref}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            find: 'class="pill live-update renamed-check"',
+            replace: 'class="pill live-update renamed-check" data-doop-name="Old layer"',
+          }),
+        })
+        if (!res.ok) throw new Error(await res.text())
+      },
+      canvasId,
+      id,
+    )
+    await until(
+      async () => (await frameHtml()).includes('data-doop-name="Old layer"'),
+      'the main to carry a layer name',
+    )
+    await switchTab('Components')
+    await page.click('[data-component-card="Tag"] [data-component-menu]')
+    await clickByText('Insert instance')
+    await until(
+      async () => (await frameHtml()).split(` data-doop-instance="${id}"`).length - 1 >= 2,
+      'the second instance',
+    )
+    await switchTab('Layers')
+    const labels = async () =>
+      page.evaluate(
+        (frame) =>
+          [...document.querySelectorAll<HTMLElement>(`[data-row-key^="${frame}|"]`)]
+            .filter((row) => row.querySelector('.text-brand.opacity-70'))
+            .map((row) => row.textContent ?? ''),
+        frameId,
+      )
+    await until(async () => (await labels()).length >= 2, 'both instance rows')
+    const shown = await labels()
+    expect(shown.some((text) => text.includes('Hero CTA'))).toBe(true)
+    expect(shown.some((text) => text.includes('Old layer'))).toBe(false)
+    expect(shown.filter((text) => text.includes('Tag')).length).toBeGreaterThanOrEqual(1)
+
+    /* the instance's own name stays its own even when the main takes the same one */
+    await page.evaluate(
+      async (canvas, ref) => {
+        const res = await fetch(`/api/canvases/${canvas}/components/${ref}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ find: 'data-doop-name="Old layer"', replace: 'data-doop-name="Hero CTA"' }),
+        })
+        if (!res.ok) throw new Error(await res.text())
+      },
+      canvasId,
+      id,
+    )
+    await until(async () => {
+      const now = await labels()
+      return (
+        now.length >= 2 &&
+        now.filter((text) => text.includes('Hero CTA')).length === 1 &&
+        now.some((text) => text.includes('Tag'))
+      )
+    }, 'the named instance to keep its name and the other to show the component’s')
+  })
+
   it('renames a standalone main’s component and its frame from the Layers row', async () => {
     const made = await page.evaluate(async (id) => {
       const post = async (url: string, body: unknown) => {

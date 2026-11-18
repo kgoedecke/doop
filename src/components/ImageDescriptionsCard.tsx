@@ -8,14 +8,23 @@ import {
   type ImageDescriptionMode,
   type ImageDescriptionPreference,
 } from '../../shared/imageDescriptions'
-import { CardDescription, CardHeader, CardTitle, SettingsCard } from './ui/card'
-import { Segmented, SegmentedItem } from './ui/segmented'
+import { CardDescription, CardHeader, CardRow, CardTitle, SettingsCard } from './ui/card'
+import { Disclosure } from './ui/collapsible'
+import { Note } from './ui/note'
 import { StatusLabel } from './ui/status-label'
+import { ToggleChipGroup, ToggleChipItem } from './ui/toggle-chip'
 
 const MODE_LABELS: Record<ImageDescriptionMode, PlainMessageKey> = {
   off: 'settings.imageDescriptionsOff',
   account: 'settings.imageDescriptionsAccount',
   server: 'settings.imageDescriptionsServer',
+}
+
+/* Who pays for the model that is ready. My model falls back to the server's
+   when the account has none that sees images, and says so. */
+const PAYER_NOTES: Record<'account' | 'server', PlainMessageKey> = {
+  account: 'settings.imageDescriptionsAccountNote',
+  server: 'settings.imageDescriptionsServerNote',
 }
 
 const REASONS: Record<DescriberReason, PlainMessageKey> = {
@@ -64,27 +73,41 @@ export function ImageDescriptionsCard() {
         <CardTitle>{t('settings.imageDescriptionsTitle')}</CardTitle>
         <CardDescription>{t('settings.imageDescriptionsDescription')}</CardDescription>
       </CardHeader>
-      <div className="px-4 pb-5 pt-4 sm:px-[22px]">
-        <Segmented
+      <CardRow label={t('settings.imageDescriptionsRow')}>
+        <ToggleChipGroup
           aria-label={t('settings.imageDescriptionsAria')}
           value={preference.mode}
           onValueChange={pick}
           disabled={busy}
         >
           {IMAGE_DESCRIPTION_MODES.map((mode) => (
-            <SegmentedItem key={mode} value={mode}>
+            <ToggleChipItem key={mode} value={mode}>
               {t(MODE_LABELS[mode])}
-            </SegmentedItem>
+            </ToggleChipItem>
           ))}
-        </Segmented>
-        <div className="mt-[10px]">
-          {describer.label !== null ? (
+        </ToggleChipGroup>
+      </CardRow>
+      <div className="flex flex-col gap-2.5 px-4 pb-5 pt-1 sm:pl-[186px] sm:pr-[22px]">
+        {describer.label !== null ? (
+          <>
             <StatusLabel tone="done">{t('settings.imageDescriptionsRunsOn', { label: describer.label })}</StatusLabel>
-          ) : (
-            <StatusLabel>{t(REASONS[describer.reason])}</StatusLabel>
-          )}
-        </div>
-        {error && <p className="mt-[10px] text-body text-accent-ink">{error}</p>}
+            {preference.paidBy && (
+              <Note>
+                {t(
+                  preference.mode === 'account' && preference.paidBy === 'server'
+                    ? 'settings.imageDescriptionsFallbackNote'
+                    : PAYER_NOTES[preference.paidBy],
+                )}
+              </Note>
+            )}
+          </>
+        ) : (
+          <Note>{t(REASONS[describer.reason])}</Note>
+        )}
+        {error && <Note tone="error">{error}</Note>}
+        <Disclosure label={t('settings.imageDescriptionsHowTitle')} className="text-caption text-ink-faint">
+          <p className="max-w-[62em] text-caption text-ink-soft">{t('settings.imageDescriptionsHow')}</p>
+        </Disclosure>
       </div>
     </SettingsCard>
   )

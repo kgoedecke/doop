@@ -169,22 +169,81 @@ export const DEFAULT_KIMI_CODE_MODEL = 'k3.1-pro'
  * run it — imageGen resolves a generator per provider (user account first,
  * then a server key). Adding a model later is one entry here, plus a new
  * generator in server/imageGen.ts only if it introduces a new provider.
+ *
+ * `openai` runs on a ChatGPT subscription or an OpenAI key; `openai-api` on an
+ * OpenAI key only. The ChatGPT (Codex) backend ignores the image tool's
+ * `model` (a made-up id draws the same image, probed 2026-11-12), so a
+ * subscription cannot choose: it gets the one `openai` entry, and the models
+ * an API key can pick are their own family.
  */
-export type ImageProvider = 'openai' | 'gemini' | 'ark'
+export type ImageProvider = 'openai' | 'openai-api' | 'gemini' | 'ark'
 
 export interface ImageModelOption {
   id: string
   name: string
   blurb: string
   provider: ImageProvider
+  /** the Settings row it sits in: a family with several entries is one row,
+   *  the entry picked from its dropdown by name; the pick is still its id */
+  family?: string
 }
 
 export const IMAGE_MODELS: ImageModelOption[] = [
   {
     id: 'gpt-image-2',
     name: 'GPT Image 2',
-    blurb: 'OpenAI’s image model — reliable text rendering and UI assets.',
+    family: 'GPT Image via ChatGPT subscription',
+    blurb: 'ChatGPT picks the model (GPT Image 2 today). Also runs on an OpenAI API key.',
     provider: 'openai',
+  },
+  {
+    id: 'gpt-image-2.6-sunburst',
+    name: 'GPT Image 2.6 Sunburst',
+    family: 'GPT Image API',
+    blurb: 'OpenAI’s newest image model — detailed visual work and editing.',
+    provider: 'openai-api',
+  },
+  {
+    id: 'gpt-image-2.6-flare',
+    name: 'GPT Image 2.6 Flare',
+    family: 'GPT Image API',
+    blurb: 'OpenAI’s newest image model, tuned for fast iteration.',
+    provider: 'openai-api',
+  },
+  {
+    id: 'gpt-image-2.5-sunburst',
+    name: 'GPT Image 2.5 Sunburst',
+    family: 'GPT Image API',
+    blurb: 'OpenAI’s most capable image model — precise edits and detail.',
+    provider: 'openai-api',
+  },
+  {
+    id: 'gpt-image-2.5-flare',
+    name: 'GPT Image 2.5 Flare',
+    family: 'GPT Image API',
+    blurb: 'Fast, high-quality everyday images from OpenAI.',
+    provider: 'openai-api',
+  },
+  {
+    id: 'chatgpt-image-latest',
+    name: 'ChatGPT Image (latest)',
+    family: 'GPT Image API',
+    blurb: 'The image model ChatGPT uses now, kept current by OpenAI.',
+    provider: 'openai-api',
+  },
+  {
+    id: 'gpt-image-1.5',
+    name: 'GPT Image 1.5',
+    family: 'GPT Image API',
+    blurb: 'OpenAI’s previous-generation image model.',
+    provider: 'openai-api',
+  },
+  {
+    id: 'gpt-image-1-mini',
+    name: 'GPT Image 1 Mini',
+    family: 'GPT Image API',
+    blurb: 'OpenAI’s low-cost image model, for drafts and volume.',
+    provider: 'openai-api',
   },
   {
     id: 'gemini-3.1-flash-image',

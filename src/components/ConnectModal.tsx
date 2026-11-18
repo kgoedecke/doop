@@ -3,6 +3,7 @@ import type { ReactNode } from 'react'
 import { navigate } from '../App'
 import { useStore } from '../lib/store'
 import { roleByAgentName } from '../../shared/agents'
+import { useRoster } from '../hooks/use-roster'
 import { posthog } from '../lib/posthog'
 import { useT, type PlainMessageKey, type Translate } from '../lib/i18n'
 import { canUseChatGPTPublicEndpoint, CHATGPT_CONNECTION_GUIDE, CHATGPT_PLUGINS_URL } from '../lib/chatgptConnection'
@@ -567,9 +568,10 @@ function MethodSwitch<T extends string>({
 export function AgentArrival({ name }: { name?: string }) {
   const t = useT()
   const presences = useStore((s) => s.presences)
+  const roster = useRoster()
   const arrived = useMemo(
-    () => Object.values(presences).find((p) => p.kind === 'agent' && !roleByAgentName(p.name)),
-    [presences],
+    () => Object.values(presences).find((p) => p.kind === 'agent' && !roleByAgentName(p.name, roster)),
+    [presences, roster],
   )
   return arrived ? (
     <span className="mr-auto inline-flex items-center gap-[7px] text-body text-success-ink">

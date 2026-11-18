@@ -117,7 +117,7 @@ describe('moving drawings between frames and canvas', () => {
     const dest = frames().find((f) => f.id === base.id)!
     const doc = parse(dest.html)
     const el = doc.querySelector<HTMLElement>('#title')!
-    expect(el.style.position).toBe('fixed')
+    expect(el.style.position).toBe('absolute')
     expect(el.style.left).toBe('30px')
     expect(el.style.width).toBe('80px')
     const scope = el.getAttribute('data-doop-carried-scope')!

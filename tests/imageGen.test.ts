@@ -208,6 +208,88 @@ describe('the image-model registry', () => {
     expect(generator.ok && generator.label).toBe('server')
   })
 
+  async function imagesApiResponse(): Promise<Response> {
+    return new Response(JSON.stringify({ created: 1, data: [{ b64_json: await tinyPng() }] }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    })
+  }
+
+  it.each(['gpt-image-2.5-sunburst', 'gpt-image-2.6-flare', 'chatgpt-image-latest', 'gpt-image-1-mini'])(
+    'draws a %s pick through the Image API on the connected OpenAI key',
+    async (model) => {
+      mockedGetAccounts.mockResolvedValue([
+        { enabled: true, userId: 'u1', kind: 'openai-key', apiKey: 'sk-user', connectedAt: 1 },
+      ])
+      mockedGetImagePref.mockResolvedValue(model)
+      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(await imagesApiResponse())
+
+      const image = await generateImage('u1', { prompt: 'a red circle', aspect: 'portrait', quality: 'high' })
+
+      expect(image.billedTo).toBe('OpenAI')
+      expect(image.mime).toBe('image/webp')
+      const [url, init] = fetchSpy.mock.calls[0]!
+      expect(String(url)).toBe('https://api.openai.com/v1/images/generations')
+      expect((init!.headers as Record<string, string>).Authorization).toBe('Bearer sk-user')
+      expect(JSON.parse(String(init!.body))).toEqual({
+        model,
+        prompt: 'a red circle',
+        n: 1,
+        size: '1024x1536',
+        quality: 'high',
+        output_format: 'png',
+      })
+    },
+  )
+
+  it('runs an Image API pick on the server key for someone who connected nothing', async () => {
+    mockedGetAccounts.mockResolvedValue([])
+    mockedGetImagePref.mockResolvedValue('gpt-image-2.6-sunburst')
+    stubEnv('OPENAI_API_KEY', 'sk-server')
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(await imagesApiResponse())
+
+    const image = await generateImage('u1', { prompt: 'a red circle' })
+
+    expect(image.billedTo).toBe('server')
+    expect((fetchSpy.mock.calls[0]![1]!.headers as Record<string, string>).Authorization).toBe('Bearer sk-server')
+  })
+
+  it('reports an Image API refusal as OpenAI’s, never as an empty image', async () => {
+    mockedGetAccounts.mockResolvedValue([
+      { enabled: true, userId: 'u1', kind: 'openai-key', apiKey: 'sk-user', connectedAt: 1 },
+    ])
+    mockedGetImagePref.mockResolvedValue('gpt-image-2.5-flare')
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ error: { message: 'Your organization must be verified' } }), { status: 403 }),
+    )
+    await expect(generateImage('u1', { prompt: 'x' })).rejects.toThrow(/OpenAI rejected the credentials \(403\)/)
+  })
+
+  it('runs a GPT Image 2.5 pick on the OpenAI key even when a ChatGPT subscription is on too', async () => {
+    mockedGetAccounts.mockResolvedValue([
+      { enabled: true, userId: 'u1', kind: 'chatgpt', accessToken: 'tok', connectedAt: 1 },
+      { enabled: true, userId: 'u1', kind: 'openai-key', apiKey: 'sk-user', connectedAt: 2 },
+    ])
+    mockedGetImagePref.mockResolvedValue('gpt-image-2.5-flare')
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(await imagesApiResponse())
+
+    await generateImage('u1', { prompt: 'a red circle' })
+
+    expect(String(fetchSpy.mock.calls[0]![0])).toBe('https://api.openai.com/v1/images/generations')
+  })
+
+  it('refuses a GPT Image 2.5 pick on a ChatGPT subscription alone, since it cannot choose a model', async () => {
+    mockedGetAccounts.mockResolvedValue([
+      { enabled: true, userId: 'u1', kind: 'chatgpt', accessToken: 'tok', connectedAt: 1 },
+    ])
+    mockedGetImagePref.mockResolvedValue('gpt-image-2.5-sunburst')
+    const fetchSpy = vi.spyOn(globalThis, 'fetch')
+    await expect(generateImage('u1', { prompt: 'x' })).rejects.toThrow(/needs an OpenAI API key/)
+    expect(fetchSpy).not.toHaveBeenCalled()
+    const available = (await imageModelAvailability('u1')).filter((m) => m.available).map((m) => m.id)
+    expect(available).toEqual(['gpt-image-2'])
+  })
+
   it('never runs a connected user on the server keys for another provider', async () => {
     mockedGetAccounts.mockResolvedValue([
       { enabled: true, userId: 'u1', kind: 'openrouter-key', apiKey: 'sk-or-x', connectedAt: 1 },

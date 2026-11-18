@@ -4,11 +4,14 @@ import {
   AUTOMATION_EXAMPLES,
   describeSchedule,
   incompleteReason,
+  narrowStepRoles,
   nextRunAt,
   normalizeSchedule,
   normalizeSteps,
   wallClock,
+  type Step,
 } from '../shared/automations.ts'
+import { AGENT_ROLES, rosterWith } from '../shared/agents.ts'
 import {
   creativeHtml,
   frameHeight,
@@ -75,15 +78,24 @@ describe('normalize', () => {
     )
   })
 
-  it('keeps only real steps, with real roles', () => {
+  it('keeps only real steps, and the ids that could name an agent', () => {
     const steps = normalizeSteps([
       { type: 'pull', accountId: 'act_1', filter: 'everything', canvasId: 'c1' },
-      { type: 'agent', prompt: ' Review it ', roles: ['bogus', 'ux', 'doop'], canvasId: 'c1' },
+      { type: 'agent', prompt: ' Review it ', roles: ['Bogus!', 'bogus', 'ux', 'doop'], canvasId: 'c1' },
     ])
     expect(steps).toEqual([
       { id: 's1', type: 'pull', provider: 'meta', accountId: 'act_1', filter: 'active', canvasId: 'c1' },
-      { id: 's2', type: 'agent', title: '', prompt: 'Review it', roles: ['ux'], canvasId: 'c1' },
+      /* `bogus` is shaped like a custom handle: only the canvas can rule it out */
+      { id: 's2', type: 'agent', title: '', prompt: 'Review it', roles: ['bogus', 'ux', 'doop'], canvasId: 'c1' },
     ])
+    /* the server narrows to the first agent the step's canvas has */
+    const narrowed = narrowStepRoles(steps as Step[], () => AGENT_ROLES)
+    expect(narrowed[1]).toMatchObject({ roles: ['ux'] })
+    expect(
+      narrowStepRoles(steps as Step[], () =>
+        rosterWith([{ ...AGENT_ROLES[0]!, id: 'bogus', name: 'Bogus', custom: true }]),
+      )[1],
+    ).toMatchObject({ roles: ['bogus'] })
     expect(normalizeSteps([{ type: 'webhook' }])).toBe(
       'each step must be a pull, agent task, Slack message or Linear ticket',
     )

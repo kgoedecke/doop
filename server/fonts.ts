@@ -6,6 +6,8 @@ import { env } from './env.ts'
 import { storeAsset } from './assets.ts'
 import { readFontFile } from './fontFile.ts'
 import { isWorkspaceMember } from './workspaces.ts'
+import { unlimitedFonts } from './entitlements.ts'
+import { FREE_FONT_FAMILIES } from '../shared/billing.ts'
 import { MAX_FONT_BYTES, type CustomFont, type FontFormat, type FontScope, type FontStyle } from '../shared/fonts.ts'
 
 /**
@@ -19,6 +21,23 @@ type FontRow = typeof t.fonts.$inferSelect
 const rows = new Map<string, FontRow>()
 
 export class FontInputError extends Error {}
+
+/** A Free library already holds its families; the route answers 402 so the
+ *  page can offer Pro. */
+export class FontLimitError extends FontInputError {}
+
+/** Refuse a family a Free library has no room for. A face of a family the
+ *  library already has is always welcome, so a family stays complete. */
+function checkFamilyRoom(scope: FontScope, userId: string, family: string): void {
+  if (unlimitedFonts(scope, userId)) return
+  const families = new Set(
+    [...rows.values()].filter((r) => inScope(r, scope, userId)).map((r) => r.family.toLowerCase()),
+  )
+  if (families.has(family.toLowerCase()) || families.size < FREE_FONT_FAMILIES) return
+  throw new FontLimitError(
+    `the Free plan holds ${FREE_FONT_FAMILIES} font families and this library has ${families.size}: upgrade to Pro for unlimited fonts, or remove a family first`,
+  )
+}
 
 export async function hydrateFonts(): Promise<void> {
   const all = await db.select().from(t.fonts)
@@ -80,28 +99,35 @@ export async function addFont(
   } catch (e) {
     throw new FontInputError(e instanceof Error ? e.message : 'the font file could not be read')
   }
-  const asset = await storeAsset(buf, info, { ownerId: user.id, uploadedBy: user.name })
-  const row: FontRow = {
-    id: nanoid(10),
-    workspaceId: 'workspaceId' in scope ? scope.workspaceId : null,
-    ownerId: user.id,
-    family: info.family,
-    weight: info.weight,
-    style: info.style,
-    format: info.format,
-    assetId: asset.id,
-    ext: asset.ext,
-    fileName: fileName.replace(/[^\w.\- ]+/g, '').slice(0, 120) || `font.${asset.ext}`,
-    size: buf.length,
-    uploadedBy: user.id,
-    createdAt: Date.now(),
-  }
+  /* a quick refusal before anything waits in the queue */
+  checkFamilyRoom(scope, user.id, info.family)
+  const cleanName = fileName.replace(/[^\w.\- ]+/g, '').slice(0, 120)
   /* find-and-replace runs one at a time per library: two uploads of the same
-     face racing would otherwise each miss the other's row and both stay */
+     face racing would otherwise each miss the other's row and both stay. The
+     file is stored inside the queue, after the checks, so a refused upload
+     leaves nothing behind. */
   return inLibraryOrder(scope, user.id, async () => {
     /* checked again in the queue: the workspace may have been deleted, or the
-       uploader removed from it, while the file was being stored */
+       uploader removed from it, while earlier uploads ran */
     if (!canUseScope(scope, user.id)) throw new FontInputError('this workspace no longer exists or you left it')
+    /* again in the queue: two new families uploaded at once both passed the first look */
+    checkFamilyRoom(scope, user.id, info.family)
+    const asset = await storeAsset(buf, info, { ownerId: user.id, uploadedBy: user.name })
+    const row: FontRow = {
+      id: nanoid(10),
+      workspaceId: 'workspaceId' in scope ? scope.workspaceId : null,
+      ownerId: user.id,
+      family: info.family,
+      weight: info.weight,
+      style: info.style,
+      format: info.format,
+      assetId: asset.id,
+      ext: asset.ext,
+      fileName: cleanName || `font.${asset.ext}`,
+      size: buf.length,
+      uploadedBy: user.id,
+      createdAt: Date.now(),
+    }
     const replaced = [...rows.values()].filter(
       (r) =>
         inScope(r, scope, user.id) &&

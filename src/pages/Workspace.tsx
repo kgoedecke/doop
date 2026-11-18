@@ -1,13 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { WorkspaceDetail, WorkspaceRole, WorkspaceSummary } from '../../shared/types'
-import { formatUsd, TEAM_SEAT_PRICE, type WorkspaceStatus } from '../../shared/billing'
+import type { LibraryPublishPolicy, WorkspaceDetail, WorkspaceRole, WorkspaceSummary } from '../../shared/types'
+import { billedSeats, formatUsd, TEAM_SEAT_PRICE, type WorkspaceStatus } from '../../shared/billing'
 import { navigate } from '../App'
 import { api, errorMessage, paywalledWorkspace } from '../lib/api'
 import { authClient } from '../lib/auth'
+import { cancelLibraryResume, confirmLibraryResume } from '../lib/libraryResume'
+import { takeNameAfterCheckout } from '../lib/upgrade'
 import { posthog } from '../lib/posthog'
 import { cachedWorkspace, fetchWorkspace } from '../lib/workspaceCache'
 import { AppRail, railLayout, workspacePanesFor, type WorkspacePane } from '../components/AppRail'
-import { UpgradeModal } from '../components/WorkspaceModals'
+import { NameWorkspaceModal, UpgradeModal } from '../components/WorkspaceModals'
+import { SeatStepper } from '../components/SeatStepper'
 import { Avatar } from '../components/ui/avatar'
 import { Badge } from '../components/ui/badge'
 import { Button } from '../components/ui/button'
@@ -22,13 +25,15 @@ import { Tabs, TabsList, TabsTrigger } from '../components/ui/tabs'
 import { Toast } from '../components/ui/toast'
 import { ChevronRightIcon } from '../components/ui/icons'
 import { FontLibrary } from '../components/FontLibrary'
+import { CustomAgents } from '../components/CustomAgents'
+import { WorkspaceLibraries } from '../components/WorkspaceLibraries'
 import { DashContent, DashHeader, DashLayout, DashMain, DashSubtitle, DashTitle } from '../components/ui/dash'
 import { timeAgo } from '../lib/time'
 import { getLocale, t as translate, useT, type PlainMessageKey } from '../lib/i18n'
 
 type Pane = WorkspacePane
 
-const PANES: readonly string[] = ['members', 'fonts', 'billing', 'general'] satisfies Pane[]
+const PANES: readonly string[] = ['members', 'fonts', 'agents', 'libraries', 'billing', 'general'] satisfies Pane[]
 
 function isPane(value: string | null): value is Pane {
   return value !== null && PANES.includes(value)
@@ -53,6 +58,8 @@ const ROLE_LABEL = {
 const TAB_LABEL = {
   members: 'workspace.people',
   fonts: 'workspace.fonts',
+  agents: 'workspace.agents',
+  libraries: 'workspace.libraries',
   billing: 'workspace.billing',
   general: 'workspace.general',
 } as const satisfies Record<Pane, PlainMessageKey>
@@ -76,6 +83,8 @@ export function Workspace({ workspaceId }: { workspaceId: string }) {
   const [missing, setMissing] = useState(false)
   const [upgrade, setUpgrade] = useState<string | null>(null)
   const [toast, setToast] = useState<string | null>(null)
+  /* paid for a workspace the upgrade modal named with a placeholder: ask for the real name */
+  const [naming, setNaming] = useState(false)
   /* the checkout round-trip lands here with its outcome in the query; read
      once, then clean the URL in the effect below */
   const [landing] = useState(() => {
@@ -106,7 +115,12 @@ export function Workspace({ workspaceId }: { workspaceId: string }) {
     const seq = ++reloadSeq.current
     fetchWorkspace(workspaceId)
       .then((detail) => {
-        if (seq === reloadSeq.current) setWs(detail)
+        if (seq !== reloadSeq.current) return
+        setWs(detail)
+        /* paid for a workspace the upgrade modal named with a placeholder: ask
+           for the real name the first time it shows as paid, whichever load
+           that is (the checkout return, a reload, Refresh) */
+        if (detail.role === 'owner' && detail.active && detail.plan && takeNameAfterCheckout(detail.id)) setNaming(true)
       })
       .catch(() => {
         if (seq === reloadSeq.current) setMissing(true)
@@ -127,12 +141,19 @@ export function Workspace({ workspaceId }: { workspaceId: string }) {
           if (summary.active && summary.plan) {
             posthog.capture('workspace_plan_activated', { workspaceId, interval: summary.interval })
             showToast(translate('workspace.planActive'))
+            /* they were on the way to a component library when the plan came up:
+               back to that canvas, where the Components panel picks it up */
+            const back = confirmLibraryResume(workspaceId)
+            if (back) navigate(back)
           }
         })
         .catch(console.error)
         .finally(reload)
     } else {
-      if (landing.checkout === 'canceled') showToast(translate('workspace.checkoutCanceled'))
+      if (landing.checkout === 'canceled') {
+        cancelLibraryResume(workspaceId)
+        showToast(translate('workspace.checkoutCanceled'))
+      }
       reload()
     }
   }, [landing, workspaceId, reload])
@@ -244,6 +265,10 @@ export function Workspace({ workspaceId }: { workspaceId: string }) {
             <MembersPane ws={ws} meId={meId} admin={admin} onChange={reload} onError={handle} onToast={showToast} />
           ) : pane === 'fonts' ? (
             <FontLibrary workspaceId={ws.id} />
+          ) : pane === 'agents' ? (
+            <CustomAgents workspaceId={ws.id} />
+          ) : pane === 'libraries' ? (
+            <WorkspaceLibraries workspaceId={ws.id} onToast={showToast} />
           ) : pane === 'billing' ? (
             <BillingPane
               ws={ws}
@@ -257,6 +282,16 @@ export function Workspace({ workspaceId }: { workspaceId: string }) {
           )}
         </DashContent>
       </DashMain>
+
+      {naming && ws && (
+        <NameWorkspaceModal
+          workspace={ws}
+          onClose={() => {
+            setNaming(false)
+            reload()
+          }}
+        />
+      )}
 
       {upgrade !== null && (
         <UpgradeModal
@@ -488,7 +523,31 @@ function BillingPane({
 }) {
   const t = useT()
   const [busy, setBusy] = useState(false)
+  /* the seats the owner is about to pay for; null while unchanged */
+  const [seatDraft, setSeatDraft] = useState<number | null>(null)
   const perSeat = ws.interval ? TEAM_SEAT_PRICE[ws.interval] : TEAM_SEAT_PRICE.month
+  const people = Math.max(1, ws.memberCount)
+  /* the stepper edits the minimum the owner pays for; the bill is that or the
+     people, whichever is larger, so a minimum below the people releases it */
+  const minimum = seatDraft ?? ws.seatsBought
+  const billed = billedSeats(minimum, people)
+  const changingSeats = seatDraft !== null && seatDraft !== ws.seatsBought
+
+  async function saveSeats() {
+    if (busy || seatDraft === null) return
+    setBusy(true)
+    try {
+      await api.setWorkspaceSeats(ws.id, seatDraft)
+      posthog.capture('workspace_seats_changed', { workspaceId: ws.id, seats: seatDraft })
+      setSeatDraft(null)
+      onSynced()
+      onToast(t('plans.seatsUpdated'))
+    } catch (caught) {
+      onToast(errorMessage(caught, t('plans.seatsFailed')))
+    } finally {
+      setBusy(false)
+    }
+  }
   const paid = ws.plan === 'team' && ws.status !== 'inactive'
 
   async function portal() {
@@ -556,14 +615,21 @@ function BillingPane({
       {paid && (
         <>
           <CardRow label={t('workspace.seats')}>
+            {isOwner && <SeatStepper value={minimum} min={1} disabled={busy} onChange={setSeatDraft} />}
             <span className="text-copy">
-              {t('workspace.seatsMath', { seats: ws.seats, price: formatUsd(perSeat) })}{' '}
-              <b>{formatUsd(ws.seats * perSeat)}</b>{' '}
+              {t('workspace.seatsMath', { seats: billed, price: formatUsd(perSeat) })}{' '}
+              <b>{formatUsd(billed * perSeat)}</b>{' '}
               {ws.interval === 'year' ? t('workspace.perYear') : t('workspace.perMonth')}
             </span>
-            {ws.seats !== ws.memberCount && (
+            {changingSeats ? (
+              <Button size="sm" variant="primary" onClick={saveSeats} disabled={busy}>
+                {t('plans.updateSeats')}
+              </Button>
+            ) : (
               <span className="text-label text-ink-faint">
-                {t('workspace.seatsCatchUp', { count: ws.memberCount })}
+                {ws.seats !== billed
+                  ? t('workspace.seatsCatchUp', { count: ws.memberCount })
+                  : t('plans.seatsInUse', { count: ws.memberCount, seats: billed })}
               </span>
             )}
           </CardRow>
@@ -646,6 +712,20 @@ function GeneralPane({
     }
   }
 
+  async function setLibraryPublish(policy: LibraryPublishPolicy) {
+    if (policy === ws.libraryPublish || busy) return
+    setBusy(true)
+    try {
+      await api.setLibraryPublish(ws.id, policy)
+      onChange()
+      onToast(t('workspace.libraryPublishSaved'))
+    } catch (caught) {
+      onToast(errorMessage(caught, t('workspace.libraryPublishFailed')))
+    } finally {
+      setBusy(false)
+    }
+  }
+
   async function remove() {
     setBusy(true)
     try {
@@ -689,6 +769,26 @@ function GeneralPane({
         <CardRow label={t('workspace.created')}>
           <span className="text-body text-ink-soft">{timeAgo(ws.createdAt)}</span>
         </CardRow>
+        {admin && (
+          <CardRow
+            label={t('workspace.libraryPublish')}
+            control={
+              <Select
+                value={ws.libraryPublish}
+                disabled={busy}
+                onValueChange={(value) => void setLibraryPublish(value as LibraryPublishPolicy)}
+              >
+                <SelectTrigger className="w-full" aria-label={t('workspace.libraryPublishAria')}>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="everyone">{t('workspace.libraryPublishEveryone')}</SelectItem>
+                  <SelectItem value="admins">{t('workspace.libraryPublishAdmins')}</SelectItem>
+                </SelectContent>
+              </Select>
+            }
+          />
+        )}
       </SettingsCard>
       {isOwner && (
         <SettingsCard tone="flat" className="border-accent-ink/30">

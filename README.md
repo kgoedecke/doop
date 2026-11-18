@@ -264,7 +264,10 @@ Agents can read `approvalStatus` (`draft`, `ready_for_dev`, `needs_review`) and
 `approval` attribution in `get_canvas` and `get_frame`. Call
 `get_canvas({ canvas_id, approval_status: "ready_for_dev" })` to find approved
 screens, then re-read `get_frame` before implementing. Only `ready_for_dev` is
-current sign-off. Approval is set by people in the app. In **Automations**, choose
+current sign-off. Approval is set by people in the app, or by an agent when a person asks
+it to: `set_frame_approval({ frame_id, status: "ready_for_dev" | "draft" })` (MCP and the Doop
+Agent) records the approval in that person's name, with the agent shown as "via". An agent
+never approves unasked, and automation runs cannot approve. In **Automations**, choose
 **Designs are approved** to run a workflow when frames on a selected canvas become
 ready for dev. Without an enabled workflow, approval only records sign-off.
 
@@ -311,6 +314,15 @@ The SwiftUI iOS app lives in [`ios/`](ios/README.md). Open `ios/Doop.xcodeproj`
 in Xcode to run it against Doop Cloud or your own HTTPS server. It uses SwiftUI for the app interface and a native canvas that
 renders frames with the Blitz HTML/CSS engine (Rust, no WebKit), over the same REST API and WebSocket rooms. The app is in development;
 see the iOS README for validation status and remaining release requirements.
+
+## Android app
+
+The native Kotlin/Jetpack Compose app lives in [`android/`](android/README.md).
+Open that directory in Android Studio or run `./gradlew assembleDebug` from it.
+It shares iOS's Blitz/Skia renderer and the existing REST/WebSocket backend, with
+native canvas gestures, editing, agent prompts, comments, exports and optional
+background task notifications. It targets ARM64 phones and tablets on Android 8+.
+See the Android README for setup, tests and release signing.
 
 ## Connect Claude
 
@@ -701,11 +713,16 @@ docker run -p 4400:4400 -e BETTER_AUTH_URL=http://localhost:4400 -e BETTER_AUTH_
 Every variable is optional except the two marked required in production. Each one is declared and
 validated once at boot ([`server/env.ts`](server/env.ts)) and documented in
 [`.env.example`](.env.example), which also lists endpoint overrides and other rarely needed knobs.
+
+The server listens on port `4400` on all interfaces by default (IPv6 when available, otherwise IPv4;
+most operating systems also accept IPv4 on the default IPv6 listener). Set `HOST=127.0.0.1` to restrict
+it to local IPv4 connections, or `HOST=::1` for local IPv6, and `PORT` to change the listening port.
+
 This is the short list a self-hoster usually touches:
 
 | What               | Variables                                                                                                                                                            | Without them                                                                       |
 | ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
-| Core               | `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL` (both required in production), `DATABASE_URL`, `TRUSTED_ORIGINS`, `PORT`                                                     | Embedded PGlite in `data/pg`, localhost origins                                    |
+| Core               | `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL` (both required in production), `DATABASE_URL`, `TRUSTED_ORIGINS`, `HOST`, `PORT`                                             | Embedded PGlite in `data/pg`, localhost origins                                    |
 | Sign-in            | `OIDC_*`, `GOOGLE_*`, `MICROSOFT_*`, `APPLE_*`, `SIGNUP_EMAIL_DOMAINS`, `ADMIN_EMAILS` ([Accounts](#accounts))                                                       | Email/password only, open signup                                                   |
 | Email              | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `SMTP_SECURE`, `EMAIL_FROM`, `REQUIRE_EMAIL_VERIFICATION`                                                        | Emails print to the server log; no verification                                    |
 | Object storage     | `BUCKET`, `ACCESS_KEY_ID`, `SECRET_ACCESS_KEY`, `ENDPOINT`, `REGION` (any S3-compatible store)                                                                       | Uploaded assets stored under `data/assets`                                         |

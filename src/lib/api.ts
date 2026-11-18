@@ -20,6 +20,7 @@ import type {
   Frame,
   FrameVersion,
   FrameVersionInfo,
+  LibraryPublishPolicy,
   WorkspaceDetail,
   WorkspaceInvite,
   WorkspaceMember,
@@ -47,19 +48,64 @@ export interface ComponentInfo {
   usage_by_frame: { id: string; name: string; instances: number; approved: boolean }[]
 }
 
-export interface ComponentCandidate {
-  suggested_name: string
-  occurrences: number
-  frames: number
-  elements_each: number
-  sample_text: string
-  example: { frame_id: string; frame_name: string; element: string }
-}
-
 export interface ComponentLibrary {
   id: string
   name: string
-  components: { id: string; name: string; signature: string; description?: string; instances: number }[]
+  /** a library the canvas's workspace has published, rather than a canvas to copy from */
+  library?: boolean
+  /** a canvas to copy from: when it was last edited, the frame Home shows for it,
+   *  and whether someone else owns it */
+  updatedAt?: number
+  previewFrameId?: string
+  shared?: boolean
+  components: {
+    id: string
+    name: string
+    signature: string
+    description?: string
+    instances: number
+    /** a published library's version of the component; absent on a canvas to copy from */
+    rev?: number
+  }[]
+}
+
+export interface LibraryChangeEntry {
+  id: string
+  name: string
+  change: import('../../shared/components').LibraryChange
+}
+
+/** A canvas and its workspace's library: may it have one, what it has published,
+ *  and which of its linked components have a newer published state. */
+export interface CanvasLibrary {
+  /** whether this server sells plans at all; off on a self-hosted one */
+  billing: boolean
+  entitled: boolean
+  blocked?: 'no_workspace' | 'plan_required'
+  workspaceId?: string
+  /** the workspace lets this viewer publish (it may keep that to its owner and admins) */
+  canPublish: boolean
+  library: boolean
+  changes: LibraryChangeEntry[]
+  published_at?: number
+  published_by?: string
+  updates: { id: string; name: string; instances: number }[]
+  /** as a library: the canvases using it that are on an older publication */
+  behind?: { id: string; name: string; components: string[] }[]
+}
+
+/** What "Update everywhere" did, or in a dry run would do, canvas by canvas. */
+export interface LibraryUpdateReport {
+  dry_run: boolean
+  canvases: {
+    canvas_id: string
+    canvas_name: string
+    updated: string[]
+    frames_changed: number
+    approvals_withdrawn: number
+  }[]
+  /** canvases left as they were: no edit access there, or the pull was refused */
+  skipped: { canvas_id?: string; canvas_name?: string; reason: 'no_edit_access' | 'failed'; message: string }[]
 }
 
 export interface ComponentImpact {
@@ -81,6 +127,14 @@ export interface InstanceChangeInput {
   detach?: boolean
 }
 import type { CustomFont } from '../../shared/fonts'
+import type {
+  BuiltInAgent,
+  BuiltInAgentPatch,
+  CustomAgent,
+  CustomAgentInput,
+  CustomAgentPatch,
+} from '../../shared/customAgents'
+import type { AgentRole } from '../../shared/agents'
 import type { DesignToken, DesignTokenInput, ThemeRename, TokenEdit, TokenResult } from '../../shared/designTokens'
 
 export type HomeActivity = ActivityItem & { canvasId: string; canvasName: string }
@@ -322,6 +376,10 @@ export interface IntegrationsStatus {
 }
 import { getIdentity } from './identity'
 
+function agentScope(workspaceId: string | undefined): string {
+  return workspaceId ? `?workspace=${encodeURIComponent(workspaceId)}` : ''
+}
+
 export interface WorkspacesResponse {
   workspaces: WorkspaceSummary[]
   billing: { enabled: boolean }
@@ -404,6 +462,29 @@ export const api = {
     }),
   removeAvatar: () => req<{ ok: boolean }>('/api/me/avatar', { method: 'DELETE' }),
   canvasFonts: (canvasId: string) => req<CustomFont[]>(`/api/canvases/${canvasId}/fonts`),
+  /** custom agents: a workspace's, or without one the signed-in person's own */
+  listCustomAgents: (workspaceId?: string) => req<CustomAgent[]>(`/api/agents${agentScope(workspaceId)}`),
+  createCustomAgent: (input: CustomAgentInput, workspaceId?: string) =>
+    req<CustomAgent>(`/api/agents${agentScope(workspaceId)}`, { method: 'POST', body: JSON.stringify(input) }),
+  updateCustomAgent: (handle: string, patch: CustomAgentPatch, workspaceId?: string) =>
+    req<CustomAgent>(`/api/agents/${encodeURIComponent(handle)}${agentScope(workspaceId)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(patch),
+    }),
+  deleteCustomAgent: (handle: string, workspaceId?: string) =>
+    req<{ ok: true }>(`/api/agents/${encodeURIComponent(handle)}${agentScope(workspaceId)}`, { method: 'DELETE' }),
+  /** a canvas's team (the built-in agents it has on, then its custom ones) */
+  canvasTeam: (canvasId: string) => req<AgentRole[]>(`/api/canvases/${canvasId}/agents`),
+  listBuiltInAgents: (workspaceId?: string) => req<BuiltInAgent[]>(`/api/agents/builtin${agentScope(workspaceId)}`),
+  updateBuiltInAgent: (id: string, patch: BuiltInAgentPatch, workspaceId?: string) =>
+    req<BuiltInAgent>(`/api/agents/builtin/${encodeURIComponent(id)}${agentScope(workspaceId)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(patch),
+    }),
+  resetBuiltInAgent: (id: string, workspaceId?: string) =>
+    req<BuiltInAgent>(`/api/agents/builtin/${encodeURIComponent(id)}${agentScope(workspaceId)}`, {
+      method: 'DELETE',
+    }),
   rotateWebhookSecret: (id: string) => req<{ secret: string }>(`/api/webhooks/${id}/rotate`, { method: 'POST' }),
   testWebhook: (id: string) => req<WebhookDeliveryResult>(`/api/webhooks/${id}/test`, { method: 'POST' }),
   notificationSettings: () => req<NotificationSettings>('/api/notifications'),
@@ -527,7 +608,7 @@ export const api = {
     req(`/api/canvases/${canvasId}/references/${refId}`, { method: 'DELETE' }),
   resolveProposal: (canvasId: string, proposalId: string, accept: boolean) =>
     req(`/api/canvases/${canvasId}/proposals/${proposalId}`, { method: 'POST', body: JSON.stringify({ accept }) }),
-  /* raw image bytes -> permanent /a/ URL (5 MB cap, type sniffed server-side) */
+  /* raw image bytes -> permanent /a/ URL (5 MB on Free, 100 MB on Pro; type sniffed server-side) */
   uploadAsset: async (canvasId: string, blob: Blob) => {
     const res = await fetch(`/api/canvases/${canvasId}/assets`, {
       method: 'POST',
@@ -535,7 +616,7 @@ export const api = {
       body: blob,
     })
     if (!res.ok) {
-      if (res.status === 413) throw new Error('image exceeds the 5 MB limit')
+      if (res.status === 413) throw new Error('image exceeds the 100 MB limit')
       const text = await res.text()
       let msg = `${res.status} ${text}`
       try {
@@ -605,9 +686,33 @@ export const api = {
     req<{ html: string; width: number; height: number; variants: number }>(
       `/api/canvases/${canvasId}/components/${componentId}/preview`,
     ),
-  componentCandidates: (canvasId: string) =>
-    req<ComponentCandidate[]>(`/api/canvases/${canvasId}/component-candidates`),
   componentLibraries: (canvasId: string) => req<ComponentLibrary[]>(`/api/canvases/${canvasId}/component-libraries`),
+  canvasLibrary: (canvasId: string) => req<CanvasLibrary>(`/api/canvases/${canvasId}/library`),
+  publishLibrary: (canvasId: string, components?: string[]) =>
+    req<{ published: LibraryChangeEntry[]; removed: LibraryChangeEntry[] }>(
+      `/api/canvases/${canvasId}/library/publish`,
+      { method: 'POST', body: JSON.stringify(components ? { components } : {}) },
+    ),
+  unpublishLibrary: (canvasId: string, components?: string[]) =>
+    req<{ unpublished: { id: string; name: string }[] }>(`/api/canvases/${canvasId}/library`, {
+      method: 'DELETE',
+      body: JSON.stringify(components ? { components } : {}),
+    }),
+  /** a published component as its library last published it, before this canvas uses it */
+  libraryPreview: (canvasId: string, libraryCanvasId: string, componentId: string) =>
+    req<{ html: string; width: number; height: number; variants: number }>(
+      `/api/canvases/${canvasId}/components/${componentId}/preview?library=${encodeURIComponent(libraryCanvasId)}`,
+    ),
+  /** pull the library's latest publication into every canvas of the workspace using it */
+  updateLibraryEverywhere: (canvasId: string, dryRun = false) =>
+    req<LibraryUpdateReport>(`/api/canvases/${canvasId}/library/update-consumers`, {
+      method: 'POST',
+      body: JSON.stringify(dryRun ? { dryRun } : {}),
+    }),
+  workspaceLibraries: (workspaceId: string) =>
+    req<{ id: string; name: string; components: number; publishedAt: number; usedBy: number; behind?: number }[]>(
+      `/api/workspaces/${workspaceId}/libraries`,
+    ),
   createComponent: (
     canvasId: string,
     body: { name: string; frameId: string; element: string; replaceMatching?: boolean; description?: string },
@@ -631,10 +736,18 @@ export const api = {
       method: 'PATCH',
       body: JSON.stringify(body),
     }),
+  /** a soft delete: no frame changes, instances keep their markup, and it can be restored */
   deleteComponent: (canvasId: string, componentId: string) =>
-    req<{ deleted: string; instances_detached: number }>(`/api/canvases/${canvasId}/components/${componentId}`, {
-      method: 'DELETE',
-    }),
+    req<{ deleted: string; instances_kept: number; frames: number }>(
+      `/api/canvases/${canvasId}/components/${componentId}`,
+      { method: 'DELETE' },
+    ),
+  /** bring a deleted component back (`restoreComponent` below puts one back to an earlier revision) */
+  undeleteComponent: (canvasId: string, componentId: string) =>
+    req<{ component: ComponentDef; main: 'kept' | 'written' | 'none' }>(
+      `/api/canvases/${canvasId}/components/${componentId}/undelete`,
+      { method: 'POST' },
+    ),
   restoreComponent: (canvasId: string, componentId: string, rev: number) =>
     req<ComponentImpact>(`/api/canvases/${canvasId}/components/${componentId}/restore`, {
       method: 'POST',
@@ -835,6 +948,10 @@ export const api = {
   getWorkspace: (id: string) => req<WorkspaceDetail>(`/api/workspaces/${id}`),
   renameWorkspace: (id: string, name: string) =>
     req<WorkspaceSummary>(`/api/workspaces/${id}`, { method: 'PATCH', body: JSON.stringify({ name }) }),
+  setLibraryPublish: (id: string, libraryPublish: LibraryPublishPolicy) =>
+    req<WorkspaceSummary>(`/api/workspaces/${id}`, { method: 'PATCH', body: JSON.stringify({ libraryPublish }) }),
+  setWorkspaceSeats: (id: string, seats: number) =>
+    req<WorkspaceSummary>(`/api/workspaces/${id}/billing/seats`, { method: 'PUT', body: JSON.stringify({ seats }) }),
   deleteWorkspace: (id: string) => req(`/api/workspaces/${id}`, { method: 'DELETE' }),
   inviteToWorkspace: (id: string, email: string, role: WorkspaceRole = 'member') =>
     req<WorkspaceInviteResult>(`/api/workspaces/${id}/members`, {
@@ -849,10 +966,11 @@ export const api = {
     req(`/api/workspaces/${id}/invites/${inviteId}`, { method: 'DELETE' }),
   /* billing: the catalogue, and the hosted Stripe pages */
   billingPlans: () => req<PlansResponse>('/api/billing/plans'),
-  workspaceCheckout: (id: string, interval: BillingInterval) =>
+  /** `seats` is how many to pay for; the bill never counts fewer than the members */
+  workspaceCheckout: (id: string, interval: BillingInterval, seats?: number) =>
     req<{ url: string }>(`/api/workspaces/${id}/billing/checkout`, {
       method: 'POST',
-      body: JSON.stringify({ interval }),
+      body: JSON.stringify({ interval, seats }),
     }),
   workspacePortal: (id: string) => req<{ url: string }>(`/api/workspaces/${id}/billing/portal`, { method: 'POST' }),
   syncWorkspaceBilling: (id: string, sessionId?: string) =>

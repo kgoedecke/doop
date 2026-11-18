@@ -17,12 +17,15 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
   ${FRAME_DROP_RUNTIME}
   ${FRAME_PROTO_RUNTIME}
   /* horizontal overscroll inside a frame must not chain to the parent page,
-     where the browser turns it into a history back/forward swipe. Adopted
-     sheet, not a <style> tag — the morph would wipe a tag from <head>. */
+     where the browser turns it into a history back/forward swipe. A frame
+     is an artboard, so it never wears a scrollbar either (its content still
+     scrolls): important, and html:root so a design's own :root or body.x
+     rule cannot outrank it.
+     Adopted sheet, not a <style> tag — the morph would wipe a tag from <head>. */
   var vSheet = null
   try {
     vSheet = new CSSStyleSheet()
-    vSheet.replaceSync('html,body{overscroll-behavior-x:none}[data-v-path-hidden]{visibility:hidden!important}')
+    vSheet.replaceSync('html,body{overscroll-behavior-x:none}html:root,html:root>body{scrollbar-width:none!important}html:root::-webkit-scrollbar,html:root>body::-webkit-scrollbar{display:none!important}[data-v-path-hidden]{visibility:hidden!important}svg[data-doop-drawing="path"]{overflow:visible}')
     document.adoptedStyleSheets = document.adoptedStyleSheets.concat(vSheet)
   } catch (e) {}
   /* ⌘Y outline mode: every box drawn as a hairline, fills and shadows off.
@@ -32,6 +35,78 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
     vOutlineSheet = new CSSStyleSheet()
     vOutlineSheet.replaceSync('html,body{background:transparent!important}body *{outline:1px solid rgba(1,119,211,.6)!important;outline-offset:-1px!important;background:transparent!important;box-shadow:none!important;text-shadow:none!important}body img,body video,body canvas,body svg{opacity:.25!important}')
   } catch (e) {}
+  /* ---- bleed ----
+     A standalone element (a shape on the canvas, no frame around it) is the
+     whole document, and an iframe paints nothing past its edge, so a stroke
+     wider than the path's box was cut off. As in Figma the box stays the
+     path's geometry and the stroke spills past it: the editor makes the
+     iframe that many px larger on every side (asked for with
+     doop:bleed-want, set with doop:bleed) and the body sits inset by it.
+     Everything this runtime says or hears stays in the frame's own design
+     px; only the browser's viewport APIs see the margin, through these. */
+  var bleed = 0
+  var bleedSheet = null
+  try { bleedSheet = new CSSStyleSheet() } catch (e) {}
+  function viewX(x) { return x + bleed }
+  function frameWidth() { return innerWidth - 2 * bleed }
+  function frameHeight() { return innerHeight - 2 * bleed }
+  function setBleed(px) {
+    bleed = px > 0 ? px : 0
+    if (!bleedSheet) return
+    bleedSheet.replaceSync(bleed
+      ? 'html:root{overflow:hidden!important}html:root>body[data-doop-canvas-element]{position:fixed!important;' +
+        'inset:' + bleed + 'px!important;width:auto!important;height:auto!important;margin:0!important}'
+      : '')
+    var rest = document.adoptedStyleSheets.filter(function (s) { return s !== bleedSheet })
+    document.adoptedStyleSheets = bleed ? rest.concat(bleedSheet) : rest
+  }
+  /* the margin a standalone shape's strokes need past its box: half the
+     stroke as drawn, a miter join (up to its own miter limit, which an
+     imported SVG may set past the default 4) or a square cap reaching
+     further, in steps so a stroke-width scrub resizes the iframe rarely */
+  var BLEED_STEP = 16
+  var BLEED_MAX = 1024
+  function neededBleed() {
+    var body = document.body
+    if (!body || !body.hasAttribute('data-doop-canvas-element')) return 0
+    var width = frameWidth(), height = frameHeight(), need = 0
+    var shapes = body.querySelectorAll('path,rect,circle,ellipse,line,polyline,polygon')
+    for (var i = 0; i < shapes.length; i++) {
+      var shape = shapes[i]
+      if (shape.closest('defs,clipPath,mask,symbol,pattern,marker,[data-doop-defs]')) continue
+      var cs = getComputedStyle(shape)
+      if (cs.stroke === 'none' || cs.display === 'none') continue
+      /* a circle of the stroke's width, through the shape's transform: how
+         far it reaches along x and along y (a stretched path's stroke
+         stretches with it) */
+      var m = shape.getScreenCTM && shape.getScreenCTM()
+      var join = /miter|arcs/.test(cs.strokeLinejoin) ? Math.max(1, parseFloat(cs.strokeMiterlimit) || 4) : 1
+      var cap = cs.strokeLinecap === 'square' ? Math.SQRT2 : 1
+      var half = (parseFloat(cs.strokeWidth) || 0) / 2 * Math.max(join, cap)
+      if (!half) continue
+      var hx = half * (m ? Math.hypot(m.a, m.c) : 1)
+      var hy = half * (m ? Math.hypot(m.b, m.d) : 1)
+      var r = designRect(shape)
+      need = Math.max(need, hx - r.x, hy - r.y, r.x + r.width + hx - width, r.y + r.height + hy - height)
+    }
+    return Math.min(BLEED_MAX, Math.ceil(Math.max(0, need) / BLEED_STEP) * BLEED_STEP)
+  }
+  var bleedWanted = 0
+  var bleedCheck = 0
+  function checkBleed() {
+    if (bleedCheck) return
+    bleedCheck = requestAnimationFrame(function () {
+      bleedCheck = 0
+      var want = neededBleed()
+      if (want === bleedWanted) return
+      bleedWanted = want
+      parent.postMessage({ type: 'doop:bleed-want', px: want }, '*')
+    })
+  }
+  try {
+    new MutationObserver(checkBleed).observe(document.documentElement, { attributes: true, childList: true, subtree: true })
+  } catch (e) {}
+  addEventListener('resize', checkBleed)
   function setOutlines(on) {
     if (!vOutlineSheet) return
     var rest = document.adoptedStyleSheets.filter(function (s) { return s !== vOutlineSheet })
@@ -126,6 +201,13 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
         styleEdit.original = target.style.cssText
         styleEdit.touched = {}
         previewStyle(target, styleEdit.styles)
+        // A vector's paint preview sits on its shapes, which the update may
+        // have replaced: their fresh styles are the baseline, painted over again.
+        if (Object.keys(styleEdit.paint).length) {
+          var shapes = vectorShapes(target)
+          styleEdit.shapes = shapes.map(function (shape) { return { el: shape, original: shape.getAttribute('style') } })
+          paintShapes(shapes, styleEdit.paint)
+        }
       }
     }
   }
@@ -223,9 +305,9 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
   function placeCaret(x, y) {
     var r = null
     if (document.caretRangeFromPoint) {
-      r = document.caretRangeFromPoint(x, y)
+      r = document.caretRangeFromPoint(viewX(x), viewX(y))
     } else if (document.caretPositionFromPoint) {
-      var p = document.caretPositionFromPoint(x, y)
+      var p = document.caretPositionFromPoint(viewX(x), viewX(y))
       if (p) { r = document.createRange(); r.setStart(p.offsetNode, p.offset); r.collapse(true) }
     }
     if (r) {
@@ -364,7 +446,7 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
     }
     var adopted = document.adoptedStyleSheets || []
     for (var t = 0; t < adopted.length; t++) {
-      if (adopted[t] === vSheet || adopted[t] === vOutlineSheet) continue // the runtime's own
+      if (adopted[t] === vSheet || adopted[t] === vOutlineSheet || adopted[t] === bleedSheet) continue // the runtime's own
       var adoptedText = rulesText(adopted[t])
       if (adoptedText === null) continue
       var adoptedStyle = document.createElement('style')
@@ -424,7 +506,7 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
     ev.preventDefault()
     ev.stopPropagation()
     var el = candidate(ev.target)
-    if (el) activate(el, ev.clientX, ev.clientY, ev.detail > 1)
+    if (el) activate(el, ev.clientX - bleed, ev.clientY - bleed, ev.detail > 1)
     else deactivate()
   }, true)
 
@@ -450,7 +532,7 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
     ev.stopPropagation()
     setEdit(false)
     parent.postMessage({ type: 'doop:edit-esc' }, '*')
-    parent.postMessage({ type: 'doop:context-menu', x: ev.clientX, y: ev.clientY }, '*')
+    parent.postMessage({ type: 'doop:context-menu', x: ev.clientX - bleed, y: ev.clientY - bleed }, '*')
   }, true)
 
   /* Focus stays in the frame after text editing ends, and the canvas page
@@ -486,17 +568,33 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
   var KEY_FIELDS = ['key', 'code', 'ctrlKey', 'metaKey', 'shiftKey', 'altKey', 'repeat']
   for (var kf = 0; kf < KEY_FIELDS.length; kf++) keyGetters[KEY_FIELDS[kf]] = getter(KeyboardEvent.prototype, KEY_FIELDS[kf])
   function relayKey(ev) {
-    if (!keyPort || editing || protoOn) return
+    if (!keyPort) return
     /* isTrusted is the event's own, unforgeable property; it is read through
        the prototype getter only where an engine puts it there */
     if (!(readTrusted ? apply(readTrusted, ev, []) : ev.isTrusted)) return
-    var t = apply(readTarget, ev, [])
-    if (t && apply(readNodeType, t, []) === 1) {
-      if (apply(elementMatches, t, ['input, textarea, select'])) return
-      if (t instanceof HTMLElement && apply(readEditable, t, [])) return
-    }
     var k = {}
     for (var f = 0; f < KEY_FIELDS.length; f++) k[KEY_FIELDS[f]] = apply(keyGetters[KEY_FIELDS[f]], ev, [])
+    /* ⌘1…⌘9 switch the desktop shell's tabs and ⌘, opens Settings
+       (desktop.ts), so they travel from text being edited and a field too:
+       nothing in here types with them. The prototype player hands its
+       screens no port, so a playing prototype keeps them (it is modal) */
+    var tabChord =
+      (k.metaKey || k.ctrlKey) && !k.altKey && !k.shiftKey && /^(Digit[1-9]|Comma)$/.test(String(k.code))
+    /* the shell is about to leave this canvas: text typed in the last
+       400ms goes first, down the key's own port so it arrives ahead of it */
+    if (tabChord && editing && editTimer && apply(readType, ev, []) === 'keydown') {
+      clearTimeout(editTimer)
+      editTimer = null
+      apply(portSend, keyPort, [{ event: 'edited', html: serialize() }])
+    }
+    if (!tabChord) {
+      if (editing || protoOn) return
+      var t = apply(readTarget, ev, [])
+      if (t && apply(readNodeType, t, []) === 1) {
+        if (apply(elementMatches, t, ['input, textarea, select'])) return
+        if (t instanceof HTMLElement && apply(readEditable, t, [])) return
+      }
+    }
     var type = apply(readType, ev, [])
     var mod = (k.metaKey || k.ctrlKey) && !k.altKey
     var letter = String(k.key).toLowerCase()
@@ -570,7 +668,7 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
 
   function designRect(el) {
     var r = el.getBoundingClientRect()
-    return { x: r.left, y: r.top, width: r.width, height: r.height }
+    return { x: r.left - bleed, y: r.top - bleed, width: r.width, height: r.height }
   }
 
   /* The element's own turn, in degrees clockwise: its rotate property plus
@@ -724,9 +822,16 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
   }
 
   function drawingHit(x, y, standalone, selected) {
-    var top = elementAt(x, y)
-    var el = standalone ? document.body.firstElementChild : top && top.closest('[data-doop-drawing]')
+    // Inside an entered standalone the press is a layer's, as in a frame.
+    if (standalone && enteredStandalone(selected)) return null
+    var top = elementAt(x, y, selected)
+    // A press inside a group drags the group, as a click there picks it.
+    var el = standalone ? document.body.firstElementChild
+      : top && groupLevel(top.closest('[data-doop-drawing]:not([data-doop-drawing="group"])') || top, selected, false)
     if (!el || !el.matches('[data-doop-drawing]') || isLocked(el)) return null
+    // A drawing inside a box (a group) moves as a layer: its box may lay it
+    // out, and a drop reorders it there or places it where it lands.
+    if (!standalone && el.parentElement !== document.body) return null
     var picked = pickedAround(selected, el)
     if (!standalone && picked && elementGeometry(picked).enabled) return null
     // A drawing picked with other layers moves with them, through the layer
@@ -774,7 +879,7 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
   /* the topmost unlocked element under a point, a standalone's root included:
      a double-click on a shape inside an imported group edits that shape */
   function vectorAt(x, y) {
-    var stack = document.elementsFromPoint(x, y)
+    var stack = document.elementsFromPoint(viewX(x), viewX(y))
     for (var i = 0; i < stack.length; i++) {
       var el = stack[i]
       if (el === document.documentElement || el === document.body) return null
@@ -807,6 +912,11 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
       layout = page.inverse().multiply(matrix)
     } finally { probe.remove() }
     var css = getComputedStyle(path)
+    matrix = matrix.translate(0, 0)
+    matrix.e -= bleed
+    matrix.f -= bleed
+    layout.e -= bleed / page.a
+    layout.f -= bleed / page.d
     var info = {
       selector: cssPath(svg), data: path.getAttribute('d'),
       matrix: [matrix.a, matrix.b, matrix.c, matrix.d, matrix.e, matrix.f],
@@ -816,7 +926,7 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
     /* a shape inside a group: where the group's box is, in the same layout px */
     if (svg.parentElement && svg.parentElement !== document.body) {
       var box = svg.parentElement.getBoundingClientRect()
-      info.parentBox = { x: box.left / page.a, y: box.top / page.d, width: box.width / page.a, height: box.height / page.d }
+      info.parentBox = { x: (box.left - bleed) / page.a, y: (box.top - bleed) / page.d, width: box.width / page.a, height: box.height / page.d }
     }
     return info
   }
@@ -831,9 +941,21 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
     return document.body.firstElementChild
   }
 
-  function elementAt(x, y) {
-    var stack = document.elementsFromPoint(x, y)
+  /* a layer inside the standalone's root is picked: the root has been
+     entered, so a press inside it is at that level, as in a group */
+  function enteredStandalone(selected) {
     var root = standaloneRoot()
+    if (!root) return false
+    var selectors = Array.isArray(selected) ? selected : selected ? [selected] : []
+    return selectors.some(function (sel) {
+      var picked = styleTarget(sel)
+      return !!picked && picked !== root && root.contains(picked)
+    })
+  }
+
+  function elementAt(x, y, selected) {
+    var stack = document.elementsFromPoint(viewX(x), viewX(y))
+    var root = enteredStandalone(selected) ? null : standaloneRoot()
     for (var i = 0; i < stack.length; i++) {
       var el = stack[i]
       if (el === document.documentElement || el === document.body) return null
@@ -843,26 +965,54 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
     return null
   }
 
-  function probe(x, y) {
-    var el = elementAt(x, y)
-    if (el) el = el.closest('[data-doop-drawing]') || el
+  /* Groups pick as a whole, as in a design tool: a click lands on the
+     outermost group around the hit, unless something inside that group is
+     already picked, which puts the click at that level (the picked layer's
+     siblings). Deeper (a double-click) steps one level into a picked
+     group. Only groups made on the canvas (⌘G, ⇧A, an SVG import) count. */
+  function groupLevel(el, selected, deeper) {
+    var chain = [el]
+    for (var p = el.parentElement; p && p !== document.body; p = p.parentElement) {
+      if (p.matches('[data-doop-drawing="group"]') && !isLocked(p)) chain.unshift(p)
+    }
+    // a press sends the one picked layer as a string, several as a list
+    var picked = (Array.isArray(selected) ? selected : typeof selected === 'string' ? [selected] : [])
+      .map(styleTarget).filter(Boolean)
+    for (var i = 0; i < chain.length - 1; i++) {
+      var group = chain[i]
+      var within = picked.some(function (s) { return s !== group && group.contains(s) })
+      var entering = deeper && picked.indexOf(group) !== -1
+      if (!within && !entering) return group
+    }
+    return chain[chain.length - 1]
+  }
+
+  function probeTarget(x, y, grouped, selected, deeper) {
+    var el = elementAt(x, y, selected)
+    if (el) el = el.closest('[data-doop-drawing]:not([data-doop-drawing="group"])') || el
+    return el && grouped ? groupLevel(el, selected, deeper) : el
+  }
+
+  function probe(x, y, grouped, selected) {
+    var el = probeTarget(x, y, grouped, selected, false)
     return el ? hitInfo(el) : null
   }
 
   /* Right-click can reach a lock so the menu can unlock it. SVGs are one
      layer in the rail, and their paths share that same context menu. */
   function contextHit(x, y) {
-    var el = document.elementFromPoint(x, y)
+    var el = document.elementFromPoint(viewX(x), viewX(y))
     if (!el || el === document.body || el === document.documentElement) return null
     el = el.closest('[data-doop-locked]') || el.closest('[data-doop-drawing]') || el.closest('svg') || el
     return hitInfo(el)
   }
 
   function moveHit(x, y, selected) {
-    var el = elementAt(x, y)
+    var el = elementAt(x, y, selected)
     // A selected group moves as a whole even when the press hits a child.
     var picked = el && pickedAround(selected, el)
     if (picked) el = picked
+    else if (el) el = groupLevel(el, selected, false)
     while (el && el !== document.body && el !== document.documentElement) {
       if (elementGeometry(el).enabled) {
         var info = hitInfo(el)
@@ -887,28 +1037,9 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
      so it skips the outerHTML/selector work and returns just tag + rect */
   /* outlines what a click there would pick: a drawing is hovered as a
      whole, the way probe() picks it, so the hover and the pick agree */
-  function hoverProbe(x, y) {
-    var el = elementAt(x, y)
-    if (el) el = el.closest('[data-doop-drawing]') || el
+  function hoverProbe(x, y, selected) {
+    var el = probeTarget(x, y, true, selected, false)
     return el ? { tag: el.tagName.toLowerCase(), selector: cssPath(el), rect: designRect(el) } : null
-  }
-
-  /* full source of one element, with runtime markers stripped */
-  function elementCode(selector) {
-    var el = null
-    try { el = selector ? document.querySelector(selector) : null } catch (e) { /* bad selector */ }
-    if (!el) return null
-    var c = el.cloneNode(true)
-    var nodes = [c].concat(Array.prototype.slice.call(c.querySelectorAll('*')))
-    for (var i = 0; i < nodes.length; i++) {
-      nodes[i].removeAttribute('data-v-ran')
-      nodes[i].removeAttribute('data-v-hover')
-      nodes[i].removeAttribute('data-v-active')
-      nodes[i].removeAttribute('contenteditable')
-    }
-    var html = c.outerHTML
-    if (html.length > 20000) html = html.slice(0, 20000) + '\\n<!-- truncated -->'
-    return html
   }
 
   /* ---- element properties (the Design panel) ----
@@ -935,7 +1066,7 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
     var p = el.parentElement
     // The body's containing canvas is the viewport, even when all children are absolute.
     return p === document.body || !p || p === document.documentElement
-      ? { x: 0, y: 0, width: innerWidth, height: innerHeight }
+      ? { x: 0, y: 0, width: frameWidth(), height: frameHeight() }
       : designRect(p)
   }
 
@@ -1009,6 +1140,7 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
         editGeometry(follower.selector, { kind: 'nudge', dx: dx, dy: dy })
       })
     }
+    if (offsetAnchored(el, cs)) return moveByOffsets(el, selector, rect, dx, dy)
     // Probe the local translation basis. This handles scaled/rotated ancestors and
     // percentage translations without flattening the element's existing transform.
     // All temporary styles are restored synchronously, before painting or saving.
@@ -1049,6 +1181,63 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
       else el.setAttribute('style', settledStyle)
     }
     return finalTranslate !== null
+  }
+
+  function isAutoOffset(el, prop) {
+    // Typed OM keeps 'auto' where getComputedStyle reports the used px.
+    try { if (el.computedStyleMap) return String(el.computedStyleMap().get(prop)) === 'auto' } catch (e) {}
+    var v = el.style.getPropertyValue(prop)
+    return !v || v === 'auto'
+  }
+
+  /* An absolutely placed layer (a drawn shape, a group) is anchored by its
+     left and top, as a design tool writes it: a move rewrites those rather
+     than piling a translate on top. One stretched between opposite offsets
+     would resize instead, so it keeps the translate path. */
+  function offsetAnchored(el, cs) {
+    return (cs.position === 'absolute' || cs.position === 'fixed') && el !== document.body
+      && isAutoOffset(el, 'right') && isAutoOffset(el, 'bottom')
+  }
+
+  function moveByOffsets(el, selector, rect, dx, dy) {
+    // The same probe as the translate path: left/top through any scaled or
+    // turned ancestor, restored synchronously before painting or saving.
+    var original = el.getAttribute('style')
+    var next = null
+    try {
+      el.style.setProperty('transition', 'none', 'important')
+      var cs = getComputedStyle(el)
+      var left = parseFloat(cs.left) || 0
+      var top = parseFloat(cs.top) || 0
+      el.style.setProperty('left', left + 'px', 'important')
+      el.style.setProperty('top', top + 'px', 'important')
+      var zero = designRect(el)
+      el.style.setProperty('left', (left + 100) + 'px', 'important')
+      var right = designRect(el)
+      el.style.setProperty('left', left + 'px', 'important')
+      el.style.setProperty('top', (top + 100) + 'px', 'important')
+      var down = designRect(el)
+      var a = (right.x - zero.x) / 100, b = (right.y - zero.y) / 100
+      var c = (down.x - zero.x) / 100, d = (down.y - zero.y) / 100
+      var determinant = a * d - b * c
+      if (Math.abs(determinant) >= 0.000001) {
+        var x = rect.x + dx - zero.x, y = rect.y + dy - zero.y
+        next = {
+          left: Math.round((left + (d * x - c * y) / determinant) * 100) / 100 + 'px',
+          top: Math.round((top + (a * y - b * x) / determinant) * 100) / 100 + 'px',
+        }
+      }
+    } finally {
+      if (original === null) el.removeAttribute('style')
+      else el.setAttribute('style', original)
+      if (next !== null) applyStyle(selector, next)
+      var settledStyle = el.getAttribute('style')
+      el.style.setProperty('transition', 'none', 'important')
+      designRect(el)
+      if (settledStyle === null) el.removeAttribute('style')
+      else el.setAttribute('style', settledStyle)
+    }
+    return next !== null
   }
 
   function dimensionValue(el, axis, cs) {
@@ -1206,6 +1395,7 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
       borderStyle: cs['border' + drawn + 'Style'],
       borderColor: cs['border' + drawn + 'Color'],
       borderRadius: px(cs.borderTopLeftRadius),
+      vector: vectorInfo(el),
       color: textValues.color,
       fontSize: px(textValues.fontSize),
       fontWeight: textValues.fontWeight,
@@ -1282,7 +1472,7 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
      cross-origin sheet cannot be read and is passed over. */
   function isRuntimeSheet(sheet) {
     var owner = sheet.ownerNode
-    return sheet === vSheet || sheet === vOutlineSheet || sheet === protoSheet ||
+    return sheet === vSheet || sheet === vOutlineSheet || sheet === bleedSheet || sheet === protoSheet ||
       !!(owner && owner.hasAttribute && owner.hasAttribute('data-v-edit'))
   }
   function sheetOutranksInline(el, name, value) {
@@ -1375,7 +1565,7 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
       postEdited()
     }
     styleEdit = { selector: selector, original: el.style.cssText, styles: {}, touched: {}, runs: [], created: [], renamed: [],
-      followers: gestureFollowers(el, followers) }
+      followers: gestureFollowers(el, followers), shapes: [], paint: {} }
     return true
   }
   function endStyleEdit(selector, cancel) {
@@ -1390,6 +1580,10 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
         if (follower.original === null) follower.el.removeAttribute('style')
         else follower.el.setAttribute('style', follower.original)
         settleGeometry(follower.el)
+      })
+      edit.shapes.forEach(function (shape) {
+        if (shape.original === null) shape.el.removeAttribute('style')
+        else shape.el.setAttribute('style', shape.original)
       })
       var original = document.createElement('div').style
       original.cssText = edit.original
@@ -1409,8 +1603,60 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
       if (selectedTextRange(el)) styleTextRange(el, edit.styles)
       postEdited(true)
       postTextState()
-    } else if (Object.keys(edit.touched).length || edit.runs.length || edit.created.length || edit.renamed.length) postEdited(true)
+    } else if (Object.keys(edit.touched).length || edit.shapes.length || edit.runs.length || edit.created.length || edit.renamed.length) postEdited(true)
     return true
+  }
+  /* A vector layer paints with SVG's fill and stroke, not the box's
+     background and border: the Design panel's Fill and Stroke write these,
+     and they go on the shapes themselves, where a drawn or imported path
+     carries them as attributes an inherited value from the <svg> loses to. */
+  var VECTOR_PAINT = ['fill', 'fill-opacity', 'stroke', 'stroke-width', 'stroke-opacity']
+  var VECTOR_SHAPE = /^(path|rect|circle|ellipse|line|polyline|polygon)$/
+  var VECTOR_SKIP = /^(defs|clippath|mask|symbol|pattern|marker|lineargradient|radialgradient|filter|foreignobject|text)$/
+  function vectorShapes(el) {
+    if (!el || el.namespaceURI !== 'http://www.w3.org/2000/svg') return []
+    var tag = el.tagName.toLowerCase()
+    if (VECTOR_SHAPE.test(tag)) return [el]
+    if (tag !== 'svg' && tag !== 'g') return []
+    var shapes = []
+    ;(function walk(node) {
+      for (var c = node.firstElementChild; c; c = c.nextElementSibling) {
+        var name = c.tagName.toLowerCase()
+        if (VECTOR_SHAPE.test(name)) shapes.push(c)
+        else if (!VECTOR_SKIP.test(name) && !(c.hasAttribute && c.hasAttribute('data-doop-defs'))) walk(c)
+      }
+    })(el)
+    return shapes
+  }
+  function vectorInfo(el) {
+    var shapes = vectorShapes(el)
+    if (!shapes.length) return null
+    var scs = getComputedStyle(shapes[0])
+    var inline = {}
+    for (var i = 0; i < VECTOR_PAINT.length; i++) {
+      var value = shapes[0].style.getPropertyValue(VECTOR_PAINT[i])
+      if (value) inline[VECTOR_PAINT[i]] = value
+    }
+    return { fill: scs.fill, fillOpacity: px(scs.fillOpacity), stroke: scs.stroke, strokeWidth: px(scs.strokeWidth), inline: inline }
+  }
+  /* the vector paint in a patch, taken out of it; null when there is none or
+     el is no vector */
+  function takeVectorPaint(el, styles) {
+    var paint = null
+    var rest = {}
+    var shapes = vectorShapes(el)
+    for (var k in styles) {
+      if (!Object.prototype.hasOwnProperty.call(styles, k)) continue
+      if (shapes.length && VECTOR_PAINT.indexOf(k) !== -1) (paint = paint || {})[k] = styles[k]
+      else rest[k] = styles[k]
+    }
+    return paint ? { shapes: shapes, paint: paint, rest: rest } : null
+  }
+  function paintShapes(shapes, paint) {
+    shapes.forEach(function (shape) {
+      patchStyle(shape, paint)
+      if (!shape.getAttribute('style')) shape.removeAttribute('style')
+    })
   }
   function applyStyle(selector, styles, uniformText) {
     var el = styleTarget(selector)
@@ -1424,6 +1670,27 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
       patchStyle(el, styles)
       if (!el.getAttribute('style')) el.removeAttribute('style')
       return true
+    }
+    var vector = takeVectorPaint(el, styles)
+    if (vector) {
+      if (gesture) {
+        Object.assign(styleEdit.paint, vector.paint)
+        // The shapes' own styles, put back on a cancel as a follower's are.
+        vector.shapes.forEach(function (shape) {
+          if (!styleEdit.shapes.some(function (known) { return known.el === shape })) {
+            styleEdit.shapes.push({ el: shape, original: shape.getAttribute('style') })
+          }
+        })
+      }
+      paintShapes(vector.shapes, vector.paint)
+      styles = vector.rest
+      if (!Object.keys(styles).length) {
+        if (!gesture) {
+          if (styleTimer) clearTimeout(styleTimer)
+          styleTimer = setTimeout(function () { styleTimer = null; postEdited() }, 250)
+        }
+        return true
+      }
     }
     function noteRuns(change) {
       if (!gesture) return
@@ -1479,6 +1746,7 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
       parent.postMessage({ type: 'doop:inspect-result', reqId: d.reqId, info: inspect(d.selector) }, '*')
     }
     if (d.type === 'doop:outlines') setOutlines(d.on === true)
+    if (d.type === 'doop:bleed' && typeof d.px === 'number') setBleed(d.px)
     if (d.type === 'doop:computed' && Array.isArray(d.properties)) {
       var computedEl = styleTarget(d.selector)
       var values = null
@@ -1538,7 +1806,7 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
     if (d.type === 'doop:edit') {
       setEdit(!!d.on)
       if (d.on && typeof d.x === 'number' && typeof d.y === 'number') {
-        var dblEl = candidate(document.elementFromPoint(d.x, d.y))
+        var dblEl = candidate(document.elementFromPoint(viewX(d.x), viewX(d.y)))
         if (dblEl) {
           activate(dblEl, d.x, d.y, true)
           selectAllIn(dblEl)
@@ -1601,7 +1869,15 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
       parent.postMessage({ type: 'doop:lock-result', reqId: d.reqId, ok: !!lockEl }, '*')
     }
     if (d.type === 'doop:probe') {
-      parent.postMessage({ type: 'doop:probe-result', reqId: d.reqId, hit: probe(d.x, d.y) }, '*')
+      parent.postMessage({ type: 'doop:probe-result', reqId: d.reqId, hit: probe(d.x, d.y, d.grouped === true, d.selected) }, '*')
+    }
+    if (d.type === 'doop:enter-group') {
+      /* a double-click: the layer one level into a picked group, or null
+         when the point is on no picked group (the double-click edits instead) */
+      var shallow = probeTarget(d.x, d.y, true, d.selected, false)
+      var inner = probeTarget(d.x, d.y, true, d.selected, true)
+      parent.postMessage({ type: 'doop:enter-group-result', reqId: d.reqId,
+        hit: inner && inner !== shallow ? hitInfo(inner) : null }, '*')
     }
     if (d.type === 'doop:context-hit') {
       parent.postMessage({ type: 'doop:context-hit-result', reqId: d.reqId, hit: contextHit(d.x, d.y) }, '*')
@@ -1612,8 +1888,16 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
     if (d.type === 'doop:move-hit') {
       parent.postMessage({ type: 'doop:move-hit-result', reqId: d.reqId, hit: moveHit(d.x, d.y, d.selected) }, '*')
     }
+    if (d.type === 'doop:placement-origin') {
+      // where the body's absolute layers are placed from, for new drawings
+      var bodyOrigin = placementOrigin(document.body)
+      parent.postMessage({ type: 'doop:placement-origin-result', reqId: d.reqId, origin: bodyOrigin }, '*')
+    }
+    if (d.type === 'doop:layer-placement') {
+      parent.postMessage({ type: 'doop:layer-placement-result', reqId: d.reqId, styles: layerPlacement(d.selector, d.target) }, '*')
+    }
     if (d.type === 'doop:move-target') {
-      parent.postMessage({ type: 'doop:move-target-result', reqId: d.reqId, result: moveTarget(d.selector, d.x, d.y) }, '*')
+      parent.postMessage({ type: 'doop:move-target-result', reqId: d.reqId, result: moveTarget(d.selector, d.x, d.y, d.at) }, '*')
     }
     if (d.type === 'doop:path') {
       parent.postMessage({ type: 'doop:path-result', reqId: d.reqId, hit: pathInfo(d) }, '*')
@@ -1629,13 +1913,10 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
       parent.postMessage({ type: 'doop:drawing-moving-result', reqId: d.reqId }, '*')
     }
     if (d.type === 'doop:hover') {
-      parent.postMessage({ type: 'doop:hover-result', reqId: d.reqId, hit: hoverProbe(d.x, d.y) }, '*')
+      parent.postMessage({ type: 'doop:hover-result', reqId: d.reqId, hit: hoverProbe(d.x, d.y, d.selected) }, '*')
     }
     if (d.type === 'doop:select') {
       parent.postMessage({ type: 'doop:select-result', reqId: d.reqId, hit: describe(d.selector) }, '*')
-    }
-    if (d.type === 'doop:code') {
-      parent.postMessage({ type: 'doop:code-result', reqId: d.reqId, html: elementCode(d.selector) }, '*')
     }
     if (d.type === 'doop:snapshot') {
       /* the document as it stands, script-made elements included, for an

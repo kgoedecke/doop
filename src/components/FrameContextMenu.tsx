@@ -15,6 +15,7 @@ import { ContextMenuContent, ContextMenuItem, ContextMenuSeparator } from './ui/
 import { MenuHint } from './ui/menu'
 import { FrameExportModal } from './FrameExportModal'
 import { FrameHistoryModal } from './FrameHistoryModal'
+import { trackPngCopy } from '../lib/exportEvents'
 
 async function copyImageUrl(frame: Frame) {
   const notify = useStore.getState().pushNotice
@@ -140,7 +141,14 @@ export function FrameContextMenu({
         >
           {t('stage.copyLink')}
         </ContextMenuItem>
-        <ContextMenuItem onSelect={() => void copyFramePng(frame)}>{t('stage.copyAsPng')}</ContextMenuItem>
+        <ContextMenuItem
+          onSelect={() => {
+            trackPngCopy('frame', 'frame_menu')
+            void copyFramePng(frame)
+          }}
+        >
+          {t('stage.copyAsPng')}
+        </ContextMenuItem>
         <ContextMenuItem onSelect={() => void copyImageUrl(frame)}>{t('stage.copyImageUrl')}</ContextMenuItem>
         <ContextMenuItem onSelect={() => setExportFrames(groupFrames())}>{t('stage.exportEllipsis')}</ContextMenuItem>
         <ContextMenuItem onSelect={() => setHistoryOpen(true)}>{t('stage.versionHistory')}</ContextMenuItem>

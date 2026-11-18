@@ -7,9 +7,11 @@ import {
   INSTANCE_ATTR,
   MAX_COMPONENT_HISTORY,
   OVERRIDES_ATTR,
+  PART_ATTR,
   PROPS_ATTR,
   REV_ATTR,
   USE_TAG,
+  isDeleted,
   type ComponentDef,
   type ComponentIssue,
   type ComponentProp,
@@ -20,6 +22,7 @@ import {
   derivePropsAndSlots,
   expandUses,
   findMarked,
+  holdsHollow,
   renderInstance,
   reconcileInstance,
   setAttr,
@@ -30,7 +33,9 @@ import {
   usedComponentIds,
   type EngineContext,
 } from './componentEngine.ts'
+import { adoptFromLibrary, findInLibraries, LibraryAdoptError } from './componentLibrary.ts'
 import { store } from './store.ts'
+import { noteCanvas } from './workBudget.ts'
 import type { Canvas } from '../shared/types.ts'
 
 /**
@@ -47,12 +52,26 @@ export function newComponentId(): string {
   return `c${componentSuffix()}`
 }
 
-export function contextFor(canvasId: string): EngineContext {
+/** A write may take up a component its workspace library publishes, the first
+ *  time something names it: `added` collects the definitions that joined the canvas. */
+export interface LibraryAdoption {
+  by: string
+  added: ComponentDef[]
+}
+
+export function contextFor(canvasId: string, adoption?: LibraryAdoption): EngineContext {
   const defs = () => store.getComponents(canvasId)
-  const find = (ref: string) => {
+  const issues: ComponentIssue[] = []
+  /* an id is exact, deleted or not: markup already on the canvas points at it. A name means
+     the component in use; a deleted one answers to its name only when nothing else has it,
+     so that asking for it says "deleted" rather than "unknown" */
+  const local = (ref: string) => {
     const wanted = ref.trim().toLowerCase()
-    return defs().find((def) => def.id === ref) ?? defs().find((def) => def.name.toLowerCase() === wanted)
+    const named = defs().filter((def) => def.name.toLowerCase() === wanted)
+    return defs().find((def) => def.id === ref) ?? named.find((def) => !isDeleted(def)) ?? named[0]
   }
+  const find = (ref: string) =>
+    local(ref) ?? (adoption && ref ? fromLibrary(canvasId, ref, adoption, issues) : undefined)
   return {
     find,
     atRev(id, rev) {
@@ -62,8 +81,41 @@ export function contextFor(canvasId: string): EngineContext {
       const snapshot = def.history.find((entry) => entry.rev === rev)
       return snapshot ? { id, name: def.name, rev, template: snapshot.template, props: snapshot.props } : undefined
     },
-    issues: [],
+    issues,
   }
+}
+
+/** Nothing on the canvas has this name: its workspace library may. A local
+ *  component always wins the name, so this is reached only for a new one. */
+function fromLibrary(
+  canvasId: string,
+  ref: string,
+  adoption: LibraryAdoption,
+  issues: ComponentIssue[],
+): ComponentDef | undefined {
+  const canvas = store.getCanvas(canvasId)
+  if (!canvas) return undefined
+  const candidates = findInLibraries(canvas, ref)
+  const [snapshot] = candidates
+  if (!snapshot) return undefined
+  if (candidates.length > 1) {
+    const where = candidates.map(
+      (entry) => `${store.getCanvas(entry.canvasId)?.name ?? entry.canvasId} (${entry.canvasId})`,
+    )
+    issues.push({
+      code: 'library_ambiguous',
+      message: `“${ref}” is published by more than one library: ${where.join(', ')}. Call import_component with the source_canvas_id you mean, then use it.`,
+    })
+    return undefined
+  }
+  try {
+    adoption.added.push(...adoptFromLibrary(canvasId, snapshot, adoption.by))
+  } catch (error) {
+    if (!(error instanceof LibraryAdoptError)) throw error
+    issues.push({ code: 'unknown_component', message: error.message })
+    return undefined
+  }
+  return store.getComponents(canvasId).find((def) => def.id === snapshot.id)
 }
 
 export function referencesComponent(html: string, id: string): boolean {
@@ -129,15 +181,47 @@ export function bumpRevision(def: ComponentDef, by: string): ComponentDef {
   return { ...def, history, rev: def.rev + 1, updatedAt: Date.now(), updatedBy: by }
 }
 
-function prepareMains(canvas: Canvas, frameId: string, html: string, by: string, ctx: EngineContext) {
+/* Revisions update_component has opened and whose main is still to be written. That write is
+   the rest of the same change, so it fills the open revision instead of adding one: the kept
+   snapshot stays the state instances were rendered from. Every write is sync, so an entry
+   never outlives its update. */
+const openRevisions = new Set<string>()
+
+const revisionKey = (canvasId: string, id: string) => `${canvasId}:${id}`
+
+/** Run a main's write as part of the revision `bumpRevision` just opened for this component. */
+export function withinRevision<T>(canvasId: string, id: string, write: () => T): T {
+  const key = revisionKey(canvasId, id)
+  openRevisions.add(key)
+  try {
+    return write()
+  } finally {
+    openRevisions.delete(key)
+  }
+}
+
+/** `only`: the mains to look at, every other one left as it is (a repair of those definitions). */
+function prepareMains(
+  canvas: Canvas,
+  frameId: string,
+  html: string,
+  by: string,
+  ctx: EngineContext,
+  only?: ReadonlySet<string>,
+) {
   const changed: ComponentDef[] = []
   const moved: ComponentDef[] = []
   const claimed = new Set<string>()
   const edits: { start: number; end: number; text: string }[] = []
-  const sheet = () => frameStylesheets(html)
-  const headTags = () => frameHeadTags(html)
+  /* each parses the whole frame, so once per call, not once per main: a frame
+     holding hundreds of mains re-parsed itself hundreds of times per propagation */
+  let sheetCache: string | undefined
+  let headCache: string[] | undefined
+  const sheet = () => (sheetCache ??= frameStylesheets(html))
+  const headTags = () => [...(headCache ??= frameHeadTags(html))]
   for (const found of findMarked(html, COMPONENT_ATTR)) {
     const id = attrOf(found.el, COMPONENT_ATTR) ?? ''
+    if (only && !only.has(id)) continue
     const def = store.getComponents(canvas.id).find((candidate) => candidate.id === id)
     if (!def) {
       /* pasted from a canvas that does not have this component: plain markup here */
@@ -149,12 +233,17 @@ function prepareMains(canvas: Canvas, frameId: string, html: string, by: string,
       })
       continue
     }
+    /* frozen: the main of a deleted component is markup of this frame alone. An edit to it
+       (an old client's save, a paste) changes neither the definition nor its status */
+    if (isDeleted(def)) continue
     const mainElsewhere =
       def.mainFrameId !== null &&
       def.mainFrameId !== frameId &&
       !!store.getFrame(def.mainFrameId)?.html.includes(`${COMPONENT_ATTR}="${id}"`)
-    if (claimed.has(id) || mainElsewhere || !frameId) {
-      /* a copy of a main is an instance, the way copying a Figma main is */
+    if (claimed.has(id) || mainElsewhere || !frameId || def.source?.library) {
+      /* a copy of a main is an instance, the way copying a Figma main is; and a
+         library component's main lives on its library canvas, so one pasted
+         here (it has no main of its own to be "elsewhere") is an instance too */
       const rendered = renderInstance(def, def, {}, '', { ctx, stack: [] })
       if (rendered) edits.push({ start: found.start, end: found.end, text: serializeOuter(rendered) })
       continue
@@ -183,7 +272,7 @@ function prepareMains(canvas: Canvas, frameId: string, html: string, by: string,
     if (same && def.mainFrameId === frameId) continue
     /* a main coming back with the same content is not a new revision */
     const next: ComponentDef =
-      same || def.rev === 0
+      same || def.rev === 0 || openRevisions.has(revisionKey(canvas.id, id))
         ? { ...def, rev: def.rev || 1, updatedAt: Date.now(), updatedBy: by }
         : bumpRevision(def, by)
     const saved = { ...next, template, css, rawCss, head, props, slots, mainFrameId: frameId }
@@ -192,14 +281,31 @@ function prepareMains(canvas: Canvas, frameId: string, html: string, by: string,
     else moved.push(saved)
   }
   /* a main this frame held and no longer does: the component lives on without one */
-  for (const def of store.getComponents(canvas.id)) {
-    if (def.mainFrameId !== frameId || !frameId || claimed.has(def.id)) continue
+  for (const def of only ? [] : store.getComponents(canvas.id)) {
+    if (def.mainFrameId !== frameId || !frameId || claimed.has(def.id) || isDeleted(def)) continue
     if (html.includes(`${COMPONENT_ATTR}="${def.id}"`)) continue
     const saved = { ...def, mainFrameId: null, updatedAt: Date.now(), updatedBy: by }
     store.saveComponent(canvas.id, saved)
     moved.push(saved)
   }
   return { html: edits.length ? splice(html, edits) : html, changed, moved }
+}
+
+/**
+ * Re-derive these definitions from their mains in this frame, as a write of the frame would,
+ * and nothing else: no other main is looked at and no instance is rendered again. `html` is
+ * the frame as the pass would leave it; it differs only where a main needed part keys.
+ */
+export function rederiveFromMains(
+  canvas: Canvas,
+  frameId: string,
+  ids: ReadonlySet<string>,
+  by: string,
+): { html: string; saved: ComponentDef[] } {
+  const frame = store.getFrame(frameId)
+  if (!frame) return { html: '', saved: [] }
+  const mains = prepareMains(canvas, frameId, frame.html, by, contextFor(canvas.id), ids)
+  return { html: mains.html, saved: [...mains.changed, ...mains.moved] }
 }
 
 function prepareInstances(html: string, ctx: EngineContext) {
@@ -213,11 +319,17 @@ function prepareInstances(html: string, ctx: EngineContext) {
       edits.push({ start: found.start, end: found.end, text: serializeOuter(found.el) })
       continue
     }
+    /* its component was deleted: the instance keeps the markup it has, untouched. So does one
+       holding an instance of a hollow component: rendered again, that instance would be lost */
+    if (isDeleted(def) || holdsHollow(found.el, ctx)) continue
     const before = serializeOuter(found.el)
     const state = reconcileInstance(found.el, ctx)
     if (!state) continue
-    const rendered = renderInstance(def, def, state.overrides, state.instanceId, { ctx, stack: [] })
+    /* only a whole write gets here: nothing more is coming for the content it holds */
+    const rendered = renderInstance(def, def, state.overrides, state.instanceId, { ctx, stack: [], final: true })
     if (!rendered) continue
+    /* the key it has is its place in what holds it (a main), not the component's own root key */
+    setAttr(rendered, PART_ATTR, attrOf(found.el, PART_ATTR) ?? null)
     const after = serializeOuter(rendered)
     if (after !== before) edits.push({ start: found.start, end: found.end, text: after })
   }
@@ -231,6 +343,8 @@ export interface PreparedHtml {
   changed: ComponentDef[]
   /** components whose main only moved (here, or out of this frame): the room needs the new location */
   moved: ComponentDef[]
+  /** components this write took up from the workspace library: the room needs them, and their tokens */
+  adopted: ComponentDef[]
 }
 
 export function prepareFrameHtml(
@@ -243,11 +357,13 @@ export function prepareFrameHtml(
   if (!touchesComponents(incoming)) {
     const lost = frameId && priorHtml.includes(`${COMPONENT_ATTR}="`)
     const moved = lost ? prepareMains(canvas, frameId, incoming, by, contextFor(canvas.id)).moved : []
-    return { html: incoming, issues: removedInstanceIssues(priorHtml, incoming), changed: [], moved }
+    return { html: incoming, issues: removedInstanceIssues(priorHtml, incoming), changed: [], moved, adopted: [] }
   }
-  const ctx = contextFor(canvas.id)
+  const adoption: LibraryAdoption = { by, added: [] }
+  const ctx = contextFor(canvas.id, adoption)
+  noteCanvas(canvas.id)
   try {
-    const expanded = expandUses(incoming, ctx)
+    const expanded = expandUses(incoming, ctx, [], 0, { final: true })
     const mains = prepareMains(canvas, frameId, expanded, by, ctx)
     const instances = prepareInstances(mains.html, ctx)
     const html = syncComponentHead(instances, closureOf(usedComponentIds(instances), canvas.id))
@@ -256,15 +372,20 @@ export function prepareFrameHtml(
       issues: dedupeIssues([...ctx.issues, ...removedInstanceIssues(priorHtml, html)]),
       changed: mains.changed,
       moved: mains.moved,
+      adopted: adoption.added,
     }
   } catch (error) {
-    /* markup nested past the call stack: the write itself still has to land */
+    /* out of budget part of the way: the operation's write boundary (server/journal.ts)
+       undoes a main folded into its definition and a component taken up from the library,
+       so neither outlives the frame write that is now not happening.
+       Markup nested past the call stack: the write itself still has to land */
     if (!(error instanceof RangeError)) throw error
     return {
       html: incoming,
       issues: [{ code: 'too_deep', message: 'this markup is nested too deeply for its components to be updated' }],
       changed: [],
       moved: [],
+      adopted: adoption.added,
     }
   }
 }
@@ -286,7 +407,7 @@ function removedInstanceIssues(prior: string, next: string): ComponentIssue[] {
   ]
 }
 
-function dedupeIssues(issues: ComponentIssue[]): ComponentIssue[] {
+export function dedupeIssues(issues: ComponentIssue[]): ComponentIssue[] {
   const seen = new Set<string>()
   return issues.filter((issue) => {
     if (seen.has(issue.message)) return false
@@ -298,14 +419,21 @@ function dedupeIssues(issues: ComponentIssue[]): ComponentIssue[] {
 /** One chunk of a live stream: components render as they arrive, each stylesheet
  *  once and in place, since the head may already have gone by. The last chunk's
  *  full pass moves them where they belong. */
-export function prepareChunk(canvas: Canvas, chunk: string, soFar: string): string {
-  if (!chunk.toLowerCase().includes(`<${USE_TAG}`)) return chunk
-  const ctx = contextFor(canvas.id)
+export function prepareChunk(
+  canvas: Canvas,
+  chunk: string,
+  soFar: string,
+  by: string,
+): { html: string; issues: ComponentIssue[]; adopted: ComponentDef[] } {
+  if (!chunk.toLowerCase().includes(`<${USE_TAG}`)) return { html: chunk, issues: [], adopted: [] }
+  const adoption: LibraryAdoption = { by, added: [] }
+  const ctx = contextFor(canvas.id, adoption)
   const expanded = expandUses(chunk, ctx)
   const styles = closureOf(usedComponentIds(expanded), canvas.id)
     .filter((def) => def.css.trim() && !soFar.includes(`${CSS_ATTR}="${def.id}"`))
     .map((def) => `<style ${CSS_ATTR}="${def.id}">\n${def.css}\n</style>`)
-  return `${styles.join('\n')}${expanded}`
+  /* a use expanded here is gone by the last chunk's pass: what it had to say is said now */
+  return { html: `${styles.join('\n')}${expanded}`, issues: ctx.issues, adopted: adoption.added }
 }
 
 /** A blank component, before its main has been written: the first prepare fills it in. */

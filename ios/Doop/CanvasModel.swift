@@ -347,8 +347,8 @@ final class CanvasModel: ObservableObject {
         return PromptScope(scope: CardScope(frameId: frame.id), label: frame.name, frameName: frame.name)
     }
 
-    func queue(_ prompt: String, scope: CardScope? = nil, assignment: AgentAssignment = .automatic) async throws {
-        let request = CardQueueRequest(title: prompt, scope: scope, assignment: assignment)
+    func queue(_ prompt: String, scope: CardScope? = nil, assignment: AgentAssignment = .automatic, runner: RunnerPick? = nil) async throws {
+        let request = CardQueueRequest(title: prompt, scope: scope, assignment: assignment, runner: runner)
         _ = try await client.data("/api/canvases/\(id)/cards", method: "POST", body: request.body)
     }
 

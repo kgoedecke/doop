@@ -1,5 +1,12 @@
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
-import { DRAFT_OPTIONS, DRAFTS_STORAGE_KEY, isDraftCount, readStoredDrafts, type DraftCount } from '../lib/homePrompt'
+import {
+  DRAFT_OPTIONS,
+  DRAFTS_STORAGE_KEY,
+  isDraftCount,
+  parseDraftCount,
+  readStoredDrafts,
+  type DraftCount,
+} from '../lib/homePrompt'
 import { setPromptBoxHidden, usePromptBoxHidden } from '../lib/homePreferences'
 import { DoopMark } from './Logo'
 import { ModelPicker } from './ModelPicker'
@@ -9,6 +16,7 @@ import { Chip } from './ui/chip'
 import { MenuButton } from './ui/menu-button'
 import { Pressable } from './ui/pressable'
 import { Textarea } from './ui/textarea'
+import { Input } from './ui/input'
 import { Button } from './ui/button'
 import { Modal, ModalActions, ModalLede, ModalTitle } from './ui/modal'
 import {
@@ -17,6 +25,7 @@ import {
   DropdownMenuContent,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from './ui/dropdown-menu'
 import {
@@ -24,10 +33,13 @@ import {
   AttachmentIcon,
   BlocksIcon,
   ChevronLeftIcon,
+  CheckIcon,
   ChevronRightIcon,
   CirclePlusIcon,
   CopyIcon,
   LayoutTemplateIcon,
+  MinusIcon,
+  PlusIcon,
   UploadIcon,
   WebIcon,
   XIcon,
@@ -305,38 +317,7 @@ export function HomeHero({
               <AttachmentIcon width={14} height={14} /> {t('home.files')}
             </Pressable>
             <span className="flex-1" />
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <MenuButton
-                  variant="quiet"
-                  aria-label={t('home.draftsAria', { count: drafts })}
-                  className="whitespace-nowrap"
-                  icon={<CopyIcon width={14} height={14} />}
-                >
-                  {t('home.drafts', { count: drafts })}
-                </MenuButton>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent side="top" align="end" width="md">
-                <DropdownMenuCaption>{t('home.draftsCaption')}</DropdownMenuCaption>
-                <DropdownMenuRadioGroup
-                  value={String(drafts)}
-                  onValueChange={(next) => {
-                    const n = Number(next)
-                    if (isDraftCount(n)) pickDrafts(n)
-                  }}
-                >
-                  {DRAFT_OPTIONS.map((n) => (
-                    <DropdownMenuRadioItem
-                      key={n}
-                      value={String(n)}
-                      description={t('home.draftsDescription', { count: n })}
-                    >
-                      {t('home.drafts', { count: n })}
-                    </DropdownMenuRadioItem>
-                  ))}
-                </DropdownMenuRadioGroup>
-              </DropdownMenuContent>
-            </DropdownMenu>
+            <DraftsMenu drafts={drafts} onPick={pickDrafts} />
             <ModelPicker disabled={busy} />
             <IconButton
               variant="primary"
@@ -378,5 +359,113 @@ export function HomeHero({
         </Pressable>
       </div>
     </section>
+  )
+}
+
+/** The composer's draft count: the usual counts as one-click picks, and a
+ *  stepper under them for any other number. */
+function DraftsMenu({ drafts, onPick }: { drafts: DraftCount; onPick: (n: DraftCount) => void }) {
+  const t = useT()
+  const [open, setOpen] = useState(false)
+  const isPreset = (DRAFT_OPTIONS as readonly number[]).includes(drafts)
+  const [custom, setCustom] = useState(String(drafts))
+
+  function pick(n: DraftCount) {
+    onPick(n)
+    setCustom(String(n))
+  }
+
+  /** the count a step starts from: what is typed when it reads, else the current one */
+  function step(by: 1 | -1) {
+    pick(Math.max(1, (parseDraftCount(custom) ?? drafts) + by))
+  }
+
+  function commitCustom(close: boolean) {
+    const n = parseDraftCount(custom)
+    if (n === null) setCustom(String(drafts))
+    else pick(n)
+    if (close) setOpen(false)
+  }
+
+  return (
+    <DropdownMenu
+      open={open}
+      onOpenChange={(next) => {
+        setOpen(next)
+        if (next) setCustom(String(drafts))
+      }}
+    >
+      <DropdownMenuTrigger asChild>
+        <MenuButton
+          variant="quiet"
+          aria-label={t('home.draftsAria', { count: drafts })}
+          className="whitespace-nowrap"
+          icon={<CopyIcon width={14} height={14} />}
+        >
+          {t('home.drafts', { count: drafts })}
+        </MenuButton>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent side="top" align="end" width="md">
+        <DropdownMenuCaption>{t('home.draftsCaption')}</DropdownMenuCaption>
+        <DropdownMenuRadioGroup
+          value={isPreset ? String(drafts) : ''}
+          onValueChange={(next) => {
+            const n = Number(next)
+            if (isDraftCount(n)) pick(n)
+          }}
+        >
+          {DRAFT_OPTIONS.map((n) => (
+            <DropdownMenuRadioItem key={n} value={String(n)} description={t('home.draftsDescription', { count: n })}>
+              {t('home.drafts', { count: n })}
+            </DropdownMenuRadioItem>
+          ))}
+        </DropdownMenuRadioGroup>
+        <DropdownMenuSeparator />
+        {/* not a menu item: Radix would take focus and typed digits from the field */}
+        <div className="flex items-center gap-2.5 px-2.5 py-2 text-body">
+          <span className="flex min-w-0 flex-1 flex-col">
+            <span className="truncate">{t('home.draftsCustom')}</span>
+            <span className="text-caption text-ink-faint">{t('home.draftsCustomDescription')}</span>
+          </span>
+          <div className="flex flex-none items-center rounded-control bg-sub p-0.5 shadow-ring">
+            <IconButton size="sm" aria-label={t('home.draftsFewer')} disabled={drafts <= 1} onClick={() => step(-1)}>
+              <MinusIcon width={12} height={12} />
+            </IconButton>
+            <Input
+              variant="bare"
+              inputSize="auto"
+              inputMode="numeric"
+              aria-label={t('home.draftsCustomAria')}
+              value={custom}
+              onChange={(event) => {
+                /* an edit that is not all digits (a pasted "2.5") is refused whole, never joined into "25" */
+                if (/^\d*$/.test(event.target.value)) setCustom(event.target.value)
+              }}
+              onFocus={(event) => event.target.select()}
+              onBlur={() => commitCustom(false)}
+              onKeyDown={(event) => {
+                if (event.key === 'Escape') return
+                event.stopPropagation()
+                if (event.key === 'Enter') {
+                  event.preventDefault()
+                  commitCustom(true)
+                } else if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
+                  event.preventDefault()
+                  step(event.key === 'ArrowUp' ? 1 : -1)
+                }
+              }}
+              style={{ width: `${Math.max(2, custom.length) + 1}ch` }}
+              className="text-center font-mono tabular-nums md:text-body"
+            />
+            <IconButton size="sm" aria-label={t('home.draftsMore')} onClick={() => step(1)}>
+              <PlusIcon width={12} height={12} />
+            </IconButton>
+          </div>
+          <span className="flex w-3.5 flex-none text-ink">
+            {!isPreset && <CheckIcon width={14} height={14} aria-hidden />}
+          </span>
+        </div>
+      </DropdownMenuContent>
+    </DropdownMenu>
   )
 }

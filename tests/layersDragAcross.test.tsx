@@ -11,6 +11,8 @@ const createFrame = vi.fn((canvasId: string, input: Partial<Frame> & { name: str
 )
 vi.mock('../src/lib/api', () => ({
   api: {
+    /* the Components tab's dot asks; nothing waits in these tests */
+    canvasLibrary: () => new Promise(() => {}),
     updateFrame: () => updateFrame(),
     deleteFrame: () => deleteFrame(),
     /* the test frames tie in the stack, so a drop between them renumbers first */

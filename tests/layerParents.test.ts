@@ -84,13 +84,14 @@ describe('grouping keeps the layout of the box it groups in', () => {
     useStore.getState().pickElements('f1', [HEADER, SECTION])
     expect(groupSelection('group')).toBe(true)
     await vi.waitFor(() => expect(html()).toContain('display: flex'))
-    expect(computedStyles.mock.calls[0]?.[1]).toBe('body:nth-of-type(1)')
+    /* the picked layers are asked first whether they sit absolute; they flow */
+    expect(computedStyles.mock.calls.at(-1)?.[1]).toBe('body:nth-of-type(1)')
   })
 
   it('reads the real parent of a layer whose path starts at its id', async () => {
     useStore.getState().pickElements('f1', [TITLE, LEDE])
     expect(groupSelection('group')).toBe(true)
     await vi.waitFor(() => expect(html()).toContain('display: flex'))
-    expect(computedStyles.mock.calls[0]?.[1]).toBe(SECTION)
+    expect(computedStyles.mock.calls.at(-1)?.[1]).toBe(SECTION)
   })
 })

@@ -5,6 +5,7 @@ import { TOKEN_BLOCK_ATTR } from '../shared/designTokens'
 /* Frame writes mirror into Postgres and broadcast; only the saved HTML and
    what the room is sent matter here. */
 vi.mock('../server/db/persist.ts', () => ({
+  saveComponent: () => {},
   saveTask: () => {},
   saveFeedback: () => {},
   saveComment: () => {},
@@ -22,6 +23,8 @@ vi.mock('../server/fonts.ts', () => ({ fontsForCanvas: () => [] }))
 
 const actions = await import('../server/actions.ts')
 const { store } = await import('../server/store.ts')
+const { createComponentFromHtml } = await import('../server/componentActions.ts')
+const { previewDocument } = await import('../server/componentPreview.ts')
 
 /**
  * Design tokens on frame writes: a write that names a token gets its value
@@ -177,6 +180,51 @@ describe('design tokens on frame writes', () => {
     expect(store.getFrame(frame.id)!.html).toContain(':root{--spacing-8:32px}')
   })
 
+  it('writes the block into a streaming frame from its first chunk, without stacking it', () => {
+    const canvasId = setup()
+    const frame = actions.createFrame(canvasId, { name: 'Stream' }, agent)!
+    actions.appendFrameHtml(
+      frame.id,
+      '<!doctype html><html><head><style>body{color:var(--color-ink)}</style></head><body>',
+      agent,
+      { start: true },
+    )
+    /* what a mid-stream screenshot renders: the stored document, and what viewers are sent */
+    const first = store.getFrame(frame.id)!.html
+    expect(first).toContain(`<head><style ${TOKEN_BLOCK_ATTR}>:root{--color-ink:#111}</style>`)
+    expect(sent.at(-1)?.html).toContain(TOKEN_BLOCK_ATTR)
+    actions.appendFrameHtml(frame.id, '<section style="padding:var(--spacing-4)">Hero</section>', agent)
+    const second = store.getFrame(frame.id)!.html
+    expect(second.split(TOKEN_BLOCK_ATTR)).toHaveLength(2)
+    expect(second).toContain('--spacing-4:16px')
+    actions.appendFrameHtml(frame.id, '</body></html>', agent, { done: true })
+    expect(store.getFrame(frame.id)!.html.split(TOKEN_BLOCK_ATTR)).toHaveLength(2)
+  })
+
+  it('waits for a complete head or body tag before writing into a stream', () => {
+    const canvasId = setup()
+    const frame = actions.createFrame(canvasId, { name: 'Stream' }, agent)!
+    /* a block placed now would land inside the tag the next chunk finishes */
+    actions.appendFrameHtml(frame.id, '<!doctype html><ht', agent, { start: true })
+    expect(store.getFrame(frame.id)!.html).toBe('<!doctype html><ht')
+    actions.appendFrameHtml(frame.id, 'ml><head></head><body style="color:var(--color-ink)">', agent)
+    expect(store.getFrame(frame.id)!.html).toContain(
+      `<!doctype html><html><head><style ${TOKEN_BLOCK_ATTR}>:root{--color-ink:#111}</style></head>`,
+    )
+  })
+
+  it('previews a component with the canvas tokens it names', () => {
+    const canvasId = setup()
+    const { component: def } = createComponentFromHtml(
+      canvasId,
+      { name: 'Chip', html: '<span class="chip">New</span>', css: '.chip{color:var(--color-primary)}' },
+      human,
+    )
+    const { html } = previewDocument(canvasId, def)
+    expect(html).toContain(TOKEN_BLOCK_ATTR)
+    expect(html).toContain('--color-primary:var(--color-ink)')
+  })
+
   it('applies a rename to a streaming frame when its stream closes', () => {
     const canvasId = setup()
     const frame = actions.createFrame(canvasId, { name: 'Stream' }, agent)!
@@ -184,6 +232,9 @@ describe('design tokens on frame writes', () => {
     actions.setTokens(canvasId, [{ name: '--spacing-4', newName: '--space-4' }], human)
     /* mid-stream the document is left alone */
     expect(store.getFrame(frame.id)!.html).toContain('var(--spacing-4)')
+    /* a chunk before the close keeps the old name's value, so the design does not lose it */
+    actions.appendFrameHtml(frame.id, '<section style="padding:var(--spacing-4)">Hero</section>', agent)
+    expect(store.getFrame(frame.id)!.html).toContain(':root{--spacing-4:16px}')
     actions.appendFrameHtml(frame.id, '</body></html>', agent, { done: true })
     const html = store.getFrame(frame.id)!.html
     expect(html).toContain('gap:var(--space-4)')

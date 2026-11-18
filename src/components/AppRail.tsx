@@ -1,6 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useState, type ReactNode } from 'react'
 import type { CanvasMeta, WorkspaceSummary } from '../../shared/types'
-import { colorFor } from '../../shared/types'
 import { api } from '../lib/api'
 import { authClient } from '../lib/auth'
 import { navigate } from '../lib/navigate'
@@ -9,13 +8,17 @@ import { timeAgo } from '../lib/time'
 import { openCanvasTab } from '../lib/desktop'
 import { useT } from '../lib/i18n'
 import { cn } from '@/lib/utils'
-import { AgentIcon } from './AgentIcon'
+import { AgentTile } from './AgentIcon'
 import { AccountMenu } from './DashShell'
+import { offersUpgrade, useMe } from '../lib/me'
+import { openUpgrade } from '../lib/upgrade'
 import { CanvasSearchModal } from './CanvasSearchModal'
 import { ConnectModal } from './ConnectModal'
+import { NativeAppCard } from './NativeAppPromo'
 import { DashNavItem, DashSectionLabel, DashSidebar, DashSidebarBrand } from './ui/dash'
 import { Dot } from './ui/dot'
 import { IconButton } from './ui/icon-button'
+import { Button } from './ui/button'
 import { Sheet, SheetContent, SheetTitle } from './ui/sheet'
 import {
   BlocksIcon,
@@ -30,10 +33,13 @@ import {
   PanelExpandIcon,
   SearchIcon,
   TextIcon,
+  BotIcon,
+  BookOpenIcon,
   UserIcon,
   UsersIcon,
   WebIcon,
   WorkflowIcon,
+  RocketIcon,
 } from './ui/icons'
 
 /**
@@ -63,13 +69,13 @@ export type RailActive =
   'all' | 'mine' | 'shared' | 'automations' | 'integrations' | 'community' | `ws:${string}` | null
 
 /** the Workspace page's panes, in the order the rail lists them */
-export type WorkspacePane = 'members' | 'fonts' | 'billing' | 'general'
+export type WorkspacePane = 'members' | 'fonts' | 'agents' | 'libraries' | 'billing' | 'general'
 
-const WORKSPACE_PANES: readonly WorkspacePane[] = ['members', 'fonts', 'billing', 'general']
+const WORKSPACE_PANES: readonly WorkspacePane[] = ['members', 'fonts', 'agents', 'libraries', 'billing', 'general']
 
 /** the panes a workspace role may open: billing and settings are for its owner and admins */
 export function workspacePanesFor(role: WorkspaceSummary['role'] | undefined): WorkspacePane[] {
-  return WORKSPACE_PANES.filter((p) => role !== 'member' || p === 'members' || p === 'fonts')
+  return WORKSPACE_PANES.filter((p) => role !== 'member' || (p !== 'billing' && p !== 'general'))
 }
 
 /** an agent that worked this recently is treated as still at the desk */
@@ -119,6 +125,9 @@ export function AppRail({
   children?: ReactNode
 }) {
   const t = useT()
+  const { data: session } = authClient.useSession()
+  const me = useMe(session?.user.id)
+  const offerUpgrade = offersUpgrade(me)
   const [own, setOwn] = useState<RailLists | null>(() => lastLists)
   const needsOwn = canvases === undefined || workspaces === undefined
   useEffect(() => {
@@ -138,6 +147,10 @@ export function AppRail({
   const [open, setOpen] = useState(readRailOpen)
   const drawer = useRailDrawer((s) => s.open)
   const setDrawer = useRailDrawer((s) => s.setOpen)
+  const upgrade = () => {
+    setDrawer(false)
+    openUpgrade({ source: 'rail' })
+  }
   const setMounted = useRailDrawer((s) => s.setMounted)
   /* tells DashHeader a rail is here to open; before paint, so the phone's
      brand row does not pop in a frame after the rest of the header */
@@ -224,6 +237,8 @@ export function AppRail({
   const paneRows = {
     members: { label: t('rail.workspacePeople'), icon: <UsersIcon size="rail" /> },
     fonts: { label: t('rail.workspaceFonts'), icon: <TextIcon size="rail" /> },
+    agents: { label: t('rail.workspaceAgents'), icon: <BotIcon size="rail" /> },
+    libraries: { label: t('rail.workspaceLibraries'), icon: <BookOpenIcon size="rail" /> },
     billing: { label: t('rail.workspaceBilling'), icon: <CreditCardIcon size="rail" /> },
     general: { label: t('rail.workspaceSettings'), icon: <GearIcon size="rail" /> },
   } satisfies Record<WorkspacePane, { label: string; icon: ReactNode }>
@@ -342,7 +357,7 @@ export function AppRail({
       <Rule />
       {agents.map((a) => (
         <span key={a.name} className="grid size-8 place-items-center" title={a.name}>
-          <AgentIcon name={a.name} size={14} color={colorFor(a.name)} />
+          <AgentTile name={a.name} />
         </span>
       ))}
       <IconButton aria-label={t('rail.connectAgent')} onClick={connect}>
@@ -357,7 +372,12 @@ export function AppRail({
           </div>
         </>
       ) : null}
-      <div className="mt-auto pt-4">
+      <div className="mt-auto flex flex-col items-center gap-2 pt-4">
+        {offerUpgrade && (
+          <IconButton aria-label={t('plans.upgradeToPro')} title={t('plans.upgradeToPro')} onClick={upgrade}>
+            <RocketIcon size="rail" className="text-brand" />
+          </IconButton>
+        )}
         <AccountMenu face side="top" align="start" />
       </div>
     </div>
@@ -517,7 +537,7 @@ export function AppRail({
             as="div"
             density="rail"
             title={t('rail.agentCanvases', { count: a.canvases })}
-            icon={<AgentIcon name={a.name} size={14} color={colorFor(a.name)} />}
+            icon={<AgentTile name={a.name} />}
             trailing={
               a.lastAt > 0 && now - a.lastAt < LIVE_WINDOW ? (
                 <Dot size="sm" className="bg-success" title={t('rail.workingNow')} />
@@ -529,14 +549,34 @@ export function AppRail({
             {a.name}
           </DashNavItem>
         ))}
-        <DashNavItem density="rail" icon={<CirclePlusIcon size="rail" />} onClick={connect}>
+        <DashNavItem
+          density="rail"
+          icon={
+            <span className="grid size-[18px] flex-none place-items-center">
+              <CirclePlusIcon size="rail" />
+            </span>
+          }
+          onClick={connect}
+        >
           {t('rail.connectAgent')}
         </DashNavItem>
       </div>
 
-      <div className="mt-auto flex items-center gap-2.5 px-1 pt-4">
-        <AccountMenu face side="top" align="start" />
-        <AccountName />
+      {/* the desktop app, on a computer's browser only; the phone drawer
+          leaves it to the App Store sheet */}
+      <div className="mt-auto flex flex-col pt-4">
+        {!inDrawer && <NativeAppCard className="mb-3" />}
+        {/* the one way to Pro that is always in view: people looked for it
+            and found only "Create workspace" */}
+        {offerUpgrade && (
+          <Button size="bar" className="mb-3 w-full justify-center" onClick={upgrade}>
+            <RocketIcon size="rail" className="text-brand" /> {t('plans.upgradeToPro')}
+          </Button>
+        )}
+        <div className="flex items-center gap-2.5 px-1">
+          <AccountMenu face side="top" align="start" />
+          <AccountName />
+        </div>
       </div>
     </div>
   )
