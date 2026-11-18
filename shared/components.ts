@@ -74,6 +74,9 @@ export interface ComponentCode {
 
 export interface ComponentSnapshot {
   rev: number
+  /** the revision this state last changed what an instance is rendered from (see
+   *  `ComponentDef.renderRev`); absent means `rev` */
+  renderRev?: number
   template: string
   rawCss: string
   head: string[]
@@ -97,6 +100,12 @@ export interface ComponentDef {
   props: ComponentProp[]
   slots: ComponentSlot[]
   rev: number
+  /** the newest revision at which what an instance is rendered from (the template and the
+   *  props) last changed. A revision of the rules alone (stylesheet, head tags) raises
+   *  `rev` and leaves this: every revision from `renderRev` to `rev` renders the same
+   *  markup, an instance is marked with `renderRev`, and it is behind only when its mark
+   *  is older. Absent means `rev`. Set by the store on every save (`store.saveComponent`). */
+  renderRev?: number
   /** the frame whose element is the main; null once that element is gone */
   mainFrameId: string | null
   code?: ComponentCode
@@ -133,6 +142,34 @@ export function withWireComponents<C extends { components?: ComponentDef[] }>(
 ): Omit<C, 'components'> & { components?: WireComponentDef[] } {
   const { components, ...rest } = canvas
   return components ? { ...rest, components: components.map(wireComponent) } : rest
+}
+
+/** The revision an instance of this state is marked with: where its markup last changed. */
+export function renderRevOf(state: { rev: number; renderRev?: number }): number {
+  return state.renderRev ?? state.rev
+}
+
+/** Do two states of a component render the same instance markup? */
+export function rendersSame(
+  a: Pick<ComponentDef, 'template' | 'props'>,
+  b: Pick<ComponentDef, 'template' | 'props'>,
+): boolean {
+  return a.template === b.template && (a.props === b.props || JSON.stringify(a.props) === JSON.stringify(b.props))
+}
+
+/** What a component rendered from at the revision an instance is marked with: the
+ *  definition itself when that revision renders as it does now, else the kept state
+ *  whose span of revisions (`renderRev`..`rev`) holds the mark. Rules-only revisions use
+ *  up kept history without moving a mark out of reach: a span is found by any of its
+ *  revisions. Undefined when no kept state covers it. */
+export function stateAtRev<D extends Pick<ComponentDef, 'rev' | 'renderRev' | 'template' | 'props' | 'history'>>(
+  def: D,
+  rev: number,
+): D | (Pick<ComponentSnapshot, 'template' | 'props'> & { rev: number }) | undefined {
+  if (rev > def.rev) return undefined
+  if (rev >= renderRevOf(def)) return rev === renderRevOf(def) ? def : { rev, template: def.template, props: def.props }
+  const kept = def.history.find((entry) => renderRevOf(entry) <= rev && rev <= entry.rev)
+  return kept ? { rev, template: kept.template, props: kept.props } : undefined
 }
 
 export function isDeleted(def: Pick<ComponentDef, 'status'> | undefined): boolean {

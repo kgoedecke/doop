@@ -1,5 +1,6 @@
 import type { Frame } from '../../shared/types'
 import { snapshotFrame } from './frameBridge'
+import { composeFrame } from './frameCompose'
 import { useStore } from './store'
 import { loadFramePages } from './ws'
 
@@ -56,7 +57,8 @@ export async function rasterizeFrame(frame: Frame, opts: RasterOptions): Promise
  *  this browser has not loaded that page, so it never draws a blank or old copy. */
 async function savedHtml(frame: Frame): Promise<string> {
   await loadFramePages([frame.id])
-  return useStore.getState().canvas?.frames.find((f) => f.id === frame.id)?.html ?? frame.html
+  /* the store's source, as a document of its own: the canvas's styles composed in */
+  return composeFrame(useStore.getState().canvas?.frames.find((f) => f.id === frame.id)?.html ?? frame.html)
 }
 
 /** The frame as an SVG file: the same self-contained document the raster

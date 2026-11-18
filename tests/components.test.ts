@@ -17,6 +17,7 @@ import { blankComponent, contextFor } from '../server/components.ts'
 import { compactDocument } from '../server/componentEngine.ts'
 import { findComponentCandidates, lookalikesIn } from '../server/componentActions.ts'
 import { COMPONENT_ATTR, INSTANCE_ATTR } from '../shared/components.ts'
+import { renderedHtml } from './rendered.ts'
 import type { Actor } from '../shared/types.ts'
 
 const actor = { name: 'Tester', kind: 'user', color: '#000', clientId: 'x' } as unknown as Actor
@@ -56,7 +57,7 @@ function setup() {
 }
 
 const current = (canvasId: string, id: string) => store.getComponents(canvasId).find((d) => d.id === id)!
-const framed = (id: string) => store.getFrame(id)!.html
+const framed = renderedHtml
 
 describe('a main element', () => {
   it('becomes a template with keys, props and only the CSS it uses', () => {

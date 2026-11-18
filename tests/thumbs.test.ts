@@ -10,6 +10,11 @@ const mocks = vi.hoisted(() => ({
 }))
 
 vi.mock('../server/screenshot.ts', () => ({ renderFrame: mocks.renderFrame }))
+/* what a render is supplied by its canvas is read off the store; here every frame names one token */
+vi.mock('../server/frameCompose.ts', () => ({
+  stampRender: (stamp: RenderStamp, source: Frame) =>
+    stampDependencies(source.canvasId, stamp, [tokenDependency('--ink')]),
+}))
 vi.mock('../server/storage.ts', () => ({
   putObject: mocks.putObject,
   getObject: mocks.getObject,
@@ -17,6 +22,7 @@ vi.mock('../server/storage.ts', () => ({
 }))
 
 import * as thumbs from '../server/thumbs.ts'
+import { bumpStyle, stampDependencies, tokenDependency, type RenderStamp } from '../server/styleVersion.ts'
 
 const frame = (id: string): Frame =>
   ({
@@ -91,6 +97,28 @@ describe('thumbs', () => {
     await p
     await tick()
     expect(mocks.deleteObject).toHaveBeenCalledWith('thumb/purged-during-put.jpg')
+  })
+
+  it('a stored thumb is stale once what the canvas supplies its frame changes, with no frame written', async () => {
+    mocks.renderFrame.mockResolvedValue(Buffer.from('rendered'))
+    mocks.getObject.mockResolvedValue(Buffer.from('rendered'))
+    const f = { ...frame('restyled-frame'), canvasId: 'restyled' }
+    await thumbs.create(f)
+    /* past the revalidation throttle */
+    const later = Date.now() + 60_000
+    vi.spyOn(Date, 'now').mockReturnValue(later)
+    await thumbs.getStored(f)
+    await tick()
+    /* a token the frame does not name changes nothing for it */
+    bumpStyle('restyled', tokenDependency('--brand'))
+    await thumbs.getStored(f)
+    await tick()
+    expect(mocks.renderFrame).toHaveBeenCalledTimes(1)
+    bumpStyle('restyled', tokenDependency('--ink'))
+    await thumbs.getStored(f)
+    await tick()
+    expect(mocks.renderFrame).toHaveBeenCalledTimes(2)
+    vi.restoreAllMocks()
   })
 
   it('getStored serves stored bytes and refreshes stale ones in the background, deduped', async () => {

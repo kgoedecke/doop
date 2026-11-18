@@ -17,6 +17,7 @@ import { execTool, RESIDENT_TOOLS } from '../server/resident.ts'
 import * as screenshot from '../server/screenshot.ts'
 import { DEFAULT_ROLE_ID, roleName } from '../shared/agents.ts'
 import { store } from '../server/store.ts'
+import { renderedHtml } from './rendered.ts'
 import * as propagation from '../server/propagation.ts'
 import { resolveActor, takeComponentIssues } from '../server/actions.ts'
 import { findComponent } from '../server/componentActions.ts'
@@ -207,7 +208,8 @@ describe('an agent working with components', () => {
     await button(canvas.id)
     const uses = Array.from({ length: 20 }, (_, i) => `<doop-use component="Button" label="Action ${i}"></doop-use>`)
     const frameId = await framed(canvas.id, uses.join(''))
-    const full = store.getFrame(frameId)!.html
+    /* the full form is the frame as rendered: its source with the canvas's styles composed in */
+    const full = renderedHtml(frameId)
     const read = await call('get_frame', { frame_id: frameId })
     expect(read.data.html.length).toBeLessThan(full.length / 3)
     expect(read.data.instances).toHaveLength(20)
@@ -226,6 +228,35 @@ describe('an agent working with components', () => {
     expect(html.match(/ data-doop-instance=/g)).toHaveLength(20)
     /* the other nineteen did not change, down to their ids */
     expect(html).toContain(/data-doop-id="[a-z0-9]{6}"/.exec(full)![0])
+  })
+
+  it('edits text copied from the full form, also where it runs into what Doop supplied', async () => {
+    const canvas = newCanvas()
+    await button(canvas.id)
+    const frameId = await framed(canvas.id, '<h1>Old title</h1><doop-use component="Button" label="Go"></doop-use>')
+    const full = (await call('get_frame', { frame_id: frameId, expand_components: true })).data.html as string
+    /* the end of the Button's stylesheet, the head's close and the heading: one stretch of the full form */
+    const spanning = /\n<\/style>\n<\/head><body><h1>Old title<\/h1>/.exec(full)?.[0]
+    expect(spanning).toBeDefined()
+    expect(store.getFrame(frameId)!.html).not.toContain(spanning)
+    const edit = await call('edit_frame_html', {
+      frame_id: frameId,
+      old_str: spanning,
+      new_str: spanning!.replace('Old title', 'New title'),
+    })
+    expect(edit.isError).toBe(false)
+    const stored = store.getFrame(frameId)!.html
+    expect(stored).toContain('<h1>New title</h1>')
+    /* stored as the frame's source, and rendered as before with the new heading */
+    expect(stored).not.toContain('data-doop-component-css')
+    expect(renderedHtml(frameId)).toBe(full.replace('Old title', 'New title'))
+
+    /* an edit of nothing but the supplied stylesheet would be dropped on the way in: it says so */
+    const rule = /padding: [^;}]+/.exec(full)![0]
+    const lost = await call('edit_frame_html', { frame_id: frameId, old_str: rule, new_str: 'padding: 99px' })
+    expect(lost.isError).toBe(true)
+    expect(lost.text).toContain('update_component')
+    expect(store.getFrame(frameId)!.html).toBe(stored)
   })
 
   it('hears about mistakes in the result, with what would have worked', async () => {
@@ -562,7 +593,7 @@ describe('an agent working with components', () => {
       canvas.id,
       '<doop-use component="Plan"></doop-use><doop-use component="Button"></doop-use>',
     )
-    expect(store.getFrame(frameId)!.html).toContain(`.plan:where([data-doop-instance="${plan().id}"]) .btn`)
+    expect(renderedHtml(frameId)).toContain(`.plan:where([data-doop-instance="${plan().id}"]) .btn`)
 
     const updated = await call('update_component', {
       canvas_id: canvas.id,
@@ -572,7 +603,7 @@ describe('an agent working with components', () => {
     expect(updated.isError).toBe(false)
     expect(plan().rawCss).toContain('.plan .btn { width: auto }')
     expect(updated.text).toContain('were not kept: .label.')
-    expect(store.getFrame(frameId)!.html).toContain('width: auto')
+    expect(renderedHtml(frameId)).toContain('width: auto')
 
     const clean = await call('update_component', {
       canvas_id: canvas.id,

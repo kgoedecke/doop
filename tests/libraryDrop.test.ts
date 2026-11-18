@@ -35,6 +35,9 @@ const button = {
   id: 'c1',
   name: 'Button',
   rev: 1,
+  template: '<div data-doop-part="a"></div>',
+  css: '',
+  head: [] as string[],
   source: { canvasId: 'lib1', componentId: 'c1', rev: 3, library: true },
 } as ComponentDef
 const drag = { libraryCanvasId: 'lib1', componentId: 'c1' }

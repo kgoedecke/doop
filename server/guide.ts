@@ -500,9 +500,10 @@ A canvas's palette, type scale, spacing, radii and fonts are typed design tokens
 properties every frame uses, each with a value per theme (light, dark, …) where it differs.
 
 - get_canvas lists them (and says when a canvas has none yet). Write var(--name) in CSS,
-  never the literal value, so one token change restyles every frame using it. Doop writes
-  the values a frame names into its own <style data-doop-tokens> block: keep that block and
-  never edit it, and never declare the palette on a frame's own :root.
+  never the literal value, so one token change restyles every frame using it. Doop supplies
+  the values a frame names wherever the frame is rendered (a <style data-doop-tokens> block
+  you may see in a screenshot's source or an expanded read): never write that block
+  yourself, and never declare the palette on a frame's own :root.
 - No tokens yet: create_tokens before the first frame, from the brief (palette by role,
   font families, type scale, spacing, radii). Decisions and their reasons go to
   save_decision; values never do.

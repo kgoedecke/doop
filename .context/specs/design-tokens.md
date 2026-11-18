@@ -42,16 +42,26 @@ every alias (a custom property's `var()` is substituted where it is declared, so
 `:root` would keep the default under a themed subtree). Alias chains are checked per theme, and a
 delete is refused while any value, default or themed, aliases the token. The block is
 replaced when the values differ and removed when the document names no token; the function
-returns the input string itself when nothing changes. It runs wherever `withFontFaces` runs:
-`withLibraryFaces` in `server/actions.ts` on every frame write (create, update, the final append
-chunk, an idle stream close) and `FrameView`'s browser save path. A frame switches theme with
+returns the input string itself when nothing changes. A frame switches theme with
 `data-doop-theme="dark"` on its `<html>`, or on one subtree.
+
+The block is part of the composed document, not of what a frame stores (lean frame storage,
+`shared/frameCompose.ts`, described in TECHSTACK): `composeFrameHtml` puts it in wherever a frame is
+rendered or handed on (the browser before posting into the iframe, the server's renderer, exports,
+anything sent to a client that does not compose), after the stylesheets of the components the frame
+uses, so a token only their rules name is carried too. Writes still run it before the font scan and
+then store the source. `DOOP_LEAN_FRAME_STORAGE=false` (temporary) stores the block in the frame
+again.
 
 ## Propagation
 
-A token change (`actions.createTokens` for frames already naming the token, `setTokens`,
-`setTokenThemes`) rewrites the block in every frame on the
-canvas whose block no longer matches (`restyleTokenFrames`), as an annotation write
+A token's value changes with no frame written: the room's `tokens` message restyles every mounted
+frame in a browser that composes, clients that do not are sent the frames it restyled, and render
+caches go by what each render was supplied (`server/styleVersion.ts`: a render of a frame naming the
+token is retired, others are not). `restyleTokenFrames` still visits the
+frames after a token change (`actions.createTokens`, `setTokens`, `setTokenThemes`) and writes the
+ones whose source changes (a rename, a theme attribute, a font face that comes or goes), or, with
+the switch off, every frame whose block no longer matches, as an annotation write
 (`store.updateFrame`'s `annotation` option): `ready_for_dev` sign-off stands, no version is
 filed, one activity line names the token and how many frames were restyled. Frames with an open
 append stream are skipped and any rename is queued for the stream's close (their done chunk, or

@@ -626,6 +626,11 @@ export type ClientMessage =
       name: string
       kind: ActorKind
       pagesOnDemand?: boolean
+      /** the browser composes each frame's document itself from the canvas's tokens
+       *  and components (shared/frameCompose.ts), so it is sent frames' source. A join
+       *  without it is sent every frame composed, and sent it again when the tokens or
+       *  a component's stylesheet change */
+      composesFrames?: boolean
       pageId?: string
       frameId?: string
     }

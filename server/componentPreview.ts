@@ -3,6 +3,7 @@ import { z } from 'zod'
 import { CSS_ATTR, type ComponentDef, type InstanceOverrides } from '../shared/components.ts'
 import type { Frame } from '../shared/types.ts'
 import { withCanvasFaces } from './canvasFaces.ts'
+import { wholeDocument } from './frameCompose.ts'
 import { contextFor } from './components.ts'
 import { renderInstance } from './componentEngine.ts'
 
@@ -83,7 +84,8 @@ figcaption{font:11px/1.3 ui-monospace,monospace;color:#777}
 export function previewFrame(canvasId: string, def: ComponentDef, combos: Record<string, string>[]): Frame {
   const { html, width, height } = previewDocument(canvasId, def, combos)
   const now = Date.now()
-  return {
+  /* the sheet brings its own stylesheets, in its own order */
+  return wholeDocument({
     id: `component-preview-${def.id}`,
     canvasId,
     name: def.name,
@@ -95,5 +97,5 @@ export function previewFrame(canvasId: string, def: ComponentDef, combos: Record
     createdAt: now,
     updatedAt: now,
     updatedBy: def.updatedBy,
-  }
+  })
 }

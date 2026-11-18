@@ -10,6 +10,7 @@ import { MAX_LAYER_SELECTOR_CHARS } from '../../shared/elementId'
 import type { Frame } from '../../shared/types'
 import { isDesktopShell } from './shell'
 import { inspectElement } from './frameBridge'
+import { composeFrame } from './frameCompose'
 import { clipToFrame, cropRaster, frameSvg, rasterizeFrame, type ClipRect } from './frameRaster'
 import { useStore } from './store'
 import { t } from './i18n'
@@ -262,7 +263,8 @@ async function exportOutcome(fetched: Promise<Fetched>): Promise<string | null> 
  *  shows, so a draft in progress exports as typed. Nothing to fetch, so it
  *  cannot fail the way the rendered exports can. */
 export function downloadFrameHtml(frame: Frame, html = frame.html): void {
-  saveBlob(new Blob([html], { type: 'text/html;charset=utf-8' }), `${frame.name || 'frame'}.html`)
+  /* a file opened by itself: the canvas's token values and component styles go with it */
+  saveBlob(new Blob([composeFrame(html)], { type: 'text/html;charset=utf-8' }), `${frame.name || 'frame'}.html`)
 }
 
 /** Render and download a frame export, reporting through the canvas toast:

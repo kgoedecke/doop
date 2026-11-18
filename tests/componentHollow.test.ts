@@ -18,12 +18,17 @@ import { compactFrameHtml } from '../server/componentActions.ts'
 import { store } from '../server/store.ts'
 import { COMPONENT_ATTR, CSS_ATTR, INSTANCE_ATTR } from '../shared/components.ts'
 import type { Actor } from '../shared/types.ts'
+import { stubEnv, unstubAllEnvs } from './envStub.ts'
 
 /*
  * A hollow definition: the row lost its markup (an older write landed last, 2026-11-11)
  * while its main and its instances still hold the design. Nothing may be rendered from it:
  * its instances keep their markup and their stylesheet whatever is written, until a write of
  * the main gives the definition its markup back.
+ *
+ * The frames here are stored as they were when that happened, with their components'
+ * stylesheets written into them (DOOP_LEAN_FRAME_STORAGE=false while they are made): the
+ * copy in the frame is the only one left, and lean storage has to keep it there too.
  */
 const actor = { name: 'Tester', kind: 'user', color: '#000', clientId: 'x' } as unknown as Actor
 
@@ -31,6 +36,13 @@ const doc = (body: string, css = '') =>
   `<!doctype html><html><head><style>${css}</style></head><body>${body}</body></html>`
 
 function setup() {
+  stubEnv('DOOP_LEAN_FRAME_STORAGE', 'false')
+  const made = composedFrames()
+  unstubAllEnvs()
+  return made
+}
+
+function composedFrames() {
   const canvas = store.createCanvas('hollow', 'owner-hollow')
   const def = blankComponent({ name: 'Button', by: 'Tester' })
   store.saveComponent(canvas.id, def)

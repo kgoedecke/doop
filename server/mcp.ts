@@ -16,6 +16,7 @@ import type { Request, Response } from 'express'
 import { fromNodeHeaders } from 'better-auth/node'
 import { z } from 'zod'
 import { store } from './store.ts'
+import { composedHtml, stampRender } from './frameCompose.ts'
 import { addPage, savePages } from './pageTools.ts'
 import {
   FIT_AXES,
@@ -66,6 +67,7 @@ import {
 import { primeImage } from './previews.ts'
 import { MAX_LAYER_SELECTOR_CHARS } from '../shared/elementId.ts'
 import { layerExport } from './layerExport.ts'
+import { renderStamp } from './styleVersion.ts'
 import {
   DEFAULT_EXPORT_SCALE,
   MAX_EXPORT_SCALE,
@@ -113,6 +115,8 @@ import {
 import {
   catalog,
   compactFrameHtml,
+  editFrameHtml,
+  frameEditProblem,
   deletedComponentsInUse,
   findComponent,
   instancesIn,
@@ -223,19 +227,6 @@ function withFitNote<T extends ToolContent>(result: T, fit: FittedFrame | undefi
 function withNotesFirst<T extends ToolContent>(result: T, notes: string[]): T {
   result.content.splice(1, 0, ...notes.map((note) => ({ type: 'text' as const, text: note })))
   return result
-}
-
-/** Find and replace in a frame, in the form get_frame shows it first: an agent copies from that. */
-function editFrameSource(frame: Frame, find: string, replace: string): { html: string } | { error: string } {
-  const compact = compactFrameHtml(frame)
-  const sources = compact === frame.html ? [frame.html] : [compact, frame.html]
-  for (const source of sources) {
-    const count = source.split(find).length - 1
-    if (count === 1) return { html: source.replace(find, () => replace) }
-    if (count > 1)
-      return { error: `old_str occurs ${count} times — include more surrounding context so it matches exactly once.` }
-  }
-  return { error: 'old_str not found in the frame HTML. Call get_frame to see the current content.' }
 }
 
 /** A PDF returned inline as base64; beyond this, export fewer frames. */
@@ -1622,7 +1613,9 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
       return withFeedbackNotice(
         text({
           ...frameSummary(f, images),
-          html: expand_components ? f.html : compactFrameHtml(f),
+          /* the full form is the document as rendered: the canvas's component stylesheets
+             and token values composed in (server/frameCompose.ts) */
+          html: expand_components ? composedHtml(f.canvasId, f.html) : compactFrameHtml(f),
           ...(instances.length ? { instances } : {}),
         }),
         f.canvasId,
@@ -2473,10 +2466,11 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
          this older image with its newer updatedAt, or the cache would serve
          it as current for the next five minutes */
       const f = { ...live }
+      const stamp = stampRender(renderStamp(f), f)
       try {
         const png = await renderFrame(f, scale ?? 1)
         /* the ChatGPT card loads this exact image next — serve it from cache */
-        primeImage(f, scale ?? 1, png)
+        primeImage(f, scale ?? 1, png, stamp)
         return withPreview(
           withFeedbackNotice(
             {
@@ -2580,10 +2574,13 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
     async ({ frame_id, old_str, new_str, agent_name }) => {
       const f = frameFor(frame_id, 'edit')
       if (!f) return noFrame(frame_id)
-      const edited = editFrameSource(f, old_str, new_str)
-      if ('error' in edited) return err(edited.error)
-      /* the edited document, so a URI completed across the replacement's edges is caught too */
-      const inline = inlineDataRefusal(edited.html, heldForms(f))
+      /* in whichever form the text was copied from: compact, stored, or the full form */
+      const edited = editFrameHtml(f, old_str, new_str)
+      if ('problem' in edited) return err(frameEditProblem(edited, 'old_str', 'get_frame'))
+      /* the edited document, so a URI completed across the replacement's edges is caught too.
+         Every form it may have been made in counts as what the frame already held */
+      const held = `${f.html}\n${compactFrameHtml(f)}\n${composedHtml(f.canvasId, f.html)}`
+      const inline = inlineDataRefusal(edited.html, held)
       if (inline) return err(inline)
       const frame = actions.updateFrame(frame_id, { html: edited.html }, actorFrom(agent_name))!
       return withPreview(

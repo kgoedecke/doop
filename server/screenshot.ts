@@ -3,6 +3,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import puppeteer, { type Browser, type Page } from 'puppeteer-core'
 import type { Frame } from '../shared/types.ts'
+import { composedHtml, isWholeDocument } from './frameCompose.ts'
 import { guardPublicPageRequests } from './publicUrl.ts'
 import { withHostedIcons } from './iconProxy.ts'
 import { withHostedPhotos } from './photoProxy.ts'
@@ -167,6 +168,14 @@ export async function loadFramePage(frame: Frame, options?: PageOptions): Promis
   }
 }
 
+/** The document a renderer loads for a frame: its stored HTML is the source, so the
+ *  canvas's component stylesheets and token values are composed in here, the one place
+ *  every server render, inspection and export passes (server/frameCompose.ts). */
+function renderDocument(frame: Frame): string {
+  if (!frame.html) return '<!doctype html><html><body></body></html>'
+  return isWholeDocument(frame) ? frame.html : composedHtml(frame.canvasId, frame.html)
+}
+
 /** A viewport of the frame's design px, whole and at least 1 each way. */
 export function frameViewport(width: number, height: number, deviceScaleFactor = 1) {
   return { width: designPx(width), height: designPx(height), deviceScaleFactor }
@@ -189,7 +198,7 @@ async function loadFrameInto(page: Page, frame: Frame, fitting = false): Promise
      asset URLs of imported frames resolve nowhere. In the app an iframe
      inherits the page origin; here a <base> stands in for it — unless the
      frame brought its own (website imports do). */
-  let html = withHostedPhotos(withHostedIcons(frame.html || '<!doctype html><html><body></body></html>'))
+  let html = withHostedPhotos(withHostedIcons(renderDocument(frame)))
   /* the editor morphs every design into a standards-mode document (FRAME_BOOTSTRAP in
      src/lib/frameRuntime.ts), so a design without a doctype renders the same way here */
   if (!/^\s*<!doctype/i.test(html)) html = `<!doctype html>${html}`

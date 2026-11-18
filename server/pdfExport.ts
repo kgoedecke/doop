@@ -3,6 +3,7 @@ import type { Canvas, Frame } from '../shared/types.ts'
 import { readingOrder } from '../shared/frameOrder.ts'
 import { canvasPages, pageFrames } from '../shared/pages.ts'
 import { MAX_PDF_FRAMES, PDF_RENDER_CONCURRENCY } from '../shared/pdfLimits.ts'
+import { composedHtml, wholeDocument } from './frameCompose.ts'
 import { designPx } from './renderLimits.ts'
 import { settleFonts } from './renderFonts.ts'
 import { frameViewport, loadFramePage, rendererAvailable } from './screenshot.ts'
@@ -66,10 +67,11 @@ function escapeAttribute(value: string): string {
  * units at the frame's size. Relative URLs resolve against the shell's
  * `<base>`, which a srcdoc document inherits.
  */
-function printShell(frame: Pick<Frame, 'width' | 'height' | 'html'>): string {
+export function printShell(frame: Pick<Frame, 'width' | 'height' | 'html' | 'canvasId'>): string {
   const width = designPx(frame.width)
   const height = designPx(frame.height)
-  const html = frame.html || '<!doctype html><html><body></body></html>'
+  /* composed here: the shell is loaded as written, and the design is inside its iframe */
+  const html = frame.html ? composedHtml(frame.canvasId, frame.html) : '<!doctype html><html><body></body></html>'
   return (
     '<!doctype html><html><head><style>html,body{margin:0;overflow:hidden}' +
     `iframe{display:block;border:0;width:${width}px;height:${height}px}</style></head>` +
@@ -80,7 +82,7 @@ function printShell(frame: Pick<Frame, 'width' | 'height' | 'html'>): string {
 /** One frame as a single-page PDF. */
 export async function renderFramePdfPage(frame: Frame): Promise<Uint8Array> {
   if (!pdfRendererAvailable()) throw new PdfRendererUnavailableError()
-  const loaded = await loadFramePage({ ...frame, html: printShell(frame) })
+  const loaded = await loadFramePage(wholeDocument({ ...frame, html: printShell(frame) }))
   const { page } = loaded
   try {
     const size = pageSizeFor(frame)

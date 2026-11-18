@@ -20,6 +20,7 @@ vi.mock('../server/fonts.ts', () => ({ fontsForCanvas: () => [] }))
 
 const actions = await import('../server/actions.ts')
 const { store } = await import('../server/store.ts')
+const { renderedHtml } = await import('./rendered.ts')
 const { componentWriteNotes, runComponentTool, streamChunkNotes } = await import('../server/componentTools.ts')
 const { componentSystemPlan } = await import('../server/reuseNotes.ts')
 
@@ -92,7 +93,7 @@ describe('reuse notes on frame writes', () => {
     const canvasId = canvasWithTokens()
     /* the frame names the token; the managed block it gets holds the literal */
     expect(write(canvasId, page(`<h1 style="color:var(--color-ink)">Hi</h1>`))).toEqual([])
-    expect(store.getCanvas(canvasId)!.frames.at(-1)!.html).toContain('data-doop-tokens')
+    expect(renderedHtml(store.getCanvas(canvasId)!.frames.at(-1)!.id)).toContain('data-doop-tokens')
   })
 
   it('flags a palette declared on :root, and a token redefined there', () => {

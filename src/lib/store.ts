@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import { canvasPages, framePageId } from '../../shared/pages'
 import { openingPageId } from './pageLink'
 import { sortByStack } from '../../shared/frameStack'
+import { sourceOf, type SharedComponent } from '../../shared/frameCompose'
 import type { DesignToken } from '../../shared/designTokens'
 import type { AgentRole } from '../../shared/agents'
 import type {
@@ -341,6 +342,16 @@ function readRulers(): boolean {
 /** ends a follow: the leader and, for an agent, its last-seen record */
 const UNFOLLOW = { following: null, followedAgent: null }
 
+/** A frame as the store keeps it: its source. What the canvas supplies to every frame
+ *  (component stylesheets, token values) is composed in where a frame is shown
+ *  (src/lib/frameCompose.ts), so a frame that arrives carrying those blocks (stored before
+ *  lean storage, or sent by a server that still writes them) is taken without them. */
+function asSource<F extends { html?: string }>(frame: F, components: readonly SharedComponent[] | undefined): F {
+  if (typeof frame.html !== 'string') return frame
+  const html = sourceOf(frame.html, components ?? [])
+  return html === frame.html ? frame : { ...frame, html }
+}
+
 export const useStore = create<State>((set, get) => ({
   canvas: null,
   activePageId: null,
@@ -398,7 +409,10 @@ export const useStore = create<State>((set, get) => ({
 
   setCanvas: (wire, loadedPageIds) =>
     set((s) => {
-      const canvas: ClientCanvas | null = wire && { ...wire, frames: wire.frames.map((f) => withHtml(f, s.canvas)) }
+      const canvas: ClientCanvas | null = wire && {
+        ...wire,
+        frames: wire.frames.map((f) => withHtml(asSource(f, wire.components), s.canvas)),
+      }
       return {
         /* the stage paints frames in array order: back to front */
         canvas: canvas && { ...canvas, frames: sortByStack(canvas.frames) },
@@ -431,7 +445,10 @@ export const useStore = create<State>((set, get) => ({
   setPageFrames: (pageId, frames) =>
     set((s) => {
       if (!s.canvas) return {}
-      const fresh = new Map(frames.filter((f) => f.canvasId === s.canvas!.id).map((f) => [f.id, f]))
+      const components = s.canvas.components
+      const fresh = new Map(
+        frames.filter((f) => f.canvasId === s.canvas!.id).map((f) => [f.id, asSource(f, components)]),
+      )
       const merged = s.canvas.frames.map((f) => fresh.get(f.id) ?? f)
       for (const f of s.canvas.frames) fresh.delete(f.id)
       return {
@@ -590,7 +607,7 @@ export const useStore = create<State>((set, get) => ({
   upsertFrame: (wire) =>
     set((s) => {
       if (!s.canvas || wire.canvasId !== s.canvas.id) return {}
-      const f = withHtml(wire, s.canvas)
+      const f = withHtml(asSource(wire, s.canvas.components), s.canvas)
       const frames = sortByStack(
         s.canvas.frames.some((x) => x.id === f.id)
           ? s.canvas.frames.map((x) => (x.id === f.id ? f : x))
@@ -618,7 +635,8 @@ export const useStore = create<State>((set, get) => ({
   patchFrameLocal: (frameId, patch) =>
     set((s) => {
       if (!s.canvas) return {}
-      const frames = s.canvas.frames.map((f) => (f.id === frameId ? { ...f, ...patch } : f))
+      const local = asSource(patch, s.canvas.components)
+      const frames = s.canvas.frames.map((f) => (f.id === frameId ? { ...f, ...local } : f))
       return { canvas: { ...s.canvas, frames: 'z' in patch ? sortByStack(frames) : frames } }
     }),
   removeFrame: (frameId) =>

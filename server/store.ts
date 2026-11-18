@@ -4,7 +4,15 @@ import * as persist from './db/persist.ts'
 import type { LinkAccess } from '../shared/canvasRole.ts'
 import { MAX_GUIDES } from '../shared/guides.ts'
 import { remapFrameTargets } from '../shared/prototype.ts'
-import type { ComponentDef } from '../shared/components.ts'
+import { renderRevOf, rendersSame, type ComponentDef } from '../shared/components.ts'
+import { composeFrameHtml } from '../shared/frameCompose.ts'
+import {
+  THEMES_DEPENDENCY,
+  bumpStyle,
+  componentDependency,
+  forgetStyleVersions,
+  tokenDependency,
+} from './styleVersion.ts'
 import { byStack, frontOf, stackOf } from '../shared/frameStack.ts'
 import { htmlLoaded, setHtml, setHtmlMissHandler, unloadHtml, withHtml } from './frameHtml.ts'
 import { afterCommit, inTransaction, recordUndo, requireBoundary } from './journal.ts'
@@ -89,6 +97,16 @@ function restoreFrame(frame: Frame, state: ReturnType<typeof frameState>) {
  * synchronously as before. `evictIdle` drops the HTML of a page nobody has
  * used for a while, never one that is held, in use or waiting on a write.
  */
+/** Set a definition's `renderRev` as it is saved: where it stood when this state renders
+ *  what the one it replaces did, else this revision. Decided here, the one place every
+ *  save passes, since a revision is opened before its content is known (`bumpRevision`,
+ *  then the main's write). The definition is the caller's own fresh object. */
+function markRenderRev(def: ComponentDef, replaced: ComponentDef | undefined) {
+  const carried = replaced ? (rendersSame(replaced, def) ? renderRevOf(replaced) : def.rev) : renderRevOf(def)
+  if (carried < def.rev) def.renderRev = carried
+  else delete def.renderRev
+}
+
 class Store {
   canvases = new Map<string, Canvas>()
   private frameIndex = new Map<string, string>() // frameId -> canvasId
@@ -876,6 +894,7 @@ class Store {
     const c = this.canvases.get(id)
     if (!c) return undefined
     requireBoundary('store.deleteCanvas')
+    forgetStyleVersions(id)
     const used = this.pagesUsed.get(id)
     for (const f of c.frames) this.frameIndex.delete(f.id)
     this.canvases.delete(id)
@@ -1053,8 +1072,12 @@ class Store {
     const list = (c.components ??= [])
     const at = list.findIndex((existing) => existing.id === def.id)
     const replaced = at === -1 ? undefined : list[at]
+    markRenderRev(def, replaced)
     if (at === -1) list.push(def)
     else list[at] = def
+    /* its stylesheet is part of every render of a frame using it (server/styleVersion.ts) */
+    if (replaced?.css !== def.css || replaced.head.join('\n') !== def.head.join('\n'))
+      bumpStyle(canvasId, componentDependency(def.id))
     recordUndo(() => {
       /* saved again since by someone else: theirs stands */
       const now = c.components?.indexOf(def) ?? -1
@@ -1073,6 +1096,7 @@ class Store {
     const at = c?.components?.findIndex((def) => def.id === id) ?? -1
     if (!c?.components || at === -1) return false
     requireBoundary('store.deleteComponent')
+    bumpStyle(canvasId, componentDependency(id))
     const [removed] = c.components.splice(at, 1)
     recordUndo(() => {
       const list = (c.components ??= [])
@@ -1182,6 +1206,8 @@ class Store {
     const c = this.canvases.get(canvasId)
     if (!c) return undefined
     requireBoundary('store.setTokens')
+    /* renders naming one of these are stale (server/styleVersion.ts) */
+    for (const input of inputs) bumpStyle(canvasId, tokenDependency(input.name))
     this.remember(c, ['tokens', 'updatedAt'], true)
     const tokens = (c.tokens ??= [])
     const now = Date.now()
@@ -1226,6 +1252,8 @@ class Store {
     const token = c?.tokens?.find((t) => t.name === name)
     if (!c || !token) return undefined
     requireBoundary('store.renameToken')
+    bumpStyle(canvasId, tokenDependency(name))
+    bumpStyle(canvasId, tokenDependency(newName))
     const before = { name: token.name, updatedAt: token.updatedAt, updatedBy: token.updatedBy }
     recordUndo(() => Object.assign(token, before))
     this.remember(c, ['updatedAt'])
@@ -1248,6 +1276,7 @@ class Store {
     const c = this.canvases.get(canvasId)
     if (!c) return undefined
     requireBoundary('store.setTokenThemes')
+    bumpStyle(canvasId, THEMES_DEPENDENCY)
     this.remember(c, ['tokens', 'tokenThemes', 'updatedAt'], true)
     c.tokenThemes = themes.length ? [...themes] : undefined
     const now = Date.now()
@@ -1270,6 +1299,7 @@ class Store {
     const c = this.canvases.get(canvasId)
     if (!c || !c.tokenThemes?.includes(from)) return false
     requireBoundary('store.renameTokenTheme')
+    bumpStyle(canvasId, THEMES_DEPENDENCY)
     this.remember(c, ['tokens', 'tokenThemes', 'updatedAt'], true)
     c.tokenThemes = c.tokenThemes.map((theme) => (theme === from ? to : theme))
     const now = Date.now()
@@ -1291,6 +1321,7 @@ class Store {
     const idx = c?.tokens?.findIndex((t) => t.name === name) ?? -1
     if (!c || idx === -1) return false
     requireBoundary('store.deleteToken')
+    bumpStyle(canvasId, tokenDependency(name))
     this.remember(c, ['tokens', 'updatedAt'])
     c.tokens!.splice(idx, 1)
     c.updatedAt = Date.now()
@@ -1303,7 +1334,8 @@ class Store {
     return this.canvases.get(canvasId)?.references ?? []
   }
 
-  /** Pin a frame to Memory: snapshot its HTML now, decoupled from the frame. */
+  /** Pin a frame to Memory: snapshot its document now, decoupled from the frame and from
+   *  the canvas's tokens and components, so it is composed here (shared/frameCompose.ts). */
   addReference(canvasId: string, frame: Frame, by: string): MemoryReference | undefined {
     const c = this.canvases.get(canvasId)
     if (!c) return undefined
@@ -1311,7 +1343,11 @@ class Store {
       id: nanoid(10),
       frameId: frame.id,
       title: frame.name,
-      html: frame.html,
+      html: composeFrameHtml(frame.html, {
+        tokens: c.tokens ?? [],
+        themes: c.tokenThemes ?? [],
+        components: c.components ?? [],
+      }),
       width: frame.width,
       height: frame.height,
       pinnedBy: by,

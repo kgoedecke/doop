@@ -17,6 +17,7 @@ import {
   activeComponents,
   componentSignature,
   isDeleted,
+  renderRevOf,
   isPropName,
   type ComponentCode,
   type ComponentDef,
@@ -92,6 +93,7 @@ import { optional, parse, parseFragment, usage as workUsage, WorkBudgetError } f
 import { afterCommit, atomic, checkpoint, transaction } from './journal.ts'
 import { usageByComponent, usageOf, type ComponentUsage } from './componentUsage.ts'
 import { store } from './store.ts'
+import { composedHtml, sourceHtml } from './frameCompose.ts'
 import { mayPublishLibrary } from './workspaces.ts'
 
 /**
@@ -374,9 +376,50 @@ export function componentDetail(canvas: Canvas, def: ComponentDef) {
   }
 }
 
-/** A frame's HTML the way agents read it. */
+/** A frame's HTML the way agents read it: its source, with instances in the short form.
+ *  Nothing the canvas supplies is in it, the token block included (a frame stored before
+ *  lean storage still carries one): agents write `var(--name)` and never the block. */
 export function compactFrameHtml(frame: Frame): string {
-  return compactDocument(frame.html, contextFor(frame.canvasId))
+  return sourceHtml(frame.canvasId, compactDocument(frame.html, contextFor(frame.canvasId)))
+}
+
+export type FrameEdit =
+  | { html: string }
+  | { problem: 'not_found' }
+  | { problem: 'ambiguous'; count: number }
+  /** the text is in what the canvas supplies to the frame, and the edit changed nothing else */
+  | { problem: 'supplied' }
+
+/**
+ * One exact find-and-replace in a frame, tried in each form an agent may have copied the
+ * text from: the compact form (what a plain read shows), the stored source, and the composed
+ * document (the full form: `get_frame` with `expand_components`). The result is written as
+ * any HTML is, so it is stored as source; an edit that only changed what the canvas supplies
+ * (a component's stylesheet, the token block) would be dropped there, and is refused instead.
+ */
+export function editFrameHtml(frame: Frame, find: string, replace: string): FrameEdit {
+  const compact = compactFrameHtml(frame)
+  const composed = composedHtml(frame.canvasId, frame.html)
+  for (const form of new Set([compact, frame.html, composed])) {
+    const count = form.split(find).length - 1
+    if (count > 1) return { problem: 'ambiguous', count }
+    if (count === 0) continue
+    const html = form.replace(find, () => replace)
+    const lost = form === composed && sourceHtml(frame.canvasId, html) === sourceHtml(frame.canvasId, form)
+    return lost && find !== replace ? { problem: 'supplied' } : { html }
+  }
+  return { problem: 'not_found' }
+}
+
+const SUPPLIED_EDIT =
+  'that text is part of what Doop supplies to the frame (a component’s stylesheet or the design-token values), not of the frame itself: change the component with update_component or the token with set_tokens'
+
+/** What went wrong with an edit, for the agent that asked for it; `find` names its parameter. */
+export function frameEditProblem(edit: Exclude<FrameEdit, { html: string }>, find: string, read: string): string {
+  if (edit.problem === 'ambiguous')
+    return `${find} occurs ${edit.count} times — include more surrounding context so it matches exactly once.`
+  if (edit.problem === 'supplied') return `${find}: ${SUPPLIED_EDIT}.`
+  return `${find} not found in the frame HTML. Call ${read} to see the current content.`
 }
 
 /** Every instance in a frame: what each is, its props, what it overrides. */
@@ -900,7 +943,7 @@ export interface InsertInput {
 }
 
 function useFor(def: ComponentDef, props: Record<string, string> | undefined, instanceId = ''): string {
-  const state = { instanceId, componentId: def.id, rev: def.rev, overrides: props ? { props } : {} }
+  const state = { instanceId, componentId: def.id, rev: renderRevOf(def), overrides: props ? { props } : {} }
   return useMarkup(def.name, state, def, undefined)
 }
 

@@ -10,6 +10,9 @@
  *  destination head, deduplicated by content. External stylesheets are not
  *  carried: nothing can say which of their rules the layer needs. */
 
+import { componentsUsedBy, syncComponentHead } from '../../shared/frameCompose'
+import { useStore } from './store'
+
 export const CARRIED_ATTR = 'data-doop-carried'
 export const SCOPE_ATTR = 'data-doop-carried-scope'
 
@@ -699,7 +702,11 @@ export function renameInCss(css: string, renamed: Record<string, string> | undef
 /** The CSS a subtree of `sourceHtml` relies on, scoped to `scope`; empty
  *  when the frame's own sheets style nothing in it. */
 export function carriedCss(sourceHtml: string, selector: string, scope: string): string {
-  const doc = parse(sourceHtml)
+  /* the store's frame is its source: the stylesheets of the components it uses are the
+     canvas's, composed in here so a part taken out of an instance keeps their rules.
+     Token values are not: the destination resolves them from the canvas, live */
+  const components = useStore.getState().canvas?.components ?? []
+  const doc = parse(syncComponentHead(sourceHtml, componentsUsedBy(sourceHtml, components)))
   let root: Element | null
   try {
     root = doc.querySelector(selector)

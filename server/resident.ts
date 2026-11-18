@@ -3,6 +3,7 @@ import { MAX_DECISION_CHARS } from '../shared/designDecisions.ts'
 import { isAgentsTask } from '../shared/agentIdentity.ts'
 import type Anthropic from '@anthropic-ai/sdk'
 import { store } from './store.ts'
+import { composedHtml, wholeDocument } from './frameCompose.ts'
 import { layerExport } from './layerExport.ts'
 import { MAX_EXPORT_SCALE, MIN_EXPORT_SCALE } from '../shared/exportScale.ts'
 import { fontsForCanvas } from './fonts.ts'
@@ -53,7 +54,14 @@ import {
 } from './guide.ts'
 import { zodToJsonSchema } from 'zod-to-json-schema'
 import { z } from 'zod'
-import { catalog, compactFrameHtml, findComponent, libraryCatalog } from './componentActions.ts'
+import {
+  catalog,
+  compactFrameHtml,
+  editFrameHtml,
+  findComponent,
+  frameEditProblem,
+  libraryCatalog,
+} from './componentActions.ts'
 import { activeComponents } from '../shared/components.ts'
 import { isAutomationCard } from '../shared/automations.ts'
 import { getUserName } from './auth.ts'
@@ -2092,17 +2100,13 @@ async function runResidentTool(
         if (typeof f.html !== 'string') return fail('frame HTML is unavailable; retry after the frame reloads')
         if (typeof input.find !== 'string' || !input.find) return fail('find must be a non-empty exact HTML string')
         if (typeof input.replace !== 'string') return fail('replace must be an HTML string')
-        /* in the form get_frame_html showed, or the expanded one if that is what was copied */
-        const compact = compactFrameHtml(f)
-        const source = compact.split(input.find).length - 1 > 0 ? compact : f.html
-        const count = source.split(input.find).length - 1
-        if (count === 0) return fail('"find" text not found — call get_frame_html and copy the exact text')
-        if (count > 1)
-          return fail(`"find" text occurs ${count} times — include more surrounding context to make it unique`)
-        const replace = input.replace
-        const edited = source.replace(input.find, () => replace)
+        /* in the form get_frame_html showed, or the stored or composed one if that is what was copied */
+        const edit = editFrameHtml(f, input.find, input.replace)
+        if ('problem' in edit) return fail(frameEditProblem(edit, '"find" text', 'get_frame_html'))
+        const edited = edit.html
         /* the edited document, so a URI completed across the replacement's edges is caught too */
-        const inline = inlineDataRefusal(edited, `${f.html}\n${compact}`, 'resident')
+        const held = `${f.html}\n${compactFrameHtml(f)}\n${composedHtml(f.canvasId, f.html)}`
+        const inline = inlineDataRefusal(edited, held, 'resident')
         if (inline) return fail(inline)
         actions.updateFrame(input.frame_id, { html: edited }, actor)
         runState.mutatedFrames.add(input.frame_id)
@@ -2434,7 +2438,8 @@ async function runResidentTool(
               : 'no style references pinned on this canvas',
           )
         }
-        const snapshot: Frame = {
+        /* whole as pinned: it keeps the tokens and component styles it had then */
+        const snapshot: Frame = wholeDocument({
           id: `reference-${ref.id}`,
           canvasId,
           name: ref.title,
@@ -2446,7 +2451,7 @@ async function runResidentTool(
           createdAt: ref.pinnedAt,
           updatedAt: ref.pinnedAt,
           updatedBy: ref.pinnedBy,
-        }
+        })
         const blocks = await frameImageBlocks(snapshot)
         const truncated = ref.html.length > MAX_HTML_READ_CHARS
         blocks.push({

@@ -12,10 +12,12 @@ import {
   REV_ATTR,
   USE_TAG,
   isDeleted,
+  stateAtRev,
   type ComponentDef,
   type ComponentIssue,
   type ComponentProp,
 } from '../shared/components.ts'
+import { componentClosure } from '../shared/frameCompose.ts'
 import { extractComponentCss, frameHeadTags, frameStylesheets } from './componentCss.ts'
 import {
   attrOf,
@@ -37,6 +39,7 @@ import {
 } from './componentEngine.ts'
 import { adoptFromLibrary, findInLibraries, LibraryAdoptError } from './componentLibrary.ts'
 import { withHostedIcons } from './iconProxy.ts'
+import { env } from './env.ts'
 import { store } from './store.ts'
 import { noteCanvas } from './workBudget.ts'
 import { WriteRefusedError } from './writeRefusal.ts'
@@ -88,12 +91,9 @@ export function contextFor(canvasId: string, adoption?: LibraryAdoption): Engine
     find,
     atRev(id, rev) {
       const def = defs().find((candidate) => candidate.id === id)
-      if (!def) return undefined
-      if (def.rev === rev) return hostedForm(def)
-      const snapshot = def.history.find((entry) => entry.rev === rev)
-      return hostedForm(
-        snapshot ? { id, name: def.name, rev, template: snapshot.template, props: snapshot.props } : undefined,
-      )
+      const state = def && stateAtRev(def, rev)
+      if (!def || !state) return undefined
+      return hostedForm(state === def ? def : { id, name: def.name, ...state })
     },
     issues,
   }
@@ -147,21 +147,7 @@ function touchesComponents(html: string): boolean {
 }
 
 function closureOf(ids: Iterable<string>, canvasId: string): ComponentDef[] {
-  const defs = store.getComponents(canvasId)
-  const seen = new Map<string, ComponentDef>()
-  const stack = [...ids]
-  for (let id = stack.pop(); id; id = stack.pop()) {
-    if (seen.has(id)) continue
-    const def = defs.find((candidate) => candidate.id === id)
-    if (!def) continue
-    seen.set(id, def)
-    for (const match of def.template.matchAll(/component="([^"]+)"/g)) {
-      const nested = defs.find((candidate) => candidate.id === match[1] || candidate.name === match[1])
-      if (nested) stack.push(nested.id)
-    }
-  }
-  /* dependencies first, so a nested component's rules come before the ones built on them */
-  return [...seen.values()].reverse()
+  return componentClosure(ids, store.getComponents(canvasId))
 }
 
 /** Would a template using these components put `id` inside itself? */
@@ -184,6 +170,7 @@ export function bumpRevision(def: ComponentDef, by: string): ComponentDef {
     ...def.history,
     {
       rev: def.rev,
+      ...(def.renderRev !== undefined ? { renderRev: def.renderRev } : {}),
       template: def.template,
       rawCss: def.rawCss,
       head: def.head,
@@ -438,9 +425,11 @@ export function dedupeIssues(issues: ComponentIssue[]): ComponentIssue[] {
   })
 }
 
-/** One chunk of a live stream: components render as they arrive, each stylesheet
- *  once and in place, since the head may already have gone by. The last chunk's
- *  full pass moves them where they belong. */
+/** One chunk of a live stream: components render as they arrive. Their stylesheets are
+ *  not the frame's to hold (lean storage): whoever is shown the frame mid-stream composes
+ *  them in (the browser, the renderer, `legacyFrame` for a client that cannot). With
+ *  `DOOP_LEAN_FRAME_STORAGE=false` each goes in once and in place, since the head may
+ *  already have gone by, and the last chunk's full pass moves them where they belong. */
 export function prepareChunk(
   canvas: Canvas,
   chunk: string,
@@ -451,9 +440,11 @@ export function prepareChunk(
   const adoption: LibraryAdoption = { by, added: [] }
   const ctx = contextFor(canvas.id, adoption)
   const expanded = expandUses(chunk, ctx)
-  const styles = closureOf(usedComponentIds(expanded), canvas.id)
-    .filter((def) => def.css.trim() && !soFar.includes(`${CSS_ATTR}="${def.id}"`))
-    .map((def) => `<style ${CSS_ATTR}="${def.id}">\n${def.css}\n</style>`)
+  const styles = env.DOOP_LEAN_FRAME_STORAGE
+    ? []
+    : closureOf(usedComponentIds(expanded), canvas.id)
+        .filter((def) => def.css.trim() && !soFar.includes(`${CSS_ATTR}="${def.id}"`))
+        .map((def) => `<style ${CSS_ATTR}="${def.id}">\n${def.css}\n</style>`)
   /* a use expanded here is gone by the last chunk's pass: what it had to say is said now */
   return { html: `${styles.join('\n')}${expanded}`, issues: ctx.issues, adopted: adoption.added }
 }

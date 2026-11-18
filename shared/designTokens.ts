@@ -9,8 +9,9 @@
  * own HTML, in one managed `<style data-doop-tokens>` block, so every renderer
  * that reads frame HTML (the canvas, screenshots, PDF export, the iOS app)
  * resolves them without knowing about the canvas. `withTokenBlock` writes
- * that block; the browser runs it on its saves, the server on every frame
- * write and again on every frame that names a token whose value changes.
+ * that block. It is composed in wherever a frame is rendered or handed on
+ * (shared/frameCompose.ts), not kept in the frame's stored HTML, so a token's
+ * value changes without a frame being written.
  */
 
 export const TOKEN_BLOCK_ATTR = 'data-doop-tokens'
@@ -220,9 +221,15 @@ export function usesToken(html: string, name: string): boolean {
 
 /** The tokens a design names, directly or through an alias chain. */
 export function tokensUsedBy(html: string, tokens: readonly DesignToken[]): DesignToken[] {
+  if (!tokens.length || !html.includes('var(')) return []
   const design = html.replace(BLOCK_RE, '')
+  /* one pass over the document, however many tokens the canvas has: a token's
+     name is all of `--[a-zA-Z0-9_-]+` (isTokenName), so this reads what
+     `usesToken` would find for each */
+  const named = new Set<string>()
+  for (const match of design.matchAll(/var\(\s*(--[a-zA-Z0-9_-]+)\s*[,)]/g)) named.add(match[1]!)
   const wanted = new Set<string>()
-  const queue = tokens.filter((t) => usesToken(design, t.name)).map((t) => t.name)
+  const queue = tokens.filter((t) => named.has(t.name)).map((t) => t.name)
   while (queue.length) {
     const name = queue.pop()!
     if (wanted.has(name)) continue
@@ -278,10 +285,15 @@ export function withTokenBlock(
   tokens: readonly DesignToken[],
   themeOrder: readonly string[] = [],
 ): string {
+  return placeTokenBlock(html, tokensCss(tokensUsedBy(html, tokens), themeOrder))
+}
+
+/** The HTML with `css` as its managed token block: replaced where one is, put first in the
+ *  head where none is, removed when `css` is empty. The input itself when nothing changes. */
+export function placeTokenBlock(html: string, css: string): string {
   const existing = BLOCK_RE.exec(html)
-  const used = tokensUsedBy(html, tokens)
-  if (!used.length) return existing ? html.replace(BLOCK_RE, '') : html
-  const tag = `<style ${TOKEN_BLOCK_ATTR}>${tokensCss(used, themeOrder)}</style>`
+  if (!css) return existing ? html.replace(BLOCK_RE, '') : html
+  const tag = `<style ${TOKEN_BLOCK_ATTR}>${css}</style>`
   if (existing) {
     if (existing[0] === tag) return html
     return `${html.slice(0, existing.index)}${tag}${html.slice(existing.index + existing[0].length)}`
@@ -459,8 +471,8 @@ export function tokensBrief(tokens: readonly DesignToken[], themeOrder: readonly
   const themes = themesOf(tokens, themeOrder)
   return (
     `Design tokens (${names}): use one by writing var(--name) in CSS — background: var(--color-primary) — ` +
-    `never the literal value, so a token change restyles every frame at once. Doop writes the values into ` +
-    `each frame's <style ${TOKEN_BLOCK_ATTR}> block by itself; do not define them yourself and keep that block. ` +
+    `never the literal value, so a token change restyles every frame at once. Doop supplies the values to ` +
+    `every frame by itself (a <style ${TOKEN_BLOCK_ATTR}> block in what is rendered); do not define them yourself. ` +
     (themes.length
       ? `Themes (${themes.join(', ')}) give some tokens a different value: put ${THEME_ATTR}="${themes[0]}" on a frame's <html> (or on one subtree) to switch it there. `
       : '') +
