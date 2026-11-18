@@ -594,6 +594,36 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
       dx: w.deltaX * unit, dy: w.deltaY * unit, ctrlKey: w.ctrlKey, metaKey: w.metaKey, shiftKey: w.shiftKey
     }])
   }, { capture: true, passive: false })
+  // Capture the middle pointer inside the document; screen-space deltas stay
+  // stable while the canvas (and therefore the iframe) moves underneath it.
+  var middleDrag = null
+  var readButton = getter(MouseEvent.prototype, 'button')
+  var readButtons = getter(MouseEvent.prototype, 'buttons')
+  var readScreenX = getter(MouseEvent.prototype, 'screenX')
+  var readScreenY = getter(MouseEvent.prototype, 'screenY')
+  var readPointerId = getter(PointerEvent.prototype, 'pointerId')
+  var capturePointer = Element.prototype.setPointerCapture
+  document.addEventListener('pointerdown', function (ev) {
+    if (!liveInput(ev) || apply(readButton, ev, []) !== 1) return
+    var id = apply(readPointerId, ev, [])
+    apply(capturePointer, root, [id])
+    middleDrag = { id: id, x: apply(readScreenX, ev, []), y: apply(readScreenY, ev, []) }
+    ev.preventDefault()
+  }, true)
+  document.addEventListener('pointermove', function (ev) {
+    if (!middleDrag || !liveInput(ev) || apply(readPointerId, ev, []) !== middleDrag.id) return
+    if (!(apply(readButtons, ev, []) & 4)) { middleDrag = null; return }
+    var x = apply(readScreenX, ev, []), y = apply(readScreenY, ev, [])
+    apply(portSend, keyPort, [{ event: 'wheel', x: 0, y: 0, dx: middleDrag.x - x, dy: middleDrag.y - y }])
+    middleDrag.x = x
+    middleDrag.y = y
+  }, true)
+  function endMiddleDrag(ev) {
+    if (middleDrag && apply(readPointerId, ev, []) === middleDrag.id) middleDrag = null
+  }
+  document.addEventListener('pointerup', endMiddleDrag, true)
+  document.addEventListener('pointercancel', endMiddleDrag, true)
+  document.addEventListener('lostpointercapture', endMiddleDrag, true)
   var keyGetters = {}
   var KEY_FIELDS = ['key', 'code', 'ctrlKey', 'metaKey', 'shiftKey', 'altKey', 'repeat']
   for (var kf = 0; kf < KEY_FIELDS.length; kf++) keyGetters[KEY_FIELDS[kf]] = getter(KeyboardEvent.prototype, KEY_FIELDS[kf])

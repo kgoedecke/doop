@@ -82,7 +82,7 @@ describe.skipIf(!findBrowserPath())('page camera and snapping', { timeout: 30_00
     const controls = '<input id="search" style="width:90px"><input id="toggle" type="checkbox">'
     const interactive = {
       ...frame('interactive', 'first', 0),
-      html: `<!doctype html><html data-doop-interactive="true"><body>${controls}
+      html: `<!-- generated --><!doctype html><!-- tool --><html data-doop-interactive="true"><body>${controls}
         <div data-doop-scroll style="height:60px;overflow:auto;overscroll-behavior:contain"><div style="height:300px">Rows</div></div>
         </body></html>`,
     }
@@ -137,6 +137,58 @@ describe.skipIf(!findBrowserPath())('page camera and snapping', { timeout: 30_00
     const y = await page.evaluate(() => window.pageState().viewport.y)
     await page.mouse.wheel({ deltaY: 30 })
     await page.waitForFunction((start) => window.pageState().viewport.y < start, { timeout: 3000 }, y)
+
+    // Switching tools from the document must not trap Escape inside the iframe.
+    await click(widget, '[data-doop-scroll]')
+    await page.keyboard.press('h')
+    await page.waitForFunction(() => {
+      const el = document.querySelector('iframe[title="interactive"]')!
+      const r = el.getBoundingClientRect()
+      return document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2) !== el
+    })
+    await page.keyboard.press('Escape')
+    await page.waitForFunction(() => document.activeElement?.tagName !== 'IFRAME', { timeout: 3000 })
+    await click(widget, '#toggle')
+    expect(await widget.$eval('#toggle', (el) => (el as HTMLInputElement).checked)).toBe(false)
+  })
+
+  it('keeps the pointer anchored during zoom and middle-drag over a rotated live frame', async () => {
+    const tilted = {
+      ...frame('tilted', 'first', 0),
+      width: 280,
+      rotation: 90,
+      html: '<html data-doop-interactive="true"><body><button>Go</button></body></html>',
+    }
+    await load(canvas([tilted]))
+    const host = (await page.waitForSelector('iframe[title="tilted"]'))!
+    await (await host.contentFrame())!.waitForSelector('button')
+    const before = (await host.boundingBox())!
+    const x = before.x + before.width * 0.25
+    const y = before.y + before.height * 0.7
+    await page.mouse.move(x, y)
+    await page.keyboard.down('Control')
+    await page.mouse.wheel({ deltaY: -35 })
+    await page.keyboard.up('Control')
+    await page.waitForFunction(
+      (w) => document.querySelector('iframe[title="tilted"]')!.getBoundingClientRect().width > w + 1,
+      {},
+      before.width,
+    )
+    const after = (await host.boundingBox())!
+    expect(Math.abs(after.x + after.width * 0.25 - x)).toBeLessThan(2)
+    expect(Math.abs(after.y + after.height * 0.7 - y)).toBeLessThan(2)
+    const start = await page.evaluate(() => window.pageState().viewport)
+    await page.mouse.down({ button: 'middle' })
+    await page.mouse.move(x + 30, y - 20, { steps: 4 })
+    await page.mouse.up({ button: 'middle' })
+    await page.waitForFunction(
+      ({ x, y }) => {
+        const p = window.pageState().viewport
+        return Math.abs(p.x - x - 30) < 2 && Math.abs(p.y - y + 20) < 2
+      },
+      { timeout: 3000 },
+      start,
+    )
   })
 
   it('centers the linked frame on a different page instead of fitting its distant siblings', async () => {

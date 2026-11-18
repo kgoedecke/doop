@@ -317,7 +317,14 @@ export const FrameView = memo(function FrameView({
   // Opt in from the saved root tag, not from a message sent by frame scripts.
   const liveFrame = useMemo(() => {
     if (!frame.html.includes('data-doop-interactive')) return false
-    const root = /^\s*(?:<!doctype\s+html\s*>\s*)?<html(?=\s|>)(?:[^'"<>]|"[^"]*"|'[^']*')*>/i.exec(frame.html)
+    // Skip only leading comments and the doctype. Never match an opt-in
+    // inside a comment or parse the frame's potentially large body.
+    const preamble = /(?:\s+|<!--[\s\S]*?-->|<!doctype\s+html\s*>)/iy
+    let offset = 0
+    while (preamble.exec(frame.html)) offset = preamble.lastIndex
+    const tag = /<html(?=\s|>)(?:[^'"<>]|"[^"]*"|'[^']*')*>/iy
+    tag.lastIndex = offset
+    const root = tag.exec(frame.html)
     if (!root) return false
     return (
       new DOMParser().parseFromString(root[0], 'text/html').documentElement.getAttribute('data-doop-interactive') ===
@@ -830,7 +837,7 @@ export const FrameView = memo(function FrameView({
   const keyPort = useRef<MessagePort | null>(null)
   const liveInput = useRef<((data: MessageEvent['data']) => void) | null>(null)
   useLayoutEffect(() => {
-    if (!liveFrame || editing || panMode || fileDragging || tool !== 'select') {
+    if (!liveFrame || editing) {
       liveInput.current = null
       return
     }
@@ -838,15 +845,26 @@ export const FrameView = memo(function FrameView({
       const iframe = iframeRef.current
       if (!iframe || !data) return
       if (data.event === 'leave') {
-        if (document.activeElement === iframe && document.hasFocus()) iframe.blur()
-      } else if (data.event === 'wheel') {
+        if (document.activeElement === iframe && document.hasFocus()) {
+          iframe.blur()
+          if (tool !== 'select') useStore.getState().setTool('select')
+        }
+      } else if (data.event === 'wheel' && !panMode && !fileDragging && tool === 'select') {
         const { x, y, dx, dy } = data
         if (![x, y, dx, dy].every(Number.isFinite)) return
         const rect = iframe.getBoundingClientRect()
+        const angle = ((frame.rotation ?? 0) * Math.PI) / 180
+        const cos = Math.cos(angle)
+        const sin = Math.sin(angle)
+        const width = iframe.offsetWidth
+        const height = iframe.offsetHeight
+        const scale = rect.width / (Math.abs(cos) * width + Math.abs(sin) * height)
+        const localX = (Math.max(0, Math.min(1, x)) - 0.5) * width
+        const localY = (Math.max(0, Math.min(1, y)) - 0.5) * height
         iframe.dispatchEvent(
           new WheelEvent('wheel', {
-            clientX: rect.left + Math.max(0, Math.min(1, x)) * rect.width,
-            clientY: rect.top + Math.max(0, Math.min(1, y)) * rect.height,
+            clientX: rect.left + rect.width / 2 + scale * (localX * cos - localY * sin),
+            clientY: rect.top + rect.height / 2 + scale * (localX * sin + localY * cos),
             deltaX: Math.max(-2000, Math.min(2000, dx)),
             deltaY: Math.max(-2000, Math.min(2000, dy)),
             ctrlKey: data.ctrlKey === true,
@@ -861,7 +879,7 @@ export const FrameView = memo(function FrameView({
     return () => {
       liveInput.current = null
     }
-  }, [liveFrame, editing, panMode, fileDragging, tool])
+  }, [liveFrame, editing, panMode, fileDragging, tool, frame.rotation])
   /* saves a document the runtime serialized after a text edit (set below) */
   const saveEditedRef = useRef<(html: string, discrete: boolean) => void>(() => {})
   useEffect(() => {
