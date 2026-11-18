@@ -144,17 +144,22 @@ describe.skipIf(!findBrowserPath())('drawing on the canvas', { timeout: 30_000 }
     await page.evaluate(() => window.drawingHarness.viewport({ x: 0, y: 0, zoom: 1 }))
     const from = await visibleDrawing('Layers', layer)
     const to = await visibleDrawing('Layers', over)
+    const layers = async () => (await (await page.$('iframe[title="Layers"]'))!.contentFrame())!
+    const offsets = async () =>
+      (await layers()).$eval(layer, (el) => `${(el as HTMLElement).style.left}/${(el as HTMLElement).style.top}`)
+    const before = await offsets()
     await drag([from.x + from.width / 2, from.y + from.height / 2], [to.x + to.width / 2, to.y + to.height / 2])
     await expect.poll(() => patchRequests).toBe(1)
-    const iframe = (await (await page.$('iframe[title="Layers"]'))!.contentFrame())!
-    const moved = await iframe.$eval(layer, (el) => ({
+    const moved = await (
+      await layers()
+    ).$eval(layer, (el) => ({
       parent: el.parentElement?.id,
       position: getComputedStyle(el).position,
-      translate: getComputedStyle(el).translate,
     }))
     expect(moved.parent).toBe(parent)
     expect(moved.position).toBe('absolute')
-    expect(moved.translate).not.toBe('none')
+    // an absolute layer moves by its own left and top
+    await expect.poll(offsets).not.toBe(before)
   })
 
   it('puts a floating layer in flow inside an absolute container whose flow content sits in a display:contents wrapper', async () => {
