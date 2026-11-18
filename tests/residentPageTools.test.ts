@@ -186,4 +186,18 @@ describe.skipIf(!findBrowserPath())('fit_height', () => {
     expect(set.is_error).toBeUndefined()
     expect(store.getFrame(frameId)!.height).toBe(420)
   }, 60_000)
+
+  it('answers a set_frame_html whose frame is deleted while it is measured', async () => {
+    const pending = execTool(
+      call('set_frame_html', { frame_id: frameId, html: tall, fit_height: true }),
+      canvasId,
+      actor(),
+      run(),
+    )
+    /* the page takes longer than this to load */
+    await new Promise((resolve) => setTimeout(resolve, 30))
+    actions.deleteFrame(frameId, actor())
+    const result = await pending
+    expect(String(result.content)).toContain('fit_height was not applied')
+  }, 60_000)
 })

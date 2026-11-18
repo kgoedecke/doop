@@ -1705,7 +1705,7 @@ const TOOLS: Anthropic.Tool[] = [
         height: { type: 'number', description: 'px; the design is not rescaled' },
         fit_height: {
           type: 'boolean',
-          description: `${FIT_HEIGHT_DESCRIPTION} Measured at the new width when you pass one; not with height.`,
+          description: `${FIT_HEIGHT_DESCRIPTION} Measured at the new width when you pass one; not with height. If the fit cannot be made, nothing else in the call is applied either.`,
         },
         locked: { type: 'boolean', description: 'true keeps humans from selecting, moving or deleting it' },
       },
@@ -2079,7 +2079,7 @@ async function runResidentTool(
           [
             'applied — the new design is revealing to viewers now',
             ...(fit?.note ? [fit.note] : []),
-            ...componentWriteNotes(store.getFrame(input.frame_id)!, { review: true }),
+            ...componentWriteNotes(fit?.frame ?? written, { review: true }),
           ].join('\n'),
         )
       }

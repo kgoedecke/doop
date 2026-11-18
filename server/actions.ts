@@ -1849,6 +1849,11 @@ export function healPartialHtml(html: string): string {
   return html
 }
 
+/** What viewers have of a frame mid-playback: the first `shown` chars, healed to paint. */
+function revealedHtml(frame: Frame, shown: number): string {
+  return shown >= frame.html.length ? frame.html : healPartialHtml(frame.html.slice(0, shown))
+}
+
 function commonPrefixLen(a: string, b: string): number {
   const n = Math.min(a.length, b.length)
   let i = 0
@@ -1946,8 +1951,11 @@ setInterval(() => {
     /* drain the rest evenly so the playback lands exactly at the deadline */
     const ticksLeft = Math.max(1, Math.ceil((r.deadline - now) / TICK_MS))
     r.shown = Math.min(total, r.shown + Math.ceil(remaining / ticksLeft))
-    const partial = r.shown >= total ? frame.html : healPartialHtml(frame.html.slice(0, r.shown))
-    broadcast(frame.canvasId, { type: 'frame:updated', frame: { ...frame, html: partial }, actor: r.actor })
+    broadcast(frame.canvasId, {
+      type: 'frame:updated',
+      frame: { ...frame, html: revealedHtml(frame, r.shown) },
+      actor: r.actor,
+    })
   }
   expireIdleStreams(now)
 }, TICK_MS)
@@ -2595,7 +2603,7 @@ export const updateFrame = atomic(function updateFrame(
     const playing = htmlChanged ? undefined : reveals.get(frameId)
     broadcast(frame.canvasId, {
       type: 'frame:updated',
-      frame: playing ? { ...frame, html: healPartialHtml(frame.html.slice(0, playing.shown)) } : frame,
+      frame: playing ? { ...frame, html: revealedHtml(frame, playing.shown) } : frame,
       actor,
     })
     if (htmlChanged) {

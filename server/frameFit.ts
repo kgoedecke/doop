@@ -2,7 +2,7 @@ import { MAX_EXPORT_SIDE } from '../shared/exportScale.ts'
 import type { Actor, Canvas, Frame } from '../shared/types.ts'
 import * as actions from './actions.ts'
 import { checkpoint } from './journal.ts'
-import { type FrameMetaPatch, type PageToolResult, updateFrameMeta } from './pageTools.ts'
+import { checkFrameMeta, type FrameMetaPatch, type PageToolResult, updateFrameMeta } from './pageTools.ts'
 import { type ContentMeasure, measureContentHeight } from './screenshot.ts'
 import { store } from './store.ts'
 
@@ -38,24 +38,27 @@ type Settled = { kind: 'fits'; height: number } | { kind: 'outgrows' }
  *  shrinks with the frame (content = a + b × height), so its fixed point is
  *  solved from two measures and confirmed with a third; with b ≥ 1 (a
  *  100vh hero above anything else) no height holds all of it. Content that
- *  fills the frame exactly is either a floor (a min-height:100vh wrapper
- *  around less than that, which a tiny viewport reveals) or sized by the
- *  viewport alone (an app shell at height:100vh), which keeps its height. */
+ *  fills the frame exactly is either a floor or sized by the viewport alone,
+ *  told apart at a 1px viewport: a min-height:100vh wrapper around less still
+ *  flows to its content there and shrinks to it, while an app shell at
+ *  height:100vh collapses and only its overflow is left, so it keeps its height. */
 export async function settleHeight(start: number, measure: ContentMeasure): Promise<Settled> {
   const clamp = (height: number) => Math.min(Math.max(1, Math.round(height)), FIT_HEIGHT_MAX)
+  const painted = async (viewport: number) => clamp((await measure(viewport)).painted)
   const from = clamp(start)
-  const first = clamp(await measure(from))
+  const first = await painted(from)
   if (first === from) {
-    const floor = clamp(await measure(1))
-    const shrinks = floor > 1 && floor < from && clamp(await measure(floor)) === floor
+    const tiny = await measure(1)
+    const floor = clamp(tiny.painted)
+    const shrinks = floor > 1 && floor < from && clamp(tiny.flow) >= floor && (await painted(floor)) === floor
     return { kind: 'fits', height: shrinks ? floor : from }
   }
-  const second = clamp(await measure(first))
+  const second = await painted(first)
   if (second === first) return { kind: 'fits', height: first }
   const slope = (second - first) / (first - from)
   if (slope >= 1) return { kind: 'outgrows' }
   const solved = clamp(Math.ceil((first - slope * from) / (1 - slope)))
-  const check = clamp(await measure(solved))
+  const check = await painted(solved)
   return Math.abs(check - solved) <= 1 ? { kind: 'fits', height: Math.max(check, solved) } : { kind: 'outgrows' }
 }
 
@@ -83,9 +86,10 @@ function fitNote(height: number): string {
 
 /** update_frame, for agents on MCP and the resident agent: `updateFrameMeta`,
  *  and with `fitHeight` the frame measured at the patch's width (its own when
- *  the patch has none) and the height written with the rest of the patch. A
- *  fit is refused while an agent streams into the frame, and when its design
- *  changed during the measurement. */
+ *  the patch has none) and the height written with the rest of the patch. The
+ *  patch is checked before the browser is asked; a fit is refused while an
+ *  agent streams into the frame and when its design changed during the
+ *  measurement, and a refused fit applies none of the patch. */
 export async function updateFrameMetaWithFit(
   canvas: Canvas,
   frameId: string,
@@ -98,6 +102,8 @@ export async function updateFrameMetaWithFit(
     return updated.ok ? { ok: true, value: { frame: updated.value } } : updated
   }
   if (patch.height !== undefined) return { ok: false, error: 'pass either height or fit_height, not both' }
+  const checked = checkFrameMeta(canvas, patch, { allowEmpty: true })
+  if (!checked.ok) return checked
   const measured = store.getFrame(frameId)
   if (!measured) return { ok: false, error: `frame ${frameId} not found` }
   if (actions.isFrameMidStream(frameId))
@@ -109,7 +115,10 @@ export async function updateFrameMetaWithFit(
   const current = store.getFrame(frameId)
   if (!current || current.canvasId !== canvas.id) return { ok: false, error: `frame ${frameId} not found` }
   if (current.html !== snapshot.html || (patch.width === undefined && current.width !== snapshot.width))
-    return { ok: false, error: 'the frame changed while it was measured: call again to fit what it is now' }
+    return {
+      ok: false,
+      error: 'the frame changed while it was measured: call update_frame with fit_height to fit what it is now',
+    }
   const updated = updateFrameMeta(canvas, frameId, { ...patch, height: height.value }, actor)
   return updated.ok ? { ok: true, value: { frame: updated.value, note: fitNote(height.value) } } : updated
 }

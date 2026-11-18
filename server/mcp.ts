@@ -2519,7 +2519,9 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
         fit_height: z
           .boolean()
           .optional()
-          .describe(`${FIT_HEIGHT_DESCRIPTION} Measured at the new width when you pass one.`),
+          .describe(
+            `${FIT_HEIGHT_DESCRIPTION} Measured at the new width when you pass one. If the fit cannot be made, nothing else in the call is applied either.`,
+          ),
         locked: z.boolean().optional(),
         rotation: z.number().optional(),
         agent_name: agentName,
