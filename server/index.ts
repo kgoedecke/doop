@@ -41,6 +41,7 @@ import { codeSchema, propSchema } from './componentTools.ts'
 import { activeComponents, wireComponent, withWireComponents } from '../shared/components.ts'
 import type { ComponentDef } from '../shared/components.ts'
 import { PRO_UPLOAD_BYTES } from '../shared/billing.ts'
+import { SIGN_IN_PATH } from '../shared/signInPath.ts'
 import { canvasPages, framePageId, openingPageId, pageFrames, samePages } from '../shared/pages.ts'
 import { normalizePageBackground } from '../shared/pageBackground.ts'
 import { MAX_STACK_WRITES, type StackWrite } from '../shared/frameStack.ts'
@@ -974,12 +975,14 @@ app.get(FIRST_CANVAS_PATH, async (req, res) => {
   const session = await auth.api.getSession({ headers: fromNodeHeaders(req.headers) }).catch(() => null)
   /* ?connect=1 rides along: the lifecycle emails link here with a static URL
      and the canvas page opens the Connect AI modal on it. Signed out (an
-     email opened in a fresh browser), the login page gets this URL as its
+     email opened in a fresh browser), the sign-in page gets this URL as its
      redirect_to, so the destination survives the sign-in. The bare path
      keeps sending a signed-out browser to the dashboard as before. */
   const connect = req.query.connect === '1' ? '?connect=1' : ''
   if (!session)
-    return res.redirect(connect ? `/?redirect_to=${encodeURIComponent(`${FIRST_CANVAS_PATH}${connect}`)}` : '/')
+    return res.redirect(
+      connect ? `${SIGN_IN_PATH}?redirect_to=${encodeURIComponent(`${FIRST_CANVAS_PATH}${connect}`)}` : '/',
+    )
   /* ?signup=<method>: a provider sign-in that just created this account
      (src/pages/AuthPage.tsx). It rides on to wherever the account lands so
      the app can report the signup with its method, then drops it. */

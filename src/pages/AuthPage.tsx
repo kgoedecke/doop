@@ -19,6 +19,7 @@ import { Field } from '../components/ui/field'
 import { Callout } from '../components/ui/callout'
 import { useT, type PlainMessageKey } from '../lib/i18n'
 import type { LoginPolicy } from '../../shared/instanceSettings'
+import { SIGN_IN_PATH, withoutSignInError } from '../../shared/signInPath'
 
 /* If login interrupted an MCP OAuth authorize redirect, send the browser
    back into the flow so the agent connection completes. */
@@ -247,7 +248,7 @@ export function AuthPage({ initialMode }: { initialMode?: 'signin' | 'signup' } 
 
   /* the SSO error code has been shown; keep it out of the address bar */
   useEffect(() => {
-    if (ssoErrorFromUrl()) history.replaceState(null, '', location.pathname)
+    if (ssoErrorFromUrl()) history.replaceState(null, '', location.pathname + withoutSignInError(location.search))
   }, [])
 
   /* the provider round trip starts the moment the policy says so: once,
@@ -288,7 +289,10 @@ export function AuthPage({ initialMode }: { initialMode?: 'signin' | 'signup' } 
         setNotice(browserSignInNotice)
         return
       }
-      const res = await start({ ...ssoRedirects(provider), errorCallbackURL: '/auth' })
+      const res = await start({
+        ...ssoRedirects(provider),
+        errorCallbackURL: SIGN_IN_PATH + withoutSignInError(location.search),
+      })
       if (res.error) setError(authErrorMessage(res.error, startFailed, t('auth.unreachable')))
     } catch {
       setError(t(NETWORK_ERROR))
@@ -339,7 +343,7 @@ export function AuthPage({ initialMode }: { initialMode?: 'signin' | 'signup' } 
           /* a platform error must not be reported as an expired link */
           setError(authErrorMessage(res.error, t('auth.resetLinkInvalid'), t('auth.unreachable')))
         } else {
-          history.replaceState(null, '', '/auth')
+          history.replaceState(null, '', SIGN_IN_PATH)
           switchMode('signin')
           setNotice(t('auth.passwordUpdated'))
         }

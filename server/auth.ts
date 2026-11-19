@@ -13,6 +13,7 @@ import { acceptInvites, joinDefaultWorkspace } from './workspaces.ts'
 import { getInstanceSettings } from './instanceSettings.ts'
 import { purgeUserData } from './accountDeletion.ts'
 import { MCP_REFRESH_TOKEN_TTL_S } from './mcpTokens.ts'
+import { SIGN_IN_PATH } from '../shared/signInPath.ts'
 import { createHash } from 'node:crypto'
 import { createRemoteJWKSet, jwtVerify } from 'jose'
 
@@ -548,8 +549,12 @@ function buildAuth() {
        actually decides linking, as intended. */
     plugins: [
       mcp({
-        loginPage: '/',
-        oidcConfig: { loginPage: '/', consentPage: '/oauth/consent', refreshTokenExpiresIn: MCP_REFRESH_TOKEN_TTL_S },
+        loginPage: SIGN_IN_PATH,
+        oidcConfig: {
+          loginPage: SIGN_IN_PATH,
+          consentPage: '/oauth/consent',
+          refreshTokenExpiresIn: MCP_REFRESH_TOKEN_TTL_S,
+        },
       }),
       admin({ impersonationSessionDuration: 15 * 60 }),
       /* oneTimeToken: how a Google / Microsoft / SSO sign-in finished in the
