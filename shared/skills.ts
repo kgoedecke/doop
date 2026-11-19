@@ -128,7 +128,7 @@ export function skillsBlock(skills: Skill[], text: string): string | undefined {
   if (!named.length) return undefined
   return [
     '# Skills requested for this work',
-    'The person asked for these skills by name (`/handle` in the request). Follow their instructions for this work, alongside everything above.',
+    "These skills were asked for by name (`/handle` in the request or in your role's instructions). Follow their instructions for this work, alongside everything above.",
     ...named.map((skill) => `## /${skill.handle}: ${skill.description}\n\n${skill.body}`),
   ].join('\n\n')
 }

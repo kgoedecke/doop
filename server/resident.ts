@@ -268,12 +268,16 @@ function earlierInThread(comment: ElementComment): ElementComment[] {
 /** The system block for the skills a run's requests name with `/handle`
  *  (shared/skills.ts), from the canvas's scope. A follow-up keeps the skill
  *  its task named and a reply the one named earlier in its thread, so "make it
- *  bigger" after /brand-check still gets it. */
+ *  bigger" after /brand-check still gets it. Instructions a team wrote for the
+ *  running agent name skills too: a reviewer told to apply /brand-check gets it
+ *  on every run; the shipped briefs are never scanned. */
 export function requestedSkillsPrompt(
   canvas: { workspaceId?: string | null; ownerId?: string | null },
   work: { items: FeedbackItem[]; cards: AgentTask[]; comments: ElementComment[] },
+  role?: AgentRole,
 ): string | undefined {
   const text = [
+    role?.custom || role?.briefByTeam ? role.brief : '',
     ...work.items.flatMap((item) => [item.text, item.about]),
     ...work.cards.map((card) => card.status),
     ...work.comments.flatMap((comment) => [comment.text, ...earlierInThread(comment).map((x) => x.text)]),
@@ -765,7 +769,7 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
       const canvas = store.getCanvas(canvasId)
       /* read when the run starts, so a skill edited while the work waited
          runs as edited; cached with its own breakpoint like the guidelines */
-      const skillsPrompt = canvas && requestedSkillsPrompt(canvas, { items, cards, comments })
+      const skillsPrompt = canvas && requestedSkillsPrompt(canvas, { items, cards, comments }, role)
       const skillsBlocks = skillsPrompt ? [{ text: skillsPrompt, cache: true }] : []
       const fontsText = [canvas ? libraryBrief(fontsForCanvas(canvas)) : '', webFontsBrief()]
         .filter(Boolean)

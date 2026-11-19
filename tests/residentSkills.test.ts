@@ -1,4 +1,5 @@
 import { beforeAll, describe, expect, it, vi } from 'vitest'
+import type { AgentRole } from '../shared/agents.ts'
 import type { AgentTask, ElementComment } from '../shared/types.ts'
 
 /* the queue mirrors every write into Postgres; only what a run reads matters here */
@@ -89,5 +90,14 @@ describe('the skills a run is given', () => {
     expect(requestedSkillsPrompt(ours, { ...none, comments: [reply] })).toContain(body('brand-check'))
     /* alice has /tone, but only the agent's later message names it */
     expect(requestedSkillsPrompt({ ownerId: 'alice' }, { ...none, comments: [reply] })).toBeUndefined()
+  })
+
+  it('gives the skill a team named in the running agent’s instructions', () => {
+    const reviewer = { id: 'reviewer', brief: 'Always apply /brand-check.' } as AgentRole
+    const work = { ...none, cards: [card('tighten the hero')] }
+    expect(requestedSkillsPrompt(ours, work, { ...reviewer, custom: true })).toContain(body('brand-check'))
+    expect(requestedSkillsPrompt(ours, work, { ...reviewer, briefByTeam: true })).toContain(body('brand-check'))
+    /* a shipped brief is never read for handles */
+    expect(requestedSkillsPrompt(ours, work, reviewer)).toBeUndefined()
   })
 })

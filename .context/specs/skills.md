@@ -94,11 +94,13 @@ as with custom agents. No realtime broadcast: the `/` menu reads the list again 
 - After `workText` is built, `requestedSkills = skillHandlesIn(skillText)` matched against
   `skillsForCanvas(canvas)`, where `skillText` is `workText` plus each feedback item's `about`
   (the task it follows up) and each comment's earlier thread messages, so "make it bigger" after
-  a `/brand-check` task keeps the skill. Resolved when the run starts, so a skill edited while work waits in
+  a `/brand-check` task keeps the skill. Instructions a team wrote for the running agent (a
+  custom agent's, an edited built-in's) are scanned too, so a reviewer told to apply `/brand-check`
+  gets it on every run; shipped briefs are not. Resolved when the run starts, so a skill edited while work waits in
   the queue runs as edited, and one deleted meanwhile is ignored.
 - When any match, one more system block after the guidelines block:
   `# Skills requested for this work` followed by, for each, `## /<handle>: <description>` and
-  the body, with a line saying the person asked for these by name and they apply to this work.
+  the body, with a line saying these were asked for by name (in the request or the role's instructions) and they apply to this work.
   Both paths get it: the `model.run` system list (with `cache: true`) and the joined string for
   `model.runHarness`.
 - The request text keeps its `/handle`s, so the agent sees which part of the request each skill

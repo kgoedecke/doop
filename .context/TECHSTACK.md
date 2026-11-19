@@ -118,6 +118,7 @@
   finds a `/handle` that starts the text or follows whitespace or `(` and ends at whitespace or
   punctuation, so paths and URLs are never skills. The resident run scans its cards, comments,
   feedback, each feedback's task and what came before each comment in its thread
+  and the instructions a team wrote for the running agent
   (`requestedSkillsPrompt` in `server/resident.ts`), and `skillsBlock` adds the bodies of the
   first five the canvas's scope has as a cached system block after the guidelines, on both the API
   and harness paths; a handle with no skill changes nothing. Skill text never reaches canvas
