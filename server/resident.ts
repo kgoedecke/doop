@@ -1692,6 +1692,16 @@ const TOOLS: Anthropic.Tool[] = [
     },
   },
   {
+    name: 'update_canvas',
+    description:
+      'Rename this canvas: the name on its tab and in the dashboard. Everyone viewing it sees the new name at once. Pages are renamed with set_canvas_pages, frames with update_frame.',
+    input_schema: {
+      type: 'object',
+      properties: { name: { type: 'string', description: 'The new canvas name' } },
+      required: ['name'],
+    },
+  },
+  {
     name: 'create_canvas_page',
     description:
       'Add a new, empty page at the end of this canvas and get its id back. Use a page when a body of work deserves its own board (a second product surface, web vs. mobile, a round of explorations) and a frame when it is one screen. Move frames onto it with update_frame, or reorder it with set_canvas_pages.',
@@ -2578,6 +2588,15 @@ async function runResidentTool(
         return ok(
           `frame ${frame.id} is now "${frame.name}" on page ${framePageId(canvas, frame)} at (${Math.round(frame.x)}, ${Math.round(frame.y)}), ${Math.round(frame.width)}x${Math.round(frame.height)}${frame.locked ? ', locked' : ''}`,
         )
+      }
+      case 'update_canvas': {
+        const name = typeof input.name === 'string' ? input.name.trim() : ''
+        if (!name) return fail('name must not be empty')
+        const before = store.getCanvas(canvasId)?.name
+        const canvas = actions.renameCanvas(canvasId, name, actor)
+        if (!canvas) return fail('canvas not found')
+        if (canvas.name !== before) runState.arrangeWrites += 1
+        return ok(JSON.stringify({ name: canvas.name }))
       }
       case 'create_canvas_page': {
         const name = typeof input.name === 'string' ? input.name.trim() : ''

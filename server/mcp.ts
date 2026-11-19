@@ -595,6 +595,28 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
   )
 
   server.registerTool(
+    'update_canvas',
+    {
+      title: 'Rename a canvas',
+      description:
+        'Rename a canvas: the name on its tab, in the dashboard and in get_canvas. Everyone viewing it sees the new name at once. Pages are renamed with set_canvas_pages, frames with update_frame.',
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      inputSchema: {
+        canvas_id: z.string(),
+        name: z.string().trim().min(1).describe('The new canvas name'),
+        agent_name: agentName,
+      },
+    },
+    async ({ canvas_id, name, agent_name }) => {
+      if (!canvasFor(canvas_id, 'edit')) return noCanvas(canvas_id)
+      const actor = actorFrom(agent_name)
+      const canvas = actions.renameCanvas(canvas_id, name, actor)
+      if (!canvas) return noCanvas(canvas_id)
+      return withFeedback(text({ ok: true, id: canvas.id, name: canvas.name }), canvas_id, actor)
+    },
+  )
+
+  server.registerTool(
     'get_canvas',
     {
       title: 'Get a canvas and its frames',

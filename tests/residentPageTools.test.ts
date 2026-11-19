@@ -114,6 +114,22 @@ describe('the resident agent reorganizes pages', () => {
     expect(pages()).toHaveLength(2)
   })
 
+  it('renames the canvas, and counts it as delivered only when the name changed', async () => {
+    const runState = run()
+    const result = await execTool(call('update_canvas', { name: ' Launch ' }), canvasId, actor(), runState)
+    expect(result.is_error).toBeUndefined()
+    expect(canvas().name).toBe('Launch')
+    expect(deliveredWork(runState)).toBe(true)
+
+    const again = run()
+    await execTool(call('update_canvas', { name: 'Launch' }), canvasId, actor(), again)
+    expect(deliveredWork(again)).toBe(false)
+
+    const empty = await execTool(call('update_canvas', { name: '  ' }), canvasId, actor(), run())
+    expect(empty.is_error).toBe(true)
+    expect(canvas().name).toBe('Launch')
+  })
+
   it('does not count a frame save that changed nothing as delivered work', async () => {
     const runState = run()
     const frame = store.getFrame(frameId)!
