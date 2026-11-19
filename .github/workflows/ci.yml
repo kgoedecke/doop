@@ -16,7 +16,7 @@ jobs:
   # commit-msg hook can't see it, so this is the only place it gets checked.
   commit-message:
     if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
+    runs-on: instabox-medium
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
@@ -31,7 +31,7 @@ jobs:
   # sum. Install is ~5s per job (setup-bun restores ~/.bun/install/cache keyed
   # on bun.lock), so the duplication is cheap.
   typecheck:
-    runs-on: ubuntu-latest
+    runs-on: instabox-medium
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
@@ -39,7 +39,7 @@ jobs:
       - run: bun run typecheck
 
   lint:
-    runs-on: ubuntu-latest
+    runs-on: instabox-medium
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
@@ -49,7 +49,7 @@ jobs:
       - run: bun run doc-lint
 
   build:
-    runs-on: ubuntu-latest
+    runs-on: instabox-medium
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
@@ -60,7 +60,7 @@ jobs:
   # The suite boots a real server per integration file, which is CPU-bound on
   # the 2-vCPU runner; sharding across runners is what brings the step down.
   test:
-    runs-on: ubuntu-latest
+    runs-on: instabox-medium
     strategy:
       fail-fast: false
       matrix:
@@ -83,8 +83,12 @@ jobs:
           "$path" --version
           echo "CHROME_PATH=$path" >> "$GITHUB_ENV"
           # Ubuntu 24.04 lets only the browsers it has an AppArmor profile for
-          # make the user namespaces Chrome's sandbox needs
-          echo 0 | sudo tee /proc/sys/kernel/apparmor_restrict_unprivileged_userns >/dev/null
+          # make the user namespaces Chrome's sandbox needs. The knob only
+          # exists on kernels that restrict unprivileged user namespaces;
+          # InstaBox's kernel does not, and it already allows them.
+          if [ -e /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]; then
+            echo 0 | sudo tee /proc/sys/kernel/apparmor_restrict_unprivileged_userns >/dev/null
+          fi
       # `bun run test`, not `bun test`: the suite is vitest, and `bun test`
       # would run Bun's own runner against the same files
       - run: bun run test -- --shard=${{ matrix.shard }}/${{ strategy.job-total }}
@@ -95,6 +99,6 @@ jobs:
   tests:
     needs: test
     if: always()
-    runs-on: ubuntu-latest
+    runs-on: instabox-medium
     steps:
       - run: test "${{ needs.test.result }}" = success
