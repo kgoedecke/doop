@@ -777,6 +777,19 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   and still refuses a turned, skewed, 3D or nonuniformly scaled ancestor; unsupported transforms
   use the axis-aligned rendered bounds for the selection outline. Tests: `elementRotate.test.ts`,
   `elementRotateBrowser.test.ts`, the turned cases in `elementResizeBrowser.test.ts`.
+- Distances (`src/lib/measure.ts`, `src/lib/measureKey.ts`, `src/components/MeasureOverlay.tsx`): holding ⌥
+  with the Select tool and something selected shows, as Figma does, red lines labelled with the distance
+  from the selection to what the pointer is over. The picked elements are measured, as one box, to the
+  element under the pointer in their frame (the runtime's `doop:measure`, `measureElement` in
+  `frameBridge.ts`), or to the box around the primary one (its parent, the frame for a root layer) when
+  the pointer is on one of them; selected frames are measured, as one box, to another frame under the
+  pointer, which is also what a picked element's frame gets once the pointer is over another frame.
+  Boxes that overlap are measured edge to matching edge, boxes apart across the gap, with a dashed
+  extension of the target's edge when it is off to one side (`measureBetween`, pure). The overlay lives
+  in the Stage's world and reads at most once a frame, on pointer events and on changes to the canvas,
+  selection or camera; nothing shows during a drag, while typing in a field, or with ⌘ / Ctrl held, and
+  letting ⌥ go over the canvas does not open the browser's menu bar. Turned frames and layers are
+  measured by their bounds. Tests: `measure.test.ts`, `measureBrowser.test.ts`.
 - Rulers and guides (`src/components/Rulers.tsx`, math in `src/lib/rulers.ts`): ⇧R or the zoom menu
   toggles `<canvas>` rulers docked on the stage's top and left edges (the top bar and the floating
   chrome step in by `RULER_PX`) (remembered under

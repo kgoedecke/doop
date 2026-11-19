@@ -19,6 +19,7 @@ import { GhostFrames } from './GhostFrames'
 import { Cursors } from './Cursors'
 import { FollowFrame } from './FollowFrame'
 import { cameraOnCursor, cameraToFollow } from '../lib/follow'
+import { MeasureOverlay } from './MeasureOverlay'
 import { SnapGuides } from './SnapGuides'
 import { GuideLines, Rulers } from './Rulers'
 import { useIsMobile } from '../hooks/use-mobile'
@@ -1214,6 +1215,7 @@ export function Stage({
                 <GuideLines stage={ref} />
                 <PrototypeOverlay />
                 <SnapGuides />
+                <MeasureOverlay />
                 <CanvasComments composeAt={composeAt} onComposeDone={dismissCompose} />
                 {showCursors && <Cursors />}
                 {drawing.preview}
