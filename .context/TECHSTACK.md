@@ -678,9 +678,16 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   still the one found idle (`lastActivity`); one whose settling fails for anything but its work
   budget is tried 3 times (`SETTLE_ATTEMPTS`, 1 s then 5 s apart), its error logged once, then
   closed unsettled, as a budget refusal is; a pass never rejects. Tokens from REST, MCP and the resident go through it; their actor flush
-  (`noteActorToken`, `noteActorThemes`) runs beneath the actions, unchanged. Not yet: components,
-  the library (with the tokens an adopted component brings, `carryLibraryTokens`), imports and
-  ingest, comment anchoring. Tests: `canvasWrites.test.ts`,
+  (`noteActorToken`, `noteActorThemes`) runs beneath the actions, unchanged. Component definitions
+  go through it too (`create-component` from markup or an element, `create-components`, each
+  entry its own unit, `update-component`, `delete-component`, `restore-component`,
+  `restore-component-version`), from REST, MCP and the resident (`server/componentTools.ts`); each
+  can answer a `view` (catalog entry and touched frames, read in the write's own step) when it
+  asks (`view: true`: the agent tools; REST never asks, and pays nothing for it), and reuse notes
+  are read where they always were. Known limitation: `replace_matching` stays one command whose
+  local host sub-commits per frame through the server's journal (`checkpoint()`), so it is not
+  ready for another host; the instances PR makes it one command per frame. Not yet: instances, detaching, propagation, the library (with the tokens an adopted
+  component brings, `carryLibraryTokens`), imports and ingest, comment anchoring. Tests: `canvasWrites.test.ts`,
   `writeBoundaryHttp.test.ts`.
 - `pg` 8.22.0 - Postgres driver for the real-database path.
 - Frame HTML in memory (`server/store.ts`, `server/frameHtml.ts`): the store keeps every canvas

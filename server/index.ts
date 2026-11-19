@@ -3,9 +3,6 @@ import {
   changeInstances,
   componentDetail,
   ComponentError,
-  createComponentFromElement,
-  createComponentFromHtml,
-  deleteComponent,
   detachAllInstances,
   findComponent,
   importableEntry,
@@ -18,12 +15,9 @@ import {
   libraryStatus,
   mayPublishFrom,
   publishToLibrary,
-  restoreComponent,
-  restoreComponentVersion,
   syncComponent,
   unpublishFromLibrary,
   updateLibraryConsumers,
-  updateComponent,
   usageOf,
 } from './componentActions.ts'
 import {
@@ -2864,24 +2858,52 @@ function withoutRevisions(result: unknown): unknown {
   return isDefinition(result.component) ? { ...result, component: wireComponent(result.component) } : result
 }
 
-function componentRoute(res: express.Response, run: () => unknown) {
-  try {
-    /* one unit: a refusal answered below (a 400, a 402) leaves nothing of the call behind */
-    res.json(withoutRevisions(transaction(run)))
-  } catch (error) {
-    /* the 402 every client turns into the upgrade prompt: for the workspace
-       that needs a plan, or for making one when the canvas is personal */
-    if (error instanceof LibraryPlanError)
-      return res.status(402).json({
-        error: error.workspaceId ? 'workspace_plan_required' : 'library_needs_workspace',
-        ...(error.workspaceId ? { workspaceId: error.workspaceId } : {}),
-        message: error.message,
-      })
-    if (error instanceof LibraryPublisherError)
-      return res.status(403).json({ error: error.message, code: 'library_publish_restricted' })
-    if (error instanceof ComponentError) return res.status(400).json({ error: error.message })
-    throw error
+/** One component call as one unit: a refusal answered by `componentRefusal` (a 400, a 402, a
+ *  403) leaves nothing of the call behind. `run` may await (a write through the canvas write
+ *  entry, server/canvasWrites.ts): then this is a promise to await inside `writeRoute`, and
+ *  anything but a refusal rejects to the error handlers. A synchronous `run` is answered here and
+ *  then, and anything but a refusal is thrown, as it always was. */
+function componentRoute(res: express.Response, run: () => Promise<unknown>): Promise<void>
+function componentRoute(res: express.Response, run: () => unknown): void
+function componentRoute(res: express.Response, run: () => unknown): Promise<void> | void {
+  const refused = (error: unknown) => {
+    if (!componentRefusal(res, error)) throw error
   }
+  try {
+    const done = transaction(run)
+    if (!(done instanceof Promise)) {
+      res.json(withoutRevisions(done))
+      return
+    }
+    return done.then((value) => void res.json(withoutRevisions(value)), refused)
+  } catch (error) {
+    refused(error)
+  }
+}
+
+type ComponentParams = { id: string; componentId: string }
+
+/** A component call's refusal as its answer; false when the error is not one. */
+function componentRefusal(res: express.Response, error: unknown): boolean {
+  /* the 402 every client turns into the upgrade prompt: for the workspace
+     that needs a plan, or for making one when the canvas is personal */
+  if (error instanceof LibraryPlanError) {
+    res.status(402).json({
+      error: error.workspaceId ? 'workspace_plan_required' : 'library_needs_workspace',
+      ...(error.workspaceId ? { workspaceId: error.workspaceId } : {}),
+      message: error.message,
+    })
+    return true
+  }
+  if (error instanceof LibraryPublisherError) {
+    res.status(403).json({ error: error.message, code: 'library_publish_restricted' })
+    return true
+  }
+  if (error instanceof ComponentError) {
+    res.status(400).json({ error: error.message })
+    return true
+  }
+  return false
 }
 
 /** A route whose handler awaits a canvas write (server/canvasWrites.ts). Express 4 hands a
@@ -3092,40 +3114,42 @@ app.get('/api/workspaces/:id/libraries', (req, res) => {
   )
 })
 
-app.post('/api/canvases/:id/components', (req, res) => {
-  const canvas = requireCanvas(req, res, req.params.id, 'edit')
-  if (!canvas) return
-  const { actor } = componentContext(req, canvas)
-  const body = componentBody(res, componentCreateBody, req.body)
-  if (!body) return
-  componentRoute(res, () => {
-    if (typeof body.html === 'string') {
-      return {
-        component: createComponentFromHtml(
-          canvas.id,
-          { ...body, html: body.html, props: body.props as never, name: String(body.name ?? '') },
+app.post(
+  '/api/canvases/:id/components',
+  writeRoute(async (req, res) => {
+    const canvas = requireCanvas(req, res, req.params.id, 'edit')
+    if (!canvas) return
+    const { actor } = componentContext(req, canvas)
+    const body = componentBody(res, componentCreateBody, req.body)
+    if (!body) return
+    await componentRoute(res, async () => {
+      if (typeof body.html === 'string') {
+        const created = await runCanvasWrite(canvas.id, {
+          type: 'create-component',
+          from: { kind: 'html', ...body, html: body.html, props: body.props as never, name: String(body.name ?? '') },
           actor,
-        ).component,
+        })
+        return { component: created.component, converted: [] }
       }
-    }
-    const created = createComponentFromElement(
-      canvas.id,
-      {
-        name: String(body.name ?? ''),
-        description: body.description,
-        props: body.props as never,
-        code: body.code,
-        frameId: String(body.frameId ?? ''),
-        element: String(body.element ?? ''),
-        autoProps: body.autoProps,
-      },
-      actor,
-    )
-    /* what the editor needs to undo this as one step */
-    const frame = store.getFrame(String(body.frameId))
-    return { ...created, frames: frame ? [frame] : [] }
-  })
-})
+      const { changed, ...created } = await runCanvasWrite(canvas.id, {
+        type: 'create-component',
+        from: {
+          kind: 'element',
+          name: String(body.name ?? ''),
+          description: body.description,
+          props: body.props as never,
+          code: body.code,
+          frameId: String(body.frameId ?? ''),
+          element: String(body.element ?? ''),
+          autoProps: body.autoProps,
+        },
+        actor,
+      })
+      /* what the editor needs to undo this as one step, as the write left it */
+      return { ...created, frames: changed }
+    })
+  }),
+)
 
 app.post('/api/canvases/:id/components/import', (req, res) => {
   const canvas = requireCanvas(req, res, req.params.id, 'edit')
@@ -3143,28 +3167,50 @@ app.post('/api/canvases/:id/components/import', (req, res) => {
   })
 })
 
-app.patch('/api/canvases/:id/components/:componentId', (req, res) => {
-  const canvas = requireCanvas(req, res, req.params.id, 'edit')
-  if (!canvas) return
-  const body = componentBody(res, componentPatchBody, req.body)
-  if (!body) return
-  componentRoute(res, () =>
-    updateComponent(canvas.id, req.params.componentId, { ...body, props: body.props as never }, userActor(req)),
-  )
-})
+app.patch(
+  '/api/canvases/:id/components/:componentId',
+  writeRoute<ComponentParams>(async (req, res) => {
+    const canvas = requireCanvas(req, res, req.params.id, 'edit')
+    if (!canvas) return
+    const body = componentBody(res, componentPatchBody, req.body)
+    if (!body) return
+    await componentRoute(res, () =>
+      runCanvasWrite(canvas.id, {
+        type: 'update-component',
+        component: req.params.componentId,
+        input: { ...body, props: body.props as never },
+        actor: userActor(req),
+      }),
+    )
+  }),
+)
 
-app.delete('/api/canvases/:id/components/:componentId', (req, res) => {
-  const canvas = requireCanvas(req, res, req.params.id, 'edit')
-  if (!canvas) return
-  componentRoute(res, () => deleteComponent(canvas.id, req.params.componentId, userActor(req)))
-})
+app.delete(
+  '/api/canvases/:id/components/:componentId',
+  writeRoute<ComponentParams>(async (req, res) => {
+    const canvas = requireCanvas(req, res, req.params.id, 'edit')
+    if (!canvas) return
+    await componentRoute(res, () =>
+      runCanvasWrite(canvas.id, { type: 'delete-component', component: req.params.componentId, actor: userActor(req) }),
+    )
+  }),
+)
 
 /* a deleted component back in use (the `/restore` beside it puts a component back to an earlier revision) */
-app.post('/api/canvases/:id/components/:componentId/undelete', (req, res) => {
-  const canvas = requireCanvas(req, res, req.params.id, 'edit')
-  if (!canvas) return
-  componentRoute(res, () => restoreComponent(canvas.id, req.params.componentId, userActor(req)))
-})
+app.post(
+  '/api/canvases/:id/components/:componentId/undelete',
+  writeRoute<ComponentParams>(async (req, res) => {
+    const canvas = requireCanvas(req, res, req.params.id, 'edit')
+    if (!canvas) return
+    await componentRoute(res, () =>
+      runCanvasWrite(canvas.id, {
+        type: 'restore-component',
+        component: req.params.componentId,
+        actor: userActor(req),
+      }),
+    )
+  }),
+)
 
 /* every instance of a component turned into plain markup, in the background queue */
 app.post('/api/canvases/:id/components/:componentId/detach-instances', (req, res) => {
@@ -3173,13 +3219,21 @@ app.post('/api/canvases/:id/components/:componentId/detach-instances', (req, res
   componentRoute(res, () => detachAllInstances(canvas.id, req.params.componentId, userActor(req)))
 })
 
-app.post('/api/canvases/:id/components/:componentId/restore', (req, res) => {
-  const canvas = requireCanvas(req, res, req.params.id, 'edit')
-  if (!canvas) return
-  componentRoute(res, () =>
-    restoreComponentVersion(canvas.id, req.params.componentId, Number(req.body?.rev), userActor(req)),
-  )
-})
+app.post(
+  '/api/canvases/:id/components/:componentId/restore',
+  writeRoute<ComponentParams>(async (req, res) => {
+    const canvas = requireCanvas(req, res, req.params.id, 'edit')
+    if (!canvas) return
+    await componentRoute(res, () =>
+      runCanvasWrite(canvas.id, {
+        type: 'restore-component-version',
+        component: req.params.componentId,
+        rev: Number(req.body?.rev),
+        actor: userActor(req),
+      }),
+    )
+  }),
+)
 
 /* the revisions a component can be put back to, oldest first: what `init` and the
    `component` messages leave out, read when something shows them */

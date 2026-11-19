@@ -7,9 +7,6 @@ import {
   changeInstances,
   componentDetail,
   ComponentError,
-  createComponentFromElement,
-  createComponentFromHtml,
-  deleteComponent,
   detachAllInstances,
   findComponent,
   findDeletedComponent,
@@ -21,13 +18,11 @@ import {
   libraryConsumers,
   lookalikesIn,
   publishToLibrary,
-  restoreComponent,
-  restoreComponentVersion,
   syncComponent,
   unpublishFromLibrary,
-  updateComponent,
   updateLibraryConsumers,
   usageExample,
+  touchedFrames,
   usageOf,
   waitingLibraryUpdates,
 } from './componentActions.ts'
@@ -39,6 +34,7 @@ import { inlineDataRefusal, type Surface } from './inlineData.ts'
 import { optional, WorkBudgetError } from './workBudget.ts'
 import { WriteRefusedError } from './writeRefusal.ts'
 import { transaction } from './journal.ts'
+import { runCanvasWrite, type ComponentView } from './canvasWrites.ts'
 
 /**
  * The component tools every agent gets, over MCP (server/mcp.ts) or in the server
@@ -93,16 +89,6 @@ interface ComponentTool {
   run(input: Record<string, unknown>, context: ToolContext): ToolResult | Promise<ToolResult>
 }
 
-/** The components a new main names in a <doop-use> that resolved to nothing, by the name it gave. */
-function missingNested(def: ComponentDef): string[] {
-  if (!def.mainFrameId) return []
-  const refs = actions
-    .peekComponentIssues(def.mainFrameId)
-    .filter((issue) => issue.code === 'unknown_component')
-    .map((issue) => /“([^”]*)”/.exec(issue.message)?.[1] ?? '')
-  return [...new Set(refs)]
-}
-
 /** One create_components call: a canvas's starting kit, not its whole library. */
 export const MAX_BATCH_COMPONENTS = 12
 
@@ -132,12 +118,14 @@ function summary(canvas: Canvas, def: ComponentDef) {
   return catalogEntry(canvas, def)
 }
 
-/** The frames a component write touched: every instance's frame and the main's,
- *  so a resident run counts the work and re-checks what it had verified. */
-function outcomeFrames(context: ToolContext, def: ComponentDef): Frame[] {
-  const ids = new Set(usageOf(context.canvas, def.id).frames.map((f) => f.id))
-  if (def.mainFrameId) ids.add(def.mainFrameId)
-  return context.canvas.frames.filter((frame) => ids.has(frame.id))
+function outcomeFrames(context: ToolContext, def: ComponentDef, extra: string[] = []): Frame[] {
+  return touchedFrames(context.canvas, def, extra)
+}
+
+/** What a routed write answers of its component, read in the write's own step; read here instead
+ *  when the canvas had gone by then (it never has in practice), as the tools did before. */
+function viewOr(canvas: Canvas, def: ComponentDef, view: ComponentView | undefined, extra: string[] = []) {
+  return view ?? { entry: summary(canvas, def), frames: outcomeFrames({ canvas } as ToolContext, def, extra) }
 }
 
 const asProps = (value: unknown) => value as Record<string, string> | undefined
@@ -233,7 +221,7 @@ export const COMPONENT_TOOLS: ComponentTool[] = [
       auto_props: z.boolean().optional().describe('false = do not infer props'),
       code: codeSchema.optional(),
     },
-    run(input, { canvas, actor }) {
+    async run(input, { canvas, actor }) {
       const shared = {
         name: String(input.name ?? ''),
         description: input.description as string | undefined,
@@ -242,9 +230,10 @@ export const COMPONENT_TOOLS: ComponentTool[] = [
         autoProps: input.auto_props as boolean | undefined,
       }
       if (typeof input.html === 'string') {
-        const { component: def, inferred } = createComponentFromHtml(
-          canvas.id,
-          {
+        const created = await runCanvasWrite(canvas.id, {
+          type: 'create-component',
+          from: {
+            kind: 'html',
             ...shared,
             html: input.html,
             css: input.css as string | undefined,
@@ -252,11 +241,14 @@ export const COMPONENT_TOOLS: ComponentTool[] = [
             height: input.height as number | undefined,
           },
           actor,
-        )
+          view: true,
+        })
+        const { component: def, inferred } = created
+        const view = viewOr(canvas, def, created.view)
         return {
           data: {
             ok: true,
-            component: summary(canvas, def),
+            component: view.entry,
             main_frame_id: def.mainFrameId,
             ...inferredProps(inferred),
           },
@@ -264,20 +256,28 @@ export const COMPONENT_TOOLS: ComponentTool[] = [
             `The main is frame main_frame_id on the Components page. No instance was placed: to use it, write ${usageExample(def)} in a frame's HTML, or call insert_instance. Call get_frame_screenshot on main_frame_id, and fit that frame to it with update_frame's fit_to_content "both".${inferredNote(inferred)}`,
             ...(optional(() => componentReuseNotes(canvas, def, shared.autoProps)) ?? []),
           ].join('\n'),
-          frames: outcomeFrames({ canvas } as ToolContext, def),
+          frames: view.frames,
         }
       }
       if (typeof input.frame_id !== 'string' || typeof input.element !== 'string')
         throw new ComponentError('pass html, or frame_id with element')
-      const { component, inferred } = createComponentFromElement(
-        canvas.id,
-        { ...shared, frameId: input.frame_id, element: input.element },
+      const created = await runCanvasWrite(canvas.id, {
+        type: 'create-component',
+        from: {
+          kind: 'element',
+          ...shared,
+          frameId: input.frame_id,
+          element: input.element,
+        },
         actor,
-      )
+        view: true,
+      })
+      const { component, inferred } = created
+      const view = viewOr(canvas, component, created.view)
       return {
         data: {
           ok: true,
-          component: summary(canvas, component),
+          component: view.entry,
           main_frame_id: component.mainFrameId,
           ...inferredProps(inferred),
         },
@@ -285,7 +285,7 @@ export const COMPONENT_TOOLS: ComponentTool[] = [
           `Use it with ${usageExample(component)}.${inferredNote(inferred)}`,
           ...(optional(() => componentReuseNotes(canvas, component, shared.autoProps)) ?? []),
         ].join('\n'),
-        frames: outcomeFrames({ canvas } as ToolContext, component),
+        frames: view.frames,
       }
     },
   },
@@ -313,63 +313,43 @@ export const COMPONENT_TOOLS: ComponentTool[] = [
         .max(MAX_BATCH_COMPONENTS)
         .describe('In dependency order: a component another one nests comes first'),
     },
-    run(input, { canvas, actor }) {
+    async run(input, { canvas, actor }) {
       const entries = (Array.isArray(input.components) ? input.components : []) as Record<string, unknown>[]
       if (!entries.length) throw new ComponentError('pass at least one component')
       if (entries.length > MAX_BATCH_COMPONENTS)
         throw new ComponentError(`at most ${MAX_BATCH_COMPONENTS} components per call; send the rest in another call`)
-      const made: ComponentDef[] = []
-      const refused: string[] = []
-      const notes: string[] = []
-      const results = entries.map((entry, index) => {
-        const name = String(entry.name ?? '')
-        try {
-          /* each entry is its own unit: a refused one leaves nothing behind and the rest go on */
-          const { component: def, inferred } = transaction(() => {
-            const created = createComponentFromHtml(
-              canvas.id,
-              {
-                name,
-                description: entry.description as string | undefined,
-                props: entry.props as never,
-                code: entry.code as never,
-                autoProps: entry.auto_props as boolean | undefined,
-                html: String(entry.html ?? ''),
-                css: entry.css as string | undefined,
-                width: entry.width as number | undefined,
-                height: entry.height as number | undefined,
-              },
-              actor,
-            )
-            /* a <doop-use> naming nothing renders as nothing: saved, the entry would lose that part for
-               good, so it is refused (undone with this unit) and can be sent again once that one exists */
-            const missing = missingNested(created.component)
-            if (missing.length)
-              throw new ComponentError(
-                `it nests ${missing.map((ref) => (ref ? `“${ref}”` : 'a <doop-use> that could not be read')).join(', ')}, which ${missing.length === 1 ? 'is' : 'are'} not a component on this canvas${refused.length ? ' (an entry this call refused, or one never made)' : ''}; nothing was made for it`,
-              )
-            return created
-          })
-          made.push(def)
-          notes.push(
-            ...(optional(() => componentReuseNotes(canvas, def, entry.auto_props as boolean | undefined)) ?? []),
-          )
-          return {
-            index,
-            ok: true as const,
-            component: summary(canvas, def),
-            main_frame_id: def.mainFrameId,
-            ...inferredProps(inferred),
-          }
-        } catch (error) {
-          /* a refusal is this entry's; a spent work budget refuses the whole call (runComponentTool) */
-          if (!(error instanceof ComponentError || error instanceof WriteRefusedError)) throw error
-          refused.push(name)
-          return { index, ok: false as const, name, error: error.message }
-        }
+      /* each entry its own unit, made in order (server/canvasWrites.ts) */
+      const created = await runCanvasWrite(canvas.id, {
+        type: 'create-components',
+        entries: entries.map((entry) => ({
+          name: String(entry.name ?? ''),
+          description: entry.description as string | undefined,
+          props: entry.props as never,
+          code: entry.code as never,
+          autoProps: entry.auto_props as boolean | undefined,
+          html: String(entry.html ?? ''),
+          css: entry.css as string | undefined,
+          width: entry.width as number | undefined,
+          height: entry.height as number | undefined,
+        })),
+        actor,
+        view: true,
       })
+      const made = created.flatMap((entry) => (entry.ok ? [entry] : []))
+      const notes = made.flatMap((entry) => entry.notes ?? [])
+      const results = created.map((entry, index) =>
+        entry.ok
+          ? {
+              index,
+              ok: true as const,
+              component: viewOr(canvas, entry.component, entry.view).entry,
+              main_frame_id: entry.component.mainFrameId,
+              ...inferredProps(entry.inferred),
+            }
+          : { index, ok: false as const, name: entry.name, error: entry.error },
+      )
       const failed = results.filter((result) => !result.ok)
-      const usage = made.map((def) => usageExample(def)).join('\n')
+      const usage = made.map((entry) => usageExample(entry.component)).join('\n')
       return {
         data: { ok: failed.length === 0, created: made.length, failed: failed.length, results },
         note: [
@@ -383,7 +363,7 @@ export const COMPONENT_TOOLS: ComponentTool[] = [
             : []),
           ...notes,
         ].join('\n'),
-        frames: made.flatMap((def) => outcomeFrames({ canvas } as ToolContext, def)),
+        frames: made.flatMap((entry) => viewOr(canvas, entry.component, entry.view).frames),
       }
     },
   },
@@ -410,11 +390,11 @@ export const COMPONENT_TOOLS: ComponentTool[] = [
       expected_rev: z.number().optional().describe('Refuse if the component has moved past this revision'),
       dry_run: z.boolean().optional().describe('Report the impact and change nothing'),
     },
-    run(input, { canvas, actor, canRead }) {
-      const result = updateComponent(
-        canvas.id,
-        String(input.component),
-        {
+    async run(input, { canvas, actor, canRead }) {
+      const result = await runCanvasWrite(canvas.id, {
+        type: 'update-component',
+        component: String(input.component),
+        input: {
           ...(input.find !== undefined ? { find: String(input.find), replace: String(input.replace ?? '') } : {}),
           ...(input.html !== undefined ? { html: String(input.html) } : {}),
           ...(input.css !== undefined ? { css: String(input.css) } : {}),
@@ -426,7 +406,10 @@ export const COMPONENT_TOOLS: ComponentTool[] = [
           dryRun: input.dry_run === true,
         },
         actor,
-      )
+        view: true,
+      })
+      const { view: written, ...updated } = result
+      const view = viewOr(canvas, result.component, written)
       /* on a library canvas the impact above counts this canvas alone: say who else follows it */
       const shared = isLibrary(canvas.id)
         ? libraryConsumers(canvas).filter((consumer) => canRead(consumer.canvas_id))
@@ -434,8 +417,8 @@ export const COMPONENT_TOOLS: ComponentTool[] = [
       return {
         data: {
           ok: true,
-          ...result,
-          component: summary(canvas, result.component),
+          ...updated,
+          component: view.entry,
           rev: result.component.rev,
           ...(shared.length ? { library_used_by: shared } : {}),
         },
@@ -451,7 +434,7 @@ export const COMPONENT_TOOLS: ComponentTool[] = [
                 isLibrary(canvas.id) ? `${IMPACT_NOTE} ${LIBRARY_NOTE}` : IMPACT_NOTE,
                 ...(optional(() => componentReuseNotes(canvas, result.component)) ?? []),
               ].join('\n'),
-              frames: outcomeFrames({ canvas } as ToolContext, result.component),
+              frames: view.frames,
             }),
       }
     },
@@ -555,14 +538,14 @@ export const COMPONENT_TOOLS: ComponentTool[] = [
         .optional()
         .describe('Also turn every instance into plain markup, in the background. Not undone by restore_component'),
     },
-    run({ component, detach_instances }, { canvas, actor }) {
+    async run({ component, detach_instances }, { canvas, actor }) {
       const ref = String(component)
       const pending = findDeletedComponent(canvas.id, ref)
       /* detaching what an earlier delete left behind is the same call again */
       const result =
         pending && detach_instances === true
           ? { deleted: pending.name, component_id: pending.id, already_deleted: true }
-          : deleteComponent(canvas.id, ref, actor)
+          : await runCanvasWrite(canvas.id, { type: 'delete-component', component: ref, actor })
       const detach = detach_instances === true ? detachAllInstances(canvas.id, result.component_id, actor) : undefined
       const touched = detach?.queued ? usageOf(canvas, result.component_id).frames.map((frame) => frame.id) : []
       return {
@@ -583,15 +566,22 @@ export const COMPONENT_TOOLS: ComponentTool[] = [
       'Bring back a component that delete_component removed (get_canvas lists those still in use under deletedComponents). Its instances were never changed, so they are linked again as they are, and it is back in the catalog. Its main is the markup that still carries it; if that is gone, a new main is written on the Components page from the kept definition. If its name was given to another component meanwhile it comes back as “<name> (restored)”. Instances that were detached stay plain markup.',
     readOnly: false,
     shape: { component: COMPONENT_REF.describe('Name or id of the deleted component') },
-    run({ component }, { canvas, actor }) {
-      const { component: def, main } = restoreComponent(canvas.id, String(component), actor)
+    async run({ component }, { canvas, actor }) {
+      const restored = await runCanvasWrite(canvas.id, {
+        type: 'restore-component',
+        component: String(component),
+        actor,
+        view: true,
+      })
+      const { component: def, main } = restored
+      const view = viewOr(canvas, def, restored.view)
       return {
-        data: { ok: true, component: summary(canvas, def), main, main_frame_id: def.mainFrameId },
+        data: { ok: true, component: view.entry, main, main_frame_id: def.mainFrameId },
         note:
           main === 'written'
             ? 'Its old main was gone, so a new one was written on the Components page (main_frame_id).'
             : 'Its instances follow it again.',
-        frames: outcomeFrames({ canvas } as ToolContext, def),
+        frames: view.frames,
       }
     },
   },
@@ -603,13 +593,20 @@ export const COMPONENT_TOOLS: ComponentTool[] = [
     readOnly: false,
     destructive: true,
     shape: { component: COMPONENT_REF, rev: z.number() },
-    run({ component, rev }, { canvas, actor }) {
-      const result = restoreComponentVersion(canvas.id, String(component), Number(rev), actor)
+    async run({ component, rev }, { canvas, actor }) {
+      const { view: written, ...result } = await runCanvasWrite(canvas.id, {
+        type: 'restore-component-version',
+        component: String(component),
+        rev: Number(rev),
+        actor,
+        view: true,
+      })
+      const view = viewOr(canvas, result.component, written)
       const note = propagationNote(result).join('\n')
       return {
-        data: { ok: true, ...result, component: summary(canvas, result.component), rev: result.component.rev },
+        data: { ok: true, ...result, component: view.entry, rev: result.component.rev },
         ...(note ? { note } : {}),
-        frames: outcomeFrames({ canvas } as ToolContext, result.component),
+        frames: view.frames,
       }
     },
   },

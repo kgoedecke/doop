@@ -2,7 +2,26 @@ import type { Actor, Frame } from '../shared/types.ts'
 import type { TokenEdit } from '../shared/designTokens.ts'
 import type { StackWrite } from '../shared/frameStack.ts'
 import * as actions from './actions.ts'
-import { editFrameHtml, type FrameEdit } from './componentActions.ts'
+import type { ComponentDef } from '../shared/components.ts'
+import {
+  catalogEntry,
+  ComponentError,
+  touchedFrames,
+  createComponentFromElement,
+  createComponentFromHtml,
+  deleteComponent,
+  editFrameHtml,
+  restoreComponent,
+  restoreComponentVersion,
+  updateComponent,
+  type CreateFromElement,
+  type CreateFromHtml,
+  type CreateResult,
+  type FrameEdit,
+  type UpdateInput,
+} from './componentActions.ts'
+import { componentReuseNotes } from './reuseNotes.ts'
+import { WriteRefusedError } from './writeRefusal.ts'
 import * as persist from './db/persist.ts'
 import {
   EMBEDDED_MIN_LENGTH,
@@ -12,10 +31,10 @@ import {
   type Existing,
   type Surface,
 } from './inlineData.ts'
-import { afterCommit } from './journal.ts'
+import { afterCommit, transaction } from './journal.ts'
 import { updateFrameMeta, type FrameMetaPatch } from './pageTools.ts'
 import { store } from './store.ts'
-import { runOperation, WorkBudgetError } from './workBudget.ts'
+import { optional, runOperation, WorkBudgetError } from './workBudget.ts'
 
 /**
  * The one way the server writes a canvas's frames: a command, carrying what the writer wants
@@ -40,9 +59,10 @@ import { runOperation, WorkBudgetError } from './workBudget.ts'
  * (`FrameVersionConflict`, checked in the same synchronous step as the write).
  *
  * Covered so far: a frame's HTML and its metadata, streams (a chunk appended, an idle stream
- * settled or closed), and design tokens and their themes (renames included, with the frames
- * they rewrite). Components and the library still call their actions directly, and so do
- * imports and ingest; they move here next.
+ * settled or closed), design tokens and their themes (renames included, with the frames they
+ * rewrite), and component definitions (made, changed, deleted, brought back). Instances,
+ * replace_matching as commands of their own, propagation and the library still call their
+ * actions directly, and so do imports and ingest; they move here next.
  *
  * A command an agent sends carries the surface it came from (`inline`), and the host checks
  * the HTML it adds for inline data against the frame as the host holds it, by that surface's
@@ -193,7 +213,58 @@ export type SetTokenThemesCommand = {
   actor: Actor
 }
 
+/** A component made: from new markup (its main goes on the Components page) or from an element
+ *  already in a frame (it becomes the main). componentActions.createComponentFromHtml / FromElement. */
+export type CreateComponentCommand = {
+  type: 'create-component'
+  from: ({ kind: 'html' } & CreateFromHtml) | ({ kind: 'element' } & CreateFromElement)
+  actor: Actor
+  /** answer a `ComponentView` too (the agent tools); REST does not ask, and pays nothing for it */
+  view?: boolean
+}
+
+/** Several components made from new markup, in order, each its own unit: one refused (or one
+ *  that nests a component the canvas does not have) is reported and the rest are still made. */
+export type CreateComponentsCommand = {
+  type: 'create-components'
+  entries: CreateFromHtml[]
+  actor: Actor
+  /** answer each made entry's view, and its reuse notes, as create_components showed them */
+  view?: boolean
+}
+
+/** A component changed (componentActions.updateComponent): its template by find and replace
+ *  or whole, its styles, name, description, props or code; `dryRun` reports the impact only. */
+export type UpdateComponentCommand = {
+  type: 'update-component'
+  component: string
+  input: UpdateInput
+  actor: Actor
+  view?: boolean
+}
+
+/** A component deleted: no frame is written, its instances stop following it. */
+export type DeleteComponentCommand = { type: 'delete-component'; component: string; actor: Actor }
+
+/** A deleted component brought back, its instances linked again (a main written if it had none). */
+export type RestoreComponentCommand = { type: 'restore-component'; component: string; actor: Actor; view?: boolean }
+
+/** A component put back to one of its earlier revisions, as a new revision. */
+export type RestoreComponentVersionCommand = {
+  type: 'restore-component-version'
+  component: string
+  rev: number
+  actor: Actor
+  view?: boolean
+}
+
 export type CanvasWrite =
+  | CreateComponentCommand
+  | CreateComponentsCommand
+  | UpdateComponentCommand
+  | DeleteComponentCommand
+  | RestoreComponentCommand
+  | RestoreComponentVersionCommand
   | CreateTokensCommand
   | SetTokensCommand
   | SetTokenThemesCommand
@@ -227,6 +298,24 @@ export type InlineRefusal = { ok: false; inline: string }
 /** What a chunk did: the frame as it now stands, or why nothing was written. */
 export type AppendFrameHtmlResult = { ok: true; frame: Frame } | { ok: false; missing: true } | InlineRefusal
 
+/** What a write of a component shows of it, for a command that asks (`view: true`), read in
+ *  the same step as the write so no later write is mixed in: its catalog entry and the frames
+ *  it touched (its instances' and its main's, and any others the write named). Absent when it
+ *  could not be read (the canvas gone): the write stands all the same. What it should have
+ *  reused (server/reuseNotes.ts) is the caller's to read, after the write, as it always was. */
+export type ComponentView = {
+  entry: ReturnType<typeof catalogEntry>
+  frames: Frame[]
+}
+
+/** One entry of `create-components`: made, or refused with why. A made entry carries its view
+ *  and its reuse notes when the command asked: each read when create_components always read
+ *  them (the entry and the notes right after that entry was made, before the next; the frames
+ *  once every entry was made, so a later entry nesting it counts). */
+export type CreatedEntry =
+  | { ok: true; component: ComponentDef; inferred: string[]; view?: ComponentView; notes?: string[] }
+  | { ok: false; name: string; error: string }
+
 /** What a stale version check answers with, over REST as before (409). */
 export const FRAME_CHANGED = 'The frame changed while you were editing. Please try again.'
 
@@ -249,6 +338,42 @@ export class CanvasMismatchError extends Error {
 /** The local host: each command's handler, the server's own actions. What a command answers
  *  is whatever its handler returns (`CanvasWriteResults`), so the two cannot drift apart. */
 const local = {
+  'create-component': (canvasId, command) => {
+    const { from, actor } = command
+    if (from.kind === 'html') {
+      const { kind: _kind, ...input } = from
+      const created = createComponentFromHtml(canvasId, input, actor)
+      return {
+        ...created,
+        changed: [] as Frame[],
+        ...viewIf(command.view, canvasId, created.component),
+      }
+    }
+    const { kind: _kind, ...input } = from
+    const created = createComponentFromElement(canvasId, input, actor)
+    /* the frame the element was in */
+    const touched = [input.frameId]
+    return {
+      ...created,
+      /* those frames as this write left them: what an editor needs to undo it as one step */
+      changed: [...new Set(touched)].flatMap((id) => store.getFrame(id) ?? []),
+      ...viewIf(command.view, canvasId, created.component, touched),
+    }
+  },
+  'create-components': (canvasId, command) => createComponentsLocally(canvasId, command),
+  'update-component': (canvasId, command) => {
+    const result = updateComponent(canvasId, command.component, command.input, command.actor)
+    return { ...result, ...viewIf(command.view, canvasId, result.component) }
+  },
+  'delete-component': (canvasId, command) => deleteComponent(canvasId, command.component, command.actor),
+  'restore-component': (canvasId, command) => {
+    const restored = restoreComponent(canvasId, command.component, command.actor)
+    return { ...restored, ...viewIf(command.view, canvasId, restored.component) }
+  },
+  'restore-component-version': (canvasId, command) => {
+    const result = restoreComponentVersion(canvasId, command.component, command.rev, command.actor)
+    return { ...result, ...viewIf(command.view, canvasId, result.component) }
+  },
   'create-frame': (canvasId, command): Frame | InlineRefusal | undefined => {
     const inline = command.inline && inlineDataRefusal(command.input.html, '', command.inline)
     if (inline) return { ok: false, inline }
@@ -359,6 +484,74 @@ function editLocally(command: EditFrameHtmlCommand): EditFrameHtmlResult {
   if (inline) return { ok: false, inline }
   const written = actions.updateFrame(command.frameId, { html: edit.html }, command.actor)
   return written ? { ok: true, frame: written } : { ok: false, missing: true }
+}
+
+/** A component's view (`ComponentView`), when the command asked and the canvas is there to read
+ *  it from; nothing otherwise, which never fails the write it follows. */
+function viewIf(
+  asked: boolean | undefined,
+  canvasId: string,
+  def: ComponentDef,
+  extra: readonly string[] = [],
+): { view?: ComponentView } {
+  if (!asked) return {}
+  const canvas = store.getCanvas(canvasId)
+  if (!canvas) return {}
+  return { view: { entry: catalogEntry(canvas, def), frames: touchedFrames(canvas, def, extra) } }
+}
+
+/** The components a new main names in a <doop-use> that resolved to nothing, by the name it gave. */
+function missingNested(def: ComponentDef): string[] {
+  if (!def.mainFrameId) return []
+  const refs = actions
+    .peekComponentIssues(def.mainFrameId)
+    .filter((issue) => issue.code === 'unknown_component')
+    .map((issue) => /“([^”]*)”/.exec(issue.message)?.[1] ?? '')
+  return [...new Set(refs)]
+}
+
+/** `create-components`: each entry its own unit (a savepoint of the caller's operation), so a
+ *  refused one leaves nothing behind and the rest go on, as create_components always made them.
+ *  A spent work budget is not an entry's refusal: it rejects the whole command. */
+function createComponentsLocally(canvasId: string, command: CreateComponentsCommand): CreatedEntry[] {
+  const refused: string[] = []
+  const results = command.entries.map((entry): CreatedEntry => {
+    try {
+      const created = transaction(() => {
+        const made = createComponentFromHtml(canvasId, entry, command.actor)
+        /* a <doop-use> naming nothing renders as nothing: saved, the entry would lose that part
+           for good, so it is refused (undone with this unit) and can be sent again once that
+           one exists */
+        const missing = missingNested(made.component)
+        if (missing.length)
+          throw new ComponentError(
+            `it nests ${missing.map((ref) => (ref ? `“${ref}”` : 'a <doop-use> that could not be read')).join(', ')}, which ${missing.length === 1 ? 'is' : 'are'} not a component on this canvas${refused.length ? ' (an entry this call refused, or one never made)' : ''}; nothing was made for it`,
+          )
+        return made
+      })
+      const canvas = command.view ? store.getCanvas(canvasId) : undefined
+      if (!canvas) return { ok: true, component: created.component, inferred: created.inferred }
+      /* where create_components read them: right after this entry, before the next is made */
+      const notes = optional(() => componentReuseNotes(canvas, created.component, entry.autoProps)) ?? []
+      return {
+        ok: true,
+        component: created.component,
+        inferred: created.inferred,
+        notes,
+        view: { entry: catalogEntry(canvas, created.component), frames: [] },
+      }
+    } catch (error) {
+      if (!(error instanceof ComponentError || error instanceof WriteRefusedError)) throw error
+      refused.push(entry.name)
+      return { ok: false, name: entry.name, error: error.message }
+    }
+  })
+  /* the frames each one touched, once every entry is made, as create_components read them */
+  const canvas = command.view ? store.getCanvas(canvasId) : undefined
+  if (canvas)
+    for (const result of results)
+      if (result.ok && result.view) result.view.frames = touchedFrames(canvas, result.component)
+  return results
 }
 
 /** What a surface counts as already in a frame when it rewrites it whole: over MCP every form
