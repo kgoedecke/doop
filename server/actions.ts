@@ -3,7 +3,7 @@ import { nanoid } from 'nanoid'
 import { indexOfAscii, lastIndexOfAscii } from '../shared/asciiSearch.ts'
 import { env } from './env.ts'
 import * as propagation from './propagation.ts'
-import { runOperation, WorkBudgetError } from './workBudget.ts'
+import { WorkBudgetError } from './workBudget.ts'
 import {
   afterCommit,
   atomic,
@@ -2058,27 +2058,66 @@ setInterval(() => {
       actor: r.actor,
     })
   }
-  expireIdleStreams(now)
+  settleIdle(now)
 }, TICK_MS)
 
-/** An agent that died mid-stream never sends the last chunk, so its work is settled here: a
- *  component change skipped while it streamed, the stylesheets, a main written in the stream. */
-export function expireIdleStreams(now = Date.now()) {
-  /* a copy: a settling that is undone puts its stream back into the map */
-  for (const [frameId, s] of [...streams]) {
-    if (now - s.lastActivity <= STREAM_IDLE_MS) continue
-    const canvasId = store.getFrame(frameId)?.canvasId
-    try {
-      runOperation(`settle stream of frame ${frameId}`, canvasId, () => settleIdleStream(frameId, s))
-    } catch (error) {
-      if (!(error instanceof WorkBudgetError)) throw error
-      /* it runs on a timer, where nothing would catch a refusal: a frame over the work
-         budget stays as its stream left it (the settling is undone as one), the stream
-         still closes, and the frame's next write settles it */
-      console.error(`[streams] ${error.message}`)
-      runOperation(`close stream of frame ${frameId}`, canvasId, () => finishStream(frameId, false))
-    }
-  }
+/* What settles idle streams on each tick: the server's write entry installs it
+   (`wireCanvasWrites`, server/canvasWrites.ts, called at boot), so that settling runs through
+   the entry like every other write. Unwired, idle streams cannot settle, and that is said, once,
+   rather than left quiet. */
+let idleSettler: ((now: number) => void) | undefined
+let unwiredSaid = false
+
+function settleIdle(now: number) {
+  if (idleSettler) return idleSettler(now)
+  if (unwiredSaid || !idleStreams(now).length) return
+  unwiredSaid = true
+  console.error('[streams] idle streams cannot settle: wireCanvasWrites() was not called in this process')
+}
+
+/** Settle idle streams with `settle` on every tick. */
+export function settleIdleStreamsWith(settle: (now: number) => void) {
+  idleSettler = settle
+}
+
+/** One stream nobody has sent to for `STREAM_IDLE_MS`, as it stood when it was found idle. */
+export type IdleStream = {
+  frameId: string
+  /** undefined for a frame that is gone, whose stream settling only closes */
+  canvasId: string | undefined
+  /** when it last received a chunk: it is settled only while that is still so */
+  lastActivity: number
+}
+
+/** The streams nobody has sent to for `STREAM_IDLE_MS`: an agent that died mid-stream never
+ *  sends the last chunk. The server settles each through the canvas write entry
+ *  (`settleIdleStreams`, server/canvasWrites.ts). */
+export function idleStreams(now = Date.now()): IdleStream[] {
+  return [...streams]
+    .filter(([, s]) => now - s.lastActivity > STREAM_IDLE_MS)
+    .map(([frameId, s]) => ({ frameId, canvasId: store.getFrame(frameId)?.canvasId, lastActivity: s.lastActivity }))
+}
+
+/** Settle an idle stream: its frame's whole-document pass (a component change skipped while
+ *  it streamed, the stylesheets, a main written in it) and its close, as one piece of work,
+ *  so a refusal part of the way leaves the frame, its components and the room as they were.
+ *  Only the stream that was found idle: one that has received a chunk since, or been begun
+ *  again, is left open (false). */
+export function settleStream(frameId: string, lastActivity: number): boolean {
+  const s = streams.get(frameId)
+  if (!s || s.lastActivity !== lastActivity) return false
+  settleIdleStream(frameId, s)
+  return true
+}
+
+/** Close a stream without settling it: what a stream whose settling was refused gets, so it
+ *  does not stay open. The frame's next write settles it. Only the stream that was found idle,
+ *  as `settleStream`. */
+export function closeStream(frameId: string, lastActivity: number): boolean {
+  const s = streams.get(frameId)
+  if (!s || s.lastActivity !== lastActivity) return false
+  finishStream(frameId, false)
+  return true
 }
 
 /** The settling pass of a stream nobody closed, and its close: one operation, so a refusal

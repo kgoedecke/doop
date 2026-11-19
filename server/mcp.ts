@@ -32,7 +32,6 @@ import { fontsForCanvas } from './fonts.ts'
 import { customAgentsForCanvas } from './customAgents.ts'
 import { describeLibrary, libraryBrief, MAX_FONT_BYTES } from '../shared/fonts.ts'
 import { addCanvasFont, uploadedFontResult } from './canvasFontUpload.ts'
-import { EMBEDDED_MIN_LENGTH, heldForms, inlineDataRefusal } from './inlineData.ts'
 import {
   MAX_TOKEN_DESCRIPTION,
   TOKEN_TYPES,
@@ -1553,13 +1552,13 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
     async ({ canvas_id, pageId, name, html, x, y, width, height, fit_to_content, agent_name }) => {
       if (!canvasFor(canvas_id, 'edit')) return noCanvas(canvas_id)
       if (fit_to_content && !html.trim()) return err(FIT_NEEDS_HTML)
-      const inline = inlineDataRefusal(html)
-      if (inline) return err(inline)
       const created = await runCanvasWrite(canvas_id, {
         type: 'create-frame',
         input: { name, pageId, html, x, y, width, height },
         actor: actorFrom(agent_name),
+        inline: 'mcp',
       })
+      if (created && 'inline' in created) return err(created.inline)
       if (!created) return noCanvas(canvas_id)
       const fit = fit_to_content ? await fitWrittenFrame(created, fit_to_content, actorFrom(agent_name)) : undefined
       const frame = fit?.frame ?? created
@@ -1642,17 +1641,18 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
     async ({ frame_id, html, fit_to_content, agent_name }) => {
       const current = frameFor(frame_id, 'edit')
       if (!current) return noFrame(frame_id)
-      /* every form the agent may have read the frame in counts as what it already held: a
-         rewrite of the full form carries over what the canvas supplies to it */
-      const inline = inlineDataRefusal(html, heldForms(current))
-      if (inline) return err(inline)
+      /* refused there if it adds inline data: every form the agent may have read the frame in
+         counts as what it already held, so a rewrite of the full form carries over what the
+         canvas supplies to it (server/canvasWrites.ts) */
       const written = await runCanvasWrite(current.canvasId, {
         type: 'write-frame',
         frameId: frame_id,
         patch: { html },
         actor: actorFrom(agent_name),
         replace: true,
+        inline: 'mcp',
       })
+      if (written && 'inline' in written) return err(written.inline)
       if (!written) return noFrame(frame_id)
       const fit = fit_to_content ? await fitWrittenFrame(written, fit_to_content, actorFrom(agent_name)) : undefined
       const frame = fit?.frame ?? written
@@ -2520,25 +2520,20 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
     async ({ frame_id, html_chunk, start, done, agent_name }) => {
       const current = frameFor(frame_id, 'edit')
       if (!current) return noFrame(frame_id)
-      /* the agent's own text: the end of its stream so far joined to this chunk, so a data:
-         URI's prefix split across chunks is caught, and so is a block of base64 text sent in
-         pieces each too short to be one. Never the stored HTML of a stream in progress, where a
-         component's image expanded mid-stream would read as an upload; but a chunk appended
-         after its stream ended is joined to the frame as stored, so the end of that is what
-         it is read with (a stream that ends is healed, its open tags closed, so a block
-         cannot in fact go on from one: this is for the case it ever could). Compared with the design the stream replaced: a rework may carry
-         over what the frame had. */
-      const base = actions.streamBase(frame_id) ?? current.html
-      const before = start ? '' : (actions.streamTail(frame_id) ?? current.html.slice(-EMBEDDED_MIN_LENGTH))
-      const refusal = inlineDataRefusal(before + html_chunk, base)
-      /* refused only for what it completes: the earlier pieces are in the frame already */
-      const completes = refusal && before && !inlineDataRefusal(html_chunk, base)
-      const inline = completes
-        ? `${refusal.replace('Refused, nothing was written:', 'Refused, this chunk was not written:')}\nThe size above counts what your earlier chunks sent too: the start of that block is already in the frame. Begin the frame again (start=true) and stream it without the block.`
-        : refusal
-      if (inline) return err(inline)
-      const frame = actions.appendFrameHtml(frame_id, html_chunk, actorFrom(agent_name), { start, done })
-      if (!frame) return noFrame(frame_id)
+      /* refused there if the chunk adds inline data, read joined to the end of the stream so
+         far, with the wording for a chunk that only completes a block (server/canvasWrites.ts) */
+      const appended = await runCanvasWrite(current.canvasId, {
+        type: 'append-frame-html',
+        frameId: frame_id,
+        chunk: html_chunk,
+        actor: actorFrom(agent_name),
+        ...(start !== undefined ? { start } : {}),
+        ...(done !== undefined ? { done } : {}),
+        inline: 'mcp',
+      })
+      if (!appended.ok && 'inline' in appended) return err(appended.inline)
+      if (!appended.ok) return noFrame(frame_id)
+      const frame = appended.frame
       const result = withNotesFirst(
         done
           ? textWithNudge(
@@ -2587,7 +2582,7 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
         find: old_str,
         replace: new_str,
         actor: actorFrom(agent_name),
-        surface: 'mcp',
+        inline: 'mcp',
       })
       if (!edited.ok) {
         if ('missing' in edited) return noFrame(frame_id)

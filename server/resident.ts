@@ -11,7 +11,7 @@ import { skillsForCanvas } from './skills.ts'
 import { skillsBlock } from '../shared/skills.ts'
 import { libraryBrief, MAX_FONT_BYTES } from '../shared/fonts.ts'
 import { addCanvasFont, uploadedFontResult } from './canvasFontUpload.ts'
-import { inlineDataRefusal } from './inlineData.ts'
+import { inlineDataRefusal, storedHtmlOf } from './inlineData.ts'
 import { webFontsBrief } from '../shared/webFonts.ts'
 import {
   TOKEN_TYPES,
@@ -1944,15 +1944,6 @@ async function frameImageBlocks(
   return blocks
 }
 
-/** A frame's HTML for comparing a write against, or nothing while it is not loaded. */
-function existingHtml(f: { html: string }): string {
-  try {
-    return typeof f.html === 'string' ? f.html : ''
-  } catch {
-    return ''
-  }
-}
-
 /** Runs one tool call of the resident's loop. Exported for tests. */
 export async function execTool(
   block: Anthropic.ToolUseBlockParam,
@@ -2013,6 +2004,8 @@ async function runResidentTool(
         if (!fitAxes.ok) return fail(fitAxes.error)
         const html = completeHtml(raw.html)
         if (!html) return fail('create_frame requires a complete non-empty HTML document ending in </html>')
+        /* the inline-data guidance before the size refusal, as this tool always answered: the
+           check reads nothing of the canvas, and the command makes it again where it writes */
         const inline = inlineDataRefusal(html, '', 'resident')
         if (inline) return fail(inline)
         if (html.length > MAX_REWRITE_CHUNK_CHARS) {
@@ -2022,7 +2015,9 @@ async function runResidentTool(
           type: 'create-frame',
           input: createFrameInput({ ...raw, html }, runState.placement, store.getCanvas(canvasId)),
           actor,
+          inline: 'resident',
         })
+        if (created && 'inline' in created) return fail(created.inline)
         if (!created) return fail('canvas not found')
         const fit = fitAxes.value ? await fitWrittenFrame(created, fitAxes.value, actor) : undefined
         const f = fit?.frame ?? created
@@ -2103,7 +2098,7 @@ async function runResidentTool(
           find: input.find,
           replace: input.replace,
           actor,
-          surface: 'resident',
+          inline: 'resident',
         })
         if (!edited.ok) {
           if ('missing' in edited) return fail('frame not found on this canvas')
@@ -2132,8 +2127,7 @@ async function runResidentTool(
             `set_frame_html is limited to ${MAX_REWRITE_CHUNK_CHARS} characters. Use begin_frame_rewrite, append_frame_rewrite chunks, and commit_frame_rewrite.`,
           )
         }
-        const inline = inlineDataRefusal(html, existingHtml(f), 'resident')
-        if (inline) return fail(inline)
+        /* refused there if it adds inline data the frame's stored HTML does not hold */
         /* a whole-document write, as MCP set_frame_html: it may replace a design another agent streams */
         const written = await runCanvasWrite(canvasId, {
           type: 'write-frame',
@@ -2141,7 +2135,9 @@ async function runResidentTool(
           patch: { html },
           actor,
           replace: true,
+          inline: 'resident',
         })
+        if (written && 'inline' in written) return fail(written.inline)
         if (!written) return fail('frame not found on this canvas')
         const fit = fitAxes.value ? await fitWrittenFrame(written, fitAxes.value, actor) : undefined
         runState.mutatedFrames.add(input.frame_id)
@@ -2174,7 +2170,7 @@ async function runResidentTool(
         const draft = (runState.rewriteDrafts.get(input.frame_id) ?? '') + raw.chunk
         /* refused at the chunk, before the draft grows, on the draft as it would stand (a URI
            split across chunks included); the frame being rewritten may carry its own over */
-        const inline = inlineDataRefusal(draft, existingHtml(f), 'resident')
+        const inline = inlineDataRefusal(draft, () => storedHtmlOf(f), 'resident')
         if (inline) return fail(inline)
         if (draft.length > MAX_REWRITE_CHARS) {
           return fail(`rewrite draft exceeds the ${MAX_REWRITE_CHARS}-character safety limit`)
@@ -2190,16 +2186,17 @@ async function runResidentTool(
         const html = completeHtml(draft)
         if (!html)
           return fail('rewrite draft is not a complete HTML document ending in </html>; append the missing content')
-        /* again at the commit: the frame may have changed since the chunks were checked */
-        const inline = inlineDataRefusal(html, existingHtml(f), 'resident')
-        if (inline) return fail(inline)
-        await runCanvasWrite(canvasId, {
+        /* again at the commit, where the write runs: the frame may have changed since the
+           chunks were checked */
+        const committed = await runCanvasWrite(canvasId, {
           type: 'write-frame',
           frameId: input.frame_id,
           patch: { html },
           actor,
           replace: true,
+          inline: 'resident',
         })
+        if (committed && 'inline' in committed) return fail(committed.inline)
         runState.rewriteDrafts.delete(input.frame_id)
         runState.mutatedFrames.add(input.frame_id)
         unverify(runState, input.frame_id)

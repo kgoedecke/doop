@@ -23,6 +23,7 @@ import { buildMcpServer } from '../server/mcp.ts'
 import { execTool, newRunState, RESIDENT_TOOL_NAMES } from '../server/resident.ts'
 import { store } from '../server/store.ts'
 import * as actions from '../server/actions.ts'
+import { settleIdleStreams } from '../server/canvasWrites.ts'
 import * as propagation from '../server/propagation.ts'
 import { blankComponent } from '../server/components.ts'
 import {
@@ -474,7 +475,7 @@ describe('detaching every instance', () => {
     await propagation.whenIdle()
     expect(framed(streaming.id)).toContain(` ${INSTANCE_ATTR}="${button.id}"`)
 
-    actions.expireIdleStreams(Date.now() + 60 * 60_000)
+    await settleIdleStreams(Date.now() + 60 * 60_000)
     await propagation.whenIdle()
     expect(framed(streaming.id)).not.toContain(` ${INSTANCE_ATTR}="${button.id}"`)
     expect(framed(streaming.id)).toContain('Left')

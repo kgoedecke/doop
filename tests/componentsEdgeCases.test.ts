@@ -15,6 +15,7 @@ vi.mock('../server/db/persist.ts', () => ({
 
 import { store } from '../server/store.ts'
 import * as actions from '../server/actions.ts'
+import { settleIdleStreams } from '../server/canvasWrites.ts'
 import * as propagation from '../server/propagation.ts'
 import { blankComponent, contextFor } from '../server/components.ts'
 import { compactDocument } from '../server/componentEngine.ts'
@@ -587,13 +588,13 @@ describe('components edge cases', () => {
     expect(store.getFrame(page.id)!.html).toContain(`>${body}</code>`)
   })
 
-  it('an idle stream still catches up on a component change', () => {
+  it('an idle stream still catches up on a component change', async () => {
     const { def } = makeComponent(canvasId, 'Pill', (id) => `<div class="pill" ${COMPONENT_ATTR}="${id}">Old</div>`)
     const page = actions.createFrame(canvasId, { name: 'Page', html: '' }, actor)!
     actions.appendFrameHtml(page.id, doc(`<doop-use component="${def.id}"></doop-use>`), actor, { start: true })
     updateComponent(canvasId, def.id, { html: `<div class="pill">Fresh</div>` }, actor)
     expect(store.getFrame(page.id)!.html).not.toContain('Fresh')
-    actions.expireIdleStreams(Date.now() + 60_000)
+    await settleIdleStreams(Date.now() + 60_000)
     expect(store.getFrame(page.id)!.html).toContain('Fresh')
   })
   it('carries the fonts and keyframes a main names in its own style attributes', () => {

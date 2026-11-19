@@ -40,9 +40,15 @@ export const EMBEDDED_MIN_LENGTH = 4096
 
 const DATA_URI = /data:([a-z0-9.+-]+\/[a-z0-9.+-]+)?((?:;[a-z0-9-]+=[^;,"'()\s]*)*);base64,([a-z0-9+/=_-]*)/gi
 
+/** What the frame already holds, or how to read it: read only once a candidate is found, and
+ *  then once, since working out every form a frame was read in (`heldForms`) is not free. */
+export type Existing = string | (() => string)
+
 /** The base64 in `submitted` that `existing` does not already hold: its data: URIs, and its
  *  blocks of base64 text that are not one. */
-export function newInlineData(submitted: string, existing = ''): InlineData[] {
+export function newInlineData(submitted: string, held: Existing = ''): InlineData[] {
+  let read: string | undefined
+  const existingText = () => (read ??= typeof held === 'function' ? held() : held)
   const found: InlineData[] = []
   /* where each data: URI's payload ends, by where it starts: counted here, not again below */
   const payloads = new Map<number, number>()
@@ -51,6 +57,7 @@ export function newInlineData(submitted: string, existing = ''): InlineData[] {
       const payload = match[3] ?? ''
       const end = match.index + match[0].length
       payloads.set(end - payload.length, end)
+      const existing = existingText()
       if (existing && existing.includes(match[0])) continue
       found.push({
         mime: (match[1] ?? 'application/octet-stream').toLowerCase(),
@@ -64,6 +71,7 @@ export function newInlineData(submitted: string, existing = ''): InlineData[] {
        no `data:` before it, labels nothing */
     const uriEnd = payloads.get(run.start)
     if (uriEnd !== undefined && uriEnd >= run.end) continue
+    const existing = existingText()
     const added = existing ? addedTo(submitted.slice(run.start, run.end), existing, run.chars) : run.chars
     if (added < EMBEDDED_MIN_LENGTH) continue
     found.push({ mime: EMBEDDED, bytes: Math.floor((added * 3) / 4) })
@@ -211,7 +219,7 @@ function advice(kind: Kind, surface: Surface): string {
 /** What to tell an agent whose write added base64 data, or null when it added none. */
 export function inlineDataRefusal(
   submitted: string | undefined,
-  existing = '',
+  existing: Existing = '',
   surface: Surface = 'mcp',
 ): string | null {
   if (!submitted) return null
@@ -244,4 +252,14 @@ export function inlineDataRefusal(
  *  entry's edits (server/canvasWrites.ts). */
 export function heldForms(frame: Frame): string {
   return `${frame.html}\n${compactFrameHtml(frame)}\n${composedHtml(frame.canvasId, frame.html)}`
+}
+
+/** A frame's stored HTML, what the resident counts as already in a frame, or nothing while
+ *  its HTML is not in memory. */
+export function storedHtmlOf(frame: { html: string }): string {
+  try {
+    return typeof frame.html === 'string' ? frame.html : ''
+  } catch {
+    return ''
+  }
 }

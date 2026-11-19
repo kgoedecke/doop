@@ -1,4 +1,6 @@
 import * as actions from './actions.ts'
+import { runCanvasWrite } from './canvasWrites.ts'
+import { runOperation } from './workBudget.ts'
 
 /**
  * The "Doop" demo agent: a scripted replay that streams a pre-authored
@@ -132,16 +134,29 @@ async function play(canvasId: string) {
   actions.setAgentStatus(canvasId, actor, 'Sketching you a welcome…')
 
   await sleep(700)
-  const frame = actions.createFrame(
-    canvasId,
-    { name: 'Welcome to Doop', x: 120, y: 120, width: 760, height: 560, html: '', demo: true },
-    actor,
+  /* through the canvas write entry (server/canvasWrites.ts), each write an operation of its
+     own, as the server's other timed writes are; a failure stops the show (play's caller logs it) */
+  const frame = await runOperation('demo frame', canvasId, () =>
+    runCanvasWrite(canvasId, {
+      type: 'create-frame',
+      input: { name: 'Welcome to Doop', x: 120, y: 120, width: 760, height: 560, html: '', demo: true },
+      actor,
+    }),
   )
   if (!frame) return
 
   for (let i = 0; i < WELCOME_HTML.length; i += CHUNK_SIZE) {
     const done = i + CHUNK_SIZE >= WELCOME_HTML.length
-    actions.appendFrameHtml(frame.id, WELCOME_HTML.slice(i, i + CHUNK_SIZE), actor, { start: i === 0, done })
+    await runOperation('demo chunk', canvasId, () =>
+      runCanvasWrite(canvasId, {
+        type: 'append-frame-html',
+        frameId: frame.id,
+        chunk: WELCOME_HTML.slice(i, i + CHUNK_SIZE),
+        actor,
+        start: i === 0,
+        done,
+      }),
+    )
     await sleep(CHUNK_MS)
   }
 

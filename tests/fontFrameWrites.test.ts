@@ -35,6 +35,8 @@ vi.mock('../server/fonts.ts', () => ({ fontsForCanvas: () => [BRAND] }))
 vi.useFakeTimers({ now: 1_000_000 })
 const actions = await import('../server/actions.ts')
 const { store } = await import('../server/store.ts')
+/* idle streams settle through the canvas write entry, as the server wires it at boot */
+;(await import('../server/canvasWrites.ts')).wireCanvasWrites()
 
 /**
  * A frame write that names a library family gets that family's @font-face —
@@ -123,26 +125,26 @@ describe('library faces on frame writes', () => {
     expect(saved.split('data-doop-webfonts')).toHaveLength(2)
   })
 
-  it('adds them when an unfinished stream goes idle', () => {
+  it('adds them when an unfinished stream goes idle', async () => {
     const canvasId = store.createCanvas('fonts', 'kevin').id
     const frame = actions.createFrame(canvasId, { name: 'Hero' }, agent)!
     actions.appendFrameHtml(frame.id, HEADLESS, agent, { start: true })
     expect(store.getFrame(frame.id)!.html).not.toContain(BRAND.url)
     sent.length = 0
-    vi.advanceTimersByTime(31_000)
+    await vi.advanceTimersByTimeAsync(31_000)
     expect(store.getFrame(frame.id)!.html).toContain(BRAND.url)
     /* and open canvases are sent the document with the faces, not just the store */
     expect(sent.some((m) => m.frameId === frame.id && m.html.includes(BRAND.url))).toBe(true)
   })
 
-  it('never sends viewers a script the stream left unfinished', () => {
+  it('never sends viewers a script the stream left unfinished', async () => {
     const canvasId = store.createCanvas('fonts', 'kevin').id
     const frame = actions.createFrame(canvasId, { name: 'Hero' }, agent)!
     actions.appendFrameHtml(frame.id, `${HEADLESS}<script>document.body.innerHTML = ''; // and then`, agent, {
       start: true,
     })
     sent.length = 0
-    vi.advanceTimersByTime(31_000)
+    await vi.advanceTimersByTimeAsync(31_000)
     const last = sent.filter((m) => m.frameId === frame.id).at(-1)!
     expect(last.html).toContain(BRAND.url)
     expect(last.html).not.toContain('<script>')
