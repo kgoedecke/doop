@@ -807,6 +807,17 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   anywhere else on it moves the value by the share of the width travelled (never jumping to the
   pointer); a click still types, mouse and pen only. Tests: `inspectorScrub.test.tsx`,
   `valueSlide.test.tsx`.
+- Frame fill (`FrameFillSection` in `Inspector.tsx`, `rootFill` in `frameRuntime.ts`): the frame
+  Inspector has a Fill section, as a Figma frame does, and it is the element panel's own
+  (`FillSection` in `ElementPanel.tsx`: colour, opacity, token binding, image fill). It edits the
+  background of the root element that paints the frame, read live through `doop:root-fill`:
+  `<body>`, whose paint covers the whole frame while `<html>` has none, unless `<html>` is painted
+  and the body is not, or covers under half the frame (a centred column). A colour edit replaces a
+  gradient over it (`background-image: none`) and a token set through the `background` shorthand
+  (shown as bound). Reads take a ticket so only the newest answer lands; until the frame answers
+  the section says so. Writes are ordinary runtime style edits (`styleElement` / `styleGesture`),
+  saved and undone like any other. Not shown for a locked frame or a standalone shape. Tests:
+  `frameFillBrowser.test.ts`.
 - Frame rotation (`shared/frameRotation.ts`, `src/lib/frameRotate.ts`): a selected frame wears a
   zone just outside each corner (`data-frame-rotate-handle`, 18 screen px, clear of the corner
   grip) that shows Figma's curved double-arrow cursor, turned to curve around its corner and with

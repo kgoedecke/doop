@@ -48,6 +48,7 @@ export const inspector: Catalog['inspector'] = {
   sectionLayout: 'Layout',
   sectionAppearance: 'Aparência',
   sectionFill: 'Preenchimento',
+  fillReading: 'Lendo o frame…',
   sectionStroke: 'Borda',
   sectionText: 'Texto',
   rowType: 'Tipo',

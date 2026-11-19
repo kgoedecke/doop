@@ -17,11 +17,21 @@ import { CopyIcon, DownloadIcon, FrameIcon, LockIcon, RotationIcon } from './ui/
 import { Button } from './ui/button'
 import { Input } from './ui/input'
 import { Textarea } from './ui/textarea'
-import { NumberField, PropertyScrubContext } from './ui/property-field'
+import { NumberField, PropertyScrubContext, PropertySection, StaticField } from './ui/property-field'
 import { normalizeRotation } from '../../shared/frameRotation'
 import { MIN_FRAME_SIZE } from '../lib/frameResize'
 import { t as translate, useT } from '../lib/i18n'
 import { trackExport, trackPngCopy } from '../lib/exportEvents'
+import {
+  onFrameChange,
+  readFrameFill,
+  styleElement,
+  styleGesture,
+  type FrameFill,
+  type StylePatch,
+} from '../lib/frameBridge'
+import { isCanvasElement } from '../lib/drawing'
+import { FillSection } from './ElementPanel'
 
 /* the rail's filled buttons: a grey well, 28px, tall enough to hit on a phone */
 const fillBtn = 'h-7 rounded-[7px] bg-sub px-2 text-[12px] font-normal text-ink hover:bg-paper-deep max-md:min-h-10'
@@ -302,6 +312,7 @@ export function Inspector({
             </div>
           </InspectorGroup>
         </PropertyScrubContext.Provider>
+        {!frame.locked && !isCanvasElement(frame.html) && <FrameFillSection frame={frame} />}
         <InspectorGroup title={t('inspector.groupExport')}>
           <div className="grid grid-cols-2 gap-1.5">
             <div className="col-span-2">
@@ -433,6 +444,91 @@ export function Inspector({
       </footer>
       {historyOpen && <FrameHistoryModal frame={frame} onClose={() => setHistoryOpen(false)} />}
     </Panel>
+  )
+}
+
+/* a burst of render and font-load events shares one read, as the element panel's does */
+const FILL_READ_DELAY_MS = 120
+
+type FillRead = { frameId: string; fill: FrameFill }
+
+/* Read the frame's fill into state. Every read takes a ticket, and only the
+   newest one's answer lands: reads after an edit and after a render can
+   come back out of order, and a stale answer must not move the field. */
+function readFillInto(latest: { current: number }, frameId: string, setRead: (read: FillRead) => void) {
+  const ticket = ++latest.current
+  readFrameFill(frameId)
+    .then((fill) => {
+      if (fill && ticket === latest.current) setRead({ frameId, fill })
+    })
+    .catch(console.error)
+}
+
+/** The frame's Fill, as Figma's frame has one: the background of the root
+ *  element that paints the frame, edited with the element panel's own Fill
+ *  section (colour, opacity, tokens, an image fill) through the live frame,
+ *  so the edit is saved and undone like any style edit. */
+function FrameFillSection({ frame }: { frame: Frame }) {
+  const t = useT()
+  const [read, setRead] = useState<FillRead | null>(null)
+  const latest = useRef(0)
+  const fill = read?.frameId === frame.id ? read.fill : null
+
+  useEffect(() => {
+    let timer: number | null = null
+    const refresh = () => {
+      if (timer) window.clearTimeout(timer)
+      timer = window.setTimeout(() => readFillInto(latest, frame.id, setRead), FILL_READ_DELAY_MS)
+    }
+    readFillInto(latest, frame.id, setRead)
+    const off = onFrameChange(frame.id, refresh)
+    return () => {
+      /* an answer still on its way belongs to the frame or document before */
+      latest.current += 1
+      off()
+      if (timer) window.clearTimeout(timer)
+    }
+  }, [frame.id, frame.html])
+
+  /* until the frame answers (its page loading, its iframe not up yet) */
+  if (!fill)
+    return (
+      <PropertySection title={t('inspector.sectionFill')}>
+        <StaticField>{t('inspector.fillReading')}</StaticField>
+      </PropertySection>
+    )
+  if (fill.locked) return null
+  const { selector } = fill
+
+  function apply(styles: StylePatch) {
+    /* the colour is the fill: a gradient over it goes, and a token set
+       through the shorthand is unset before the longhand replaces it */
+    const patch: StylePatch = {
+      ...(fill?.shorthand && 'background-color' in styles ? { background: null } : {}),
+      ...styles,
+      ...(fill?.overlay && 'background-color' in styles ? { 'background-image': 'none' } : {}),
+    }
+    styleElement(frame.id, selector, patch)
+      .then(() => readFillInto(latest, frame.id, setRead))
+      .catch(console.error)
+  }
+  function scrub(phase: 'begin' | 'commit' | 'cancel') {
+    styleGesture(frame.id, selector, phase)
+      .then(() => readFillInto(latest, frame.id, setRead))
+      .catch(console.error)
+  }
+
+  return (
+    <PropertyScrubContext.Provider
+      value={{ onStart: () => scrub('begin'), onEnd: (cancel) => scrub(cancel ? 'cancel' : 'commit') }}
+    >
+      <FillSection
+        frame={frame}
+        selector={selector}
+        info={{ backgroundColor: fill.backgroundColor, inline: fill.inline, vector: null, image: fill.image }}
+        apply={apply}
+      />
+    </PropertyScrubContext.Provider>
   )
 }
 
