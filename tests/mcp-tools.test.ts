@@ -270,8 +270,8 @@ it('get_canvas lists the pages and narrows the frames to page_id', async () => {
    the three safety hints set explicitly, a title, and — for the tools that
    render a preview card — the component wiring (server/chatgptApp.ts). */
 describe('MCP ChatGPT app contract', () => {
-  async function connected() {
-    const server = buildMcpServer('Test Owner', 'test-owner-id')
+  async function connected(clientName?: string) {
+    const server = buildMcpServer('Test Owner', 'test-owner-id', clientName)
     const client = new Client({ name: 'doop-chatgpt-contract-test', version: '1.0.0' })
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair()
     await server.connect(serverTransport)
@@ -315,8 +315,46 @@ describe('MCP ChatGPT app contract', () => {
     }
   })
 
+  /* A client with nowhere to embed a card opens each one as a browser tab (Pi
+     did), so only the hosts known to embed it are told about it */
+  it.each([
+    undefined,
+    'pi',
+    'pi-mcp-doop',
+    'codex-mcp-client',
+    'openai-mcp (Codex)',
+    'claude-code',
+    'Claude Code (doop)',
+  ])('offers %s no preview card', async (clientName) => {
+    const { client, close } = await connected(clientName)
+    try {
+      const { tools } = await client.listTools()
+      expect(tools.length).toBeGreaterThan(30)
+      for (const tool of tools) {
+        expect(tool._meta?.ui, tool.name).toBeUndefined()
+        expect(tool._meta?.['openai/outputTemplate'], tool.name).toBeUndefined()
+      }
+    } finally {
+      await close()
+    }
+  })
+
+  it.each(['openai-mcp', 'ChatGPT', 'Anthropic/ClaudeAI', 'Claude', 'claude-ai (via mcp-remote 0.15.1)'])(
+    'offers %s the preview card',
+    async (clientName) => {
+      const { client, close } = await connected(clientName)
+      try {
+        const { tools } = await client.listTools()
+        const meta = tools.find((t) => t.name === 'get_frame_screenshot')!._meta as Record<string, unknown>
+        expect(meta['openai/outputTemplate']).toBe(FRAME_PREVIEW_URI)
+      } finally {
+        await close()
+      }
+    },
+  )
+
   it('links the frame tools to the preview component and serves it as an MCP Apps resource', async () => {
-    const { client, close } = await connected()
+    const { client, close } = await connected('openai-mcp')
     try {
       const { tools } = await client.listTools()
       const byName = Object.fromEntries(tools.map((t) => [t.name, t]))

@@ -86,7 +86,7 @@ import { extensions, type McpToolHelpers } from './extensions.ts'
 import { websiteAccessErrorMessage } from './websiteAccess.ts'
 import { mentionedRole } from '../shared/agents.ts'
 import * as allowance from './allowance.ts'
-import { previewOf, previewToolMeta, registerFramePreview, type CanvasPreview } from './chatgptApp.ts'
+import { embedsPreview, previewOf, previewToolMeta, registerFramePreview, type CanvasPreview } from './chatgptApp.ts'
 import * as persist from './db/persist.ts'
 import type { FrameApproval } from '../shared/types.ts'
 import { recordAgentFeedback } from './agentFeedback.ts'
@@ -455,6 +455,9 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
   const server = new McpServer({ name: 'doop-canvas', version: packageJson.version }, { instructions: INSTRUCTIONS })
   loadToolTargets(server)
   registerFramePreview(server)
+  /* only for a client that shows the card inside the conversation (embedsPreview) */
+  const previewMeta = (invoking: string, invoked: string) =>
+    embedsPreview(clientName) ? previewToolMeta(invoking, invoked) : undefined
 
   server.registerTool(
     'get_guide',
@@ -598,7 +601,7 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
     'get_canvas',
     {
       title: 'Get a canvas and its frames',
-      _meta: previewToolMeta('Reading the canvas…', 'Canvas loaded'),
+      _meta: previewMeta('Reading the canvas…', 'Canvas loaded'),
       description:
         "Get a canvas: its name, its pages (id, name, prototype start frame) and its frames with pageId, position, size, approvalStatus and human approval attribution (not the HTML — use get_frame for that). Pass page_id to see one page's frames only; filter approval_status to ready_for_dev to find screens approved for implementation. Use this to see the current layout before adding or editing frames. Pass your agent_name so the result can tell you when human feedback is waiting (claim it with get_feedback).",
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
@@ -1549,7 +1552,7 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
     'set_frame_html',
     {
       title: 'Replace a frame’s HTML',
-      _meta: previewToolMeta('Redesigning the frame…', 'Frame redesigned'),
+      _meta: previewMeta('Redesigning the frame…', 'Frame redesigned'),
       description:
         'Replace the HTML design of a frame in one shot. The change renders live for everyone viewing the canvas. For new or heavily reworked designs, prefer append_frame_html so viewers can watch the design stream in. Keep data-doop-* attributes on elements you carry over: comments and links point at data-doop-id, prototype wiring and locks ride on the others. ' +
         COMPOSE_CHECK,
@@ -2144,7 +2147,7 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
     'import_webpage',
     {
       title: 'Import an editable webpage',
-      _meta: previewToolMeta('Importing the webpage…', 'Webpage imported'),
+      _meta: previewMeta('Importing the webpage…', 'Webpage imported'),
       description:
         'Import ONE public webpage into a canvas as an editable HTML snapshot. The rendered DOM is captured, scripts/iframes are removed, stylesheets are inlined, and the resulting source frame appears on the canvas for comparison or editing. Use this when a referenced or redesign-target page should be visible to everyone; leave the imported source frame unchanged and make the new design in a separate frame. For inspection without changing the canvas, use view_website.',
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
@@ -2316,7 +2319,7 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
     'get_frame_screenshot',
     {
       title: 'Screenshot a frame',
-      _meta: previewToolMeta('Rendering the frame…', 'Frame rendered'),
+      _meta: previewMeta('Rendering the frame…', 'Frame rendered'),
       description:
         'Render a frame and return a PNG screenshot of it — this is how you SEE your design. Always review your work with this after creating or updating a frame, then fix what looks wrong (spacing, overflow, contrast, alignment) and check again. Iterate until it actually looks good, not just until the HTML seems right.',
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
@@ -2425,7 +2428,7 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
     'edit_frame_html',
     {
       title: 'Edit a frame’s HTML in place',
-      _meta: previewToolMeta('Editing the frame…', 'Frame edited'),
+      _meta: previewMeta('Editing the frame…', 'Frame edited'),
       description:
         'Make a targeted edit to a frame: exact find-and-replace in its HTML, as get_frame returned it (a <doop-use> can be edited like any tag). Use this for small tweaks (copy, a color, spacing, one element) instead of resending the whole document — the change morphs into the rendered frame in place. old_str must appear EXACTLY ONCE in the current HTML (call get_frame first if unsure); include enough surrounding context to make it unique. Keep data-doop-* attributes on the element you edit: comments and links point at its data-doop-id.',
       annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
@@ -2465,7 +2468,7 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
     'update_frame',
     {
       title: 'Rename, move or resize a frame',
-      _meta: previewToolMeta('Updating the frame…', 'Frame updated'),
+      _meta: previewMeta('Updating the frame…', 'Frame updated'),
       description:
         "Update frame metadata in one call: rename it (name), move it on its page (x, y), resize it (width, height), turn it (rotation: degrees clockwise about its centre; 0 straightens it), or move it to another page (pageId from get_canvas; it keeps its x/y unless you pass new ones and lands in front of that page's frames). Set locked to true to lock the frame on the canvas (humans cannot select, move, resize or delete it from the stage until it is unlocked) or false to unlock it.",
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
