@@ -47,6 +47,7 @@ export function FrameExportModal({
   }
 
   function downloadPdf() {
+    setExportSettings({ format: 'pdf' })
     trackExport('pdf', groupFrames.length, 'frame_menu')
     void downloadFramesPdf(frame.canvasId, readingOrder(groupFrames))
     onClose()

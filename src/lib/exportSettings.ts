@@ -1,12 +1,17 @@
 import { useSyncExternalStore } from 'react'
 import { DEFAULT_EXPORT_SCALE, parseExportScale } from '../../shared/exportScale'
-import type { FrameExportFormat } from './frameExport'
+/** What the Export group's format menu picks. PDF is a whole frame's
+ *  (the server prints it), so an element's export reads it as PNG. */
+export type ExportPickFormat = 'png' | 'jpg' | 'svg' | 'pdf'
 
-/** The last image export picked: a density and a format, which the
+/** The formats a layer inside a frame exports to. */
+export type ElementExportFormat = Exclude<ExportPickFormat, 'pdf'>
+
+/** The last export picked: a density and a format, which the
  *  Inspector's Export group and the Export dialogs start from. */
 export interface ExportSettings {
   scale: number
-  format: FrameExportFormat
+  format: ExportPickFormat
 }
 
 /* Per browser, like the panel layout: someone who exports 3x posters
@@ -15,8 +20,14 @@ export const EXPORT_SETTINGS_STORAGE_KEY = 'doop:export-settings'
 
 const DEFAULTS: ExportSettings = { scale: DEFAULT_EXPORT_SCALE, format: 'png' }
 
-function isFormat(value: unknown): value is FrameExportFormat {
-  return value === 'png' || value === 'jpg' || value === 'svg'
+function isFormat(value: unknown): value is ExportPickFormat {
+  return value === 'png' || value === 'jpg' || value === 'svg' || value === 'pdf'
+}
+
+/** The format an element's export uses for a pick: a PDF pick, which an
+ *  element has no export to, falls back to PNG. */
+export function elementFormat(format: ExportPickFormat): ElementExportFormat {
+  return format === 'pdf' ? 'png' : format
 }
 
 /** A stored pick, each field falling back to the default on its own. */
