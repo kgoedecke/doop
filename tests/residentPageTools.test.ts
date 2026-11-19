@@ -166,21 +166,28 @@ describe('the resident agent reorganizes pages', () => {
   })
 })
 
-describe.skipIf(!findBrowserPath())('fit_height', () => {
+describe.skipIf(!findBrowserPath())('fit_to_content', () => {
   const tall = '<!doctype html><html><body style="margin:0"><div style="height:640px"></div></body></html>'
 
   it('fits a frame from update_frame, and refuses it with height', async () => {
     actions.updateFrame(frameId, { html: tall }, actor())
     const refused = await execTool(
-      call('update_frame', { frame_id: frameId, height: 10, fit_height: true }),
+      call('update_frame', { frame_id: frameId, height: 10, fit_to_content: 'height' }),
       canvasId,
       actor(),
       run(),
     )
     expect(refused.is_error).toBe(true)
+    const invalid = await execTool(
+      call('update_frame', { frame_id: frameId, fit_to_content: true }),
+      canvasId,
+      actor(),
+      run(),
+    )
+    expect(String(invalid.content)).toContain('must be "height", "width" or "both"')
     const runState = run()
     const result = await execTool(
-      call('update_frame', { frame_id: frameId, fit_height: true }),
+      call('update_frame', { frame_id: frameId, fit_to_content: 'height' }),
       canvasId,
       actor(),
       runState,
@@ -193,14 +200,14 @@ describe.skipIf(!findBrowserPath())('fit_height', () => {
 
   it('fits what create_frame and set_frame_html write', async () => {
     const created = await execTool(
-      call('create_frame', { name: 'Fitted', width: 390, height: 844, html: tall, fit_height: true }),
+      call('create_frame', { name: 'Fitted', width: 390, height: 844, html: tall, fit_to_content: 'height' }),
       canvasId,
       actor(),
       run(),
     )
     expect(String(created.content)).toMatch(/390x640/)
     const set = await execTool(
-      call('set_frame_html', { frame_id: frameId, html: tall.replace('640px', '420px'), fit_height: true }),
+      call('set_frame_html', { frame_id: frameId, html: tall.replace('640px', '420px'), fit_to_content: 'height' }),
       canvasId,
       actor(),
       run(),
@@ -212,7 +219,7 @@ describe.skipIf(!findBrowserPath())('fit_height', () => {
   it('answers a set_frame_html whose frame is deleted while it is measured', async () => {
     const measuring = holdNextMeasure()
     const pending = execTool(
-      call('set_frame_html', { frame_id: frameId, html: tall, fit_height: true }),
+      call('set_frame_html', { frame_id: frameId, html: tall, fit_to_content: 'height' }),
       canvasId,
       actor(),
       run(),
@@ -221,6 +228,6 @@ describe.skipIf(!findBrowserPath())('fit_height', () => {
     actions.deleteFrame(frameId, actor())
     measuring.release()
     const result = await pending
-    expect(String(result.content)).toContain('fit_height was not applied')
+    expect(String(result.content)).toContain('fit_to_content was not applied')
   }, 60_000)
 })

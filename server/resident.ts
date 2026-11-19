@@ -23,7 +23,7 @@ import { RESIDENT_TASK_LIMIT } from './allowance.ts'
 import * as actions from './actions.ts'
 import { captureFeature, captureTokenResults } from './featureEvents.ts'
 import { inspectFrame, renderFrame } from './screenshot.ts'
-import { FIT_HEIGHT_ON, fitNotes, fitWrittenFrame, updateFrameMetaWithFit } from './frameFit.ts'
+import { FIT_AXES, FIT_ON, fitNotes, fitWrittenFrame, readFitAxes, updateFrameMetaWithFit } from './frameFit.ts'
 import { AGENT_ROLES, DEFAULT_ROLE_ID, roleById, roleByAgentName, roleName } from '../shared/agents.ts'
 import { resolvePersonMentions, withoutAgentMentions, type Mentionable } from '../shared/personMentions.ts'
 import { commentPeople, threadAuthorIds } from './canvasPeople.ts'
@@ -1238,10 +1238,7 @@ const TOOLS: Anthropic.Tool[] = [
             'Canvas position in px. Optional: left out, the frame lands on the page the request is about — beside the pin of a canvas comment, else to the right of the existing frames.',
         },
         y: { type: 'number', description: 'Canvas position in px. Optional, see x.' },
-        fit_height: {
-          type: 'boolean',
-          description: FIT_HEIGHT_ON.create,
-        },
+        fit_to_content: { type: 'string', enum: [...FIT_AXES], description: FIT_ON.create },
       },
       required: ['name', 'width', 'height', 'html'],
     },
@@ -1305,10 +1302,7 @@ const TOOLS: Anthropic.Tool[] = [
       properties: {
         frame_id: { type: 'string' },
         html: { type: 'string', description: 'Complete, self-contained HTML document' },
-        fit_height: {
-          type: 'boolean',
-          description: FIT_HEIGHT_ON.set,
-        },
+        fit_to_content: { type: 'string', enum: [...FIT_AXES], description: FIT_ON.set },
       },
       required: ['frame_id', 'html'],
     },
@@ -1722,10 +1716,7 @@ const TOOLS: Anthropic.Tool[] = [
         y: { type: 'number', description: 'Canvas position in px' },
         width: { type: 'number', description: 'px; the design is not rescaled' },
         height: { type: 'number', description: 'px; the design is not rescaled' },
-        fit_height: {
-          type: 'boolean',
-          description: FIT_HEIGHT_ON.update,
-        },
+        fit_to_content: { type: 'string', enum: [...FIT_AXES], description: FIT_ON.update },
         locked: { type: 'boolean', description: 'true keeps humans from selecting, moving or deleting it' },
       },
       required: ['frame_id'],
@@ -1979,8 +1970,10 @@ async function runResidentTool(
           html?: string
           x?: number
           y?: number
-          fit_height?: boolean
+          fit_to_content?: unknown
         }
+        const fitAxes = readFitAxes(raw.fit_to_content)
+        if (!fitAxes.ok) return fail(fitAxes.error)
         const html = completeHtml(raw.html)
         if (!html) return fail('create_frame requires a complete non-empty HTML document ending in </html>')
         const inline = inlineDataRefusal(html, '', 'resident')
@@ -1994,7 +1987,7 @@ async function runResidentTool(
           actor,
         )
         if (!created) return fail('canvas not found')
-        const fit = raw.fit_height === true ? await fitWrittenFrame(created, actor) : undefined
+        const fit = fitAxes.value ? await fitWrittenFrame(created, fitAxes.value, actor) : undefined
         const f = fit?.frame ?? created
         runState.mutatedFrames.add(f.id)
         unverify(runState, f.id)
@@ -2085,6 +2078,8 @@ async function runResidentTool(
       case 'set_frame_html': {
         const f = store.getFrame(input.frame_id)
         if (!f || f.canvasId !== canvasId) return fail('frame not found on this canvas')
+        const fitAxes = readFitAxes((block.input as { fit_to_content?: unknown }).fit_to_content)
+        if (!fitAxes.ok) return fail(fitAxes.error)
         const html = completeHtml(input.html)
         if (!html) {
           return fail(
@@ -2100,10 +2095,7 @@ async function runResidentTool(
         if (inline) return fail(inline)
         const written = actions.updateFrame(input.frame_id, { html }, actor)
         if (!written) return fail('frame not found on this canvas')
-        const fit =
-          (block.input as { fit_height?: unknown }).fit_height === true
-            ? await fitWrittenFrame(written, actor)
-            : undefined
+        const fit = fitAxes.value ? await fitWrittenFrame(written, fitAxes.value, actor) : undefined
         runState.mutatedFrames.add(input.frame_id)
         unverify(runState, input.frame_id)
         return ok(
@@ -2603,6 +2595,8 @@ async function runResidentTool(
         const canvas = store.getCanvas(canvasId)
         const f = store.getFrame(input.frame_id)
         if (!canvas || !f || f.canvasId !== canvasId) return fail('frame not found on this canvas')
+        const fitAxes = readFitAxes(raw.fit_to_content)
+        if (!fitAxes.ok) return fail(fitAxes.error)
         /* the store updates the frame object in place, so what it was is read first */
         const arrangement = (frame: typeof f) =>
           [frame.name, framePageId(canvas, frame), frame.x, frame.y, frame.width, frame.height, !!frame.locked].join(
@@ -2623,7 +2617,7 @@ async function runResidentTool(
             height: num(raw.height),
             locked: typeof raw.locked === 'boolean' ? raw.locked : undefined,
           },
-          raw.fit_height === true,
+          fitAxes.value,
           actor,
         )
         if (!updated.ok) return fail(updated.error)

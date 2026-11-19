@@ -17,7 +17,8 @@ import { z } from 'zod'
 import { store } from './store.ts'
 import { addPage, savePages } from './pageTools.ts'
 import {
-  FIT_HEIGHT_ON,
+  FIT_AXES,
+  FIT_ON,
   FIT_NEEDS_HTML,
   type FittedFrame,
   fitNotes,
@@ -210,7 +211,7 @@ function withComponentNotes<T extends ToolContent>(result: T, frame: Frame, opti
   return withNotesFirst(result, componentWriteNotes(frame, options))
 }
 
-/** What fit_height did, right after the result's data: it says what the frame's height now is. */
+/** What fit_to_content did, right after the result's data: it says what the frame's size now is. */
 function withFitNote<T extends ToolContent>(result: T, fit: FittedFrame | undefined): T {
   return withNotesFirst(result, fitNotes(fit))
 }
@@ -1529,23 +1530,23 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
         y: z.number().optional(),
         width: z.number().optional().describe('Default 640'),
         height: z.number().optional().describe('Default 480'),
-        fit_height: z
-          .boolean()
+        fit_to_content: z
+          .enum(FIT_AXES)
           .optional()
           .describe(
-            `${FIT_HEIGHT_ON.create} Needs the whole design in html: after streaming with append_frame_html, call update_frame with fit_height instead.`,
+            `${FIT_ON.create} Needs the whole design in html: after streaming with append_frame_html, call update_frame with fit_to_content instead.`,
           ),
         agent_name: agentName,
       },
     },
-    async ({ canvas_id, pageId, name, html, x, y, width, height, fit_height, agent_name }) => {
+    async ({ canvas_id, pageId, name, html, x, y, width, height, fit_to_content, agent_name }) => {
       if (!canvasFor(canvas_id, 'edit')) return noCanvas(canvas_id)
-      if (fit_height && !html.trim()) return err(FIT_NEEDS_HTML)
+      if (fit_to_content && !html.trim()) return err(FIT_NEEDS_HTML)
       const inline = inlineDataRefusal(html)
       if (inline) return err(inline)
       const created = actions.createFrame(canvas_id, { name, pageId, html, x, y, width, height }, actorFrom(agent_name))
       if (!created) return noCanvas(canvas_id)
-      const fit = fit_height ? await fitWrittenFrame(created, actorFrom(agent_name)) : undefined
+      const fit = fit_to_content ? await fitWrittenFrame(created, fit_to_content, actorFrom(agent_name)) : undefined
       const frame = fit?.frame ?? created
       const canvas = store.getCanvas(canvas_id)
       const result = withFitNote(
@@ -1617,11 +1618,11 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
       inputSchema: {
         frame_id: z.string(),
         html: z.string(),
-        fit_height: z.boolean().optional().describe(FIT_HEIGHT_ON.set),
+        fit_to_content: z.enum(FIT_AXES).optional().describe(FIT_ON.set),
         agent_name: agentName,
       },
     },
-    async ({ frame_id, html, fit_height, agent_name }) => {
+    async ({ frame_id, html, fit_to_content, agent_name }) => {
       const current = frameFor(frame_id, 'edit')
       if (!current) return noFrame(frame_id)
       /* every form the agent may have read the frame in counts as what it already held: a
@@ -1630,7 +1631,7 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
       if (inline) return err(inline)
       const written = actions.updateFrame(frame_id, { html }, actorFrom(agent_name), { replace: true })
       if (!written) return noFrame(frame_id)
-      const fit = fit_height ? await fitWrittenFrame(written, actorFrom(agent_name)) : undefined
+      const fit = fit_to_content ? await fitWrittenFrame(written, fit_to_content, actorFrom(agent_name)) : undefined
       const frame = fit?.frame ?? written
       return withPreview(
         withGuidelinesNudge(
@@ -2578,7 +2579,7 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
       title: 'Rename, move or resize a frame',
       _meta: previewMeta('Updating the frame…', 'Frame updated'),
       description:
-        "Update frame metadata in one call: rename it (name), move it on its page (x, y), resize it (width, height, or fit_height to make it as tall as its content), turn it (rotation: degrees clockwise about its centre; 0 straightens it), or move it to another page (pageId from get_canvas; it keeps its x/y unless you pass new ones and lands in front of that page's frames). Set locked to true to lock the frame on the canvas (humans cannot select, move, resize or delete it from the stage until it is unlocked) or false to unlock it.",
+        "Update frame metadata in one call: rename it (name), move it on its page (x, y), resize it (width, height, or fit_to_content to size it to its content), turn it (rotation: degrees clockwise about its centre; 0 straightens it), or move it to another page (pageId from get_canvas; it keeps its x/y unless you pass new ones and lands in front of that page's frames). Set locked to true to lock the frame on the canvas (humans cannot select, move, resize or delete it from the stage until it is unlocked) or false to unlock it.",
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
       inputSchema: {
         frame_id: z.string(),
@@ -2588,17 +2589,17 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
         y: z.number().optional(),
         width: z.number().optional(),
         height: z.number().optional(),
-        fit_height: z.boolean().optional().describe(FIT_HEIGHT_ON.update),
+        fit_to_content: z.enum(FIT_AXES).optional().describe(FIT_ON.update),
         locked: z.boolean().optional(),
         rotation: z.number().optional(),
         agent_name: agentName,
       },
     },
-    async ({ frame_id, agent_name, fit_height, ...patch }) => {
+    async ({ frame_id, agent_name, fit_to_content, ...patch }) => {
       const found = frameFor(frame_id, 'edit')
       const canvas = found && store.getCanvas(found.canvasId)
       if (!canvas) return noFrame(frame_id)
-      const updated = await updateFrameMetaWithFit(canvas, frame_id, patch, fit_height === true, actorFrom(agent_name))
+      const updated = await updateFrameMetaWithFit(canvas, frame_id, patch, fit_to_content, actorFrom(agent_name))
       if (!updated.ok) return err(updated.error)
       const { frame } = updated.value
       const result = withFitNote(text({ ok: true, frame: frameSummary(frame) }), updated.value)

@@ -3,7 +3,7 @@ import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Frame } from '../shared/types.ts'
 
-/* fit_height (#532): a frame's height set to its content's, measured in the
+/* fit_to_content (#532): a frame sized to its content, measured in the
    server's Chromium. Writes persist like any canvas change; only the frame
    left behind and what viewers are sent matter here, so persistence is stubbed. */
 vi.mock('../server/db/persist.ts', () => ({
@@ -83,7 +83,7 @@ async function callTool(name: string, args: Record<string, unknown>): Promise<Ca
 
 const texts = (result: CallResult) => result.content.map((part) => part.text ?? '').join('\n')
 const fit = (frame: Frame, args: Record<string, unknown> = {}) =>
-  callTool('update_frame', { frame_id: frame.id, fit_height: true, ...args })
+  callTool('update_frame', { frame_id: frame.id, fit_to_content: 'height', ...args })
 
 describe('settleHeight', () => {
   /** a measure of content that `content` gives for a viewport, all of it in flow */
@@ -171,21 +171,40 @@ describe('settleHeight', () => {
   })
 })
 
-describe('fit_height refusals', () => {
-  it('refuses height and fit_height together on update_frame', async () => {
+describe('fit_to_content refusals', () => {
+  it('refuses height and a height fit together on update_frame', async () => {
     const frame = frameWith(doc(block(500)))
     const result = await fit(frame, { height: 200 })
     expect(result.isError).toBe(true)
-    expect(texts(result)).toContain('either height or fit_height')
+    expect(texts(result)).toContain('either height or fit_to_content')
     expect(frame.height).toBe(300)
   })
 
   it('refuses a create with no design to measure, before making the frame', async () => {
     const before = store.getCanvas(canvasId)!.frames.length
-    const result = await callTool('create_frame', { canvas_id: canvasId, name: 'Empty', html: '', fit_height: true })
+    const result = await callTool('create_frame', {
+      canvas_id: canvasId,
+      name: 'Empty',
+      html: '',
+      fit_to_content: 'height',
+    })
     expect(result.isError).toBe(true)
-    expect(texts(result)).toContain('update_frame with fit_height')
+    expect(texts(result)).toContain('update_frame with fit_to_content')
     expect(store.getCanvas(canvasId)!.frames.length).toBe(before)
+  })
+
+  it('refuses width with a width fit, and keeps a given height with one', async () => {
+    const frame = frameWith(doc(block(500)))
+    for (const axes of ['width', 'both']) {
+      const result = await fit(frame, { fit_to_content: axes, width: 200 })
+      expect(result.isError).toBe(true)
+      expect(texts(result)).toContain(`either width or fit_to_content "${axes}"`)
+    }
+    const both = await fit(frame, { fit_to_content: 'both', height: 200 })
+    expect(texts(both)).toContain('either height or fit_to_content "both"')
+    expect(frame).toMatchObject({ width: 400, height: 300 })
+    const invalid = await fit(frame, { fit_to_content: 'yes' })
+    expect(invalid.isError).toBe(true)
   })
 
   it('refuses a frame an agent is still streaming into', async () => {
@@ -197,7 +216,7 @@ describe('fit_height refusals', () => {
   })
 })
 
-describe.skipIf(!findBrowserPath())('fit_height in a browser', () => {
+describe.skipIf(!findBrowserPath())('fit_to_content in a browser', () => {
   it('grows a frame whose content is cut off', async () => {
     const frame = frameWith(doc(block(700) + block(584)))
     const result = await fit(frame)
@@ -342,6 +361,45 @@ describe.skipIf(!findBrowserPath())('fit_height in a browser', () => {
     expect(frame).toMatchObject({ width: 800, height: 400 })
   }, 60_000)
 
+  it('hugs the width as a Figma frame does, never wider than the frame', async () => {
+    /* a component main drawn on a big frame hugs to it, its body's margins included */
+    const badge = frameWith(doc(block(32, 'width:120px'), 'margin:16px'), { width: 480, height: 240 })
+    const both = await fit(badge, { fit_to_content: 'both' })
+    expect(both.isError).toBeFalsy()
+    expect(badge).toMatchObject({ width: 152, height: 64 })
+    expect(texts(both)).toContain('now 152x64px')
+
+    /* width alone keeps the height, and a height passed with it is applied */
+    const wide = frameWith(doc(block(40, 'width:250px')), { width: 400, height: 300 })
+    expect(texts(await fit(wide, { fit_to_content: 'width', height: 180 }))).toContain('now 250px wide')
+    expect(wide).toMatchObject({ width: 250, height: 180 })
+
+    /* text that wraps at the frame's width already needs all of it: nothing narrows or grows */
+    const prose = frameWith(doc(`<p style="margin:0">${'Copy that wraps at any width it is given. '.repeat(30)}</p>`))
+    await fit(prose, { fit_to_content: 'width' })
+    expect(prose.width).toBe(400)
+
+    /* a positioned layer past its parent counts; one past a sideways clipper does not */
+    const tagged = frameWith(
+      doc(
+        '<div style="position:relative;width:100px;height:40px"><span style="position:absolute;left:100px;width:50px;height:10px"></span></div>' +
+          '<div style="position:relative;width:80px;height:40px;overflow-x:clip"><span style="position:absolute;left:0;width:300px;height:10px"></span></div>',
+      ),
+    )
+    await fit(tagged, { fit_to_content: 'width' })
+    expect(tagged.width).toBe(150)
+  }, 60_000)
+
+  it('hugs to what a media query lays out at the narrower width', async () => {
+    const frame = frameWith(
+      doc(
+        '<style>.box{width:200px;height:10px}@media (max-width:300px){.box{width:280px}}</style><div class="box"></div>',
+      ),
+    )
+    await fit(frame, { fit_to_content: 'width' })
+    expect(frame.width).toBe(280)
+  }, 60_000)
+
   it('refuses a fit when the design changed while it was measured', async () => {
     const frame = frameWith(doc(block(500)))
     const measuring = holdNextMeasure()
@@ -367,14 +425,18 @@ describe.skipIf(!findBrowserPath())('fit_height in a browser', () => {
       canvas_id: canvasId,
       name: 'Created',
       html: doc(block(333)),
-      fit_height: true,
+      fit_to_content: 'height',
     })
     expect(created.isError).toBeFalsy()
     const { frame } = JSON.parse(created.content[0]!.text!) as { frame: { id: string; height: number } }
     expect(frame.height).toBe(333)
     expect(created.content[1]!.text).toContain('now 333px tall')
 
-    const set = await callTool('set_frame_html', { frame_id: frame.id, html: doc(block(512)), fit_height: true })
+    const set = await callTool('set_frame_html', {
+      frame_id: frame.id,
+      html: doc(block(512)),
+      fit_to_content: 'height',
+    })
     expect(set.isError).toBeFalsy()
     expect(store.getFrame(frame.id)!.height).toBe(512)
     expect(set.content[1]!.text).toContain('now 512px tall')
@@ -382,7 +444,12 @@ describe.skipIf(!findBrowserPath())('fit_height in a browser', () => {
 
   it('sends the write before measuring, and never jumps a playback ahead', async () => {
     const html = doc(block(333) + `<p>${'A design long enough to play back over a few ticks. '.repeat(200)}</p>`)
-    const result = await callTool('create_frame', { canvas_id: canvasId, name: 'Played', html, fit_height: true })
+    const result = await callTool('create_frame', {
+      canvas_id: canvasId,
+      name: 'Played',
+      html,
+      fit_to_content: 'height',
+    })
     expect(result.isError).toBeFalsy()
     const { frame } = JSON.parse(result.content[0]!.text!) as { frame: { height: number } }
     const created = sent.findIndex((message) => message.type === 'frame:created')

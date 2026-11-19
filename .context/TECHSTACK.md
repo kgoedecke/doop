@@ -235,16 +235,20 @@
   `MAX_PAGE_NAME`. The guide's "Frames and HTML" section says when a page beats a frame. Tests:
   the page and `update_canvas` cases in `mcp-tools.test.ts`, `residentPageTools.test.ts` (the
   resident has the same tool).
-- Fitting a frame to its content (`server/frameFit.ts`, `measureContentHeight` in
-  `server/screenshot.ts`): `fit_height: true` on `update_frame` (at the new `width` when the call
-  passes one), `create_frame` and `set_frame_html`, for MCP agents and the resident alike
-  (`updateFrameMetaWithFit`, `fitWrittenFrame`, the shared wording in `FIT_HEIGHT_ON`), sets the
-  height to the content's as the server's Chromium lays it out, so agents stop guessing heights
-  between screenshots (#532). Each measure waits two animation frames (the frame's own resize,
+- Fitting a frame to its content (`server/frameFit.ts`, `measureContent` in
+  `server/screenshot.ts`): `fit_to_content` (`FIT_AXES`: `"height"`, `"width"`, `"both"`) on
+  `update_frame`, `create_frame` and `set_frame_html`, for MCP agents and the resident alike
+  (`updateFrameMetaWithFit`, `fitWrittenFrame`, `readFitAxes`, the shared wording in `FIT_ON`),
+  sizes the frame to its content as the server's Chromium lays it out, so agents stop guessing
+  sizes between screenshots (#532). `"width"` hugs, as a Figma frame does: the root at
+  `width: fit-content` for one measure, never wider than the frame, measured again at the hugged width in case a media query lays it out wider
+  (`hugWidth`); it suits component mains and cards, not screens, where a centred max-width layout
+  would lose its gutters. `"both"` hugs, then fits the height at that width. Only the measured
+  sides are written; a height fit is made at the call's new `width` when it passes one. Each measure waits two animation frames (the frame's own resize,
   ResizeObserver and matchMedia handlers run first), awaits fonts and finishes animations, lets the
   root and body go of their height (a `min-height` stays: one in px is the design's floor, one in vh
   is found by the 1px probe), then reports `flow` (the root's own box), `painted` (the lowest thing
-  painted: positioned descendants, absolute `::before` / `::after` and text running past its
+  painted, and `right` the rightmost: positioned descendants, absolute `::before` / `::after` and text running past its
   element too, leaving out fixed elements, invisible ones at `visibility:hidden` or `opacity:0`,
   and what a scroller or clipper hides) and `shell` (judged as loaded: the page fills its viewport
   and no more while a part at least half its height scrolls inside, an app shell on a div, the body or `html,body{height:100%}`,
@@ -257,7 +261,8 @@
   refused. Content filling the frame exactly is measured at a 1px viewport: a `min-height:100vh`
   wrapper still flows to its content there and shrinks to it, a `height:100vh` one collapses to
   its overflow and keeps its height. Capped at `FIT_HEIGHT_MAX` (`MAX_EXPORT_SIDE`). The patch is
-  checked (`checkFrameMeta`) before the browser is asked; a fit is refused with `height`, while an
+  checked (`checkFrameMeta`) before the browser is asked; a fit is refused with the side it measures
+  (`height` for a height fit, `width` for a width fit), while an
   agent streams into the frame, and when the design changed during the measurement, and a refused
   fit applies none of the call. After `create_frame` / `set_frame_html` the write is committed
   before the browser wait (`checkpoint`) and a failed fit leaves it standing with a note. A
