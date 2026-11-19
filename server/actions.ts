@@ -2751,6 +2751,9 @@ export const deleteCanvas = atomic(function deleteCanvas(canvasId: string): bool
 })
 
 export function renameCanvas(canvasId: string, name: string, actor: Actor) {
+  /* the same name changes nothing, so nobody is told it did */
+  const current = store.getCanvas(canvasId)
+  if (current?.name === name) return current
   const canvas = store.renameCanvas(canvasId, name)
   if (!canvas) return undefined
   broadcast(canvasId, { type: 'canvas:renamed', name, actor })

@@ -895,6 +895,7 @@ read-only / destructive / idempotent annotations; the server registers no MCP pr
 | `list_canvases`          | List the canvases you can open, including workspace canvases                                                        |
 | `create_canvas`          | Create a canvas (optionally in a workspace), returns its shareable id                                               |
 | `get_canvas`             | Canvas layout: every frame's position/size/meta                                                                     |
+| `update_canvas`          | Rename a canvas                                                                                                     |
 | `set_canvas_pages`       | Create, rename, reorder or delete canvas pages                                                                      |
 | `set_page_background`    | Paint one page's canvas a colour of its own, or clear it back to the theme paper                                    |
 | **Frames**               |                                                                                                                     |
