@@ -18,6 +18,7 @@ const {
   drawingDocument,
   drawingInk,
   drawingTarget,
+  onPixelGrid,
   isCanvasElement,
   pathData,
   pathDrawing,
@@ -228,8 +229,16 @@ describe('saving and targeting drawings', () => {
     ])
     await saveDrawing(curve, { ...target, frameId: 'f' })
     const saved = doc(useStore.getState().canvas!.frames[0]!.html)
-    expect(saved.querySelector('path')!.getAttribute('d')).toBe(pathData(curve))
-    expect(saved.querySelector<SVGSVGElement>('svg')!.style.left).toBe(`${curve.x - frame.x}px`)
+    const svg = saved.querySelector<SVGSVGElement>('svg')!
+    // its box lands on whole pixels, grown outward from the drawn one
+    const left = parseFloat(svg.style.left)
+    const top = parseFloat(svg.style.top)
+    expect(left).toBe(Math.floor(curve.x - frame.x))
+    expect(top).toBe(Math.floor(curve.y - frame.y))
+    // and the ink, tangents included, stays exactly where it was drawn
+    expect(saved.querySelector('path')!.getAttribute('d')).toBe(
+      pathData({ ...curve, x: frame.x + left, y: frame.y + top }),
+    )
   })
 
   it('saves completed queued drawings on their original page after navigation without stealing selection', async () => {
@@ -317,5 +326,41 @@ describe('saving and targeting drawings', () => {
     expect(useStore.getState().canvas?.frames).toHaveLength(1)
     await undo()
     expect(api.deleteFrame).not.toHaveBeenCalled()
+  })
+})
+
+describe('onPixelGrid', () => {
+  it('rounds a box to whole pixels', () => {
+    expect(onPixelGrid({ tool: 'rectangle', x: 13.05, y: 7.6, width: 104.1, height: 98.89 })).toMatchObject({
+      x: 13,
+      y: 8,
+      width: 104,
+      height: 99,
+    })
+  })
+
+  it('grows a path box outward so the ink stays put', () => {
+    expect(onPixelGrid({ tool: 'path', x: 13.6, y: 7.2, width: 10.1, height: 4.5, points: [] })).toMatchObject({
+      x: 13,
+      y: 7,
+      width: 11,
+      height: 5,
+    })
+  })
+
+  it('keeps a circle or squared box square', () => {
+    expect(onPixelGrid({ tool: 'circle', x: 0.4, y: 0.6, width: 10.2, height: 10.2 })).toMatchObject({
+      x: 0,
+      y: 1,
+      width: 10,
+      height: 10,
+    })
+  })
+
+  it('never makes a box smaller than one pixel', () => {
+    expect(onPixelGrid({ tool: 'rectangle', x: 4.4, y: 4.4, width: 0.2, height: 0.2 })).toMatchObject({
+      width: 1,
+      height: 1,
+    })
   })
 })
