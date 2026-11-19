@@ -1,4 +1,5 @@
 import type { Actor, Frame } from '../shared/types.ts'
+import type { TokenEdit } from '../shared/designTokens.ts'
 import type { StackWrite } from '../shared/frameStack.ts'
 import * as actions from './actions.ts'
 import { editFrameHtml, type FrameEdit } from './componentActions.ts'
@@ -38,9 +39,10 @@ import { runOperation, WorkBudgetError } from './workBudget.ts'
  * `CanvasMismatchError`), and is still at `ifUpdatedAt` where the command carries one
  * (`FrameVersionConflict`, checked in the same synchronous step as the write).
  *
- * Covered so far: a frame's HTML and its metadata, and streams (a chunk appended, an idle
- * stream settled or closed). Tokens, components and the library still call their actions
- * directly, and so do imports and ingest; they move here next.
+ * Covered so far: a frame's HTML and its metadata, streams (a chunk appended, an idle stream
+ * settled or closed), and design tokens and their themes (renames included, with the frames
+ * they rewrite). Components and the library still call their actions directly, and so do
+ * imports and ingest; they move here next.
  *
  * A command an agent sends carries the surface it came from (`inline`), and the host checks
  * the HTML it adds for inline data against the frame as the host holds it, by that surface's
@@ -167,7 +169,34 @@ export type SettleStreamCommand = { type: 'settle-stream'; frameId: string; last
  *  stream found idle, as `settle-stream`. */
 export type CloseStreamCommand = { type: 'close-stream'; frameId: string; lastActivity: number }
 
+/** Design tokens added (actions.createTokens): each entry as an agent or the panel sent it,
+ *  checked by the host, one result per entry. Answers the results and the canvas's tokens as
+ *  this write left them. */
+export type CreateTokensCommand = { type: 'create-tokens'; tokens: unknown[]; actor: Actor }
+
+/** Design tokens changed, renamed or deleted, in order (actions.setTokens). A rename rewrites
+ *  the frames that name the token, as an annotation. A value change writes no frame where
+ *  frames are stored lean (they name the token, and are composed with its value where they are
+ *  rendered); one is written only where its source changes (a font face that comes or goes).
+ *  Answers the results and the tokens as this write left them. */
+export type SetTokensCommand = { type: 'set-tokens'; edits: TokenEdit[]; actor: Actor }
+
+/** The canvas's token themes and their order, after renaming those in `renames`
+ *  (actions.setTokenThemes). A theme rename also rewrites the frames that name it
+ *  (`data-doop-theme`), as an annotation. Both as sent: the host checks them, and refuses a bad
+ *  list by rejecting with `TokenThemesError`, nothing written. Answers the themes and the
+ *  tokens as this write left them. */
+export type SetTokenThemesCommand = {
+  type: 'set-token-themes'
+  themes: unknown
+  renames?: unknown
+  actor: Actor
+}
+
 export type CanvasWrite =
+  | CreateTokensCommand
+  | SetTokensCommand
+  | SetTokenThemesCommand
   | CreateFrameCommand
   | AppendFrameHtmlCommand
   | SettleStreamCommand
@@ -237,6 +266,19 @@ const local = {
   'append-frame-html': (_canvasId, command) => appendLocally(command),
   'settle-stream': (_canvasId, command) => actions.settleStream(command.frameId, command.lastActivity),
   'close-stream': (_canvasId, command) => actions.closeStream(command.frameId, command.lastActivity),
+  /* the tokens are read in the same step as the write, so no other write can come between */
+  'create-tokens': (canvasId, command) => {
+    const results = actions.createTokens(canvasId, command.tokens, command.actor)
+    return results && { results, tokens: store.getTokens(canvasId) }
+  },
+  'set-tokens': (canvasId, command) => {
+    const results = actions.setTokens(canvasId, command.edits, command.actor)
+    return results && { results, tokens: store.getTokens(canvasId) }
+  },
+  'set-token-themes': (canvasId, command) => {
+    const themes = actions.setTokenThemes(canvasId, command.themes, command.actor, command.renames ?? [])
+    return themes && { themes, tokens: store.getTokens(canvasId) }
+  },
   'edit-frame-html': (_canvasId, command) => editLocally(command),
   'frame-meta': (canvasId, command) => {
     const canvas = store.getCanvas(canvasId)

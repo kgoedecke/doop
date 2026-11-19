@@ -2604,11 +2604,11 @@ async function runResidentTool(
       case 'create_tokens': {
         const raw = block.input as { tokens?: unknown }
         if (!Array.isArray(raw.tokens) || !raw.tokens.length) return fail('tokens must be a non-empty array')
-        const results = actions.createTokens(canvasId, raw.tokens, actor)
-        if (!results) return fail('canvas not found')
-        captureTokenResults(runState.requesterId, canvasId, 'resident', results)
-        runState.tokenWrites += tokenWritesIn(results)
-        return ok(JSON.stringify({ results }))
+        const written = await runCanvasWrite(canvasId, { type: 'create-tokens', tokens: raw.tokens, actor })
+        if (!written) return fail('canvas not found')
+        captureTokenResults(runState.requesterId, canvasId, 'resident', written.results)
+        runState.tokenWrites += tokenWritesIn(written.results)
+        return ok(JSON.stringify({ results: written.results }))
       }
       case 'set_tokens': {
         const raw = block.input as { tokens?: unknown }
@@ -2627,25 +2627,32 @@ async function runResidentTool(
             ...(e.delete === true ? { delete: true } : {}),
           }
         })
-        const results = actions.setTokens(canvasId, edits, actor)
-        if (!results) return fail('canvas not found')
-        captureTokenResults(runState.requesterId, canvasId, 'resident', results)
-        runState.tokenWrites += tokenWritesIn(results)
-        return ok(JSON.stringify({ results }))
+        const written = await runCanvasWrite(canvasId, { type: 'set-tokens', edits, actor })
+        if (!written) return fail('canvas not found')
+        captureTokenResults(runState.requesterId, canvasId, 'resident', written.results)
+        runState.tokenWrites += tokenWritesIn(written.results)
+        return ok(JSON.stringify({ results: written.results }))
       }
       case 'set_token_themes': {
         const raw = block.input as { themes?: unknown; renames?: unknown }
         try {
-          const themes = actions.setTokenThemes(canvasId, raw.themes, actor, raw.renames ?? [])
-          if (!themes) return fail('canvas not found')
+          const set = await runCanvasWrite(canvasId, {
+            type: 'set-token-themes',
+            themes: raw.themes,
+            renames: raw.renames,
+            actor,
+          })
+          if (!set) return fail('canvas not found')
           runState.tokenWrites += 1
           captureFeature(runState.requesterId, 'token_themes_set', 'resident', {
             canvas_id: canvasId,
-            theme_count: themes.length,
+            theme_count: set.themes.length,
           })
-          return ok(`token themes are now ${themes.length ? themes.join(', ') : 'none'}`)
+          return ok(`token themes are now ${set.themes.length ? set.themes.join(', ') : 'none'}`)
         } catch (e) {
-          return fail(e instanceof Error ? e.message : 'invalid themes')
+          /* only a refusal of the list; anything else fails the tool call (below), undone */
+          if (e instanceof actions.TokenThemesError) return fail(e.message)
+          throw e
         }
       }
       case 'update_frame': {

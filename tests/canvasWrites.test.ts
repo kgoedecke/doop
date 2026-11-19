@@ -13,6 +13,8 @@ vi.mock('../server/db/persist.ts', () => ({
   deleteFrame: () => {},
   frameWritePending: () => false,
   getFrameVersion: async () => undefined,
+  saveToken: () => {},
+  deleteToken: () => {},
   saveComponent: () => {},
   deleteComponent: () => {},
   saveFeedback: () => {},
@@ -36,7 +38,7 @@ const { newInlineData } = await import('../server/inlineData.ts')
 const { blankComponent } = await import('../server/components.ts')
 const { updateComponent } = await import('../server/componentActions.ts')
 const { COMPONENT_ATTR } = await import('../shared/components.ts')
-const { transaction } = await import('../server/journal.ts')
+const { openTransaction, transaction } = await import('../server/journal.ts')
 const { runOperation, WorkBudgetError } = await import('../server/workBudget.ts')
 const { withArgsCanvases } = await import('../server/toolLoads.ts')
 const { execTool } = await import('../server/resident.ts')
@@ -688,5 +690,143 @@ describe('settling idle streams', () => {
     >()
     const createUnchecked = () => runCanvasWrite('c', { type: 'create-frame', input: { name: 'x' }, actor: user })
     expectTypeOf<Awaited<ReturnType<typeof createUnchecked>>>().toEqualTypeOf<Frame | undefined>()
+  })
+})
+
+describe('design tokens through the canvas write entry', () => {
+  const ink = { name: '--color-ink', type: 'color', value: '#111111' }
+  const names = () => store.getTokens(canvasId).map((token) => token.name)
+  /** The store refuses the next token write, as storage or a work budget might. */
+  const refuseNextTokens = () =>
+    vi.spyOn(store, 'setTokens').mockImplementationOnce(() => {
+      throw new Error('storage refused')
+    })
+
+  it('answers each token command with what its action answers', async () => {
+    const created = await runCanvasWrite(canvasId, { type: 'create-tokens', tokens: [ink], actor: user })
+    expect(created?.results).toMatchObject([{ name: '--color-ink', result: 'created' }])
+    /* the tokens this write left, read with it: not whatever a later write leaves */
+    expect(created?.tokens.map((token) => token.name)).toEqual(['--color-ink'])
+    const renamed = await runCanvasWrite(canvasId, {
+      type: 'set-tokens',
+      edits: [{ name: '--color-ink', newName: '--color-text' }],
+      actor: user,
+    })
+    expect(renamed?.results[0]).toMatchObject({ name: '--color-text' })
+    expect(renamed?.tokens.map((token) => token.name)).toEqual(['--color-text'])
+    expect(names()).toEqual(['--color-text'])
+    expect(await runCanvasWrite(canvasId, { type: 'set-token-themes', themes: ['dark'], actor: user })).toMatchObject({
+      themes: ['dark'],
+      tokens: [{ name: '--color-text' }],
+    })
+    expect(await runCanvasWrite('no-such-canvas', { type: 'create-tokens', tokens: [ink], actor: user })).toBe(
+      undefined,
+    )
+    /* a bad list is refused by rejecting with TokenThemesError, as the action threw, with
+       nothing written */
+    const refused = runCanvasWrite(canvasId, { type: 'set-token-themes', themes: 'dark', actor: user })
+    await expect(refused).rejects.toBeInstanceOf(actions.TokenThemesError)
+    await expect(refused).rejects.toThrow('themes must be an array of names')
+    expect(store.getTokenThemes(canvasId)).toEqual(['dark'])
+  })
+
+  it('a rejected token command inside a request is undone, and tells nobody', async () => {
+    const fails = refuseNextTokens()
+    /* what the HTTP middleware and undoRequest do with a request (server/index.ts) */
+    const request = openTransaction()
+    await expect(
+      request.run(async () => {
+        await runCanvasWrite(canvasId, { type: 'set-token-themes', themes: ['dark'], actor: user })
+        await runCanvasWrite(canvasId, { type: 'create-tokens', tokens: [ink], actor: user })
+      }),
+    ).rejects.toThrow('storage refused')
+    request.rollback()
+    fails.mockRestore()
+    expect(store.getTokenThemes(canvasId)).toEqual([])
+    expect(names()).toEqual([])
+    expect(sent).toEqual([])
+  })
+
+  it('a rejected token command inside an MCP tool call is undone, and tells nobody', async () => {
+    const fails = refuseNextTokens()
+    await expect(
+      withArgsCanvases(
+        {},
+        async () => {
+          await runCanvasWrite(canvasId, { type: 'set-token-themes', themes: ['dark'], actor: agent })
+          await runCanvasWrite(canvasId, { type: 'create-tokens', tokens: [ink], actor: agent })
+        },
+        'create_tokens',
+      ),
+    ).rejects.toThrow('storage refused')
+    fails.mockRestore()
+    expect(store.getTokenThemes(canvasId)).toEqual([])
+    expect(names()).toEqual([])
+    expect(sent).toEqual([])
+  })
+
+  const runState = () => ({
+    mutatedFrames: new Set<string>(),
+    sourceFrames: new Set<string>(),
+    verificationFrames: new Set<string>(),
+    verifiedFrames: new Set<string>(),
+    seenVerified: new Set<string>(),
+    rewriteDrafts: new Map<string, string>(),
+    vision: false,
+    imagesGenerated: 0,
+    repliedThreads: new Set<string>(),
+    awaitingThreads: new Set<string>(),
+    tokenWrites: 0,
+    arrangeWrites: 0,
+  })
+  const resident = () => actions.resolveActor({ name: roleName(DEFAULT_ROLE_ID), kind: 'agent' })
+
+  it('a rejected token command inside a resident tool call answers an error, is undone, and tells nobody', async () => {
+    const fails = refuseNextTokens()
+    /* a token with a value for a theme the canvas lacks: the theme is declared first, then the
+       token write is refused, and the tool call's operation undoes the theme too */
+    const result = await execTool(
+      {
+        type: 'tool_use',
+        id: 't1',
+        name: 'create_tokens',
+        input: { tokens: [{ ...ink, themes: { dark: '#eeeeee' } }] },
+      },
+      canvasId,
+      resident(),
+      runState(),
+    )
+    expect(fails).toHaveBeenCalled()
+    fails.mockRestore()
+    expect(result.is_error).toBe(true)
+    expect(String(result.content)).toContain('storage refused')
+    expect(store.getTokenThemes(canvasId)).toEqual([])
+    expect(names()).toEqual([])
+    expect(sent).toEqual([])
+  })
+
+  it('answers a refused theme list in the tool’s words, and fails the tool call on anything else', async () => {
+    const refused = await execTool(
+      { type: 'tool_use', id: 't1', name: 'set_token_themes', input: { themes: 'dark' } },
+      canvasId,
+      resident(),
+      runState(),
+    )
+    expect(refused).toMatchObject({ is_error: true, content: 'themes must be an array of names' })
+    /* storage failing is not a refusal of the list: the tool call fails, and is undone */
+    const fails = vi.spyOn(store, 'setTokenThemes').mockImplementationOnce(() => {
+      throw new Error('storage refused')
+    })
+    const failed = await execTool(
+      { type: 'tool_use', id: 't2', name: 'set_token_themes', input: { themes: ['dark'] } },
+      canvasId,
+      resident(),
+      runState(),
+    )
+    fails.mockRestore()
+    expect(failed.is_error).toBe(true)
+    expect(String(failed.content)).toContain('storage refused')
+    expect(store.getTokenThemes(canvasId)).toEqual([])
+    expect(sent).toEqual([])
   })
 })

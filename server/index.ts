@@ -82,7 +82,7 @@ import { MAX_AVATAR_BYTES, avatarUrl } from '../shared/avatar.ts'
 import { fontsForCanvas, hydrateFonts } from './fonts.ts'
 import { addCanvasFont, uploadedFontResult } from './canvasFontUpload.ts'
 import { MAX_FONT_BYTES } from '../shared/fonts.ts'
-import { tokensCss, tokensMarkdown, tokensTailwind } from '../shared/designTokens.ts'
+import { tokensCss, tokensMarkdown, tokensTailwind, type TokenEdit, type TokenResult } from '../shared/designTokens.ts'
 import {
   canEditCanvas,
   canManageCanvas,
@@ -162,6 +162,7 @@ import {
   FrameVersionConflict,
   runCanvasWrite,
   wireCanvasWrites,
+  type CanvasWriteResults,
 } from './canvasWrites.ts'
 import { isPeerViewport } from '../shared/viewport.ts'
 import { exportScaleSuffix, fitExportScale, fullFrameRenderScale, parseExportScale } from '../shared/exportScale.ts'
@@ -2394,50 +2395,83 @@ app.get('/api/canvases/:id/tokens', (req, res) => {
 })
 
 /* the token themes (light, dark, …), in display order; a theme that leaves takes its values along */
-app.put('/api/canvases/:id/token-themes', (req, res) => {
-  if (!requireCanvas(req, res, req.params.id, 'edit')) return
-  try {
-    const themes = actions.setTokenThemes(req.params.id, req.body?.themes, userActor(req), req.body?.renames ?? [])
-    if (!themes) return res.status(404).json({ error: 'not found' })
-    captureFeature(req.user!.id, 'token_themes_set', 'ui', { canvas_id: req.params.id, theme_count: themes.length })
-    res.json({ themes, tokens: store.getTokens(req.params.id) })
-  } catch (e) {
-    res.status(400).json({ error: e instanceof Error ? e.message : 'invalid themes' })
-  }
-})
+app.put(
+  '/api/canvases/:id/token-themes',
+  writeRoute(async (req, res) => {
+    if (!requireCanvas(req, res, req.params.id, 'edit')) return
+    let set: CanvasWriteResults['set-token-themes']
+    try {
+      set = await runCanvasWrite(req.params.id, {
+        type: 'set-token-themes',
+        themes: req.body?.themes,
+        renames: req.body?.renames,
+        actor: userActor(req),
+      })
+    } catch (e) {
+      /* only a refusal of the list itself; anything else is the request's failure (a work
+         budget's 422, the error handlers), with its writes undone */
+      if (e instanceof actions.TokenThemesError) return res.status(400).json({ error: e.message })
+      throw e
+    }
+    if (!set) return res.status(404).json({ error: 'not found' })
+    captureFeature(req.user!.id, 'token_themes_set', 'ui', { canvas_id: req.params.id, theme_count: set.themes.length })
+    res.json({ themes: set.themes, tokens: set.tokens })
+  }),
+)
 
-app.post('/api/canvases/:id/tokens', (req, res) => {
-  if (!requireCanvas(req, res, req.params.id, 'edit')) return
-  const inputs = Array.isArray(req.body?.tokens) ? req.body.tokens : [req.body]
-  if (inputs.length > 200) return res.status(400).json({ error: 'at most 200 tokens per request' })
-  const results = actions.createTokens(req.params.id, inputs, userActor(req))
-  if (!results) return res.status(404).json({ error: 'not found' })
-  captureTokenResults(req.user!.id, req.params.id, 'ui', results)
-  res.json({ results, tokens: store.getTokens(req.params.id) })
-})
+app.post(
+  '/api/canvases/:id/tokens',
+  writeRoute(async (req, res) => {
+    if (!requireCanvas(req, res, req.params.id, 'edit')) return
+    const inputs = Array.isArray(req.body?.tokens) ? req.body.tokens : [req.body]
+    if (inputs.length > 200) return res.status(400).json({ error: 'at most 200 tokens per request' })
+    const written = await runCanvasWrite(req.params.id, {
+      type: 'create-tokens',
+      tokens: inputs,
+      actor: userActor(req),
+    })
+    if (!written) return res.status(404).json({ error: 'not found' })
+    captureTokenResults(req.user!.id, req.params.id, 'ui', written.results)
+    res.json({ results: written.results, tokens: written.tokens })
+  }),
+)
+
+/** One token by name changed, renamed (newName) or deleted, answered with what the write left. */
+function tokenEditRoute(
+  edit: (req: express.Request<{ id: string; name: string }>) => TokenEdit,
+  answer: (result: TokenResult | undefined) => Record<string, unknown>,
+) {
+  return writeRoute<{ id: string; name: string }>(async (req, res) => {
+    if (!requireCanvas(req, res, req.params.id, 'edit')) return
+    const written = await runCanvasWrite(req.params.id, {
+      type: 'set-tokens',
+      edits: [edit(req)],
+      actor: userActor(req),
+    })
+    if (!written) return res.status(404).json({ error: 'not found' })
+    captureTokenResults(req.user!.id, req.params.id, 'ui', written.results)
+    const [result] = written.results
+    if (result?.result === 'error') return res.status(400).json({ error: result.message })
+    res.json({ ...answer(result), tokens: written.tokens })
+  })
+}
 
 /* change, rename (newName) or delete (delete: true) one token by name */
-app.put('/api/canvases/:id/tokens/:name', (req, res) => {
-  if (!requireCanvas(req, res, req.params.id, 'edit')) return
-  const body = typeof req.body === 'object' && req.body !== null ? req.body : {}
-  const edit = { ...body, name: req.params.name }
-  const results = actions.setTokens(req.params.id, [edit], userActor(req))
-  if (!results) return res.status(404).json({ error: 'not found' })
-  captureTokenResults(req.user!.id, req.params.id, 'ui', results)
-  const [result] = results
-  if (result?.result === 'error') return res.status(400).json({ error: result.message })
-  res.json({ result, tokens: store.getTokens(req.params.id) })
-})
+app.put(
+  '/api/canvases/:id/tokens/:name',
+  tokenEditRoute(
+    (req) => ({ ...(typeof req.body === 'object' && req.body !== null ? req.body : {}), name: req.params.name }),
+    (result) => ({ result }),
+  ),
+)
 
-app.delete('/api/canvases/:id/tokens/:name', (req, res) => {
-  if (!requireCanvas(req, res, req.params.id, 'edit')) return
-  const results = actions.setTokens(req.params.id, [{ name: req.params.name, delete: true }], userActor(req))
-  if (!results) return res.status(404).json({ error: 'not found' })
-  captureTokenResults(req.user!.id, req.params.id, 'ui', results)
-  const [result] = results
-  if (result?.result === 'error') return res.status(400).json({ error: result.message })
-  res.json({ ok: true, tokens: store.getTokens(req.params.id) })
-})
+app.delete(
+  '/api/canvases/:id/tokens/:name',
+  tokenEditRoute(
+    (req) => ({ name: req.params.name, delete: true }),
+    () => ({ ok: true }),
+  ),
+)
 
 /* the styleguide: the canvas's tokens and its guidelines as one markdown
    document — what a coding agent pulls into a repo as its DESIGN.md */
