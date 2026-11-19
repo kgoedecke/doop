@@ -47,14 +47,15 @@ describe.skipIf(!findBrowserPath() || !CLIPBOARD_IS_RELIABLE)('canvas clipboard 
   let page: Page
   let created: Partial<Frame>[] = []
   let uploads = 0
+  let deleted: string[] = []
   const errors: string[] = []
 
   /* Headless Chromium on macOS binds copy and paste in the OS menu, not in
      Blink, so a key chord alone never fires the clipboard events there; the
      editing command goes along with the key (a macOS-only CDP option). */
-  async function chord(key: 'c' | 'v') {
+  async function chord(key: 'c' | 'x' | 'v') {
     const mod = process.platform === 'darwin' ? 'Meta' : 'Control'
-    const commands = process.platform === 'darwin' ? [key === 'c' ? 'copy' : 'paste'] : undefined
+    const commands = process.platform === 'darwin' ? [{ c: 'copy', x: 'cut', v: 'paste' }[key]] : undefined
     await page.keyboard.down(mod)
     await page.keyboard.press(key, { commands })
     await page.keyboard.up(mod)
@@ -81,9 +82,7 @@ describe.skipIf(!findBrowserPath() || !CLIPBOARD_IS_RELIABLE)('canvas clipboard 
     })
   }
 
-  /* the frame's name at its left end: a picked element near the frame's
-     top wears its toolbar over the middle of the name, clear of the rotate
-     zones, and a centre click would land on the toolbar */
+  /* the frame's name at its left end, clear of a picked element's rotate zones */
   async function clickFrameTitle(button: 'left' | 'right' = 'left') {
     await page.click('[data-frame-title]', { button, offset: { x: 4, y: 9 } })
   }
@@ -103,15 +102,13 @@ describe.skipIf(!findBrowserPath() || !CLIPBOARD_IS_RELIABLE)('canvas clipboard 
     await page.waitForSelector('[role="menu"]', { hidden: true })
   }
 
+  /* a double-click on text opens it for editing */
   async function editText() {
     const doc = (await (await page.$('iframe[data-doop-frame]'))!.contentFrame())!
-    await doc.click('h1')
-    const edit = await page.waitForFunction(() =>
-      [...document.querySelectorAll('button')].find((el) => el.textContent?.trim() === 'Edit text'),
-    )
-    const button = await edit.asElement()!.toElement('button')
-    await button.click()
-    await doc.click('h1')
+    const inner = await doc.$eval('h1', (el) => el.getBoundingClientRect().toJSON())
+    const outer = await page.$eval('iframe[data-doop-frame]', (el) => el.getBoundingClientRect().toJSON())
+    const zoom = outer.width / FRAME.width
+    await page.mouse.click(outer.x + (inner.x + 5) * zoom, outer.y + (inner.y + 5) * zoom, { count: 2 })
     await doc.waitForSelector('[contenteditable]')
     return doc
   }
@@ -119,6 +116,7 @@ describe.skipIf(!findBrowserPath() || !CLIPBOARD_IS_RELIABLE)('canvas clipboard 
   beforeEach(async () => {
     created = []
     uploads = 0
+    deleted = []
     page = await pages.open()
     page.setDefaultTimeout(4_000)
     await page.setViewport({ width: 1200, height: 900 })
@@ -136,6 +134,8 @@ describe.skipIf(!findBrowserPath() || !CLIPBOARD_IS_RELIABLE)('canvas clipboard 
     await page.setRequestInterception(true)
     page.on('request', async (request) => {
       const path = new URL(request.url()).pathname
+      if (path.startsWith('/api/frames/') && request.method() === 'DELETE')
+        deleted.push(path.slice('/api/frames/'.length))
       if (path === '/api/canvases/c/frames' && request.method() === 'POST') {
         const frame: Partial<Frame> = JSON.parse(request.postData()!)
         created.push(frame)
@@ -262,6 +262,80 @@ describe.skipIf(!findBrowserPath() || !CLIPBOARD_IS_RELIABLE)('canvas clipboard 
     await chord('v')
     await expect.poll(() => count('h1')).toBe(2)
     expect(uploads).toBe(0)
+  })
+
+  it('cuts the picked element and pastes it back as one undo step each', async () => {
+    await page.evaluate(() => window.canvasClipboardHarness.pick('#card'))
+    await chord('x')
+    await expect.poll(() => count('section')).toBe(0)
+    expect(await count('#other')).toBe(1)
+    await page.evaluate(() => window.canvasClipboardHarness.pick('#other'))
+    await chord('v')
+    await expect.poll(() => count('section')).toBe(1)
+    expect(await count('section h1, section button')).toBe(2)
+    await page.evaluate(() => window.canvasClipboardHarness.undo())
+    expect(await count('section')).toBe(0)
+    await page.evaluate(() => window.canvasClipboardHarness.undo())
+    expect(await count('section')).toBe(1)
+  })
+
+  it('cuts a selected frame and pastes it as a new frame', async () => {
+    await clickFrameTitle()
+    await chord('x')
+    /* the server's broadcast removes the frame from the store; this harness
+       has no room, so the delete request is what shows the cut */
+    await expect.poll(() => deleted).toEqual(['f'])
+    await chord('v')
+    await expect.poll(() => created.length).toBe(1)
+    expect(created[0]).toMatchObject({ html: HTML, width: 400, height: 300 })
+  })
+
+  it('copies a locked element on cut and leaves it in place', async () => {
+    await page.evaluate((frame) => {
+      window.canvasClipboardHarness.seed([
+        { ...frame, html: frame.html.replace('id="card"', 'id="card" data-doop-locked="true"') },
+      ])
+      window.canvasClipboardHarness.pick('#card')
+    }, FRAME)
+    await chord('x')
+    expect(await page.evaluate(() => navigator.clipboard.readText())).toContain('doop:clipboard:')
+    expect(await count('section')).toBe(1)
+  })
+
+  it('cuts through the element menu', async () => {
+    const doc = (await (await page.$('iframe[data-doop-frame]'))!.contentFrame())!
+    await doc.click('h1', { button: 'right' })
+    await choose('Cut')
+    await expect.poll(() => count('h1')).toBe(0)
+    expect(await count('section button')).toBe(1)
+    await page.evaluate(() => window.canvasClipboardHarness.pick('#card'))
+    await chord('v')
+    await expect.poll(() => count('h1')).toBe(1)
+  })
+
+  it('cuts a frame through its menu', async () => {
+    await clickFrameTitle('right')
+    await choose('Cut')
+    /* the server's broadcast removes the frame from the store; this harness
+       has no room, so the delete request is what shows the cut */
+    await expect.poll(() => deleted).toEqual(['f'])
+    await chord('v')
+    await expect.poll(() => created.length).toBe(1)
+    expect(created[0]).toMatchObject({ html: HTML, width: 400, height: 300 })
+  })
+
+  it('keeps the element when the menu cut is denied by the clipboard', async () => {
+    await page.evaluate(() =>
+      Object.defineProperty(navigator.clipboard, 'writeText', {
+        configurable: true,
+        value: () => Promise.reject(new DOMException('Clipboard denied', 'NotAllowedError')),
+      }),
+    )
+    const doc = (await (await page.$('iframe[data-doop-frame]'))!.contentFrame())!
+    await doc.click('h1', { button: 'right' })
+    await choose('Cut')
+    await page.waitForFunction(() => window.canvasClipboardHarness.notice()?.includes('Couldn’t copy'))
+    expect(await count('h1')).toBe(1)
   })
 
   it('copies a frame through its menu and pastes with the keyboard', async () => {

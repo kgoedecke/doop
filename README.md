@@ -34,7 +34,8 @@ runs on **GPT, Claude, Gemini, DeepSeek, Kimi or Qwen** models
   free tasks as `RESIDENT_TASK_LIMIT` grants (none by default) ([setup](#the-doop-agent)); the
   first-canvas welcome performance is scripted and runs without any of it.
 - **Pages within a canvas** — organize frames into named pages from the Layers panel. Add, rename,
-  drag to reorder, double-click to rename, or right-click to rename and delete empty pages.
+  drag to reorder, or double-click to rename. Right-click for page actions, including copying
+  a link, without switching away from the open page.
   Page edits support Undo/Redo; selected frames can move between pages. Agents can list pages
   with `get_canvas`, manage them with `set_canvas_pages` (passing the original list as
   `expectedPages` to protect collaborators), and target frames with `pageId`. Each page can wear
@@ -170,7 +171,9 @@ layers of that frame, so agents read and edit them like any other markup.
 - **Zoom** — 8% to 1600%. Wheel pans, ⌘/Ctrl + wheel or a pinch zooms; a 1px pixel grid fades in from
   300%. The zoom menu has 50/100/200% presets and the rulers toggle.
 - **Panels** — the right side panel has **Agents**, **Comments**, **Activity** and **Memory** tabs;
-  Layers and the side panel can be resized, and ⌘. hides all UI.
+  Layers and the side panel can be resized. Drag the divider between Pages and Layers to change
+  their split; arrow keys move it, Home and End reach its limits, and Doop remembers it per canvas.
+  Pages starts compact until you resize it. ⌘. hides all UI.
 - **Themes** — Light, Dark or System under Settings → Appearance.
 - **Phones** — the canvas works on a phone: one-finger pan, pinch zoom, tap to comment, and bottom
   sheets for canvas actions, Layers and the Inspector.
@@ -892,6 +895,7 @@ read-only / destructive / idempotent annotations; the server registers no MCP pr
 | `list_canvases`          | List the canvases you can open, including workspace canvases                                                        |
 | `create_canvas`          | Create a canvas (optionally in a workspace), returns its shareable id                                               |
 | `get_canvas`             | Canvas layout: every frame's position/size/meta                                                                     |
+| `update_canvas`          | Rename a canvas                                                                                                     |
 | `set_canvas_pages`       | Create, rename, reorder or delete canvas pages                                                                      |
 | `set_page_background`    | Paint one page's canvas a colour of its own, or clear it back to the theme paper                                    |
 | **Frames**               |                                                                                                                     |

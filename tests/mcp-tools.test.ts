@@ -196,6 +196,53 @@ it('create_canvas_page adds a named page with a fresh id and keeps the rest', as
   }
 })
 
+it('update_canvas renames the canvas, tells the room and logs it once', async () => {
+  const actions = await import('../server/actions.ts')
+  const { store } = await import('../server/store.ts')
+  const { MAX_CANVAS_NAME } = await import('../shared/pages.ts')
+  const broadcast = vi.fn()
+  actions.wire(broadcast, () => {})
+  const canvas = { id: 'mcp-rename', ownerId: 'test-owner-id', name: 'Draft', frames: [] }
+  const { client, close, body } = await pagesClient(canvas)
+  const stored = () => store.getCanvas(canvas.id)!.name
+  const rename = (name: string) =>
+    client.callTool({ name: 'update_canvas', arguments: { canvas_id: canvas.id, name, agent_name: 'Agent' } })
+  try {
+    const result = await rename('  Checkout flow ')
+    expect(result.isError).toBeFalsy()
+    expect(body(result)).toMatchObject({ ok: true, id: canvas.id, name: 'Checkout flow' })
+    expect(stored()).toBe('Checkout flow')
+    const renames = () => broadcast.mock.calls.filter(([, message]) => message.type === 'canvas:renamed')
+    expect(renames()).toEqual([[canvas.id, expect.objectContaining({ name: 'Checkout flow' })]])
+
+    expect((await rename('Checkout flow')).isError).toBeFalsy()
+    expect(renames()).toHaveLength(1)
+    expect(actions.getActivity(canvas.id).filter((a) => a.message.includes('renamed the canvas'))).toHaveLength(1)
+
+    expect((await rename('   ')).isError).toBe(true)
+    expect((await rename('x'.repeat(MAX_CANVAS_NAME + 1))).isError).toBe(true)
+    expect(stored()).toBe('Checkout flow')
+  } finally {
+    await close()
+  }
+})
+
+it('update_canvas refuses a canvas the agent can only view', async () => {
+  const canvas = { id: 'mcp-rename-view', ownerId: 'someone-else', name: 'Theirs', linkAccess: 'view', frames: [] }
+  const { store } = await import('../server/store.ts')
+  const { client, close } = await pagesClient(canvas)
+  try {
+    const result = await client.callTool({
+      name: 'update_canvas',
+      arguments: { canvas_id: canvas.id, name: 'Mine now', agent_name: 'Agent' },
+    })
+    expect(result.isError).toBe(true)
+    expect(store.getCanvas(canvas.id)!.name).toBe('Theirs')
+  } finally {
+    await close()
+  }
+})
+
 it('create_canvas_page refuses a page beyond the canvas limit', async () => {
   const { MAX_PAGES } = await import('../server/store.ts')
   const { client, close } = await pagesClient({
@@ -270,8 +317,8 @@ it('get_canvas lists the pages and narrows the frames to page_id', async () => {
    the three safety hints set explicitly, a title, and — for the tools that
    render a preview card — the component wiring (server/chatgptApp.ts). */
 describe('MCP ChatGPT app contract', () => {
-  async function connected() {
-    const server = buildMcpServer('Test Owner', 'test-owner-id')
+  async function connected(clientName?: string) {
+    const server = buildMcpServer('Test Owner', 'test-owner-id', clientName)
     const client = new Client({ name: 'doop-chatgpt-contract-test', version: '1.0.0' })
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair()
     await server.connect(serverTransport)
@@ -315,8 +362,46 @@ describe('MCP ChatGPT app contract', () => {
     }
   })
 
+  /* A client with nowhere to embed a card opens each one as a browser tab (Pi
+     did), so only the hosts known to embed it are told about it */
+  it.each([
+    undefined,
+    'pi',
+    'pi-mcp-doop',
+    'codex-mcp-client',
+    'openai-mcp (Codex)',
+    'claude-code',
+    'Claude Code (doop)',
+  ])('offers %s no preview card', async (clientName) => {
+    const { client, close } = await connected(clientName)
+    try {
+      const { tools } = await client.listTools()
+      expect(tools.length).toBeGreaterThan(30)
+      for (const tool of tools) {
+        expect(tool._meta?.ui, tool.name).toBeUndefined()
+        expect(tool._meta?.['openai/outputTemplate'], tool.name).toBeUndefined()
+      }
+    } finally {
+      await close()
+    }
+  })
+
+  it.each(['openai-mcp', 'ChatGPT', 'Anthropic/ClaudeAI', 'Claude', 'claude-ai (via mcp-remote 0.15.1)'])(
+    'offers %s the preview card',
+    async (clientName) => {
+      const { client, close } = await connected(clientName)
+      try {
+        const { tools } = await client.listTools()
+        const meta = tools.find((t) => t.name === 'get_frame_screenshot')!._meta as Record<string, unknown>
+        expect(meta['openai/outputTemplate']).toBe(FRAME_PREVIEW_URI)
+      } finally {
+        await close()
+      }
+    },
+  )
+
   it('links the frame tools to the preview component and serves it as an MCP Apps resource', async () => {
-    const { client, close } = await connected()
+    const { client, close } = await connected('openai-mcp')
     try {
       const { tools } = await client.listTools()
       const byName = Object.fromEntries(tools.map((t) => [t.name, t]))

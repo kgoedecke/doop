@@ -52,3 +52,22 @@ export function fitBox(
     zoom,
   }
 }
+
+/** For a long column, fit the width and show the start instead of shrinking
+ * the whole page into an overview. Compact pages still use the normal fit. */
+export function fitColumnStart(
+  box: WorldBox,
+  stage: { width: number; height: number },
+  insets: StageInsets,
+  limits: { min: number; max: number },
+) {
+  const across = span(stage.width, insets.left, insets.right)
+  const down = span(stage.height, insets.top, insets.bottom)
+  const zoom = Math.min(limits.max, Math.max(limits.min, (across.length - FIT_PAD * 2) / Math.max(1, box.width)))
+  if (box.height * zoom <= down.length * 2) return null
+  return {
+    x: across.from + (across.length - box.width * zoom) / 2 - box.x * zoom,
+    y: down.from + Math.min(FIT_PAD, down.length / 4) - box.y * zoom,
+    zoom,
+  }
+}

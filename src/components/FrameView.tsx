@@ -13,7 +13,6 @@ import { loadPathEdit, type PathEditSource } from '../lib/pathEditing'
 import { currentPageCanvas } from '../lib/pages'
 import { noteFrameDocument, registerFrameWindow, requestFrame, unregisterFrameWindow } from '../lib/frameBridge'
 import { api } from '../lib/api'
-import { copyElementLink } from '../lib/elementLink'
 import { sendWs } from '../lib/ws'
 import { throttle } from '../lib/throttle'
 import { getIdentity } from '../lib/identity'
@@ -30,7 +29,6 @@ import { ElementContextMenu, type LiveHit } from './ElementContextMenu'
 import { TextFormatToolbar } from './TextFormatToolbar'
 import type { TextFormatState } from '../lib/richText'
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from './ui/context-menu'
-import { DEFAULT_ROLE_ID } from '../../shared/agents'
 import { posthog } from '../lib/posthog'
 import { isResidentLimit } from './TeamAllowance'
 import { CommentComposer, CommentPin, CommentThread } from './CommentPopovers'
@@ -38,9 +36,8 @@ import { PixelGrid } from './PixelGrid'
 import { FRAME_COMMENT_SELECTOR, isElementComment, isFrameComment, elementCommentPosition } from '../../shared/comments'
 import { elementIdSelector } from '../../shared/elementId'
 import { cn } from '@/lib/utils'
-import { Button } from './ui/button'
 import { Tooltip } from './ui/tooltip'
-import { CommentIcon, EditIcon, EyeClosedIcon, GithubIcon, LockIcon, SyncIcon, SparkIcon } from './ui/icons'
+import { EditIcon, EyeClosedIcon, GithubIcon, LockIcon, SyncIcon } from './ui/icons'
 import { isSyncedFrame } from '../lib/sync'
 import { isGithubFrame, isGithubPlaceholder } from '../lib/github'
 import { AgentIcon } from './AgentIcon'
@@ -99,13 +96,10 @@ function designOffset(e: React.PointerEvent<HTMLElement>, rotation = 0): { x: nu
    far out, so a pin or label never dwarfs the frame it sits on). Preserve
    these expressions exactly. */
 const COUNTER_SCALE = '[transform:scale(min(calc(1/var(--zoom,1)),2.4))]'
-/* The element toolbar and the composer are not capped, like the rest of the
+/* The text formatting bar and the composer are not capped, like the rest of the
    comment UI (CommentPopovers): screen UI the user reads and types in keeps
    its size at every zoom, the way Figma's comment pins do. */
 const POPOVER_SCALE = '[transform:scale(calc(1/var(--zoom,1)))_translateY(calc(-100%_-_8px))]'
-/* the same popover over a selection wearing its grips: it sits clear of
-   the rotate zones outside the top corners, which reach 25px above */
-const POPOVER_SCALE_CLEAR = '[transform:scale(calc(1/var(--zoom,1)))_translateY(calc(-100%_-_30px))]'
 
 /* screen px between a frame's name and its top edge, at every zoom */
 const LABEL_GAP = 6
@@ -115,7 +109,7 @@ function badgeBottom(frame: Frame): number {
   const b = rotatedBounds(frame, frame.rotation ?? 0)
   return b.y + b.height
 }
-/* a selected frame's outline, grips and toolbar paint above every frame on
+/* a selected frame's outline, grips and popovers paint above every frame on
    the page (whose z-indexes are their ranks in the paint order), so a layer
    in front never covers the selection being worked on */
 const SELECTION_CHROME_Z = 1_000_000
@@ -124,8 +118,6 @@ const EDITOR_CHIP =
 /* a frame narrower on screen than a chip's words keeps only its icon, so
    neighbouring frames' chips never run into each other */
 const EDITOR_CHIP_TEXT = '@max-[180px]/title:hidden'
-/* the element toolbar's buttons sit on ink and stay compact */
-const EL_TOOLBAR_BTN = 'rounded-[7px] px-2 py-1 text-xs'
 
 /** A hidden frame's place on the stage: nothing, unless it is selected —
  *  then a dashed box with its name, so a pick from the Layers panel still
@@ -214,7 +206,7 @@ interface ProbeHit {
 }
 
 /* what a surface click's probe is for; see `probeIntent` */
-type ProbeIntent = 'toolbar' | 'comment' | 'toggle'
+type ProbeIntent = 'pick' | 'comment' | 'toggle'
 
 /* a key the frame runtime relays from its own document, over its port */
 interface KeyRelay {
@@ -268,6 +260,9 @@ export const FrameView = memo(function FrameView({
   >('frame')
   const [menuProbe, setMenuProbe] = useState<{ request: number; html: string; x: number; y: number } | null>(null)
   const menuKind = useRef<'frame' | 'element'>('frame')
+  /* the element a reader had picked when they opened the frame menu, which
+     is the only menu they get: its link is offered there */
+  const [menuElement, setMenuElement] = useState<ProbeHit | null>(null)
   const menuRequest = useRef(0)
   const surfaceRef = useRef<HTMLDivElement>(null)
   const elementMove = useElementMove(frame, layoutZoom)
@@ -686,8 +681,8 @@ export const FrameView = memo(function FrameView({
       if (only && !more.length) recordUpdate(only.frameId, only.before, only.after)
       else if (more.length) recordUpdates(updates)
       /* a click (no drag) on the frame surface targets the element under
-         the cursor: probe it and show the element toolbar */
-      if (!moved && probeOnClick) probeAt(off.x, off.y, togglesElement ? 'toggle' : 'toolbar')
+         the cursor: probe it and pick it */
+      if (!moved && probeOnClick) probeAt(off.x, off.y, togglesElement ? 'toggle' : 'pick')
       /* a moved frame carries its picked element along, so the pick (and
          the panel showing it) stays; a press on a layer that cannot move
          lands here too, and must not close the panel it was meant for. A
@@ -969,10 +964,10 @@ export const FrameView = memo(function FrameView({
   const [pinPos, setPinPos] = useState<Record<string, { x: number; y: number } | null>>({})
   const probeReq = useRef(0)
   const probeTimer = useRef<number | null>(null)
-  /* what the pending probe is for: the element toolbar, (Comment tool) a
+  /* what the pending probe is for: picking the element, (Comment tool) a
      composer opened straight away on the hit, or (⇧-click) adding the hit
      to the picked set or dropping it */
-  const probeIntent = useRef<ProbeIntent>('toolbar')
+  const probeIntent = useRef<ProbeIntent>('pick')
   /* the design-space point the pending probe asks about */
   const probePoint = useRef({ x: 0, y: 0 })
   const activeSelRef = useRef<string | null>(null)
@@ -1050,9 +1045,6 @@ export const FrameView = memo(function FrameView({
     if (!layerHover) setHover(null)
   }
 
-  /* composer prefill for the element toolbar */
-  const [composePrefill, setComposePrefill] = useState('')
-
   function cancelProbe() {
     probeReq.current += 1
     if (probeTimer.current) {
@@ -1065,7 +1057,6 @@ export const FrameView = memo(function FrameView({
   function closeElementPopovers() {
     cancelProbe()
     setComposing(false)
-    setComposePrefill('')
     setOpenThread(null)
   }
 
@@ -1083,12 +1074,11 @@ export const FrameView = memo(function FrameView({
         Math.min(FRAME_NAME_COMMENT_AT, frame.height / 2),
       ),
     )
-    setComposePrefill('')
     setComposing(true)
   }
 
   /* delayed slightly so the second click of a double-click (→ edit mode)
-     cancels it instead of flashing the toolbar; a comment click has no
+     cancels it instead of flashing the pick; a comment click has no
      double-click to wait out, so it probes at once */
   /* the layers picked in this frame, which tell the runtime how deep in its
      groups a click lands */
@@ -1097,7 +1087,7 @@ export const FrameView = memo(function FrameView({
     return s.selectedElement?.frameId === frame.id ? pickedSelectors(s) : []
   }
 
-  function probeAt(x: number, y: number, intent: ProbeIntent = 'toolbar') {
+  function probeAt(x: number, y: number, intent: ProbeIntent = 'pick') {
     if (!frame.html || editing) return
     /* the current pick stays until the probe answers: clearing it here would
        close the element panel and reopen it a beat later on the next
@@ -1115,7 +1105,7 @@ export const FrameView = memo(function FrameView({
           '*',
         )
       },
-      intent === 'toolbar' ? 250 : 0,
+      intent === 'pick' ? 250 : 0,
     )
   }
 
@@ -1228,7 +1218,7 @@ export const FrameView = memo(function FrameView({
      shell is a resize of the locked shape */
   const shellLocked = useMemo(() => !!shellSel && isLayerLocked(frame, shellSel), [frame, shellSel])
   /* Returning to a frame-only link (or closing the element panel) also
-     removes the previous element's toolbar and outline. */
+     removes the previous element's outline. */
   useLayoutEffect(() => {
     // eslint-disable-next-line react/set-state-in-effect -- queued on purpose, see above
     if (!wantedSel) setProbe((p) => (p?.selector === FRAME_COMMENT_SELECTOR ? p : null))
@@ -1318,13 +1308,11 @@ export const FrameView = memo(function FrameView({
           return
         }
         /* a plain click on one of several picked elements leaves it alone picked */
-        if (hit && probeIntent.current === 'toolbar')
+        if (hit && probeIntent.current === 'pick')
           useStore.getState().pickElement({ frameId: frame.id, selector: hit.selector }, true)
         setProbe(hit)
-        /* the Comment tool skips the element toolbar: the composer opens on
-           the hit, the same one the toolbar's own Comment button opens */
+        /* the Comment tool opens the composer on the hit */
         if (hit && probeIntent.current === 'comment') {
-          setComposePrefill('')
           setComposing(true)
         }
       }
@@ -1504,7 +1492,7 @@ export const FrameView = memo(function FrameView({
     /* A fast double-click can precede the delayed single-click probe.
        Resolve its element now so the properties panel opens in that case too. */
     if (at) {
-      probeIntent.current = 'toolbar'
+      probeIntent.current = 'pick'
       probeReq.current += 1
       iframeRef.current?.contentWindow?.postMessage(
         { type: 'doop:probe', reqId: probeReq.current, x: at.x, y: at.y, grouped: true, selected: pickedHere() },
@@ -1674,6 +1662,7 @@ export const FrameView = memo(function FrameView({
               if (editing) exitEdit()
               menuKind.current = 'frame'
               setMenuTarget('frame')
+              setMenuElement(readOnly && probe && probe.selector !== FRAME_COMMENT_SELECTOR ? probe : null)
               setMenuProbe(null)
               return
             }
@@ -1699,6 +1688,10 @@ export const FrameView = memo(function FrameView({
             !shapeMoving &&
             !editing &&
             !pathEdit &&
+            /* the badge's layer paints above the whole world, so it would sit
+               on top of this frame's composer (an open thread is in a layer
+               above the badges) */
+            !composing &&
             (!wantedSel || shellPicked) &&
             createPortal(
               <div
@@ -1951,7 +1944,7 @@ export const FrameView = memo(function FrameView({
             {(!editing || panMode || fileDragging || tool !== 'select') && <div className="absolute inset-0" />}
           </div>
           {/* everything drawn over the frame rather than in it: selection ring,
-              element outlines, grips, comments and the element toolbar. While
+              element outlines, grips, comments and the text formatting bar. While
               the frame is selected the layer stacks above every frame, so a
               layer in front of this one never hides what is being worked on */}
           <div
@@ -2113,9 +2106,9 @@ export const FrameView = memo(function FrameView({
               />
             )}
 
-            {/* element comments: pins + element toolbar + composer, all in frame
-          coords. The toolbar anchors to the probed element normally, and to
-          the actively edited element in edit mode. `data-comment-ui`: the
+            {/* element comments: pins + composer, and the text formatting bar
+          while editing, all in frame coords. They anchor to the probed
+          element normally, and to the actively edited element in edit mode. `data-comment-ui`: the
           Comment tool's cursor is forced over the whole stage except inside
           the comment UI, which keeps its own cursors. */}
             {(() => {
@@ -2143,9 +2136,9 @@ export const FrameView = memo(function FrameView({
                       >
                         <CommentThread
                           thread={thread}
-                          onReply={(text) =>
+                          onReply={(text, mentions) =>
                             api
-                              .replyComment(c.id, text)
+                              .replyComment(c.id, text, mentions)
                               .then(() => posthog.capture('element_comment_replied'))
                               .catch((err) => {
                                 /* the wall explains a hit limit; anything else
@@ -2172,117 +2165,68 @@ export const FrameView = memo(function FrameView({
                     )
                   })}
 
-                  {anchor && (editing || !multiPick) && selected && !contextMenuOpen && !elementMove.moving && (
-                    <div
-                      className={cn(
-                        'pointer-events-auto absolute z-[7] origin-top-left',
-                        furnitureShown && !composing ? POPOVER_SCALE_CLEAR : POPOVER_SCALE,
-                      )}
-                      style={{
-                        left: Math.min(
-                          Math.max(composing ? (anchor.point?.x ?? anchor.rect.x) : anchor.rect.x, 4),
-                          Math.max(4, frame.width - 60),
-                        ),
-                        top: Math.max(composing ? (anchor.point?.y ?? anchor.rect.y) : anchor.rect.y, 2),
-                      }}
-                      onPointerDown={(e) => e.stopPropagation()}
-                    >
-                      {!composing ? (
-                        <>
-                          {editing && (
-                            <div className="mb-1 flex w-fit rounded-control bg-ink p-1 shadow-pop">
-                              <TextFormatToolbar
-                                state={textFormat}
-                                onFormat={(command) => {
-                                  posthog.capture('text_formatted', { command })
-                                  iframeRef.current?.contentWindow?.postMessage(
-                                    { type: 'doop:text-format', command },
-                                    '*',
-                                  )
-                                }}
-                              />
-                            </div>
-                          )}
-                          <div className="flex items-center gap-1.5 whitespace-nowrap rounded-[10px] bg-ink px-[7px] py-[5px] shadow-pop">
-                            <span className="rounded-[5px] bg-paper/[0.14] px-[5px] py-px text-[11px] font-bold text-paper [font-family:ui-monospace,monospace]">
-                              {anchor.tag}
-                            </span>
-                            <Button
-                              variant="inverse"
-                              className={EL_TOOLBAR_BTN}
-                              onClick={() => {
-                                setComposePrefill('')
-                                setComposing(true)
+                  {anchor &&
+                    (composing ? editing || !multiPick : editing) &&
+                    selected &&
+                    !contextMenuOpen &&
+                    !elementMove.moving && (
+                      <div
+                        className={cn('pointer-events-auto absolute z-[7] origin-top-left', POPOVER_SCALE)}
+                        style={{
+                          left: Math.min(
+                            Math.max(composing ? (anchor.point?.x ?? anchor.rect.x) : anchor.rect.x, 4),
+                            Math.max(4, frame.width - 60),
+                          ),
+                          top: Math.max(composing ? (anchor.point?.y ?? anchor.rect.y) : anchor.rect.y, 2),
+                        }}
+                        onPointerDown={(e) => e.stopPropagation()}
+                      >
+                        {!composing ? (
+                          <div className="flex w-fit rounded-control bg-ink p-1 shadow-pop">
+                            <TextFormatToolbar
+                              state={textFormat}
+                              onFormat={(command) => {
+                                posthog.capture('text_formatted', { command })
+                                iframeRef.current?.contentWindow?.postMessage(
+                                  { type: 'doop:text-format', command },
+                                  '*',
+                                )
                               }}
-                            >
-                              <CommentIcon size="rail" /> {t('stage.elementComment')}
-                            </Button>
-                            <Button
-                              variant="inverse"
-                              className={EL_TOOLBAR_BTN}
-                              onClick={() => {
-                                /* pre-mentioned → the comment dispatches as an agent
-                             job scoped to this element's selector + snippet */
-                                setComposePrefill(`@${DEFAULT_ROLE_ID} `)
-                                setComposing(true)
-                              }}
-                            >
-                              <SparkIcon size="rail" /> {t('stage.askAi')}
-                            </Button>
-                            <Button
-                              variant="inverse"
-                              className={EL_TOOLBAR_BTN}
-                              aria-label={t('stage.copyLinkToElement')}
-                              onClick={() => void copyElementLink(frame, anchor)}
-                            >
-                              {t('stage.copyLink')}
-                            </Button>
-                            {!editing && canEdit && anchor.text !== '' && (
-                              <Button
-                                variant="inverse"
-                                className={EL_TOOLBAR_BTN}
-                                onClick={() => {
-                                  enterEdit()
-                                }}
-                              >
-                                <EditIcon size="rail" /> {t('stage.editText')}
-                              </Button>
-                            )}
+                            />
                           </div>
-                        </>
-                      ) : (
-                        <CommentComposer
-                          initialText={composePrefill}
-                          placeholder={
-                            anchor.selector === FRAME_COMMENT_SELECTOR ? t('stage.commentOnFrame') : undefined
-                          }
-                          onSubmit={(text) => {
-                            /* Keep the clicked point until the element moves. If the
+                        ) : (
+                          <CommentComposer
+                            placeholder={
+                              anchor.selector === FRAME_COMMENT_SELECTOR ? t('stage.commentOnFrame') : undefined
+                            }
+                            onSubmit={(text, mentions) => {
+                              /* Keep the clicked point until the element moves. If the
                              element cannot be found in saved HTML, use a frame pin. */
-                            api
-                              .addComment(frame.id, {
-                                selector: anchor.selector,
-                                ...(anchor.elementId ? { elementId: anchor.elementId } : {}),
-                                snippet: anchor.snippet,
-                                text,
-                                x: anchor.point?.x ?? anchor.rect.x,
-                                y: anchor.point?.y ?? anchor.rect.y,
-                                elementOrigin: { x: anchor.rect.x, y: anchor.rect.y },
-                              })
-                              .then(() => posthog.capture('element_comment_created'))
-                              .catch((err) => {
-                                /* an @mention past the free tier raises the wall */
-                                if (isResidentLimit(err)) useStore.getState().setLimitWall(true)
-                                else console.error(err)
-                              })
-                            if (editing) setComposing(false)
-                            else closePopovers()
-                          }}
-                          onCancel={() => (editing ? setComposing(false) : closePopovers())}
-                        />
-                      )}
-                    </div>
-                  )}
+                              api
+                                .addComment(frame.id, {
+                                  selector: anchor.selector,
+                                  ...(anchor.elementId ? { elementId: anchor.elementId } : {}),
+                                  snippet: anchor.snippet,
+                                  text,
+                                  mentions,
+                                  x: anchor.point?.x ?? anchor.rect.x,
+                                  y: anchor.point?.y ?? anchor.rect.y,
+                                  elementOrigin: { x: anchor.rect.x, y: anchor.rect.y },
+                                })
+                                .then(() => posthog.capture('element_comment_created'))
+                                .catch((err) => {
+                                  /* an @mention past the free tier raises the wall */
+                                  if (isResidentLimit(err)) useStore.getState().setLimitWall(true)
+                                  else console.error(err)
+                                })
+                              if (editing) setComposing(false)
+                              else closePopovers()
+                            }}
+                            onCancel={() => (editing ? setComposing(false) : closePopovers())}
+                          />
+                        )}
+                      </div>
+                    )}
                 </div>
               )
             })()}
@@ -2311,7 +2255,7 @@ export const FrameView = memo(function FrameView({
         </div>
       </ContextMenuTrigger>
       {menuTarget === 'frame' ? (
-        <FrameContextMenu frame={frame} at={menuAt} />
+        <FrameContextMenu frame={frame} at={menuAt} element={menuElement ?? undefined} />
       ) : (menuProbe && menuProbe.html !== frame.html) ||
         (typeof menuTarget === 'object' && menuTarget.html !== frame.html) ? (
         <ContextMenuContent>

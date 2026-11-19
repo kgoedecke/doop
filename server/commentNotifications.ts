@@ -24,6 +24,8 @@ import type { ActorKind, Canvas, ElementComment } from '../shared/types.ts'
  * message. Held mail is in memory only — a restart during the window drops
  * it, which is acceptable for a courtesy email and keeps this state-free.
  *
+ * Someone a comment @mentions is told at once instead (tellMentioned).
+ *
  * Requires SMTP (server/mailer.ts). Without it nothing is queued: an email
  * nobody receives is not worth logging on every comment.
  */
@@ -69,7 +71,52 @@ export function onCanvasEvent(canvasId: string, event: CanvasEvent): void {
     ...(event.frame ? { frameName: event.frame.name } : {}),
     actorKind: event.actorKind,
   }
-  for (const userId of recipientsFor(canvas, event.comment, event.actorKind)) queue(userId, canvasId, item)
+  /* someone the comment @mentions hears about it at once, on its own, and
+     not again in the digest; the author's own mention tells nobody */
+  const author = event.actorKind === 'user' ? event.comment.fromUserId : undefined
+  const mentioned = (event.mentions ?? []).filter((id) => id !== author)
+  const told = new Set(mentioned)
+  for (const userId of recipientsFor(canvas, event.comment, event.actorKind))
+    if (!told.has(userId)) queue(userId, canvasId, item)
+  if (mentioned.length) void tellMentioned(canvasId, item, mentioned)
+}
+
+/** Email the people a comment @mentions (resolved when it was posted,
+ *  server/canvasPeople.ts), each once. Someone who switched comment emails
+ *  off, was banned or can no longer open the canvas is not written to. */
+async function tellMentioned(canvasId: string, item: PendingComment, ids: string[]) {
+  try {
+    const people = await mailableForComments(ids)
+    /* access is read after the lookup: it may have changed meanwhile */
+    const canvas = store.getCanvas(canvasId)
+    if (!canvas) return
+    await Promise.all(
+      people
+        .filter((person) => canAccessCanvas(person.id, canvas))
+        .map((person) =>
+          sendMail(mentionEmail(person, canvas, item)).catch((err: unknown) => {
+            console.error(`[comments] mention email to ${person.id} failed`, err)
+          }),
+        ),
+    )
+  } catch (err) {
+    console.error(`[comments] could not read the people mentioned on ${canvasId}`, err)
+  }
+}
+
+/** The email for one comment that names the person. */
+export function mentionEmail(
+  person: Mailable,
+  canvas: Pick<Canvas, 'id' | 'name'>,
+  { comment, frameName }: PendingComment,
+): { to: string; subject: string; text: string } {
+  const where = frameName ? `in ${quote(frameName)}` : 'on the canvas'
+  const text = comment.text.length > 600 ? `${comment.text.slice(0, 597)}…` : comment.text
+  return {
+    to: person.email,
+    subject: `${comment.from} mentioned you on ${quote(canvas.name)}`,
+    text: `Hi ${person.name || 'there'},\n\n${comment.from} mentioned you ${where}:\n\n  ${quote(text.replace(/\n/g, '\n  '))}\n\nReply in the thread:\n${commentLink(comment)}\n\n—\nYou get this because you collaborate on ${quote(canvas.name)}. Turn comment emails off under Settings → Your account: ${settingsLink('account')}\n`,
+  }
 }
 
 function queue(userId: string, canvasId: string, item: PendingComment) {

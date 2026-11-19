@@ -80,6 +80,33 @@ describe.skipIf(!findBrowserPath())('page list controls and keyboard history', (
     await page.evaluate(() => new Promise(requestAnimationFrame))
   }
 
+  it('copies another page’s link without leaving the current page', async () => {
+    await page.browserContext().overridePermissions(origin, ['clipboard-read', 'clipboard-sanitized-write'])
+    const canvasPath = new URL(page.url()).pathname
+    await page.click('button[aria-label="Add page"]')
+    await page.waitForFunction(() => document.querySelectorAll('[data-page-id]').length === 2)
+    await page.waitForSelector('button[aria-label="Add page"]:enabled')
+    const source = '[data-page-id]:first-child button'
+    const target = '[data-page-id]:last-child button'
+    await page.click(source)
+    const currentUrl = page.url()
+    await page.click(target, { button: 'right' })
+    expect(await page.$eval(source, (el) => el.getAttribute('aria-current'))).toBe('page')
+    expect(page.url()).toBe(currentUrl)
+    await page.locator('::-p-aria(Copy link to page)').setTimeout(3000).click()
+    await page.waitForSelector('::-p-text(Page link copied)')
+    expect(await page.$eval(source, (el) => el.getAttribute('aria-current'))).toBe('page')
+    expect(page.url()).toBe(currentUrl)
+
+    const id = await page.$eval(target, (el) => el.closest('[data-page-id]')!.getAttribute('data-page-id'))
+    const link = new URL(await page.evaluate(() => navigator.clipboard.readText()))
+    expect(link.origin).toBe(origin)
+    expect(link.pathname).toBe(canvasPath)
+    expect([...link.searchParams]).toEqual([['page', id]])
+    await page.goto(link.href)
+    await page.waitForSelector('[data-page-id]:last-child [aria-current="page"]')
+  }, 20_000)
+
   it('drags pages, double-clicks to rename, and restores a deleted page and frame with Cmd+Z', async () => {
     // Exercise the ordering that made this test race on CI: broadcasts land first.
     await page.emulateNetworkConditions({ offline: false, download: -1, upload: -1, latency: 150 })

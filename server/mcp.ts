@@ -6,7 +6,7 @@ import { createHash } from 'node:crypto'
 import { eq } from 'drizzle-orm'
 import { db } from './db/index.ts'
 import * as authSchema from './db/auth-schema.ts'
-import { canvasPages, framePageId, MAX_PAGE_NAME } from '../shared/pages.ts'
+import { canvasPages, framePageId, MAX_CANVAS_NAME, MAX_PAGE_NAME } from '../shared/pages.ts'
 import { normalizePageBackground } from '../shared/pageBackground.ts'
 import { prototypeReport, prototypeUrl, setPrototypeStart } from './prototypeTools.ts'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
@@ -20,7 +20,7 @@ import { fontsForCanvas } from './fonts.ts'
 import { customAgentsForCanvas } from './customAgents.ts'
 import { describeLibrary, libraryBrief, MAX_FONT_BYTES } from '../shared/fonts.ts'
 import { addCanvasFont, uploadedFontResult } from './canvasFontUpload.ts'
-import { inlineDataRefusal } from './inlineData.ts'
+import { EMBEDDED_MIN_LENGTH, inlineDataRefusal } from './inlineData.ts'
 import { unclosedUseRefusal } from './components.ts'
 import { frameWriteRefusal } from './frameWriteRefusal.ts'
 import {
@@ -42,7 +42,7 @@ import * as workspaces from './workspaces.ts'
 import { auth, getUserName, isBanned } from './auth.ts'
 import { capture, captureThrottled } from './analytics.ts'
 import { captureFeature, captureTokenResults } from './featureEvents.ts'
-import { renderFrame } from './screenshot.ts'
+import { inspectFrame, renderFrame } from './screenshot.ts'
 import { imagesForFrames } from './assets.ts'
 import type { FrameImage } from '../shared/imageDescriptions.ts'
 import { renderedHeight } from './renderLimits.ts'
@@ -87,8 +87,9 @@ import { normalizeImportUrl } from './importer.ts'
 import { extensions, type McpToolHelpers } from './extensions.ts'
 import { websiteAccessErrorMessage } from './websiteAccess.ts'
 import { mentionedRole } from '../shared/agents.ts'
+import { resolveCommentMentions, threadAuthorIds } from './canvasPeople.ts'
 import * as allowance from './allowance.ts'
-import { previewOf, previewToolMeta, registerFramePreview, type CanvasPreview } from './chatgptApp.ts'
+import { embedsPreview, previewOf, previewToolMeta, registerFramePreview, type CanvasPreview } from './chatgptApp.ts'
 import * as persist from './db/persist.ts'
 import type { FrameApproval } from '../shared/types.ts'
 import { recordAgentFeedback } from './agentFeedback.ts'
@@ -142,6 +143,12 @@ You MUST call get_guide({ topic: "doop-instructions" }) before using other Doop 
 - When Doop gets in your way, call report_issue, then carry on.`
 
 /** What this server's integrations add to the main guide. */
+/** A frame's HTML in every form an agent may have read it in (stored and compact), for
+ *  telling what a write adds from what it carries over (server/inlineData.ts). */
+function heldForms(frame: Frame): string {
+  return `${frame.html}\n${compactFrameHtml(frame)}`
+}
+
 function extensionGuideLines(): string[] {
   return extensions.flatMap((extension) => extension.mcpGuideLines ?? [])
 }
@@ -457,6 +464,9 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
   const server = new McpServer({ name: 'doop-canvas', version: packageJson.version }, { instructions: INSTRUCTIONS })
   loadToolTargets(server)
   registerFramePreview(server)
+  /* only for a client that shows the card inside the conversation (embedsPreview) */
+  const previewMeta = (invoking: string, invoked: string) =>
+    embedsPreview(clientName) ? previewToolMeta(invoking, invoked) : undefined
 
   server.registerTool(
     'get_guide',
@@ -577,7 +587,7 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
         'Create a new design canvas. Returns the canvas id, which is part of the shareable URL (/c/<id>). Pass workspace_id (from list_canvases) to create it inside a shared workspace so every member can open it.',
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
       inputSchema: {
-        name: z.string().describe('Canvas name'),
+        name: z.string().trim().min(1).max(MAX_CANVAS_NAME).describe('Canvas name'),
         workspace_id: z.string().optional().describe('Create inside this shared workspace'),
         agent_name: agentName.optional(),
       },
@@ -597,10 +607,32 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
   )
 
   server.registerTool(
+    'update_canvas',
+    {
+      title: 'Rename a canvas',
+      description:
+        'Rename a canvas: the name on its tab, in the dashboard and in get_canvas. Everyone viewing it sees the new name at once. Pages are renamed with set_canvas_pages, frames with update_frame.',
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      inputSchema: {
+        canvas_id: z.string(),
+        name: z.string().trim().min(1).max(MAX_CANVAS_NAME).describe('The new canvas name'),
+        agent_name: agentName,
+      },
+    },
+    async ({ canvas_id, name, agent_name }) => {
+      if (!canvasFor(canvas_id, 'edit')) return noCanvas(canvas_id)
+      const actor = actorFrom(agent_name)
+      const canvas = actions.renameCanvas(canvas_id, name, actor)
+      if (!canvas) return noCanvas(canvas_id)
+      return withFeedback(text({ ok: true, id: canvas.id, name: canvas.name }), canvas_id, actor)
+    },
+  )
+
+  server.registerTool(
     'get_canvas',
     {
       title: 'Get a canvas and its frames',
-      _meta: previewToolMeta('Reading the canvas…', 'Canvas loaded'),
+      _meta: previewMeta('Reading the canvas…', 'Canvas loaded'),
       description:
         "Get a canvas: its name, its pages (id, name, prototype start frame) and its frames with pageId, position, size, approvalStatus and human approval attribution (not the HTML — use get_frame for that). Pass page_id to see one page's frames only; filter approval_status to ready_for_dev to find screens approved for implementation. Use this to see the current layout before adding or editing frames. Pass your agent_name so the result can tell you when human feedback is waiting (claim it with get_feedback).",
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
@@ -1141,7 +1173,7 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
     {
       title: 'Reply to a comment',
       description:
-        'Reply inside an element-comment thread on a canvas. The reply inherits the root comment’s element anchor, so an @mention in it gives the resident agent the same anchor the conversation is about. Writing does not resolve the thread — read the request with get_comments, make the change, then close it with resolve_comment. If the text @mentions a resident role (e.g. "@Doop"), it counts as a new resident task against the account’s meter, exactly like a comment left in the browser.',
+        'Reply inside an element-comment thread on a canvas. The reply inherits the root comment’s element anchor, so an @mention in it gives the resident agent the same anchor the conversation is about. Writing does not resolve the thread — read the request with get_comments, make the change, then close it with resolve_comment. If the text @mentions a resident role (e.g. "@Doop"), it counts as a new resident task against the account’s meter, exactly like a comment left in the browser. To tag a person, write @ and their name exactly as a comment\'s `from` spells it (e.g. "@Ana Souza"): someone the canvas is shared with, or already in the thread, is emailed at once.',
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
       inputSchema: {
         canvas_id: z.string(),
@@ -1154,10 +1186,13 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
       if (!canvasFor(canvas_id, 'comment')) return noCanvas(canvas_id)
       const found = actions.findComment(comment_id)
       if (!found || found.canvasId !== canvas_id) return noComment(comment_id)
-      if (!body.trim() || !actions.openThread(comment_id)) return err('thread resolved or empty text')
+      const canvas = store.getCanvas(canvas_id)
+      if (!body.trim() || !canvas || !actions.openThread(comment_id)) return err('thread resolved or empty text')
+      /* people it tags are emailed; a person's name is never an agent's */
+      const mentions = await resolveCommentMentions(canvas, body.trim(), { authorIds: threadAuthorIds(found) })
       /* an @mention commands the resident agent to change frames — the REST
          reply route holds comment-only visitors to the same rule */
-      const mentioned = mentionedRole(body, actions.canvasRoster(canvas_id))
+      const mentioned = mentionedRole(mentions.roleText, actions.canvasRoster(canvas_id))
       if (mentioned && !canvasFor(canvas_id, 'edit'))
         return err('asking an agent to change the canvas needs edit access')
       const actor = actorFrom(agent_name)
@@ -1176,7 +1211,7 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
       /* attributed to the agent, billed to the connecting user: the resident
          picks whose model account pays from the requester id, and without one
          it falls back to the canvas owner's — wrong on a shared canvas */
-      const reply = actions.replyToComment(comment_id, body, actor.name, ownerId, 'agent')
+      const reply = actions.replyToComment(comment_id, body, actor.name, ownerId, 'agent', mentions)
       if (!reply) {
         /* the thread closed while the meter was being written: give the task back */
         if (gate && ownerId) {
@@ -1551,7 +1586,7 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
     'set_frame_html',
     {
       title: 'Replace a frame’s HTML',
-      _meta: previewToolMeta('Redesigning the frame…', 'Frame redesigned'),
+      _meta: previewMeta('Redesigning the frame…', 'Frame redesigned'),
       description:
         'Replace the HTML design of a frame in one shot. The change renders live for everyone viewing the canvas. For new or heavily reworked designs, prefer append_frame_html so viewers can watch the design stream in. Keep data-doop-* attributes on elements you carry over: comments and links point at data-doop-id, prototype wiring and locks ride on the others. ' +
         COMPOSE_CHECK,
@@ -1561,7 +1596,9 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
     async ({ frame_id, html, agent_name }) => {
       const current = frameFor(frame_id, 'edit')
       if (!current) return noFrame(frame_id)
-      const refused = frameWriteRefusal(html, { existing: current.html })
+      /* every form the agent may have read the frame in counts as what it already held: a
+         rewrite of the full form carries over what the canvas supplies to it */
+      const refused = frameWriteRefusal(html, { existing: heldForms(current) })
       if (refused) return err(refused)
       const frame = actions.updateFrame(frame_id, { html }, actorFrom(agent_name), { replace: true })
       if (!frame) return noFrame(frame_id)
@@ -2146,7 +2183,7 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
     'import_webpage',
     {
       title: 'Import an editable webpage',
-      _meta: previewToolMeta('Importing the webpage…', 'Webpage imported'),
+      _meta: previewMeta('Importing the webpage…', 'Webpage imported'),
       description:
         'Import ONE public webpage into a canvas as an editable HTML snapshot. The rendered DOM is captured, scripts/iframes are removed, stylesheets are inlined, and the resulting source frame appears on the canvas for comparison or editing. Use this when a referenced or redesign-target page should be visible to everyone; leave the imported source frame unchanged and make the new design in a separate frame. For inspection without changing the canvas, use view_website.',
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
@@ -2315,10 +2352,44 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
   )
 
   server.registerTool(
+    'inspect_frame',
+    {
+      title: 'Inspect a rendered frame',
+      description:
+        "Render a frame and read it as data rather than pixels: the design in use (colours, backgrounds, fonts, sizes, radii, shadows, CSS variables), an outline of its key elements with text, box (design px) and computed style, and `problems`: content past the frame's edge, text cut off by its box, and text or controls overlapping. Problems are candidates to check against the screenshot: a deliberate overlap (stacked avatars, a label on a photo) or a clipped preview is fine as it is. Pass selectors to report on those elements instead of the automatic outline (a data-doop-id, a class, any CSS selector). Use it with get_frame_screenshot to pin down what looks wrong, and before editing a large frame.",
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      inputSchema: {
+        frame_id: z.string(),
+        selectors: z
+          .array(z.string())
+          .max(20)
+          .optional()
+          .describe('CSS selectors to report on (up to 20 matches each) instead of the automatic outline'),
+        agent_name: agentName.optional(),
+      },
+    },
+    async ({ frame_id, selectors, agent_name }) => {
+      const f = frameFor(frame_id, 'view')
+      if (!f) return noFrame(frame_id)
+      arrive(f.canvasId, agent_name)
+      try {
+        const inspection = await inspectFrame({ ...f }, { selectors })
+        return withFeedbackNotice(
+          text({ ...inspection, approvalStatus: f.approval?.status ?? 'draft' }),
+          f.canvasId,
+          agent_name ? actorFrom(agent_name) : undefined,
+        )
+      } catch (e) {
+        return err(e instanceof Error ? e.message : 'inspection failed')
+      }
+    },
+  )
+
+  server.registerTool(
     'get_frame_screenshot',
     {
       title: 'Screenshot a frame',
-      _meta: previewToolMeta('Rendering the frame…', 'Frame rendered'),
+      _meta: previewMeta('Rendering the frame…', 'Frame rendered'),
       description:
         'Render a frame and return a PNG screenshot of it — this is how you SEE your design. Always review your work with this after creating or updating a frame, then fix what looks wrong (spacing, overflow, contrast, alignment) and check again. Iterate until it actually looks good, not just until the HTML seems right.',
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
@@ -2387,17 +2458,22 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
     async ({ frame_id, html_chunk, start, done, agent_name }) => {
       const current = frameFor(frame_id, 'edit')
       if (!current) return noFrame(frame_id)
-      /* the agent's own text: the end of its last chunk joined to this one, so a URI split
-         across chunks is caught (a split can only fall inside the short data:…;base64, prefix:
-         past it, the earlier chunk already held the prefix and was refused). Never the stored
-         HTML, where a component's image expanded mid-stream would read as an upload. Compared
-         with the design the stream replaced: a rework may carry over what the frame had. */
-      const inline = start
-        ? inlineDataRefusal(html_chunk, current.html)
-        : inlineDataRefusal(
-            (actions.streamTail(frame_id) ?? '') + html_chunk,
-            actions.streamBase(frame_id) ?? current.html,
-          )
+      /* the agent's own text: the end of its stream so far joined to this chunk, so a data:
+         URI's prefix split across chunks is caught, and so is a block of base64 text sent in
+         pieces each too short to be one. Never the stored HTML of a stream in progress, where a
+         component's image expanded mid-stream would read as an upload; but a chunk appended
+         after its stream ended is joined to the frame as stored, so the end of that is what
+         it is read with (a stream that ends is healed, its open tags closed, so a block
+         cannot in fact go on from one: this is for the case it ever could). Compared with the design the stream replaced: a rework may carry
+         over what the frame had. */
+      const base = actions.streamBase(frame_id) ?? current.html
+      const before = start ? '' : (actions.streamTail(frame_id) ?? current.html.slice(-EMBEDDED_MIN_LENGTH))
+      const refusal = inlineDataRefusal(before + html_chunk, base)
+      /* refused only for what it completes: the earlier pieces are in the frame already */
+      const completes = refusal && before && !inlineDataRefusal(html_chunk, base)
+      const inline = completes
+        ? `${refusal.replace('Refused, nothing was written:', 'Refused, this chunk was not written:')}\nThe size above counts what your earlier chunks sent too: the start of that block is already in the frame. Begin the frame again (start=true) and stream it without the block.`
+        : refusal
       /* the last chunk makes the document whole (mid-stream the stored HTML keeps a waiting
          <doop-use> as written): one still open would be placed empty, so the chunk is refused.
          A refused chunk keeps the stream from going idle while it comes again */
@@ -2435,7 +2511,7 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
     'edit_frame_html',
     {
       title: 'Edit a frame’s HTML in place',
-      _meta: previewToolMeta('Editing the frame…', 'Frame edited'),
+      _meta: previewMeta('Editing the frame…', 'Frame edited'),
       description:
         'Make a targeted edit to a frame: exact find-and-replace in its HTML, as get_frame returned it (a <doop-use> can be edited like any tag). Use this for small tweaks (copy, a color, spacing, one element) instead of resending the whole document — the change morphs into the rendered frame in place. old_str must appear EXACTLY ONCE in the current HTML (call get_frame first if unsure); include enough surrounding context to make it unique. Keep data-doop-* attributes on the element you edit: comments and links point at its data-doop-id.',
       annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
@@ -2453,7 +2529,7 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
       if ('error' in edited) return err(edited.error)
       /* the edited document, so a URI completed or a tag left open across the replacement's edges is caught too */
       const refused = frameWriteRefusal(edited.html, {
-        existing: `${f.html}\n${compactFrameHtml(f)}`,
+        existing: heldForms(f),
         streamed: actions.isFrameMidStream(frame_id) ? f.html : '',
       })
       if (refused) return err(refused)
@@ -2478,7 +2554,7 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
     'update_frame',
     {
       title: 'Rename, move or resize a frame',
-      _meta: previewToolMeta('Updating the frame…', 'Frame updated'),
+      _meta: previewMeta('Updating the frame…', 'Frame updated'),
       description:
         "Update frame metadata in one call: rename it (name), move it on its page (x, y), resize it (width, height), turn it (rotation: degrees clockwise about its centre; 0 straightens it), or move it to another page (pageId from get_canvas; it keeps its x/y unless you pass new ones and lands in front of that page's frames). Set locked to true to lock the frame on the canvas (humans cannot select, move, resize or delete it from the stage until it is unlocked) or false to unlock it.",
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },

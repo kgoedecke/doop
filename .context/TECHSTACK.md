@@ -29,7 +29,7 @@
   internal selection language.
 - Element links use `/c/<canvasId>?frame=<frameId>&element=<data-doop-id>` (no selector form,
   and no backwards compatibility for the old one). `src/lib/elementLink.ts` owns copying from the
-  element toolbar and Layers menu, stamping first when the element has no id; `Stage.tsx`
+  element menu and Layers menu, stamping first when the element has no id; `Stage.tsx`
   focuses its page and frame; `FrameView.tsx` resolves the id in the ready iframe, including
   script-created elements, re-picks the positional path so the Layers panel follows, and falls
   back to frame details if nothing carries the id. Browser regressions in
@@ -229,8 +229,12 @@
   every frame's `pageId`, and narrows to one page with `page_id`; `create_canvas_page` adds an
   empty page at the end (`actions.createCanvasPage`, a server-minted id, `MAX_PAGES` enforced)
   and returns it for `create_frame`'s `pageId`; `set_canvas_pages` stays the whole-list call for
-  rename, reorder and delete; `update_frame` moves a frame between pages. The guide's "Frames
-  and HTML" section says when a page beats a frame. Tests: the page cases in `mcp-tools.test.ts`.
+  rename, reorder and delete; `update_frame` moves a frame between pages; `update_canvas` renames
+  the canvas itself (`actions.renameCanvas`, the app's own rename; a name it already has changes
+  nothing). Agents' canvas names are capped at `MAX_CANVAS_NAME` as page names are at
+  `MAX_PAGE_NAME`. The guide's "Frames and HTML" section says when a page beats a frame. Tests:
+  the page and `update_canvas` cases in `mcp-tools.test.ts`, `residentPageTools.test.ts` (the
+  resident has the same tool).
 - Feature usage events: a feature an agent can reach reports from the server through
   `captureFeature` (`server/featureEvents.ts`) at the REST route, MCP tool and resident tool, on the
   signed-in user, the agent's connecting user or the resident run's requester, with `via` (`ui`,
@@ -266,7 +270,10 @@
   healed document, so a cut-off script never runs).
 - No files inside frames (`server/inlineData.ts`, `LEAN_FRAMES` in `server/guide.ts`): an agent
   write that adds a base64 `data:` URI of any kind is refused and nothing is written, with what to
-  do per kind (font, picture, SVG, media). Checked on what the call submits: MCP `create_frame`,
+  do per kind (font, picture, SVG, media). So is one that adds a block of 4,096 or more base64
+  characters that is not a data: URI (`EMBEDDED_MIN_LENGTH`: a packed script bundle, a compressed
+  data file in a string literal; one canvas held 6 MB of it per frame, 13 GB across its kept
+  versions). Checked on what the call submits: MCP `create_frame`,
   `set_frame_html`, `append_frame_html` chunks, `edit_frame_html`'s `new_str`, every component
   tool's strings, and the resident's create / set / edit / rewrite chunks. A URI the frame already
   holds may be carried over (a PDF import embeds its fonts), so such a frame stays editable.
@@ -568,7 +575,9 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   (`store.pickElements`), and ⌘] / ⌘[ step the picked elements, together, or the selected frame
   forward or backward, ⌘⌥] / ⌘⌥[ to the front or back (`reorderElements` / `reorderLayers`,
   `restackFrame`), one undo step each. A picked standalone shape is its page's row: Tab, ⌘A and
-  the brackets treat it as a frame, and ⌘A skips stack-locked shapes (`isStackLocked`). ↩ and Tab act only when no control has the keyboard (`isControlTarget`) and
+  the brackets treat it as a frame, and ⌘A skips stack-locked shapes (`isStackLocked`). In the Layers panel ⇧/⌘-click on a
+  top-level row (frame or canvas shape) adds it to the selection or drops it, as ⇧-click does on the canvas,
+  and ⌫ in the tree deletes every selected one. ↩ and Tab act only when no control has the keyboard (`isControlTarget`) and
   something is selected, so buttons, menus and the Layers tree keep theirs. The bracket chords are
   read by `code` too, since ⌥ changes the typed character on macOS. Tests: `selectionKeys.test.ts`.
 - Canvas commands (`src/lib/actions/`): every editor command is one entry in `registry.ts` (id,
@@ -617,7 +626,18 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   (`planGroup`: direction from the wider run, gap the mean space, `align-items` the shared edge,
   children reordered to the flow and given `flex-shrink:0`) when they do not overlap along it, else
   pinned (an absolute box of their bounds, children re-based). Layers in flow keep the
-  flow-carrying group. ⇧⌘G on an absolute group puts its layers back absolute where they show. A
+  flow-carrying group. ⇧⌘G on an absolute group puts its layers back absolute where they show. Shapes on the canvas
+  (`src/lib/canvasGroups.ts`): ⌘G on two or more unlocked, unturned standalone shapes of one page keeps the
+  frontmost one's frame (its id, comments, versions and stack place) and moves the others' layers into it,
+  inside one `data-doop-drawing="group"` layer placed by percentages so the frame's grips scale them; the
+  others' frames go, all as one undo step (`recordShellRewrite`). A shape whose frame would go is refused
+  when it carries comments or a component main. ⇧⌘G on such a group gives each layer a frame of its own
+  just behind, the group's frame keeping the frontmost. Every write is conditional: a shape a teammate edited
+  meanwhile stays on the canvas and leaves the group (`keepShell`), and the step is `guarded`: undo or redo
+  refuses once someone else (as the room reports, `src/lib/theirSaves.ts`) has saved a frame it would overwrite or delete since its own save (`noteSaved`); this browser's later steps and their undo do not count. It checks again before each write, and each write is conditional on the newest version this browser knows, so a save landing meanwhile is a conflict, not overwritten. Refused
+  too: moving the frame's corner under comments pinned to the frame (they are frame-relative), splitting a
+  group turned or flipped as a whole, and splitting one whose wrapper has comments; a hidden group splits into hidden shapes. A split is tracked whole, so an undo pressed meanwhile waits for it, and
+  it selects the new shapes only if the selection and page are still the ones it started from. Tests: `canvasGroups.test.ts`. A
   click picks the outermost canvas group around the hit, a double-click on a picked group goes one
   level in, and with a layer inside picked clicks pick its siblings (`groupLevel`); comments still
   pin to the element under the pointer. Drops (`frameDropRuntime.ts`, canvas drags of layers and
@@ -762,9 +782,21 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   bounds and turned with it, so a turned layer keeps its grips and resizes along its own axes
   (`derotateDelta`; no guide snapping while turned). `sizable` now admits the element's own turn
   and still refuses a turned, skewed, 3D or nonuniformly scaled ancestor; unsupported transforms
-  use the axis-aligned rendered bounds for the selection outline. The element toolbar lifts to 30px above a
-  selection wearing furniture, clear of the top zones. Tests: `elementRotate.test.ts`,
+  use the axis-aligned rendered bounds for the selection outline. Tests: `elementRotate.test.ts`,
   `elementRotateBrowser.test.ts`, the turned cases in `elementResizeBrowser.test.ts`.
+- Distances (`src/lib/measure.ts`, `src/lib/measureKey.ts`, `src/components/MeasureOverlay.tsx`): holding ⌥
+  with the Select tool and something selected shows, as Figma does, red lines labelled with the distance
+  from the selection to what the pointer is over. The picked elements are measured, as one box, to the
+  element under the pointer in their frame (the runtime's `doop:measure`, `measureElement` in
+  `frameBridge.ts`), or to the box around the primary one (its parent, the frame for a root layer) when
+  the pointer is on one of them; selected frames are measured, as one box, to another frame under the
+  pointer, which is also what a picked element's frame gets once the pointer is over another frame.
+  Boxes that overlap are measured edge to matching edge, boxes apart across the gap, with a dashed
+  extension of the target's edge when it is off to one side (`measureBetween`, pure). The overlay lives
+  in the Stage's world and reads at most once a frame, on pointer events and on changes to the canvas,
+  selection or camera; nothing shows during a drag, while typing in a field, or with ⌘ / Ctrl held, and
+  letting ⌥ go over the canvas does not open the browser's menu bar. Turned frames and layers are
+  measured by their bounds. Tests: `measure.test.ts`, `measureBrowser.test.ts`.
 - Rulers and guides (`src/components/Rulers.tsx`, math in `src/lib/rulers.ts`): ⇧R or the zoom menu
   toggles `<canvas>` rulers docked on the stage's top and left edges (the top bar and the floating
   chrome step in by `RULER_PX`) (remembered under
@@ -877,6 +909,30 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   (`actions.handBackComment`: unclaimed, no longer an agent item in memory and in its row, the thread open), so the
   person's `@mention` answer queues fresh work carrying the whole conversation. MCP agents have
   had the same two tools all along. Tests: `residentComments.test.ts`, `agentToolParity.test.ts`.
+- People in comments (`shared/personMentions.ts`, `server/canvasPeople.ts`, `src/components/MentionPicker.tsx`):
+  a mention is `@` plus the person's account name in the text (`@Ana Souza`, longest name first,
+  no case, a name ends where no letter, combining mark, digit or `_` follows). Typing `@` in the
+  composer, a thread reply or the Comments panel's reply lists the canvas's people (owner,
+  members, workspace members, from `GET /api/canvases/:id/people`, comment role, names and faces
+  only, asked again whenever a field mounts) and, for editors, its agents; the thread draws
+  mentions in brand. Names are not unique, so the picker sends the ids it picked as `mentions`
+  beside the text (the latest pick of a name in the draft; an agent picked over a person
+  named like its handle rides as `agent:<id>`, so the agent gets it). The routes, MCP `reply_to_comment` and the resident's reply resolve the text
+  once (`resolveCommentMentions` → `resolvePersonMentions`) against everyone eligible (those
+  people plus the thread's authors) before any filtering: a name several people share reaches
+  only the picked ones, and nobody when none was picked. The result's `roleText` (people
+  blanked out) is what the agent matcher, the edit-access check and the meter read, so
+  `@Doop Fan` is not `@doop`; the resident strips agent mentions only outside people's
+  (`withoutAgentMentions`). The ids ride the `comment.created` / `comment.replied` event, and
+  `commentNotifications.ts` emails each at once (`mentionEmail`) and leaves them out of that
+  comment's digest. The author, someone who switched comment emails off, a banned account or
+  someone who lost access is not written to. Comment links (`src/lib/commentLink.ts`, the shape
+  of `server/links.ts`'s `commentLink`): "Copy link to comment" on a pin's right-click menu, an
+  open Comments panel row's, and the link button on a thread's first message. Opening one,
+  `Stage` follows the root to its current frame, not the one the link names. Tests:
+  `personMentions.test.ts`, `commentLink.test.ts`, the `@mentions` cases in
+  `commentNotifications.test.ts`, the picker cases in `commentsPanel.test.tsx`, the mention and
+  `/people` cases in `canvasCommentsRoute.test.ts`, the person case in `residentComments.test.ts`.
 - Chat in the Agents tab (`src/components/AgentChat.tsx`, `src/lib/agentChat.ts`): under Recent
   tasks, each composer prompt (a board card without a `kind`) and any feedback left on it is a
   turn, oldest first, with the agent's answer under it: waiting, working, the run's closing words,

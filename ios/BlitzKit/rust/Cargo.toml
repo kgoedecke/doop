@@ -11,14 +11,14 @@ crate-type = ["staticlib", "rlib"]
 [dependencies]
 # Blitz from the `doop` branch of kgoedecke/blitz: DioxusLabs/blitz at 0f60502 plus our
 # rendering fixes (inline SVG, web fonts, placeholders, filters, opt-in prefers-reduced-motion),
-# each also sent upstream.
+# each also sent upstream, and a scale change that starts no CSS transitions (fork only for now).
 # Update by rebasing that branch and bumping the rev here.
-blitz-dom = { git = "https://github.com/kgoedecke/blitz", rev = "3cbca256ee8863a030e9e37a8be1001975e2bdfe", default-features = false, features = ["default"] }
+blitz-dom = { git = "https://github.com/kgoedecke/blitz", rev = "35a984ff9958ad24bd7ca4f7b0d03b8a8d16e0a9", default-features = false, features = ["default"] }
 # Same taffy as the pinned Blitz workspace: the bridge re-rounds layout on the device-pixel grid.
 taffy = { git = "https://github.com/DioxusLabs/taffy", rev = "49152ca29664f9687c714c7732d88ff07d62110a", default-features = false, features = ["std", "content_size"] }
-blitz-html = { git = "https://github.com/kgoedecke/blitz", rev = "3cbca256ee8863a030e9e37a8be1001975e2bdfe", default-features = false }
-blitz-paint = { git = "https://github.com/kgoedecke/blitz", rev = "3cbca256ee8863a030e9e37a8be1001975e2bdfe", default-features = false, features = ["svg"] }
-blitz-traits = { git = "https://github.com/kgoedecke/blitz", rev = "3cbca256ee8863a030e9e37a8be1001975e2bdfe", default-features = false }
+blitz-html = { git = "https://github.com/kgoedecke/blitz", rev = "35a984ff9958ad24bd7ca4f7b0d03b8a8d16e0a9", default-features = false }
+blitz-paint = { git = "https://github.com/kgoedecke/blitz", rev = "35a984ff9958ad24bd7ca4f7b0d03b8a8d16e0a9", default-features = false, features = ["svg"] }
+blitz-traits = { git = "https://github.com/kgoedecke/blitz", rev = "35a984ff9958ad24bd7ca4f7b0d03b8a8d16e0a9", default-features = false }
 # Same parley revision as the pinned Blitz commit, for one shared font context.
 parley = { git = "https://github.com/linebender/parley", rev = "718dcb721941fd8e72128833122d31f5a4e80504", default-features = false, features = ["std", "system"] }
 anyrender = "0.14"
@@ -39,32 +39,33 @@ url = "2"
 # panics there; documents still retain downloaded resources in memory. Keep the
 # existing disk cache on Apple targets, without changing their feature set.
 [target.'cfg(not(target_os = "android"))'.dependencies]
-blitz-net = { git = "https://github.com/kgoedecke/blitz", rev = "3cbca256ee8863a030e9e37a8be1001975e2bdfe", default-features = false, features = ["cache"] }
+blitz-net = { git = "https://github.com/kgoedecke/blitz", rev = "35a984ff9958ad24bd7ca4f7b0d03b8a8d16e0a9", default-features = false, features = ["cache"] }
 
 [target.'cfg(target_os = "android")'.dependencies]
-blitz-net = { git = "https://github.com/kgoedecke/blitz", rev = "3cbca256ee8863a030e9e37a8be1001975e2bdfe", default-features = false }
+blitz-net = { git = "https://github.com/kgoedecke/blitz", rev = "35a984ff9958ad24bd7ca4f7b0d03b8a8d16e0a9", default-features = false }
 
 # Local fixes; see the header of each vendored Cargo.toml.
 # Stylo (the `stylo` crates below) from the `doop` branch of kgoedecke/stylo: 0.22.0 with
 # `background-clip: text` and `-webkit-text-fill-color` parsed in Servo builds, and the
-# `prefers-reduced-motion` media feature.
+# `prefers-reduced-motion` media feature, and `TraversalFlags::DeviceChangeOnly` (a restyle for a
+# new device pixel ratio starts no transitions).
 # anyrender from the `doop` branch of kgoedecke/anyrender: the published 0.14 / anyrender_skia
 # 0.12 commit plus the variable-font fix (DioxusLabs/anyrender#128). Both crates come from the
 # fork so that blitz-paint and the Skia backend share one `anyrender`.
 [patch.crates-io]
 anyrender = { git = "https://github.com/kgoedecke/anyrender", rev = "229216b1c86c13b8ba00eaf8d274d42f4ce91d80" }
 anyrender_skia = { git = "https://github.com/kgoedecke/anyrender", rev = "229216b1c86c13b8ba00eaf8d274d42f4ce91d80" }
-stylo = { git = "https://github.com/kgoedecke/stylo", rev = "f247bcfd8e380832e02c9c2b69d83bd5ee59bb43" }
-stylo_traits = { git = "https://github.com/kgoedecke/stylo", rev = "f247bcfd8e380832e02c9c2b69d83bd5ee59bb43" }
-stylo_atoms = { git = "https://github.com/kgoedecke/stylo", rev = "f247bcfd8e380832e02c9c2b69d83bd5ee59bb43" }
-stylo_dom = { git = "https://github.com/kgoedecke/stylo", rev = "f247bcfd8e380832e02c9c2b69d83bd5ee59bb43" }
-stylo_static_prefs = { git = "https://github.com/kgoedecke/stylo", rev = "f247bcfd8e380832e02c9c2b69d83bd5ee59bb43" }
-stylo_derive = { git = "https://github.com/kgoedecke/stylo", rev = "f247bcfd8e380832e02c9c2b69d83bd5ee59bb43" }
-stylo_malloc_size_of = { git = "https://github.com/kgoedecke/stylo", rev = "f247bcfd8e380832e02c9c2b69d83bd5ee59bb43" }
-selectors = { git = "https://github.com/kgoedecke/stylo", rev = "f247bcfd8e380832e02c9c2b69d83bd5ee59bb43" }
-servo_arc = { git = "https://github.com/kgoedecke/stylo", rev = "f247bcfd8e380832e02c9c2b69d83bd5ee59bb43" }
-to_shmem = { git = "https://github.com/kgoedecke/stylo", rev = "f247bcfd8e380832e02c9c2b69d83bd5ee59bb43" }
-to_shmem_derive = { git = "https://github.com/kgoedecke/stylo", rev = "f247bcfd8e380832e02c9c2b69d83bd5ee59bb43" }
+stylo = { git = "https://github.com/kgoedecke/stylo", rev = "39c0595f1a3c0ecac30f045bc440ee09e2d46a2a" }
+stylo_traits = { git = "https://github.com/kgoedecke/stylo", rev = "39c0595f1a3c0ecac30f045bc440ee09e2d46a2a" }
+stylo_atoms = { git = "https://github.com/kgoedecke/stylo", rev = "39c0595f1a3c0ecac30f045bc440ee09e2d46a2a" }
+stylo_dom = { git = "https://github.com/kgoedecke/stylo", rev = "39c0595f1a3c0ecac30f045bc440ee09e2d46a2a" }
+stylo_static_prefs = { git = "https://github.com/kgoedecke/stylo", rev = "39c0595f1a3c0ecac30f045bc440ee09e2d46a2a" }
+stylo_derive = { git = "https://github.com/kgoedecke/stylo", rev = "39c0595f1a3c0ecac30f045bc440ee09e2d46a2a" }
+stylo_malloc_size_of = { git = "https://github.com/kgoedecke/stylo", rev = "39c0595f1a3c0ecac30f045bc440ee09e2d46a2a" }
+selectors = { git = "https://github.com/kgoedecke/stylo", rev = "39c0595f1a3c0ecac30f045bc440ee09e2d46a2a" }
+servo_arc = { git = "https://github.com/kgoedecke/stylo", rev = "39c0595f1a3c0ecac30f045bc440ee09e2d46a2a" }
+to_shmem = { git = "https://github.com/kgoedecke/stylo", rev = "39c0595f1a3c0ecac30f045bc440ee09e2d46a2a" }
+to_shmem_derive = { git = "https://github.com/kgoedecke/stylo", rev = "39c0595f1a3c0ecac30f045bc440ee09e2d46a2a" }
 
 [features]
 default = ["skia"]

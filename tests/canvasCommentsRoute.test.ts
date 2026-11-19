@@ -409,3 +409,28 @@ it('retains the element placement across a server restart', async () => {
   const reply = await (await owner.post(`/api/comments/${root.id}/replies`, { text: 'After restart' })).json()
   expect(reply).toMatchObject({ elementId: root.elementId, x: 45, y: 67, elementOrigin: { x: 10, y: 20 } })
 }, 70_000)
+
+describe('@mentioning a person', () => {
+  it("reads a member's name as theirs, not as an agent's that it starts with", async () => {
+    const fan = await new Client(server).signUp('fan@test.dev', 'Doop Fan')
+    expect((await owner.post(`/api/canvases/${canvasId}/members`, { email: 'fan@test.dev' })).status).toBe(200)
+    /* with no resident tasks left, an agent mention would be refused */
+    const res = await owner.post(`/api/canvases/${canvasId}/comments`, { pageId, x: 1, y: 1, text: '@Doop Fan hi' })
+    const comment = await res.json()
+    expect(res.status, JSON.stringify(comment)).toBe(200)
+    expect(comment.forAgent).toBeUndefined()
+    const people = await (await fan.get(`/api/canvases/${canvasId}/people`)).json()
+    expect(people.map((p: { name: string }) => p.name)).toEqual(['Owner', 'Doop Fan'])
+  })
+})
+
+describe('GET /api/canvases/:id/people', () => {
+  it('lists who a comment may @mention, names only, and refuses strangers', async () => {
+    const res = await owner.get(`/api/canvases/${canvasId}/people`)
+    expect(res.status).toBe(200)
+    const people = await res.json()
+    expect(people[0]).toEqual(expect.objectContaining({ name: 'Owner' }))
+    expect(people[0].email).toBeUndefined()
+    expect((await stranger.get(`/api/canvases/${canvasId}/people`)).status).toBeGreaterThanOrEqual(400)
+  })
+})
