@@ -13,6 +13,8 @@ export function pageFrames(canvas: Canvas, pageId: string): Frame[] {
 }
 
 export const MAX_PAGE_NAME = 100
+/** The longest canvas name an agent may give, the page limit's twin. */
+export const MAX_CANVAS_NAME = 100
 
 /** The name for a copy of `name`: "<name> copy", then "<name> copy 2", "… 3"
  *  while `taken` already holds it. The base is trimmed so the result fits

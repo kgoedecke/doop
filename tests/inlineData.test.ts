@@ -78,6 +78,100 @@ describe('newInlineData', () => {
   })
 })
 
+describe('base64 that is not a data: URI', () => {
+  /* what a packed bundle looks like: gzip's header as base64, then the payload */
+  const packed = (chars: number) => `H4sI${'Ab3+/9zQ'.repeat(Math.ceil(chars / 8)).slice(0, chars - 4)}`
+  const loader = (payload: string) =>
+    `<script>const bytes=Uint8Array.from(atob("${payload}"),x=>x.charCodeAt(0))</script>`
+
+  it('finds a long block of it in a script, by its decoded size', () => {
+    expect(newInlineData(loader(packed(8000)))).toEqual([{ mime: 'embedded/base64', bytes: 6000 }])
+    /* the URL-safe alphabet, and padding after it */
+    expect(newInlineData(`<script>const d="${'a-b_'.repeat(2000)}=="</script>`)).toHaveLength(1)
+  })
+
+  it('leaves alone what a design writes without spaces', () => {
+    /* an integrity hash, a signed URL, a long id, a path */
+    const hash = `<script src="/x.js" integrity="sha384-${'oqVuAfXRKap7fdgcCY5uykM6'.repeat(4)}"></script>`
+    const url = `<img src="https://cdn.example/a/${'f'.repeat(3000)}.png?token=${'A'.repeat(900)}&sig=${'b'.repeat(900)}">`
+    const path = `<svg><path d="${'M10 20L30 40C50,60 70,80 90,100Z'.repeat(400)}"/></svg>`
+    const prose = `<p>${'word '.repeat(4000)}</p>`
+    for (const html of [hash, url, path, prose, loader(packed(4095))]) expect(newInlineData(html)).toEqual([])
+  })
+
+  it('counts a data: URI once, however long its payload', () => {
+    const big = `<img src="data:image/png;base64,${packed(9000)}">`
+    expect(newInlineData(big)).toEqual([{ mime: 'image/png', bytes: 6750 }])
+    expect(newInlineData(big + loader(packed(8000)))).toHaveLength(2)
+  })
+
+  it('takes `;base64,` for a label only on a real data: URI', () => {
+    /* the prefix kept apart from `data:`, to be joined when the page runs */
+    const split = `<script>const png="image/png;base64,${packed(8000)}";img.src="data:"+png</script>`
+    expect(newInlineData(split)).toEqual([{ mime: 'embedded/base64', bytes: 6000 }])
+  })
+
+  it('lets a block the frame already holds be carried over, and refuses one more', () => {
+    const held = loader(packed(8000))
+    expect(newInlineData(held, doc(held))).toEqual([])
+    const more = `H4sI${'Zz9+/0xQ'.repeat(1000)}`
+    expect(newInlineData(held + loader(more), doc(held))).toEqual([{ mime: 'embedded/base64', bytes: 6003 }])
+  })
+
+  it('reads megabytes of it in one pass', () => {
+    const html = loader(packed(6_000_000)) + `<p>${'Ab3+ '.repeat(200_000)}</p>`
+    const started = performance.now()
+    expect(newInlineData(html)).toEqual([{ mime: 'embedded/base64', bytes: 4_500_000 }])
+    /* a loose bound: one pass takes milliseconds, walking each run from every character minutes */
+    expect(performance.now() - started).toBeLessThan(10_000)
+  })
+
+  it('sees a block wrapped over lines or written as joined strings', () => {
+    const lines = (width: number) => packed(8000).match(new RegExp(`.{1,${width}}`, 'g'))!
+    /* `base64 file` wraps at 76 columns, PEM at 64: atob reads through the line ends */
+    expect(newInlineData(`<script>const d=atob(\`${lines(76).join('\n')}\`)</script>`)).toEqual([
+      { mime: 'embedded/base64', bytes: 6000 },
+    ])
+    expect(newInlineData(`<script>const d="${lines(64).join('\\\n')}"</script>`)).toHaveLength(1)
+    expect(newInlineData(`<script>const d="${lines(1000).join('" +\n  "')}"</script>`)).toHaveLength(1)
+    /* words, however many, are not lines of base64 */
+    expect(newInlineData(`<p>${'supercalifragilistic expialidocious '.repeat(400)}</p>`)).toEqual([])
+  })
+
+  it('lets a block the frame holds come back smaller or in pieces, and counts what was added to it', () => {
+    const block = packed(40_000)
+    const held = doc(loader(block))
+    /* a span cut out of its middle, and one cut from each end */
+    expect(newInlineData(loader(block.slice(0, 15_000) + block.slice(25_000)), held)).toEqual([])
+    expect(newInlineData(loader(block.slice(3000, 30_000)), held)).toEqual([])
+    /* 5,000 characters of something else put into it */
+    const grown = block.slice(0, 20_000) + 'Zz9+/0xQ'.repeat(625) + block.slice(20_000)
+    const [added] = newInlineData(loader(grown), held)
+    expect(added?.mime).toBe('embedded/base64')
+    expect(added!.bytes).toBeGreaterThanOrEqual(3072)
+    expect(added!.bytes).toBeLessThan(6000)
+    /* and a block that only starts like the one held is all new */
+    expect(newInlineData(loader(block.slice(0, 300) + 'Zz9+/0xQ'.repeat(1000)), held)).toHaveLength(1)
+  })
+
+  it('says what it found and what to do instead', () => {
+    const message = inlineDataRefusal(loader(packed(8000)) + loader(packed(400_000)))!
+    expect(message).toContain('nothing was written')
+    expect(message).toContain('2 blocks of base64 text (299 KB)')
+    expect(message).toContain('<script src>')
+    /* it stands alone: the tools for a picture or a font are named here, not "as above" */
+    expect(message).toContain('upload_asset')
+    expect(message).toContain('upload_font')
+    expect(message).not.toContain('as above')
+    expect(message).toContain('each screen in a frame of its own')
+    expect(message).toContain('without the base64.')
+    const both = inlineDataRefusal(loader(packed(8000)) + `<img src="${PNG}">`)!
+    expect(both).toContain('1 base64 data: URI (image/png')
+    expect(both).toContain('and 1 block of base64 text (6 KB)')
+    expect(both).toContain('without the data: URIs and the base64 blocks.')
+  })
+})
+
 describe('inlineDataRefusal', () => {
   it('says what to do for each kind it found', () => {
     const message = inlineDataRefusal(faceCss + `<img src="${PNG}">`)!
@@ -185,6 +279,47 @@ describe('over MCP', () => {
     })
     expect(second.isError).toBe(true)
     expect(second.text).toContain('font/ttf')
+  })
+
+  it('catches a block of base64 text streamed in pieces each too short to be one', async () => {
+    const frame = actions.createFrame(
+      canvasId,
+      { name: 'Hero', html: doc(''), width: 400, height: 300 },
+      actions.resolveActor({ name: 'Kevin', kind: 'user' }),
+    )!
+    const piece = 'Ab3+/9zQ'.repeat(250)
+    const send = (html_chunk: string, start = false) =>
+      call('append_frame_html', { frame_id: frame.id, html_chunk, start })
+    expect((await send(`<html><body><script>const packed="${piece}`, true)).isError).toBe(false)
+    expect((await send(piece)).isError).toBe(false)
+    /* the third piece makes it 6,000 characters */
+    const third = await send(piece)
+    expect(third.isError).toBe(true)
+    expect(third.text).toContain('block of base64 text')
+    /* the earlier pieces are in the frame: it says so, and what to do */
+    expect(third.text).toContain('this chunk was not written')
+    expect(third.text).not.toContain('nothing was written')
+    expect(third.text).toContain('start=true')
+    expect(store.getFrame(frame.id)!.html).not.toContain(piece.repeat(3))
+  })
+
+  it('lets a rewrite carry over what the full form of the frame holds', async () => {
+    const frame = actions.createFrame(
+      canvasId,
+      {
+        name: 'Hero',
+        html: doc(`<script>const packed="H4sI${'Ab3+/9zQ'.repeat(1000)}"</script>`),
+        width: 400,
+        height: 300,
+      },
+      actions.resolveActor({ name: 'Kevin', kind: 'user' }),
+    )!
+    const full = await call('get_frame', { frame_id: frame.id, expand_components: true })
+    const html = (JSON.parse(full.text) as { html: string }).html
+    expect(
+      (await call('set_frame_html', { frame_id: frame.id, html: html.replace('</body>', '<p>More</p></body>') }))
+        .isError,
+    ).toBe(false)
   })
 
   it('lets a later chunk of a rework carry over what the frame had before the stream', async () => {

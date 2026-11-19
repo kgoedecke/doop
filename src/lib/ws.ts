@@ -3,6 +3,7 @@ import { isPeerViewport } from '../../shared/viewport'
 import { roleAllows } from '../../shared/canvasRole'
 import { getIdentity } from './identity'
 import { useStore } from './store'
+import { noteTheirSave } from './theirSaves'
 
 let socket: WebSocket | null = null
 let currentCanvasId: string | null = null
@@ -167,10 +168,12 @@ function handle(msg: ServerMessage) {
       break
     case 'frame:created':
       s.upsertFrame(msg.frame)
+      if (msg.actor.clientId !== me) noteTheirSave(msg.frame.id, msg.frame.updatedAt)
       if (msg.actor.clientId !== me) s.flash(msg.frame.id, msg.actor.color)
       break
     case 'frame:updated':
       s.upsertFrame(msg.frame)
+      if (msg.actor.clientId !== me) noteTheirSave(msg.frame.id, msg.frame.updatedAt)
       /* during a live stream the marching border replaces per-chunk flashes */
       if (msg.actor.clientId !== me && !s.streams[msg.frame.id]) s.flash(msg.frame.id, msg.actor.color)
       break

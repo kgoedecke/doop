@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { colorFor } from '../../shared/types'
 import { canCommentOpenCanvas, useStore } from '../lib/store'
 import { api } from '../lib/api'
@@ -11,7 +11,10 @@ import { cn } from '@/lib/utils'
 import { Button } from './ui/button'
 import { Input } from './ui/input'
 import { PanelBody } from './ui/panel'
-import { CheckIcon } from './ui/icons'
+import { CheckIcon, LinkIcon } from './ui/icons'
+import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from './ui/context-menu'
+import { MentionText, useMentionPicker } from './MentionPicker'
+import { copyCommentLink } from '../lib/commentLink'
 import { Disclosure } from './ui/collapsible'
 import { isResidentLimit } from './TeamAllowance'
 import { useT } from '../lib/i18n'
@@ -108,6 +111,8 @@ function ThreadRow({ thread }: { thread: CommentThreadGroup }) {
   const [draft, setDraft] = useState('')
   const [sending, setSending] = useState(false)
   const [failed, setFailed] = useState(false)
+  const fieldRef = useRef<HTMLInputElement>(null)
+  const mentions = useMentionPicker({ value: draft, onChange: setDraft, fieldRef })
 
   /* fly to the pin (its frame, or its point on the canvas) and pop it — the
      pin shows the whole conversation, this row is the index entry */
@@ -130,7 +135,7 @@ function ThreadRow({ thread }: { thread: CommentThreadGroup }) {
     setSending(true)
     setFailed(false)
     try {
-      await api.replyComment(root.id, text)
+      await api.replyComment(root.id, text, mentions.picked(text))
       posthog.capture('element_comment_replied')
       setDraft((current) => (current === draft ? '' : current))
     } catch (err) {
@@ -150,57 +155,68 @@ function ThreadRow({ thread }: { thread: CommentThreadGroup }) {
 
   return (
     <div className="mx-1.5 py-1">
-      <div
-        role="button"
-        tabIndex={0}
-        title={frame ? t('stage.goToFrame', { name: frame.name }) : t('stage.goToPin')}
-        onClick={goToThread}
-        onKeyDown={(e) => {
-          if (e.target !== e.currentTarget) return
-          if (e.key === 'Enter' || e.key === ' ') {
-            e.preventDefault()
-            goToThread()
-          }
-        }}
-        className="grid cursor-pointer grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2 gap-y-[2px] rounded-[8px] px-1.5 py-2 text-[12px] leading-[18px] hover:bg-sub focus-visible:bg-sub focus-visible:outline-none"
-      >
-        <span className="flex min-w-0 items-center gap-1.5 whitespace-nowrap">
-          <span
-            aria-hidden
-            className="grid size-4 flex-none place-items-center rounded-full text-[8px] leading-none font-medium text-white"
-            style={{ background: colorFor(root.from) }}
+      <ContextMenu>
+        {/* a resolved thread has no pin for a link to open */}
+        <ContextMenuTrigger asChild disabled={resolved}>
+          <div
+            role="button"
+            tabIndex={0}
+            title={frame ? t('stage.goToFrame', { name: frame.name }) : t('stage.goToPin')}
+            onClick={goToThread}
+            onKeyDown={(e) => {
+              if (e.target !== e.currentTarget) return
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault()
+                goToThread()
+              }
+            }}
+            className="grid cursor-pointer grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2 gap-y-[2px] rounded-[8px] px-1.5 py-2 text-[12px] leading-[18px] hover:bg-sub focus-visible:bg-sub focus-visible:outline-none"
           >
-            {root.from.slice(0, 1).toUpperCase()}
-          </span>
-          <b className="truncate font-medium text-ink">{root.from}</b>
-        </span>
-        <span className="text-[11px] text-ink-faint tabular-nums">{timeAgo(root.at)}</span>
-        {/* open threads clamp (the pin shows the whole conversation); a
+            <span className="flex min-w-0 items-center gap-1.5 whitespace-nowrap">
+              <span
+                aria-hidden
+                className="grid size-4 flex-none place-items-center rounded-full text-[8px] leading-none font-medium text-white"
+                style={{ background: colorFor(root.from) }}
+              >
+                {root.from.slice(0, 1).toUpperCase()}
+              </span>
+              <b className="truncate font-medium text-ink">{root.from}</b>
+            </span>
+            <span className="text-[11px] text-ink-faint tabular-nums">{timeAgo(root.at)}</span>
+            {/* open threads clamp (the pin shows the whole conversation); a
             resolved one has no pin to open, so it reads in full here */}
-        <span className={cn('col-span-2 min-w-0 break-words pl-[22px] text-ink-soft', !resolved && 'line-clamp-3')}>
-          {root.text}
-        </span>
-        {(frame || resolved) && (
-          <span className="col-span-2 flex min-w-0 items-center gap-[7px] pl-[22px] text-[11px] text-ink-faint">
-            {resolved && (
-              <span className="grid size-3 flex-none place-items-center rounded-full bg-ink text-paper">
-                <CheckIcon className="size-[8px]" strokeWidth={2.4} />
+            <span className={cn('col-span-2 min-w-0 break-words pl-[22px] text-ink-soft', !resolved && 'line-clamp-3')}>
+              <MentionText text={root.text} />
+            </span>
+            {(frame || resolved) && (
+              <span className="col-span-2 flex min-w-0 items-center gap-[7px] pl-[22px] text-[11px] text-ink-faint">
+                {resolved && (
+                  <span className="grid size-3 flex-none place-items-center rounded-full bg-ink text-paper">
+                    <CheckIcon className="size-[8px]" strokeWidth={2.4} />
+                  </span>
+                )}
+                {frame && (
+                  <span className="min-w-0 truncate" title={frame.name}>
+                    {frame.name}
+                  </span>
+                )}
+                {resolved && root.resolvedBy && (
+                  <span className="min-w-0 truncate">
+                    {frame ? '· ' : ''}
+                    {t('stage.resolvedBy', { name: root.resolvedBy })}
+                  </span>
+                )}
               </span>
             )}
-            {frame && (
-              <span className="min-w-0 truncate" title={frame.name}>
-                {frame.name}
-              </span>
-            )}
-            {resolved && root.resolvedBy && (
-              <span className="min-w-0 truncate">
-                {frame ? '· ' : ''}
-                {t('stage.resolvedBy', { name: root.resolvedBy })}
-              </span>
-            )}
-          </span>
-        )}
-      </div>
+          </div>
+        </ContextMenuTrigger>
+        <ContextMenuContent>
+          <ContextMenuItem onSelect={() => void copyCommentLink(root)}>
+            <LinkIcon size="rail" />
+            {t('stage.copyCommentLink')}
+          </ContextMenuItem>
+        </ContextMenuContent>
+      </ContextMenu>
       {resolved && thread.replies.length > 0 && (
         <Disclosure
           label={t('stage.replies', { count: thread.replies.length })}
@@ -213,7 +229,9 @@ function ThreadRow({ thread }: { thread: CommentThreadGroup }) {
                   <span className="truncate font-medium text-ink">{reply.from}</span>
                   <span className="shrink-0 text-caption text-ink-faint">{timeAgo(reply.at)}</span>
                 </div>
-                <p className="whitespace-pre-wrap break-words">{reply.text}</p>
+                <p className="whitespace-pre-wrap break-words">
+                  <MentionText text={reply.text} />
+                </p>
               </li>
             ))}
           </ol>
@@ -221,19 +239,28 @@ function ThreadRow({ thread }: { thread: CommentThreadGroup }) {
       )}
       {!resolved && canComment && (
         <div className="flex items-center gap-1.5 py-1 pr-1.5 pl-[28px]">
-          <Input
-            variant="bare"
-            inputSize="auto"
-            className="h-7 min-w-0 flex-1 rounded-[7px] bg-surface px-2.5 shadow-ring focus:shadow-elevation-1-focus md:text-[12px]"
-            placeholder={t('stage.replyPanelPlaceholder')}
-            aria-label={t('stage.replyTo', { name: root.from })}
-            value={draft}
-            disabled={sending}
-            onChange={(e) => setDraft(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && !isComposingEnter(e)) void reply()
-            }}
-          />
+          <div className="relative min-w-0 flex-1">
+            <Input
+              ref={fieldRef}
+              variant="bare"
+              inputSize="auto"
+              className="h-7 w-full min-w-0 rounded-[7px] bg-surface px-2.5 shadow-ring focus:shadow-elevation-1-focus md:text-[12px]"
+              placeholder={t('stage.replyPanelPlaceholder')}
+              aria-label={t('stage.replyTo', { name: root.from })}
+              value={draft}
+              disabled={sending}
+              onChange={(e) => {
+                setDraft(e.target.value)
+                mentions.onCaret(e)
+              }}
+              {...mentions.fieldProps}
+              onKeyDown={(e) => {
+                if (mentions.onKeyDown(e)) return
+                if (e.key === 'Enter' && !isComposingEnter(e)) void reply()
+              }}
+            />
+            {mentions.list}
+          </div>
           <Button
             variant="bare"
             className="h-7 flex-none gap-1 rounded-[7px] px-2 text-[12px] font-normal"

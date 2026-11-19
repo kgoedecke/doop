@@ -13,17 +13,19 @@
       import { useStore } from '/src/lib/store.ts'
       import '/src/styles.css'
 
+      const canvasId = new URLSearchParams(location.search).get('fixtureCanvasId') ?? 'c'
+
       /* the canvas page as an editor has it open, with all its chrome; the
          test hands it the canvas the room would have sent */
       window.canvasPageHarness = {
         seed: (frames, canvas) =>
           useStore
             .getState()
-            .setCanvas({ id: 'c', name: 'Canvas', frames, role: 'edit', createdAt: 0, updatedAt: 0, ...canvas }),
-        setPages: (pages) => useStore.getState().setPages(pages, 'c'),
+            .setCanvas({ id: canvasId, name: 'Canvas', frames, role: 'edit', createdAt: 0, updatedAt: 0, ...canvas }),
+        setPages: (pages) => useStore.getState().setPages(pages, canvasId),
       }
       createRoot(document.getElementById('root')).render(
-        React.createElement(TooltipProvider, null, React.createElement(CanvasPage, { canvasId: 'c' })),
+        React.createElement(TooltipProvider, null, React.createElement(CanvasPage, { canvasId })),
       )
     </script>
   </body>

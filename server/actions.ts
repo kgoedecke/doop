@@ -1,3 +1,4 @@
+import type { ResolvedMentions } from '../shared/personMentions.ts'
 import { nanoid } from 'nanoid'
 import { indexOfAscii, lastIndexOfAscii } from '../shared/asciiSearch.ts'
 import { env } from './env.ts'
@@ -40,6 +41,7 @@ import { hasElementId, stampElementId } from './elementIds.ts'
 import { decodeEscapedHtml, looksEscapedHtml, repairEscapedHtml } from './escapedHtml.ts'
 import { forgetLibrary } from './componentLibrary.ts'
 import { withCanvasFaces, withCanvasFacesMidStream } from './canvasFaces.ts'
+import { EMBEDDED_MIN_LENGTH } from './inlineData.ts'
 import {
   MAX_TOKENS,
   MAX_TOKEN_DESCRIPTION,
@@ -837,7 +839,7 @@ async function frameAnchor(frame: Frame, input: FrameAnchorInput, by: string): P
 
 export async function addElementComment(
   frameId: string,
-  input: FrameAnchorInput & { text: string },
+  input: FrameAnchorInput & { text: string; mentions?: ResolvedMentions },
   from: string,
   fromUserId?: string,
 ): Promise<ElementComment | undefined> {
@@ -846,7 +848,7 @@ export async function addElementComment(
   const anchor = await frameAnchor(frame, input, from)
   /* a frame deleted while its element was being stamped takes no comment */
   if (!store.getFrame(frameId)) return undefined
-  return postComment(frame.canvasId, anchor, input.text, from, fromUserId)
+  return postComment(frame.canvasId, anchor, input.text, from, fromUserId, 'user', undefined, input.mentions)
 }
 
 /** The anchor as it is written onto a comment; what the anchor does not
@@ -1010,14 +1012,23 @@ export const moveComment = atomic(async function moveComment(
  *  between frames, or a spot where something should go. */
 export function addCanvasComment(
   canvasId: string,
-  input: { pageId: string; x: number; y: number; text: string },
+  input: { pageId: string; x: number; y: number; text: string; mentions?: ResolvedMentions },
   from: string,
   fromUserId?: string,
 ): ElementComment | undefined {
   const canvas = store.getCanvas(canvasId)
   if (!canvas || !canvasPages(canvas).some((page) => page.id === input.pageId)) return undefined
   if (!Number.isFinite(input.x) || !Number.isFinite(input.y)) return undefined
-  return postComment(canvasId, { pageId: input.pageId, x: input.x, y: input.y }, input.text, from, fromUserId)
+  return postComment(
+    canvasId,
+    { pageId: input.pageId, x: input.x, y: input.y },
+    input.text,
+    from,
+    fromUserId,
+    'user',
+    undefined,
+    input.mentions,
+  )
 }
 
 /** Reply inside a thread: the reply inherits the root comment's anchor (its
@@ -1029,12 +1040,13 @@ export function replyToComment(
   from: string,
   fromUserId?: string,
   kind: ActorKind = 'user',
+  mentions?: ResolvedMentions,
 ): ElementComment | undefined {
   const open = openThread(commentId)
   if (!open) return undefined
   const anchor = replyAnchor(open)
   if (!anchor) return undefined
-  return postComment(open.root.canvasId, anchor, text, from, fromUserId, kind, open.root.id)
+  return postComment(open.root.canvasId, anchor, text, from, fromUserId, kind, open.root.id, mentions)
 }
 
 function replyAnchor({ root, frame }: { root: ElementComment; frame?: Frame }): CommentAnchor | undefined {
@@ -1074,11 +1086,14 @@ function postComment(
   fromUserId?: string,
   kind: ActorKind = 'user',
   parentId?: string,
+  /** the people the text @mentions, read by the caller (server/canvasPeople.ts) */
+  mentions?: ResolvedMentions,
 ): ElementComment | undefined {
   const clean = text.trim()
   if (!clean) return undefined
-  /* @Doop, @brand, @a11y… — whichever resident agent is mentioned picks it up */
-  const mentioned = mentionedRole(clean, canvasRoster(canvasId))
+  /* @Doop, @brand, @a11y… — whichever resident agent is mentioned picks it
+     up; a person's name (`@Brand Smith`) is not an agent's */
+  const mentioned = mentionedRole(mentions?.roleText ?? clean, canvasRoster(canvasId))
   const list = commentLog.get(canvasId) ?? []
   /* strictly increasing per canvas: thread order is reconstructed from `at`
      after a restart, so two messages must never share a timestamp */
@@ -1120,6 +1135,7 @@ function postComment(
     comment,
     frame,
     actorKind: kind,
+    ...(mentions?.ids.length ? { mentions: mentions.ids } : {}),
   })
   return comment
 }
@@ -1793,12 +1809,15 @@ interface StreamState {
   /** the frame's HTML before the opening chunk replaced it: what a later chunk
    *  may carry over (server/inlineData.ts compares against it) */
   base: string
-  /** the end of the agent's last chunk as it sent it, before components expanded:
-   *  enough to catch a data: URI prefix split across two chunks */
+  /** the end of the agent's stream as it sent it, before components expanded: what the
+   *  next chunk is joined to, so base64 split across chunks is seen whole */
   tail: string
 }
 
-const STREAM_TAIL_CHARS = 256
+/* enough for a data: URI's prefix split across two chunks, and for a block of base64 text sent
+   in pieces: a run is refused once it reaches EMBEDDED_MIN_LENGTH (server/inlineData.ts), so one
+   still growing at the end of the stream is shorter than that and is held here whole */
+const STREAM_TAIL_CHARS = Math.max(256, EMBEDDED_MIN_LENGTH)
 
 const streams = new Map<string, StreamState>() // frameId -> state
 
@@ -2750,6 +2769,9 @@ export const deleteCanvas = atomic(function deleteCanvas(canvasId: string): bool
 })
 
 export function renameCanvas(canvasId: string, name: string, actor: Actor) {
+  /* the same name changes nothing, so nobody is told it did */
+  const current = store.getCanvas(canvasId)
+  if (current?.name === name) return current
   const canvas = store.renameCanvas(canvasId, name)
   if (!canvas) return undefined
   broadcast(canvasId, { type: 'canvas:renamed', name, actor })

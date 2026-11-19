@@ -94,7 +94,13 @@ describe('PagesPanel rename', () => {
     container = document.createElement('div')
     document.body.appendChild(container)
     root = createRoot(container)
-    act(() => root.render(<PagesPanel />))
+    act(() =>
+      root.render(
+        <div data-slot="panel">
+          <PagesPanel canvasId="c1" />
+        </div>,
+      ),
+    )
   })
 
   afterEach(() => {
