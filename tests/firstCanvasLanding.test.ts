@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { Client, startServer, type Server } from './harness.ts'
+import { SIGN_IN_PATH } from '../shared/signInPath.ts'
 import { FIRST_CANVAS_PATH, firstCanvasPathAfterSignup } from '../shared/firstCanvas.ts'
 
 let server: Server
@@ -40,10 +41,12 @@ describe('first-canvas landing', () => {
 
   /* the lifecycle emails link to /api/welcome?connect=1: the Connect AI
      intent must survive a sign-in, and reach the canvas as ?connect=1 */
-  it('keeps ?connect=1 through the login page when signed out', async () => {
+  it('keeps ?connect=1 through the sign-in page when signed out', async () => {
     const res = await new Client(server).get(`${FIRST_CANVAS_PATH}?connect=1`)
     expect(res.status).toBe(302)
-    expect(res.headers.get('location')).toBe(`/?redirect_to=${encodeURIComponent(`${FIRST_CANVAS_PATH}?connect=1`)}`)
+    expect(res.headers.get('location')).toBe(
+      `${SIGN_IN_PATH}?redirect_to=${encodeURIComponent(`${FIRST_CANVAS_PATH}?connect=1`)}`,
+    )
   })
 
   it('passes ?connect=1 on to the first canvas when signed in', async () => {
