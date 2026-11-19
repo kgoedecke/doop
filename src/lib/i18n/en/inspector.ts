@@ -49,6 +49,7 @@ export const inspector = {
   sectionLayout: 'Layout',
   sectionAppearance: 'Appearance',
   sectionFill: 'Fill',
+  fillReading: 'Reading the frame…',
   sectionStroke: 'Stroke',
   sectionText: 'Text',
   rowType: 'Type',

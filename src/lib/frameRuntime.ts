@@ -1528,6 +1528,59 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
     }
   }
 
+  /* The frame's fill, as Figma's frame Fill: the root element that paints
+     the frame's background. The body's paint covers the whole frame while
+     the root has none (CSS propagates it to the canvas); once the root is
+     painted too, the body paints only its own box, so it is the fill only
+     while that box covers most of the frame (a centred column is not). */
+  function rootFill() {
+    var html = document.documentElement
+    var body = document.body
+    var el = body && !(painted(html) && (!painted(body) || !coversFrame(body))) ? body : html
+    var cs = getComputedStyle(el)
+    var inline = {}
+    var color = el.style.getPropertyValue('background-color')
+    // A token set through the shorthand (background: var(--surface)) leaves
+    // the longhand empty: it reads back pending substitution.
+    var shorthand = el.style.getPropertyValue('background').trim()
+    if (color) inline['background-color'] = color
+    else if (/^var\\(\\s*--[\\w-]+\\s*\\)$/.test(shorthand)) inline['background-color'] = shorthand
+    return {
+      selector: el === body ? 'body' : 'html',
+      backgroundColor: cs.backgroundColor,
+      image: imageFill(el, cs),
+      /* a gradient or layered image over the colour, which a colour edit replaces */
+      overlay: cs.backgroundImage !== 'none' && !imageFill(el, cs),
+      inline: inline,
+      shorthand: !!shorthand,
+      locked: isLocked(el),
+    }
+  }
+  function painted(el) {
+    var cs = getComputedStyle(el)
+    return colorAlphaOf(cs.backgroundColor) > 0 || cs.backgroundImage !== 'none'
+  }
+  function coversFrame(el) {
+    var r = el.getBoundingClientRect()
+    var w = document.documentElement.clientWidth
+    var h = document.documentElement.clientHeight
+    var seen = Math.max(0, Math.min(r.right, w) - Math.max(r.left, 0)) * Math.max(0, Math.min(r.bottom, h) - Math.max(r.top, 0))
+    return w * h > 0 && seen / (w * h) >= 0.5
+  }
+  /* the alpha of a computed colour: rgb()/rgba(), and the slash form of
+     every other colour function (oklch(… / 0), color(srgb … / 0.5)) */
+  function colorAlphaOf(color) {
+    if (!color || color === 'transparent') return 0
+    var slash = /\\/\\s*([\\d.]+)(%?)\\s*\\)\\s*$/.exec(color)
+    if (slash) return parseFloat(slash[1]) / (slash[2] ? 100 : 1)
+    var legacy = /^rgba\\(([^)]*)\\)$/.exec(color)
+    if (legacy) {
+      var parts = legacy[1].split(',')
+      if (parts.length > 3) return parseFloat(parts[3])
+    }
+    return 1
+  }
+
   var styleTimer = null
   var styleEdit = null
   function styleTarget(selector) {
@@ -1885,6 +1938,9 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
     if (d.type === 'doop:inspect') {
       parent.postMessage({ type: 'doop:inspect-result', reqId: d.reqId, info: inspect(d.selector) }, '*')
     }
+    if (d.type === 'doop:root-fill') {
+      parent.postMessage({ type: 'doop:root-fill-result', reqId: d.reqId, fill: rootFill() }, '*')
+    }
     if (d.type === 'doop:outlines') setOutlines(d.on === true)
     if (d.type === 'doop:bleed' && typeof d.px === 'number') setBleed(d.px)
     if (d.type === 'doop:computed' && Array.isArray(d.properties)) {
@@ -1915,7 +1971,7 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
     }
     if (d.type === 'doop:replace-image') {
       var replaced = replaceImage(d.selector, d.image, d.url)
-      parent.postMessage({ type: 'doop:replace-image-result', reqId: d.reqId, info: replaced ? inspect(d.selector) : null }, '*')
+      parent.postMessage({ type: 'doop:replace-image-result', reqId: d.reqId, ok: replaced, info: replaced ? inspect(d.selector) : null }, '*')
     }
     if (d.type === 'doop:nudge' && Array.isArray(d.selectors)) {
       var movable = d.selectors.map(function (selector) {
