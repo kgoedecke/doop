@@ -232,3 +232,18 @@ it('scrolls the row the arrows pick into view', async () => {
   expect(scrolled.at(-1)).toContain('/release-notes')
   spy.mockRestore()
 })
+
+it('replaces the whole handle when picking with the caret inside it', async () => {
+  act(() => root.render(<Field />))
+  await type('/brand-check then more')
+  const el = field()
+  await act(async () => {
+    el.focus()
+    el.setSelectionRange(3, 3)
+    document.dispatchEvent(new Event('selectionchange'))
+  })
+  await act(async () => {})
+  expect(options()).toEqual(['/brand-checkBrand voice'])
+  await press('Enter')
+  expect(el.value).toBe('/brand-check then more')
+})

@@ -123,7 +123,9 @@ export function useSkillMenu({
 
   function pick(handle: string) {
     if (!partial) return
-    setText(`${text.slice(0, partial.start)}/${handle} ${text.slice(caret)}`)
+    /* the rest of a handle the caret sits inside, and its space, give way to the pick */
+    const rest = text.slice(caret).replace(/^[a-z0-9-]*\s?/, '')
+    setText(`${text.slice(0, partial.start)}/${handle} ${rest}`)
     place(partial.start + handle.length + 2)
   }
 

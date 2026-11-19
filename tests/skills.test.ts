@@ -55,6 +55,8 @@ describe('skillHandlesIn', () => {
     expect(skillHandlesIn('either a/b works')).toEqual([])
     expect(skillHandlesIn('a comment //x here')).toEqual([])
     expect(skillHandlesIn('/A-caps and /x too short')).toEqual([])
+    expect(skillHandlesIn('edit /brand-check.html and /tone.md')).toEqual([])
+    expect(skillHandlesIn('end with /brand-check.) or /tone?!')).toEqual(['brand-check', 'tone'])
   })
 
   it('keeps a handle named twice once, in order of first appearance', () => {

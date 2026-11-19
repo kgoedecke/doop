@@ -93,9 +93,9 @@ export function parseSkillPatch(raw: unknown): Parsed<SkillPatch> {
 }
 
 /* a /handle starts the text or follows whitespace or "(", and ends at
-   whitespace, the end or punctuation, so /c/abc and https://x.com/brand are
-   not skills */
-const MENTION = new RegExp(`(?:^|[\\s(])/(${HANDLE})(?=$|[\\s.,;:!?)])`, 'g')
+   whitespace, the end or punctuation that itself ends there, so /c/abc,
+   https://x.com/brand and /brand.html are not skills */
+const MENTION = new RegExp(`(?:^|[\\s(])/(${HANDLE})(?=[.,;:!?)]*(?:$|\\s))`, 'g')
 
 /** Every `/handle` the text names, in order of first appearance. Only
  *  candidates: the server keeps the ones the canvas's scope has. */
