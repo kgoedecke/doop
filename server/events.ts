@@ -12,8 +12,21 @@ import type { Actor, ActorKind, AgentTask, ElementComment, Frame } from '../shar
  */
 export type CanvasEvent =
   /* `frame` is an element comment's frame; a canvas comment has none */
-  | { type: 'comment.created'; comment: ElementComment; frame: Frame | undefined; actorKind: ActorKind }
-  | { type: 'comment.replied'; comment: ElementComment; frame: Frame | undefined; actorKind: ActorKind }
+  /* `mentions`: the people the text @mentions (shared/personMentions.ts) */
+  | {
+      type: 'comment.created'
+      comment: ElementComment
+      frame: Frame | undefined
+      actorKind: ActorKind
+      mentions?: string[]
+    }
+  | {
+      type: 'comment.replied'
+      comment: ElementComment
+      frame: Frame | undefined
+      actorKind: ActorKind
+      mentions?: string[]
+    }
   /** the root of a thread (or a lone reply) was resolved; `by` is a display name */
   | { type: 'comment.resolved'; comment: ElementComment; frame: Frame | undefined; by: string }
   | { type: 'frame.created'; frame: Frame; actor: Actor }

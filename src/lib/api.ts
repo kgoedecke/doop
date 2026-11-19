@@ -140,6 +140,13 @@ import type { DesignToken, DesignTokenInput, ThemeRename, TokenEdit, TokenResult
 
 export type HomeActivity = ActivityItem & { canvasId: string; canvasName: string }
 
+/** someone a comment may @mention */
+export interface CanvasPerson {
+  id: string
+  name: string
+  image?: string
+}
+
 export interface CanvasMember {
   userId: string
   name: string
@@ -922,6 +929,8 @@ export const api = {
       selector?: string
       elementId?: string
       snippet: string
+      /** the people picked from the @ list, for names several share */
+      mentions?: string[]
       text: string
       x: number
       y: number
@@ -935,11 +944,16 @@ export const api = {
       body: JSON.stringify({ selector, ...(snippet ? { snippet } : {}) }),
     }),
   /** a comment pinned to a point on the canvas (world coordinates on a page) rather than to an element */
-  addCanvasComment: (canvasId: string, input: { pageId: string; x: number; y: number; text: string }) =>
-    req(`/api/canvases/${canvasId}/comments`, { method: 'POST', body: JSON.stringify(input) }),
-  replyComment: (commentId: string, text: string) =>
-    req(`/api/comments/${commentId}/replies`, { method: 'POST', body: JSON.stringify({ text }) }),
+  addCanvasComment: (
+    canvasId: string,
+    input: { pageId: string; x: number; y: number; text: string; mentions?: string[] },
+  ) => req(`/api/canvases/${canvasId}/comments`, { method: 'POST', body: JSON.stringify(input) }),
+  /** `mentions`: the people picked from the @ list, for names several share */
+  replyComment: (commentId: string, text: string, mentions: string[] = []) =>
+    req(`/api/comments/${commentId}/replies`, { method: 'POST', body: JSON.stringify({ text, mentions }) }),
   resolveComment: (commentId: string) => req(`/api/comments/${commentId}/resolve`, { method: 'POST' }),
+  /** who a comment on this canvas may @mention: owner, members, workspace members */
+  canvasPeople: (canvasId: string) => req<CanvasPerson[]>(`/api/canvases/${canvasId}/people`),
   /** re-pin a thread (its root or any reply names it) where its pin was dropped */
   moveComment: (commentId: string, anchor: CommentAnchorInput) =>
     req<ElementComment>(`/api/comments/${commentId}/anchor`, { method: 'PATCH', body: JSON.stringify(anchor) }),

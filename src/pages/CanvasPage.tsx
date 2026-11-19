@@ -408,6 +408,12 @@ export function CanvasPage({
       const typing = isTypingTarget(e.target)
       if (dispatchActionKey(e, typing)) return
       if (typing) return
+      /* a held ⌘X cuts once: the auto-repeat would cut the frame left
+         selected around a cut element next, as a held ⌫ would */
+      if ((e.metaKey || e.ctrlKey) && e.repeat && e.key.toLowerCase() === 'x') {
+        e.preventDefault()
+        return
+      }
       /* a picked element (from the canvas or the layers tree) is what ⌫
          removes — the frame it lives in only goes when nothing inside it is
          selected. Auto-repeat is ignored: a held key must not take the
@@ -449,25 +455,37 @@ export function CanvasPage({
     return () => window.removeEventListener('keydown', onKey)
   }, [canvasId, presenting]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  /* Native copy/paste events let us write the selection's token and read
+  /* Native copy/cut/paste events let us write the selection's token and read
      clipboard images without asking for clipboard-read permission. */
   useEffect(() => {
-    function onCopy(e: ClipboardEvent) {
-      if (isTypingTarget(e.target) || window.getSelection()?.toString() || !e.clipboardData) return
+    /* the picked elements, else the selected frames, onto the clipboard;
+       false when there is nothing of the canvas's to take (text selected on
+       the page, a field focused, nothing selected) */
+    function writeSelection(e: ClipboardEvent, onWritten?: () => void): boolean {
+      if (isTypingTarget(e.target) || window.getSelection()?.toString() || !e.clipboardData) return false
       const state = useStore.getState()
       const picked = state.selectedElement
       const frame = state.canvas?.frames.find((f) => f.id === picked?.frameId)
       let copy: () => boolean | void
       if (picked) {
-        if (!frame) return
+        if (!frame) return false
         const selectors = pickedSelectors(state)
         copy = () => copyPicked(frame, selectors)
       } else {
         const frames = state.canvas?.frames.filter((f) => state.selectedIds.includes(f.id)) ?? []
-        if (!frames.length) return
+        if (!frames.length) return false
         copy = () => copyFrames(frames)
       }
-      if (writeCanvasClipboard(copy, e.clipboardData)) e.preventDefault()
+      return writeCanvasClipboard(copy, e.clipboardData, onWritten)
+    }
+    function onCopy(e: ClipboardEvent) {
+      if (writeSelection(e)) e.preventDefault()
+    }
+    /* ⌘X: copy, then remove what ⌫ would. Locked frames and layers stay put,
+       as they do on ⌫, so cutting one only copies it; a reader's cut copies. */
+    function onCut(e: ClipboardEvent) {
+      const remove = canEditOpenCanvas(useStore.getState()) ? () => void deleteSelection() : undefined
+      if (writeSelection(e, remove)) e.preventDefault()
     }
     function onPaste(e: ClipboardEvent) {
       if (isTypingTarget(e.target)) return
@@ -502,9 +520,11 @@ export function CanvasPage({
       }
     }
     window.addEventListener('copy', onCopy)
+    window.addEventListener('cut', onCut)
     window.addEventListener('paste', onPaste)
     return () => {
       window.removeEventListener('copy', onCopy)
+      window.removeEventListener('cut', onCut)
       window.removeEventListener('paste', onPaste)
     }
   }, [canvasId])

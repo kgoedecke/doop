@@ -9,6 +9,15 @@ import { ApiError } from '../lib/api'
 import { Button } from './ui/button'
 import { PageIcon, PlusIcon } from './ui/icons'
 import { cn } from '../lib/utils'
+import {
+  clampPagesPx,
+  pagesHeightCss,
+  pagesMaxPx,
+  pagesMinPx,
+  pagesPctOf,
+  pagesPxAfterKey,
+  usePagesPct,
+} from '../lib/pagesSplit'
 import { ContextMenu, ContextMenuTrigger, ContextMenuContent, ContextMenuItem } from './ui/context-menu'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select'
 import { useT } from '@/lib/i18n'
@@ -19,7 +28,8 @@ import { useT } from '@/lib/i18n'
 export const sectionHeading = 'text-[11px] font-normal text-ink-faint'
 const sectionBtn = 'size-5 rounded-[5px] text-ink-faint hover:bg-paper-deep hover:text-ink'
 
-export function PagesPanel({ fill = false }: { fill?: boolean }) {
+export function PagesPanel({ canvasId }: { canvasId: string }) {
+  const [pagesPct, setPagesPct] = usePagesPct(canvasId)
   const canvas = useStore((s) => s.canvas)
   const activePageId = useStore((s) => s.activePageId)
   const selectedIds = useStore((s) => s.selectedIds)
@@ -41,6 +51,9 @@ export function PagesPanel({ fill = false }: { fill?: boolean }) {
   if (!canvas) return null
   const pages = canvasPages(canvas)
   const movableIds = canvas.frames.filter((f) => selectedIds.includes(f.id) && !f.locked).map((f) => f.id)
+  /* the picker is there to move the selection somewhere else, so it needs a second page */
+  const showMovePicker = !readOnly && selectedIds.length > 0 && pages.length > 1
+  const minPx = pagesMinPx(showMovePicker)
 
   async function moveSelection(pageId: string) {
     if (!canvas || busy || !movableIds.length) return
@@ -205,7 +218,6 @@ export function PagesPanel({ fill = false }: { fill?: boolean }) {
           <ContextMenuTrigger asChild>
             <div
               data-page-id={page.id}
-              onContextMenu={() => useStore.getState().setActivePage(page.id)}
               className={cn(
                 'group relative flex h-[27px] items-center gap-1 rounded-[7px] pr-2.5 text-[12px] text-ink-soft hover:bg-sub',
                 page.id === activePageId && 'bg-paper-deep text-ink hover:bg-paper-deep',
@@ -312,20 +324,26 @@ export function PagesPanel({ fill = false }: { fill?: boolean }) {
   )
 
   return (
-    <div className={cn('flex flex-none flex-col', fill && 'min-h-0 flex-1')}>
+    <div
+      data-slot="pages-panel"
+      className="relative flex flex-none flex-col border-b border-line-soft"
+      style={
+        pagesPct === null ? { maxHeight: pagesHeightCss(100, minPx) } : { height: pagesHeightCss(pagesPct, minPx) }
+      }
+    >
       <div className={cn('mt-1.5 flex h-6 flex-none items-center justify-between pr-2.5 pl-3.5', sectionHeading)}>
         <span data-slot="page-section-heading" className={sectionHeading}>
           {t('panels.pagesTitle')}
         </span>
         {!readOnly && addPage}
       </div>
-      <div className={cn('overflow-y-auto px-2 pb-1', fill ? 'min-h-0 flex-1' : 'max-h-[30vh]')}>{list}</div>
-      {!readOnly && selectedIds.length > 0 && pages.length > 1 && (
+      <div className={cn('min-h-0 overflow-y-auto px-2 pb-1', pagesPct === null && 'max-h-[30vh]')}>{list}</div>
+      {showMovePicker && (
         /* the canvas shortcuts listen on window: ⌫ would delete the frames
            being moved and typed letters would switch tools, so the picker's
            keys stop here; React bubbles the portalled list's keys through this
            div too, before the native event reaches window */
-        <div className="px-2 pb-2" onKeyDown={(e) => e.stopPropagation()}>
+        <div className="flex-none px-2 pb-2" onKeyDown={(e) => e.stopPropagation()}>
           <Select value="" disabled={busy || !movableIds.length} onValueChange={(id) => void moveSelection(id)}>
             <SelectTrigger size="sm" className="w-full" aria-label={t('panels.pagesMoveSelection')}>
               <SelectValue placeholder={t('panels.pagesMoveSelectionPlaceholder')} />
@@ -342,6 +360,76 @@ export function PagesPanel({ fill = false }: { fill?: boolean }) {
           </Select>
         </div>
       )}
+      <PagesSplitHandle minPx={minPx} onChange={setPagesPct} />
     </div>
   )
+}
+
+/** The Pages section's bottom edge: dragged, or moved with the arrow keys, Home and End. Each step measures the
+ *  section and its rail again, so it starts from what is on screen. The separator's value and range are those
+ *  measures too: the section also changes height when its content or the window does, not only on a drag. The
+ *  browser releases the pointer's capture when the drag ends, which resets the drag. */
+function PagesSplitHandle({ minPx, onChange }: { minPx: number; onChange: (pct: number) => void }) {
+  const t = useT()
+  const handle = useRef<HTMLDivElement>(null)
+  const drag = useRef<{ y: number; pagesPx: number; railPx: number } | null>(null)
+  const [sizes, setSizes] = useState({ pagesPx: 0, railPx: 0 })
+  useEffect(() => {
+    const el = handle.current
+    if (!el) return
+    const measure = () => {
+      const next = measurePages(el)
+      setSizes((prev) => (prev.pagesPx === next.pagesPx && prev.railPx === next.railPx ? prev : next))
+    }
+    const observer = new ResizeObserver(measure)
+    observer.observe(el.closest('[data-slot="pages-panel"]')!)
+    observer.observe(el.closest('[data-slot="panel"]')!)
+    return () => observer.disconnect()
+  }, [])
+  return (
+    <div
+      ref={handle}
+      role="separator"
+      tabIndex={0}
+      aria-orientation="horizontal"
+      aria-label={t('panels.pagesResize')}
+      aria-valuemin={minPx}
+      aria-valuemax={pagesMaxPx(sizes.railPx, minPx)}
+      aria-valuenow={Math.round(sizes.pagesPx)}
+      data-slot="pages-split"
+      className="absolute inset-x-2 top-full h-1.5 cursor-row-resize touch-none rounded-full focus-visible:bg-ink/20 focus-visible:outline-none"
+      onPointerDown={(e) => {
+        if (e.button !== 0) return
+        e.preventDefault()
+        e.stopPropagation()
+        drag.current = { y: e.clientY, ...measurePages(e.currentTarget) }
+        e.currentTarget.setPointerCapture(e.pointerId)
+      }}
+      onPointerMove={(e) => {
+        const start = drag.current
+        if (!start) return
+        e.stopPropagation()
+        const px = clampPagesPx(start.pagesPx + e.clientY - start.y, start.railPx, minPx)
+        onChange(pagesPctOf(px, start.railPx))
+      }}
+      onLostPointerCapture={() => {
+        drag.current = null
+      }}
+      onKeyDown={(e) => {
+        const { pagesPx, railPx } = measurePages(e.currentTarget)
+        const px = pagesPxAfterKey(e.key, pagesPx, railPx, minPx)
+        if (px === undefined) return
+        e.preventDefault()
+        e.stopPropagation()
+        onChange(pagesPctOf(px, railPx))
+      }}
+    />
+  )
+}
+
+/** The Pages section and the rail it sits in, both in px. */
+function measurePages(handle: HTMLElement) {
+  const pages = handle.closest<HTMLElement>('[data-slot="pages-panel"]')!
+  const rail = handle.closest<HTMLElement>('[data-slot="panel"]')!
+  return { pagesPx: pages.getBoundingClientRect().height, railPx: rail.getBoundingClientRect().height }
 }

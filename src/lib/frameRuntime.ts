@@ -292,7 +292,7 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
   }
 
   /* tell the parent which element is selected for editing, so it can anchor
-     the element toolbar (comment etc.) to it */
+     the text formatting bar to it */
   function activeInfo() {
     return activeEl ? hitInfo(activeEl) : null
   }
@@ -1040,6 +1040,24 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
   function hoverProbe(x, y, selected) {
     var el = probeTarget(x, y, true, selected, false)
     return el ? { tag: el.tagName.toLowerCase(), selector: cssPath(el), rect: designRect(el) } : null
+  }
+
+  /* ⌥ measuring: where the picked elements are, the box around the primary
+     one, and what the pointer is over when that is none of them */
+  function measure(selector, x, y, selected) {
+    var picked = []
+    ;[selector].concat(Array.isArray(selected) ? selected : []).forEach(function (sel) {
+      var found = null
+      try { found = sel ? document.querySelector(sel) : null } catch (e) { /* bad selector */ }
+      if (found && found !== document.documentElement && found !== document.body && picked.indexOf(found) === -1) picked.push(found)
+    })
+    var el = picked[0]
+    if (!el || !el.matches(selector)) return null
+    var over = probeTarget(x, y, true, selected, false)
+    return {
+      rects: picked.map(designRect), parent: parentBounds(el),
+      over: over && picked.indexOf(over) === -1 ? designRect(over) : null,
+    }
   }
 
   /* ---- element properties (the Design panel) ----
@@ -1914,6 +1932,9 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
     }
     if (d.type === 'doop:hover') {
       parent.postMessage({ type: 'doop:hover-result', reqId: d.reqId, hit: hoverProbe(d.x, d.y, d.selected) }, '*')
+    }
+    if (d.type === 'doop:measure') {
+      parent.postMessage({ type: 'doop:measure-result', reqId: d.reqId, measure: measure(d.selector, d.x, d.y, d.selected) }, '*')
     }
     if (d.type === 'doop:select') {
       parent.postMessage({ type: 'doop:select-result', reqId: d.reqId, hit: describe(d.selector) }, '*')

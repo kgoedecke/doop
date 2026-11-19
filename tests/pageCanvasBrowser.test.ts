@@ -8,6 +8,7 @@ import type { Canvas, Frame } from '../shared/types'
 declare global {
   interface Window {
     seedPages: (canvas: Canvas) => void
+    openPage: (id: string) => void
     pickElement: (frameId: string, selector: string) => void
     frameHtml: (frameId: string) => string | undefined
     trace: unknown[]
@@ -78,6 +79,71 @@ describe.skipIf(!findBrowserPath())('page camera and snapping', { timeout: 30_00
     await page.waitForSelector('iframe[data-doop-frame]')
   }
 
+  /* right-click an element of the target frame and take its menu's link item */
+  async function copyLinkTo(selector: string) {
+    const iframe = (await page.$('iframe[title="target"]'))!
+    const doc = (await iframe.contentFrame())!
+    const inner = await doc.$eval(selector, (el) => el.getBoundingClientRect().toJSON())
+    const outer = await iframe.evaluate((el) => el.getBoundingClientRect().toJSON())
+    const zoom = outer.width / 200
+    await page.mouse.click(outer.x + (inner.x + 5) * zoom, outer.y + (inner.y + 5) * zoom, { button: 'right' })
+    const item = await page.waitForFunction(() =>
+      [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(
+        (el) => el.firstChild?.textContent === 'Copy link to element',
+      ),
+    )
+    await (await item.asElement()!.toElement('div')).click()
+  }
+
+  it('restores pan and zoom when returning to a page', async () => {
+    await load(canvas([frame('directory', 'first', 0), frame('target', 'second', 3000)]))
+    const initial = await page.evaluate(() => window.pageState().viewport)
+    await page.mouse.move(1100, 400)
+    await page.keyboard.down('Control')
+    await page.mouse.wheel({ deltaY: 30 })
+    await page.keyboard.up('Control')
+    await page.waitForFunction((zoom) => window.pageState().viewport.zoom !== zoom, {}, initial.zoom)
+    const zoomed = await page.evaluate(() => window.pageState().viewport)
+    await page.mouse.wheel({ deltaY: 200 })
+    await page.waitForFunction((y) => window.pageState().viewport.y !== y, {}, zoomed.y)
+    const before = await page.evaluate(() => window.pageState().viewport)
+
+    await page.evaluate(() => window.openPage('second'))
+    await page.waitForSelector('iframe[title="target"]')
+    await page.evaluate(() => window.openPage('first'))
+    await page.waitForSelector('iframe[title="directory"]')
+    expect(await page.evaluate(() => window.pageState().viewport)).toEqual(before)
+
+    // A link to the already visited second page must override its saved fit.
+    await page.mouse.wheel({ deltaY: -75 })
+    await page.waitForFunction((y) => window.pageState().viewport.y !== y, {}, before.y)
+    const fromLink = await page.evaluate(() => {
+      const viewport = window.pageState().viewport
+      history.pushState(null, '', '?frame=target')
+      window.dispatchEvent(new PopStateEvent('popstate'))
+      return viewport
+    })
+    await waitState('the direct link overrides the saved view', () => window.pageState().selectedId === 'target')
+    expect(await page.evaluate(() => window.pageState().viewport)).toMatchObject({ x: -2500, zoom: 1 })
+    await page.evaluate(() => window.openPage('first'))
+    await page.waitForSelector('iframe[title="directory"]')
+    expect(await page.evaluate(() => window.pageState().viewport)).toEqual(fromLink)
+  })
+
+  it('starts at the top of a tall single-column page on first visit', async () => {
+    await load(
+      canvas([
+        { ...frame('directory', 'first', 0), width: 900, height: 4000 },
+        { ...frame('continued', 'first', 0), width: 900, y: 4100 },
+      ]),
+    )
+    const top = await page.$eval('iframe[title="directory"]', (el) => el.getBoundingClientRect().top)
+    const { zoom } = await page.evaluate(() => window.pageState().viewport)
+    expect(top).toBeGreaterThanOrEqual(0)
+    expect(top).toBeLessThan(200)
+    expect(zoom).toBeGreaterThanOrEqual(0.9)
+  })
+
   it('centers the linked frame on a different page instead of fitting its distant siblings', async () => {
     await load(
       canvas([frame('original', 'first', 0), frame('target', 'second', 3000), frame('distant', 'second', 12000)]),
@@ -105,7 +171,6 @@ describe.skipIf(!findBrowserPath())('page camera and snapping', { timeout: 30_00
       canvas([frame('original', 'first', 0), target]),
       `?${new URLSearchParams({ frame: target.id, element: 'h1h1h1' })}`,
     )
-    await page.waitForSelector('button[aria-label="Copy link to element"]')
     await page.waitForFunction((sel) => window.pageState().selectedElement?.selector === sel, {}, selector)
     expect(await page.evaluate(() => window.pageState())).toMatchObject({
       activePageId: pageId,
@@ -116,8 +181,8 @@ describe.skipIf(!findBrowserPath())('page camera and snapping', { timeout: 30_00
       viewport: { x: -2500, y: 300, zoom: 1 },
     })
 
-    // Copy through the actual element toolbar, then reopen the resulting URL.
-    await page.locator('button[aria-label="Copy link to element"]').click()
+    // Copy through the element's own menu, then reopen the resulting URL.
+    await copyLinkTo('h1')
     await page.waitForFunction(() => window.pageState().notice === 'Element link copied')
     const copied = await page.evaluate(() => navigator.clipboard.readText())
     const url = new URL(copied)
@@ -126,7 +191,6 @@ describe.skipIf(!findBrowserPath())('page camera and snapping', { timeout: 30_00
     expect(url.searchParams.get('element')).toBe('h1h1h1')
     expect(url.searchParams.has('selector')).toBe(false)
     await load(canvas([target]), url.search)
-    await page.waitForSelector('button[aria-label="Copy link to element"]')
     await page.waitForFunction((sel) => window.pageState().selectedElement?.selector === sel, {}, selector)
 
     // Deselecting still removes the probe and its panel after a deep link.
@@ -139,8 +203,8 @@ describe.skipIf(!findBrowserPath())('page camera and snapping', { timeout: 30_00
     const target = { ...frame('target', 'first', 0), html: '<main id="hero"><h1>Design</h1><p>Body</p></main>' }
     await load(canvas([target]), '?frame=target')
     await page.evaluate(() => window.pickElement('target', '#hero > p:nth-of-type(1)'))
-    await page.waitForSelector('button[aria-label="Copy link to element"]')
-    await page.locator('button[aria-label="Copy link to element"]').click()
+    await page.waitForFunction(() => window.pageState().selectedElement?.selector === '#hero > p:nth-of-type(1)')
+    await copyLinkTo('p')
     await page.waitForFunction(() => window.pageState().notice === 'Element link copied')
     const url = new URL(await page.evaluate(() => navigator.clipboard.readText()))
     const elementId = url.searchParams.get('element')!
@@ -151,6 +215,19 @@ describe.skipIf(!findBrowserPath())('page camera and snapping', { timeout: 30_00
     /* the stamped document answers the link it produced */
     await load(canvas([{ ...target, html: html! }]), url.search)
     await page.waitForFunction(() => window.pageState().selectedElement?.selector === '#hero > p:nth-of-type(1)')
+  })
+
+  it('lets a reader copy the link of the element they picked from the frame menu', async () => {
+    const target = {
+      ...frame('target', 'first', 0),
+      html: '<main id="hero"><h1 data-doop-id="h1h1h1">Design</h1></main>',
+    }
+    await load({ ...canvas([target]), role: 'view' }, '?frame=target&element=h1h1h1')
+    await page.waitForFunction(() => window.pageState().selectedElement?.selector === '#hero > h1:nth-of-type(1)')
+    await copyLinkTo('h1')
+    await page.waitForFunction(() => window.pageState().notice === 'Element link copied')
+    const url = new URL(await page.evaluate(() => navigator.clipboard.readText()))
+    expect(url.searchParams.get('element')).toBe('h1h1h1')
   })
 
   it('falls back to the frame when no element carries the linked id', async () => {
@@ -196,7 +273,6 @@ describe.skipIf(!findBrowserPath())('page camera and snapping', { timeout: 30_00
       </script>`,
     }
     await load(canvas([frame('original', 'first', 0), target]), '?frame=target&element=chart0')
-    await page.waitForSelector('button[aria-label="Copy link to element"]', { timeout: 5000 })
     await page.waitForFunction(() => window.pageState().selectedElement?.selector === '#chart')
     expect(await page.evaluate(() => window.pageState())).toMatchObject({
       activePageId: pageId,
@@ -208,12 +284,11 @@ describe.skipIf(!findBrowserPath())('page camera and snapping', { timeout: 30_00
     expect(await page.evaluate(() => window.pageState().notice)).toBeUndefined()
 
     /* the live element wears its id, so the link needs no stamp */
-    await page.locator('button[aria-label="Copy link to element"]').click()
+    await copyLinkTo('#chart')
     await page.waitForFunction(() => window.pageState().notice === 'Element link copied')
     const copied = await page.evaluate(() => navigator.clipboard.readText())
     expect(new URL(copied).searchParams.get('element')).toBe('chart0')
     await load(canvas([target]), new URL(copied).search)
-    await page.waitForSelector('button[aria-label="Copy link to element"]', { timeout: 5000 })
     await page.waitForFunction(() => window.pageState().selectedElement?.selector === '#chart')
   })
 
@@ -232,7 +307,6 @@ describe.skipIf(!findBrowserPath())('page camera and snapping', { timeout: 30_00
       inspectorOpen: true,
       notice: 'This element no longer exists. Showing its frame instead.',
     })
-    expect(await page.$('button[aria-label="Copy link to element"]')).toBeNull()
   })
 
   it('follows another element link and browser history within the same mounted canvas', async () => {
@@ -247,7 +321,6 @@ describe.skipIf(!findBrowserPath())('page camera and snapping', { timeout: 30_00
       window.dispatchEvent(new PopStateEvent('popstate'))
     })
     await waitState('second link', () => window.pageState().selectedElement?.selector === '#two')
-    await page.waitForSelector('button[aria-label="Copy link to element"]')
     await page.evaluate(() => history.back())
     await waitState('back to the first link', () => window.pageState().selectedElement?.selector === '#one')
     await page.evaluate(() => {
@@ -255,7 +328,6 @@ describe.skipIf(!findBrowserPath())('page camera and snapping', { timeout: 30_00
       window.dispatchEvent(new PopStateEvent('popstate'))
     })
     await waitState('frame-only link', () => window.pageState().inspectorOpen && !window.pageState().selectedElement)
-    await page.waitForSelector('button[aria-label="Copy link to element"]', { hidden: true })
   })
 
   it('does not snap a drag to the invisible frame on another page', async () => {

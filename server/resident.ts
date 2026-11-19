@@ -25,7 +25,9 @@ import { RESIDENT_TASK_LIMIT } from './allowance.ts'
 import * as actions from './actions.ts'
 import { captureFeature, captureTokenResults } from './featureEvents.ts'
 import { inspectFrame, renderFrame } from './screenshot.ts'
-import { AGENT_ROLES, DEFAULT_ROLE_ID, roleById, roleByAgentName, roleName, withoutMentions } from '../shared/agents.ts'
+import { AGENT_ROLES, DEFAULT_ROLE_ID, roleById, roleByAgentName, roleName } from '../shared/agents.ts'
+import { resolvePersonMentions, withoutAgentMentions, type Mentionable } from '../shared/personMentions.ts'
+import { commentPeople, threadAuthorIds } from './canvasPeople.ts'
 import type { AgentRole, Roster } from '../shared/agents.ts'
 import { runnerKey } from '../shared/agentRunner.ts'
 import * as imageSearch from './imageSearch.ts'
@@ -78,7 +80,7 @@ import {
   searchInspiration,
 } from './inspiration.ts'
 import type { Actor, AgentTask, Canvas, ElementComment, Frame } from '../shared/types.ts'
-import { canvasPages, framePageId, MAX_PAGE_NAME, pageFrames, samePages } from '../shared/pages.ts'
+import { canvasPages, framePageId, MAX_CANVAS_NAME, MAX_PAGE_NAME, pageFrames, samePages } from '../shared/pages.ts'
 import { addPage, pageList, parsePageList, savePages, updateFrameMeta } from './pageTools.ts'
 import { isCanvasComment, isFrameComment } from '../shared/comments.ts'
 import { websiteAccessErrorMessage } from './websiteAccess.ts'
@@ -1161,14 +1163,24 @@ export function replyInThread(
   actor: Actor,
   runState: Pick<RunState, 'repliedThreads' | 'awaitingThreads'>,
   awaiting = false,
+  /** the people it may tag (server/canvasPeople.ts commentPeople) */
+  people: readonly Mentionable[] = [],
 ): { ok: true; reply: ElementComment } | { ok: false; error: string } {
-  const clean = withoutMentions(text, actions.canvasRoster(canvasId)).trim()
+  /* agents' @mentions become plain names; people's stay, and are emailed */
+  const clean = withoutAgentMentions(text, actions.canvasRoster(canvasId), people).trim()
   if (!clean) return { ok: false, error: 'empty reply' }
   const found = actions.findComment(commentId)
   if (!found || found.canvasId !== canvasId) return { ok: false, error: 'no such comment on this canvas' }
   const open = actions.openThread(commentId)
   if (!open) return { ok: false, error: 'thread resolved, or its frame is gone' }
-  const reply = actions.replyToComment(commentId, clean, actor.name, undefined, 'agent')
+  const reply = actions.replyToComment(
+    commentId,
+    clean,
+    actor.name,
+    undefined,
+    'agent',
+    resolvePersonMentions(clean, people),
+  )
   if (!reply) return { ok: false, error: 'thread resolved meanwhile' }
   runState.repliedThreads.add(open.root.id)
   if (awaiting) runState.awaitingThreads.add(open.root.id)
@@ -1252,10 +1264,17 @@ const TOOLS: Anthropic.Tool[] = [
   {
     name: 'inspect_frame',
     description:
-      'Inspect the rendered page without relying on class names. Returns a compact semantic element outline, visible text, geometry, computed colors, typography, radii, shadows, and CSS variables. Use this before working with large frames and for cross-frame visual references.',
+      "Inspect the rendered page without relying on class names. Returns a compact semantic element outline, visible text, geometry, computed colors, typography, radii, shadows, and CSS variables, plus `problems`: content past the frame's edge, text cut off by its box, and text or controls overlapping (candidates to check against the screenshot; a deliberate overlap is fine). Pass selectors to report on those elements instead of the automatic outline. Use this before working with large frames, for cross-frame visual references and to pin down layout faults.",
     input_schema: {
       type: 'object',
-      properties: { frame_id: { type: 'string' } },
+      properties: {
+        frame_id: { type: 'string' },
+        selectors: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'CSS selectors to report on (up to 20 matches each) instead of the automatic outline',
+        },
+      },
       required: ['frame_id'],
     },
   },
@@ -1518,7 +1537,7 @@ const TOOLS: Anthropic.Tool[] = [
   {
     name: 'reply_to_comment',
     description:
-      'Answer inside a comment thread on this canvas — the person who left the comment sees it under their pin. Use it when a request needs a decision only they can make, or deserves a word mid-task; your final message is posted into every thread you worked on automatically, so do not repeat it here. Plain prose, no @mentions. Replying does not resolve the thread.',
+      'Answer inside a comment thread on this canvas — the person who left the comment sees it under their pin. Use it when a request needs a decision only they can make, or deserves a word mid-task; your final message is posted into every thread you worked on automatically, so do not repeat it here. Plain prose and no agent @mentions; to bring a person in, write @ and their name as the thread spells it ("@Ana Souza") and they are emailed. Replying does not resolve the thread.',
     input_schema: {
       type: 'object',
       properties: {
@@ -1717,6 +1736,16 @@ const TOOLS: Anthropic.Tool[] = [
         locked: { type: 'boolean', description: 'true keeps humans from selecting, moving or deleting it' },
       },
       required: ['frame_id'],
+    },
+  },
+  {
+    name: 'update_canvas',
+    description:
+      'Rename this canvas: the name on its tab and in the dashboard. Everyone viewing it sees the new name at once. Pages are renamed with set_canvas_pages, frames with update_frame.',
+    input_schema: {
+      type: 'object',
+      properties: { name: { type: 'string', description: 'The new canvas name' } },
+      required: ['name'],
     },
   },
   {
@@ -1983,7 +2012,9 @@ async function runResidentTool(
       case 'inspect_frame': {
         const f = store.getFrame(input.frame_id)
         if (!f || f.canvasId !== canvasId) return fail('frame not found on this canvas')
-        const inspection = await inspectFrame(f)
+        const asked = (input as Record<string, unknown>).selectors
+        const selectors = Array.isArray(asked) ? asked.filter((x): x is string => typeof x === 'string') : undefined
+        const inspection = await inspectFrame(f, { selectors })
         return ok(
           JSON.stringify({
             ...inspection,
@@ -2439,14 +2470,11 @@ async function runResidentTool(
       }
       case 'reply_to_comment': {
         const awaiting = (block.input as { awaiting_answer?: unknown }).awaiting_answer === true
-        const posted = replyInThread(
-          canvasId,
-          String(input.comment_id ?? ''),
-          String(input.text ?? ''),
-          actor,
-          runState,
-          awaiting,
-        )
+        const commentId = String(input.comment_id ?? '')
+        const thread = actions.findComment(commentId)
+        const canvas = store.getCanvas(canvasId)
+        const people = canvas && thread ? await commentPeople(canvas, threadAuthorIds(thread)) : []
+        const posted = replyInThread(canvasId, commentId, String(input.text ?? ''), actor, runState, awaiting, people)
         if (!posted.ok) return fail(posted.error)
         return ok(
           awaiting
@@ -2606,6 +2634,15 @@ async function runResidentTool(
         return ok(
           `frame ${frame.id} is now "${frame.name}" on page ${framePageId(canvas, frame)} at (${Math.round(frame.x)}, ${Math.round(frame.y)}), ${Math.round(frame.width)}x${Math.round(frame.height)}${frame.locked ? ', locked' : ''}`,
         )
+      }
+      case 'update_canvas': {
+        const name = typeof input.name === 'string' ? input.name.trim() : ''
+        if (!name || name.length > MAX_CANVAS_NAME) return fail(`name must be 1-${MAX_CANVAS_NAME} characters`)
+        const before = store.getCanvas(canvasId)?.name
+        const canvas = actions.renameCanvas(canvasId, name, actor)
+        if (!canvas) return fail('canvas not found')
+        if (canvas.name !== before) runState.arrangeWrites += 1
+        return ok(JSON.stringify({ name: canvas.name }))
       }
       case 'create_canvas_page': {
         const name = typeof input.name === 'string' ? input.name.trim() : ''

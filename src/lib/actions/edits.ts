@@ -38,6 +38,7 @@ import {
 } from '../layers'
 import { FLEX_ITEM_STYLE, flexItemStyle, groupStyle, planGroup, type GroupPlan } from '../groupLayout'
 import { isLayerLocked, saveFrameHtml, setFramesHidden, setLayersHidden, standaloneSelector } from '../layerEdits'
+import { groupableCanvasShapes, groupCanvasShapes, selectedCanvasGroup, ungroupCanvasGroup } from '../canvasGroups'
 import {
   alignBoxes,
   distributeEdges,
@@ -68,6 +69,18 @@ export function pickedLayers(): Picked | null {
   if (!picked || !frame) return null
   const selectors = pickedSelectors(s)
   return { frame, selectors, standalone: selectors.length === 1 && standaloneSelector(frame) === selectors[0] }
+}
+
+/** ⌘G has something to group: layers inside one frame, or two or more
+ *  shapes on the canvas. */
+export function canGroup(): boolean {
+  return hasInnerPick() || !!groupableCanvasShapes(selectedFrames())
+}
+
+/** ⇧⌘G has something to ungroup: layers inside one frame, or a group of
+ *  shapes on the canvas. */
+export function canUngroup(): boolean {
+  return hasInnerPick() || !!selectedCanvasGroup()
 }
 
 /** Layers inside a frame (not a standalone shape) are picked. */
@@ -266,6 +279,9 @@ function pickAfterRewrite(frame: Frame, selectors: string[]) {
 /** ⌘G (and ⌥⌘G, "Frame selection"): the picked layers wrapped in one box. */
 export function groupSelection(kind: 'group' | 'frame'): boolean {
   const p = pickedLayers()
+  /* shapes on the canvas group into the frontmost one; framing them is not a thing yet */
+  const shapes = kind === 'group' && (!p || p.standalone) ? groupableCanvasShapes(selectedFrames()) : null
+  if (shapes) return groupCanvasShapes(shapes, t('actions.groupName'))
   if (!p || p.standalone || p.frame.locked) return false
   if (p.selectors.some((s) => isLayerLocked(p.frame, s))) return false
   void groupKeepingLayout(p, kind === 'group' ? t('actions.groupName') : t('actions.frameName'))
@@ -554,6 +570,11 @@ async function groupKeepingLayout(p: Picked, name: string) {
 /** ⇧⌘G / ⌘⌫: each picked box gives way to what it holds. */
 export function ungroupSelection(): boolean {
   const p = pickedLayers()
+  const canvasGroup = !p || p.standalone ? selectedCanvasGroup() : null
+  if (canvasGroup) {
+    void ungroupCanvasGroup(canvasGroup)
+    return true
+  }
   if (!p || p.standalone || p.frame.locked) return false
   void ungroupKeepingPlaces(p)
   return true
