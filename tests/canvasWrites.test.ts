@@ -36,10 +36,10 @@ const {
 } = await import('../server/canvasWrites.ts')
 const { newInlineData } = await import('../server/inlineData.ts')
 const { blankComponent } = await import('../server/components.ts')
-const { updateComponent } = await import('../server/componentActions.ts')
+const { ComponentError, createComponentFromHtml, updateComponent } = await import('../server/componentActions.ts')
 const { COMPONENT_ATTR } = await import('../shared/components.ts')
 const { openTransaction, transaction } = await import('../server/journal.ts')
-const { runOperation, WorkBudgetError } = await import('../server/workBudget.ts')
+const { runOperation, usage, WorkBudgetError } = await import('../server/workBudget.ts')
 const { withArgsCanvases } = await import('../server/toolLoads.ts')
 const { execTool } = await import('../server/resident.ts')
 const { DEFAULT_ROLE_ID, roleName } = await import('../shared/agents.ts')
@@ -827,6 +827,177 @@ describe('design tokens through the canvas write entry', () => {
     expect(failed.is_error).toBe(true)
     expect(String(failed.content)).toContain('storage refused')
     expect(store.getTokenThemes(canvasId)).toEqual([])
+    expect(sent).toEqual([])
+  })
+})
+
+describe('component definitions through the canvas write entry', () => {
+  const chip = { name: 'Chip', html: '<span class="chip">Chip</span>', css: '.chip { color: red }' }
+  const componentNames = () => (store.getCanvas(canvasId)!.components ?? []).map((def) => def.name)
+  const residentState = () => ({
+    mutatedFrames: new Set<string>(),
+    sourceFrames: new Set<string>(),
+    verificationFrames: new Set<string>(),
+    verifiedFrames: new Set<string>(),
+    seenVerified: new Set<string>(),
+    rewriteDrafts: new Map<string, string>(),
+    vision: false,
+    imagesGenerated: 0,
+    repliedThreads: new Set<string>(),
+    awaitingThreads: new Set<string>(),
+    tokenWrites: 0,
+    arrangeWrites: 0,
+  })
+  /** The store refuses the `nth` component save from now on, as storage might. */
+  const refuseComponentSave = (nth: number) => {
+    let saves = 0
+    const save = store.saveComponent.bind(store)
+    return vi.spyOn(store, 'saveComponent').mockImplementation((...args) => {
+      saves += 1
+      if (saves === nth) throw new Error('storage refused')
+      return save(...args)
+    })
+  }
+
+  it('answers each command with what its action answers, and what the write left', async () => {
+    const created = await runCanvasWrite(canvasId, {
+      type: 'create-component',
+      from: { kind: 'html', ...chip },
+      actor: user,
+      view: true,
+    })
+    expect(created.component).toMatchObject({ name: 'Chip' })
+    expect(created.view?.entry).toMatchObject({ name: 'Chip' })
+    expect(created.view?.frames.map((frame) => frame.id)).toEqual([created.component.mainFrameId])
+
+    const batch = await runCanvasWrite(canvasId, {
+      type: 'create-components',
+      entries: [
+        { name: 'Badge', html: '<b class="badge">New</b>' },
+        { name: 'Card', html: '<div class="card"><doop-use component="Nowhere"></doop-use></div>' },
+      ],
+      actor: user,
+    })
+    expect(batch.map((entry) => entry.ok)).toEqual([true, false])
+    expect(batch[1]).toMatchObject({ ok: false, name: 'Card', error: expect.stringContaining('Nowhere') })
+    expect(componentNames()).toEqual(['Chip', 'Badge'])
+
+    const updated = await runCanvasWrite(canvasId, {
+      type: 'update-component',
+      component: 'Chip',
+      input: { find: '>Chip<', replace: '>Chip!<' },
+      actor: user,
+    })
+    expect(updated.component.rev).toBe(created.component.rev + 1)
+    /* not asked for: none built */
+    expect(updated.view).toBeUndefined()
+
+    const restored = await runCanvasWrite(canvasId, {
+      type: 'restore-component-version',
+      component: 'Chip',
+      rev: created.component.rev,
+      actor: user,
+    })
+    expect(restored.component.template).toContain('>Chip<')
+
+    expect(await runCanvasWrite(canvasId, { type: 'delete-component', component: 'Badge', actor: user })).toMatchObject(
+      { deleted: 'Badge' },
+    )
+    const back = await runCanvasWrite(canvasId, { type: 'restore-component', component: 'Badge', actor: user })
+    expect(back.component).toMatchObject({ name: 'Badge' })
+
+    /* a refusal rejects, as the action threw it */
+    await expect(
+      runCanvasWrite(canvasId, { type: 'update-component', component: 'Nobody', input: {}, actor: user }),
+    ).rejects.toBeInstanceOf(ComponentError)
+  })
+
+  it('costs a request what calling the action did: no view is built unless asked', async () => {
+    /* what a write parses, in an operation of its own, on a canvas of its own */
+    const parsed = async (write: () => Promise<unknown> | unknown) => {
+      canvasId = store.createCanvas('cost', 'ada').id
+      let bytes = 0
+      await runOperation('cost', canvasId, async () => {
+        await write()
+        bytes = usage().parsedBytes
+      })
+      return bytes
+    }
+    const update = { find: '>Chip<', replace: '>Chip!<' }
+    /* main's REST path: the actions, called directly */
+    const direct = await parsed(() => {
+      createComponentFromHtml(canvasId, chip, user)
+      updateComponent(canvasId, 'Chip', update, user)
+    })
+    const routed = await parsed(async () => {
+      await runCanvasWrite(canvasId, { type: 'create-component', from: { kind: 'html', ...chip }, actor: user })
+      await runCanvasWrite(canvasId, { type: 'update-component', component: 'Chip', input: update, actor: user })
+    })
+    expect(direct).toBeGreaterThan(0)
+    expect(routed).toBe(direct)
+  })
+
+  it('a rejected component command inside a request is undone, earlier writes too, and tells nobody', async () => {
+    const fails = refuseComponentSave(1)
+    const request = openTransaction()
+    await expect(
+      request.run(async () => {
+        await runCanvasWrite(canvasId, { type: 'set-token-themes', themes: ['dark'], actor: user })
+        await runCanvasWrite(canvasId, { type: 'create-component', from: { kind: 'html', ...chip }, actor: user })
+      }),
+    ).rejects.toThrow('storage refused')
+    request.rollback()
+    fails.mockRestore()
+    expect(store.getTokenThemes(canvasId)).toEqual([])
+    expect(componentNames()).toEqual([])
+    expect(store.getCanvas(canvasId)!.frames).toEqual([])
+    expect(sent).toEqual([])
+  })
+
+  it('a rejected component command inside an MCP tool call is undone, earlier writes too, and tells nobody', async () => {
+    const fails = refuseComponentSave(1)
+    await expect(
+      withArgsCanvases(
+        {},
+        async () => {
+          await runCanvasWrite(canvasId, { type: 'set-token-themes', themes: ['dark'], actor: agent })
+          await runCanvasWrite(canvasId, { type: 'create-component', from: { kind: 'html', ...chip }, actor: agent })
+        },
+        'create_component',
+      ),
+    ).rejects.toThrow('storage refused')
+    fails.mockRestore()
+    expect(store.getTokenThemes(canvasId)).toEqual([])
+    expect(componentNames()).toEqual([])
+    expect(sent).toEqual([])
+  })
+
+  it('a rejected component command inside a resident tool call answers an error, is undone, and tells nobody', async () => {
+    /* the second entry's save fails: the first, already made, goes with the tool call */
+    const first = refuseComponentSave(99)
+    await runCanvasWrite(canvasId, { type: 'create-component', from: { kind: 'html', ...chip }, actor: agent })
+    const savesPerComponent = first.mock.calls.length
+    first.mockRestore()
+    canvasId = store.createCanvas('writes', 'ada').id
+    sent = []
+    const fails = refuseComponentSave(savesPerComponent + 1)
+    const result = await execTool(
+      {
+        type: 'tool_use',
+        id: 't1',
+        name: 'create_components',
+        input: { components: [chip, { name: 'Badge', html: '<b class="badge">New</b>' }] },
+      },
+      canvasId,
+      actions.resolveActor({ name: roleName(DEFAULT_ROLE_ID), kind: 'agent' }),
+      residentState(),
+    )
+    expect(fails.mock.calls.length).toBeGreaterThan(savesPerComponent)
+    fails.mockRestore()
+    expect(result.is_error).toBe(true)
+    expect(String(result.content)).toContain('storage refused')
+    expect(componentNames()).toEqual([])
+    expect(store.getCanvas(canvasId)!.frames).toEqual([])
     expect(sent).toEqual([])
   })
 })

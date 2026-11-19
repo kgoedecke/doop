@@ -298,6 +298,14 @@ export function deletedComponentsInUse(canvas: Canvas, usage = usageByComponent(
   })
 }
 
+/** The frames a write of this component touched: every instance's frame and the main's, and any
+ *  others the write named, so a resident run counts the work and re-checks what it had verified. */
+export function touchedFrames(canvas: Canvas, def: ComponentDef, extra: readonly string[] = []): Frame[] {
+  const ids = new Set([...usageOf(canvas, def.id).frames.map((frame) => frame.id), ...extra])
+  if (def.mainFrameId) ids.add(def.mainFrameId)
+  return canvas.frames.filter((frame) => ids.has(frame.id))
+}
+
 /** The one-line catalog entry: little to read, enough to use the component without another call. */
 export function catalogEntry(canvas: Canvas, def: ComponentDef, usage = usageOf(canvas, def.id)) {
   return {
