@@ -967,10 +967,10 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
     async ({ canvas_id, tokens, agent_name }) => {
       if (!canvasFor(canvas_id, 'edit')) return noCanvas(canvas_id)
       const actor = actorFrom(agent_name)
-      const results = actions.createTokens(canvas_id, tokens, actor)
-      if (!results) return noCanvas(canvas_id)
-      captureTokenResults(ownerId, canvas_id, 'mcp', results)
-      return withFeedback(text({ results }), canvas_id, actor)
+      const written = await runCanvasWrite(canvas_id, { type: 'create-tokens', tokens, actor })
+      if (!written) return noCanvas(canvas_id)
+      captureTokenResults(ownerId, canvas_id, 'mcp', written.results)
+      return withFeedback(text({ results: written.results }), canvas_id, actor)
     },
   )
 
@@ -1006,14 +1006,17 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
     async ({ canvas_id, tokens, agent_name }) => {
       if (!canvasFor(canvas_id, 'edit')) return noCanvas(canvas_id)
       const actor = actorFrom(agent_name)
-      const results = actions.setTokens(
-        canvas_id,
-        tokens.map(({ new_name, ...rest }) => ({ ...rest, ...(new_name !== undefined ? { newName: new_name } : {}) })),
+      const written = await runCanvasWrite(canvas_id, {
+        type: 'set-tokens',
+        edits: tokens.map(({ new_name, ...rest }) => ({
+          ...rest,
+          ...(new_name !== undefined ? { newName: new_name } : {}),
+        })),
         actor,
-      )
-      if (!results) return noCanvas(canvas_id)
-      captureTokenResults(ownerId, canvas_id, 'mcp', results)
-      return withFeedback(text({ results }), canvas_id, actor)
+      })
+      if (!written) return noCanvas(canvas_id)
+      captureTokenResults(ownerId, canvas_id, 'mcp', written.results)
+      return withFeedback(text({ results: written.results }), canvas_id, actor)
     },
   )
 
@@ -1041,12 +1044,14 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
       if (!canvasFor(canvas_id, 'edit')) return noCanvas(canvas_id)
       const actor = actorFrom(agent_name)
       try {
-        const set = actions.setTokenThemes(canvas_id, themes, actor, renames ?? [])
+        const set = await runCanvasWrite(canvas_id, { type: 'set-token-themes', themes, renames, actor })
         if (!set) return noCanvas(canvas_id)
-        captureFeature(ownerId, 'token_themes_set', 'mcp', { canvas_id, theme_count: set.length })
-        return withFeedback(text({ ok: true, themes: set }), canvas_id, actor)
+        captureFeature(ownerId, 'token_themes_set', 'mcp', { canvas_id, theme_count: set.themes.length })
+        return withFeedback(text({ ok: true, themes: set.themes }), canvas_id, actor)
       } catch (e) {
-        return err(e instanceof Error ? e.message : 'invalid themes')
+        /* only a refusal of the list; anything else fails the tool call, its writes undone */
+        if (e instanceof actions.TokenThemesError) return err(e.message)
+        throw e
       }
     },
   )

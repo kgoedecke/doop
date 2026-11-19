@@ -656,7 +656,10 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   command carrying intent (`create-frame`, `write-frame`, `edit-frame-html` with its find and
   replace, `frame-meta`, `restack-frames`, `set-approval`, `agent-approval`, `delete-frame`,
   `restore-version`, `stamp-element-id`, `take-in-edit`, and for streams `append-frame-html`,
-  `settle-stream`, `close-stream`) and answering a typed result, read off its handler. An agent's
+  `settle-stream`, `close-stream`, and for tokens `create-tokens`, `set-tokens` (a rename rewrites
+  the frames naming the token; a value change writes no frame under lean storage) and
+  `set-token-themes` (a theme rename rewrites the frames naming it); each answers the tokens as
+  its write left them, and a refused theme list rejects with `TokenThemesError`) and answering a typed result, read off its handler. An agent's
   command carries its surface (`inline: 'mcp' | 'resident'`) and the host checks the HTML it adds
   for inline data against the frame as the host holds it, by that surface's rule (`heldForms` for
   MCP, read lazily; stored HTML for the resident; a chunk joined to its stream's tail). Contract for every host: always a promise, a failure only its rejection, awaited
@@ -674,8 +677,10 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   follower say so instead of settling or taking an edit in. A stream is settled only while it is
   still the one found idle (`lastActivity`); one whose settling fails for anything but its work
   budget is tried 3 times (`SETTLE_ATTEMPTS`, 1 s then 5 s apart), its error logged once, then
-  closed unsettled, as a budget refusal is; a pass never rejects. Not yet: tokens, components, the library, imports and ingest, comment
-  anchoring. Tests: `canvasWrites.test.ts`,
+  closed unsettled, as a budget refusal is; a pass never rejects. Tokens from REST, MCP and the resident go through it; their actor flush
+  (`noteActorToken`, `noteActorThemes`) runs beneath the actions, unchanged. Not yet: components,
+  the library (with the tokens an adopted component brings, `carryLibraryTokens`), imports and
+  ingest, comment anchoring. Tests: `canvasWrites.test.ts`,
   `writeBoundaryHttp.test.ts`.
 - `pg` 8.22.0 - Postgres driver for the real-database path.
 - Frame HTML in memory (`server/store.ts`, `server/frameHtml.ts`): the store keeps every canvas

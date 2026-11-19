@@ -3446,6 +3446,15 @@ export const setTokens = atomic(function setTokens(
 /** Replace the canvas's token themes (order included): a theme that leaves
  *  takes its values with it, and every frame is restyled. Throws on bad
  *  input with a message for the caller's error channel. */
+/** A theme list (or its renames) that `setTokenThemes` refuses as asked: the caller's answer
+ *  is "invalid themes" with this message. Anything else it throws is not a refusal of the list. */
+export class TokenThemesError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'TokenThemesError'
+  }
+}
+
 export const setTokenThemes = atomic(function setTokenThemes(
   canvasId: string,
   themes: unknown,
@@ -3453,8 +3462,8 @@ export const setTokenThemes = atomic(function setTokenThemes(
   renames: unknown = [],
 ): string[] | undefined {
   if (!store.getCanvas(canvasId)) return undefined
-  if (!Array.isArray(themes)) throw new Error('themes must be an array of names')
-  if (!Array.isArray(renames)) throw new Error('renames must be an array of { from, to }')
+  if (!Array.isArray(themes)) throw new TokenThemesError('themes must be an array of names')
+  if (!Array.isArray(renames)) throw new TokenThemesError('renames must be an array of { from, to }')
   /* every check runs against a simulated list before anything is written,
      so a bad request changes nothing */
   const before = store.getTokenThemes(canvasId)
@@ -3464,20 +3473,23 @@ export const setTokenThemes = atomic(function setTokenThemes(
     const entry = typeof raw === 'object' && raw !== null ? (raw as Record<string, unknown>) : {}
     const from = typeof entry.from === 'string' ? entry.from.trim().toLowerCase() : ''
     const to = typeof entry.to === 'string' ? entry.to.trim().toLowerCase() : ''
-    if (!isThemeName(to)) throw new Error(`invalid theme name “${String(entry.to)}” — use a lowercase slug like "dark"`)
+    if (!isThemeName(to))
+      throw new TokenThemesError(`invalid theme name “${String(entry.to)}” — use a lowercase slug like "dark"`)
     if (from === to) continue
-    if (!simulated.includes(from)) throw new Error(`no theme named “${from}”`)
-    if (simulated.includes(to)) throw new Error(`a theme named “${to}” already exists`)
+    if (!simulated.includes(from)) throw new TokenThemesError(`no theme named “${from}”`)
+    if (simulated.includes(to)) throw new TokenThemesError(`a theme named “${to}” already exists`)
     simulated = simulated.map((theme) => (theme === from ? to : theme))
     moves.push({ from, to })
   }
   const names: string[] = []
   for (const raw of themes) {
     const theme = typeof raw === 'string' ? raw.trim().toLowerCase() : ''
-    if (!isThemeName(theme)) throw new Error(`invalid theme name “${String(raw)}” — use a lowercase slug like "dark"`)
+    if (!isThemeName(theme))
+      throw new TokenThemesError(`invalid theme name “${String(raw)}” — use a lowercase slug like "dark"`)
     if (!names.includes(theme)) names.push(theme)
   }
-  if (names.length > MAX_TOKEN_THEMES) throw new Error(`a canvas has at most ${MAX_TOKEN_THEMES} token themes`)
+  if (names.length > MAX_TOKEN_THEMES)
+    throw new TokenThemesError(`a canvas has at most ${MAX_TOKEN_THEMES} token themes`)
   const same = simulated.length === names.length && simulated.every((theme, i) => theme === names[i])
   if (same && !moves.length) return names
 
