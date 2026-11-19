@@ -156,7 +156,13 @@ import { skillsRouter } from './skillRoutes.ts'
 import { activeAgentTasks } from '../shared/agentActivity.ts'
 import { colorFor } from '../shared/types.ts'
 import { agentKeyOf } from '../shared/agentIdentity.ts'
-import { CanvasMismatchError, FRAME_CHANGED, FrameVersionConflict, runCanvasWrite } from './canvasWrites.ts'
+import {
+  CanvasMismatchError,
+  FRAME_CHANGED,
+  FrameVersionConflict,
+  runCanvasWrite,
+  wireCanvasWrites,
+} from './canvasWrites.ts'
 import { isPeerViewport } from '../shared/viewport.ts'
 import { exportScaleSuffix, fitExportScale, fullFrameRenderScale, parseExportScale } from '../shared/exportScale.ts'
 import { emailShare } from './canvasShares.ts'
@@ -594,6 +600,9 @@ setInterval(() => {
 }, 5000)
 
 actions.wire(broadcast, agentTouch)
+/* idle streams settle, and a canvas actor's browser edits are taken in, through the canvas
+   write entry: wired here, once, rather than by importing it */
+wireCanvasWrites()
 /* asset_refs follow each frame as it renders, its components' stylesheets included */
 persist.viewAssetsThrough(composedHtml)
 /* frames rest as references into their canvas's components (server/frameRest.ts) */
@@ -3230,17 +3239,25 @@ app.put(
   }),
 )
 
-app.post('/api/frames/:id/append', (req, res) => {
-  if (!requireFrame(req, res, req.params.id, 'edit')) return
-  const { html_chunk, start, done } = req.body ?? {}
-  const actor = userActor(req)
-  const frame = actions.appendFrameHtml(req.params.id, String(html_chunk ?? ''), actor, {
-    start: !!start,
-    done: !!done,
-  })
-  if (!frame) return res.status(404).json({ error: 'frame not found' })
-  res.json({ ok: true, htmlBytes: frame.html.length })
-})
+app.post(
+  '/api/frames/:id/append',
+  writeRoute(async (req, res) => {
+    const current = requireFrame(req, res, req.params.id, 'edit')
+    if (!current) return
+    const { html_chunk, start, done } = req.body ?? {}
+    const actor = userActor(req)
+    const appended = await runCanvasWrite(current.canvasId, {
+      type: 'append-frame-html',
+      frameId: req.params.id,
+      chunk: String(html_chunk ?? ''),
+      actor,
+      start: !!start,
+      done: !!done,
+    })
+    if (!appended.ok) return res.status(404).json({ error: 'frame not found' })
+    res.json({ ok: true, htmlBytes: appended.frame.html.length })
+  }),
+)
 
 app.delete(
   '/api/frames/:id',

@@ -1,5 +1,5 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { Actor, ServerMessage } from '../shared/types'
+import { beforeEach, describe, expect, expectTypeOf, it, vi } from 'vitest'
+import type { Actor, Frame, ServerMessage } from '../shared/types'
 
 /* persistence is not under test: what the entry does with an operation is */
 vi.mock('../server/db/persist.ts', () => ({
@@ -13,6 +13,8 @@ vi.mock('../server/db/persist.ts', () => ({
   deleteFrame: () => {},
   frameWritePending: () => false,
   getFrameVersion: async () => undefined,
+  saveComponent: () => {},
+  deleteComponent: () => {},
   saveFeedback: () => {},
   saveComment: () => {},
   saveDecision: () => {},
@@ -21,10 +23,21 @@ vi.mock('../server/db/persist.ts', () => ({
 vi.mock('../server/fonts.ts', () => ({ fontsForCanvas: () => [] }))
 const actions = await import('../server/actions.ts')
 const { store } = await import('../server/store.ts')
-const { CanvasMismatchError, FRAME_CHANGED, FrameVersionConflict, runCanvasWrite } =
-  await import('../server/canvasWrites.ts')
+const {
+  CanvasMismatchError,
+  FRAME_CHANGED,
+  FrameVersionConflict,
+  runCanvasWrite,
+  settleIdleStreams,
+  settleRetriesPending,
+  wireCanvasWrites,
+} = await import('../server/canvasWrites.ts')
+const { newInlineData } = await import('../server/inlineData.ts')
+const { blankComponent } = await import('../server/components.ts')
+const { updateComponent } = await import('../server/componentActions.ts')
+const { COMPONENT_ATTR } = await import('../shared/components.ts')
 const { transaction } = await import('../server/journal.ts')
-const { runOperation } = await import('../server/workBudget.ts')
+const { runOperation, WorkBudgetError } = await import('../server/workBudget.ts')
 const { withArgsCanvases } = await import('../server/toolLoads.ts')
 const { execTool } = await import('../server/resident.ts')
 const { DEFAULT_ROLE_ID, roleName } = await import('../shared/agents.ts')
@@ -32,6 +45,9 @@ const { DEFAULT_ROLE_ID, roleName } = await import('../shared/agents.ts')
 /* The canvas write entry (server/canvasWrites.ts) and its local host: the server's own
    actions. Its contract: always a promise, a failure only ever its rejection, and every
    kind of operation that awaits it undone by that rejection as by a thrown error. */
+
+/* the take-in hook and the idle settler, as the server wires them at boot */
+wireCanvasWrites()
 
 const user: Actor = { name: 'Ada', kind: 'user', color: '#2743ee' }
 const agent: Actor = { name: 'Doop', kind: 'agent', color: '#000' }
@@ -80,7 +96,7 @@ describe('the canvas write entry, on its local host', () => {
       find: '<p>one</p>',
       replace: '<p>two</p>',
       actor: agent,
-      surface: 'mcp',
+      inline: 'mcp',
     })
     expect(edited.ok && edited.frame.html).toContain('<p>two</p>')
     expect(
@@ -90,7 +106,7 @@ describe('the canvas write entry, on its local host', () => {
         find: '<p>missing</p>',
         replace: '',
         actor: agent,
-        surface: 'mcp',
+        inline: 'mcp',
       }),
     ).toEqual({ ok: false, problem: { problem: 'not_found' } })
     expect(
@@ -100,7 +116,7 @@ describe('the canvas write entry, on its local host', () => {
         find: 'a',
         replace: 'b',
         actor: agent,
-        surface: 'mcp',
+        inline: 'mcp',
       }),
     ).toEqual({ ok: false, missing: true })
     const inline = await runCanvasWrite(canvasId, {
@@ -109,7 +125,7 @@ describe('the canvas write entry, on its local host', () => {
       find: '<p>two</p>',
       replace: `<img src="data:image/png;base64,${'A'.repeat(64)}">`,
       actor: agent,
-      surface: 'resident',
+      inline: 'resident',
     })
     expect(inline.ok).toBe(false)
     expect('inline' in inline && inline.inline).toEqual(expect.any(String))
@@ -327,5 +343,350 @@ describe('a rejected canvas write inside each kind of operation', () => {
     expect(String(result.content)).toContain('storage refused')
     expect(store.getFrame(frame.id)?.html).toContain('<p>before</p>')
     expect(sent).toEqual([])
+  })
+})
+
+describe('streams through the canvas write entry', () => {
+  const base64 = (chars: number) => 'QUJD'.repeat(Math.ceil(chars / 4)).slice(0, chars)
+
+  it('appends a chunk, and answers a frame that is gone as missing', async () => {
+    const frame = actions.createFrame(canvasId, { name: 'Streamed' }, agent)!
+    const first = await runCanvasWrite(canvasId, {
+      type: 'append-frame-html',
+      frameId: frame.id,
+      chunk: '<!doctype html><html><head></head><body><p>one</p>',
+      actor: agent,
+      start: true,
+      inline: 'mcp',
+    })
+    expect(first.ok && first.frame.html).toContain('<p>one</p>')
+    expect(actions.isFrameMidStream(frame.id)).toBe(true)
+    const last = await runCanvasWrite(canvasId, {
+      type: 'append-frame-html',
+      frameId: frame.id,
+      chunk: '<p>two</p></body></html>',
+      actor: agent,
+      done: true,
+    })
+    expect(last.ok && last.frame.html).toContain('<p>two</p>')
+    expect(actions.isFrameMidStream(frame.id)).toBe(false)
+    expect(
+      await runCanvasWrite(canvasId, { type: 'append-frame-html', frameId: 'gone', chunk: 'x', actor: agent }),
+    ).toEqual({ ok: false, missing: true })
+  })
+
+  it('refuses a chunk that adds inline data, in the words the MCP tool used, and writes nothing', async () => {
+    const frame = actions.createFrame(canvasId, { name: 'Inline' }, agent)!
+    const html = '<!doctype html><html><head></head><body>'
+    await runCanvasWrite(canvasId, {
+      type: 'append-frame-html',
+      frameId: frame.id,
+      chunk: html,
+      actor: agent,
+      start: true,
+      inline: 'mcp',
+    })
+    const whole = await runCanvasWrite(canvasId, {
+      type: 'append-frame-html',
+      frameId: frame.id,
+      chunk: `<img src="data:image/png;base64,${base64(64)}">`,
+      actor: agent,
+      inline: 'mcp',
+    })
+    expect(!whole.ok && 'inline' in whole && whole.inline).toMatch(/^Refused, nothing was written:/)
+    /* a block of base64 sent in two chunks, each too short to be one: the second completes it */
+    const half = base64(3000)
+    expect(
+      (
+        await runCanvasWrite(canvasId, {
+          type: 'append-frame-html',
+          frameId: frame.id,
+          chunk: `<script>const a = "${half}`,
+          actor: agent,
+          inline: 'mcp',
+        })
+      ).ok,
+    ).toBe(true)
+    const completing = await runCanvasWrite(canvasId, {
+      type: 'append-frame-html',
+      frameId: frame.id,
+      chunk: `${half}"</script>`,
+      actor: agent,
+      inline: 'mcp',
+    })
+    expect(!completing.ok && 'inline' in completing && completing.inline).toMatch(
+      /^Refused, this chunk was not written:[\s\S]*Begin the frame again \(start=true\)/,
+    )
+    expect(store.getFrame(frame.id)?.html).not.toContain(`${half}"`)
+    /* the same chunk from a writer that is not checked (a person, the demo) is written */
+    expect(
+      (
+        await runCanvasWrite(canvasId, {
+          type: 'append-frame-html',
+          frameId: frame.id,
+          chunk: `<img src="data:image/png;base64,${base64(64)}">`,
+          actor: user,
+        })
+      ).ok,
+    ).toBe(true)
+  })
+
+  it('checks a whole frame by each surface’s rule, only for commands that ask', async () => {
+    const uri = `data:image/png;base64,${base64(64)}`
+    const refused = await runCanvasWrite(canvasId, {
+      type: 'create-frame',
+      input: { name: 'Agent', html: doc(`<img src="${uri}">`) },
+      actor: agent,
+      inline: 'resident',
+    })
+    expect(refused).toMatchObject({
+      ok: false,
+      inline: expect.stringMatching(/^Refused, nothing was written:/),
+    })
+    expect(store.getCanvas(canvasId)!.frames.some((frame) => frame.name === 'Agent')).toBe(false)
+    /* a person's frame is not checked */
+    const kept = await runCanvasWrite(canvasId, {
+      type: 'create-frame',
+      input: { name: 'Person', html: doc(`<img src="${uri}">`) },
+      actor: user,
+    })
+    expect(kept?.html).toContain(uri)
+    /* a rewrite may carry over what the frame holds, on either surface */
+    for (const surface of ['mcp', 'resident'] as const) {
+      const carried = await runCanvasWrite(canvasId, {
+        type: 'write-frame',
+        frameId: kept!.id,
+        patch: { html: doc(`<p>${surface}</p><img src="${uri}">`) },
+        actor: agent,
+        inline: surface,
+      })
+      expect(carried && 'inline' in carried).toBe(false)
+    }
+    const added = await runCanvasWrite(canvasId, {
+      type: 'write-frame',
+      frameId: kept!.id,
+      patch: { html: doc(`<img src="data:image/gif;base64,${base64(64)}">`) },
+      actor: agent,
+      inline: 'mcp',
+    })
+    expect(added).toMatchObject({ ok: false, inline: expect.any(String) })
+    /* a frame that is not there is checked as holding nothing, never skipped */
+    expect(
+      await runCanvasWrite(canvasId, {
+        type: 'write-frame',
+        frameId: 'gone',
+        patch: { html: doc(`<img src="${uri}">`) },
+        actor: agent,
+        inline: 'mcp',
+      }),
+    ).toMatchObject({ ok: false, inline: expect.any(String) })
+    expect(store.getFrame(kept!.id)?.html).toContain('<p>resident</p>')
+  })
+
+  it('reads what a frame holds only once a candidate is found, and then once', () => {
+    let reads = 0
+    const held = () => {
+      reads++
+      return ''
+    }
+    expect(newInlineData('<p>nothing here</p>', held)).toEqual([])
+    expect(reads).toBe(0)
+    newInlineData(`<img src="data:image/png;base64,QUJD"><img src="data:image/gif;base64,REVG">`, held)
+    expect(reads).toBe(1)
+  })
+
+  it('a rejected chunk is undone inside its operation, opens no stream and tells nobody', async () => {
+    const frame = actions.createFrame(canvasId, { name: 'Refused', html: doc('<p>before</p>') }, agent)!
+    sent = []
+    const fails = refuseNextWrite()
+    await expect(
+      runOperation('mcp append_frame_html', canvasId, () =>
+        runCanvasWrite(canvasId, {
+          type: 'append-frame-html',
+          frameId: frame.id,
+          chunk: '<!doctype html><html><body><p>after',
+          actor: agent,
+          start: true,
+          inline: 'mcp',
+        }),
+      ),
+    ).rejects.toThrow('storage refused')
+    fails.mockRestore()
+    expect(store.getFrame(frame.id)?.html).toContain('<p>before</p>')
+    expect(actions.isFrameMidStream(frame.id)).toBe(false)
+    expect(sent).toEqual([])
+  })
+
+  it('settles an idle stream through the entry, and closes one whose settling is refused', async () => {
+    const settledFrame = actions.createFrame(canvasId, { name: 'Idle' }, agent)!
+    actions.appendFrameHtml(settledFrame.id, '<!doctype html><html><head></head><body><p>half', agent, { start: true })
+    sent = []
+    await settleIdleStreams(Date.now() + 60_000)
+    expect(actions.isFrameMidStream(settledFrame.id)).toBe(false)
+    expect(types()).toContain('frame:streaming')
+
+    /* a stream that is behind its component, so that settling it rewrites the frame */
+    const def = blankComponent({ name: 'Pill', by: 'Tester', props: [] })
+    store.saveComponent(canvasId, def)
+    const main = actions.createFrame(canvasId, { name: 'Pill main', html: '' }, user)!
+    actions.updateFrame(main.id, { html: doc(`<div class="pill" ${COMPONENT_ATTR}="${def.id}">Old</div>`) }, user)
+    const refusedFrame = actions.createFrame(canvasId, { name: 'Too heavy' }, agent)!
+    actions.appendFrameHtml(refusedFrame.id, doc(`<doop-use component="${def.id}"></doop-use>`), agent, {
+      start: true,
+    })
+    updateComponent(canvasId, def.id, { html: `<div class="pill">Fresh</div>` }, user)
+    const html = store.getFrame(refusedFrame.id)!.html
+    expect(html).not.toContain('Fresh')
+    const refuses = vi.spyOn(store, 'updateFrame').mockImplementationOnce(() => {
+      throw new WorkBudgetError('settle', canvasId, 'bytes')
+    })
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
+    await settleIdleStreams(Date.now() + 60_000)
+    const refusedOnce = refuses.mock.calls.length
+    refuses.mockRestore()
+    logged.mockRestore()
+    expect(refusedOnce).toBeGreaterThan(0)
+    /* the settling was undone, the stream closed all the same */
+    expect(actions.isFrameMidStream(refusedFrame.id)).toBe(false)
+    expect(store.getFrame(refusedFrame.id)?.html).toBe(html)
+  })
+})
+
+describe('settling idle streams', () => {
+  /** A stream whose settling rewrites its frame: it uses a component that changed since. */
+  function streamBehindItsComponent(name: string) {
+    const def = blankComponent({ name, by: 'Tester', props: [] })
+    store.saveComponent(canvasId, def)
+    const main = actions.createFrame(canvasId, { name: `${name} main`, html: '' }, user)!
+    actions.updateFrame(main.id, { html: doc(`<div class="pill" ${COMPONENT_ATTR}="${def.id}">Old</div>`) }, user)
+    const frame = actions.createFrame(canvasId, { name: `${name} page` }, agent)!
+    actions.appendFrameHtml(frame.id, doc(`<doop-use component="${def.id}"></doop-use>`), agent, { start: true })
+    updateComponent(canvasId, def.id, { html: `<div class="pill">Fresh</div>` }, user)
+    return frame
+  }
+
+  it('leaves open a stream that receives a chunk while an earlier one settles', async () => {
+    const first = actions.createFrame(canvasId, { name: 'First' }, agent)!
+    const second = actions.createFrame(canvasId, { name: 'Second' }, agent)!
+    for (const frame of [first, second])
+      actions.appendFrameHtml(frame.id, '<!doctype html><html><head></head><body><p>half', agent, { start: true })
+    /* the chunk below must not share a millisecond with the streams' last activity */
+    await new Promise((resolve) => setTimeout(resolve, 5))
+    const pass = settleIdleStreams(Date.now() + 60_000)
+    /* the first is settled by now (the local host writes when called); the pass awaits it */
+    expect(actions.isFrameMidStream(first.id)).toBe(false)
+    actions.appendFrameHtml(second.id, '<p>more</p>', agent)
+    await pass
+    expect(actions.isFrameMidStream(second.id)).toBe(true)
+    expect(store.getFrame(second.id)?.html).toContain('<p>more</p>')
+  })
+
+  it('retries a failing settle after 1 s and 5 s, then closes the stream, saying so', async () => {
+    const frame = streamBehindItsComponent('Failing')
+    const html = store.getFrame(frame.id)!.html
+    const fails = vi.spyOn(store, 'updateFrame').mockImplementation(() => {
+      throw new Error('storage refused')
+    })
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
+    /* the clock alone is faked: settling sets no timer of its own */
+    vi.useFakeTimers({ toFake: ['Date'], now: Date.now() + 60_000 })
+    const pass = async (advance: number) => {
+      vi.setSystemTime(Date.now() + advance)
+      await settleIdleStreams()
+    }
+    const tries = () => fails.mock.calls.length
+    try {
+      await pass(0)
+      const once = tries()
+      expect(once).toBeGreaterThan(0)
+      await pass(999) /* too soon: not tried */
+      expect(tries()).toBe(once)
+      await pass(1)
+      const twice = tries()
+      expect(twice).toBeGreaterThan(once)
+      expect(actions.isFrameMidStream(frame.id)).toBe(true)
+      await pass(4_999) /* too soon */
+      expect(tries()).toBe(twice)
+      await pass(1)
+      expect(tries()).toBeGreaterThan(twice)
+    } finally {
+      vi.useRealTimers()
+      fails.mockRestore()
+    }
+    const lines = logged.mock.calls.map((call) => String(call[0]))
+    logged.mockRestore()
+    expect(actions.isFrameMidStream(frame.id)).toBe(false)
+    expect(store.getFrame(frame.id)?.html).toBe(html)
+    /* the error once, with its stack, and the close */
+    expect(lines.filter((line) => line.includes('settling the stream of frame'))).toHaveLength(1)
+    expect(lines.filter((line) => line.includes('closed the stream of frame'))).toHaveLength(1)
+    expect(settleRetriesPending()).toBe(0)
+  })
+
+  it('forgets a failed settle once its stream has closed another way', async () => {
+    const frame = streamBehindItsComponent('Forgotten')
+    const fails = vi.spyOn(store, 'updateFrame').mockImplementationOnce(() => {
+      throw new Error('storage refused')
+    })
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
+    await settleIdleStreams(Date.now() + 60_000)
+    fails.mockRestore()
+    logged.mockRestore()
+    expect(settleRetriesPending()).toBe(1)
+    /* the agent sends its last chunk after all */
+    actions.appendFrameHtml(frame.id, '</body></html>', agent, { done: true })
+    expect(actions.isFrameMidStream(frame.id)).toBe(false)
+    await settleIdleStreams(Date.now() + 60_000)
+    expect(settleRetriesPending()).toBe(0)
+  })
+
+  it('never rejects: a throw while closing, or anywhere in a pass, is logged, and the next pass runs', async () => {
+    const frame = streamBehindItsComponent('Throwing')
+    const refuses = vi.spyOn(store, 'updateFrame').mockImplementationOnce(() => {
+      throw new WorkBudgetError('settle', canvasId, 'bytes')
+    })
+    /* the log line after a close throws: the close's own guard catches it */
+    const logged = vi.spyOn(console, 'error').mockImplementation((line: unknown) => {
+      if (String(line).includes('closed the stream of frame')) throw new Error('the log broke')
+    })
+    await expect(settleIdleStreams(Date.now() + 60_000)).resolves.toBeUndefined()
+    refuses.mockRestore()
+    expect(actions.isFrameMidStream(frame.id)).toBe(false)
+    expect(logged.mock.calls.some(([line]) => String(line).includes('could not close'))).toBe(true)
+
+    /* a throw outside the close (here the budget line itself): the pass's guard catches it */
+    const other = streamBehindItsComponent('Throwing again')
+    const refusesAgain = vi.spyOn(store, 'updateFrame').mockImplementationOnce(() => {
+      throw new WorkBudgetError('settle', canvasId, 'bytes')
+    })
+    logged.mockImplementation((line: unknown) => {
+      if (String(line).startsWith('[streams] ') && String(line).includes('was stopped'))
+        throw new Error('the log broke')
+    })
+    await expect(settleIdleStreams(Date.now() + 60_000)).resolves.toBeUndefined()
+    refusesAgain.mockRestore()
+    expect(logged.mock.calls.some(([line]) => String(line).includes('settling idle streams failed'))).toBe(true)
+    logged.mockRestore()
+
+    /* and the next pass runs, and settles */
+    expect(actions.isFrameMidStream(other.id)).toBe(true)
+    await settleIdleStreams(Date.now() + 60_000)
+    expect(actions.isFrameMidStream(other.id)).toBe(false)
+  })
+
+  it('answers an inline refusal, by type, exactly when the command may carry inline', () => {
+    const appendUnchecked = () =>
+      runCanvasWrite('c', { type: 'append-frame-html', frameId: 'f', chunk: '', actor: user })
+    expectTypeOf<Awaited<ReturnType<typeof appendUnchecked>>>().toEqualTypeOf<
+      { ok: true; frame: Frame } | { ok: false; missing: true }
+    >()
+    const surface = undefined as 'mcp' | 'resident' | undefined
+    const appendMaybe = () =>
+      runCanvasWrite('c', { type: 'append-frame-html', frameId: 'f', chunk: '', actor: user, inline: surface })
+    expectTypeOf<Awaited<ReturnType<typeof appendMaybe>>>().toEqualTypeOf<
+      { ok: true; frame: Frame } | { ok: false; missing: true } | { ok: false; inline: string }
+    >()
+    const createUnchecked = () => runCanvasWrite('c', { type: 'create-frame', input: { name: 'x' }, actor: user })
+    expectTypeOf<Awaited<ReturnType<typeof createUnchecked>>>().toEqualTypeOf<Frame | undefined>()
   })
 })

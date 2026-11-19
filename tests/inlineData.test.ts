@@ -354,7 +354,7 @@ describe('over MCP', () => {
       expect(last.text).toContain('<doop-use component="Card"> is opened')
       expect(store.getFrame(frameId)!.html).toBe(streamed)
       /* the refusal counts as the agent at work: the idle sweep 15s on leaves the stream open */
-      actions.expireIdleStreams(Date.now() + 15_000)
+      await (await import('../server/canvasWrites.ts')).settleIdleStreams(Date.now() + 15_000)
       expect(actions.isFrameMidStream(frameId)).toBe(true)
 
       const again = await call('append_frame_html', {

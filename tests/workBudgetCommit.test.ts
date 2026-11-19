@@ -84,6 +84,7 @@ vi.mock('parse5', async (original) => {
 
 import { store } from '../server/store.ts'
 import * as actions from '../server/actions.ts'
+import { settleIdleStreams } from '../server/canvasWrites.ts'
 import * as propagation from '../server/propagation.ts'
 import { blankComponent } from '../server/components.ts'
 import { publishedOn, publishLibrary } from '../server/componentLibrary.ts'
@@ -455,7 +456,7 @@ const OPERATIONS: Record<string, Case> = {
         actor,
         { start: true },
       ),
-    run: () => actions.expireIdleStreams(Date.now() + 10 * 60_000),
+    run: () => settleIdleStreams(Date.now() + 10 * 60_000),
   },
   /* ---- components: the tools, as MCP and the resident agent share them ---- */
   'create_component (the tool) from markup': {
