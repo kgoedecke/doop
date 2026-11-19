@@ -39,8 +39,9 @@ function newSkillPath(scope: AgentScope): string {
 
 /**
  * The `/handle` menu of a field whose text can ask for a skill (the composer,
- * comments, an automation's agent step, Home's prompt box): typing `/` lists the canvas's
- * skills, more letters narrow it, ↑↓ move, Enter or Tab writes `/handle `,
+ * comments, an automation's agent step, Home's prompt box, an agent's
+ * Instructions): typing `/` lists the canvas's skills, more letters narrow it,
+ * ↑↓ move, Enter or Tab writes `/handle `,
  * Esc closes. Focus never leaves the field. With nothing matching the menu
  * closes, so Enter keeps doing what the field does.
  *

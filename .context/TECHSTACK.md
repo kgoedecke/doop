@@ -123,12 +123,12 @@
   first five the canvas's scope has as a cached system block after the guidelines, on both the API
   and harness paths; a handle with no skill changes nothing. Skill text never reaches canvas
   viewers. Route: `/api/skills` (`?workspace=`, members only). Typing `/` in the composer, a
-  comment, a reply, an automation's agent step or Home's prompt box opens `useSkillMenu` (`src/components/SkillMenu.tsx`,
+  comment, a reply, an automation's agent step, Home's prompt box or an agent's Instructions opens `useSkillMenu` (`src/components/SkillMenu.tsx`,
   `partialHandleAt`), fed by `GET /api/canvases/:id/skills` (edit role, handle and description
   only, plus `addIn`: where this viewer may add one); Home, before its canvas exists, reads
   `/api/skills` for the scope it will make the canvas in. The composer also has a Skills button that
   writes the `/`, and its menu ends with "New skill", the skills card's form via `?skill=new`. Tests: `skills.test.ts`, `skillsHttp.test.ts`, `residentSkills.test.ts`,
-  `skillMenu.test.tsx`, `skillsCard.test.tsx`.
+  `skillMenu.test.tsx`, `skillsCard.test.tsx`, `agentInstructionsSkills.test.tsx`.
 - Agent feedback (`server/agentFeedback.ts`, `shared/agentFeedback.ts`): agents talk to the Doop
   team through two MCP tools, which the resident agent has under the same names. `report_issue`
   (kind `issue`: `bug`, `tool_error`, `confusing`, `missing_capability`, `other`) is for where Doop
