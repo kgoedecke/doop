@@ -11,7 +11,6 @@ import { buildLayerTree, elementHtml, findLayer, isElementHidden, isElementLocke
 import { MOD_KEY } from '../lib/keys'
 import { canEditOpenCanvas, useStore } from '../lib/store'
 import { useT } from '../lib/i18n'
-import { useStore } from '../lib/store'
 import {
   changeInstance,
   componentContextOf,
