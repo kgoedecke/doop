@@ -3,10 +3,10 @@ import type { Frame } from '../../shared/types'
 import { useStore } from '../lib/store'
 import { api, errorMessage } from '../lib/api'
 import { beginFrameSave } from '../lib/frameSaves'
-import { copyFramePng, downloadFrameExport, downloadFrameHtml } from '../lib/frameExport'
+import { copyFramePng, downloadFrameExport, downloadFrameHtml, downloadFramesPdf } from '../lib/frameExport'
 import { setExportSettings, useExportSettings } from '../lib/exportSettings'
 import { fitExportScale, formatExportScale } from '../../shared/exportScale'
-import { ExportOptions } from './ExportOptions'
+import { ExportOptions, FRAME_FORMATS } from './ExportOptions'
 import { deleteFrameTracked, recordUpdate, trackSave } from '../lib/history'
 import { setFramesLocked } from '../lib/layerEdits'
 import { FrameHistoryModal } from './FrameHistoryModal'
@@ -316,7 +316,7 @@ export function Inspector({
         <InspectorGroup title={t('inspector.groupExport')}>
           <div className="grid grid-cols-2 gap-1.5">
             <div className="col-span-2">
-              <ExportOptions value={exportSettings} onChange={setExportSettings} compact />
+              <ExportOptions value={exportSettings} onChange={setExportSettings} formats={FRAME_FORMATS} compact />
             </div>
             <Button
               variant="bare"
@@ -324,7 +324,8 @@ export function Inspector({
               title={t('inspector.exportImageTitle')}
               onClick={() => {
                 trackExport(exportSettings.format, 1, 'inspector')
-                void downloadFrameExport(frame, exportSettings.format, exportSettings.scale)
+                if (exportSettings.format === 'pdf') void downloadFramesPdf(frame.canvasId, [frame])
+                else void downloadFrameExport(frame, exportSettings.format, exportSettings.scale)
               }}
             >
               <DownloadIcon className="size-3.5" />

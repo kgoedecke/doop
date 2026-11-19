@@ -75,3 +75,9 @@ it('copies the layer as a PNG at the shared scale', () => {
   expect(copyElementPng).toHaveBeenCalledWith(frame, target, 3)
   expect(posthog.capture).toHaveBeenCalledWith('png_copied', { target: 'element', source: 'element_panel' })
 })
+
+it('exports the layer as PNG while the frame format is PDF, which a layer has none of', () => {
+  act(() => setExportSettings({ scale: 2, format: 'pdf' }))
+  act(() => button('Export Pricing card').click())
+  expect(downloadElementExport).toHaveBeenCalledWith(frame, target, 'png', 2)
+})

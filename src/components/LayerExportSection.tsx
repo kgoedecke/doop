@@ -1,7 +1,7 @@
 import type { Frame } from '../../shared/types'
 import { fitExportScale, formatExportScale } from '../../shared/exportScale'
 import { trackExport, trackPngCopy } from '../lib/exportEvents'
-import { setExportSettings, useExportSettings } from '../lib/exportSettings'
+import { elementFormat, setExportSettings, useExportSettings } from '../lib/exportSettings'
 import { copyElementPng, downloadElementExport, type ElementTarget } from '../lib/frameExport'
 import { useT } from '../lib/i18n'
 import { cn } from '@/lib/utils'
@@ -28,8 +28,9 @@ export function LayerExportSection({ frame, target }: { frame: Frame; target: El
           className={cn(actionClass, 'min-w-0 gap-1.5')}
           title={t('inspector.exportLayerTitle')}
           onClick={() => {
-            trackExport(settings.format, 1, 'element_panel', 'element')
-            void downloadElementExport(frame, target, settings.format, settings.scale)
+            const format = elementFormat(settings.format)
+            trackExport(format, 1, 'element_panel', 'element')
+            void downloadElementExport(frame, target, format, settings.scale)
           }}
         >
           <DownloadIcon className="size-3.5 flex-none" />
