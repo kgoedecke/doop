@@ -41,6 +41,7 @@ import { hasElementId, stampElementId } from './elementIds.ts'
 import { decodeEscapedHtml, looksEscapedHtml, repairEscapedHtml } from './escapedHtml.ts'
 import { forgetLibrary } from './componentLibrary.ts'
 import { withCanvasFaces, withCanvasFacesMidStream } from './canvasFaces.ts'
+import { EMBEDDED_MIN_LENGTH } from './inlineData.ts'
 import {
   MAX_TOKENS,
   MAX_TOKEN_DESCRIPTION,
@@ -1808,12 +1809,15 @@ interface StreamState {
   /** the frame's HTML before the opening chunk replaced it: what a later chunk
    *  may carry over (server/inlineData.ts compares against it) */
   base: string
-  /** the end of the agent's last chunk as it sent it, before components expanded:
-   *  enough to catch a data: URI prefix split across two chunks */
+  /** the end of the agent's stream as it sent it, before components expanded: what the
+   *  next chunk is joined to, so base64 split across chunks is seen whole */
   tail: string
 }
 
-const STREAM_TAIL_CHARS = 256
+/* enough for a data: URI's prefix split across two chunks, and for a block of base64 text sent
+   in pieces: a run is refused once it reaches EMBEDDED_MIN_LENGTH (server/inlineData.ts), so one
+   still growing at the end of the stream is shorter than that and is held here whole */
+const STREAM_TAIL_CHARS = Math.max(256, EMBEDDED_MIN_LENGTH)
 
 const streams = new Map<string, StreamState>() // frameId -> state
 

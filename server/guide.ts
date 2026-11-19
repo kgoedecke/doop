@@ -198,7 +198,8 @@ export const FRAME_STYLES = `- Style an element on the element itself: style="â€
  *  guide and the resident agents' system prompt. */
 export const LEAN_FRAMES = `- Frames carry markup, never files. A frame is sent whole to every viewer and agent on each
   edit, so anything pasted into it is paid for on every round-trip. A base64 data: URI of any
-  kind is refused and nothing is written. Put each heavy thing where it belongs:
+  kind is refused and nothing is written, and so is a long block of base64 text in a script or
+  anywhere else (a packed bundle, a compressed data file). Put each heavy thing where it belongs:
   - Fonts: a family the canvas library or the hosted fonts already have is used by name alone.
     Any other font file goes into the library with upload_font, then is named in CSS: never an
     @font-face with the file inlined.
@@ -213,7 +214,9 @@ export const LEAN_FRAMES = `- Frames carry markup, never files. A frame is sent 
     <script src> or <link>, never pasted in. Better still, write only the CSS the design uses.
   - Data: a chart or table needs a few representative rows, not the dataset. Keep inline JSON to a
     few KB.
-  - Icon sets: hotlink each icon you use from search_icons, not a sprite sheet of the whole set.`
+  - Icon sets: hotlink each icon you use from search_icons, not a sprite sheet of the whole set.
+  - An application: a frame is one screen. Never pack an app's bundles and pages into a frame to
+    make it clickable; put each screen in its own frame and wire them as a prototype.`
 
 export const COMPONENTS = `A component is one design used in many places: change its main and every instance follows.
 get_canvas and list_components show a canvas's components with their props.
