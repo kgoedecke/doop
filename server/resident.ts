@@ -3,7 +3,7 @@ import { MAX_DECISION_CHARS } from '../shared/designDecisions.ts'
 import { isAgentsTask } from '../shared/agentIdentity.ts'
 import type Anthropic from '@anthropic-ai/sdk'
 import { store } from './store.ts'
-import { composedHtml, wholeDocument } from './frameCompose.ts'
+import { wholeDocument } from './frameCompose.ts'
 import { layerExport } from './layerExport.ts'
 import { MAX_EXPORT_SCALE, MIN_EXPORT_SCALE } from '../shared/exportScale.ts'
 import { fontsForCanvas } from './fonts.ts'
@@ -54,14 +54,7 @@ import {
 } from './guide.ts'
 import { zodToJsonSchema } from 'zod-to-json-schema'
 import { z } from 'zod'
-import {
-  catalog,
-  compactFrameHtml,
-  editFrameHtml,
-  findComponent,
-  frameEditProblem,
-  libraryCatalog,
-} from './componentActions.ts'
+import { catalog, compactFrameHtml, findComponent, frameEditProblem, libraryCatalog } from './componentActions.ts'
 import { activeComponents } from '../shared/components.ts'
 import { isAutomationCard } from '../shared/automations.ts'
 import { getUserName } from './auth.ts'
@@ -98,6 +91,7 @@ import {
 import type { Actor, AgentTask, Canvas, ElementComment, Frame } from '../shared/types.ts'
 import { canvasPages, framePageId, MAX_CANVAS_NAME, MAX_PAGE_NAME, pageFrames, samePages } from '../shared/pages.ts'
 import { addPage, pageList, parsePageList, savePages } from './pageTools.ts'
+import { runCanvasWrite } from './canvasWrites.ts'
 import { isCanvasComment, isFrameComment } from '../shared/comments.ts'
 import { websiteAccessErrorMessage } from './websiteAccess.ts'
 import { executeGuardedBatch } from './guardedBatch.ts'
@@ -2024,11 +2018,11 @@ async function runResidentTool(
         if (html.length > MAX_REWRITE_CHUNK_CHARS) {
           return fail(`create_frame HTML must be compact (at most ${MAX_REWRITE_CHUNK_CHARS} characters)`)
         }
-        const created = actions.createFrame(
-          canvasId,
-          createFrameInput({ ...raw, html }, runState.placement, store.getCanvas(canvasId)),
+        const created = await runCanvasWrite(canvasId, {
+          type: 'create-frame',
+          input: createFrameInput({ ...raw, html }, runState.placement, store.getCanvas(canvasId)),
           actor,
-        )
+        })
         if (!created) return fail('canvas not found')
         const fit = fitAxes.value ? await fitWrittenFrame(created, fitAxes.value, actor) : undefined
         const f = fit?.frame ?? created
@@ -2100,15 +2094,23 @@ async function runResidentTool(
         if (typeof f.html !== 'string') return fail('frame HTML is unavailable; retry after the frame reloads')
         if (typeof input.find !== 'string' || !input.find) return fail('find must be a non-empty exact HTML string')
         if (typeof input.replace !== 'string') return fail('replace must be an HTML string')
-        /* in the form get_frame_html showed, or the stored or composed one if that is what was copied */
-        const edit = editFrameHtml(f, input.find, input.replace)
-        if ('problem' in edit) return fail(frameEditProblem(edit, '"find" text', 'get_frame_html'))
-        const edited = edit.html
-        /* the edited document, so a URI completed across the replacement's edges is caught too */
-        const held = `${f.html}\n${compactFrameHtml(f)}\n${composedHtml(f.canvasId, f.html)}`
-        const inline = inlineDataRefusal(edited, held, 'resident')
-        if (inline) return fail(inline)
-        actions.updateFrame(input.frame_id, { html: edited }, actor)
+        /* matched in the form get_frame_html showed, or the stored or composed one if that is
+           what was copied, and checked for inline data the frame did not hold, where the
+           frame's writes are run (server/canvasWrites.ts) */
+        const edited = await runCanvasWrite(canvasId, {
+          type: 'edit-frame-html',
+          frameId: input.frame_id,
+          find: input.find,
+          replace: input.replace,
+          actor,
+          surface: 'resident',
+        })
+        if (!edited.ok) {
+          if ('missing' in edited) return fail('frame not found on this canvas')
+          return fail(
+            'inline' in edited ? edited.inline : frameEditProblem(edited.problem, '"find" text', 'get_frame_html'),
+          )
+        }
         runState.mutatedFrames.add(input.frame_id)
         unverify(runState, input.frame_id)
         const notes = componentWriteNotes(store.getFrame(input.frame_id)!)
@@ -2133,7 +2135,13 @@ async function runResidentTool(
         const inline = inlineDataRefusal(html, existingHtml(f), 'resident')
         if (inline) return fail(inline)
         /* a whole-document write, as MCP set_frame_html: it may replace a design another agent streams */
-        const written = actions.updateFrame(input.frame_id, { html }, actor, { replace: true })
+        const written = await runCanvasWrite(canvasId, {
+          type: 'write-frame',
+          frameId: input.frame_id,
+          patch: { html },
+          actor,
+          replace: true,
+        })
         if (!written) return fail('frame not found on this canvas')
         const fit = fitAxes.value ? await fitWrittenFrame(written, fitAxes.value, actor) : undefined
         runState.mutatedFrames.add(input.frame_id)
@@ -2185,7 +2193,13 @@ async function runResidentTool(
         /* again at the commit: the frame may have changed since the chunks were checked */
         const inline = inlineDataRefusal(html, existingHtml(f), 'resident')
         if (inline) return fail(inline)
-        actions.updateFrame(input.frame_id, { html }, actor, { replace: true })
+        await runCanvasWrite(canvasId, {
+          type: 'write-frame',
+          frameId: input.frame_id,
+          patch: { html },
+          actor,
+          replace: true,
+        })
         runState.rewriteDrafts.delete(input.frame_id)
         runState.mutatedFrames.add(input.frame_id)
         unverify(runState, input.frame_id)
@@ -2529,7 +2543,13 @@ async function runResidentTool(
           return fail('approval is set for the person who asked, and nobody who can edit this canvas asked')
         const name = await getUserName(requester)
         if (!name) return fail('the person who asked could not be found')
-        const result = actions.agentSetFrameApproval(input.frame_id, status, { id: requester, name }, actor)
+        const result = await runCanvasWrite(canvasId, {
+          type: 'agent-approval',
+          frameId: input.frame_id,
+          status,
+          user: { id: requester, name },
+          actor,
+        })
         if (!result.ok) return fail(result.error)
         /* "mark this ready for dev" is the whole job: a design edit after it would undo the sign-off */
         runState.arrangeWrites += 1

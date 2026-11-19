@@ -155,6 +155,7 @@ import { skillsRouter } from './skillRoutes.ts'
 import { activeAgentTasks } from '../shared/agentActivity.ts'
 import { colorFor } from '../shared/types.ts'
 import { agentKeyOf } from '../shared/agentIdentity.ts'
+import { CanvasMismatchError, FRAME_CHANGED, FrameVersionConflict, runCanvasWrite } from './canvasWrites.ts'
 import { isPeerViewport } from '../shared/viewport.ts'
 import { exportScaleSuffix, fitExportScale, fullFrameRenderScale, parseExportScale } from '../shared/exportScale.ts'
 import { emailShare } from './canvasShares.ts'
@@ -1412,7 +1413,7 @@ function requireFrame(
     }
     // PATCH and DELETE mutate the store synchronously after this check.
     if (frame.updatedAt !== expectedUpdatedAt) {
-      res.status(409).json({ error: 'The frame changed while you were editing. Please try again.', frame })
+      res.status(409).json({ error: FRAME_CHANGED, frame })
       return null
     }
   }
@@ -2656,86 +2657,102 @@ app.post('/api/canvases/:id/pages/:pageId/duplicate', async (req, res) => {
   }
 })
 
-app.post('/api/canvases/:id/frames', (req, res) => {
-  if (!requireCanvas(req, res, req.params.id, 'edit')) return
-  const { name, pageId, x, y, width, height, html, hidden, locked, z, rotation } = req.body ?? {}
-  if (pageId !== undefined && !store.getCanvas(req.params.id)?.pages?.some((p) => p.id === pageId))
-    return res.status(400).json({ error: 'page not found' })
-  const actor = userActor(req)
-  /* `hidden`, `locked` and `z` let undo bring a deleted frame back as it was */
-  const frame = actions.createFrame(
-    req.params.id,
-    {
-      name: String(name || 'Frame'),
-      pageId,
-      x,
-      y,
-      width,
-      height,
-      html,
-      hidden: hidden === true,
-      locked: locked === true,
-      z: Number.isFinite(z) ? z : undefined,
-      rotation: normalizeRotation(rotation),
-    },
-    actor,
-  )
-  if (!frame) return res.status(404).json({ error: 'canvas not found' })
-  res.json(frame)
-})
+app.post(
+  '/api/canvases/:id/frames',
+  writeRoute(async (req, res) => {
+    if (!requireCanvas(req, res, req.params.id, 'edit')) return
+    const { name, pageId, x, y, width, height, html, hidden, locked, z, rotation } = req.body ?? {}
+    if (pageId !== undefined && !store.getCanvas(req.params.id)?.pages?.some((p) => p.id === pageId))
+      return res.status(400).json({ error: 'page not found' })
+    const actor = userActor(req)
+    /* `hidden`, `locked` and `z` let undo bring a deleted frame back as it was */
+    const frame = await runCanvasWrite(req.params.id, {
+      type: 'create-frame',
+      input: {
+        name: String(name || 'Frame'),
+        pageId,
+        x,
+        y,
+        width,
+        height,
+        html,
+        hidden: hidden === true,
+        locked: locked === true,
+        z: Number.isFinite(z) ? z : undefined,
+        rotation: normalizeRotation(rotation),
+      },
+      actor,
+    })
+    if (!frame) return res.status(404).json({ error: 'canvas not found' })
+    res.json(frame)
+  }),
+)
 
 /* the Layers panel's stacking order for several frames at once: all of
    them or none */
-app.put('/api/canvases/:id/stack', (req, res) => {
-  if (!requireCanvas(req, res, req.params.id, 'edit')) return
-  const writes: unknown = req.body?.frames
-  if (
-    !Array.isArray(writes) ||
-    writes.length === 0 ||
-    writes.length > MAX_STACK_WRITES ||
-    !writes.every((w) => typeof w?.id === 'string' && Number.isFinite(w?.z))
-  )
-    return res.status(400).json({ error: 'frames must be a list of { id, z }' })
-  const frames = actions.restackFrames(
-    req.params.id,
-    writes.map((w: StackWrite) => ({ id: w.id, z: w.z })),
-    userActor(req),
-  )
-  if (!frames) return res.status(404).json({ error: 'frame not found' })
-  res.json(frames)
-})
+app.put(
+  '/api/canvases/:id/stack',
+  writeRoute(async (req, res) => {
+    if (!requireCanvas(req, res, req.params.id, 'edit')) return
+    const writes: unknown = req.body?.frames
+    if (
+      !Array.isArray(writes) ||
+      writes.length === 0 ||
+      writes.length > MAX_STACK_WRITES ||
+      !writes.every((w) => typeof w?.id === 'string' && Number.isFinite(w?.z))
+    )
+      return res.status(400).json({ error: 'frames must be a list of { id, z }' })
+    const frames = await runCanvasWrite(req.params.id, {
+      type: 'restack-frames',
+      frames: writes.map((w: StackWrite) => ({ id: w.id, z: w.z })),
+      actor: userActor(req),
+    })
+    if (!frames) return res.status(404).json({ error: 'frame not found' })
+    res.json(frames)
+  }),
+)
 
-app.patch('/api/frames/:id', (req, res) => {
-  const current = requireFrame(req, res, req.params.id, 'edit', req.body?.expectedUpdatedAt)
-  if (!current) return
-  const { actor: _ignored, expectedUpdatedAt: _version, ...patch } = req.body ?? {}
-  const actor = userActor(req)
-  if (
-    patch.pageId !== undefined &&
-    !store.getCanvas(store.getFrame(req.params.id)!.canvasId)?.pages?.some((p) => p.id === patch.pageId)
-  )
-    return res.status(400).json({ error: 'page not found' })
-  const allowed = ['name', 'pageId', 'x', 'y', 'width', 'height', 'html'] as const
-  const clean: Record<string, unknown> = {}
-  for (const k of allowed) if (patch[k] !== undefined) clean[k] = patch[k]
-  /* the eye in the Layers panel: anything but a literal true shows the frame */
-  if (patch.hidden !== undefined) clean.hidden = patch.hidden === true
-  if (patch.locked !== undefined) clean.locked = !!patch.locked
-  /* the stacking order the Layers panel sets */
-  if (patch.z !== undefined) {
-    if (!Number.isFinite(patch.z)) return res.status(400).json({ error: 'z must be a finite number' })
-    clean.z = patch.z
-  }
-  /* a turn about the centre, stored in (-180, 180]; null or 0 straightens */
-  if (patch.rotation !== undefined) {
-    if (patch.rotation !== null && !Number.isFinite(patch.rotation))
-      return res.status(400).json({ error: 'rotation must be a finite number of degrees' })
-    clean.rotation = normalizeRotation(patch.rotation)
-  }
-  const frame = actions.updateFrame(req.params.id, clean, actor)
-  if (!frame) return res.status(404).json({ error: 'frame not found' })
-  res.json(frame)
-})
+app.patch(
+  '/api/frames/:id',
+  writeRoute(async (req, res) => {
+    const current = requireFrame(req, res, req.params.id, 'edit', req.body?.expectedUpdatedAt)
+    if (!current) return
+    const { actor: _ignored, expectedUpdatedAt: _version, ...patch } = req.body ?? {}
+    const actor = userActor(req)
+    if (
+      patch.pageId !== undefined &&
+      !store.getCanvas(store.getFrame(req.params.id)!.canvasId)?.pages?.some((p) => p.id === patch.pageId)
+    )
+      return res.status(400).json({ error: 'page not found' })
+    const allowed = ['name', 'pageId', 'x', 'y', 'width', 'height', 'html'] as const
+    const clean: Record<string, unknown> = {}
+    for (const k of allowed) if (patch[k] !== undefined) clean[k] = patch[k]
+    /* the eye in the Layers panel: anything but a literal true shows the frame */
+    if (patch.hidden !== undefined) clean.hidden = patch.hidden === true
+    if (patch.locked !== undefined) clean.locked = !!patch.locked
+    /* the stacking order the Layers panel sets */
+    if (patch.z !== undefined) {
+      if (!Number.isFinite(patch.z)) return res.status(400).json({ error: 'z must be a finite number' })
+      clean.z = patch.z
+    }
+    /* a turn about the centre, stored in (-180, 180]; null or 0 straightens */
+    if (patch.rotation !== undefined) {
+      if (patch.rotation !== null && !Number.isFinite(patch.rotation))
+        return res.status(400).json({ error: 'rotation must be a finite number of degrees' })
+      clean.rotation = normalizeRotation(patch.rotation)
+    }
+    const frame = await runCanvasWrite(current.canvasId, {
+      type: 'write-frame',
+      frameId: req.params.id,
+      patch: clean,
+      actor,
+      /* checked above for a quick answer, and again by the host as it writes */
+      ...versionCheck(req.body?.expectedUpdatedAt),
+    })
+    if (!frame) return res.status(404).json({ error: 'frame not found' })
+    res.json(frame)
+  }),
+)
 
 /* Components. Reads are for anyone who can see the canvas; everything else edits it. */
 function componentContext(req: express.Request, canvas: Canvas) {
@@ -2819,6 +2836,34 @@ function componentRoute(res: express.Response, run: () => unknown) {
     if (error instanceof ComponentError) return res.status(400).json({ error: error.message })
     throw error
   }
+}
+
+/** A route whose handler awaits a canvas write (server/canvasWrites.ts). Express 4 hands a
+ *  synchronous handler's throw to the error handlers but drops an async one's rejection, so
+ *  the rejection is passed on here: `undoRequest` then undoes the request's writes before
+ *  anything answers it, as it did when these handlers were synchronous. */
+function writeRoute<Params extends Record<string, string> = { id: string }>(
+  handler: (req: express.Request<Params>, res: express.Response) => Promise<unknown>,
+): express.RequestHandler<Params> {
+  return (req, res, next) => {
+    handler(req, res).catch(next)
+  }
+}
+
+/** The version a request said it edited (`expectedUpdatedAt`, which `requireFrame` has checked
+ *  is a nonnegative integer), as the command's `ifUpdatedAt`: the host checks it again as it
+ *  writes, which is the check that counts. */
+function versionCheck(expectedUpdatedAt: unknown): { ifUpdatedAt?: number } {
+  return typeof expectedUpdatedAt === 'number' ? { ifUpdatedAt: expectedUpdatedAt } : {}
+}
+
+/** A canvas write refused for what its caller asserted: the frame moved past the version the
+ *  request edited (the same 409 and body `requireFrame` answers), or is on another canvas. */
+const canvasWriteRefusal: express.ErrorRequestHandler = (error, _req, res, next) => {
+  if (res.headersSent) return next(error)
+  if (error instanceof FrameVersionConflict) return res.status(409).json({ error: FRAME_CHANGED, frame: error.frame })
+  if (error instanceof CanvasMismatchError) return res.status(409).json({ error: error.message })
+  next(error)
 }
 
 /** A handler threw: what the request had changed is undone before anything answers it. */
@@ -3158,18 +3203,29 @@ app.patch('/api/frames/:id/instances', (req, res) => {
   componentRoute(res, () => changeInstances(current.canvasId, current.id, changes, userActor(req)))
 })
 
-app.put('/api/frames/:id/approval', (req, res) => {
-  const current = requireFrame(req, res, req.params.id, 'edit', req.body?.expectedUpdatedAt)
-  if (!current) return
-  const { status, expectedUpdatedAt } = req.body ?? {}
-  if (expectedUpdatedAt === undefined)
-    return res.status(400).json({ error: 'expectedUpdatedAt is required to approve the reviewed version' })
-  if (status !== 'ready_for_dev' && status !== 'draft')
-    return res.status(400).json({ error: 'status must be ready_for_dev or draft' })
-  if (status === 'ready_for_dev' && actions.isFrameStreaming(current.id))
-    return res.status(409).json({ error: 'Wait for the design to finish before approving it.' })
-  res.json(actions.setFrameApproval(current.id, status === 'ready_for_dev', req.user!))
-})
+app.put(
+  '/api/frames/:id/approval',
+  writeRoute(async (req, res) => {
+    const current = requireFrame(req, res, req.params.id, 'edit', req.body?.expectedUpdatedAt)
+    if (!current) return
+    const { status, expectedUpdatedAt } = req.body ?? {}
+    if (expectedUpdatedAt === undefined)
+      return res.status(400).json({ error: 'expectedUpdatedAt is required to approve the reviewed version' })
+    if (status !== 'ready_for_dev' && status !== 'draft')
+      return res.status(400).json({ error: 'status must be ready_for_dev or draft' })
+    if (status === 'ready_for_dev' && actions.isFrameStreaming(current.id))
+      return res.status(409).json({ error: 'Wait for the design to finish before approving it.' })
+    res.json(
+      await runCanvasWrite(current.canvasId, {
+        type: 'set-approval',
+        frameId: current.id,
+        ready: status === 'ready_for_dev',
+        user: { id: req.user!.id, name: req.user!.name },
+        ...versionCheck(expectedUpdatedAt),
+      }),
+    )
+  }),
+)
 
 app.post('/api/frames/:id/append', (req, res) => {
   if (!requireFrame(req, res, req.params.id, 'edit')) return
@@ -3183,13 +3239,22 @@ app.post('/api/frames/:id/append', (req, res) => {
   res.json({ ok: true, htmlBytes: frame.html.length })
 })
 
-app.delete('/api/frames/:id', (req, res) => {
-  if (!requireFrame(req, res, req.params.id, 'edit', req.body?.expectedUpdatedAt)) return
-  const actor = userActor(req)
-  const frame = actions.deleteFrame(req.params.id, actor)
-  if (!frame) return res.status(404).json({ error: 'frame not found' })
-  res.json({ ok: true })
-})
+app.delete(
+  '/api/frames/:id',
+  writeRoute(async (req, res) => {
+    const current = requireFrame(req, res, req.params.id, 'edit', req.body?.expectedUpdatedAt)
+    if (!current) return
+    const actor = userActor(req)
+    const frame = await runCanvasWrite(current.canvasId, {
+      type: 'delete-frame',
+      frameId: req.params.id,
+      actor,
+      ...versionCheck(req.body?.expectedUpdatedAt),
+    })
+    if (!frame) return res.status(404).json({ error: 'frame not found' })
+    res.json({ ok: true })
+  }),
+)
 
 /* design history: the states a frame had before later edits replaced them,
    newest first and without HTML; one version in full; restore (same
@@ -3212,15 +3277,24 @@ app.get('/api/frames/:id/versions/:versionId', async (req, res) => {
   res.json({ ...version, html: composedHtml(frame.canvasId, html) })
 })
 
-app.post('/api/frames/:id/versions/:versionId/restore', async (req, res) => {
-  if (!requireFrame(req, res, req.params.id, 'edit')) return
-  const actor = userActor(req)
-  const restored = await actions.restoreFrameVersion(req.params.id, req.params.versionId, actor)
-  if (restored === null) return res.status(404).json({ error: 'version not found' })
-  if (!restored) return res.status(404).json({ error: 'frame not found' })
-  captureFeature(req.user!.id, 'frame_version_restored', 'ui', { canvas_id: restored.frame.canvasId })
-  res.json(restored)
-})
+app.post(
+  '/api/frames/:id/versions/:versionId/restore',
+  writeRoute<{ id: string; versionId: string }>(async (req, res) => {
+    const current = requireFrame(req, res, req.params.id, 'edit')
+    if (!current) return
+    const actor = userActor(req)
+    const restored = await runCanvasWrite(current.canvasId, {
+      type: 'restore-version',
+      frameId: req.params.id,
+      versionId: req.params.versionId,
+      actor,
+    })
+    if (restored === null) return res.status(404).json({ error: 'version not found' })
+    if (!restored) return res.status(404).json({ error: 'frame not found' })
+    captureFeature(req.user!.id, 'frame_version_restored', 'ui', { canvas_id: restored.frame.canvasId })
+    res.json(restored)
+  }),
+)
 
 app.post('/api/frames/:id/comments', async (req, res) => {
   const frame = requireFrame(req, res, req.params.id, 'comment')
@@ -3254,18 +3328,27 @@ app.post('/api/frames/:id/comments', async (req, res) => {
    the frame HTML if it has none yet — for a link that outlives edits around
    it. Anyone who may comment may stamp: the write is an annotation, not a
    design change, so it leaves sign-off alone. */
-app.post('/api/frames/:id/element-id', async (req, res) => {
-  const frame = requireFrame(req, res, req.params.id, 'comment')
-  if (!frame) return
-  const selector = typeof req.body?.selector === 'string' ? req.body.selector.trim() : ''
-  if (!selector || selector.length > actions.MAX_ELEMENT_SELECTOR_CHARS) {
-    return res.status(400).json({ error: 'selector required' })
-  }
-  const snippet = typeof req.body?.snippet === 'string' ? req.body.snippet.slice(0, 400) : undefined
-  const stamped = await actions.ensureElementId(frame.id, selector, req.user!.name, snippet || undefined)
-  if (!stamped) return res.status(409).json({ error: 'the element could not be found in the frame right now' })
-  res.json({ elementId: stamped.id, frameUpdatedAt: stamped.frame.updatedAt })
-})
+app.post(
+  '/api/frames/:id/element-id',
+  writeRoute(async (req, res) => {
+    const frame = requireFrame(req, res, req.params.id, 'comment')
+    if (!frame) return
+    const selector = typeof req.body?.selector === 'string' ? req.body.selector.trim() : ''
+    if (!selector || selector.length > actions.MAX_ELEMENT_SELECTOR_CHARS) {
+      return res.status(400).json({ error: 'selector required' })
+    }
+    const snippet = typeof req.body?.snippet === 'string' ? req.body.snippet.slice(0, 400) : undefined
+    const stamped = await runCanvasWrite(frame.canvasId, {
+      type: 'stamp-element-id',
+      frameId: frame.id,
+      selector,
+      by: req.user!.name,
+      ...(snippet ? { like: snippet } : {}),
+    })
+    if (!stamped) return res.status(409).json({ error: 'the element could not be found in the frame right now' })
+    res.json({ elementId: stamped.id, frameUpdatedAt: stamped.frame.updatedAt })
+  }),
+)
 
 /* a comment pinned to a point on the canvas (world coordinates on one of its
    pages) rather than to an element — metered exactly like an element comment */
@@ -3691,6 +3774,7 @@ if (env.isProduction) {
    answers 422 */
 app.use(undoRequest)
 app.use(workBudgetRefusal)
+app.use(canvasWriteRefusal)
 
 const server = http.createServer(app)
 const wss = new WebSocketServer({
