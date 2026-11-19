@@ -504,6 +504,26 @@ describe('an agent working with components', () => {
     expect(clean.text).not.toContain('were not kept')
   })
 
+  it('says where it could not read a component’s CSS past', async () => {
+    const canvas = newCanvas()
+    const made = await call('create_component', {
+      canvas_id: canvas.id,
+      name: 'Quote',
+      html: '<blockquote class="q"><p class="body">Hi</p></blockquote>',
+      css: ".q { padding: 8px } .q::before { content: 'open } .body { color: red }",
+    })
+    expect(made.isError).toBe(false)
+    expect(made.text).toContain('COMPONENT: the CSS for “Quote” could not be read past: .q::before')
+
+    const tailwind = await call('update_component', {
+      canvas_id: canvas.id,
+      component: 'Quote',
+      css: String.raw`.q { padding: 8px } .\[\&_p\:not\(\[class\*\=\'x\'\]\)\]\:m-0 p { margin: 0 } .body { color: red }`,
+    })
+    expect(tailwind.text).not.toContain('could not be read')
+    expect(findComponent(canvas.id, 'Quote')!.rawCss).toContain('color: red')
+  })
+
   it('names inferred props after what each element is, and lists them in the result', async () => {
     const canvas = newCanvas()
     const made = await call('create_component', {

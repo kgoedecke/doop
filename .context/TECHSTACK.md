@@ -1042,7 +1042,10 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   agent's own edit is not a whole write; another agent's is refused unless it replaces the design
   (`replace`: MCP and resident `set_frame_html`, the resident's rewrite commit). The scanner skips
   `<doop-use` text in scripts, styles, textareas, titles and comments and in names like
-  `<doop-user-chip>`. Tests: `componentDrops.test.ts`, the `<doop-use>` cases in `inlineData.test.ts`.
+  `<doop-user-chip>`. Tests: `componentDrops.test.ts`, the `<doop-use>` cases in `inlineData.test.ts`. A component's CSS is read with CSS escapes honoured (Tailwind's `\'` in
+  `[class*='size-']` is part of a class name, not a string); a sheet that still cannot be read to the
+  end (a string or block left open, text outside a rule) is reported as `css_not_read` with where it
+  went wrong, beside `css_not_kept`. Tests: `componentCssEscapes.test.ts`.
 - Component system first (`SYSTEM_FIRST`, `COMPOSE_CHECK` in `server/guide.ts`): the guide opens
   with a must-do list (tokens, then a component system set up the way a designer sets up a Figma
   file, then screens composed from it; themes are tokens, never a copied frame), the brief creates
