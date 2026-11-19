@@ -17,6 +17,10 @@
  * span cut out of it, two blocks joined): what counts is how much of it the frame did not hold.
  */
 
+import type { Frame } from '../shared/types.ts'
+import { compactFrameHtml } from './componentActions.ts'
+import { composedHtml } from './frameCompose.ts'
+
 export type Surface = 'mcp' | 'resident'
 
 export interface InlineData {
@@ -232,4 +236,12 @@ export function inlineDataRefusal(
     ...kinds.map((kind) => `- ${advice(kind, surface)}`),
     `Then send the HTML again without the ${uris.length ? 'data: URIs' : 'base64'}${uris.length && blocks.length ? ' and the base64 blocks' : ''}.`,
   ].join('\n')
+}
+
+/** A frame's HTML in every form an agent may have read it in (stored, compact, and the full
+ *  form with what the canvas supplies): what a write may carry over without adding it, for
+ *  `inlineDataRefusal`'s `existing`. One rule for MCP set_frame_html and the canvas write
+ *  entry's edits (server/canvasWrites.ts). */
+export function heldForms(frame: Frame): string {
+  return `${frame.html}\n${compactFrameHtml(frame)}\n${composedHtml(frame.canvasId, frame.html)}`
 }

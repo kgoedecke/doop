@@ -27,11 +27,12 @@ import {
   fitWrittenFrame,
   updateFrameMetaWithFit,
 } from './frameFit.ts'
+import { runCanvasWrite } from './canvasWrites.ts'
 import { fontsForCanvas } from './fonts.ts'
 import { customAgentsForCanvas } from './customAgents.ts'
 import { describeLibrary, libraryBrief, MAX_FONT_BYTES } from '../shared/fonts.ts'
 import { addCanvasFont, uploadedFontResult } from './canvasFontUpload.ts'
-import { EMBEDDED_MIN_LENGTH, inlineDataRefusal } from './inlineData.ts'
+import { EMBEDDED_MIN_LENGTH, heldForms, inlineDataRefusal } from './inlineData.ts'
 import {
   MAX_TOKEN_DESCRIPTION,
   TOKEN_TYPES,
@@ -115,7 +116,6 @@ import {
 import {
   catalog,
   compactFrameHtml,
-  editFrameHtml,
   frameEditProblem,
   deletedComponentsInUse,
   findComponent,
@@ -157,11 +157,6 @@ You MUST call get_guide({ topic: "doop-instructions" }) before using other Doop 
 - When Doop gets in your way, call report_issue, then carry on.`
 
 /** What this server's integrations add to the main guide. */
-/** A frame's HTML in every form an agent may have read it in (stored and compact), for
- *  telling what a write adds from what it carries over (server/inlineData.ts). */
-function heldForms(frame: Frame): string {
-  return `${frame.html}\n${compactFrameHtml(frame)}`
-}
 
 function extensionGuideLines(): string[] {
   return extensions.flatMap((extension) => extension.mcpGuideLines ?? [])
@@ -1560,7 +1555,11 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
       if (fit_to_content && !html.trim()) return err(FIT_NEEDS_HTML)
       const inline = inlineDataRefusal(html)
       if (inline) return err(inline)
-      const created = actions.createFrame(canvas_id, { name, pageId, html, x, y, width, height }, actorFrom(agent_name))
+      const created = await runCanvasWrite(canvas_id, {
+        type: 'create-frame',
+        input: { name, pageId, html, x, y, width, height },
+        actor: actorFrom(agent_name),
+      })
       if (!created) return noCanvas(canvas_id)
       const fit = fit_to_content ? await fitWrittenFrame(created, fit_to_content, actorFrom(agent_name)) : undefined
       const frame = fit?.frame ?? created
@@ -1647,7 +1646,13 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
          rewrite of the full form carries over what the canvas supplies to it */
       const inline = inlineDataRefusal(html, heldForms(current))
       if (inline) return err(inline)
-      const written = actions.updateFrame(frame_id, { html }, actorFrom(agent_name), { replace: true })
+      const written = await runCanvasWrite(current.canvasId, {
+        type: 'write-frame',
+        frameId: frame_id,
+        patch: { html },
+        actor: actorFrom(agent_name),
+        replace: true,
+      })
       if (!written) return noFrame(frame_id)
       const fit = fit_to_content ? await fitWrittenFrame(written, fit_to_content, actorFrom(agent_name)) : undefined
       const frame = fit?.frame ?? written
@@ -2574,15 +2579,21 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
     async ({ frame_id, old_str, new_str, agent_name }) => {
       const f = frameFor(frame_id, 'edit')
       if (!f) return noFrame(frame_id)
-      /* in whichever form the text was copied from: compact, stored, or the full form */
-      const edited = editFrameHtml(f, old_str, new_str)
-      if ('problem' in edited) return err(frameEditProblem(edited, 'old_str', 'get_frame'))
-      /* the edited document, so a URI completed across the replacement's edges is caught too.
-         Every form it may have been made in counts as what the frame already held */
-      const held = `${f.html}\n${compactFrameHtml(f)}\n${composedHtml(f.canvasId, f.html)}`
-      const inline = inlineDataRefusal(edited.html, held)
-      if (inline) return err(inline)
-      const frame = actions.updateFrame(frame_id, { html: edited.html }, actorFrom(agent_name))!
+      /* matched in whichever form the text was copied from, and checked for inline data the
+         frame did not hold, where the frame's writes are run (server/canvasWrites.ts) */
+      const edited = await runCanvasWrite(f.canvasId, {
+        type: 'edit-frame-html',
+        frameId: frame_id,
+        find: old_str,
+        replace: new_str,
+        actor: actorFrom(agent_name),
+        surface: 'mcp',
+      })
+      if (!edited.ok) {
+        if ('missing' in edited) return noFrame(frame_id)
+        return err('inline' in edited ? edited.inline : frameEditProblem(edited.problem, 'old_str', 'get_frame'))
+      }
+      const frame = edited.frame
       return withPreview(
         withStatusNudge(
           withFeedback(
@@ -2652,7 +2663,13 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
       if (!found) return noFrame(frame_id)
       const actor = actorFrom(agent_name)
       arrive(found.canvasId, agent_name)
-      const result = actions.agentSetFrameApproval(frame_id, status, { id: ownerId, name: owner }, actor)
+      const result = await runCanvasWrite(found.canvasId, {
+        type: 'agent-approval',
+        frameId: frame_id,
+        status,
+        user: { id: ownerId, name: owner },
+        actor,
+      })
       if (!result.ok) return err(result.error)
       return withFeedback(text({ ok: true, frame: frameSummary(result.frame) }), result.frame.canvasId, actor)
     },
@@ -2697,8 +2714,14 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
       annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
     },
     async ({ frame_id, version_id, agent_name }) => {
-      if (!frameFor(frame_id, 'edit')) return noFrame(frame_id)
-      const restored = await actions.restoreFrameVersion(frame_id, version_id, actorFrom(agent_name))
+      const current = frameFor(frame_id, 'edit')
+      if (!current) return noFrame(frame_id)
+      const restored = await runCanvasWrite(current.canvasId, {
+        type: 'restore-version',
+        frameId: frame_id,
+        versionId: version_id,
+        actor: actorFrom(agent_name),
+      })
       if (restored === null) return err(`no version ${version_id} on frame ${frame_id} — call list_frame_versions`)
       if (!restored) return noFrame(frame_id)
       captureFeature(ownerId, 'frame_version_restored', 'mcp', { canvas_id: restored.frame.canvasId })
@@ -2719,8 +2742,13 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
       inputSchema: { frame_id: z.string(), agent_name: agentName },
     },
     async ({ frame_id, agent_name }) => {
-      if (!frameFor(frame_id, 'edit')) return noFrame(frame_id)
-      const frame = actions.deleteFrame(frame_id, actorFrom(agent_name))
+      const current = frameFor(frame_id, 'edit')
+      if (!current) return noFrame(frame_id)
+      const frame = await runCanvasWrite(current.canvasId, {
+        type: 'delete-frame',
+        frameId: frame_id,
+        actor: actorFrom(agent_name),
+      })
       if (!frame) return noFrame(frame_id)
       return text({ ok: true, deleted: frame.name })
     },

@@ -651,6 +651,22 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   fault-injection sweep `workBudgetCommit.test.ts` (memory, a modelled database and a viewer's
   replayed copy, for every write operation) and `writeBoundaryHttp.test.ts` (the real server,
   rebooted on its database).
+- Canvas writes (`server/canvasWrites.ts`, `.context/plans/actor-owns-writes.md` step 2): a frame's
+  HTML and metadata are written through one entry, `runCanvasWrite(canvasId, command)`, a typed
+  command carrying intent (`create-frame`, `write-frame`, `edit-frame-html` with its find and
+  replace, `frame-meta`, `restack-frames`, `set-approval`, `agent-approval`, `delete-frame`,
+  `restore-version`, `stamp-element-id`, `take-in-edit`) and answering a typed result, read off
+  its handler. Contract for every host: always a promise, a failure only its rejection, awaited
+  inside an operation that awaits (REST through `writeRoute` in `server/index.ts`, which hands a
+  rejection to `undoRequest`; MCP and resident tool calls; the take-in's `runOperation`), so a
+  rejection undoes the operation. The entry refuses a frame on another canvas than `canvasId`
+  (`CanvasMismatchError`) and enforces a command's `ifUpdatedAt` as it writes
+  (`FrameVersionConflict`, answered over REST as the 409 `requireFrame` gives). Its only host is
+  local: the actions above, which still write synchronously when called, so writes, undo and
+  `afterCommit` are as before. Routed: the REST frame routes, MCP and resident frame tools,
+  version restore, `/element-id` and the actor take-in. Not yet: streams, tokens, components,
+  the library, imports and ingest, comment anchoring. Tests: `canvasWrites.test.ts`,
+  `writeBoundaryHttp.test.ts`.
 - `pg` 8.22.0 - Postgres driver for the real-database path.
 - Frame HTML in memory (`server/store.ts`, `server/frameHtml.ts`): the store keeps every canvas
   and frame, but frame HTML (most of the data) loads per page. Boot reads `frames` without `html`;

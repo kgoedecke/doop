@@ -211,3 +211,63 @@ describe('a request that lands', () => {
     expect(await historyOf()).toEqual(history)
   }, 60_000)
 })
+
+describe('a canvas write that rejects', () => {
+  /** Restart on the same database with this parse budget. */
+  async function restartWithBudget(mb: string) {
+    await new Promise((resolve) => setTimeout(resolve, 700))
+    const dataDir = server.dataDir
+    server.stop({ keepData: true })
+    await server.stopped
+    server = await startServer({ DOOP_WORK_BUDGET_PARSE_MB: mb }, dataDir)
+  }
+
+  it('a refused restore answers 422, and leaves the frame, its history and the room as they were', async () => {
+    /* a design too heavy for the 1 MB budget to restore, written under a larger one, then
+       replaced so that it is the version filed */
+    await restartWithBudget('64')
+    const heavyBody = `<doop-use component="Chip"></doop-use><p>${'lorem ipsum '.repeat(60_000)}</p>`
+    const made = await owner.post(`/api/canvases/${canvasId}/frames`, { name: 'Heavy', html: doc(heavyBody) })
+    expect(made.status).toBe(200)
+    const frameId = ((await made.json()) as { id: string }).id
+    expect((await owner.patch(`/api/frames/${frameId}`, { html: doc('<p>Light</p>') })).status).toBe(200)
+    await restartWithBudget('1')
+
+    const historyOf = async () =>
+      (await (await owner.get(`/api/frames/${frameId}/versions`)).json()) as { id: string; htmlBytes: number }[]
+    const history = await historyOf()
+    const heavy = history.find((version) => version.htmlBytes > 400_000)
+    expect(heavy).toBeDefined()
+    const before = await seenNow()
+    const watching = await joined()
+    const refused = await owner.post(`/api/frames/${frameId}/versions/${heavy!.id}/restore`, {})
+    expect(refused.status).toBe(422)
+    expect(((await refused.json()) as { code: string }).code).toBe('work_budget_exceeded')
+    await settle()
+    expect(writes(watching.messages)).toEqual([])
+    watching.close()
+    expect(await historyOf()).toEqual(history)
+    expect(await seenNow()).toEqual(before)
+    await reboot()
+    expect(await seenNow()).toEqual(before)
+    expect(await historyOf()).toEqual(history)
+  }, 120_000)
+
+  it('set_frame_html over MCP refused for its budget changes nothing, and the room hears nothing', async () => {
+    const before = await seenNow()
+    const main = before.frames.find((frame) => frame.name === 'Chip')!
+    const watching = await joined()
+    const refused = await mcpCall('set_frame_html', {
+      frame_id: main.id,
+      html: main.html.replace('</body>', `<p>${'lorem ipsum '.repeat(40_000)}</p></body>`),
+      agent_name: 'Tester',
+    })
+    expect(refused.isError).toBe(true)
+    await settle()
+    expect(writes(watching.messages)).toEqual([])
+    watching.close()
+    expect(await seenNow()).toEqual(before)
+    await reboot()
+    expect(await seenNow()).toEqual(before)
+  }, 60_000)
+})

@@ -2,7 +2,8 @@ import { MAX_EXPORT_SIDE } from '../shared/exportScale.ts'
 import type { Actor, Canvas, Frame } from '../shared/types.ts'
 import * as actions from './actions.ts'
 import { checkpoint } from './journal.ts'
-import { checkFrameMeta, type FrameMetaPatch, type PageToolResult, updateFrameMeta } from './pageTools.ts'
+import { runCanvasWrite } from './canvasWrites.ts'
+import { checkFrameMeta, type FrameMetaPatch, type PageToolResult } from './pageTools.ts'
 import { type ContentExtent, type ContentProbe, freshFrameOverflow, measureContent } from './screenshot.ts'
 import { designPx } from './renderLimits.ts'
 import { store } from './store.ts'
@@ -249,7 +250,22 @@ function fitClash(patch: FrameMetaPatch, axes: FitAxes): string | null {
   return null
 }
 
-/** update_frame, for agents on MCP and the resident agent: `updateFrameMeta`,
+/** The patch through the canvas write entry (server/canvasWrites.ts), as update_frame writes it. */
+async function writeFrameMeta(
+  canvas: Canvas,
+  frameId: string,
+  patch: FrameMetaPatch,
+  actor: Actor,
+): Promise<PageToolResult<Frame>> {
+  return (
+    (await runCanvasWrite(canvas.id, { type: 'frame-meta', frameId, patch, actor })) ?? {
+      ok: false,
+      error: `frame ${frameId} not found`,
+    }
+  )
+}
+
+/** update_frame, for agents on MCP and the resident agent: the patch written,
  *  and with `fit` the frame measured (at the patch's width and height, its own
  *  when the patch has none) and the fitted size written with the rest of the
  *  patch. The patch is checked before the browser is asked; a fit is refused
@@ -263,7 +279,7 @@ export async function updateFrameMetaWithFit(
   actor: Actor,
 ): Promise<PageToolResult<FittedFrame>> {
   if (!fit) {
-    const updated = updateFrameMeta(canvas, frameId, patch, actor)
+    const updated = await writeFrameMeta(canvas, frameId, patch, actor)
     return updated.ok ? { ok: true, value: { frame: updated.value } } : updated
   }
   const clash = fitClash(patch, fit)
@@ -299,7 +315,7 @@ export async function updateFrameMetaWithFit(
     ...(fitsWidth(fit) ? { width: size.value.width } : {}),
     ...(fitsHeight(fit) ? { height: size.value.height } : {}),
   }
-  const updated = updateFrameMeta(canvas, frameId, fitted, actor)
+  const updated = await writeFrameMeta(canvas, frameId, fitted, actor)
   return updated.ok ? { ok: true, value: { frame: updated.value, note: fitNote(fit, size.value) } } : updated
 }
 
