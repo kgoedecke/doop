@@ -199,6 +199,7 @@ it('create_canvas_page adds a named page with a fresh id and keeps the rest', as
 it('update_canvas renames the canvas, tells the room and logs it once', async () => {
   const actions = await import('../server/actions.ts')
   const { store } = await import('../server/store.ts')
+  const { MAX_CANVAS_NAME } = await import('../shared/pages.ts')
   const broadcast = vi.fn()
   actions.wire(broadcast, () => {})
   const canvas = { id: 'mcp-rename', ownerId: 'test-owner-id', name: 'Draft', frames: [] }
@@ -219,6 +220,7 @@ it('update_canvas renames the canvas, tells the room and logs it once', async ()
     expect(actions.getActivity(canvas.id).filter((a) => a.message.includes('renamed the canvas'))).toHaveLength(1)
 
     expect((await rename('   ')).isError).toBe(true)
+    expect((await rename('x'.repeat(MAX_CANVAS_NAME + 1))).isError).toBe(true)
     expect(stored()).toBe('Checkout flow')
   } finally {
     await close()

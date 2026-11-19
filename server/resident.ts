@@ -76,7 +76,7 @@ import {
   searchInspiration,
 } from './inspiration.ts'
 import type { Actor, AgentTask, Canvas, ElementComment, Frame } from '../shared/types.ts'
-import { canvasPages, framePageId, MAX_PAGE_NAME, pageFrames, samePages } from '../shared/pages.ts'
+import { canvasPages, framePageId, MAX_CANVAS_NAME, MAX_PAGE_NAME, pageFrames, samePages } from '../shared/pages.ts'
 import { addPage, pageList, parsePageList, savePages, updateFrameMeta } from './pageTools.ts'
 import { isCanvasComment, isFrameComment } from '../shared/comments.ts'
 import { websiteAccessErrorMessage } from './websiteAccess.ts'
@@ -2591,7 +2591,7 @@ async function runResidentTool(
       }
       case 'update_canvas': {
         const name = typeof input.name === 'string' ? input.name.trim() : ''
-        if (!name) return fail('name must not be empty')
+        if (!name || name.length > MAX_CANVAS_NAME) return fail(`name must be 1-${MAX_CANVAS_NAME} characters`)
         const before = store.getCanvas(canvasId)?.name
         const canvas = actions.renameCanvas(canvasId, name, actor)
         if (!canvas) return fail('canvas not found')

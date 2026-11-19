@@ -6,7 +6,7 @@ import { createHash } from 'node:crypto'
 import { eq } from 'drizzle-orm'
 import { db } from './db/index.ts'
 import * as authSchema from './db/auth-schema.ts'
-import { canvasPages, framePageId, MAX_PAGE_NAME } from '../shared/pages.ts'
+import { canvasPages, framePageId, MAX_CANVAS_NAME, MAX_PAGE_NAME } from '../shared/pages.ts'
 import { normalizePageBackground } from '../shared/pageBackground.ts'
 import { prototypeReport, prototypeUrl, setPrototypeStart } from './prototypeTools.ts'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
@@ -575,7 +575,7 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
         'Create a new design canvas. Returns the canvas id, which is part of the shareable URL (/c/<id>). Pass workspace_id (from list_canvases) to create it inside a shared workspace so every member can open it.',
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
       inputSchema: {
-        name: z.string().describe('Canvas name'),
+        name: z.string().trim().min(1).max(MAX_CANVAS_NAME).describe('Canvas name'),
         workspace_id: z.string().optional().describe('Create inside this shared workspace'),
         agent_name: agentName.optional(),
       },
@@ -603,7 +603,7 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
       inputSchema: {
         canvas_id: z.string(),
-        name: z.string().trim().min(1).describe('The new canvas name'),
+        name: z.string().trim().min(1).max(MAX_CANVAS_NAME).describe('The new canvas name'),
         agent_name: agentName,
       },
     },

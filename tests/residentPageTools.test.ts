@@ -17,7 +17,7 @@ vi.mock('../server/db/persist.ts', () => ({
 const actions = await import('../server/actions.ts')
 const { store } = await import('../server/store.ts')
 const { deliveredWork, execTool } = await import('../server/resident.ts')
-const { canvasPages, framePageId } = await import('../shared/pages.ts')
+const { canvasPages, framePageId, MAX_CANVAS_NAME } = await import('../shared/pages.ts')
 const { DEFAULT_ROLE_ID, roleName } = await import('../shared/agents.ts')
 
 const actor = () => actions.resolveActor({ name: roleName(DEFAULT_ROLE_ID), kind: 'agent' })
@@ -125,8 +125,10 @@ describe('the resident agent reorganizes pages', () => {
     await execTool(call('update_canvas', { name: 'Launch' }), canvasId, actor(), again)
     expect(deliveredWork(again)).toBe(false)
 
-    const empty = await execTool(call('update_canvas', { name: '  ' }), canvasId, actor(), run())
-    expect(empty.is_error).toBe(true)
+    for (const name of ['  ', 'x'.repeat(MAX_CANVAS_NAME + 1)]) {
+      const refused = await execTool(call('update_canvas', { name }), canvasId, actor(), run())
+      expect(refused.is_error).toBe(true)
+    }
     expect(canvas().name).toBe('Launch')
   })
 

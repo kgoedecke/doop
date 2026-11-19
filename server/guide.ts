@@ -441,8 +441,8 @@ ${FRAME_STYLES}
   frame's pageId. Put one screen in a frame and a body of work on a page: a second product
   surface, a platform (web vs. mobile), a round of explorations. create_canvas_page adds one
   and returns its id for create_frame's pageId; get_canvas with page_id reads one page;
-  set_canvas_pages renames, reorders or deletes pages. A link to a page is
-  /c/<canvas_id>?page=<page_id>.
+  set_canvas_pages renames, reorders or deletes pages, and update_canvas renames the canvas
+  itself. A link to a page is /c/<canvas_id>?page=<page_id>.
 - Element links: /c/<canvas_id>?frame=<frame_id>&element=<element_id> points at the one
   element carrying data-doop-id="<element_id>" in that frame's HTML. Find that attribute with
   get_frame before applying the feedback; if no element carries it any more, ask for an
