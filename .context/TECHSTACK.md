@@ -266,7 +266,10 @@
   healed document, so a cut-off script never runs).
 - No files inside frames (`server/inlineData.ts`, `LEAN_FRAMES` in `server/guide.ts`): an agent
   write that adds a base64 `data:` URI of any kind is refused and nothing is written, with what to
-  do per kind (font, picture, SVG, media). Checked on what the call submits: MCP `create_frame`,
+  do per kind (font, picture, SVG, media). So is one that adds a block of 4,096 or more base64
+  characters that is not a data: URI (`EMBEDDED_MIN_LENGTH`: a packed script bundle, a compressed
+  data file in a string literal; one canvas held 6 MB of it per frame, 13 GB across its kept
+  versions). Checked on what the call submits: MCP `create_frame`,
   `set_frame_html`, `append_frame_html` chunks, `edit_frame_html`'s `new_str`, every component
   tool's strings, and the resident's create / set / edit / rewrite chunks. A URI the frame already
   holds may be carried over (a PDF import embeds its fonts), so such a frame stays editable.

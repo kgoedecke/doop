@@ -20,7 +20,7 @@ import { fontsForCanvas } from './fonts.ts'
 import { customAgentsForCanvas } from './customAgents.ts'
 import { describeLibrary, libraryBrief, MAX_FONT_BYTES } from '../shared/fonts.ts'
 import { addCanvasFont, uploadedFontResult } from './canvasFontUpload.ts'
-import { inlineDataRefusal } from './inlineData.ts'
+import { EMBEDDED_MIN_LENGTH, inlineDataRefusal } from './inlineData.ts'
 import {
   MAX_TOKEN_DESCRIPTION,
   TOKEN_TYPES,
@@ -141,6 +141,12 @@ You MUST call get_guide({ topic: "doop-instructions" }) before using other Doop 
 - When Doop gets in your way, call report_issue, then carry on.`
 
 /** What this server's integrations add to the main guide. */
+/** A frame's HTML in every form an agent may have read it in (stored and compact), for
+ *  telling what a write adds from what it carries over (server/inlineData.ts). */
+function heldForms(frame: Frame): string {
+  return `${frame.html}\n${compactFrameHtml(frame)}`
+}
+
 function extensionGuideLines(): string[] {
   return extensions.flatMap((extension) => extension.mcpGuideLines ?? [])
 }
@@ -1566,7 +1572,9 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
     async ({ frame_id, html, agent_name }) => {
       const current = frameFor(frame_id, 'edit')
       if (!current) return noFrame(frame_id)
-      const inline = inlineDataRefusal(html, current.html)
+      /* every form the agent may have read the frame in counts as what it already held: a
+         rewrite of the full form carries over what the canvas supplies to it */
+      const inline = inlineDataRefusal(html, heldForms(current))
       if (inline) return err(inline)
       const frame = actions.updateFrame(frame_id, { html }, actorFrom(agent_name), { replace: true })
       if (!frame) return noFrame(frame_id)
@@ -2426,17 +2434,22 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
     async ({ frame_id, html_chunk, start, done, agent_name }) => {
       const current = frameFor(frame_id, 'edit')
       if (!current) return noFrame(frame_id)
-      /* the agent's own text: the end of its last chunk joined to this one, so a URI split
-         across chunks is caught (a split can only fall inside the short data:…;base64, prefix:
-         past it, the earlier chunk already held the prefix and was refused). Never the stored
-         HTML, where a component's image expanded mid-stream would read as an upload. Compared
-         with the design the stream replaced: a rework may carry over what the frame had. */
-      const inline = start
-        ? inlineDataRefusal(html_chunk, current.html)
-        : inlineDataRefusal(
-            (actions.streamTail(frame_id) ?? '') + html_chunk,
-            actions.streamBase(frame_id) ?? current.html,
-          )
+      /* the agent's own text: the end of its stream so far joined to this chunk, so a data:
+         URI's prefix split across chunks is caught, and so is a block of base64 text sent in
+         pieces each too short to be one. Never the stored HTML of a stream in progress, where a
+         component's image expanded mid-stream would read as an upload; but a chunk appended
+         after its stream ended is joined to the frame as stored, so the end of that is what
+         it is read with (a stream that ends is healed, its open tags closed, so a block
+         cannot in fact go on from one: this is for the case it ever could). Compared with the design the stream replaced: a rework may carry
+         over what the frame had. */
+      const base = actions.streamBase(frame_id) ?? current.html
+      const before = start ? '' : (actions.streamTail(frame_id) ?? current.html.slice(-EMBEDDED_MIN_LENGTH))
+      const refusal = inlineDataRefusal(before + html_chunk, base)
+      /* refused only for what it completes: the earlier pieces are in the frame already */
+      const completes = refusal && before && !inlineDataRefusal(html_chunk, base)
+      const inline = completes
+        ? `${refusal.replace('Refused, nothing was written:', 'Refused, this chunk was not written:')}\nThe size above counts what your earlier chunks sent too: the start of that block is already in the frame. Begin the frame again (start=true) and stream it without the block.`
+        : refusal
       if (inline) return err(inline)
       const frame = actions.appendFrameHtml(frame_id, html_chunk, actorFrom(agent_name), { start, done })
       if (!frame) return noFrame(frame_id)
@@ -2483,7 +2496,7 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
       const edited = editFrameSource(f, old_str, new_str)
       if ('error' in edited) return err(edited.error)
       /* the edited document, so a URI completed across the replacement's edges is caught too */
-      const inline = inlineDataRefusal(edited.html, `${f.html}\n${compactFrameHtml(f)}`)
+      const inline = inlineDataRefusal(edited.html, heldForms(f))
       if (inline) return err(inline)
       const frame = actions.updateFrame(frame_id, { html: edited.html }, actorFrom(agent_name))!
       return withPreview(
