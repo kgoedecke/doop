@@ -114,8 +114,8 @@ export function pasteFrameAtScreen(canvasId: string, clientX: number, clientY: n
   const vp = useStore.getState().viewport
   createFromClip(
     canvasId,
-    (clientX - (stage?.left ?? 0) - vp.x) / vp.zoom,
-    (clientY - (stage?.top ?? 0) - vp.y) / vp.zoom,
+    Math.round((clientX - (stage?.left ?? 0) - vp.x) / vp.zoom),
+    Math.round((clientY - (stage?.top ?? 0) - vp.y) / vp.zoom),
   )
 }
 
@@ -129,8 +129,8 @@ export function pasteFrameCentered(canvasId: string) {
   const stage = stageViewportSize()
   createFromClip(
     canvasId,
-    (stage.width / 2 - vp.x) / vp.zoom - width / 2,
-    (stage.height / 2 - vp.y) / vp.zoom - height / 2,
+    Math.round((stage.width / 2 - vp.x) / vp.zoom - width / 2),
+    Math.round((stage.height / 2 - vp.y) / vp.zoom - height / 2),
   )
 }
 

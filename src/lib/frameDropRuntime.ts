@@ -90,7 +90,7 @@ export const FRAME_DROP_RUNTIME = `
     var shift = new DOMMatrix(cs.transform === 'none' ? undefined : cs.transform)
     var cx = (rect.x + rect.width / 2 - origin.x) / origin.scale.x - shift.e
     var cy = (rect.y + rect.height / 2 - origin.y) / origin.scale.y - shift.f
-    var round = function (n) { return Math.round(n * 100) / 100 }
+    var round = function (n) { return Math.round(n) }
     var last = null
     for (var i = parent.children.length - 1; i >= 0 && !last; i--) {
       var child = parent.children[i]
