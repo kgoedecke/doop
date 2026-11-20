@@ -1369,9 +1369,10 @@ export const FrameView = memo(function FrameView({
       if (ev.data?.type === 'doop:located' && typeof ev.data.reqId === 'string') {
         if (ev.data.reqId === '__layer-hover__') {
           /* the pointer may have left the row while the runtime looked: a late
-             reply must not paint an outline nobody is hovering */
+             reply (one answered again once a transition ended, too) must not
+             paint an outline nobody is hovering, nor another row's box */
           const hovered = useStore.getState().hoveredLayer
-          if (!hovered || hovered.frameId !== frame.id) return
+          if (!hovered || hovered.frameId !== frame.id || hovered.selector !== ev.data.selector) return
           const rect = ev.data.rect as HoverHit['rect'] | null
           const selector = hovered.selector
           /* the tag of the selector's last step: "section:nth-of-type(2)" → "section" */

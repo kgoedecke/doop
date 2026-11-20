@@ -1075,24 +1075,42 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
       box: target && found ? renderedBox(target, found) : null,
     }, '*')
   }
-  /* the latest locate per request id: only it answers again once layout settles */
-  var locateTurns = {}
+  /* the turn of the locate still waiting per request id: a newer locate for
+     the same id takes over, and an id leaves once its waits are over */
+  var locateTurn = 0
+  var locateWaiting = Object.create(null)
 
-  /* Calls back once the transitions and animations running now have ended
-     and no font is loading; not at all when nothing is in motion. Endless
-     animations (a spinner) never settle, so they are not waited for. */
+  /* Calls back, at most once a frame, as each transition or animation running
+     now ends and when a font that is loading is in, so an outline catches up
+     with a short transition without waiting for a long one elsewhere in the
+     frame; \`done\` is true on the last. Returns whether anything is in motion.
+     Endless or paused-in-place animations (a spinner, a zero playback rate)
+     never end, so they are not waited for. */
   function whenLayoutSettles(cb) {
     var waits = []
     if (document.getAnimations) {
       document.getAnimations().forEach(function (animation) {
         var end = animation.effect ? animation.effect.getComputedTiming().endTime : Infinity
-        if (animation.playState !== 'running' || !isFinite(end)) return
+        if (animation.playState !== 'running' || animation.playbackRate === 0 || !isFinite(end)) return
         /* a cancelled one rejects: it moves nothing further, so it counts as ended */
         waits.push(animation.finished.then(null, function () {}))
       })
     }
     if (document.fonts.status === 'loading') waits.push(document.fonts.ready)
-    if (waits.length) Promise.all(waits).then(cb)
+    var left = waits.length
+    var queued = false
+    waits.forEach(function (wait) {
+      wait.then(function () {
+        left -= 1
+        if (queued) return
+        queued = true
+        requestAnimationFrame(function () {
+          queued = false
+          cb(left === 0)
+        })
+      })
+    })
+    return waits.length > 0
   }
 
   /* ---- element properties (the Design panel) ----
@@ -1991,11 +2009,14 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
       /* the update that asked may have started a transition (a component
          variant under \`transition: all\`) or be waiting on a font, so the
          element is not at its size yet: answer again once it is */
-      var turn = (locateTurns[d.reqId] || 0) + 1
-      locateTurns[d.reqId] = turn
-      whenLayoutSettles(function () {
-        if (locateTurns[d.reqId] === turn) locate(d.reqId, d.selector)
+      var turn = ++locateTurn
+      var moving = whenLayoutSettles(function (done) {
+        if (locateWaiting[d.reqId] !== turn) return
+        locate(d.reqId, d.selector)
+        if (done) delete locateWaiting[d.reqId]
       })
+      if (moving) locateWaiting[d.reqId] = turn
+      else delete locateWaiting[d.reqId]
     }
   })
   parent.postMessage({ type: 'doop:frame-ready' }, '*')

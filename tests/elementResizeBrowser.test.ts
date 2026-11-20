@@ -740,22 +740,31 @@ describe.skipIf(!findBrowserPath())('element resize handles', () => {
   it('follows the picked element to the size its transition settles at', async () => {
     /* a component variant under `transition: all`: the update lands, the
        outline is measured while the padding is still on its way, and it must
-       not stay at that size */
+       not stay at that size, nor wait on a spinner that never ends or a slow
+       animation elsewhere in the frame */
     const variant = (icon: 'none' | 'leading') => `<!doctype html><html><head><style>
       body { margin: 0; padding: 20px }
       #button { display: inline-block; width: 100px; height: 36px; padding: 0 12px; transition: all 400ms linear }
       #button[data-icon="leading"] { padding-left: 40px }
-    </style></head><body><div id="button" data-icon="${icon}"></div></body></html>`
+      @keyframes turn { to { rotate: 360deg } }
+      #spinner { width: 20px; height: 20px; animation: turn 1s linear infinite }
+      #slow { width: 20px; height: 20px; animation: turn 10s linear }
+    </style></head><body>
+      <div id="button" data-icon="${icon}"></div><div id="spinner"></div><div id="slow"></div>
+    </body></html>`
     await reset(variant('none'))
+    /* the reset morphs the previous fixture's first box into the button, which
+       then transitions from that box's size: start once it is still */
+    const frame = (await frameDoc())!
+    await frame.waitForFunction(() => document.getElementById('button')!.getAnimations().length === 0)
     await select('#button')
     const grips = () =>
       page.$eval('[data-resize-handles]', (el) => (el instanceof HTMLElement ? parseFloat(el.style.width) : null))
     expect(await grips()).toBe(124)
 
     saved = { ...saved, html: variant('leading'), updatedAt: saved.updatedAt + 1 }
-    await page.evaluate((frame) => window.elementPanelHarness.remote(frame), saved)
-    const frame = (await frameDoc())!
+    await page.evaluate((next) => window.elementPanelHarness.remote(next), saved)
     await frame.waitForFunction(() => document.getElementById('button')!.dataset.icon === 'leading')
     await expect.poll(grips, { timeout: 2_000 }).toBe(152)
-  })
+  }, 20_000)
 })

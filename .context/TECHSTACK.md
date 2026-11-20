@@ -733,9 +733,10 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   text runs, rotated or skewed elements, locked layers, locked frames and the Comment tool get no
   grips. The outline, comment pins and hover outlines follow their element through
   `doop:locate`, asked again on every html update; the runtime answers straight away and,
-  when the update started a finite transition or animation or a font is loading, again once
-  they settle (`whenLayoutSettles`), so a variant under `transition: all` does not leave the
-  outline at a mid-transition size. `tests/elementResize.test.ts` covers the geometry and
+  while finite transitions or animations run or a font loads, again as each one ends (at most
+  once a frame, the latest locate per id only; `whenLayoutSettles`), so a variant under
+  `transition: all` does not leave the outline at a mid-transition size and a long animation
+  elsewhere in the frame does not hold it back. A late hover reply for another row is dropped. `tests/elementResize.test.ts` covers the geometry and
   `tests/elementResizeBrowser.test.ts` drags the grips in Chromium.
 - A selected frame wears the same furniture as a selected element (`FrameResizeHandles.tsx`,
   geometry in `src/lib/frameResize.ts`): a grip in each corner, grabbable edges, a two-pixel
