@@ -2271,16 +2271,60 @@ export function announceAdopted(canvasId: string, adopted: ComponentDef[], actor
   for (const def of adopted) broadcastComponent(canvasId, def, actor)
   const names = adopted.map((def) => `“${def.name}”`).join(', ')
   logComponent(canvasId, actor, `added ${names} from the workspace library`)
-  const carry = () => carryLibraryTokens(canvasId, adopted, actor)
-  if (!withinWrite) return carry()
-  /* once the write has landed and been sent, as work of its own */
+  if (!withinWrite) return carryLibraryTokens(canvasId, adopted, actor)
+  /* once the write has landed and been sent, as a write of its own: through the canvas write
+     entry, which installs the carrier (`carryAdoptedTokensWith`) */
+  const carry = () => carryAdopted(canvasId, adopted, actor)
   if (inTransaction()) postCommit(carry)
   else queueMicrotask(carry)
+}
+
+/* What carries the tokens of components a frame write took up, once that write has landed: the
+   server's write entry installs it (`wireCanvasWrites`, server/canvasWrites.ts, called at boot),
+   so that the carry runs through the entry like every other write. Unwired, the carry runs here
+   as it did before the entry, and that it bypassed the entry is said, once. */
+let adoptedTokenCarrier: ((canvasId: string, componentIds: string[], actor: Actor) => void) | undefined
+let carryUnwiredSaid = false
+
+function carryAdopted(canvasId: string, adopted: ComponentDef[], actor: Actor) {
+  if (adoptedTokenCarrier)
+    return adoptedTokenCarrier(
+      canvasId,
+      adopted.map((def) => def.id),
+      actor,
+    )
+  /* unwired: carried here, as before the entry, rather than lost */
+  if (!carryUnwiredSaid && libraryTokensMissing(canvasId, adopted).length) {
+    carryUnwiredSaid = true
+    console.error(
+      '[library] carrying adopted components’ tokens outside the canvas write entry: wireCanvasWrites() was not called',
+    )
+  }
+  carryLibraryTokens(canvasId, adopted, actor)
+}
+
+/** Carry the tokens of components a frame write took up with `carry`, once that write lands. */
+export function carryAdoptedTokensWith(carry: (canvasId: string, componentIds: string[], actor: Actor) => void) {
+  adoptedTokenCarrier = carry
 }
 
 /** Create the library's tokens these linked components name and the canvas
  *  lacks: on first use, and again when a pulled update starts naming new ones. */
 export function carryLibraryTokens(canvasId: string, adopted: ComponentDef[], actor: Actor) {
+  const missing = libraryTokensMissing(canvasId, adopted)
+  if (!missing.length || !store.getCanvas(canvasId)) return []
+  const inputs = aliasesLast(missing).map(({ name, type, value, themes, description }) => ({
+    name,
+    type,
+    value,
+    ...(themes ? { themes } : {}),
+    ...(description ? { description } : {}),
+  }))
+  return createTokens(canvasId, inputs, actor) ?? []
+}
+
+/** The library's tokens these linked components name and the canvas lacks, by name. */
+function libraryTokensMissing(canvasId: string, adopted: ComponentDef[]): DesignToken[] {
   const have = new Set(store.getTokens(canvasId).map((token) => token.name))
   const missing = new Map<string, DesignToken>()
   for (const def of adopted) {
@@ -2288,15 +2332,7 @@ export function carryLibraryTokens(canvasId: string, adopted: ComponentDef[], ac
     const used = tokensUsedBy(`${def.template}\n${def.css}`, store.getTokens(def.source.canvasId))
     for (const token of used) if (!have.has(token.name)) missing.set(token.name, token)
   }
-  if (!missing.size || !store.getCanvas(canvasId)) return
-  const inputs = aliasesLast([...missing.values()]).map(({ name, type, value, themes, description }) => ({
-    name,
-    type,
-    value,
-    ...(themes ? { themes } : {}),
-    ...(description ? { description } : {}),
-  }))
-  createTokens(canvasId, inputs, actor)
+  return [...missing.values()]
 }
 
 /** Tokens ordered so each comes after the ones its values read: an alias is

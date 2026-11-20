@@ -11,20 +11,16 @@ import {
   findComponent,
   findDeletedComponent,
   importableEntry,
-  importComponent,
-  insertInstance,
-  instancesIn,
   libraryCatalog,
   libraryConsumers,
   lookalikesIn,
   publishToLibrary,
-  syncComponent,
   unpublishFromLibrary,
-  updateLibraryConsumers,
   usageExample,
   touchedFrames,
   usageOf,
-  waitingLibraryUpdates,
+  insertInstance,
+  instancesIn,
 } from './componentActions.ts'
 import { isLibrary, librariesForCanvas } from './componentLibrary.ts'
 import * as actions from './actions.ts'
@@ -34,7 +30,8 @@ import { inlineDataRefusal, type Surface } from './inlineData.ts'
 import { optional, WorkBudgetError } from './workBudget.ts'
 import { WriteRefusedError } from './writeRefusal.ts'
 import { transaction } from './journal.ts'
-import { runCanvasWrite, type ComponentView } from './canvasWrites.ts'
+import { readableSources, runCanvasWrite, type ComponentView } from './canvasWrites.ts'
+import { updateLibraryConsumers } from './libraryUpdates.ts'
 
 /**
  * The component tools every agent gets, over MCP (server/mcp.ts) or in the server
@@ -620,13 +617,22 @@ export const COMPONENT_TOOLS: ComponentTool[] = [
       source_canvas_id: z.string().describe('The library canvas'),
       component: COMPONENT_REF,
     },
-    run({ source_canvas_id, component }, { canvas, actor, canRead }) {
+    async run({ source_canvas_id, component }, { canvas, actor, canRead }) {
       const source = String(source_canvas_id)
       /* a workspace library goes by the canvas, like its fonts: whoever may edit here may use it */
       const shared = librariesForCanvas(canvas).some((library) => library.canvasId === source)
       if (!shared && !canRead(source)) throw new ComponentError('this account cannot read that canvas')
-      const def = importComponent(canvas.id, source, String(component), actor)
-      return { data: { ok: true, component: summary(canvas, def) }, note: `Use it with ${usageExample(def)}.` }
+      const { component: def, view } = await runCanvasWrite(canvas.id, {
+        type: 'import-component',
+        from: source,
+        component: String(component),
+        actor,
+        view: true,
+      })
+      return {
+        data: { ok: true, component: viewOr(canvas, def, view).entry },
+        note: `Use it with ${usageExample(def)}.`,
+      }
     },
   },
   {
@@ -639,27 +645,32 @@ export const COMPONENT_TOOLS: ComponentTool[] = [
     shape: {
       component: COMPONENT_REF.optional().describe('Component name or id; omit for every waiting library update'),
     },
-    run({ component }, { canvas, actor, canRead }) {
+    async run({ component }, { canvas, actor, canRead }) {
       if (component === undefined || component === '') {
-        const waiting = waitingLibraryUpdates(canvas)
-        const frames = new Map<string, Frame>()
-        const updated: string[] = []
-        for (const def of waiting) {
-          const result = syncComponent(canvas.id, def.id, actor, canRead)
-          if (!result.updated) continue
-          updated.push(result.component.name)
-          for (const frame of outcomeFrames({ canvas } as ToolContext, result.component)) frames.set(frame.id, frame)
-        }
+        const result = await runCanvasWrite(canvas.id, {
+          type: 'sync-library-updates',
+          readable: readableSources(canvas.id, canRead),
+          actor,
+          view: true,
+        })
         return {
-          data: { ok: true, updated: updated.length > 0, components: updated },
-          ...(waiting.length ? {} : { note: 'No workspace-library update is waiting on this canvas.' }),
-          frames: [...frames.values()],
+          data: { ok: true, updated: result.updated.length > 0, components: result.updated.map((def) => def.name) },
+          ...(result.waiting ? {} : { note: 'No workspace-library update is waiting on this canvas.' }),
+          frames: result.frames ?? [],
         }
       }
-      const result = syncComponent(canvas.id, String(component), actor, canRead)
+      const ref = String(component)
+      const { view, ...result } = await runCanvasWrite(canvas.id, {
+        type: 'sync-component',
+        component: ref,
+        readable: readableSources(canvas.id, canRead),
+        actor,
+        view: true,
+      })
+      const shown = viewOr(canvas, result.component, view)
       return {
-        data: { ok: true, updated: result.updated, component: summary(canvas, result.component) },
-        frames: result.updated ? outcomeFrames({ canvas } as ToolContext, result.component) : [],
+        data: { ok: true, updated: result.updated, component: shown.entry },
+        frames: result.updated ? shown.frames : [],
       }
     },
   },

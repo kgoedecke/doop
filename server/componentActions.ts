@@ -1644,7 +1644,7 @@ export function syncComponent(canvasId: string, ref: string, actor: Actor, canRe
 /* Spec: .context/specs/workspace-component-library.md.                 */
 /* ------------------------------------------------------------------ */
 
-function requireLibraryPlan(canvas: Canvas, doing: string) {
+export function requireLibraryPlan(canvas: Canvas, doing: string) {
   const block = libraryBlock(canvas)
   if (!block) return
   if (block.reason === 'no_workspace')
@@ -1665,7 +1665,7 @@ export function mayPublishFrom(canvas: Pick<Canvas, 'workspaceId'>, userId: stri
 
 /** The one gate on who publishes and withdraws: REST, MCP and the resident
  *  agent all reach the library through the two functions that call it. */
-function requireLibraryPublisher(canvas: Canvas, userId: string | undefined) {
+export function requireLibraryPublisher(canvas: Canvas, userId: string | undefined) {
   if (mayPublishFrom(canvas, userId)) return
   throw new LibraryPublisherError(
     "Publishing to this workspace's library is limited to its owner and admins. One of them can publish this, or change who may publish in the workspace's General settings.",
@@ -1987,7 +1987,8 @@ export interface LibrarySkippedConsumer {
   /** absent for a canvas the account cannot open */
   canvas_id?: string
   canvas_name?: string
-  reason: 'no_edit_access' | 'failed'
+  /** `not_reached`: the update stopped at an earlier canvas, and left this one as it was */
+  reason: 'no_edit_access' | 'failed' | 'not_reached'
   message: string
 }
 
@@ -2020,7 +2021,7 @@ function staleLinks(canvas: Canvas, libraryCanvasId: string): ComponentDef[] {
   return [...stale.values()]
 }
 
-function previewConsumerUpdate(canvas: Canvas, libraryCanvasId: string): LibraryConsumerUpdate | undefined {
+export function previewConsumerUpdate(canvas: Canvas, libraryCanvasId: string): LibraryConsumerUpdate | undefined {
   const stale = staleLinks(canvas, libraryCanvasId)
   if (!stale.length) return undefined
   const frames = new Map<string, boolean>()
@@ -2036,7 +2037,7 @@ function previewConsumerUpdate(canvas: Canvas, libraryCanvasId: string): Library
 
 /** Pull the library's publication into one loaded canvas. A refusal part of the way
  *  leaves what was already pulled in place, so both halves are returned. */
-function pullIntoConsumer(canvas: Canvas, library: Canvas, actor: Actor) {
+export function pullIntoConsumer(canvas: Canvas, library: Canvas, actor: Actor) {
   const updated = new Set<string>()
   const frames = new Map<string, boolean>()
   let refusal: string | undefined
@@ -2067,88 +2068,4 @@ function pullIntoConsumer(canvas: Canvas, library: Canvas, actor: Actor) {
       }
     : undefined
   return { update, refusal }
-}
-
-/** Bring every canvas of the workspace that uses this library up to its latest
- *  publication, in one step. Publishing never does this: it is its own act, by someone
- *  who may edit each canvas it changes, and it reports canvas by canvas what it did.
- *  Each pull is the ordinary one (pullFromLibrary): history is filed, approved frames
- *  keep their sign-off and the canvas's room is told.
- *
- *  Frame HTML is loaded per canvas (store.load), and a pull reads and rewrites the
- *  consumer's frames, so each consumer is loaded and held while it is worked on: one
- *  at a time, so a workspace of many canvases is never all in memory for this. */
-export async function updateLibraryConsumers(
-  libraryCanvasId: string,
-  actor: Actor,
-  options: LibraryUpdateOptions,
-): Promise<LibraryUpdateReport> {
-  const library = store.getCanvas(libraryCanvasId)
-  if (!library) fail('canvas not found')
-  requireLibraryPlan(library, 'Updating the canvases that use a library')
-  requireLibraryPublisher(library, options.publisherId)
-  if (!isLibrary(library.id))
-    fail('this canvas has not published a library, so no canvas follows it — publish_library comes first')
-  const report: LibraryUpdateReport = {
-    dry_run: options.dryRun === true,
-    library: { canvas_id: library.id, canvas_name: library.name },
-    canvases: [],
-    skipped: [],
-  }
-  for (const consumer of libraryConsumers(library)) {
-    if (!consumer.update_waiting) continue
-    const named = options.canRead(consumer.canvas_id)
-      ? { canvas_id: consumer.canvas_id, canvas_name: consumer.canvas_name }
-      : {}
-    if (!options.canEdit(consumer.canvas_id)) {
-      report.skipped.push({
-        ...named,
-        reason: 'no_edit_access',
-        message: 'this account may not edit that canvas; someone who can has to pull the update there',
-      })
-      continue
-    }
-    const canvas = await store.load(consumer.canvas_id)
-    /* deleted, or moved out of the workspace, while an earlier canvas was being read */
-    if (!canvas) continue
-    const release = store.hold(canvas.id)
-    try {
-      if (report.dry_run) {
-        const preview = previewConsumerUpdate(canvas, library.id)
-        if (preview) report.canvases.push(preview)
-        continue
-      }
-      const { update, refusal } = pullIntoConsumer(canvas, library, actor)
-      /* a sub-commit per canvas: its pull is sent and its frames enter the queue now, before
-         the wait below (which would otherwise wait on a queue nothing has reached yet), and
-         a canvas that is done stays done if a later one is refused */
-      checkpoint()
-      if (update) {
-        /* the pull only queued its frames (all of them: the canvas is loaded): wait here, canvas
-           held, for the ones it really changed.
-           The wait blocks nothing (the queue works a frame per tick), and keeps the canvases
-           this walks through in memory one at a time. */
-        const drained = (await propagation.whenCanvasIdle(canvas.id)).propagate
-        report.canvases.push({
-          ...update,
-          frames_changed: drained?.frames.length ?? 0,
-          approvals_withdrawn: drained?.frames.filter((frame) => frame.approvalLost).length ?? 0,
-        })
-      }
-      if (refusal) report.skipped.push({ ...named, reason: 'failed', message: refusal })
-    } finally {
-      release()
-    }
-  }
-  if (!report.dry_run && report.canvases.length) {
-    const count = report.canvases.length
-    actions.logComponent(
-      library.id,
-      actor,
-      `updated ${count} canvas${count === 1 ? '' : 'es'} to this library’s latest publication`,
-    )
-    /* the library's own panel counts who is behind: it reads again */
-    actions.broadcastLibrary(library, actor)
-  }
-  return report
 }

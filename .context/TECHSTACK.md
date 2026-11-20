@@ -718,9 +718,26 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   annotation write, nothing for a frame mid-stream), one operation per frame, then stores the
   row before the comments name the ids. `actions.ts` reaches the entry by a dynamic import, so
   it still imports nothing from `canvasWrites.ts` when it loads. The seed canvas at first boot
-  stays a direct `store` write. Not yet: detaching, propagation, the library (with
-  the tokens an adopted component brings, `carryLibraryTokens`). Tests: `canvasWrites.test.ts`,
-  `importWrites.test.ts`, `writeBoundaryHttp.test.ts`.
+  stays a direct `store` write.
+  The workspace library goes through it too: `import-component` (from a workspace library,
+  linked, or a copy from any canvas the caller checked it may read), `sync-component` and
+  `sync-library-updates` (one, or every waiting pull all or none; the caller's read check rides
+  along as `readable`, `readableSources`), `pull-library` (one per canvas from
+  `updateLibraryConsumers`, now in `server/libraryUpdates.ts`, which commits each with
+  `checkpoint()` before the next, as before the entry; once a pull was committed, a refusal or a
+  spent budget anywhere in a canvas's step (its load, its pull, the wait for its frames) stops the
+  walk and is reported in `skipped`, the canvases not reached that still use the library as
+  `not_reached`; anything else is logged and fails the call) and `carry-library-tokens` (the
+  tokens of components a frame write took up, sent once that write lands through
+  `carryAdoptedTokensWith`, which `wireCanvasWrites()` installs; unwired, they are carried
+  directly and that is logged once; the adoption itself is part of the frame write), from REST
+  (`/components/import`, `/components/:id/sync`, `/library/update-consumers`), MCP and the
+  resident; `view: true` builds the catalog entry and frames in the write's step, never failing
+  it. Copying from a canvas that is not a library still sub-commits per component it updates
+  (`checkpoint()`), as `replace_matching` does. Publishing writes the library's publication, not
+  a canvas, and is not routed.
+  Not yet: detaching, propagation. Tests: `canvasWrites.test.ts`, `importWrites.test.ts`,
+  `canvasWritesLibrary.test.ts`, `writeBoundaryHttp.test.ts`.
 - `pg` 8.22.0 - Postgres driver for the real-database path.
 - Frame HTML in memory (`server/store.ts`, `server/frameHtml.ts`): the store keeps every canvas
   and frame, but frame HTML (most of the data) loads per page. Boot reads `frames` without `html`;

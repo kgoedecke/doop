@@ -6,6 +6,10 @@ import type { ComponentDef } from '../shared/components.ts'
 import {
   catalogEntry,
   ComponentError,
+  importComponent,
+  pullIntoConsumer,
+  syncComponent,
+  waitingLibraryUpdates,
   touchedFrames,
   createComponentFromElement,
   createComponentFromHtml,
@@ -66,8 +70,11 @@ import { optional, runOperation, WorkBudgetError } from './workBudget.ts'
  * rewrite), component definitions (made, changed, deleted, brought back), instances (placed,
  * changed), imports and ingest
  * (`runImportWrite`, `landImportFrame`, below), and the element ids comments are anchored by
- * (a new comment's, a moved one's and the boot backfill's). Propagation and the library still
- * call their actions directly; they move here next.
+ * (a new comment's, a moved one's and the boot backfill's), and what a canvas takes from its
+ * workspace library or another canvas (a component imported, one or every waiting update
+ * pulled, a library's publication pulled into each canvas using it, and the tokens an adopted
+ * component brings). Propagation still calls its actions directly; it moves here next.
+ * Publishing a library writes the library's publication, not a canvas, and stays outside.
  *
  * A command an agent sends carries the surface it came from (`inline`), and the host checks
  * the HTML it adds for inline data against the frame as the host holds it, by that surface's
@@ -290,6 +297,7 @@ export type ChangeInstancesCommand = {
 export type CanvasWrite =
   | InsertInstanceCommand
   | ChangeInstancesCommand
+  | LibraryWrite
   | CreateComponentCommand
   | CreateComponentsCommand
   | UpdateComponentCommand
@@ -367,9 +375,148 @@ export class CanvasMismatchError extends Error {
   }
 }
 
+/* ------------------------------------------------------------------ */
+/* The workspace library, and components copied from another canvas:  */
+/* what a canvas takes up from elsewhere, and pulls when it moves on.  */
+/* ------------------------------------------------------------------ */
+
+/** A component taken up from another canvas, with what it is built from
+ *  (componentActions.importComponent): from a workspace library of this canvas, linked to what
+ *  it published (and the library's tokens it names, carried along); from any other canvas, a
+ *  copy with a main of its own. Who may read `from` is the caller's check. */
+export type ImportComponentCommand = {
+  type: 'import-component'
+  /** the canvas it comes from */
+  from: string
+  /** its name or id there */
+  component: string
+  actor: Actor
+  /** answer its `ComponentView` too (the agent tools) */
+  view?: boolean
+}
+
+/** One component brought up to its origin (componentActions.syncComponent): what its workspace
+ *  library last published, or a copied one's source canvas as it is now. */
+export type SyncComponentCommand = {
+  type: 'sync-component'
+  component: string
+  /** the canvases the caller may read (`readableSources`): a copied component is pulled only
+   *  from one of these */
+  readable: readonly string[]
+  actor: Actor
+  view?: boolean
+}
+
+/** Every workspace-library update waiting on the canvas pulled, all or none. */
+export type SyncLibraryUpdatesCommand = {
+  type: 'sync-library-updates'
+  /** the canvases the caller may read, as `sync-component` */
+  readable: readonly string[]
+  actor: Actor
+  /** answer the frames the pulls touched, read once every pull is made */
+  view?: boolean
+}
+
+/** A library's latest publication pulled into one canvas using it (`updateLibraryConsumers`,
+ *  server/libraryUpdates.ts, sends one per canvas, and commits each before the next). A
+ *  refusal part of the way keeps what was pulled before it and is answered as `refusal`;
+ *  anything else takes back the whole pull. */
+export type PullLibraryCommand = { type: 'pull-library'; library: string; actor: Actor }
+
+/** The library's tokens these linked components name, created where the canvas lacks them
+ *  (actions.carryLibraryTokens): what a frame write that took components up sends once it
+ *  has landed (`carryAdoptedTokensWith`). Answers the tokens it created. */
+export type CarryLibraryTokensCommand = { type: 'carry-library-tokens'; components: readonly string[]; actor: Actor }
+
+export type LibraryWrite =
+  | ImportComponentCommand
+  | SyncComponentCommand
+  | SyncLibraryUpdatesCommand
+  | PullLibraryCommand
+  | CarryLibraryTokensCommand
+
+/** The library's commands on the local host. Each view is read in the write's own step, and
+ *  only when asked; one that cannot be read (the canvas gone, the work budget spent) is left
+ *  out, and the write stands. */
+const libraryHost = {
+  'import-component': (canvasId, command) => {
+    const component = importComponent(canvasId, command.from, command.component, command.actor)
+    return { component, ...optionalView(command.view, canvasId, component) }
+  },
+  'sync-component': (canvasId, command) => {
+    const readable = new Set(command.readable)
+    const { component, updated } = syncComponent(canvasId, command.component, command.actor, (id) => readable.has(id))
+    return { component, updated, ...optionalView(command.view, canvasId, component) }
+  },
+  'sync-library-updates': (canvasId, command) => {
+    const canvas = store.getCanvas(canvasId)
+    if (!canvas) throw new ComponentError('canvas not found')
+    const waiting = waitingLibraryUpdates(canvas)
+    const readable = new Set(command.readable)
+    /* all of them or none, as sync_component always pulled them. One pulled with an earlier
+       one (that one is built from it) has nothing left to pull */
+    const updated = transaction(() =>
+      waiting.flatMap((def) => {
+        const result = syncComponent(canvasId, def.id, command.actor, (id) => readable.has(id))
+        return result.updated ? [result.component] : []
+      }),
+    )
+    if (!command.view) return { waiting: waiting.length, updated }
+    /* after every pull, so building it spends nothing ahead of a write */
+    const frames = optional(() => {
+      const touched = new Map<string, Frame>()
+      for (const def of updated) for (const frame of touchedFrames(canvas, def)) touched.set(frame.id, frame)
+      return [...touched.values()]
+    })
+    return { waiting: waiting.length, updated, ...(frames ? { frames } : {}) }
+  },
+  'pull-library': (canvasId, command) => {
+    const canvas = store.getCanvas(canvasId)
+    const library = store.getCanvas(command.library)
+    if (!canvas || !library) return { update: undefined, refusal: undefined }
+    /* one unit: anything that is not a refusal takes back this canvas's whole pull. Committing
+       it is the caller's decision (updateLibraryConsumers commits between canvases) */
+    return transaction(() => pullIntoConsumer(canvas, library, command.actor))
+  },
+  'carry-library-tokens': (canvasId, command) => {
+    const wanted = new Set(command.components)
+    const adopted = store.getComponents(canvasId).filter((def) => wanted.has(def.id))
+    return actions.carryLibraryTokens(canvasId, adopted, command.actor)
+  },
+} satisfies {
+  [Type in LibraryWrite['type']]: (canvasId: string, command: Extract<LibraryWrite, { type: Type }>) => unknown
+}
+
+/** A component's view when asked, unless it cannot be read: never the write's failure. */
+function optionalView(asked: boolean | undefined, canvasId: string, def: ComponentDef): { view?: ComponentView } {
+  if (!asked) return {}
+  return optional(() => viewIf(true, canvasId, def)) ?? {}
+}
+
+/** The canvases the components on `canvasId` came from that the caller may read: every
+ *  canvas a pull there could ask about (`syncComponent` asks only of a component's source),
+ *  so a sync command carries the caller's read check as data, answering as it would have. */
+export function readableSources(canvasId: string, canRead: (canvasId: string) => boolean): string[] {
+  const sources = new Set(store.getComponents(canvasId).flatMap((def) => (def.source ? [def.source.canvasId] : [])))
+  return [...sources].filter((id) => canRead(id))
+}
+
+/** Carry the tokens of components a frame write took up, through the entry, once that write
+ *  has landed. It runs as work of its own after a commit (actions.announceAdopted), where
+ *  nothing awaits it: a rejection is logged. The carry creates its tokens in one unit
+ *  (createTokens is atomic), so a failure leaves nothing of it behind. */
+function carryAdoptedTokens(canvasId: string, components: string[], actor: Actor) {
+  runCanvasWrite(canvasId, { type: 'carry-library-tokens', components, actor }).catch((error: unknown) =>
+    console.error(`[library] could not carry the tokens of components taken up on ${canvasId}`, error),
+  )
+}
+
+/* ------------------------------------------------------------------ */
+
 /** The local host: each command's handler, the server's own actions. What a command answers
  *  is whatever its handler returns (`CanvasWriteResults`), so the two cannot drift apart. */
 const local = {
+  ...libraryHost,
   'create-component': (canvasId, command) => {
     const { from, actor } = command
     if (from.kind === 'html') {
@@ -785,11 +932,12 @@ let wired = false
 
 /**
  * Hand the server's own write work to this entry: idle streams settled on the playback tick
- * (actions.ts). Called once at boot by the server (server/index.ts), and by a test that runs
+ * (actions.ts), and the tokens a library adoption carries. Called once at boot by the server (server/index.ts), and by a test that runs
  * it. Until it is called, idle streams do not settle.
  */
 export function wireCanvasWrites() {
   if (wired) return
   wired = true
   actions.settleIdleStreamsWith((now) => void settleIdleStreams(now))
+  actions.carryAdoptedTokensWith(carryAdoptedTokens)
 }
