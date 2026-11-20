@@ -81,31 +81,6 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.actor_cleanups": {
-      "name": "actor_cleanups",
-      "schema": "",
-      "columns": {
-        "canvas_id": {
-          "name": "canvas_id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
     "public.agent_defaults": {
       "name": "agent_defaults",
       "schema": "",
@@ -1036,24 +1011,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "frame_store": {
-          "name": "frame_store",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "thumbnail_frame_id": {
-          "name": "thumbnail_frame_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "preview_frame_id": {
-          "name": "preview_frame_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
         "created_at": {
           "name": "created_at",
           "type": "bigint",
@@ -1265,12 +1222,6 @@
           "primaryKey": false,
           "notNull": true
         },
-        "render_rev": {
-          "name": "render_rev",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        },
         "template": {
           "name": "template",
           "type": "text",
@@ -1306,6 +1257,12 @@
           "type": "text",
           "primaryKey": false,
           "notNull": true
+        },
+        "render_rev": {
+          "name": "render_rev",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
         }
       },
       "indexes": {},
@@ -1391,12 +1348,6 @@
           "primaryKey": false,
           "notNull": true
         },
-        "render_rev": {
-          "name": "render_rev",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        },
         "main_frame_id": {
           "name": "main_frame_id",
           "type": "text",
@@ -1458,6 +1409,12 @@
           "type": "text",
           "primaryKey": false,
           "notNull": true
+        },
+        "render_rev": {
+          "name": "render_rev",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
         }
       },
       "indexes": {},
@@ -1750,42 +1707,6 @@
         "design_tokens_canvas_id_name_pk": {
           "name": "design_tokens_canvas_id_name_pk",
           "columns": ["canvas_id", "name"]
-        }
-      },
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.feature_flags": {
-      "name": "feature_flags",
-      "schema": "",
-      "columns": {
-        "flag": {
-          "name": "flag",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "user_id": {
-          "name": "user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {},
-      "compositePrimaryKeys": {
-        "feature_flags_flag_user_id_pk": {
-          "name": "feature_flags_flag_user_id_pk",
-          "columns": ["flag", "user_id"]
         }
       },
       "uniqueConstraints": {},
@@ -2649,12 +2570,6 @@
           "primaryKey": false,
           "notNull": true
         },
-        "refresh_token": {
-          "name": "refresh_token",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
         "expires_at": {
           "name": "expires_at",
           "type": "bigint",
@@ -2672,12 +2587,6 @@
           "type": "jsonb",
           "primaryKey": false,
           "notNull": true
-        },
-        "api_base": {
-          "name": "api_base",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
         },
         "connected_at": {
           "name": "connected_at",
@@ -3551,43 +3460,6 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.onboarding_profiles": {
-      "name": "onboarding_profiles",
-      "schema": "",
-      "columns": {
-        "user_id": {
-          "name": "user_id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "role": {
-          "name": "role",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "intent": {
-          "name": "intent",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "completed_at": {
-          "name": "completed_at",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
     "public.resident_usage": {
       "name": "resident_usage",
       "schema": "",
@@ -3613,6 +3485,89 @@
         }
       },
       "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.skills": {
+      "name": "skills",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "scope": {
+          "name": "scope",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "handle": {
+          "name": "handle",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "description": {
+          "name": "description",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "body": {
+          "name": "body",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_by": {
+          "name": "created_by",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {
+        "skills_scope_handle_idx": {
+          "name": "skills_scope_handle_idx",
+          "columns": [
+            {
+              "expression": "scope",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "handle",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
       "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
@@ -4133,6 +4088,12 @@
           "type": "text",
           "primaryKey": false,
           "notNull": true
+        },
+        "agent_key": {
+          "name": "agent_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
         },
         "owner": {
           "name": "owner",

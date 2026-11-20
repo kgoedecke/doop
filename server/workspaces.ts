@@ -6,6 +6,7 @@ import { db } from './db/index.ts'
 import * as t from './db/schema.ts'
 import * as authSchema from './db/auth-schema.ts'
 import { store } from './store.ts'
+import { afterCommit, recordUndo } from './journal.ts'
 import * as billing from './billing.ts'
 import { mailerConfigured, sendMail } from './mailer.ts'
 import { dropWorkspaceFonts } from './fonts.ts'
@@ -15,9 +16,10 @@ import { notifyUsers } from './userEvents.ts'
 import { avatarUrl } from '../shared/avatar.ts'
 import { billedSeats, isBillingInterval, isWorkspaceActive, parseSeats } from '../shared/billing.ts'
 import type { BillingInterval, WorkspaceStatus } from '../shared/billing.ts'
-import { isLibraryPublishPolicy, isWorkspaceRole } from '../shared/types.ts'
+import { isLibraryPublishPolicy, isLinkSharingPolicy, isWorkspaceRole } from '../shared/types.ts'
 import type {
   LibraryPublishPolicy,
+  LinkSharingPolicy,
   WorkspaceDetail,
   WorkspaceInvite,
   WorkspaceMember,
@@ -56,6 +58,9 @@ export interface WorkspaceRecord {
   billingEventAt: number | null
   /** who may publish to the component library; stored null for 'everyone' */
   libraryPublish: LibraryPublishPolicy
+  /** whether its canvases may be shared by link or listed in the gallery;
+   *  stored null for 'allowed' */
+  linkSharing: LinkSharingPolicy
   createdAt: number
   updatedAt: number
 }
@@ -95,6 +100,7 @@ export async function hydrateWorkspaces(): Promise<void> {
       cancelAtPeriodEnd: r.cancelAtPeriodEnd,
       billingEventAt: r.billingEventAt,
       libraryPublish: r.libraryPublish === 'admins' ? 'admins' : 'everyone',
+      linkSharing: r.linkSharing === 'off' ? 'off' : 'allowed',
       createdAt: r.createdAt,
       updatedAt: r.updatedAt,
     })
@@ -181,6 +187,7 @@ export function summaryFor(ws: WorkspaceRecord, viewerId: string): WorkspaceSumm
     ...(ws.currentPeriodEnd ? { currentPeriodEnd: ws.currentPeriodEnd } : {}),
     cancelAtPeriodEnd: ws.cancelAtPeriodEnd,
     libraryPublish: ws.libraryPublish,
+    linkSharing: ws.linkSharing,
     createdAt: ws.createdAt,
     updatedAt: ws.updatedAt,
   }
@@ -193,6 +200,14 @@ export function mayPublishLibrary(workspaceId: string, userId: string | undefine
   const ws = records.get(workspaceId)
   if (!ws || ws.libraryPublish === 'everyone') return true
   return hasRole(workspaceId, userId, 'admin')
+}
+
+/** May canvases in this workspace be shared beyond the team (a share link for
+ *  anyone, a Community listing)? A personal canvas (no workspace) and a
+ *  workspace that is gone restrict nothing. */
+export function linkSharingAllowed(workspaceId: string | undefined): boolean {
+  if (!workspaceId) return true
+  return records.get(workspaceId)?.linkSharing !== 'off'
 }
 
 /** Every workspace on the instance, for the admin's default-workspace pick. */
@@ -229,6 +244,7 @@ export function createWorkspace(name: string, ownerId: string): WorkspaceRecord 
     cancelAtPeriodEnd: false,
     billingEventAt: null,
     libraryPublish: 'everyone',
+    linkSharing: 'allowed',
     createdAt: now,
     updatedAt: now,
   }
@@ -236,7 +252,7 @@ export function createWorkspace(name: string, ownerId: string): WorkspaceRecord 
   membersOf(ws.id).set(ownerId, { role: 'owner', addedAt: now })
   swallow(
     db.transaction(async (tx) => {
-      await tx.insert(t.workspaces).values({ ...ws, libraryPublish: null })
+      await tx.insert(t.workspaces).values({ ...ws, libraryPublish: null, linkSharing: null })
       await tx
         .insert(t.workspaceMembers)
         .values({ workspaceId: ws.id, userId: ownerId, role: 'owner', addedBy: ownerId, addedAt: now })
@@ -266,6 +282,43 @@ export function setLibraryPublish(id: string, policy: LibraryPublishPolicy): Wor
       .where(eq(t.workspaces.id, id)),
   )
   return ws
+}
+
+/* Who hears that a canvas went private without a request on that canvas: the
+   server's room, which tells open tabs and each connection its new role, and
+   closes the ones left without access. Registered at boot (server/index.ts),
+   since the room lives there. */
+let sharingClosed: (canvasId: string) => void = () => {}
+
+export function onCanvasSharingClosed(listener: (canvasId: string) => void) {
+  sharingClosed = listener
+}
+
+/** Allow or stop sharing the workspace's canvases beyond the team. Stopping
+ *  makes every canvas in it private at once: its share link goes back to no
+ *  access and it leaves the Community gallery, so allowing sharing again
+ *  re-opens nothing by itself. Returns the canvases it closed. */
+export function setLinkSharing(id: string, policy: LinkSharingPolicy): string[] {
+  const ws = records.get(id)
+  if (!ws) return []
+  const before = { linkSharing: ws.linkSharing, updatedAt: ws.updatedAt }
+  ws.linkSharing = policy
+  ws.updatedAt = Date.now()
+  /* one write with the canvases it closes: undone together, stored together */
+  recordUndo(() => Object.assign(ws, before))
+  const updatedAt = ws.updatedAt
+  afterCommit(() =>
+    swallow(
+      db
+        .update(t.workspaces)
+        .set({ linkSharing: policy === 'off' ? 'off' : null, updatedAt })
+        .where(eq(t.workspaces.id, id)),
+    ),
+  )
+  if (policy === 'allowed') return []
+  const closed = store.closePublicSharing(id)
+  afterCommit(() => closed.forEach((canvasId) => sharingClosed(canvasId)))
+  return closed
 }
 
 /** Tear a workspace down: its canvases return to their owners' personal
@@ -652,14 +705,19 @@ workspacesRouter.get('/:id', async (req, res) => {
 workspacesRouter.patch('/:id', (req, res) => {
   const ws = requireWorkspace(req, res, req.params.id, 'admin')
   if (!ws) return
-  /* a name, the library's publish setting, or both */
+  /* a name, the library's publish setting, link sharing, or any of them */
   const policy: unknown = req.body?.libraryPublish
   if (policy !== undefined && !isLibraryPublishPolicy(policy))
     return res.status(400).json({ error: 'libraryPublish must be everyone or admins' })
+  const linkSharing: unknown = req.body?.linkSharing
+  if (linkSharing !== undefined && !isLinkSharingPolicy(linkSharing))
+    return res.status(400).json({ error: 'linkSharing must be allowed or off' })
   const name = typeof req.body?.name === 'string' ? req.body.name.trim().slice(0, 80) : ''
-  if (!name && policy === undefined) return res.status(400).json({ error: 'name required' })
+  if (!name && policy === undefined && linkSharing === undefined)
+    return res.status(400).json({ error: 'name required' })
   if (name) renameWorkspace(ws.id, name)
   if (policy !== undefined) setLibraryPublish(ws.id, policy)
+  if (linkSharing !== undefined && linkSharing !== ws.linkSharing) setLinkSharing(ws.id, linkSharing)
   res.json(summaryFor(ws, req.user!.id))
 })
 

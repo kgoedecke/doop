@@ -234,6 +234,7 @@ export interface State {
   patchFrameLocal(frameId: string, patch: Partial<Frame>): void
   removeFrame(frameId: string): void
   renameCanvasLocal(name: string): void
+  closeSharingLocal(): void
   /** upsert (doc set) or remove (doc null) a style guide on the open canvas */
   setGuidelineLocal(name: string, doc: GuidelineDoc | null): void
   /** a component changed in the room, or was deleted (null) */
@@ -672,6 +673,20 @@ export const useStore = create<State>((set, get) => ({
       }
     }),
   renameCanvasLocal: (name) => set((s) => (s.canvas ? { canvas: { ...s.canvas, name } } : {})),
+  closeSharingLocal: () =>
+    set((s) =>
+      s.canvas
+        ? {
+            canvas: {
+              ...s.canvas,
+              linkAccess: undefined,
+              publishedAt: undefined,
+              description: undefined,
+              category: undefined,
+            },
+          }
+        : {},
+    ),
   setComponentLocal: (id, component) =>
     set((s) => {
       if (!s.canvas) return {}

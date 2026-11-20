@@ -1,6 +1,7 @@
 import express from 'express'
 import { store } from './store.ts'
 import { getUserName } from './auth.ts'
+import { linkSharingAllowed } from './workspaces.ts'
 import { isCommunityCategory, type Canvas, type CommunityItem } from '../shared/types.ts'
 import { withWireComponents } from '../shared/components.ts'
 
@@ -58,7 +59,7 @@ communityRouter.get('/', async (_req, res) => {
   const items = await Promise.all(
     store
       .listPublished()
-      .filter((c) => publishableFrames(c).length)
+      .filter((c) => publishableFrames(c).length && linkSharingAllowed(c.workspaceId))
       .map(toItem),
   )
   res.json(items)
@@ -69,7 +70,8 @@ communityRouter.get('/', async (_req, res) => {
  *  its copy count. */
 communityRouter.post('/:id/copy', async (req, res) => {
   const source = store.getCanvas(req.params.id)
-  if (!source || source.publishedAt === undefined) return res.status(404).json({ error: 'not in the gallery' })
+  if (!source || source.publishedAt === undefined || !linkSharingAllowed(source.workspaceId))
+    return res.status(404).json({ error: 'not in the gallery' })
   try {
     const copy = await store.duplicateCanvas(source.id, req.user!.id, req.user!.name, {
       name: source.name,

@@ -1487,7 +1487,10 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
 - Canvas access: `canvasRole` in `server/access.ts` gives owners, members and workspace members
   edit, and share-link visitors the link's level (`none` / `view` / `comment` / `edit`). REST,
   the WebSocket room and MCP gate reads, comments and writes on it separately; spec in
-  `.context/specs/share-link-roles.md`.
+  `.context/specs/share-link-roles.md`. A workspace's admins can switch link sharing off
+  (`workspaces.link_sharing`, migration 0065): every link in it reads as `none`, its canvases go
+  private and leave the Community gallery, and new links and listings are refused
+  (`link_sharing_off`).
 
 - Bun 1.3.10 - package manager; lockfile at `bun.lock`, installed with `bun install
 --frozen-lockfile` in CI.

@@ -211,6 +211,8 @@ export const panels = {
   shareInviteFailed: 'invite failed',
   shareRemoveFailed: 'removal failed',
   shareAccessFailed: 'access update failed',
+  shareLinkSharingOff:
+    '{name}’s admins have turned off link sharing: only invited people and workspace members can open this canvas.',
   sharePublishFailed: 'publish failed',
   shareCopyFailed: 'Couldn’t copy the link. Copy the URL from your browser instead.',
   shareTitle: 'Share “{name}”',

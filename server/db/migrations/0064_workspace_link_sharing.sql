@@ -1,0 +1,1 @@
+ALTER TABLE "workspaces" ADD COLUMN "link_sharing" text;

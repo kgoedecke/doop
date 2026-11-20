@@ -991,6 +991,32 @@ class Store {
     return c
   }
 
+  /** A workspace stopped sharing beyond the team: every canvas in it goes
+   *  private (share link back to no access) and leaves the Community gallery.
+   *  Returns the ids of the canvases it changed. */
+  closePublicSharing(workspaceId: string): string[] {
+    const closed: string[] = []
+    for (const c of this.canvases.values()) {
+      if (c.workspaceId !== workspaceId) continue
+      if (this.closeCanvasSharing(c)) closed.push(c.id)
+    }
+    return closed
+  }
+
+  /** Make one canvas private and take it out of the gallery; false when it
+   *  was neither shared by link nor listed. */
+  closeCanvasSharing(c: Canvas): boolean {
+    if (!c.linkAccess && c.publishedAt === undefined) return false
+    requireBoundary('store.closeCanvasSharing')
+    this.remember(c, ['linkAccess', 'publishedAt', 'category', 'description'])
+    delete c.linkAccess
+    delete c.publishedAt
+    delete c.description
+    delete c.category
+    this.saveCanvasLater(c)
+    return true
+  }
+
   countWorkspaceCanvases(workspaceId: string): number {
     let n = 0
     for (const c of this.canvases.values()) if (c.workspaceId === workspaceId) n++

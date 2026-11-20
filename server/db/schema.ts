@@ -124,6 +124,9 @@ export const workspaces = pgTable('workspaces', {
   /** who may publish to the workspace's component library: 'admins' (owner and
    *  admins only); null is everyone who can edit the library canvas */
   libraryPublish: text('library_publish'),
+  /** 'off': no canvas in it may be shared by link or listed in the Community
+   *  gallery; null allows both (each canvas's owner decides) */
+  linkSharing: text('link_sharing'),
   createdAt: bigint('created_at', { mode: 'number' }).notNull(),
   updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
 })
