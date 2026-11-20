@@ -93,7 +93,7 @@ import * as workspaces from './workspaces.ts'
 import { uploadCap } from './entitlements.ts'
 import { startStallWatchdog } from './stallWatchdog.ts'
 import { beginOperation, endOperation, withinOperation, WorkBudgetError } from './workBudget.ts'
-import { openTransaction, outsideOperation, transaction, type OpenTransaction } from './journal.ts'
+import { afterCommit, openTransaction, outsideOperation, transaction, type OpenTransaction } from './journal.ts'
 import * as billing from './billing.ts'
 import * as demo from './demo.ts'
 import { db, initDb } from './db/index.ts'
@@ -385,6 +385,15 @@ function refreshRoomRoles(canvasId: string) {
     }
   }
 }
+
+/* A canvas went private because its workspace keeps canvases to the team:
+   open tabs drop the link level and the gallery listing they show, and link
+   visitors lose the room. */
+function sharingClosed(canvasId: string) {
+  broadcast(canvasId, { type: 'canvas:sharing-closed' })
+  refreshRoomRoles(canvasId)
+}
+workspaces.onCanvasSharingClosed(sharingClosed)
 
 function send(ws: WebSocket, msg: ServerMessage) {
   if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg))
@@ -1913,12 +1922,18 @@ app.get('/api/canvases/:id', (req, res) => {
     })
 })
 
+/* A workspace's admins can keep its canvases to the team (Workspace → General →
+   Link sharing): no share link for anyone, no Community listing. */
+const LINK_SHARING_OFF = 'this workspace’s admins have turned off sharing outside the workspace'
+
 /* Community gallery listing — the owner's call alone, like link access.
    PUT both lists and re-describes; DELETE takes it down. */
 app.put('/api/canvases/:id/publish', (req, res) => {
   const c = requireCanvas(req, res, req.params.id, 'edit')
   if (!c) return
   if (c.ownerId !== req.user!.id) return res.status(403).json({ error: 'only the owner can publish a canvas' })
+  if (!workspaces.linkSharingAllowed(c.workspaceId))
+    return res.status(403).json({ error: LINK_SHARING_OFF, code: 'link_sharing_off' })
   if (!publishableFrames(c).length) return res.status(400).json({ error: 'add a frame before publishing' })
   const listing = parseListing(req.body)
   if (typeof listing === 'string') return res.status(400).json({ error: listing })
@@ -1956,6 +1971,11 @@ app.put('/api/canvases/:id/workspace', (req, res) => {
     if (!requireGrowableWorkspace(req, res, target)) return
   }
   store.setWorkspace(c.id, target ?? undefined)
+  /* filed in a workspace that keeps its canvases to the team: the link and
+     the gallery listing go, as they did for the canvases already there */
+  const closed = !workspaces.linkSharingAllowed(c.workspaceId) && store.closeCanvasSharing(c)
+  /* Close connections that lost access before sending the destination team's roster. */
+  afterCommit(() => (closed ? sharingClosed(c.id) : refreshRoomRoles(c.id)))
   actions.announceTeam(c.id)
   res.json({ ok: true })
 })
@@ -2001,6 +2021,8 @@ app.patch('/api/canvases/:id', (req, res) => {
     if (c.ownerId !== req.user!.id) return res.status(403).json({ error: 'only the owner can change link access' })
     if (!isLinkAccess(linkAccess))
       return res.status(400).json({ error: 'linkAccess must be "none", "view", "comment" or "edit"' })
+    if (linkAccess !== 'none' && !workspaces.linkSharingAllowed(c.workspaceId))
+      return res.status(403).json({ error: LINK_SHARING_OFF, code: 'link_sharing_off' })
     store.setLinkAccess(c.id, linkAccess)
     refreshRoomRoles(c.id)
   }

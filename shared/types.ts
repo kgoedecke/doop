@@ -233,6 +233,16 @@ export function isLibraryPublishPolicy(value: unknown): value is LibraryPublishP
   return LIBRARY_PUBLISH_POLICIES.includes(value as LibraryPublishPolicy)
 }
 
+/** Whether a workspace's canvases may be shared beyond the team: a share link
+ *  for anyone ("Anyone with the link can…") and a Community gallery listing.
+ *  'off' keeps every canvas in it to the owner, invited people and members. */
+export const LINK_SHARING_POLICIES = ['allowed', 'off'] as const
+export type LinkSharingPolicy = (typeof LINK_SHARING_POLICIES)[number]
+
+export function isLinkSharingPolicy(value: unknown): value is LinkSharingPolicy {
+  return LINK_SHARING_POLICIES.includes(value as LinkSharingPolicy)
+}
+
 /** A workspace as the dashboard lists it — for one viewer, hence `role`. */
 export interface WorkspaceSummary {
   id: string
@@ -257,6 +267,8 @@ export interface WorkspaceSummary {
   cancelAtPeriodEnd: boolean
   /** who may publish to its component library */
   libraryPublish: LibraryPublishPolicy
+  /** may its canvases be shared by link or listed in the Community gallery */
+  linkSharing: LinkSharingPolicy
   createdAt: number
   updatedAt: number
 }
@@ -704,6 +716,9 @@ export type ServerMessage =
   | { type: 'frame:deleted'; frameId: string; actor: Actor }
   | { type: 'frame:streaming'; frameId: string; active: boolean; actor: Actor }
   | { type: 'canvas:renamed'; name: string; actor: Actor }
+  /** the workspace's admins switched link sharing off: the canvas is private
+   *  and out of the Community gallery (an owner's Share modal follows) */
+  | { type: 'canvas:sharing-closed' }
   | { type: 'canvas:pages'; pages: CanvasPageInfo[]; actor: Actor }
   /** a ruler guide was added or moved (guide set) or removed (null) */
   | { type: 'guide'; id: string; guide: CanvasGuide | null; actor: Actor }

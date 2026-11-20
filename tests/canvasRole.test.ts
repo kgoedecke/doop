@@ -7,10 +7,19 @@ import type { Canvas } from '../shared/types.ts'
 vi.mock('../server/workspaces.ts', () => ({
   isWorkspaceMember: (workspaceId: string, userId: string) => workspaceId === 'ws-1' && userId === 'teammate',
   hasRole: () => false,
+  /* 'ws-locked' has switched link sharing off */
+  linkSharingAllowed: (workspaceId: string | undefined) => workspaceId !== 'ws-locked',
 }))
 
-const { canAccessCanvas, canCommentCanvas, canEditCanvas, canvasRole, hasDurableCanvasAccess, roomMessageNeeds } =
-  await import('../server/access.ts')
+const {
+  canAccessCanvas,
+  canCommentCanvas,
+  canEditCanvas,
+  canvasRole,
+  guestCanvasRole,
+  hasDurableCanvasAccess,
+  roomMessageNeeds,
+} = await import('../server/access.ts')
 const { roleAllows, storedLinkAccess, toLinkAccess } = await import('../shared/canvasRole.ts')
 
 function canvas(overrides: Partial<Canvas> = {}): Canvas {
@@ -53,6 +62,17 @@ describe('canvasRole', () => {
   it('gives signed-out callers nothing, even on an edit link', () => {
     expect(canvasRole(undefined, canvas({ linkAccess: 'edit' }))).toBeNull()
   })
+
+  it.each(['view', 'comment', 'edit'] as const)(
+    'closes a %s link in a workspace that switched link sharing off',
+    (link) => {
+      const c = canvas({ linkAccess: link, workspaceId: 'ws-locked' })
+      expect(canvasRole('stranger', c)).toBeNull()
+      expect(guestCanvasRole(c)).toBeNull()
+      expect(canvasRole('owner', c)).toBe('edit')
+      expect(canvasRole('member', c)).toBe('edit')
+    },
+  )
 
   it('keeps ownerless legacy canvases open so they can be claimed', () => {
     expect(canvasRole(undefined, canvas({ ownerId: undefined }))).toBe('edit')

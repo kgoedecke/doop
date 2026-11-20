@@ -389,6 +389,9 @@ function handle(msg: ServerMessage) {
     case 'canvas:renamed':
       s.renameCanvasLocal(msg.name)
       break
+    case 'canvas:sharing-closed':
+      s.closeSharingLocal()
+      break
     case 'component':
       s.setComponentLocal(msg.id, msg.component)
       break

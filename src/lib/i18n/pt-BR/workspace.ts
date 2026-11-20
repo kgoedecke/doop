@@ -126,6 +126,20 @@ export const workspace: Catalog['workspace'] = {
   libraryPublishAdmins: 'Somente dono e admins',
   libraryPublishSaved: 'Publicação na biblioteca atualizada',
   libraryPublishFailed: 'Não foi possível mudar quem pode publicar',
+  linkSharing: 'Compartilhamento por link',
+  linkSharingAria: 'Se os canvas podem ser compartilhados fora do workspace',
+  linkSharingAllowed: 'Donos podem compartilhar por link',
+  linkSharingOff: 'Somente membros do workspace',
+  linkSharingAllowedHint:
+    'O dono de cada canvas pode compartilhá-lo com qualquer pessoa que tenha o link, ou publicá-lo na Comunidade.',
+  linkSharingOffHint:
+    'Nenhum canvas aqui pode ser compartilhado por link nem publicado na Comunidade. Convide pessoas para um canvas ou para o workspace.',
+  linkSharingOffTitle: 'Desativar o compartilhamento por link?',
+  linkSharingOffDescription:
+    'Todos os canvas deste workspace ficam privados agora: os links deixam de funcionar e as publicações na Comunidade saem do ar. Reativar o compartilhamento não os reabre.',
+  linkSharingOffConfirm: 'Desativar compartilhamento por link',
+  linkSharingSaved: 'Compartilhamento por link atualizado',
+  linkSharingFailed: 'Não foi possível mudar o compartilhamento por link',
   deleteWorkspace: 'Excluir workspace',
   deleteDescription:
     'Cada canvas volta para o espaço pessoal de quem é dono dele — nada é excluído. As pessoas perdem o acesso aos canvases que não são delas.',

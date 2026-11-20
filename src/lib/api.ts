@@ -25,6 +25,7 @@ import type {
   FrameVersion,
   FrameVersionInfo,
   LibraryPublishPolicy,
+  LinkSharingPolicy,
   WorkspaceDetail,
   WorkspaceInvite,
   WorkspaceMember,
@@ -1008,6 +1009,8 @@ export const api = {
     req<WorkspaceSummary>(`/api/workspaces/${id}`, { method: 'PATCH', body: JSON.stringify({ name }) }),
   setLibraryPublish: (id: string, libraryPublish: LibraryPublishPolicy) =>
     req<WorkspaceSummary>(`/api/workspaces/${id}`, { method: 'PATCH', body: JSON.stringify({ libraryPublish }) }),
+  setLinkSharing: (id: string, linkSharing: LinkSharingPolicy) =>
+    req<WorkspaceSummary>(`/api/workspaces/${id}`, { method: 'PATCH', body: JSON.stringify({ linkSharing }) }),
   setWorkspaceSeats: (id: string, seats: number) =>
     req<WorkspaceSummary>(`/api/workspaces/${id}/billing/seats`, { method: 'PUT', body: JSON.stringify({ seats }) }),
   deleteWorkspace: (id: string) => req(`/api/workspaces/${id}`, { method: 'DELETE' }),

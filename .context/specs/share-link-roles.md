@@ -42,6 +42,26 @@ webhooks, automations and live activities stay out of reach of link visitors.
   appended, only for agents that can edit. A refusal on a readable canvas says which role the
   account has. Resident runs (local agent, Gemini cloud) require edit for their run-scoped MCP.
 
+## Workspace link sharing
+
+A workspace's owner and admins can keep its canvases to the team: Workspace → General → Link
+sharing, `PATCH /api/workspaces/:id { linkSharing: 'allowed' | 'off' }` (`workspaces.link_sharing`,
+migration `0065`, null for allowed; `WorkspaceSummary.linkSharing`). Off:
+
+- `sharedLinkLevel` in `server/access.ts` reads every link in the workspace as `none`, so
+  `canvasRole` and `guestCanvasRole` grant link visitors nothing, whatever is stored.
+- Switching it off (`workspaces.setLinkSharing` → `store.closePublicSharing`) makes each canvas in
+  it private and takes it out of the Community gallery for good, then tells their rooms
+  (`onCanvasSharingClosed`: a `canvas:sharing-closed` message, so an owner's open Share modal
+  follows, then `refreshRoomRoles`, closing link visitors with 4403). The policy and the canvases
+  are one journaled write. Switching it back on reopens nothing by itself.
+- `PATCH /api/canvases/:id` with a level other than `none` and `PUT /api/canvases/:id/publish`
+  answer 403 `link_sharing_off`; a canvas moved into the workspace is made private on the way in
+  (`store.closeCanvasSharing`); the gallery list and copy route skip such canvases.
+- The Share modal greys out the link picker, says why and hides the gallery listing.
+
+Owners, invited members and workspace members are unaffected.
+
 ## Guests (signed out)
 
 `guestCanvasRole(canvas)` in `server/access.ts` is `view` for an owned canvas whose link is `view`,
@@ -79,4 +99,6 @@ without a reply field. The server enforces all of it regardless.
 `tests/guestCanvas.test.ts` (signed-out guests: refusal, the view cap, what is withheld, silence,
 link off) and `tests/shareLinkRoles.test.ts` (real server: REST writes refused for view and comment links,
 comments allowed for comment links, the @mention rule, WS drag/editing not relayed, MCP writes
-refused for a visitor's agent key, live role change and disconnect).
+refused for a visitor's agent key, live role change and disconnect) and
+`tests/workspaceLinkSharing.test.ts` (the workspace switch: admins only, rooms closed, links and
+listings refused, a canvas moved in, switching back on).

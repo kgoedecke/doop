@@ -124,6 +124,19 @@ export const workspace = {
   libraryPublishAdmins: 'Owner and admins only',
   libraryPublishSaved: 'Library publishing updated',
   libraryPublishFailed: 'Couldn’t change who can publish',
+  linkSharing: 'Link sharing',
+  linkSharingAria: 'Whether canvases can be shared outside the workspace',
+  linkSharingAllowed: 'Owners can share by link',
+  linkSharingOff: 'Workspace members only',
+  linkSharingAllowedHint: 'Each canvas’s owner can share it with anyone who has the link, or list it in Community.',
+  linkSharingOffHint:
+    'No canvas here can be shared by link or listed in Community. Invite people to a canvas, or to the workspace.',
+  linkSharingOffTitle: 'Turn off link sharing?',
+  linkSharingOffDescription:
+    'Every canvas in this workspace becomes private now: share links stop working and Community listings come down. Turning sharing back on won’t reopen them.',
+  linkSharingOffConfirm: 'Turn off link sharing',
+  linkSharingSaved: 'Link sharing updated',
+  linkSharingFailed: 'Couldn’t change link sharing',
   deleteWorkspace: 'Delete workspace',
   deleteDescription:
     'Every canvas goes back to the personal space of whoever owns it — nothing is deleted. People lose access to canvases that aren’t theirs.',

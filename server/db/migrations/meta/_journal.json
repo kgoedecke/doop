@@ -432,15 +432,22 @@
     {
       "idx": 62,
       "version": "7",
-      "when": 1795571531317,
+      "when": 1795256824668,
       "tag": "0062_component_revisions",
       "breakpoints": true
     },
     {
       "idx": 63,
       "version": "7",
-      "when": 1794997089168,
+      "when": 1795256825668,
       "tag": "0063_component_render_rev",
+      "breakpoints": true
+    },
+    {
+      "idx": 64,
+      "version": "7",
+      "when": 1795256826668,
+      "tag": "0064_workspace_link_sharing",
       "breakpoints": true
     }
   ]

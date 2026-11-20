@@ -211,6 +211,8 @@ export const panels: Catalog['panels'] = {
   shareInviteFailed: 'falha ao convidar',
   shareRemoveFailed: 'falha ao remover',
   shareAccessFailed: 'falha ao atualizar o acesso',
+  shareLinkSharingOff:
+    'Os admins de {name} desativaram o compartilhamento por link: só pessoas convidadas e membros do workspace podem abrir este canvas.',
   sharePublishFailed: 'falha ao publicar',
   shareCopyFailed: 'Não foi possível copiar o link. Copie a URL do seu navegador.',
   shareTitle: 'Compartilhar “{name}”',
