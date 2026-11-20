@@ -736,8 +736,19 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   it. Copying from a canvas that is not a library still sub-commits per component it updates
   (`checkpoint()`), as `replace_matching` does. Publishing writes the library's publication, not
   a canvas, and is not routed.
-  Not yet: detaching, propagation. Tests: `canvasWrites.test.ts`, `importWrites.test.ts`,
-  `canvasWritesLibrary.test.ts`, `writeBoundaryHttp.test.ts`.
+  The background queue's frames go through it too (`propagate-frame`, `detach-frame`):
+  `server/propagation.ts` sends each frame's turn through the routes `canvasWrites.ts` sets
+  as it loads (`routeFrameTask`; unrouted, as in a test of the actions alone, the task's own
+  handler does it). Each turn is its own operation, and each canvas has at most one turn in
+  flight while the others take theirs. A turn unanswered after 30 s (`TURN_TIMEOUT_MS`) is
+  said as failed and its canvas goes on. A canvas deleted mid-turn, or a job that ended,
+  keeps nothing of the answer and reports nothing. A failing turn is undone, said and
+  skipped, as before, and a tick never rejects. Detaching every instance is `detach-instances`
+  (delete_component's `detach_instances`, REST `/detach-instances`), answering the ids it
+  queued, and the frames only when asked (`frames: true`, the agent tools). Every server write
+  to a canvas's frames, components and tokens now goes through the entry. Tests:
+  `canvasWrites.test.ts`, `importWrites.test.ts`, `canvasWritesLibrary.test.ts`,
+  `writeBoundaryHttp.test.ts`.
 - `pg` 8.22.0 - Postgres driver for the real-database path.
 - Frame HTML in memory (`server/store.ts`, `server/frameHtml.ts`): the store keeps every canvas
   and frame, but frame HTML (most of the data) loads per page. Boot reads `frames` without `html`;

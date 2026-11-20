@@ -7,7 +7,6 @@ import {
   changeInstances,
   componentDetail,
   ComponentError,
-  detachAllInstances,
   findComponent,
   findDeletedComponent,
   importableEntry,
@@ -18,7 +17,6 @@ import {
   unpublishFromLibrary,
   usageExample,
   touchedFrames,
-  usageOf,
   insertInstance,
   instancesIn,
 } from './componentActions.ts'
@@ -543,16 +541,24 @@ export const COMPONENT_TOOLS: ComponentTool[] = [
         pending && detach_instances === true
           ? { deleted: pending.name, component_id: pending.id, already_deleted: true }
           : await runCanvasWrite(canvas.id, { type: 'delete-component', component: ref, actor })
-      const detach = detach_instances === true ? detachAllInstances(canvas.id, result.component_id, actor) : undefined
-      const touched = detach?.queued ? usageOf(canvas, result.component_id).frames.map((frame) => frame.id) : []
+      const detached =
+        detach_instances === true
+          ? await runCanvasWrite(canvas.id, {
+              type: 'detach-instances',
+              component: result.component_id,
+              actor,
+              frames: true,
+            })
+          : undefined
+      const { touched = [], frameIds: _frameIds, ...detach } = detached ?? {}
       return {
-        data: { ok: true, ...result, ...(detach ? { detach } : {}) },
-        note: detach
-          ? detach.queued
-            ? `Detaching ${detach.instances} instance${detach.instances === 1 ? '' : 's'} in ${detach.frames} frame${detach.frames === 1 ? '' : 's'} in the background, a frame at a time: they become plain markup that keeps its look. This is not undone by restore_component.`
+        data: { ok: true, ...result, ...(detached ? { detach } : {}) },
+        note: detached
+          ? detached.queued
+            ? `Detaching ${detached.instances} instance${detached.instances === 1 ? '' : 's'} in ${detached.frames} frame${detached.frames === 1 ? '' : 's'} in the background, a frame at a time: they become plain markup that keeps its look. This is not undone by restore_component.`
             : 'Nothing on the canvas uses it, so there was nothing to detach.'
           : 'No frame was changed: its instances look the same and no longer follow it. restore_component brings it back; delete_component with detach_instances=true turns what is left into plain markup.',
-        frames: canvas.frames.filter((frame) => touched.includes(frame.id)),
+        frames: touched,
       }
     },
   },

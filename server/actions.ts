@@ -2458,7 +2458,7 @@ function propagationScope(_canvasId: string): 'all' | 'loaded' {
  *  what changed, a canvas on an actor, compact storage switched off) it is an ordinary
  *  write: history is filed and the room sees frame:updated. Sign-off stands either way,
  *  since the frame itself was not edited. A frame mid-stream catches up when its stream ends. */
-function propagateIntoFrame(
+export function propagateIntoFrame(
   canvasId: string,
   frameId: string,
   componentIds: string[],
