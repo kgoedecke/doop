@@ -25,13 +25,13 @@ export const FIT_HEIGHT_MAX = MAX_EXPORT_SIDE
 
 /** What every tool taking fit_to_content tells the agent about it. */
 const FIT_DESCRIPTION =
-  'Sizes the frame to its content, measured in a browser, instead of guessing a size and checking screenshots. "height": the frame becomes as tall as its content at its width; parts sized in vh are laid out at the fitted height, and a design whose content always outgrows its viewport (a 100vh hero with more below) is refused. "width": the frame narrows to hug its content and never gets wider; for a component main, a badge or a card, not a screen, where a centred max-width layout would lose its side margins. "both": hugs the width, then fits the height at it.'
+  'Sizes the frame to its content, measured in a browser, instead of guessing a size and checking screenshots. "height": the frame becomes as tall as its content at its width; parts sized in vh are laid out at the fitted height, and a design whose content always outgrows its viewport (a 100vh hero with more below) is refused. "width": the frame narrows to hug its content and never gets wider; for a component main, a badge or a card, not a screen, where a centred max-width layout would lose its side margins. "both": hugs the width, then fits the height at it, and hugs the width again at that height until the two agree.'
 
 /** fit_to_content's full description on each tool, the same for MCP agents and the resident. */
 export const FIT_ON = {
   create: `${FIT_DESCRIPTION} width and height are where the measuring starts. If the fit cannot be made, the frame is still created and the result says why.`,
   set: `${FIT_DESCRIPTION} If the fit cannot be made, the new HTML still stands and the result says why.`,
-  update: `${FIT_DESCRIPTION} "height" is measured at the new width when you pass one. Not with height when fitting the height, nor with width when fitting the width. If the fit cannot be made, nothing else in the call is applied either.`,
+  update: `${FIT_DESCRIPTION} "height" is measured at the new width, and "width" at the new height, when you pass one. Not with height when fitting the height, nor with width when fitting the width. If the fit cannot be made, nothing else in the call is applied either.`,
 }
 
 /** Why there is nothing to fit yet: a frame with no design, such as one a stream is about to fill. */
@@ -141,25 +141,39 @@ async function hugWidth(probe: ContentProbe, from: number, height: number): Prom
 
 type FitSize = { width: number; height: number }
 
+/** How many times "both" hugs the width and settles the height before giving up on them agreeing. */
+const BOTH_PASSES = 3
+
+const OUTGROWS =
+  'this design grows with its frame (parts sized in vh, such as a 100vh hero, push the rest below the viewport at any height): set height instead, or size those parts in px'
+
 /** The frame's size once fitted along `axes`, measured from `from` (the size the patch asks
- *  for, the frame's own where it asks none): a width is hugged at that height, and a height
- *  settled at the fitted width. */
+ *  for, the frame's own where it asks none; the page loads at it too, so a script reading the
+ *  viewport sees it): a width is hugged at that height, and a height settled at the fitted
+ *  width. "both" hugs again at the settled height, since a height query or a vh width can lay
+ *  the content out wider there, until a width and the height settled at it agree. */
 async function measuredSize(frame: Frame, from: FitSize, axes: FitAxes): Promise<PageToolResult<FitSize>> {
   if (!frame.html.trim()) return { ok: false, error: FIT_NEEDS_HTML }
+  const hug = (probe: ContentProbe, height: number) => hugWidth(probe, designPx(from.width), height)
   try {
-    const fitted = await measureContent(frame, async (probe): Promise<PageToolResult<FitSize>> => {
-      const fittedWidth = fitsWidth(axes) ? await hugWidth(probe, designPx(from.width), from.height) : from.width
-      if (!fitsHeight(axes)) return { ok: true, value: { width: fittedWidth, height: from.height } }
-      const settled = await settleHeight(from.height, (height) => probe.height(fittedWidth, height))
-      return settled.kind === 'fits'
-        ? { ok: true, value: { width: fittedWidth, height: settled.height } }
-        : {
-            ok: false,
-            error:
-              'this design grows with its frame (parts sized in vh, such as a 100vh hero, push the rest below the viewport at any height): set height instead, or size those parts in px',
-          }
+    return await measureContent({ ...frame, ...from }, async (probe): Promise<PageToolResult<FitSize>> => {
+      let width = fitsWidth(axes) ? await hug(probe, from.height) : from.width
+      if (!fitsHeight(axes)) return { ok: true, value: { width, height: from.height } }
+      let height = from.height
+      for (let pass = 0; pass < BOTH_PASSES; pass++) {
+        const settled = await settleHeight(height, (at) => probe.height(width, at))
+        if (settled.kind !== 'fits') return { ok: false, error: OUTGROWS }
+        height = settled.height
+        if (!fitsWidth(axes)) return { ok: true, value: { width, height } }
+        const rehugged = await hug(probe, height)
+        if (rehugged === width) return { ok: true, value: { width, height } }
+        width = rehugged
+      }
+      return {
+        ok: false,
+        error: `the content's width and height keep changing each other (a height media query or a width in vh): pass width or height and fit the other side`,
+      }
     })
-    return fitted
   } catch (e) {
     return { ok: false, error: `could not measure the frame: ${e instanceof Error ? e.message : String(e)}` }
   }

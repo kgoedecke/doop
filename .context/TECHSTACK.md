@@ -243,8 +243,8 @@
   sizes between screenshots (#532). `"width"` hugs, as a Figma frame does: the root at
   `width: fit-content` for one measure, never wider than the frame, measured again at the hugged width in case a media query lays it out wider
   (`hugWidth`); it suits component mains and cards, not screens, where a centred max-width layout
-  would lose its gutters. `"both"` hugs, then fits the height at that width. Only the measured
-  sides are written; a height fit is made at the call's new `width` when it passes one. Each measure waits two animation frames (the frame's own resize,
+  would lose its gutters. `"both"` hugs, then fits the height at that width, and hugs again at that height until the two agree (three passes, then refused). Only the measured
+  sides are written; a height fit is made at the call's new `width` and a width fit at its new `height`, and the page loads at that size. Each measure waits two animation frames (the frame's own resize,
   ResizeObserver and matchMedia handlers run first), awaits fonts and finishes animations, lets the
   root and body go of their height (a `min-height` stays: one in px is the design's floor, one in vh
   is found by the 1px probe), then reports `flow` (the root's own box), `painted` (the lowest thing

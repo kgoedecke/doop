@@ -420,6 +420,27 @@ describe.skipIf(!findBrowserPath())('fit_to_content in a browser', () => {
     const result = await pending
     expect(result.isError).toBe(true)
     expect(texts(result)).toContain('changed while it was measured')
+    expect([frame.width, frame.height]).toEqual([400, 500])
+  }, 60_000)
+
+  it('loads the page at the height the same call sets, for a script that reads it once', async () => {
+    const frame = frameWith(
+      doc(
+        '<div id="b" style="height:10px"></div><script>document.getElementById("b").style.width = innerHeight <= 200 ? "280px" : "120px"</script>',
+      ),
+    )
+    await fit(frame, { fit_to_content: 'width', height: 180 })
+    expect([frame.width, frame.height]).toEqual([280, 180])
+  }, 60_000)
+
+  it('hugs the width again at the height "both" settles on', async () => {
+    const frame = frameWith(
+      doc(
+        '<style>.box{width:120px;height:180px}@media (max-height:200px){.box{width:280px}}</style><div class="box"></div>',
+      ),
+    )
+    await fit(frame, { fit_to_content: 'both' })
+    expect([frame.width, frame.height]).toEqual([280, 180])
   }, 60_000)
 
   it('refuses a fit when the design changed while it was measured', async () => {
