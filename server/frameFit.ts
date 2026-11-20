@@ -94,7 +94,8 @@ function secantStep(a: Probe, b: Probe): number | undefined {
  *  - An app shell (a viewport-tall page whose content scrolls inside it) keeps its height.
  *  - Content that fills the frame exactly is either a floor or sized by the viewport alone,
  *    told apart at a 1px viewport: a min-height:100vh wrapper around less still flows to its
- *    content there and shrinks to it, a height:100vh one collapses and keeps its height. */
+ *    content there and shrinks to it (searched from there when vh parts inside it still grow),
+ *    a height:100vh one collapses and keeps its height. */
 export async function settleHeight(start: number, measure: HeightMeasure): Promise<Settled> {
   const clamp = (height: number) => Math.min(designPx(height), FIT_HEIGHT_MAX)
   const probe = async (at: number): Promise<Probe> => ({ at, content: Math.round((await measure(at)).painted) })
@@ -105,8 +106,11 @@ export async function settleHeight(start: number, measure: HeightMeasure): Promi
   if (point.content === from) {
     const tiny = await measure(1)
     const floor = clamp(tiny.painted)
-    const shrinks = floor > 1 && floor < from && clamp(tiny.flow) >= floor && (await probe(floor)).content === floor
-    return { kind: 'fits', height: shrinks ? floor : from }
+    if (!(floor > 1 && floor < from && clamp(tiny.flow) >= floor)) return { kind: 'fits', height: from }
+    /* a floor that holds is the height; one whose content still grows with the viewport (vh parts
+       inside the min-height wrapper) is where the search starts */
+    point = await probe(floor)
+    if (point.content === floor) return { kind: 'fits', height: floor }
   }
   let previous: Probe | undefined
   for (let measures = 2; measures < MAX_MEASURES; measures++) {
@@ -122,7 +126,11 @@ export async function settleHeight(start: number, measure: HeightMeasure): Promi
       const slope = (reached.content - below.content) / (reached.at - below.at)
       /* content that grows with its frame is no taller in a frame of its own height, so the
          frame takes the height the content measured, not the step's rounded-up guess */
-      return slope > STEEPEST_FIT ? { kind: 'outgrows' } : { kind: 'fits', height: clamp(reached.content) }
+      if (slope > STEEPEST_FIT) return { kind: 'outgrows' }
+      /* a measure that rounds up (content of 600.5 at 601) holds a px lower too, where it fits exactly */
+      const height = clamp(reached.content)
+      const lower = height > 1 && height < FIT_HEIGHT_MAX ? await probe(height - 1) : undefined
+      return { kind: 'fits', height: lower && lower.content <= lower.at ? lower.at : height }
     }
     previous = point
     point = reached
@@ -131,11 +139,13 @@ export async function settleHeight(start: number, measure: HeightMeasure): Promi
 }
 
 /** The width the content hugs to, never past `from`. Measured again at the hugged width, since
- *  a media query there may lay the content out wider; the wider of the two holds it. */
+ *  a media query there may lay the content out differently: wider, the wider holds it; narrower
+ *  (columns that stack), the narrower holds it when the content keeps to it there too. */
 async function hugWidth(probe: ContentProbe, from: number, height: number): Promise<number> {
   const first = designPx(Math.min(await probe.width(from, height), from))
   if (first >= from) return from
   const second = designPx(await probe.width(first, height))
+  if (second < first && designPx(await probe.width(second, height)) <= second) return second
   return Math.min(from, Math.max(first, second))
 }
 

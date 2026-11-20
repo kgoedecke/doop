@@ -95,9 +95,15 @@ describe('settleHeight', () => {
   it('takes a measure that holds at the height it gives', async () => {
     const measure = design(640)
     expect(await settleHeight(300, measure)).toEqual({ kind: 'fits', height: 640 })
-    /* the measure, the one that confirms it, and the slope below */
-    expect(measure).toHaveBeenCalledTimes(3)
+    /* the measure, the one that confirms it, the slope below and a px lower */
+    expect(measure).toHaveBeenCalledTimes(4)
     expect(await settleHeight(640, design(640))).toEqual({ kind: 'fits', height: 640 })
+  })
+
+  it('takes the px below a measure that rounds up, where the content fits exactly', async () => {
+    /* 300 + h/2 measures 600.5 at 601, rounded to 601; at 600 it is exactly 600 */
+    const measure = curve((viewport) => Math.round(300 + viewport / 2))
+    expect(await settleHeight(601, measure)).toEqual({ kind: 'fits', height: 600 })
   })
 
   it('solves a design that grows with part of its viewport', async () => {
@@ -259,7 +265,7 @@ describe.skipIf(!findBrowserPath())('fit_to_content in a browser', () => {
       doc(
         block(100) +
           '<div style="position:absolute;top:400px;width:10px;height:50px"></div>' +
-          '<div style="position:fixed;bottom:0;height:40px;width:100%"></div>' +
+          '<div style="position:fixed;top:0;height:2000px;width:100%"></div>' +
           '<nav style="position:absolute;top:0;height:2000px;width:10px;visibility:hidden"></nav>' +
           '<nav style="position:absolute;top:0;height:2000px;width:10px;opacity:0"></nav>' +
           '<div style="position:relative;height:0"><ul style="position:absolute;top:0;height:900px;margin:0;visibility:hidden">menu</ul></div>' +
@@ -441,6 +447,85 @@ describe.skipIf(!findBrowserPath())('fit_to_content in a browser', () => {
     )
     await fit(frame, { fit_to_content: 'both' })
     expect([frame.width, frame.height]).toEqual([280, 180])
+  }, 60_000)
+
+  it('settles "both" again when the re-hugged width changes the height', async () => {
+    /* hugged at 300 tall it is 120 wide and settles 180 tall; there it is 280 wide, and at 280
+       wide it is 100 tall */
+    const frame = frameWith(
+      doc(
+        '<style>.box{width:120px;height:180px}@media (max-height:200px){.box{width:280px}}@media (min-width:200px){.box{height:100px}}</style><div class="box"></div>',
+      ),
+    )
+    await fit(frame, { fit_to_content: 'both' })
+    expect([frame.width, frame.height]).toEqual([280, 100])
+  }, 60_000)
+
+  it('refuses "both" when the width and height keep moving each other', async () => {
+    const frame = frameWith(doc('<div style="width:calc(100px + 50vh);height:calc(100px + 50vw)"></div>'), {
+      width: 600,
+      height: 300,
+    })
+    const result = await fit(frame, { fit_to_content: 'both' })
+    expect(result.isError).toBe(true)
+    expect(texts(result)).toContain('keep changing each other')
+    expect([frame.width, frame.height]).toEqual([600, 300])
+  }, 60_000)
+
+  it('hugs a hug-height layout at the frame height, after a height measure released the body', async () => {
+    const frame = frameWith(
+      '<!doctype html><html style="height:100%"><body style="margin:0;height:100%"><div style="height:100%;display:flex;width:fit-content"><div style="height:100%;aspect-ratio:1/1"></div><div style="width:120px;height:200px"></div></div></body></html>',
+      { width: 600, height: 300 },
+    )
+    await fit(frame, { fit_to_content: 'both' })
+    expect([frame.width, frame.height]).toEqual([320, 200])
+  }, 60_000)
+
+  it('keeps a body height set in px', async () => {
+    const frame = frameWith(
+      doc(
+        '<div style="width:100px;height:100px"></div>',
+        'margin:0;height:600px;display:flex;align-items:center;justify-content:center',
+      ),
+    )
+    await fit(frame)
+    expect(frame.height).toBe(600)
+  }, 60_000)
+
+  it('shrinks a min-height:100vh page whose parts are in vh to where it holds', async () => {
+    const frame = frameWith(
+      doc('<main style="min-height:100vh"><div style="height:50vh"></div><div style="height:200px"></div></main>'),
+      { height: 900 },
+    )
+    await fit(frame)
+    expect(frame.height).toBe(400)
+  }, 60_000)
+
+  it('cuts a pseudo-element where its own element clips sideways, and hugs a right-to-left page', async () => {
+    const clipped = frameWith(
+      doc(
+        '<style>.c{position:relative;width:80px;height:40px;overflow-x:clip}.c::after{content:"";position:absolute;left:0;top:0;width:300px;height:10px}</style><div class="c"></div>',
+      ),
+    )
+    await fit(clipped, { fit_to_content: 'width' })
+    expect(clipped.width).toBe(80)
+
+    const rtl = frameWith(
+      '<!doctype html><html dir="rtl"><body style="margin:0"><div style="width:150px;height:40px"></div></body></html>',
+    )
+    await fit(rtl, { fit_to_content: 'width' })
+    expect(rtl.width).toBe(150)
+  }, 60_000)
+
+  it('hugs to columns a narrower media query stacks', async () => {
+    const frame = frameWith(
+      doc(
+        '<style>.cols{display:flex;gap:16px}.cols>div{width:160px;height:20px;flex:none}@media (max-width:360px){.cols{flex-direction:column}}</style><div class="cols"><div></div><div></div></div>',
+      ),
+      { width: 600 },
+    )
+    await fit(frame, { fit_to_content: 'width' })
+    expect(frame.width).toBe(160)
   }, 60_000)
 
   it('refuses a fit when the design changed while it was measured', async () => {

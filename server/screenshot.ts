@@ -710,10 +710,11 @@ async function settleDocument(): Promise<void> {
 }
 
 /** Runs in the frame's page. Measuring the height, the root and body are let go of their height
- *  (a body at 100vh or 100% would hold the frame at its current height; a min-height stays, since
- *  a px one is the design's own floor and a vh one is found by settleHeight's 1px probe). With
- *  `hug`, the root shrinks to fit its content for the one measure (`width: fit-content`, never
- *  wider than the viewport), as a Figma frame hugs. Either way the extent is the furthest thing
+ *  (a body at 100vh or 100% would hold the frame at its current height; a height in px and a
+ *  min-height stay, since a px one is the design's own and a vh min-height is found by
+ *  settleHeight's 1px probe). With `hug`, the root shrinks to fit its content for the one measure
+ *  (`width: fit-content`, never wider than the viewport, held at the left in a right-to-left
+ *  page), as a Figma frame hugs, at the height the canvas gives it. Either way the extent is the furthest thing
  *  painted: the root's own box covers what flows, a walk adds what is positioned or overflows its
  *  box, text running past its element and absolute ::before / ::after included. Left out: what a
  *  scroller or clipper hides, what is invisible (a closed menu at visibility:hidden or opacity:0),
@@ -722,10 +723,14 @@ function contentExtent(hug: boolean): ContentExtent {
   const MAX_ELEMENTS = 20_000
   const hugged = hug ? document.createElement('style') : null
   if (hugged) {
-    hugged.textContent = 'html{width:fit-content!important;min-width:0!important;max-width:none!important}'
+    /* a right-to-left root shrinks against the right edge: held at the left, its width is its right */
+    const rtl = getComputedStyle(document.documentElement).direction === 'rtl'
+    hugged.textContent = `html{width:fit-content!important;min-width:0!important;max-width:none!important${rtl ? ';margin-left:0!important;margin-right:auto!important' : ''}}`
     document.head.append(hugged)
   }
-  let release = document.querySelector('style[data-doop-fit]')
+  let release = document.querySelector<HTMLStyleElement>('style[data-doop-fit]')
+  /* a hug is measured at the frame's height, as the canvas lays it out, not a released one */
+  if (hug && release?.sheet) release.sheet.disabled = true
   if (!release && !hug) {
     /* judged as loaded, before the root and body are released: an app shell on the body (or on
        html,body{height:100%}) would otherwise unroll its scroller into the frame */
@@ -742,9 +747,33 @@ function contentExtent(hug: boolean): ContentExtent {
     const root = document.documentElement
     const fillsViewport = root.scrollHeight <= innerHeight + 1 && root.getBoundingClientRect().bottom >= innerHeight - 1
     const shell = fillsViewport && Array.from(document.body.querySelectorAll('*')).slice(0, MAX_ELEMENTS).some(scrolls)
+    /* a height the design set in px is its own, as a min-height is: only a height that follows
+       the viewport (100vh, 100%, auto) is let go of. The cascade is read roughly: the last
+       height declared for the element in its style attribute, else in a plain rule of the page */
+    const declaredHeight = (el: HTMLElement) => {
+      if (el.style.height) return el.style.height
+      let height = ''
+      for (const sheet of Array.from(document.styleSheets)) {
+        let rules: CSSRuleList
+        try {
+          rules = sheet.cssRules
+        } catch {
+          continue
+        }
+        for (const rule of Array.from(rules))
+          if (rule instanceof CSSStyleRule && rule.style.height && el.matches(rule.selectorText))
+            height = rule.style.height
+      }
+      return height
+    }
+    const released = [document.documentElement, document.body]
+      .filter((el) => !/^[\d.]+px$/.test(declaredHeight(el)))
+      .map((el) => el.localName)
     release = document.createElement('style')
     release.setAttribute('data-doop-fit', shell ? 'shell' : '')
-    release.textContent = 'html,body{height:auto!important;max-height:none!important}'
+    release.textContent = released.length
+      ? `${released.join(',')}{height:auto!important;max-height:none!important}`
+      : ''
     document.head.append(release)
   }
   const shell = release?.getAttribute('data-doop-fit') === 'shell'
@@ -766,12 +795,14 @@ function contentExtent(hug: boolean): ContentExtent {
       if (block) blockStyle = getComputedStyle(block)
     }
     if (clips && block === el) return null
+    const own = block === el
     const box = block?.getBoundingClientRect()
     const bottomEdge = box ? box.bottom - parseFloat(blockStyle.borderBottomWidth) : innerHeight - window.scrollY
     const rightEdge = box ? box.right - parseFloat(blockStyle.borderRightWidth) : innerWidth - window.scrollX
     return {
       bottom: bottomEdge - parseFloat(pseudo.bottom) - parseFloat(pseudo.marginBottom),
       right: rightEdge - parseFloat(pseudo.right) - parseFloat(pseudo.marginRight),
+      own,
     }
   }
   /* `rightmost`: an ancestor that clips sideways only (overflow-x:clip) cuts what reaches past it */
@@ -793,8 +824,11 @@ function contentExtent(hug: boolean): ContentExtent {
       const inside = style.overflowX === 'visible' ? rightmost : Math.min(rightmost, rect.right)
       if (style.visibility !== 'hidden') {
         if (rect.width > 0 || rect.height > 0) reach(rect, rightmost)
-        reach(pseudoEdges(child, style, clips, '::before'), rightmost)
-        reach(pseudoEdges(child, style, clips, '::after'), rightmost)
+        /* placed by the element itself, a pseudo-element is cut where the element clips sideways */
+        for (const which of ['::before', '::after'] as const) {
+          const edges = pseudoEdges(child, style, clips, which)
+          reach(edges, edges?.own ? inside : rightmost)
+        }
         /* its own text, which may run past its box; elements inside are walked themselves */
         if (!clips)
           for (const node of Array.from(child.childNodes)) {
@@ -808,6 +842,7 @@ function contentExtent(hug: boolean): ContentExtent {
   }
   walk(document.body, Infinity)
   hugged?.remove()
+  if (release?.sheet) release.sheet.disabled = false
   return {
     painted: Math.ceil(bottom + window.scrollY),
     flow: Math.ceil(flow + window.scrollY),
