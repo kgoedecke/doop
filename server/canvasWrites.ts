@@ -10,19 +10,22 @@ import {
   createComponentFromElement,
   createComponentFromHtml,
   deleteComponent,
+  changeInstances,
   editFrameHtml,
+  insertInstance,
+  instancesIn,
   restoreComponent,
   restoreComponentVersion,
   updateComponent,
   type CreateFromElement,
   type CreateFromHtml,
-  type CreateResult,
   type FrameEdit,
+  type InsertInput,
+  type InstanceChange,
   type UpdateInput,
 } from './componentActions.ts'
 import { componentReuseNotes } from './reuseNotes.ts'
 import { WriteRefusedError } from './writeRefusal.ts'
-import * as persist from './db/persist.ts'
 import {
   EMBEDDED_MIN_LENGTH,
   heldForms,
@@ -31,7 +34,7 @@ import {
   type Existing,
   type Surface,
 } from './inlineData.ts'
-import { afterCommit, transaction } from './journal.ts'
+import { transaction } from './journal.ts'
 import { updateFrameMeta, type FrameMetaPatch } from './pageTools.ts'
 import { store } from './store.ts'
 import { optional, runOperation, WorkBudgetError } from './workBudget.ts'
@@ -60,9 +63,9 @@ import { optional, runOperation, WorkBudgetError } from './workBudget.ts'
  *
  * Covered so far: a frame's HTML and its metadata, streams (a chunk appended, an idle stream
  * settled or closed), design tokens and their themes (renames included, with the frames they
- * rewrite), and component definitions (made, changed, deleted, brought back). Instances,
- * replace_matching as commands of their own, propagation and the library still call their
- * actions directly, and so do imports and ingest; they move here next.
+ * rewrite), component definitions (made, changed, deleted, brought back), instances (placed,
+ * changed). Propagation and the
+ * library still call their actions directly, and so do imports and ingest; they move here next.
  *
  * A command an agent sends carries the surface it came from (`inline`), and the host checks
  * the HTML it adds for inline data against the frame as the host holds it, by that surface's
@@ -258,7 +261,23 @@ export type RestoreComponentVersionCommand = {
   view?: boolean
 }
 
+/** An instance of a component placed in a frame (componentActions.insertInstance). */
+export type InsertInstanceCommand = { type: 'insert-instance'; input: InsertInput; actor: Actor }
+
+/** Instances in one frame changed in one step: props, overrides, resets, detaching
+ *  (componentActions.changeInstances). With `view`, answers the frame's instances too, read
+ *  in the write's own step (`undefined` when that is over the work budget). */
+export type ChangeInstancesCommand = {
+  type: 'change-instances'
+  frameId: string
+  changes: InstanceChange[]
+  actor: Actor
+  view?: boolean
+}
+
 export type CanvasWrite =
+  | InsertInstanceCommand
+  | ChangeInstancesCommand
   | CreateComponentCommand
   | CreateComponentsCommand
   | UpdateComponentCommand
@@ -351,14 +370,19 @@ const local = {
     }
     const { kind: _kind, ...input } = from
     const created = createComponentFromElement(canvasId, input, actor)
-    /* the frame the element was in */
-    const touched = [input.frameId]
     return {
       ...created,
-      /* those frames as this write left them: what an editor needs to undo it as one step */
-      changed: [...new Set(touched)].flatMap((id) => store.getFrame(id) ?? []),
-      ...viewIf(command.view, canvasId, created.component, touched),
+      /* the frame the element was in, as this write left it: what an editor needs to undo it */
+      changed: store.getFrame(input.frameId) ? [store.getFrame(input.frameId)!] : [],
+      ...viewIf(command.view, canvasId, created.component, [input.frameId]),
     }
+  },
+  'insert-instance': (canvasId, command) => insertInstance(canvasId, command.input, command.actor),
+  'change-instances': (canvasId, command) => {
+    const changed = changeInstances(canvasId, command.frameId, command.changes, command.actor)
+    /* the change is in: reading the instances back is a courtesy the budget may not cover (and
+       undefined, so left out of an answer, unless asked for) */
+    return { ...changed, instances: command.view ? optional(() => instancesIn(changed.frame)) : undefined }
   },
   'create-components': (canvasId, command) => createComponentsLocally(canvasId, command),
   'update-component': (canvasId, command) => {
