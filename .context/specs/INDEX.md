@@ -49,3 +49,6 @@ lists every file in this folder.
   published snapshots, linked definitions without a local main, resolve-on-write, updates pulled on
   request, the agent and editor surfaces, who may publish, the Team-plan upsell on canvases without
   a library and resuming after checkout.
+- [storybook-import.md](storybook-import.md) - Storybook import: a team's real components from its
+  published Storybook (or, through the CLI, one on localhost) as Doop components with variants as
+  CSS, tokens light and dark and fonts in the library; sync, fidelity check, REST, MCP and CLI.

@@ -47,6 +47,11 @@ const MISSING = [
   'upload_asset',
   'list_linear_issues', // integration tools, registered by their connections
   'get_linear_issue',
+  /* a Storybook import is a job a person or a connected agent starts (and the CLI, with an agent
+     key); the resident composes from the components it brought */
+  'list_storybook_components',
+  'import_storybook',
+  'sync_storybook',
 ]
 
 async function mcpToolNames(): Promise<string[]> {

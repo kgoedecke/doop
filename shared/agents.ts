@@ -7,6 +7,7 @@
  * two roles never look like the same worker on the canvas. `color` is the
  * role's crew colour, used only to tint its Doop mark.
  */
+import { STORYBOOK_WORKER } from './storybookSource.ts'
 
 export interface AgentRole {
   id: string
@@ -121,6 +122,15 @@ export function roleById(id: string | undefined, roster: Roster): AgentRole | un
 export function roleByAgentName(name: string | undefined, roster: Roster): AgentRole | undefined {
   const key = name?.toLowerCase()
   return key ? roster.find((r) => r.name.toLowerCase() === key) : undefined
+}
+
+/** Server-side jobs that show up in the Agents panel the way an agent does —
+ *  a named worker with a task and a progress bar — but are no one's AI: they
+ *  don't count as "you connected an agent", and there is no one to reply to. */
+const JOB_WORKERS = new Set([STORYBOOK_WORKER.toLowerCase()])
+
+export function isJobWorker(name: string | undefined): boolean {
+  return !!name && JOB_WORKERS.has(name.toLowerCase())
 }
 
 /** The name a role id works under. An id the roster no longer has (a custom

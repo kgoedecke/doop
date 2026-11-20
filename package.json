@@ -8,10 +8,11 @@
     "node": ">=26.13.1 <27"
   },
   "scripts": {
-    "dev": "bun run build:claude-extension && concurrently -n server,web -c yellow,cyan \"node --watch --env-file-if-exists=.env server/index.ts\" \"vite\"",
-    "build": "bun run build:claude-extension && vite build",
+    "dev": "bun run build:claude-extension && bun run build:storybook-cli && concurrently -n server,web -c yellow,cyan \"node --watch --env-file-if-exists=.env server/index.ts\" \"vite\"",
+    "build": "bun run build:claude-extension && bun run build:storybook-cli && vite build",
     "build:vscode-extension": "node scripts/build-vscode-extension.mjs",
     "build:claude-extension": "node scripts/build-claude-extension.mjs",
+    "build:storybook-cli": "node scripts/build-storybook-cli.mjs",
     "start": "NODE_ENV=production node server/index.ts",
     "typecheck": "tsgo --noEmit && tsgo -p vscode-extension/tsconfig.json",
     "test": "vitest run",

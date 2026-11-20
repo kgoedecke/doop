@@ -54,6 +54,10 @@ export const canvas = {
   linkCopied: 'Canvas link copied',
   itemsImported: { one: '{count} item imported', other: '{count} items imported' },
   importedWithFailures: '{imported} · {failed} failed',
+  framesImporting: {
+    one: 'Importing {count} frame — Doop is on it',
+    other: 'Importing {count} frames — Doop is on it',
+  },
   cardsQueued: { one: '{count} card queued — Doop is on it', other: '{count} cards queued — Doop is on it' },
   cardsQueuedPlan: {
     one: '{count} card queued — your desktop’s Claude is on it',

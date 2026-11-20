@@ -4,6 +4,7 @@ import { ImageIcon, PdfIcon, PuzzleIcon, RadioTowerIcon, ServerIcon, VectorIcon,
 import canvaLogo from './brand/canva.svg'
 import linearLogo from './brand/linear.svg'
 import slackLogo from './brand/slack.svg'
+import storybookLogo from './brand/storybook.svg'
 
 /**
  * Every third-party logo the product wears, from one place. A mark is a
@@ -359,6 +360,7 @@ export type AppIconBrand =
   | 'canva'
   | 'website'
   | 'live-app'
+  | 'storybook'
   | 'pdf'
   | 'png'
   | 'jpg'
@@ -448,6 +450,10 @@ const APP_TILES: Record<AppIconBrand, AppTile> = {
   },
   website: { tile: '#0177d3', art: chromeGlyph(WebIcon) },
   'live-app': { tile: '#1f9d55', art: chromeGlyph(RadioTowerIcon) },
+  storybook: {
+    tile: '#fff',
+    art: (side) => <img src={storybookLogo} alt="" width={Math.round(side * 0.75)} height={Math.round(side * 0.75)} />,
+  },
   pdf: { tile: '#e5322d', art: chromeGlyph(PdfIcon) },
   png: { tile: '#6e56cf', art: chromeGlyph(ImageIcon) },
   jpg: { tile: '#0891b2', art: chromeGlyph(ImageIcon) },

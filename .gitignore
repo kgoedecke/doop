@@ -1,6 +1,7 @@
 node_modules
 dist
 public/claude-extension
+public/cli
 data
 data.*/
 desktop/src-tauri/target

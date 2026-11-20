@@ -1,5 +1,5 @@
 import { CAPTURE_PREFIX, pasteWebCapture } from '../lib/webCapture'
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { canEditOpenCanvas, pickedSelectors, roleOf, useStore } from '../lib/store'
 import { followPageInUrl } from '../lib/pageUrl'
 import { MOD_KEY, PRESENT_SHORTCUT_HINT, isControlTarget, isMenuTarget, isTypingTarget, pressedKey } from '../lib/keys'
@@ -64,6 +64,7 @@ import { pageFrames } from '../../shared/pages'
 import type { Frame, GithubImportRunner } from '../../shared/types'
 import { ImportStepFooter, ImportStepHeader, SourcePicker } from '../components/ImportSources'
 import { importSources } from '../components/importSourceList'
+import { clientIntegrations } from '../integrations'
 import { PresentMode } from '../components/PresentMode'
 import { CommandPalette } from '../components/CommandPalette'
 import { MainMenu } from '../components/MainMenu'
@@ -1435,6 +1436,10 @@ export function CanvasPage({
             const imported = t('canvas.itemsImported', { count: frameIds.length })
             showToast(failedCount ? t('canvas.importedWithFailures', { imported, failed: failedCount }) : imported)
           }}
+          onImporting={(frameCount) => {
+            setShowImport(false)
+            showToast(t('canvas.framesImporting', { count: frameCount }))
+          }}
           onQueued={(cardCount, runner) => {
             setShowImport(false)
             setGhInstallPass(null)
@@ -1477,6 +1482,7 @@ function ImportModal({
   initialSource = null,
   onClose,
   onDone,
+  onImporting,
   onQueued,
   onConnectAgent,
 }: {
@@ -1487,6 +1493,8 @@ function ImportModal({
   initialSource?: string | null
   onClose: () => void
   onDone: (frameIds: string[], failedCount: number) => void
+  /** an integration's import runs on as a task: frames land while the canvas is open */
+  onImporting: (frameCount: number) => void
   /** a repo import queues cards on the board instead of landing frames */
   onQueued: (cardCount: number, runner: GithubImportRunner) => void
   /** open Connect AI over the import, for a repo import's own agent */
@@ -1502,6 +1510,8 @@ function ImportModal({
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [busy, setBusy] = useState<'discovering' | 'importing' | null>(null)
   const [error, setError] = useState<string | null>(null)
+  /* an integration's import under review (the modal's whole view swaps) */
+  const [integrationReview, setIntegrationReview] = useState<ReactNode | null>(null)
   /* a connected repo's screen manifest under review — the modal's third view */
   const [repoReview, setRepoReview] = useState<{ connection: GithubConnectionInfo; manifest: RepoManifest } | null>(
     null,
@@ -1722,7 +1732,9 @@ function ImportModal({
       onClose={() => !busy && onClose()}
     >
       <>
-        {repoGuide && repoReview ? (
+        {integrationReview ? (
+          integrationReview
+        ) : repoGuide && repoReview ? (
           <RepoAgentGuide
             canvasId={canvasId}
             repo={repoReview.connection.repo}
@@ -1929,7 +1941,22 @@ function ImportModal({
                 onReview={openRepoReview}
                 onBack={() => setSource(null)}
               />
-            ) : null}
+            ) : (
+              clientIntegrations.map(
+                (integration) =>
+                  integration.id === source &&
+                  integration.ImportSection && (
+                    <integration.ImportSection
+                      key={integration.id}
+                      canvasId={canvasId}
+                      setReview={setIntegrationReview}
+                      onImporting={onImporting}
+                      onClose={onClose}
+                      onBack={() => setSource(null)}
+                    />
+                  ),
+              )
+            )}
           </>
         ) : (
           <>

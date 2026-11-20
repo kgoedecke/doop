@@ -3,6 +3,7 @@ import type { IntegrationsStatus } from '../lib/api'
 import type { PlainMessageKey } from '../lib/i18n'
 import { linearIntegration } from './linear'
 import { slackIntegration } from './slack'
+import { storybookIntegration } from './storybook'
 
 /**
  * Client extensions, the mirror of `server/extensions.ts`: each integration
@@ -28,6 +29,7 @@ export interface ImportSectionProps {
   setReview(view: ReactNode | null): void
   /** the import started and runs on as a task — close the modal */
   onImporting(frameCount: number): void
+  onClose(): void
   /** return to the source picker */
   onBack(): void
 }
@@ -65,4 +67,4 @@ export type ClientIntegration =
       }
     })
 
-export const clientIntegrations: ClientIntegration[] = [linearIntegration, slackIntegration]
+export const clientIntegrations: ClientIntegration[] = [linearIntegration, slackIntegration, storybookIntegration]

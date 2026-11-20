@@ -46,6 +46,11 @@ function reportLimit(err: unknown) {
   else console.error(err)
 }
 
+/** How far a job with countable steps has come, as a whole percent. */
+function jobPercent(task: AgentTask): number {
+  return task.progress ? Math.round((task.progress.done / task.progress.total) * 100) : 0
+}
+
 function duration(t: AgentTask): string {
   const end = t.endedAt ?? Date.now()
   const s = Math.max(1, Math.round((end - t.startedAt) / 1000))
@@ -329,8 +334,7 @@ function TaskGroup({ label, tasks }: { label: string; tasks: AgentTask[] }) {
   )
 }
 
-/** The one figure a row shows at its right end: how far a job has got, how
- *  long a running task has been at it, or how long ago a finished one ended. */
+/** Elapsed time while running, then how long ago the task ended. */
 function taskTime(task: AgentTask): string {
   if (task.failedAt) return timeAgo(task.failedAt)
   if (task.endedAt) return timeAgo(task.endedAt)
@@ -441,6 +445,21 @@ function RecentTaskRow({ task }: { task: AgentTask }) {
               {t('panels.activityRetry')}
             </Button>
           )}
+        </span>
+      )}
+      {running && task.progress && (
+        <span
+          className="col-span-2 ml-[22px] block h-[3px] overflow-hidden rounded-full bg-line-soft"
+          role="progressbar"
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={jobPercent(task)}
+          aria-label={task.status}
+        >
+          <span
+            className="block h-full rounded-full transition-[width] duration-300 ease-out"
+            style={{ width: `${Math.max(3, jobPercent(task))}%`, background: task.color }}
+          />
         </span>
       )}
     </div>

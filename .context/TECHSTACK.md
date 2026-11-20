@@ -400,6 +400,25 @@ server/index.ts` in prod. `erasableSyntaxOnly` and `verbatimModuleSyntax` in tsc
   `$os = iOS` without `$lib = posthog-ios` is mobile Safari. Tests: `analyticsConfig.test.ts`.
 - `ws` 8.18.0 - WebSocket server for realtime multiplayer (cursors, presence, frame edits,
   activity feed) over one room per canvas.
+- Storybook import (`.context/specs/storybook-import.md`, an extension: `server/storybook/`,
+  `src/integrations/storybook/`, shared `shared/storybook*.ts`, CLI `cli/doop-storybook.ts` built to
+  `public/cli/doop-storybook.mjs` by `bun run build:storybook-cli`): a Storybook's stories into Doop
+  components. `storybookPage` runs in the story's page (the server's renderer for a public
+  Storybook; the developer's Playwright, Puppeteer or Chrome through the CLI for localhost or a VPN,
+  which sends captures to MCP `import_storybook` with an agent key): props from the preview's
+  story store (enum and boolean controls as enum props, shown string args as text props), each
+  value re-rendered over the addons channel, CSS from the CSSOM, decorators stepped past, dark
+  through a theme global or `prefers-color-scheme`. `buildKit` turns the class differences between
+  renders into `[data-<prop>]` rules, `.dark` into `[data-doop-theme="dark"]`, theme colours into
+  tokens; the importer writes fonts (`addCanvasFont`), tokens and components (`runComponentTool`,
+  so every note an agent gets applies), checks each main against its story's pixels
+  (`fidelity.ts`) and keeps the source in `storybook_sources` for sync (a content
+  hash per component; tokens it made update, others are left alone). REST under
+  `/api/canvases/:id/storybook`, MCP `list_storybook_components` / `import_storybook` /
+  `sync_storybook`, a job per canvas shown as the "Storybook Import" task. Tests:
+  `storybookKit.test.ts`, `storybookCaptureBrowser.test.ts` (fixture `tests/fixtures/iframe.html`),
+  `storybookImport.test.ts`, `storybookImportHttp.test.ts`, `storybookCli.test.ts`, and the opt-in
+  `storybookLive.test.ts` (`STORYBOOK_LIVE_URL`).
 - Custom fonts (`shared/fonts.ts`, `server/fonts.ts`, `server/fontFile.ts`): font libraries, one
   per workspace (used on its canvases) and one per person (used on their personal canvases),
   managed in Settings → Fonts and Workspace → Fonts (`FontLibrary.tsx`, strings in the `fonts`
