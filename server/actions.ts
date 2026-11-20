@@ -3,7 +3,7 @@ import { nanoid } from 'nanoid'
 import { indexOfAscii, lastIndexOfAscii } from '../shared/asciiSearch.ts'
 import { env } from './env.ts'
 import * as propagation from './propagation.ts'
-import { WorkBudgetError } from './workBudget.ts'
+import { runOperation, WorkBudgetError } from './workBudget.ts'
 import {
   afterCommit,
   atomic,
@@ -892,7 +892,15 @@ async function frameAnchor(frame: Frame, input: FrameAnchorInput, by: string): P
     return { frame, elementId: input.elementId, snippet, ...placement }
   }
   if (onElement) {
-    const stamped = await ensureElementId(frame.id, selector, by, snippet || undefined)
+    /* through the canvas write entry, as the /element-id route stamps */
+    const { runCanvasWrite } = await canvasWrites()
+    const stamped = await runCanvasWrite(frame.canvasId, {
+      type: 'stamp-element-id',
+      frameId: frame.id,
+      selector,
+      by,
+      ...(snippet ? { like: snippet } : {}),
+    })
     if (stamped) return { frame: stamped.frame, elementId: stamped.id, snippet, ...placement }
   }
   return { frame, snippet: '', ...(point ? { point } : {}) }
@@ -952,36 +960,48 @@ export async function backfillElementIds(
     byFrame.set(comment.frameId, list)
   }
   const counts = { stamped: 0, lost: 0, failed: 0 }
+  const { runCanvasWrite } = await canvasWrites()
   for (const [frameId, rows] of byFrame) {
     const found: Array<{ comment: ElementComment; id: string }> = []
     const lost: ElementComment[] = []
     /* one frame's canvas at a time; the idle sweep gives it back afterwards */
-    let html = (await store.loadFrame(frameId))?.html
-    if (html === undefined) continue
-    for (const { comment, selector } of rows) {
-      try {
-        const result = stampElementId(html, selector)
-        if (result) {
-          html = result.html
-          found.push({ comment, id: result.id })
-        } else lost.push(comment)
-      } catch (err) {
-        counts.failed++
-        console.error(`[comments] element id backfill: comment ${comment.id} on frame ${frameId}:`, err)
-      }
+    const loaded = await store.loadFrame(frameId)
+    if (!loaded) continue
+    const leave = (err?: unknown) => {
+      counts.failed += rows.length
+      console.error(`[comments] element id backfill: frame ${frameId} not written, left for the next boot:`, err)
     }
+    let written: ReturnType<typeof stampElementIds>
     try {
-      const frame = store.getFrame(frameId)
-      if (frame && html !== frame.html) {
-        const next = store.updateFrame(frameId, { html }, frame.updatedBy, { annotation: true })
-        if (!next) continue
-        await persist.saveFrameNow(next)
-        broadcast(next.canvasId, {
-          type: 'frame:updated',
-          frame: next,
-          actor: resolveActor({ name: next.updatedBy, kind: 'user' }),
-        })
+      /* through the canvas write entry, every stamp in one write, as an operation of its own:
+         committed when this resolves, and then stored before any comment names the ids */
+      written = await runOperation('element id backfill', loaded.canvasId, () =>
+        runCanvasWrite(loaded.canvasId, {
+          type: 'stamp-element-ids',
+          frameId,
+          selectors: rows.map((row) => row.selector),
+        }),
+      )
+      if (written?.frame) await persist.saveFrameNow(written.frame)
+    } catch (err) {
+      leave(err)
+      continue
+    }
+    /* gone, mid-stream or refused: tried again at the next boot */
+    if (!written) {
+      leave('the frame is gone, being streamed into, or refused the write')
+      continue
+    }
+    rows.forEach(({ comment }, i) => {
+      const stamp = written.stamps[i]
+      if (stamp && 'id' in stamp) found.push({ comment, id: stamp.id })
+      else if (stamp && 'lost' in stamp) lost.push(comment)
+      else {
+        counts.failed++
+        console.error(`[comments] element id backfill: comment ${comment.id} on frame ${frameId}:`, stamp?.error)
       }
+    })
+    try {
       for (const { comment, id } of found) {
         if (reanchored(comment)) continue
         comment.elementId = id
@@ -1008,6 +1028,45 @@ export async function backfillElementIds(
 function reanchored(comment: ElementComment): boolean {
   return findComment(comment.id) !== comment
 }
+
+/** The element ids of several positional selectors in one frame (the boot backfill): every
+ *  stamp made into the frame's HTML, then one annotation write, shown to the room when its
+ *  operation commits, like every write. Per selector, in order: its id, `lost` where the path no
+ *  longer resolves, or the error that stopped it. `frame` is the frame as written; absent when
+ *  nothing needed writing. Undefined when the frame is gone, is being streamed into, or the
+ *  write was refused. Durable once its row is stored: the caller stores it after the commit. */
+export function stampElementIds(
+  frameId: string,
+  selectors: readonly string[],
+): { frame?: Frame; stamps: Array<{ id: string } | { lost: true } | { error: unknown }> } | undefined {
+  const frame = store.getFrame(frameId)
+  if (!frame || isFrameStreaming(frameId)) return undefined
+  let html = frame.html
+  const stamps = selectors.map((selector) => {
+    try {
+      const result = stampElementId(html, selector)
+      if (!result) return { lost: true as const }
+      html = result.html
+      return { id: result.id }
+    } catch (error) {
+      return { error }
+    }
+  })
+  if (html === frame.html) return { stamps }
+  const next = store.updateFrame(frameId, { html }, frame.updatedBy, { annotation: true })
+  if (!next) return undefined
+  /* sent when the write's operation commits (broadcast waits for it) */
+  broadcast(next.canvasId, {
+    type: 'frame:updated',
+    frame: next,
+    actor: resolveActor({ name: next.updatedBy, kind: 'user' }),
+  })
+  return { frame: next, stamps }
+}
+
+/** The canvas write entry (server/canvasWrites.ts), which imports this module: reached when a
+ *  write is made rather than imported, so neither module ever loads the other half-loaded. */
+const canvasWrites = () => import('./canvasWrites.ts')
 
 /** Re-pin a thread where its root pin was dropped: on an element, on a
  *  frame as a whole or on the canvas, on any frame of the same canvas. The

@@ -311,7 +311,8 @@ async function pullInto(row: AutomationRow, step: Extract<Step, { type: 'pull' }
     })
     const n = result.created.length
     const noun = n === 1 ? 'creative' : 'creatives'
-    return result.skipped > 0 ? `${n} new ${noun} (${result.skipped} already here)` : `${n} ${noun} pulled`
+    const summary = result.skipped > 0 ? `${n} new ${noun} (${result.skipped} already here)` : `${n} ${noun} pulled`
+    return result.failed ? `${summary} · ${result.failed} failed` : summary
   } catch (err) {
     if (err instanceof meta.MetaAuthError)
       throw new StepError(`Meta rejected the connection: ${err.message}`, 'reconnect')

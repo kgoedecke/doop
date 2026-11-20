@@ -34,7 +34,7 @@ import {
   type Existing,
   type Surface,
 } from './inlineData.ts'
-import { transaction } from './journal.ts'
+import { inTransaction, transaction } from './journal.ts'
 import { updateFrameMeta, type FrameMetaPatch } from './pageTools.ts'
 import { store } from './store.ts'
 import { optional, runOperation, WorkBudgetError } from './workBudget.ts'
@@ -64,8 +64,10 @@ import { optional, runOperation, WorkBudgetError } from './workBudget.ts'
  * Covered so far: a frame's HTML and its metadata, streams (a chunk appended, an idle stream
  * settled or closed), design tokens and their themes (renames included, with the frames they
  * rewrite), component definitions (made, changed, deleted, brought back), instances (placed,
- * changed). Propagation and the
- * library still call their actions directly, and so do imports and ingest; they move here next.
+ * changed), imports and ingest
+ * (`runImportWrite`, `landImportFrame`, below), and the element ids comments are anchored by
+ * (a new comment's, a moved one's and the boot backfill's). Propagation and the library still
+ * call their actions directly; they move here next.
  *
  * A command an agent sends carries the surface it came from (`inline`), and the host checks
  * the HTML it adds for inline data against the frame as the host holds it, by that surface's
@@ -168,6 +170,16 @@ export type StampElementIdCommand = {
   selector: string
   by: string
   like?: string
+}
+
+/** Several elements of one frame made addressable by id at once, in one annotation write
+ *  (actions.stampElementIds): the boot backfill of comments anchored before element ids. Answers
+ *  each selector's id, or that it is lost or failed; nothing for a frame being streamed into.
+ *  Saved and shown when its operation commits, as every write. */
+export type StampElementIdsCommand = {
+  type: 'stamp-element-ids'
+  frameId: string
+  selectors: string[]
 }
 
 /** The next chunk of a stream into a frame (actions.appendFrameHtml): `start` begins it,
@@ -300,6 +312,7 @@ export type CanvasWrite =
   | DeleteFrameCommand
   | RestoreVersionCommand
   | StampElementIdCommand
+  | StampElementIdsCommand
 
 /** What an edit did: the frame as written, or why nothing was. `missing`: the frame (or its
  *  canvas) is not there. */
@@ -443,6 +456,7 @@ const local = {
     actions.restoreFrameVersion(command.frameId, command.versionId, command.actor),
   'stamp-element-id': (_canvasId, command) =>
     actions.ensureElementId(command.frameId, command.selector, command.by, command.like),
+  'stamp-element-ids': (_canvasId, command) => actions.stampElementIds(command.frameId, command.selectors),
 } satisfies {
   [Type in CanvasWrite['type']]: (canvasId: string, command: Extract<CanvasWrite, { type: Type }>) => unknown
 }
@@ -617,6 +631,71 @@ function appendLocally(command: AppendFrameHtmlCommand): AppendFrameHtmlResult {
     ...(command.done !== undefined ? { done: command.done } : {}),
   })
   return frame ? { ok: true, frame } : { ok: false, missing: true }
+}
+
+/* ------------------------------------------------------------------ */
+/* Imports and ingest: frames brought in from elsewhere (a webpage, a  */
+/* PSD, Figma, Canva, Meta, the design-sync snippet, a GitHub repo).   */
+/* They use the commands above; this is how they call the entry.       */
+/* ------------------------------------------------------------------ */
+
+/** How an import that takes its frame maker as a dependency (webpage, PSD) makes a frame: as
+ *  the entry makes it, always a promise, a failure only its rejection. */
+export type CreateImportedFrame = (
+  canvasId: string,
+  input: CreateFrameCommand['input'],
+  actor: Actor,
+) => Promise<Frame | undefined>
+
+/** The rejections of imports' own writes, told apart from the imports' own failures */
+const importWriteFailures = new WeakSet<Error>()
+
+/**
+ * A frame write an import makes, through the entry. Inside a transaction (a request, an MCP or
+ * resident tool call) it is a savepoint of it: a rejection leaves nothing of this write and goes
+ * on to undo the rest. Outside one (an import that answered its request first and goes on, an
+ * automation, a timer) it is an operation of its own, committed by itself, as such an import's
+ * writes always were. A rejection is marked (`isImportWriteFailure`) so that an import's catch,
+ * which answers a capture or a download that failed, passes it on to the operation instead.
+ */
+export async function runImportWrite<const C extends CanvasWrite>(
+  name: string,
+  canvasId: string,
+  command: C,
+): Promise<CanvasWriteResult<C>> {
+  try {
+    if (inTransaction()) return await transaction(() => runCanvasWrite(canvasId, command))
+    return await runOperation(name, canvasId, () => runCanvasWrite(canvasId, command))
+  } catch (error) {
+    const failure = error instanceof Error ? error : new Error(String(error))
+    importWriteFailures.add(failure)
+    throw failure
+  }
+}
+
+/** Did this error come from an import's write (`runImportWrite`), not from the import itself? */
+export function isImportWriteFailure(error: unknown): error is Error {
+  return error instanceof Error && importWriteFailures.has(error)
+}
+
+/** One frame of an import that lands frame after frame (a website's pages, Figma, Meta): each
+ *  frame its own unit (`runImportWrite`), and one refused is answered as `{ ok: false }`, not
+ *  rejected, with nothing of it left behind. The frames before it stand, the import reports this
+ *  one as failed and goes on, and it never rejects after landing some. A spent work budget
+ *  inside a request or tool call is not a frame's refusal: it rejects, and the call is undone
+ *  (outside one, each frame has a budget of its own, so it is that frame's). */
+export async function landImportFrame<const C extends CanvasWrite>(
+  name: string,
+  canvasId: string,
+  command: C,
+): Promise<{ ok: true; result: CanvasWriteResult<C> } | { ok: false; error: Error }> {
+  const inside = inTransaction()
+  try {
+    return { ok: true, result: await runImportWrite(name, canvasId, command) }
+  } catch (error) {
+    if (!(error instanceof Error) || (inside && error instanceof WorkBudgetError)) throw error
+    return { ok: false, error }
+  }
 }
 
 /* ------------------------------------------------------------------ */

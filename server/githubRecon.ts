@@ -3,6 +3,7 @@ import { ModelAuthError, ModelUnavailableError, type AgentModel } from './agentM
 import type { TurnBlock } from './openaiAgent.ts'
 import { createAsset } from './assets.ts'
 import * as actions from './actions.ts'
+import { runImportWrite } from './canvasWrites.ts'
 import { store } from './store.ts'
 import {
   fetchRepoBinary,
@@ -545,7 +546,7 @@ export async function runRepoCards(
 }
 
 /** Land one frame for a screen at the connection's next grid slot. */
-function placeRepoFrame(
+async function placeRepoFrame(
   canvasId: string,
   conn: GithubConnection,
   screen: RepoScreenRef,
@@ -553,11 +554,16 @@ function placeRepoFrame(
   width: number,
   height: number,
   actor: Actor,
-): Frame {
+): Promise<Frame> {
   const canvas = store.getCanvas(canvasId)
   if (!canvas) throw new Error('canvas not found')
   const at = nextRepoFramePosition(canvas.frames, conn.id, width)
-  const frame = actions.createFrame(canvasId, { name: screen.title.slice(0, 80), ...at, width, height, html }, actor)
+  /* placed in the same step as the write, so two screens landing together never share a slot */
+  const frame = await runImportWrite('GitHub sketch', canvasId, {
+    type: 'create-frame',
+    input: { name: screen.title.slice(0, 80), ...at, width, height, html },
+    actor,
+  })
   if (!frame) throw new Error('canvas not found')
   return frame
 }
@@ -574,7 +580,7 @@ async function sketchScreen(
 ): Promise<void> {
   if (screen.source === 'static') {
     const html = wrapRepoHtml(await fetchRepoFile(conn, screen.sourcePath), conn, screen)
-    placeRepoFrame(canvasId, conn, screen, html, PAGE_W, STATIC_H, actor)
+    await placeRepoFrame(canvasId, conn, screen, html, PAGE_W, STATIC_H, actor)
     return
   }
 
@@ -646,13 +652,22 @@ async function sketchScreen(
   }
   const { html, height } = extractHtml((result?.content ?? []) as { type: string; text?: string }[])
   const withAssets = await resolveRepoAssets(conn, html, pathSet)
-  let frame = placeRepoFrame(canvasId, conn, screen, wrapGeneratedHtml(withAssets, conn, screen), width, height, actor)
+  let frame = await placeRepoFrame(
+    canvasId,
+    conn,
+    screen,
+    wrapGeneratedHtml(withAssets, conn, screen),
+    width,
+    height,
+    actor,
+  )
 
   /* Doop's own doctrine: never ship without looking. Render the draft,
      show the model its own output, and let it fix what is visibly
      wrong — the single biggest quality lever short of executing the
      app. Draft stays on the canvas while the fix round runs. */
   for (let round = 0; round < REVIEW_ROUNDS; round++) {
+    let fix: { html: string; height: number }
     try {
       const { renderFrame } = await import('./screenshot.ts')
       const shot = await renderFrame(frame, frame.height > 4000 ? 0.7 : 1, {
@@ -683,15 +698,18 @@ async function sketchScreen(
       result = fixed
       const redo = extractHtml(fixed.content as { type: string; text?: string }[])
       const redoAssets = await resolveRepoAssets(conn, redo.html, pathSet)
-      frame =
-        actions.updateFrame(
-          frame.id,
-          { html: wrapGeneratedHtml(redoAssets, conn, screen), height: redo.height },
-          actor,
-        ) ?? frame
+      fix = { html: wrapGeneratedHtml(redoAssets, conn, screen), height: redo.height }
     } catch (err) {
       console.error(`[github-recon] review round for ${screen.route} failed — keeping the draft`, err)
       break
     }
+    /* outside the catch: a refused write fails this screen's card, as a refused placement does */
+    frame =
+      (await runImportWrite('GitHub sketch review', canvasId, {
+        type: 'write-frame',
+        frameId: frame.id,
+        patch: fix,
+        actor,
+      })) ?? frame
   }
 }

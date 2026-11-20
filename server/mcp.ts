@@ -27,7 +27,7 @@ import {
   fitWrittenFrame,
   updateFrameMetaWithFit,
 } from './frameFit.ts'
-import { runCanvasWrite } from './canvasWrites.ts'
+import { isImportWriteFailure, runCanvasWrite } from './canvasWrites.ts'
 import { fontsForCanvas } from './fonts.ts'
 import { customAgentsForCanvas } from './customAgents.ts'
 import { describeLibrary, libraryBrief, MAX_FONT_BYTES } from '../shared/fonts.ts'
@@ -2309,6 +2309,8 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
           frame,
         ])
       } catch (e) {
+        /* a refused write fails the tool call, which undoes it */
+        if (isImportWriteFailure(e)) throw e
         return err(
           websiteAccessErrorMessage(e, 'connected-agent') ?? (e instanceof Error ? e.message : 'webpage import failed'),
         )

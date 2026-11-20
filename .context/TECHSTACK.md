@@ -697,10 +697,30 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   with what it linked (`converted`, `changed`, which REST answers as `frames`, `matching_stopped`,
   and `matching_error` when it was not the budget); anything else rejects, as before. The agents'
   view is read once after the run, outside a command (the actor host will need a read command).
-  Not yet:
-  detaching, propagation, the library (with the tokens an adopted
-  component brings, `carryLibraryTokens`), imports and ingest, comment anchoring. Tests: `canvasWrites.test.ts`,
-  `writeBoundaryHttp.test.ts`.
+  Imports and ingest go
+  through it with `create-frame` / `write-frame` (webpage and website import over REST, MCP, the
+  resident and the PostHog pull; PSD; Figma; Canva; Meta; `/ingest`; the GitHub sketches).
+  `runImportWrite` is a savepoint of the request or tool call it runs in, else an operation of
+  its own. `landImportFrame` (a website's pages, Figma, Meta) makes each frame its own unit and
+  answers a refused one as that frame's failure, so pages already landed stay; only a spent work
+  budget inside a request or tool call rejects. The REST import routes have no catch of their
+  own: any failure goes to `importRefusal`, which undoes the request and answers the JSON 400
+  they always did (422 for a work budget). Where one function both fetches and writes (MCP
+  `import_webpage`, `import_psd`, `import_figma`, `import_from_canva`, the PostHog pull,
+  `/ingest`), a write's rejection is marked (`isImportWriteFailure`) so the import's own catch
+  passes it on; the GitHub review round fetches inside its catch and writes outside it. Figma's
+  timed image repair swaps its copies into the frame as it is now, writing with that version's
+  `ifUpdatedAt`; on a conflict it reads the frame again, up to 3 times, so an edit made
+  meanwhile is kept and the images still repaired. Comment anchoring stamps through
+  `stamp-element-id` (a new comment, a moved one; both routes through `writeRoute`, and a
+  charged task is given back when the comment is not posted, `server/chargedWork.ts`). The boot
+  backfill uses `stamp-element-ids` (`actions.stampElementIds`: every stamp of a frame in one
+  annotation write, nothing for a frame mid-stream), one operation per frame, then stores the
+  row before the comments name the ids. `actions.ts` reaches the entry by a dynamic import, so
+  it still imports nothing from `canvasWrites.ts` when it loads. The seed canvas at first boot
+  stays a direct `store` write. Not yet: detaching, propagation, the library (with
+  the tokens an adopted component brings, `carryLibraryTokens`). Tests: `canvasWrites.test.ts`,
+  `importWrites.test.ts`, `writeBoundaryHttp.test.ts`.
 - `pg` 8.22.0 - Postgres driver for the real-database path.
 - Frame HTML in memory (`server/store.ts`, `server/frameHtml.ts`): the store keeps every canvas
   and frame, but frame HTML (most of the data) loads per page. Boot reads `frames` without `html`;
