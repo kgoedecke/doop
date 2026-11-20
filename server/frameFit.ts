@@ -141,13 +141,16 @@ async function hugWidth(probe: ContentProbe, from: number, height: number): Prom
 
 type FitSize = { width: number; height: number }
 
-async function measuredSize(frame: Frame, width: number, axes: FitAxes): Promise<PageToolResult<FitSize>> {
+/** The frame's size once fitted along `axes`, measured from `from` (the size the patch asks
+ *  for, the frame's own where it asks none): a width is hugged at that height, and a height
+ *  settled at the fitted width. */
+async function measuredSize(frame: Frame, from: FitSize, axes: FitAxes): Promise<PageToolResult<FitSize>> {
   if (!frame.html.trim()) return { ok: false, error: FIT_NEEDS_HTML }
   try {
     const fitted = await measureContent(frame, async (probe): Promise<PageToolResult<FitSize>> => {
-      const fittedWidth = fitsWidth(axes) ? await hugWidth(probe, designPx(width), frame.height) : width
-      if (!fitsHeight(axes)) return { ok: true, value: { width: fittedWidth, height: frame.height } }
-      const settled = await settleHeight(frame.height, (height) => probe.height(fittedWidth, height))
+      const fittedWidth = fitsWidth(axes) ? await hugWidth(probe, designPx(from.width), from.height) : from.width
+      if (!fitsHeight(axes)) return { ok: true, value: { width: fittedWidth, height: from.height } }
+      const settled = await settleHeight(from.height, (height) => probe.height(fittedWidth, height))
       return settled.kind === 'fits'
         ? { ok: true, value: { width: fittedWidth, height: settled.height } }
         : {
@@ -183,7 +186,7 @@ function fitClash(patch: FrameMetaPatch, axes: FitAxes): string | null {
 }
 
 /** update_frame, for agents on MCP and the resident agent: `updateFrameMeta`,
- *  and with `fit` the frame measured (the height at the patch's width, its own
+ *  and with `fit` the frame measured (at the patch's width and height, its own
  *  when the patch has none) and the fitted size written with the rest of the
  *  patch. The patch is checked before the browser is asked; a fit is refused
  *  while an agent streams into the frame and when its design changed during
@@ -208,16 +211,24 @@ export async function updateFrameMetaWithFit(
   if (actions.isFrameMidStream(frameId))
     return { ok: false, error: 'the frame is still streaming: fit it once the stream is done' }
   const snapshot = { ...measured }
-  const size = await measuredSize(snapshot, patch.width ?? snapshot.width, fit)
+  const size = await measuredSize(
+    snapshot,
+    { width: patch.width ?? snapshot.width, height: patch.height ?? snapshot.height },
+    fit,
+  )
   if (!size.ok) return size
   const current = store.getFrame(frameId)
   if (!current || current.canvasId !== canvas.id) return { ok: false, error: `frame ${frameId} not found` }
-  if (current.html !== snapshot.html || (patch.width === undefined && current.width !== snapshot.width))
+  if (
+    current.html !== snapshot.html ||
+    (patch.width === undefined && current.width !== snapshot.width) ||
+    (patch.height === undefined && current.height !== snapshot.height)
+  )
     return {
       ok: false,
       error: 'the frame changed while it was measured: call update_frame with fit_to_content to fit what it is now',
     }
-  /* only the sides measured: a height fit at a width someone changes meanwhile is refused above */
+  /* only the sides measured: a fit at a size someone changes meanwhile is refused above */
   const fitted = {
     ...patch,
     ...(fitsWidth(fit) ? { width: size.value.width } : {}),
