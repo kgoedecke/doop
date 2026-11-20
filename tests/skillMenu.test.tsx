@@ -247,3 +247,18 @@ it('replaces the whole handle when picking with the caret inside it', async () =
   await press('Enter')
   expect(el.value).toBe('/brand-check then more')
 })
+
+it('keeps the word after the caret when the Skills button opens the menu before it', async () => {
+  act(() => root.render(<Field />))
+  await type('hello world')
+  const el = field()
+  await act(async () => {
+    el.focus()
+    el.setSelectionRange(6, 6)
+    document.dispatchEvent(new Event('selectionchange'))
+  })
+  await act(async () => (host.querySelector('[data-testid=skills]') as HTMLButtonElement).click())
+  await act(async () => {})
+  await press('Enter')
+  expect(el.value).toBe('hello /brand-check world')
+})

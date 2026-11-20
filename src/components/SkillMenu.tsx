@@ -141,8 +141,10 @@ export function useSkillMenu({
     setActive(0)
     if (already && at === to) return place(at)
     const lead = at > 0 && !/[\s(]/.test(text[at - 1] ?? '') ? ' ' : ''
+    /* a word right after the caret is the request's, not a handle to finish: keep it apart */
+    const trail = to < text.length && !/\s/.test(text[to] ?? '') ? ' ' : ''
     const start = at + lead.length
-    setText(`${text.slice(0, at)}${lead}/${text.slice(to)}`)
+    setText(`${text.slice(0, at)}${lead}/${trail}${text.slice(to)}`)
     place(start + 1)
   }
 
