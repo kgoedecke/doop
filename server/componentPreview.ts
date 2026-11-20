@@ -1,26 +1,38 @@
 import { serializeOuter } from 'parse5'
+import { z } from 'zod'
 import { CSS_ATTR, type ComponentDef, type InstanceOverrides } from '../shared/components.ts'
 import type { Frame } from '../shared/types.ts'
 import { withCanvasFaces } from './canvasFaces.ts'
 import { contextFor } from './components.ts'
 import { renderInstance } from './componentEngine.ts'
 
-/**
- * A sheet of one component in every combination of its enum props, for people in
- * the Components panel and for agents checking a change: variants are CSS, so
- * the only real way to review them is to look at them.
- */
-
-const MAX_VARIANTS = 12
+const MAX_PREVIEWS = 12
 const SHEET_WIDTH = 720
 const CELL_HEIGHT = 170
 
-function combinations(def: ComponentDef): Record<string, string>[] {
+export const previewDescription = `Check a component after creating or editing it. Omit props for its default appearance, pass a value to check one variant, or pass a list to compare values side by side (e.g. {"tone": ["solid", "ghost"]}). Unspecified props keep their defaults. Request up to ${MAX_PREVIEWS} combinations per image.`
+export const previewProps = z.record(z.string(), z.union([z.string(), z.array(z.string()).min(1)])).optional()
+
+export class PreviewQueryError extends Error {
+  override name = 'PreviewQueryError'
+}
+
+export function previewCombinations(def: ComponentDef, props: z.infer<typeof previewProps> = {}) {
   let combos: Record<string, string>[] = [{}]
-  for (const prop of def.props) {
-    if (prop.type !== 'enum' || !prop.options?.length) continue
-    combos = combos.flatMap((combo) => prop.options!.map((option) => ({ ...combo, [prop.name]: option })))
-    if (combos.length > MAX_VARIANTS) return combos.slice(0, MAX_VARIANTS)
+  for (const [name, selection] of Object.entries(props)) {
+    const prop = def.props.find((candidate) => candidate.name === name)
+    if (!prop) {
+      const known = def.props.map((candidate) => candidate.name)
+      throw new PreviewQueryError(`“${def.name}” has no prop “${name}”; its props: ${known.join(', ') || 'none'}`)
+    }
+    const values = [...new Set(Array.isArray(selection) ? selection : [selection])]
+    const allowed = prop.type === 'boolean' ? ['true', 'false'] : prop.options
+    const wrong = allowed && values.find((value) => !allowed.includes(value))
+    if (allowed && wrong !== undefined)
+      throw new PreviewQueryError(`“${wrong}” is not a value of “${name}”; its values: ${allowed.join(', ')}`)
+    if (combos.length * values.length > MAX_PREVIEWS)
+      throw new PreviewQueryError(`Request at most ${MAX_PREVIEWS} combinations per image. Narrow the prop values.`)
+    combos = combos.flatMap((combo) => values.map((value) => ({ ...combo, [name]: value })))
   }
   return combos
 }
@@ -42,20 +54,8 @@ const label = (combo: Record<string, string>) =>
 
 const escapeHtml = (text: string) => text.replace(/&/g, '&amp;').replace(/</g, '&lt;')
 
-/**
- * `all` is the review sheet agents look at, one captioned cell per variant;
- * `default` is the Components panel's card: the component as it renders with
- * no props given, uncaptioned.
- */
-export type PreviewSheet = 'all' | 'default'
-
-export function previewDocument(
-  canvasId: string,
-  def: ComponentDef,
-  sheet: PreviewSheet = 'all',
-): { html: string; width: number; height: number; variants: number } {
+export function previewDocument(canvasId: string, def: ComponentDef, combos: Record<string, string>[] = [{}]) {
   const ctx = contextFor(canvasId)
-  const combos = sheet === 'default' ? [{}] : combinations(def)
   const cells = combos.map((combo) => {
     const overrides: InstanceOverrides = Object.keys(combo).length ? { props: combo } : {}
     const root = renderInstance(def, def, overrides, '', { ctx, stack: [] })
@@ -79,9 +79,9 @@ figcaption{font:11px/1.3 ui-monospace,monospace;color:#777}
   return { html, width: SHEET_WIDTH, height: rows * CELL_HEIGHT, variants: combos.length }
 }
 
-/** The sheet as a frame-shaped value, for the screenshot renderer. */
-export function previewFrame(canvasId: string, def: ComponentDef): Frame & { variants: number } {
-  const { html, width, height, variants } = previewDocument(canvasId, def)
+/** The sheet as a frame-shaped value for the screenshot renderer. */
+export function previewFrame(canvasId: string, def: ComponentDef, combos: Record<string, string>[]): Frame {
+  const { html, width, height } = previewDocument(canvasId, def, combos)
   const now = Date.now()
   return {
     id: `component-preview-${def.id}`,
@@ -95,6 +95,5 @@ export function previewFrame(canvasId: string, def: ComponentDef): Frame & { var
     createdAt: now,
     updatedAt: now,
     updatedBy: def.updatedBy,
-    variants,
   }
 }

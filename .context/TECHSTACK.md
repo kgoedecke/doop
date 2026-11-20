@@ -1016,7 +1016,9 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   canvas. The components pass runs first on every write, then `withLibraryFaces`, so an expanded
   `<doop-use>` naming a library family gets its face. Agents read and write the short form
   (`get_frame`, `edit_frame_html`); tools live once in `server/componentTools.ts` for MCP and the
-  resident agent. `src/lib/components.ts` and `ComponentsPanel.tsx` (the Layers panel's Components
+  resident agent. `get_component_preview` and the resident's `screenshot_component` show the default
+  instance, or compare selected prop values in one image (up to 12 combinations). Omitted props keep
+  their defaults. `src/lib/components.ts` and `ComponentsPanel.tsx` (the Layers panel's Components
   tab, beside Tokens) / `ComponentSection.tsx` are the editor's side. A component is renamed from its card's menu
   or a double-click on its name in that tab, or from its main's Layers row (`renameComponent`; instances are
   linked by id, so they follow). As in Figma, renaming an instance's row names that layer

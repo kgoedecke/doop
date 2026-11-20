@@ -285,7 +285,8 @@ needs a reusable piece the system lacks, add it, then use it.
 - To change them all, call update_component with find + replace, and read the impact it reports.
   Approved frames keep their sign-off: following a component is not an edit. Use dry_run first on anything
   widely used. Never edit each instance by hand.
-- get_component_preview shows you every variant at once. Look at it after changing a component.
+- After changing a component, use get_component_preview to check the appearance you edited. Omit props
+  for the default, or pass e.g. {"tone": ["solid", "ghost"]} to compare two tones at the default size.
 - Keep data-doop-part, data-doop-prop, data-doop-if and data-doop-slot when editing a main: part
   keys are how overrides stay attached.
 - update_component returns before the instances have followed: they are rewritten in the
