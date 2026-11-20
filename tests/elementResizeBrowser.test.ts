@@ -736,4 +736,26 @@ describe.skipIf(!findBrowserPath())('element resize handles', () => {
     await page.mouse.move(surface.left - 20, surface.top - 20)
     await page.waitForFunction(() => !document.querySelector('[data-hover-outline]'))
   }, 20_000)
+
+  it('follows the picked element to the size its transition settles at', async () => {
+    /* a component variant under `transition: all`: the update lands, the
+       outline is measured while the padding is still on its way, and it must
+       not stay at that size */
+    const variant = (icon: 'none' | 'leading') => `<!doctype html><html><head><style>
+      body { margin: 0; padding: 20px }
+      #button { display: inline-block; width: 100px; height: 36px; padding: 0 12px; transition: all 400ms linear }
+      #button[data-icon="leading"] { padding-left: 40px }
+    </style></head><body><div id="button" data-icon="${icon}"></div></body></html>`
+    await reset(variant('none'))
+    await select('#button')
+    const grips = () =>
+      page.$eval('[data-resize-handles]', (el) => (el instanceof HTMLElement ? parseFloat(el.style.width) : null))
+    expect(await grips()).toBe(124)
+
+    saved = { ...saved, html: variant('leading'), updatedAt: saved.updatedAt + 1 }
+    await page.evaluate((frame) => window.elementPanelHarness.remote(frame), saved)
+    const frame = (await frameDoc())!
+    await frame.waitForFunction(() => document.getElementById('button')!.dataset.icon === 'leading')
+    await expect.poll(grips, { timeout: 2_000 }).toBe(152)
+  })
 })

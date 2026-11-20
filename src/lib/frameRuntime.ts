@@ -1060,6 +1060,41 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
     }
   }
 
+  /* where an outline, pin or hover goes: one element's box, by selector */
+  function locate(reqId, selector) {
+    var found = null
+    try {
+      var target = selector ? document.querySelector(selector) : null
+      if (target) found = designRect(target)
+    } catch (e) { /* bad selector -> null */ }
+    var canSize = !!target && sizable(target)
+    parent.postMessage({
+      type: 'doop:located', reqId: reqId, selector: selector, rect: found,
+      sizable: canSize,
+      rotation: canSize ? ownRotation(target) || 0 : 0,
+      box: target && found ? renderedBox(target, found) : null,
+    }, '*')
+  }
+  /* the latest locate per request id: only it answers again once layout settles */
+  var locateTurns = {}
+
+  /* Calls back once the transitions and animations running now have ended
+     and no font is loading; not at all when nothing is in motion. Endless
+     animations (a spinner) never settle, so they are not waited for. */
+  function whenLayoutSettles(cb) {
+    var waits = []
+    if (document.getAnimations) {
+      document.getAnimations().forEach(function (animation) {
+        var end = animation.effect ? animation.effect.getComputedTiming().endTime : Infinity
+        if (animation.playState !== 'running' || !isFinite(end)) return
+        /* a cancelled one rejects: it moves nothing further, so it counts as ended */
+        waits.push(animation.finished.then(null, function () {}))
+      })
+    }
+    if (document.fonts.status === 'loading') waits.push(document.fonts.ready)
+    if (waits.length) Promise.all(waits).then(cb)
+  }
+
   /* ---- element properties (the Design panel) ----
      The panel cannot read computed styles across the sandbox, so it asks for
      a summary of one element and writes changes back as inline styles; the
@@ -1952,18 +1987,15 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
       }
     }
     if (d.type === 'doop:locate') {
-      var found = null
-      try {
-        var target = d.selector ? document.querySelector(d.selector) : null
-        if (target) found = designRect(target)
-      } catch (e) { /* bad selector -> null */ }
-      var canSize = !!target && sizable(target)
-      parent.postMessage({
-        type: 'doop:located', reqId: d.reqId, selector: d.selector, rect: found,
-        sizable: canSize,
-        rotation: canSize ? ownRotation(target) || 0 : 0,
-        box: target && found ? renderedBox(target, found) : null,
-      }, '*')
+      locate(d.reqId, d.selector)
+      /* the update that asked may have started a transition (a component
+         variant under \`transition: all\`) or be waiting on a font, so the
+         element is not at its size yet: answer again once it is */
+      var turn = (locateTurns[d.reqId] || 0) + 1
+      locateTurns[d.reqId] = turn
+      whenLayoutSettles(function () {
+        if (locateTurns[d.reqId] === turn) locate(d.reqId, d.selector)
+      })
     }
   })
   parent.postMessage({ type: 'doop:frame-ready' }, '*')
