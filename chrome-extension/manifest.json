@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Doop Capture",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Capture a page or section as editable HTML and paste it into Doop.",
   "permissions": ["activeTab", "scripting", "clipboardWrite"],
   "action": {
