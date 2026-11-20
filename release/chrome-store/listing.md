@@ -1,18 +1,18 @@
 # Chrome Web Store listing draft
 
-Name: Doop Cature
+Name: Doop Capture
 
 Summary: Capture a page or section as editable HTML and paste it into Doop.
 
 ## Description
 
-Bring a website into your design workflow with Doop Cature.
+Bring a website into your design workflow with Doop Capture.
 
 Select a section or capture the currently loaded page, copy the result, and paste it into a Doop canvas as an editable HTML frame. Keep the text, layout, and computed styles as a starting point for your next design.
 
 HOW TO USE
 
-1. Open a website and click Doop Cature in your toolbar.
+1. Open a website and click Doop Capture in your toolbar.
 2. Choose Select a section or Capture entire page.
 3. Click Copy to Doop in the capture toolbar.
 4. Open an editable Doop canvas and paste.
