@@ -114,8 +114,14 @@ export interface LibraryUpdateReport {
     frames_changed: number
     approvals_withdrawn: number
   }[]
-  /** canvases left as they were: no edit access there, or the pull was refused */
-  skipped: { canvas_id?: string; canvas_name?: string; reason: 'no_edit_access' | 'failed'; message: string }[]
+  /** canvases left as they were: no edit access there, the pull was refused, or the update
+   *  stopped before it reached them */
+  skipped: {
+    canvas_id?: string
+    canvas_name?: string
+    reason: 'no_edit_access' | 'failed' | 'not_reached'
+    message: string
+  }[]
 }
 
 export interface ComponentImpact {

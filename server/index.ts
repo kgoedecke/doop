@@ -5,7 +5,6 @@ import {
   detachAllInstances,
   findComponent,
   importableEntry,
-  importComponent,
   libraryEntry,
   LibraryPlanError,
   libraryConsumers,
@@ -13,9 +12,7 @@ import {
   libraryStatus,
   mayPublishFrom,
   publishToLibrary,
-  syncComponent,
   unpublishFromLibrary,
-  updateLibraryConsumers,
   usageOf,
 } from './componentActions.ts'
 import {
@@ -156,10 +153,12 @@ import {
   FrameVersionConflict,
   isImportWriteFailure,
   landImportFrame,
+  readableSources,
   runCanvasWrite,
   wireCanvasWrites,
   type CanvasWriteResults,
 } from './canvasWrites.ts'
+import { updateLibraryConsumers } from './libraryUpdates.ts'
 import { isPeerViewport } from '../shared/viewport.ts'
 import { exportScaleSuffix, fitExportScale, fullFrameRenderScale, parseExportScale } from '../shared/exportScale.ts'
 import { emailShare } from './canvasShares.ts'
@@ -3063,41 +3062,43 @@ app.post('/api/canvases/:id/library/publish', (req, res) => {
 /* update everywhere: pull this library's latest publication into every canvas of
    the workspace using it. Its own request, never part of a publish; it changes only
    canvases this person may edit and answers with what it did, canvas by canvas */
-app.post('/api/canvases/:id/library/update-consumers', async (req, res) => {
-  const canvas = requireCanvas(req, res, req.params.id, 'edit')
-  if (!canvas) return
-  const body = componentBody(res, libraryUpdateBody, req.body ?? {})
-  if (!body) return
-  const userId = req.user!.id
-  const allowed = (need: CanvasRole) => (id: string) => {
-    const other = store.getCanvas(id)
-    return !!other && roleAllows(canvasRole(userId, other), need)
-  }
-  try {
-    const report = await updateLibraryConsumers(canvas.id, userActor(req), {
-      dryRun: body.dryRun === true,
-      canEdit: allowed('edit'),
-      canRead: allowed('view'),
-      publisherId: userId,
-    })
-    if (!report.dry_run)
-      captureFeature(userId, 'library_updated_everywhere', 'ui', {
-        canvas_id: canvas.id,
-        canvases: report.canvases.length,
-        skipped: report.skipped.length,
+app.post(
+  '/api/canvases/:id/library/update-consumers',
+  writeRoute(async (req, res) => {
+    const canvas = requireCanvas(req, res, req.params.id, 'edit')
+    if (!canvas) return
+    const body = componentBody(res, libraryUpdateBody, req.body ?? {})
+    if (!body) return
+    const userId = req.user!.id
+    const allowed = (need: CanvasRole) => (id: string) => {
+      const other = store.getCanvas(id)
+      return !!other && roleAllows(canvasRole(userId, other), need)
+    }
+    try {
+      const report = await updateLibraryConsumers(canvas.id, userActor(req), {
+        dryRun: body.dryRun === true,
+        canEdit: allowed('edit'),
+        canRead: allowed('view'),
+        publisherId: userId,
       })
-    res.json(report)
-  } catch (error) {
-    /* the same answers as its neighbours: 402 for the plan, 400 for a refusal.
-       Anything else is answered here, since nothing catches an async handler's throw */
-    if (error instanceof ComponentError)
-      return componentRoute(res, () => {
+      if (!report.dry_run)
+        captureFeature(userId, 'library_updated_everywhere', 'ui', {
+          canvas_id: canvas.id,
+          canvases: report.canvases.length,
+          skipped: report.skipped.length,
+        })
+      res.json(report)
+    } catch (error) {
+      /* the same answers as its neighbours: 402 for the plan, 400 for a refusal. Anything
+         else goes on to `undoRequest`, which undoes what the request changed before the
+         error handlers answer it (it failed before any canvas was updated) */
+      if (!componentRefusal(res, error)) {
+        console.error(`[library] could not update the canvases using ${canvas.id}:`, error)
         throw error
-      })
-    console.error(`[library] could not update the canvases using ${canvas.id}:`, error)
-    res.status(500).json({ error: 'could not update the canvases using this library' })
-  }
-})
+      }
+    }
+  }),
+)
 
 /* stop sharing: the named components, or the whole library */
 app.delete('/api/canvases/:id/library', (req, res) => {
@@ -3171,21 +3172,29 @@ app.post(
   }),
 )
 
-app.post('/api/canvases/:id/components/import', (req, res) => {
-  const canvas = requireCanvas(req, res, req.params.id, 'edit')
-  if (!canvas) return
-  const source = String(req.body?.sourceCanvasId ?? '')
-  const origin = store.getCanvas(source)
-  /* a workspace library goes by the canvas, like its fonts: whoever may edit here may use it */
-  const shared = librariesForCanvas(canvas).some((library) => library.canvasId === source)
-  if (!shared && (!origin || !roleAllows(canvasRole(req.user!.id, origin), 'view')))
-    return res.status(403).json({ error: 'this account cannot read that canvas' })
-  componentRoute(res, () => {
-    const def = importComponent(canvas.id, source, String(req.body?.component ?? ''), userActor(req))
-    if (def.source?.library) captureFeature(req.user!.id, 'library_component_used', 'ui', { canvas_id: canvas.id })
-    return def
-  })
-})
+app.post(
+  '/api/canvases/:id/components/import',
+  writeRoute(async (req, res) => {
+    const canvas = requireCanvas(req, res, req.params.id, 'edit')
+    if (!canvas) return
+    const source = String(req.body?.sourceCanvasId ?? '')
+    const origin = store.getCanvas(source)
+    /* a workspace library goes by the canvas, like its fonts: whoever may edit here may use it */
+    const shared = librariesForCanvas(canvas).some((library) => library.canvasId === source)
+    if (!shared && (!origin || !roleAllows(canvasRole(req.user!.id, origin), 'view')))
+      return res.status(403).json({ error: 'this account cannot read that canvas' })
+    await componentRoute(res, async () => {
+      const { component: def } = await runCanvasWrite(canvas.id, {
+        type: 'import-component',
+        from: source,
+        component: String(req.body?.component ?? ''),
+        actor: userActor(req),
+      })
+      if (def.source?.library) captureFeature(req.user!.id, 'library_component_used', 'ui', { canvas_id: canvas.id })
+      return def
+    })
+  }),
+)
 
 app.patch(
   '/api/canvases/:id/components/:componentId',
@@ -3265,19 +3274,28 @@ app.get('/api/canvases/:id/components/:componentId/revisions', (req, res) => {
   res.json({ rev: def.rev, revisions: def.history })
 })
 
-app.post('/api/canvases/:id/components/:componentId/sync', (req, res) => {
-  const canvas = requireCanvas(req, res, req.params.id, 'edit')
-  if (!canvas) return
-  componentRoute(res, () => {
-    const result = syncComponent(canvas.id, req.params.componentId, userActor(req), (id) => {
+app.post(
+  '/api/canvases/:id/components/:componentId/sync',
+  writeRoute<ComponentParams>(async (req, res) => {
+    const canvas = requireCanvas(req, res, req.params.id, 'edit')
+    if (!canvas) return
+    const canRead = (id: string) => {
       const other = store.getCanvas(id)
       return !!other && roleAllows(canvasRole(req.user!.id, other), 'view')
+    }
+    await componentRoute(res, async () => {
+      const result = await runCanvasWrite(canvas.id, {
+        type: 'sync-component',
+        component: req.params.componentId,
+        readable: readableSources(canvas.id, canRead),
+        actor: userActor(req),
+      })
+      if (result.updated && result.component.source?.library)
+        captureFeature(req.user!.id, 'library_update_pulled', 'ui', { canvas_id: canvas.id })
+      return result
     })
-    if (result.updated && result.component.source?.library)
-      captureFeature(req.user!.id, 'library_update_pulled', 'ui', { canvas_id: canvas.id })
-    return result
-  })
-})
+  }),
+)
 
 app.get('/api/canvases/:id/components/:componentId/preview', (req, res) => {
   const canvas = requireCanvas(req, res, req.params.id, 'view')
