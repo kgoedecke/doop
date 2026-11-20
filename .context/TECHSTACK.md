@@ -684,9 +684,21 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   `restore-component-version`), from REST, MCP and the resident (`server/componentTools.ts`); each
   can answer a `view` (catalog entry and touched frames, read in the write's own step) when it
   asks (`view: true`: the agent tools; REST never asks, and pays nothing for it), and reuse notes
-  are read where they always were. Known limitation: `replace_matching` stays one command whose
-  local host sub-commits per frame through the server's journal (`checkpoint()`), so it is not
-  ready for another host; the instances PR makes it one command per frame. Not yet: instances, detaching, propagation, the library (with the tokens an adopted
+  are read where they always were. Instances go through it too (`insert-instance`, `change-instances`,
+  from `insert_instance`, `update_instances` and REST `/api/frames/:id/instances`), and
+  `replace_matching` is only `createFromElement`: the component (`create-component-for-matching`,
+  which answers the shape and the frames; `create-component` takes no `replaceMatching`), then
+  one `link-matching` per frame; the host reads the definition once per command with its template
+  (parsed templates cached by id and a hash of the template text), so an instance is stamped with
+  the rev it was keyed against, and a revision landing part way is taken up by the frames after
+  it. The first command keeps the component and each that links keeps its frame (on the local
+  host a `checkpoint()`). Only the create can fail the call: a spent budget or a refusal in a
+  frame (`ComponentError`, a component deleted part way, `LibraryAdoptError`) ends the run there
+  with what it linked (`converted`, `changed`, which REST answers as `frames`, `matching_stopped`,
+  and `matching_error` when it was not the budget); anything else rejects, as before. The agents'
+  view is read once after the run, outside a command (the actor host will need a read command).
+  Not yet:
+  detaching, propagation, the library (with the tokens an adopted
   component brings, `carryLibraryTokens`), imports and ingest, comment anchoring. Tests: `canvasWrites.test.ts`,
   `writeBoundaryHttp.test.ts`.
 - `pg` 8.22.0 - Postgres driver for the real-database path.

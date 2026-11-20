@@ -36,10 +36,13 @@ const {
 } = await import('../server/canvasWrites.ts')
 const { newInlineData } = await import('../server/inlineData.ts')
 const { blankComponent } = await import('../server/components.ts')
-const { ComponentError, createComponentFromHtml, updateComponent } = await import('../server/componentActions.ts')
-const { COMPONENT_ATTR } = await import('../shared/components.ts')
+const { ComponentError, createComponentFromHtml, deleteComponent, updateComponent } =
+  await import('../server/componentActions.ts')
+const { runComponentTool } = await import('../server/componentTools.ts')
+const { stubEnv, unstubAllEnvs } = await import('./envStub.ts')
+const { COMPONENT_ATTR, renderRevOf } = await import('../shared/components.ts')
 const { openTransaction, transaction } = await import('../server/journal.ts')
-const { runOperation, usage, WorkBudgetError } = await import('../server/workBudget.ts')
+const { parse, runOperation, usage, WorkBudgetError } = await import('../server/workBudget.ts')
 const { withArgsCanvases } = await import('../server/toolLoads.ts')
 const { execTool } = await import('../server/resident.ts')
 const { DEFAULT_ROLE_ID, roleName } = await import('../shared/agents.ts')
@@ -998,6 +1001,137 @@ describe('component definitions through the canvas write entry', () => {
     expect(String(result.content)).toContain('storage refused')
     expect(componentNames()).toEqual([])
     expect(store.getCanvas(canvasId)!.frames).toEqual([])
+    expect(sent).toEqual([])
+  })
+})
+
+describe('instances through the canvas write entry', () => {
+  /** A component, and a frame to place it in, without anything said to the room. */
+  async function setup() {
+    const made = await runCanvasWrite(canvasId, {
+      type: 'create-component',
+      from: { kind: 'html', name: 'Chip', html: '<span class="chip">Chip</span>' },
+      actor: user,
+    })
+    const page = actions.createFrame(canvasId, { name: 'Page', html: doc('<p>page</p>') }, user)!
+    sent = []
+    return { component: made.component, page }
+  }
+  const residentState = () => ({
+    mutatedFrames: new Set<string>(),
+    sourceFrames: new Set<string>(),
+    verificationFrames: new Set<string>(),
+    verifiedFrames: new Set<string>(),
+    seenVerified: new Set<string>(),
+    rewriteDrafts: new Map<string, string>(),
+    vision: false,
+    imagesGenerated: 0,
+    repliedThreads: new Set<string>(),
+    awaitingThreads: new Set<string>(),
+    tokenWrites: 0,
+    arrangeWrites: 0,
+  })
+
+  it('places and changes instances, answering what the write left', async () => {
+    const { page } = await setup()
+    const placed = await runCanvasWrite(canvasId, {
+      type: 'insert-instance',
+      input: { frameId: page.id, component: 'Chip', props: {} },
+      actor: user,
+    })
+    expect(placed.instanceId).not.toBe('')
+    expect(placed.frame.html).toContain('data-doop-instance=')
+    const changed = await runCanvasWrite(canvasId, {
+      type: 'change-instances',
+      frameId: page.id,
+      changes: [{ instanceId: placed.instanceId, detach: true }],
+      actor: user,
+      view: true,
+    })
+    expect(changed.missing).toEqual([])
+    expect(changed.instances).toEqual([])
+    /* not asked for: not read */
+    const again = await runCanvasWrite(canvasId, {
+      type: 'change-instances',
+      frameId: page.id,
+      changes: [],
+      actor: user,
+    })
+    expect(again.instances).toBeUndefined()
+  })
+
+  it('a rejected instance command inside a request is undone, earlier writes too, and tells nobody', async () => {
+    const { page } = await setup()
+    const html = store.getFrame(page.id)!.html
+    const fails = refuseNextWrite()
+    const request = openTransaction()
+    await expect(
+      request.run(async () => {
+        await runCanvasWrite(canvasId, { type: 'set-token-themes', themes: ['dark'], actor: user })
+        await runCanvasWrite(canvasId, {
+          type: 'insert-instance',
+          input: { frameId: page.id, component: 'Chip' },
+          actor: user,
+        })
+      }),
+    ).rejects.toThrow('storage refused')
+    request.rollback()
+    fails.mockRestore()
+    expect(store.getTokenThemes(canvasId)).toEqual([])
+    expect(store.getFrame(page.id)!.html).toBe(html)
+    expect(sent).toEqual([])
+  })
+
+  it('a rejected instance command inside an MCP tool call is undone, earlier writes too, and tells nobody', async () => {
+    const { page } = await setup()
+    const html = store.getFrame(page.id)!.html
+    const fails = refuseNextWrite()
+    await expect(
+      withArgsCanvases(
+        {},
+        async () => {
+          await runCanvasWrite(canvasId, { type: 'set-token-themes', themes: ['dark'], actor: agent })
+          await runCanvasWrite(canvasId, {
+            type: 'insert-instance',
+            input: { frameId: page.id, component: 'Chip' },
+            actor: agent,
+          })
+        },
+        'insert_instance',
+      ),
+    ).rejects.toThrow('storage refused')
+    fails.mockRestore()
+    expect(store.getTokenThemes(canvasId)).toEqual([])
+    expect(store.getFrame(page.id)!.html).toBe(html)
+    expect(sent).toEqual([])
+  })
+
+  it('a rejected instance command inside a resident tool call answers an error, is undone, and tells nobody', async () => {
+    const { page } = await setup()
+    /* one instance placed and kept, then one change of two refused: the call undoes it all */
+    const placed = await runCanvasWrite(canvasId, {
+      type: 'insert-instance',
+      input: { frameId: page.id, component: 'Chip' },
+      actor: user,
+    })
+    const html = store.getFrame(page.id)!.html
+    sent = []
+    const fails = refuseNextWrite()
+    const result = await execTool(
+      {
+        type: 'tool_use',
+        id: 't1',
+        name: 'update_instances',
+        input: { frame_id: page.id, instances: [{ instance_id: placed.instanceId, detach: true }] },
+      },
+      canvasId,
+      actions.resolveActor({ name: roleName(DEFAULT_ROLE_ID), kind: 'agent' }),
+      residentState(),
+    )
+    fails.mockRestore()
+    expect(result.is_error).toBe(true)
+    expect(String(result.content)).toContain('storage refused')
+    expect(store.getFrame(page.id)!.html).toBe(html)
     expect(sent).toEqual([])
   })
 })

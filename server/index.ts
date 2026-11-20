@@ -1,13 +1,11 @@
 import { env } from './env.ts'
 import {
-  changeInstances,
   componentDetail,
   ComponentError,
   detachAllInstances,
   findComponent,
   importableEntry,
   importComponent,
-  insertInstance,
   libraryEntry,
   LibraryPlanError,
   libraryConsumers,
@@ -3277,31 +3275,44 @@ app.get('/api/canvases/:id/components/:componentId/preview', (req, res) => {
   res.json(previewDocument(canvas.id, def))
 })
 
-app.post('/api/frames/:id/instances', (req, res) => {
-  const current = requireFrame(req, res, req.params.id, 'edit')
-  if (!current) return
-  const body = req.body ?? {}
-  componentRoute(res, () =>
-    insertInstance(
-      current.canvasId,
-      {
-        frameId: current.id,
-        component: String(body.component ?? ''),
-        props: body.props,
-        target: body.target,
-        position: body.position,
-      },
-      userActor(req),
-    ),
-  )
-})
+app.post(
+  '/api/frames/:id/instances',
+  writeRoute(async (req, res) => {
+    const current = requireFrame(req, res, req.params.id, 'edit')
+    if (!current) return
+    const body = req.body ?? {}
+    await componentRoute(res, () =>
+      runCanvasWrite(current.canvasId, {
+        type: 'insert-instance',
+        input: {
+          frameId: current.id,
+          component: String(body.component ?? ''),
+          props: body.props,
+          target: body.target,
+          position: body.position,
+        },
+        actor: userActor(req),
+      }),
+    )
+  }),
+)
 
-app.patch('/api/frames/:id/instances', (req, res) => {
-  const current = requireFrame(req, res, req.params.id, 'edit')
-  if (!current) return
-  const changes = Array.isArray(req.body?.changes) ? req.body.changes : []
-  componentRoute(res, () => changeInstances(current.canvasId, current.id, changes, userActor(req)))
-})
+app.patch(
+  '/api/frames/:id/instances',
+  writeRoute(async (req, res) => {
+    const current = requireFrame(req, res, req.params.id, 'edit')
+    if (!current) return
+    const changes = Array.isArray(req.body?.changes) ? req.body.changes : []
+    await componentRoute(res, () =>
+      runCanvasWrite(current.canvasId, {
+        type: 'change-instances',
+        frameId: current.id,
+        changes,
+        actor: userActor(req),
+      }),
+    )
+  }),
+)
 
 app.put(
   '/api/frames/:id/approval',
