@@ -657,40 +657,78 @@ async function inspectOn(page: Page, frame: Frame, options: InspectOptions): Pro
 }
 
 /** A frame's content in design px: `painted` is the lowest thing it paints, `flow` the bottom of
- *  the root's own box (what flows, overflow left out), `right` the rightmost thing it paints. `shell`
- *  says the design, as loaded, is an app shell: it fits its viewport and a large part of it
- *  scrolls inside. */
+ *  the root's own box (what flows, overflow left out), `right` the rightmost thing it paints.
+ *  `shell` says the design, as loaded, is an app shell: it fits its viewport and a large part of
+ *  it scrolls inside. `spills` counts the boxes in flow that run out of their parent's content box
+ *  (into its padding or past it): a box held at the viewport's height spills its content once the
+ *  viewport is too short for it, where a box that grows with its content never does. */
 export interface ContentExtent {
   painted: number
   flow: number
   right: number
   shell: boolean
+  spills: number
 }
 
 /** Measures on one loaded page, at a viewport of `width` × `height`. A design sized in vh changes
  *  with the viewport, so the fit may measure at several heights (server/frameFit.ts). */
 export interface ContentProbe {
-  /** the content's height, the root and body let go of theirs */
+  /** the content's height, the root and body let go of a height that follows the viewport */
   height: (width: number, height: number) => Promise<ContentExtent>
   /** the width the content hugs to: the root shrunk to fit its content, never past `width` */
   width: (width: number, height: number) => Promise<number>
 }
 
-/** Loads the frame once and hands `settle` a probe on it. */
+/** How much taller the viewport is made to tell a root height that follows it from a fixed one. */
+const FOLLOW_PROBE_PX = 200
+
+/** Loads the frame once and hands `settle` a probe on it. Before the first height measure, the
+ *  root and body are read at two viewport heights: one whose height follows the viewport (100vh,
+ *  100%, a script sizing it) is let go of while measuring the height, one that keeps its height
+ *  (px, rem, calc of those, whatever rule set it) is the design's own and stays. A width is hugged
+ *  with nothing let go of, as the canvas lays the design out. */
 export function measureContent<T>(frame: Frame, settle: (probe: ContentProbe) => Promise<T>): Promise<T> {
   return renderer.withPage('measuring the frame', RENDER_TIMEOUT_MS, async (page) => {
     await loadFrameInto(page, frame)
     await installNameShim(page)
-    const measure = async (width: number, height: number, hug: boolean) => {
+    let released: string[] | undefined
+    const layOut = async (width: number, height: number, release: boolean) => {
+      await page.evaluate(holdRelease, release)
       await page.setViewport(frameViewport(width, height))
       await page.evaluate(settleDocument)
-      return page.evaluate(contentExtent, hug)
+    }
+    const followers = async (width: number, height: number) => {
+      await layOut(width, height, false)
+      const before = await page.evaluate(rootHeights)
+      await layOut(width, height + FOLLOW_PROBE_PX, false)
+      const after = await page.evaluate(rootHeights)
+      return (['html', 'body'] as const).filter((name) => before[name] !== after[name])
+    }
+    const measure = async (width: number, height: number, hug: boolean) => {
+      if (!hug && !released) released = await followers(width, height)
+      await layOut(width, height, !hug)
+      return page.evaluate(contentExtent, hug, released ?? [])
     }
     return settle({
       height: (width, height) => measure(width, height, false),
       width: async (width, height) => (await measure(width, height, true)).right,
     })
   })
+}
+
+/** Runs in the frame's page: switches the height release (`contentExtent` installs it) on or off,
+ *  ahead of a viewport change, so the frame's resize handlers run against the layout measured. */
+function holdRelease(on: boolean): void {
+  const release = document.querySelector<HTMLStyleElement>('style[data-doop-fit]')
+  if (release?.sheet) release.sheet.disabled = !on
+}
+
+/** Runs in the frame's page: the root's and body's heights. */
+function rootHeights(): { html: number; body: number } {
+  return {
+    html: document.documentElement.getBoundingClientRect().height,
+    body: document.body.getBoundingClientRect().height,
+  }
 }
 
 /** Runs in the frame's page before each measure. The frame's own resize, ResizeObserver and
@@ -709,17 +747,18 @@ async function settleDocument(): Promise<void> {
   }
 }
 
-/** Runs in the frame's page. Measuring the height, the root and body are let go of their height
- *  (a body at 100vh or 100% would hold the frame at its current height; a height in px and a
- *  min-height stay, since a px one is the design's own and a vh min-height is found by
- *  settleHeight's 1px probe). With `hug`, the root shrinks to fit its content for the one measure
- *  (`width: fit-content`, never wider than the viewport, held at the left in a right-to-left
- *  page), as a Figma frame hugs, at the height the canvas gives it. Either way the extent is the furthest thing
- *  painted: the root's own box covers what flows, a walk adds what is positioned or overflows its
- *  box, text running past its element and absolute ::before / ::after included. Left out: what a
- *  scroller or clipper hides, what is invisible (a closed menu at visibility:hidden or opacity:0),
- *  and fixed elements, which sit on the viewport rather than the content. */
-function contentExtent(hug: boolean): ContentExtent {
+/** Runs in the frame's page. Measuring the height, the root and body in `released` (those whose
+ *  height follows the viewport: a body at 100vh or 100% would hold the frame at its current
+ *  height) are let go of their height; a min-height stays, since a px one is the design's own
+ *  floor and a vh one is found by settleHeight's 1px probe. With `hug`, the root shrinks to fit
+ *  its content for the one measure (`width: fit-content`, never wider than the viewport, held at
+ *  the left in a right-to-left page), as a Figma frame hugs. Either way the extent is the furthest
+ *  thing painted: the root's own box covers what flows, a walk adds what is positioned or
+ *  overflows its box, text running past its element and absolute ::before / ::after included,
+ *  each cut on the axis a box clips. Left out: what is invisible (a closed menu at
+ *  visibility:hidden or opacity:0) and fixed elements, which sit on the viewport rather than the
+ *  content. */
+function contentExtent(hug: boolean, released: string[]): ContentExtent {
   const MAX_ELEMENTS = 20_000
   const hugged = hug ? document.createElement('style') : null
   if (hugged) {
@@ -728,9 +767,7 @@ function contentExtent(hug: boolean): ContentExtent {
     hugged.textContent = `html{width:fit-content!important;min-width:0!important;max-width:none!important${rtl ? ';margin-left:0!important;margin-right:auto!important' : ''}}`
     document.head.append(hugged)
   }
-  let release = document.querySelector<HTMLStyleElement>('style[data-doop-fit]')
-  /* a hug is measured at the frame's height, as the canvas lays it out, not a released one */
-  if (hug && release?.sheet) release.sheet.disabled = true
+  let release = document.querySelector('style[data-doop-fit]')
   if (!release && !hug) {
     /* judged as loaded, before the root and body are released: an app shell on the body (or on
        html,body{height:100%}) would otherwise unroll its scroller into the frame */
@@ -747,28 +784,6 @@ function contentExtent(hug: boolean): ContentExtent {
     const root = document.documentElement
     const fillsViewport = root.scrollHeight <= innerHeight + 1 && root.getBoundingClientRect().bottom >= innerHeight - 1
     const shell = fillsViewport && Array.from(document.body.querySelectorAll('*')).slice(0, MAX_ELEMENTS).some(scrolls)
-    /* a height the design set in px is its own, as a min-height is: only a height that follows
-       the viewport (100vh, 100%, auto) is let go of. The cascade is read roughly: the last
-       height declared for the element in its style attribute, else in a plain rule of the page */
-    const declaredHeight = (el: HTMLElement) => {
-      if (el.style.height) return el.style.height
-      let height = ''
-      for (const sheet of Array.from(document.styleSheets)) {
-        let rules: CSSRuleList
-        try {
-          rules = sheet.cssRules
-        } catch {
-          continue
-        }
-        for (const rule of Array.from(rules))
-          if (rule instanceof CSSStyleRule && rule.style.height && el.matches(rule.selectorText))
-            height = rule.style.height
-      }
-      return height
-    }
-    const released = [document.documentElement, document.body]
-      .filter((el) => !/^[\d.]+px$/.test(declaredHeight(el)))
-      .map((el) => el.localName)
     release = document.createElement('style')
     release.setAttribute('data-doop-fit', shell ? 'shell' : '')
     release.textContent = released.length
@@ -781,10 +796,11 @@ function contentExtent(hug: boolean): ContentExtent {
   const flow = rootBox.bottom
   let bottom = flow
   let right = rootBox.right
+  let spills = 0
   const text = document.createRange()
   /* an absolute ::before / ::after has no box of its own to read: its far edges are its containing
-     block's padding edges less its used offsets and margins; one placed by a clipper is cut */
-  const pseudoEdges = (el: Element, style: CSSStyleDeclaration, clips: boolean, which: '::before' | '::after') => {
+     block's padding edges less its used offsets and margins; `own` when the element places it */
+  const pseudoEdges = (el: Element, style: CSSStyleDeclaration, which: '::before' | '::after') => {
     const pseudo = getComputedStyle(el, which)
     if (pseudo.content === 'none' || pseudo.content === 'normal' || pseudo.position !== 'absolute') return null
     if (pseudo.display === 'none' || pseudo.visibility === 'hidden' || pseudo.opacity === '0') return null
@@ -794,60 +810,71 @@ function contentExtent(hug: boolean): ContentExtent {
       block = block.parentElement
       if (block) blockStyle = getComputedStyle(block)
     }
-    if (clips && block === el) return null
-    const own = block === el
     const box = block?.getBoundingClientRect()
     const bottomEdge = box ? box.bottom - parseFloat(blockStyle.borderBottomWidth) : innerHeight - window.scrollY
     const rightEdge = box ? box.right - parseFloat(blockStyle.borderRightWidth) : innerWidth - window.scrollX
     return {
       bottom: bottomEdge - parseFloat(pseudo.bottom) - parseFloat(pseudo.marginBottom),
       right: rightEdge - parseFloat(pseudo.right) - parseFloat(pseudo.marginRight),
-      own,
+      own: block === el,
     }
   }
-  /* `rightmost`: an ancestor that clips sideways only (overflow-x:clip) cuts what reaches past it */
-  const reach = (edges: { bottom: number; right: number } | null, rightmost: number) => {
+  /* `cap`: what the ancestors that clip let show, per axis; a box outside it shows nothing */
+  type Cap = { right: number; bottom: number }
+  const reach = (edges: { bottom: number; right: number; top?: number; left?: number } | null, cap: Cap) => {
     if (!edges) return
-    if (Number.isFinite(edges.bottom)) bottom = Math.max(bottom, edges.bottom)
-    if (Number.isFinite(edges.right)) right = Math.max(right, Math.min(edges.right, rightmost))
+    if ((edges.left ?? -Infinity) >= cap.right || (edges.top ?? -Infinity) >= cap.bottom) return
+    if (Number.isFinite(edges.bottom)) bottom = Math.max(bottom, Math.min(edges.bottom, cap.bottom))
+    if (Number.isFinite(edges.right)) right = Math.max(right, Math.min(edges.right, cap.right))
+  }
+  /* the box an element lays its children out in, its border and padding taken off */
+  const contentBox = (el: Element, style: CSSStyleDeclaration) => {
+    const box = el.getBoundingClientRect()
+    return {
+      top: box.top + parseFloat(style.borderTopWidth) + parseFloat(style.paddingTop),
+      bottom: box.bottom - parseFloat(style.borderBottomWidth) - parseFloat(style.paddingBottom),
+    }
   }
   let seen = 0
-  const walk = (el: Element, rightmost: number) => {
+  const walk = (el: Element, cap: Cap, holds: { top: number; bottom: number }) => {
     for (const child of Array.from(el.children)) {
       if (++seen > MAX_ELEMENTS) return
       const style = getComputedStyle(child)
       if (style.display === 'none' || style.position === 'fixed' || style.opacity === '0') continue
-      /* overflow-x hidden, auto or scroll compute overflow-y to auto; only clip leaves it visible */
-      const clips = style.overflowY !== 'visible'
-      /* a hidden box takes no paint, though a child of it may opt back in with visibility:visible */
       const rect = child.getBoundingClientRect()
-      const inside = style.overflowX === 'visible' ? rightmost : Math.min(rightmost, rect.right)
+      /* each axis that does not show its overflow (hidden, clip, auto, scroll) cuts what is inside */
+      const inside: Cap = {
+        right: style.overflowX === 'visible' ? cap.right : Math.min(cap.right, rect.right),
+        bottom: style.overflowY === 'visible' ? cap.bottom : Math.min(cap.bottom, rect.bottom),
+      }
+      const inFlow = style.position === 'static' || style.position === 'relative'
+      if (inFlow && rect.height > 0 && (rect.top < holds.top - 1 || rect.bottom > holds.bottom + 1)) spills++
+      /* a hidden box takes no paint, though a child of it may opt back in with visibility:visible */
       if (style.visibility !== 'hidden') {
-        if (rect.width > 0 || rect.height > 0) reach(rect, rightmost)
-        /* placed by the element itself, a pseudo-element is cut where the element clips sideways */
+        if (rect.width > 0 || rect.height > 0) reach(rect, cap)
+        /* placed by the element itself, a pseudo-element is cut where the element clips */
         for (const which of ['::before', '::after'] as const) {
-          const edges = pseudoEdges(child, style, clips, which)
-          reach(edges, edges?.own ? inside : rightmost)
+          const edges = pseudoEdges(child, style, which)
+          reach(edges, edges?.own ? inside : cap)
         }
         /* its own text, which may run past its box; elements inside are walked themselves */
-        if (!clips)
-          for (const node of Array.from(child.childNodes)) {
-            if (node.nodeType !== Node.TEXT_NODE || !node.textContent?.trim()) continue
-            text.selectNodeContents(node)
-            reach(text.getBoundingClientRect(), inside)
-          }
+        for (const node of Array.from(child.childNodes)) {
+          if (node.nodeType !== Node.TEXT_NODE || !node.textContent?.trim()) continue
+          text.selectNodeContents(node)
+          reach(text.getBoundingClientRect(), inside)
+        }
       }
-      if (!clips) walk(child, inside)
+      walk(child, inside, contentBox(child, style))
     }
   }
-  walk(document.body, Infinity)
+  walk(document.body, { right: Infinity, bottom: Infinity }, contentBox(document.body, getComputedStyle(document.body)))
   hugged?.remove()
-  if (release?.sheet) release.sheet.disabled = false
   return {
     painted: Math.ceil(bottom + window.scrollY),
     flow: Math.ceil(flow + window.scrollY),
     right: Math.ceil(right + window.scrollX),
     shell,
+    spills,
   }
 }
 

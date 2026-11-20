@@ -88,15 +88,20 @@ const fit = (frame: Frame, args: Record<string, unknown> = {}) =>
 describe('settleHeight', () => {
   /** a measure of content that `content` gives for a viewport, all of it in flow */
   const curve = (content: (viewport: number) => number) =>
-    vi.fn(async (viewport: number) => ({ painted: content(viewport), flow: content(viewport), shell: false }))
+    vi.fn(async (viewport: number) => ({
+      painted: content(viewport),
+      flow: content(viewport),
+      shell: false,
+      spills: 0,
+    }))
   /** content of `fixed` px plus `share` of the viewport, as a vh-sized part makes it */
   const design = (fixed: number, share = 0) => curve((viewport) => fixed + share * viewport)
 
   it('takes a measure that holds at the height it gives', async () => {
     const measure = design(640)
     expect(await settleHeight(300, measure)).toEqual({ kind: 'fits', height: 640 })
-    /* the measure, the one that confirms it, the slope below and a px lower */
-    expect(measure).toHaveBeenCalledTimes(4)
+    /* the measure, the one that confirms it, and the slope below */
+    expect(measure).toHaveBeenCalledTimes(3)
     expect(await settleHeight(640, design(640))).toEqual({ kind: 'fits', height: 640 })
   })
 
@@ -133,10 +138,11 @@ describe('settleHeight', () => {
       painted: Math.max(122, viewport),
       flow: viewport,
       shell: false,
+      spills: 0,
     }))
     expect(await settleHeight(900, collapsing)).toEqual({ kind: 'fits', height: 900 })
     /* one whose content scrolls inside it, as loaded */
-    const scrolling = vi.fn(async () => ({ painted: 2120, flow: 2120, shell: true }))
+    const scrolling = vi.fn(async () => ({ painted: 2120, flow: 2120, shell: true, spills: 0 }))
     expect(await settleHeight(844, scrolling)).toEqual({ kind: 'fits', height: 844 })
   })
 
@@ -517,15 +523,92 @@ describe.skipIf(!findBrowserPath())('fit_to_content in a browser', () => {
     expect(rtl.width).toBe(150)
   }, 60_000)
 
-  it('hugs to columns a narrower media query stacks', async () => {
+  it('keeps a card that a narrower media query sets to width:100%', async () => {
     const frame = frameWith(
       doc(
-        '<style>.cols{display:flex;gap:16px}.cols>div{width:160px;height:20px;flex:none}@media (max-width:360px){.cols{flex-direction:column}}</style><div class="cols"><div></div><div></div></div>',
+        '<style>.card{width:320px;box-sizing:border-box;padding:16px}@media (max-width:360px){.card{width:100%}}</style><div class="card">Title</div>',
       ),
       { width: 600 },
     )
     await fit(frame, { fit_to_content: 'width' })
-    expect(frame.width).toBe(160)
+    expect(frame.width).toBe(320)
+  }, 60_000)
+
+  it('hugs again while each wider layout sets off a wider one', async () => {
+    const frame = frameWith(
+      doc(
+        '<style>.box{width:200px;height:20px}@media (max-width:250px){.box{width:280px}}@media (min-width:260px) and (max-width:320px){.box{width:360px}}</style><div class="box"></div>',
+      ),
+    )
+    await fit(frame, { fit_to_content: 'width' })
+    expect(frame.width).toBe(360)
+  }, 60_000)
+
+  it('keeps a viewport-tall screen whose padding or border outlasts a tiny viewport', async () => {
+    const screen = (inner: string, style: string) =>
+      frameWith(doc(`<div style="box-sizing:border-box;height:100vh;${style}">${inner}</div>`), {
+        width: 800,
+        height: 900,
+      })
+    const hero = screen(
+      '<h1 style="margin:0;font-size:32px;line-height:40px">Welcome</h1>',
+      'padding:48px;display:flex;align-items:center;justify-content:center',
+    )
+    const framed = screen('<h1>App</h1><p>Content</p>', 'border:1px solid #ccc;overflow:hidden')
+    const tall = screen('<div style="height:55vh"></div>', 'padding:40px')
+    for (const frame of [hero, framed, tall]) {
+      const result = await fit(frame)
+      expect(result.isError).toBeFalsy()
+      expect(frame.height).toBe(900)
+    }
+  }, 60_000)
+
+  it('takes a min-height breakpoint at its own height, not a px under it', async () => {
+    const frame = frameWith(
+      doc('<style>.p{height:520px}@media (min-height:600px){.p{height:600px}}</style><div class="p"></div>'),
+      { height: 800 },
+    )
+    await fit(frame)
+    expect(frame.height).toBe(600)
+  }, 60_000)
+
+  it('keeps a root height set by any rule in a fixed length, and lets go of one that follows the viewport', async () => {
+    const fitted = async (html: string, height = 300) => {
+      const frame = frameWith(html, { height })
+      await fit(frame)
+      return frame.height
+    }
+    const box = '<div style="width:100px;height:100px"></div>'
+    const page = (css: string, html = '') =>
+      `<!doctype html><html${html}><head><style>${css}</style></head><body style="margin:0">${box}</body></html>`
+    expect(await fitted(page('@layer base{body{height:600px}}'))).toBe(600)
+    expect(await fitted(page('body{height:calc(500px + 6.25rem)!important}body{height:100vh}'))).toBe(600)
+    expect(await fitted(page('body{height:600px}@media (max-width:500px){body{height:100vh}}'), 900)).toBe(100)
+    /* body at 100% of a root fixed in px is fixed too: its 50% child keeps its share */
+    expect(
+      await fitted(
+        '<!doctype html><html style="height:600px"><body style="margin:0;height:100%"><div style="height:50%"></div><div style="height:500px"></div></body></html>',
+      ),
+    ).toBe(800)
+  }, 60_000)
+
+  it('hugs at the frame height before resize handlers run, after a height measure', async () => {
+    const frame = frameWith(
+      '<!doctype html><html style="height:100%"><body style="margin:0;height:100%"><div id="box" style="height:200px"></div><div style="position:absolute;top:0;left:0;width:10px;height:300px"></div><script>const sync = () => { document.getElementById("box").style.width = document.body.clientHeight + "px" }; sync(); addEventListener("resize", sync)</script></body></html>',
+      { width: 600, height: 400 },
+    )
+    await fit(frame, { fit_to_content: 'both' })
+    expect([frame.width, frame.height]).toEqual([300, 300])
+  }, 60_000)
+
+  it('counts what shows past a box that clips one axis only', async () => {
+    const frame = frameWith(
+      doc(
+        '<style>.c{position:relative;width:80px;height:40px;overflow-y:clip;overflow-x:visible}.c::after{content:"";position:absolute;left:0;top:0;width:300px;height:20px}</style><div class="c"></div>',
+      ),
+    )
+    await fit(frame, { fit_to_content: 'width' })
+    expect(frame.width).toBe(300)
   }, 60_000)
 
   it('refuses a fit when the design changed while it was measured', async () => {

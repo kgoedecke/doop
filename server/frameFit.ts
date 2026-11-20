@@ -107,9 +107,13 @@ export async function settleHeight(start: number, measure: HeightMeasure): Promi
     const tiny = await measure(1)
     const floor = clamp(tiny.painted)
     if (!(floor > 1 && floor < from && clamp(tiny.flow) >= floor)) return { kind: 'fits', height: from }
+    /* a box held at the viewport's height (border-box with padding, a vh child inside) spills out
+       of it there, where a min-height wrapper grows with its content: that is a screen */
+    const atFloor = await measure(floor)
+    if (atFloor.spills > opening.spills) return { kind: 'fits', height: from }
     /* a floor that holds is the height; one whose content still grows with the viewport (vh parts
        inside the min-height wrapper) is where the search starts */
-    point = await probe(floor)
+    point = { at: floor, content: Math.round(atFloor.painted) }
     if (point.content === floor) return { kind: 'fits', height: floor }
   }
   let previous: Probe | undefined
@@ -123,14 +127,15 @@ export async function settleHeight(start: number, measure: HeightMeasure): Promi
       (reached.content <= next && next - reached.content <= 1) || (next === FIT_HEIGHT_MAX && reached.content > next)
     if (holds) {
       const below = await probe(Math.max(1, next - Math.max(100, Math.round(next / 4))))
-      const slope = (reached.content - below.content) / (reached.at - below.at)
+      const slope = reached.at > below.at ? (reached.content - below.content) / (reached.at - below.at) : 0
       /* content that grows with its frame is no taller in a frame of its own height, so the
          frame takes the height the content measured, not the step's rounded-up guess */
       if (slope > STEEPEST_FIT) return { kind: 'outgrows' }
-      /* a measure that rounds up (content of 600.5 at 601) holds a px lower too, where it fits exactly */
+      /* content that grows with the viewport may measure rounded up (600.5 at 601), and then fits a
+         px lower exactly; content that does not grow is exact already */
       const height = clamp(reached.content)
-      const lower = height > 1 && height < FIT_HEIGHT_MAX ? await probe(height - 1) : undefined
-      return { kind: 'fits', height: lower && lower.content <= lower.at ? lower.at : height }
+      const lower = slope > 0 && height > 1 && height < FIT_HEIGHT_MAX ? await probe(height - 1) : undefined
+      return { kind: 'fits', height: lower && lower.content === lower.at ? lower.at : height }
     }
     previous = point
     point = reached
@@ -138,15 +143,21 @@ export async function settleHeight(start: number, measure: HeightMeasure): Promi
   return { kind: 'outgrows' }
 }
 
+/** How many times a hug is measured again at the width it gave. */
+const HUG_MEASURES = 3
+
 /** The width the content hugs to, never past `from`. Measured again at the hugged width, since
- *  a media query there may lay the content out differently: wider, the wider holds it; narrower
- *  (columns that stack), the narrower holds it when the content keeps to it there too. */
+ *  a media query there may lay the content out wider, and again at that, until it holds. A
+ *  narrower layout there is not taken: content at width:100% shrinks to its text when hugged. */
 async function hugWidth(probe: ContentProbe, from: number, height: number): Promise<number> {
-  const first = designPx(Math.min(await probe.width(from, height), from))
-  if (first >= from) return from
-  const second = designPx(await probe.width(first, height))
-  if (second < first && designPx(await probe.width(second, height)) <= second) return second
-  return Math.min(from, Math.max(first, second))
+  let width = from
+  for (let measures = 0; measures < HUG_MEASURES; measures++) {
+    const hugged = designPx(Math.min(await probe.width(width, height), from))
+    if (measures > 0 && hugged <= width) return width
+    width = hugged
+    if (width >= from) return from
+  }
+  return width
 }
 
 type FitSize = { width: number; height: number }
