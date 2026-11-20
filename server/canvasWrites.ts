@@ -27,9 +27,13 @@ import {
   type InsertInput,
   type InstanceChange,
   type UpdateInput,
+  /* the background queue's frames, and detaching */
+  detachAllInstances,
+  detachInFrame,
 } from './componentActions.ts'
 import { componentReuseNotes } from './reuseNotes.ts'
 import { WriteRefusedError } from './writeRefusal.ts'
+import * as propagation from './propagation.ts'
 import {
   EMBEDDED_MIN_LENGTH,
   heldForms,
@@ -69,12 +73,14 @@ import { optional, runOperation, WorkBudgetError } from './workBudget.ts'
  * settled or closed), design tokens and their themes (renames included, with the frames they
  * rewrite), component definitions (made, changed, deleted, brought back), instances (placed,
  * changed), imports and ingest
- * (`runImportWrite`, `landImportFrame`, below), and the element ids comments are anchored by
- * (a new comment's, a moved one's and the boot backfill's), and what a canvas takes from its
+ * (`runImportWrite`, `landImportFrame`, below), the element ids comments are anchored by
+ * (a new comment's, a moved one's and the boot backfill's), what a canvas takes from its
  * workspace library or another canvas (a component imported, one or every waiting update
  * pulled, a library's publication pulled into each canvas using it, and the tokens an adopted
- * component brings). Propagation still calls its actions directly; it moves here next.
- * Publishing a library writes the library's publication, not a canvas, and stays outside.
+ * component brings), and the background queue: each frame's turn of propagation and detaching
+ * (`propagate-frame`, `detach-frame`, routed as this module loads, at the end of the file), and
+ * detaching every instance (`detach-instances`). Publishing a library writes the library's
+ * publication, not a canvas, and stays outside.
  *
  * A command an agent sends carries the surface it came from (`inline`), and the host checks
  * the HTML it adds for inline data against the frame as the host holds it, by that surface's
@@ -294,7 +300,44 @@ export type ChangeInstancesCommand = {
   view?: boolean
 }
 
+/* ---- the background queue's frames, and detaching (server/propagation.ts) ---- */
+
+/** One frame's turn in the propagation queue (actions.propagateIntoFrame): the frame rendered
+ *  again from the components that changed, or rewritten where what it stores changed too. A
+ *  frame mid-stream, out of memory or not using them is left as it is. Answers the queue's
+ *  `FrameOutcome`, read in the write's own step. */
+export type PropagateFrameCommand = {
+  type: 'propagate-frame'
+  frameId: string
+  componentIds: string[]
+  actor: Actor
+}
+
+/** One frame's turn in the detach queue (componentActions.detachInFrame): every instance of
+ *  these components in it becomes plain markup that keeps its look; a frame mid-stream is
+ *  deferred until its stream closes. */
+export type DetachFrameCommand = {
+  type: 'detach-frame'
+  frameId: string
+  componentIds: string[]
+  actor: Actor
+}
+
+/** Every instance of a component cut loose, in the background (componentActions.detachAllInstances):
+ *  queued with the commit, a frame per turn. Answers what was queued and the ids of the frames
+ *  it will rewrite; with `frames` (the agent tools, which show them), those frames too, read in
+ *  the write's own step. REST does not ask. */
+export type DetachInstancesCommand = {
+  type: 'detach-instances'
+  component: string
+  actor: Actor
+  frames?: boolean
+}
+
 export type CanvasWrite =
+  | PropagateFrameCommand
+  | DetachFrameCommand
+  | DetachInstancesCommand
   | InsertInstanceCommand
   | ChangeInstancesCommand
   | LibraryWrite
@@ -543,6 +586,15 @@ const local = {
     /* the change is in: reading the instances back is a courtesy the budget may not cover (and
        undefined, so left out of an answer, unless asked for) */
     return { ...changed, instances: command.view ? optional(() => instancesIn(changed.frame)) : undefined }
+  },
+  'propagate-frame': (canvasId, command) =>
+    actions.propagateIntoFrame(canvasId, command.frameId, command.componentIds, command.actor),
+  'detach-frame': (canvasId, command) => detachInFrame(canvasId, command.frameId, command.componentIds, command.actor),
+  'detach-instances': (canvasId, command) => {
+    const queued = detachAllInstances(canvasId, command.component, command.actor)
+    if (!command.frames) return { ...queued, touched: undefined }
+    const ids = new Set(queued.frameIds)
+    return { ...queued, touched: (store.getCanvas(canvasId)?.frames ?? []).filter((frame) => ids.has(frame.id)) }
   },
   'create-components': (canvasId, command) => createComponentsLocally(canvasId, command),
   'update-component': (canvasId, command) => {
@@ -941,3 +993,14 @@ export function wireCanvasWrites() {
   actions.settleIdleStreamsWith((now) => void settleIdleStreams(now))
   actions.carryAdoptedTokensWith(carryAdoptedTokens)
 }
+
+/* The queue's frames go through the entry as this module loads, so every caller of the queue
+   (a changed main, a detach) has its frame writes routed wherever the server runs, not only
+   once `wireCanvasWrites` is called. Each turn is its own operation (propagation.visit), so a
+   rejected command undoes that frame alone; the queue says so and goes on. */
+propagation.routeFrameTask('propagate', (canvasId, frameId, componentIds, actor) =>
+  runCanvasWrite(canvasId, { type: 'propagate-frame', frameId, componentIds, actor }),
+)
+propagation.routeFrameTask('detach', (canvasId, frameId, componentIds, actor) =>
+  runCanvasWrite(canvasId, { type: 'detach-frame', frameId, componentIds, actor }),
+)

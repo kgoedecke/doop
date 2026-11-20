@@ -1121,6 +1121,8 @@ export interface DetachQueued {
   queued: boolean
   instances: number
   frames: number
+  /** the frames it queued: those using the component */
+  frameIds: string[]
 }
 
 /**
@@ -1228,12 +1230,17 @@ export function detachAllInstances(canvasId: string, ref: string, actor: Actor):
   const usage = usageOf(canvas, def.id)
   /* queued with the commit of the operation that asked */
   if (usage.instances) afterCommit(() => propagation.enqueue('detach', canvasId, [def.id], actor))
-  return { queued: usage.instances > 0, instances: usage.instances, frames: usage.frames.length }
+  return {
+    queued: usage.instances > 0,
+    instances: usage.instances,
+    frames: usage.frames.length,
+    frameIds: usage.instances ? usage.frames.map((frame) => frame.id) : [],
+  }
 }
 
 /** One frame's turn in the detach queue: an ordinary write, so history is filed, sign-off on
  *  an approved frame goes back to review and the room sees it. */
-function detachInFrame(
+export function detachInFrame(
   canvasId: string,
   frameId: string,
   componentIds: string[],

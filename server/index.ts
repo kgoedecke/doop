@@ -2,7 +2,6 @@ import { env } from './env.ts'
 import {
   componentDetail,
   ComponentError,
-  detachAllInstances,
   findComponent,
   importableEntry,
   libraryEntry,
@@ -3242,11 +3241,21 @@ app.post(
 )
 
 /* every instance of a component turned into plain markup, in the background queue */
-app.post('/api/canvases/:id/components/:componentId/detach-instances', (req, res) => {
-  const canvas = requireCanvas(req, res, req.params.id, 'edit')
-  if (!canvas) return
-  componentRoute(res, () => detachAllInstances(canvas.id, req.params.componentId, userActor(req)))
-})
+app.post(
+  '/api/canvases/:id/components/:componentId/detach-instances',
+  writeRoute<ComponentParams>(async (req, res) => {
+    const canvas = requireCanvas(req, res, req.params.id, 'edit')
+    if (!canvas) return
+    await componentRoute(res, async () => {
+      const { queued, instances, frames } = await runCanvasWrite(canvas.id, {
+        type: 'detach-instances',
+        component: req.params.componentId,
+        actor: userActor(req),
+      })
+      return { queued, instances, frames }
+    })
+  }),
+)
 
 app.post(
   '/api/canvases/:id/components/:componentId/restore',

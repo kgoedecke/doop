@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, expectTypeOf, it, vi } from 'vitest'
+import type { FrameRunner } from '../server/propagation.ts'
 import type { Actor, Frame, ServerMessage } from '../shared/types'
 
 /* persistence is not under test: what the entry does with an operation is */
@@ -36,14 +37,12 @@ const {
 } = await import('../server/canvasWrites.ts')
 const { newInlineData } = await import('../server/inlineData.ts')
 const { blankComponent } = await import('../server/components.ts')
-const { ComponentError, createComponentFromHtml, deleteComponent, updateComponent } =
-  await import('../server/componentActions.ts')
-const { runComponentTool } = await import('../server/componentTools.ts')
-const { stubEnv, unstubAllEnvs } = await import('./envStub.ts')
-const { COMPONENT_ATTR, renderRevOf } = await import('../shared/components.ts')
+const { ComponentError, createComponentFromHtml, updateComponent } = await import('../server/componentActions.ts')
+const { COMPONENT_ATTR } = await import('../shared/components.ts')
 const { openTransaction, transaction } = await import('../server/journal.ts')
-const { parse, runOperation, usage, WorkBudgetError } = await import('../server/workBudget.ts')
+const { runOperation, usage, WorkBudgetError } = await import('../server/workBudget.ts')
 const { withArgsCanvases } = await import('../server/toolLoads.ts')
+const propagation = await import('../server/propagation.ts')
 const { execTool } = await import('../server/resident.ts')
 const { DEFAULT_ROLE_ID, roleName } = await import('../shared/agents.ts')
 
@@ -1132,6 +1131,197 @@ describe('instances through the canvas write entry', () => {
     expect(result.is_error).toBe(true)
     expect(String(result.content)).toContain('storage refused')
     expect(store.getFrame(page.id)!.html).toBe(html)
+    expect(sent).toEqual([])
+  })
+})
+
+describe('the background queue through the canvas write entry', () => {
+  /** A component and `count` pages each holding one instance of it, the queue drained. */
+  async function chips(count: number) {
+    await runCanvasWrite(canvasId, {
+      type: 'create-component',
+      from: { kind: 'html', name: 'Chip', html: '<span class="chip">Chip</span>' },
+      actor: user,
+    })
+    const pages = Array.from({ length: count }, (_, n) =>
+      actions.createFrame(canvasId, { name: `Page ${n}`, html: doc(`<p>page ${n}</p>`) }, user)!,
+    )
+    for (const page of pages)
+      await runCanvasWrite(canvasId, {
+        type: 'insert-instance',
+        input: { frameId: page.id, component: 'Chip' },
+        actor: user,
+      })
+    await propagation.whenIdle()
+    sent = []
+    return pages
+  }
+  /** The first frame write the queue makes throws `error`, before anything is written. */
+  function refuseFirstQueuedWrite(error: Error) {
+    let thrown = false
+    const fail = () => {
+      if (thrown) return
+      thrown = true
+      throw error
+    }
+    const update = store.updateFrame.bind(store)
+    const rerender = store.rerenderFrame.bind(store)
+    const spies = [
+      vi.spyOn(store, 'updateFrame').mockImplementation((...args: Parameters<typeof store.updateFrame>) => {
+        fail()
+        return update(...args)
+      }),
+      vi.spyOn(store, 'rerenderFrame').mockImplementation((...args: Parameters<typeof store.rerenderFrame>) => {
+        fail()
+        return rerender(...args)
+      }),
+    ]
+    return () => spies.forEach((spy) => spy.mockRestore())
+  }
+  const updatedFrames = () => sent.flatMap((message) => (message.type === 'frame:updated' ? [message.frame.id] : []))
+  const holdsChip = (frameId: string, chip: string) => store.getFrame(frameId)!.html.includes(chip)
+
+  for (const [kind, error] of [
+    ['a spent work budget', new WorkBudgetError('queue propagate', 'canvas', 'bytes')],
+    ['a refused write', new Error('storage refused')],
+  ] as const) {
+    it(`renders every frame again but the one whose turn hits ${kind}, which is undone and tells nobody`, async () => {
+      const pages = await chips(3)
+      await runCanvasWrite(canvasId, {
+        type: 'update-component',
+        component: 'Chip',
+        input: { find: 'class="chip"', replace: 'class="chip big"' },
+        actor: user,
+      })
+      const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
+      const restore = refuseFirstQueuedWrite(error)
+      await propagation.whenIdle()
+      restore()
+      const fresh = pages.filter((page) => holdsChip(page.id, 'chip big'))
+      const stale = pages.filter((page) => !holdsChip(page.id, 'chip big'))
+      expect(fresh).toHaveLength(2)
+      expect(stale).toHaveLength(1)
+      /* the room hears of the frames brought up, and nothing of the one undone */
+      expect(updatedFrames()).not.toContain(stale[0]!.id)
+      for (const page of fresh) expect(updatedFrames()).toContain(page.id)
+      /* said and skipped, as the queue always did, and never rejected */
+      expect(logged.mock.calls.some(([line]) => String(line).includes(`frame ${stale[0]!.id}`))).toBe(true)
+      logged.mockRestore()
+    })
+  }
+
+  it('detaches every frame but the one whose write is refused, which keeps its instance', async () => {
+    const pages = await chips(3)
+    const detach = await runCanvasWrite(canvasId, {
+      type: 'detach-instances',
+      component: 'Chip',
+      actor: user,
+      frames: true,
+    })
+    /* what was queued, and the frames it will rewrite, read in the write's own step */
+    expect(detach).toMatchObject({ queued: true, instances: 3, frames: 3 })
+    const ids = pages.map((page) => page.id).sort()
+    expect([...detach.frameIds].sort()).toEqual(ids)
+    expect(detach.touched!.map((frame) => frame.id).sort()).toEqual(ids)
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const restore = refuseFirstQueuedWrite(new Error('storage refused'))
+    await propagation.whenIdle()
+    restore()
+    logged.mockRestore()
+    const kept = pages.filter((page) => holdsChip(page.id, 'data-doop-instance='))
+    expect(kept).toHaveLength(1)
+    expect(updatedFrames()).not.toContain(kept[0]!.id)
+    expect(updatedFrames()).toHaveLength(2)
+    const line = actions.getActivity(canvasId).find((item) => item.message.startsWith('detached'))
+    expect(line?.message).toContain('detached 2 instances')
+  })
+
+  it('reads the frames a detach rewrites only when asked', async () => {
+    await chips(2)
+    const detach = await runCanvasWrite(canvasId, { type: 'detach-instances', component: 'Chip', actor: user })
+    expect(detach.frameIds).toHaveLength(2)
+    expect(detach.touched).toBeUndefined()
+    await propagation.whenIdle()
+  })
+
+  it("lets other canvases go on while one canvas's turn goes unanswered, and says that turn failed", async () => {
+    const hungCanvas = canvasId
+    const hungPages = await chips(2)
+    canvasId = store.createCanvas('other', 'ada').id
+    const pages = await chips(2)
+    const timeout = propagation.setTurnTimeout(200)
+    const routed: FrameRunner | undefined = propagation.routeFrameTask('propagate', (...turn) =>
+      turn[0] === hungCanvas ? new Promise(() => {}) : routed!(...turn),
+    )
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      for (const id of [hungCanvas, canvasId])
+        await runCanvasWrite(id, {
+          type: 'update-component',
+          component: 'Chip',
+          input: { find: 'class="chip"', replace: 'class="chip big"' },
+          actor: user,
+        })
+      await propagation.whenCanvasIdle(canvasId)
+      for (const page of pages) expect(holdsChip(page.id, 'chip big')).toBe(true)
+      for (const page of hungPages) expect(holdsChip(page.id, 'chip big')).toBe(false)
+      /* each of the hung canvas's turns is said as failed when it times out, and the canvas goes on */
+      await propagation.whenIdle()
+      const timedOut = logged.mock.calls.filter(([, , error]) => String(error).includes('no answer within 0.2 s'))
+      expect(timedOut).toHaveLength(2)
+    } finally {
+      propagation.routeFrameTask('propagate', routed!)
+      propagation.setTurnTimeout(timeout)
+      logged.mockRestore()
+    }
+  })
+
+  it('keeps nothing of a turn whose canvas was deleted while it was in flight', async () => {
+    await chips(2)
+    const doomed = canvasId
+    let turns = 0
+    const routed: FrameRunner | undefined = propagation.routeFrameTask('propagate', async (...turn) => {
+      const outcome = await routed!(...turn)
+      /* the last frame's turn: the one whose answer would close the job and report it */
+      turns += 1
+      if (turns === 2) transaction(() => store.deleteCanvas(doomed))
+      return outcome
+    })
+    let reported: Awaited<ReturnType<typeof propagation.whenCanvasIdle>> | undefined
+    try {
+      await runCanvasWrite(doomed, {
+        type: 'update-component',
+        component: 'Chip',
+        input: { find: 'class="chip"', replace: 'class="chip big"' },
+        actor: user,
+      })
+      sent = []
+      reported = await propagation.whenCanvasIdle(doomed)
+      await propagation.whenIdle()
+    } finally {
+      propagation.routeFrameTask('propagate', routed!)
+    }
+    expect(turns).toBe(2)
+    expect(reported.propagate).toBeUndefined()
+    expect(store.getCanvas(doomed)).toBeUndefined()
+    expect(propagation.pendingFrames(doomed)).toBe(0)
+    /* no "updated … in N frames" line, and nothing else said, for a canvas that is gone */
+    expect(sent.filter((message) => message.type === 'activity')).toEqual([])
+  })
+
+  it('queues nothing for a detach whose request is undone', async () => {
+    const pages = await chips(2)
+    const request = openTransaction()
+    await expect(
+      request.run(async () => {
+        await runCanvasWrite(canvasId, { type: 'detach-instances', component: 'Chip', actor: user })
+        throw new Error('a later step failed')
+      }),
+    ).rejects.toThrow('a later step failed')
+    request.rollback()
+    await propagation.whenIdle()
+    expect(propagation.pendingFrames(canvasId)).toBe(0)
+    for (const page of pages) expect(holdsChip(page.id, 'data-doop-instance=')).toBe(true)
     expect(sent).toEqual([])
   })
 })
