@@ -2811,11 +2811,11 @@ app.get('/api/canvases/:id/components/:componentId/preview', (req, res) => {
       .find((library) => library.canvasId === libraryId)
       ?.components.find((entry) => entry.id === req.params.componentId)
     if (!snapshot) return res.status(404).json({ error: 'component not found' })
-    return res.json(previewDocument(libraryId, snapshotAsDef(snapshot), 'default'))
+    return res.json(previewDocument(libraryId, snapshotAsDef(snapshot)))
   }
   const def = findComponent(canvas.id, req.params.componentId)
   if (!def) return res.status(404).json({ error: 'component not found' })
-  res.json(previewDocument(canvas.id, def, 'default'))
+  res.json(previewDocument(canvas.id, def))
 })
 
 app.post('/api/frames/:id/instances', (req, res) => {
