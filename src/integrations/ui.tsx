@@ -17,7 +17,8 @@ export function IntegrationCard({
   tile: ReactNode
   name: string
   detail: string
-  connected: boolean
+  /** null: nothing to connect, so no status line */
+  connected: boolean | null
   footnote: string
   actions: ReactNode
   children?: ReactNode
@@ -31,9 +32,11 @@ export function IntegrationCard({
           <div className="text-copy font-medium">{name}</div>
           <div className="mt-0.5 truncate text-label text-ink-soft">{detail}</div>
         </div>
-        <StatusLabel tone={connected ? 'done' : 'muted'} className="ml-auto">
-          {connected ? t('automations.connected') : t('automations.notConnected')}
-        </StatusLabel>
+        {connected !== null && (
+          <StatusLabel tone={connected ? 'done' : 'muted'} className="ml-auto">
+            {connected ? t('automations.connected') : t('automations.notConnected')}
+          </StatusLabel>
+        )}
       </div>
       {children}
       <div className="mt-auto flex items-center gap-2">

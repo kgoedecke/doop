@@ -556,6 +556,80 @@ export function setAgentStatus(canvasId: string, actor: Actor, status: string) {
 }
 
 /* ------------------------------------------------------------------ */
+/* Progress tasks: a server-side job (an import) shown the way an      */
+/* agent's work is — a named worker in the Agents panel, one task, a   */
+/* status that changes in place and a bar that fills.                  */
+/* ------------------------------------------------------------------ */
+
+/** Open a task with `total` countable steps for `actor`. Unlike
+ *  setAgentStatus, later updates rewrite this one task instead of closing it
+ *  and opening another — forty steps are one job, not forty tasks. */
+export function startProgressTask(canvasId: string, actor: Actor, status: string, total: number): AgentTask {
+  const task: AgentTask = {
+    id: nanoid(8),
+    agentName: actor.name,
+    ...(actor.agentKey ? { agentKey: actor.agentKey } : {}),
+    owner: actor.owner,
+    color: actor.color,
+    status,
+    startedAt: Date.now(),
+    progress: { done: 0, total: Math.max(1, total) },
+  }
+  prepend(taskLog, canvasId, task)
+  stored.saveTask(canvasId, task)
+  broadcast(canvasId, { type: 'task', task })
+  agentTouch(canvasId, actor, undefined, status)
+  logActivity(canvasId, actor, `started: ${status}`)
+  return task
+}
+
+/** Move a progress task along: new wording, more steps done, or both. Also
+ *  the job's heartbeat — presence would otherwise expire mid-import and fail
+ *  the task as "disconnected". */
+export function advanceProgressTask(
+  canvasId: string,
+  taskId: string,
+  patch: { status?: string; done?: number; total?: number; frameId?: string },
+) {
+  const task = (taskLog.get(canvasId) ?? []).find((t) => t.id === taskId)
+  if (!task || task.endedAt || !task.progress) return
+  edit(task)
+  if (patch.status) task.status = patch.status
+  const total = Math.max(1, patch.total ?? task.progress.total)
+  /* A job learns its size as it goes, so the total can grow. The bar must not
+     go backwards when it does: hold the fraction already shown, and let the
+     newly discovered work slow the bar instead of rewinding it. */
+  const shown = task.progress.done / task.progress.total
+  const done = Math.max(patch.done ?? 0, Math.ceil(shown * total - 1e-9))
+  task.progress = { done: Math.min(total, done), total }
+  if (patch.frameId) task.frameIds = [...(task.frameIds ?? []), patch.frameId].slice(-TASK_FRAMES_CAP)
+  broadcast(canvasId, { type: 'task', task })
+  agentTouch(canvasId, progressAgent(task), patch.frameId, task.status)
+}
+
+/** The worker a progress task belongs to, as its presence knows it. */
+function progressAgent(task: AgentTask) {
+  return { name: task.agentName, owner: task.owner, ...(task.agentKey ? { agentKey: task.agentKey } : {}) }
+}
+
+/** Close a progress task: done, or failed with the reason as its last word. */
+export function finishProgressTask(canvasId: string, taskId: string, outcome: { status: string; failed?: boolean }) {
+  const task = (taskLog.get(canvasId) ?? []).find((t) => t.id === taskId)
+  if (!task || task.endedAt) return
+  const now = Date.now()
+  edit(task).status = outcome.status
+  if (outcome.failed) {
+    task.failedAt = now
+    task.failureReason = outcome.status
+  } else if (task.progress) task.progress = { ...task.progress, done: task.progress.total }
+  task.endedAt = now
+  stored.saveTask(canvasId, task)
+  broadcast(canvasId, { type: 'task', task })
+  agentTouch(canvasId, progressAgent(task), undefined, null)
+  logActivity(canvasId, resolveActor({ ...progressAgent(task), kind: 'agent' }), outcome.status)
+}
+
+/* ------------------------------------------------------------------ */
 /* Task feedback: humans reply to a task in the UI; the text is        */
 /* delivered to the agent inside its NEXT MCP tool result (MCP is      */
 /* pull-based — the result-nudge layer is our channel into the agent). */

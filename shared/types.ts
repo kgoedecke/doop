@@ -474,6 +474,9 @@ export interface AgentTask {
   /** board cards: the connection and model the composer picked for this
    *  card; absent runs on the requester's Settings default */
   runner?: RunnerPick
+  /** a job with countable steps (an import): how far along it is. Live only
+   *  — not persisted; a task whose server died mid-job is closed on expiry */
+  progress?: { done: number; total: number }
 }
 
 export interface CardScope {

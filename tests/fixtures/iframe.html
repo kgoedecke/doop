@@ -1,0 +1,138 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Storybook preview (fixture)</title>
+    <!--
+      A Storybook preview as tests/storybookCaptureBrowser.test.ts needs one: the story store's
+      loadStory with argTypes, the addons channel (updateStoryArgs, resetStoryArgs,
+      updateGlobals, storyRendered), a decorator wrapping the story, a theme global, Tailwind-like
+      escaped classes and rules inserted through the CSSOM the way CSS-in-JS does. Named
+      iframe.html because that is where a Storybook's stories live: storyUrl() points here.
+    -->
+    <style>
+      :root {
+        --primary: #0177d3;
+        --radius: 8px;
+      }
+      html.dark {
+        --primary: #7cc4ff;
+      }
+      body {
+        margin: 0;
+        font-family: Arial, sans-serif;
+        color: #111;
+      }
+      #storybook-root {
+        padding: 16px;
+      }
+      .theme-provider {
+        display: block;
+      }
+      .btn {
+        display: inline-flex;
+        border-radius: var(--radius);
+        padding: 8px 14px;
+        border: 0;
+      }
+      .btn-solid {
+        background: var(--primary);
+        color: #fff;
+      }
+      .btn-ghost {
+        background: transparent;
+        color: var(--primary);
+      }
+      .h-9 {
+        height: 36px;
+      }
+      .h-7 {
+        height: 28px;
+      }
+      @media (hover: hover) {
+        .btn:hover {
+          filter: brightness(1.1);
+        }
+      }
+      @media (hover: none) {
+        .btn {
+          padding: 20px;
+        }
+      }
+      .unused-elsewhere {
+        color: red;
+      }
+    </style>
+    <style id="css-in-js"></style>
+  </head>
+  <body>
+    <div id="storybook-root"></div>
+    <script>
+      /* CSS-in-JS: rules through insertRule, so the <style> serializes empty */
+      document.getElementById('css-in-js').sheet.insertRule('.label { letter-spacing: 0.5px; }')
+      document.getElementById('css-in-js').sheet.insertRule(String.raw`.\[\&_svg\]\:w-4 svg { width: 16px; }`)
+
+      const storyId = new URL(location.href).searchParams.get('id')
+      const initialArgs = { variant: 'solid', size: 'md', disabled: false, label: 'Save changes' }
+      let args = { ...initialArgs }
+      const listeners = new Map()
+      const channel = {
+        on(event, fn) {
+          listeners.set(event, [...(listeners.get(event) ?? []), fn])
+        },
+        off(event, fn) {
+          listeners.set(
+            event,
+            (listeners.get(event) ?? []).filter((other) => other !== fn),
+          )
+        },
+        emit(event, payload) {
+          if (event === 'updateStoryArgs') args = { ...args, ...payload.updatedArgs }
+          if (event === 'resetStoryArgs') args = { ...initialArgs }
+          if (event === 'updateGlobals')
+            document.documentElement.classList.toggle('dark', payload.globals.theme === 'dark')
+          if (['updateStoryArgs', 'resetStoryArgs', 'updateGlobals'].includes(event))
+            setTimeout(() => {
+              render()
+              for (const fn of listeners.get('storyRendered') ?? []) fn(storyId)
+            }, 10)
+        },
+      }
+      function render() {
+        const size = args.size === 'sm' ? 'h-7' : 'h-9'
+        /* a decorator: the theme provider every story is wrapped in */
+        document.getElementById('storybook-root').innerHTML =
+          `<div class="theme-provider"><button class="btn btn-${args.variant} ${size} [&_svg]:w-4" id="radix-:r1:" aria-describedby="radix-:r2:" ${args.disabled ? 'disabled' : ''}>` +
+          `<svg viewBox="0 0 16 16"></svg><span class="label">${args.label}</span></button></div>`
+      }
+      window.__STORYBOOK_ADDONS_CHANNEL__ = channel
+      window.__STORYBOOK_PREVIEW__ = {
+        storyStoreValue: {
+          async loadStory() {
+            return {
+              initialArgs,
+              parameters: { docs: { description: { component: 'The button for every action.' } } },
+              argTypes: {
+                variant: {
+                  type: { name: 'enum', value: ['solid', 'ghost'] },
+                  options: ['solid', 'ghost'],
+                  control: { type: 'select' },
+                },
+                size: {
+                  type: { name: 'enum', value: ['md', 'sm'] },
+                  options: ['md', 'sm'],
+                  control: { type: 'radio' },
+                },
+                disabled: { type: { name: 'boolean' }, control: { type: 'boolean' } },
+                label: { type: { name: 'string' }, control: { type: 'text' }, description: 'What it says' },
+                onClick: { action: 'clicked', table: { disable: true } },
+              },
+            }
+          },
+          projectAnnotations: { globalTypes: { theme: { toolbar: { items: ['light', 'dark'] } } } },
+        },
+      }
+      render()
+    </script>
+  </body>
+</html>

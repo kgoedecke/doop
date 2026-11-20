@@ -14,6 +14,7 @@ import {
 import { open, seal } from '../secretBox.ts'
 import type { CanvasGuide, CanvasPageInfo, FrameApproval } from '../../shared/types.ts'
 import type { AutomationRunState, AutomationTrigger, Schedule, Step } from '../../shared/automations.ts'
+import type { StorybookRunResult, StorybookSourceComponent } from '../../shared/storybookSource.ts'
 import type {
   ComponentCode,
   ComponentDef,
@@ -252,6 +253,28 @@ export const syncKeys = pgTable(
     lastUsedAt: bigint('last_used_at', { mode: 'number' }),
   },
   (t) => [index('sync_keys_canvas_idx').on(t.canvasId), index('sync_keys_secret_idx').on(t.secret)],
+)
+
+/** A Storybook a canvas imported components from, kept so it can be synced again
+ *  (.context/specs/storybook-import.md, "Sync"). One per canvas and Storybook URL; cold path,
+ *  read when someone imports or syncs. */
+export const storybookSources = pgTable(
+  'storybook_sources',
+  {
+    id: text('id').primaryKey(),
+    canvasId: text('canvas_id').notNull(),
+    url: text('url').notNull(),
+    /** the components picked, and what each became */
+    components: jsonb('components').$type<StorybookSourceComponent[]>().notNull(),
+    /** tokens this source made, which a sync may update (any other token of the name is left alone) */
+    tokens: jsonb('tokens').$type<string[]>().notNull(),
+    /** the last run's outcome per component, for the import section */
+    lastResult: jsonb('last_result').$type<StorybookRunResult | null>(),
+    createdBy: text('created_by').notNull(),
+    createdAt: bigint('created_at', { mode: 'number' }).notNull(),
+    syncedAt: bigint('synced_at', { mode: 'number' }),
+  },
+  (t) => [uniqueIndex('storybook_sources_canvas_url_idx').on(t.canvasId, t.url)],
 )
 
 /** Link hotspots a synced page declares: where each same-app link sits in the

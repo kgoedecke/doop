@@ -52,6 +52,10 @@ export const canvas: Catalog['canvas'] = {
   linkCopied: 'Link do canvas copiado',
   itemsImported: { one: '{count} item importado', other: '{count} itens importados' },
   importedWithFailures: '{imported} · {failed} com falha',
+  framesImporting: {
+    one: 'Importando {count} frame — Doop está nisso',
+    other: 'Importando {count} frames — Doop está nisso',
+  },
   cardsQueued: {
     one: '{count} card na fila — o Doop está cuidando disso',
     other: '{count} cards na fila — o Doop está cuidando disso',

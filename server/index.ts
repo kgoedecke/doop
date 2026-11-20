@@ -3741,6 +3741,18 @@ app.post('/api/canvases/:id/import/discover', async (req, res) => {
   }
 })
 
+/* Extension-owned canvas routes (the Storybook import and future integrations):
+   each extension mounts under /api/canvases/:id/<extension id> with the
+   core's own canvas gate and import rate slot. */
+for (const extension of extensions) {
+  if (extension.canvasRouter) {
+    app.use(
+      `/api/canvases/:id/${extension.id}`,
+      extension.canvasRouter({ requireCanvas, takeImportSlot, undoRequest: undoRequestWrites }),
+    )
+  }
+}
+
 /* Imports write through the canvas write entry. Whatever fails (a capture, a file that cannot
    be read, a refused write) goes to `importRefusal`, which undoes the request first */
 app.post<{ id: string }>(

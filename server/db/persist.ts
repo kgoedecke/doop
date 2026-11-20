@@ -1051,6 +1051,7 @@ export function deleteCanvas(canvasId: string) {
       for (const key of revisionsFiled.keys()) if (key.startsWith(prefix)) revisionsFiled.delete(key)
     }),
   )
+  swallow(db.delete(t.storybookSources).where(eq(t.storybookSources.canvasId, canvasId)))
   swallow(db.delete(t.libraryComponents).where(eq(t.libraryComponents.canvasId, canvasId)))
   swallow(db.delete(t.guidelineVersions).where(eq(t.guidelineVersions.canvasId, canvasId)))
   swallow(
