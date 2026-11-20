@@ -682,18 +682,20 @@ export interface ContentProbe {
 /** How much taller the viewport is made to tell a root height that follows it from a fixed one. */
 const FOLLOW_PROBE_PX = 200
 
-/** Loads the frame once and hands `settle` a probe on it. Before the first height measure, the
- *  root and body are read at two viewport heights: one whose height follows the viewport (100vh,
- *  100%, a script sizing it) is let go of while measuring the height, one that keeps its height
- *  (px, rem, calc of those, whatever rule set it) is the design's own and stays. A width is hugged
- *  with nothing let go of, as the canvas lays the design out. */
+/** Loads the frame once and hands `settle` a probe on it. Before the first height measure at a
+ *  width, the root and body are read at two viewport heights: one whose height follows the
+ *  viewport (100vh, 100%, a script sizing it) is let go of while measuring the height, one that
+ *  keeps its height (px, rem, calc of those, whatever rule set it) is the design's own and stays.
+ *  They are read again whenever the width changes, since a width media query can fix a height
+ *  that followed the viewport. A width is hugged with nothing let go of, as the canvas lays the
+ *  design out. */
 export function measureContent<T>(frame: Frame, settle: (probe: ContentProbe) => Promise<T>): Promise<T> {
   return renderer.withPage('measuring the frame', RENDER_TIMEOUT_MS, async (page) => {
     await loadFrameInto(page, frame)
     await installNameShim(page)
-    let released: string[] | undefined
+    let released: { width: number; rule: string } | undefined
     const layOut = async (width: number, height: number, release: boolean) => {
-      await page.evaluate(holdRelease, release)
+      await page.evaluate(holdRelease, release, released?.rule ?? '')
       await page.setViewport(frameViewport(width, height))
       await page.evaluate(settleDocument)
     }
@@ -705,9 +707,9 @@ export function measureContent<T>(frame: Frame, settle: (probe: ContentProbe) =>
       return (['html', 'body'] as const).filter((name) => before[name] !== after[name])
     }
     const measure = async (width: number, height: number, hug: boolean) => {
-      if (!hug && !released) released = await followers(width, height)
+      if (!hug && released?.width !== width) released = { width, rule: releaseRule(await followers(width, height)) }
       await layOut(width, height, !hug)
-      return page.evaluate(contentExtent, hug, released ?? [])
+      return page.evaluate(contentExtent, hug, released?.rule ?? '')
     }
     return settle({
       height: (width, height) => measure(width, height, false),
@@ -716,11 +718,19 @@ export function measureContent<T>(frame: Frame, settle: (probe: ContentProbe) =>
   })
 }
 
-/** Runs in the frame's page: switches the height release (`contentExtent` installs it) on or off,
- *  ahead of a viewport change, so the frame's resize handlers run against the layout measured. */
-function holdRelease(on: boolean): void {
+/** Runs in the frame's page: switches the height release (`contentExtent` installs it) on or off
+ *  and sets it to `rule`, ahead of a viewport change, so the frame's resize handlers run against
+ *  the layout measured. */
+function holdRelease(on: boolean, rule: string): void {
   const release = document.querySelector<HTMLStyleElement>('style[data-doop-fit]')
-  if (release?.sheet) release.sheet.disabled = !on
+  if (!release) return
+  release.textContent = rule
+  if (release.sheet) release.sheet.disabled = !on
+}
+
+/** The rule letting go of the heights of the root and body in `released`. */
+function releaseRule(released: string[]): string {
+  return released.length ? `${released.join(',')}{height:auto!important;max-height:none!important}` : ''
 }
 
 /** Runs in the frame's page: the root's and body's heights. */
@@ -747,9 +757,9 @@ async function settleDocument(): Promise<void> {
   }
 }
 
-/** Runs in the frame's page. Measuring the height, the root and body in `released` (those whose
- *  height follows the viewport: a body at 100vh or 100% would hold the frame at its current
- *  height) are let go of their height; a min-height stays, since a px one is the design's own
+/** Runs in the frame's page. Measuring the height, `rule` lets the root and body whose height
+ *  follows the viewport go of it (a body at 100vh or 100% would hold the frame at its current
+ *  height); a min-height stays, since a px one is the design's own
  *  floor and a vh one is found by settleHeight's 1px probe. With `hug`, the root shrinks to fit
  *  its content for the one measure (`width: fit-content`, never wider than the viewport, held at
  *  the left in a right-to-left page), as a Figma frame hugs. Either way the extent is the furthest
@@ -758,7 +768,7 @@ async function settleDocument(): Promise<void> {
  *  each cut on the axis a box clips. Left out: what is invisible (a closed menu at
  *  visibility:hidden or opacity:0) and fixed elements, which sit on the viewport rather than the
  *  content. */
-function contentExtent(hug: boolean, released: string[]): ContentExtent {
+function contentExtent(hug: boolean, rule: string): ContentExtent {
   const MAX_ELEMENTS = 20_000
   const hugged = hug ? document.createElement('style') : null
   if (hugged) {
@@ -786,9 +796,7 @@ function contentExtent(hug: boolean, released: string[]): ContentExtent {
     const shell = fillsViewport && Array.from(document.body.querySelectorAll('*')).slice(0, MAX_ELEMENTS).some(scrolls)
     release = document.createElement('style')
     release.setAttribute('data-doop-fit', shell ? 'shell' : '')
-    release.textContent = released.length
-      ? `${released.join(',')}{height:auto!important;max-height:none!important}`
-      : ''
+    release.textContent = rule
     document.head.append(release)
   }
   const shell = release?.getAttribute('data-doop-fit') === 'shell'

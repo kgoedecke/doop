@@ -246,7 +246,7 @@
   would lose its gutters. `"both"` hugs, then fits the height at that width, and hugs again at that height until the two agree (three passes, then refused). Only the measured
   sides are written; a height fit is made at the call's new `width` and a width fit at its new `height`, and the page loads at that size. Each measure waits two animation frames (the frame's own resize,
   ResizeObserver and matchMedia handlers run first), awaits fonts and finishes animations, lets the
-  root and body go of their height when it follows the viewport (judged once, before the first height measure, by reading both at two viewport heights: a height fixed by any rule, in px, rem or calc, stays, as does a `min-height`: one in px is the design's floor, one in vh
+  root and body go of their height when it follows the viewport (judged before the first height measure at each width, by reading both at two viewport heights, so a width media query that fixes the height is seen: a height fixed by any rule, in px, rem or calc, stays, as does a `min-height`: one in px is the design's floor, one in vh
   is found by the 1px probe), then reports `flow` (the root's own box), `painted` (the lowest thing
   painted, and `right` the rightmost: positioned descendants, absolute `::before` / `::after` and text running past its
   element too, each cut on the axis a box clips (`overflow-y:clip` alone cuts only the bottom), leaving out fixed elements and invisible ones at `visibility:hidden` or `opacity:0`), `spills` (boxes in flow running out of their parent's content box) and `shell` (judged as loaded: the page fills its viewport

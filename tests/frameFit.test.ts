@@ -467,6 +467,19 @@ describe.skipIf(!findBrowserPath())('fit_to_content in a browser', () => {
     expect([frame.width, frame.height]).toEqual([280, 100])
   }, 60_000)
 
+  it('reads again which root heights follow the viewport when "both" changes the width', async () => {
+    /* at 120 wide the body is 100vh and let go of; re-hugged at 180 tall the box is 280 wide, where
+       a media query holds the body at 250px and centres the box in it */
+    const frame = frameWith(
+      doc(
+        '<style>body{height:100vh}.box{width:120px;height:180px}@media (min-width:200px){body{height:250px}}@media (max-height:260px){.box{width:280px}}</style><div class="box"></div>',
+        'margin:0;display:flex;flex-direction:column;justify-content:center',
+      ),
+    )
+    await fit(frame, { fit_to_content: 'both' })
+    expect([frame.width, frame.height]).toEqual([280, 250])
+  }, 60_000)
+
   it('refuses "both" when the width and height keep moving each other', async () => {
     const frame = frameWith(doc('<div style="width:calc(100px + 50vh);height:calc(100px + 50vw)"></div>'), {
       width: 600,
