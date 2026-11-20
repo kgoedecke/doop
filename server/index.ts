@@ -106,6 +106,8 @@ import { encryptionConfigured } from './secretBox.ts'
 import * as authSchema from './db/auth-schema.ts'
 import * as persist from './db/persist.ts'
 import { handleMcpRequest } from './mcp.ts'
+import { createImportedWebpageFrame } from './webpageImport.ts'
+import { refundUnlessDone } from './chargedWork.ts'
 import { RendererBusyError } from './renderBrowser.ts'
 import { getAsset, reconcileAssetRefs, beginTicketUpload, endTicketUpload, createAsset } from './assets.ts'
 import * as ingest from './ingest.ts'
@@ -152,6 +154,8 @@ import {
   CanvasMismatchError,
   FRAME_CHANGED,
   FrameVersionConflict,
+  isImportWriteFailure,
+  landImportFrame,
   runCanvasWrite,
   wireCanvasWrites,
   type CanvasWriteResults,
@@ -1047,6 +1051,8 @@ app.options('/ingest/:key', (_req, res) => {
 
 app.post('/ingest/:key', express.json({ limit: '10mb', type: () => true }), (req, res) => {
   ingest.handleIngest(req, res).catch((err) => {
+    /* a refused write undoes the request; a failure after the frame was written leaves it */
+    if (isImportWriteFailure(err)) undoRequestWrites(res)
     console.error('[ingest] failed', err)
     if (!res.headersSent) res.status(500).json({ error: 'sync failed' })
   })
@@ -2932,11 +2938,27 @@ const canvasWriteRefusal: express.ErrorRequestHandler = (error, _req, res, next)
   next(error)
 }
 
+/** Undo what the request has changed so far (nothing once its response has started). */
+function undoRequestWrites(res: express.Response) {
+  ;(res.locals.writes as OpenTransaction | undefined)?.rollback()
+}
+
 /** A handler threw: what the request had changed is undone before anything answers it. */
 const undoRequest: express.ErrorRequestHandler = (error, _req, res, next) => {
-  ;(res.locals.writes as OpenTransaction | undefined)?.rollback()
+  undoRequestWrites(res)
   next(error)
 }
+
+/** An import route's failure, passed on by writeRoute: what the request wrote is undone, a spent
+ *  work budget answers 422 as everywhere (passed on), anything else the JSON 400 the import routes
+ *  always answered, a refused write included. */
+const importRefusal =
+  (fallback: string): express.ErrorRequestHandler =>
+  (error, _req, res, next) => {
+    if (res.headersSent || error instanceof WorkBudgetError) return next(error)
+    undoRequestWrites(res)
+    res.status(400).json({ error: error instanceof Error ? error.message : fallback })
+  }
 
 /** A request the component engine refused for costing too much: nothing was written. */
 const workBudgetRefusal: express.ErrorRequestHandler = (error, _req, res, next) => {
@@ -3415,33 +3437,47 @@ app.post(
   }),
 )
 
-app.post('/api/frames/:id/comments', async (req, res) => {
-  const frame = requireFrame(req, res, req.params.id, 'comment')
-  if (!frame) return
-  const { selector, elementId, snippet, x, y, elementOrigin } = req.body ?? {}
-  const text = String(req.body?.text ?? '').trim()
-  const canvas = store.getCanvas(frame.canvasId)
-  const mentions = canvas
-    ? await resolveCommentMentions(canvas, text, { picked: req.body?.mentions })
-    : { ids: [], roleText: text }
-  if (refuseAgentMention(req, res, frame.canvasId, mentions.roleText)) return
-  /* a comment that @mentions a resident agent is a new command to the team,
+/* through writeRoute: an element comment stamps the element's id through the canvas write
+   entry, and a rejection there undoes the request instead of leaving it unanswered */
+app.post(
+  '/api/frames/:id/comments',
+  writeRoute(async (req, res) => {
+    const frame = requireFrame(req, res, req.params.id, 'comment')
+    if (!frame) return
+    const { selector, elementId, snippet, x, y, elementOrigin } = req.body ?? {}
+    const text = String(req.body?.text ?? '').trim()
+    const canvas = store.getCanvas(frame.canvasId)
+    const mentions = canvas
+      ? await resolveCommentMentions(canvas, text, { picked: req.body?.mentions })
+      : { ids: [], roleText: text }
+    if (refuseAgentMention(req, res, frame.canvasId, mentions.roleText)) return
+    /* a comment that @mentions a resident agent is a new command to the team,
      so it's metered like a card; plain comments and replies stay free */
-  if (mentionedRole(mentions.roleText, actions.canvasRoster(frame.canvasId))) {
-    const gate = await allowance.consumeResidentTask(req.user!.id)
-    if (!gate.ok) {
-      return res.status(403).json({ error: 'resident_limit', used: gate.used, limit: gate.limit })
+    let gate: Awaited<ReturnType<typeof allowance.consumeResidentTask>> | undefined
+    if (mentionedRole(mentions.roleText, actions.canvasRoster(frame.canvasId))) {
+      gate = await allowance.consumeResidentTask(req.user!.id)
+      if (!gate.ok) {
+        return res.status(403).json({ error: 'resident_limit', used: gate.used, limit: gate.limit })
+      }
     }
-  }
-  const comment = await actions.addElementComment(
-    req.params.id,
-    { selector, elementId, snippet, text, x, y, elementOrigin, mentions },
-    req.user!.name,
-    req.user!.id,
-  )
-  if (!comment) return res.status(404).json({ error: 'frame not found or empty text' })
-  res.json(comment)
-})
+    /* the element's stamp can be refused: a comment that is not posted gives the task back */
+    const userId = req.user!.id
+    const comment = await refundUnlessDone(
+      gate,
+      (charged) => allowance.refundResidentTask(charged, userId),
+      () =>
+        actions.addElementComment(
+          req.params.id,
+          { selector, elementId, snippet, text, x, y, elementOrigin, mentions },
+          req.user!.name,
+          userId,
+        ),
+      userId,
+    )
+    if (!comment) return res.status(404).json({ error: 'frame not found or empty text' })
+    res.json(comment)
+  }),
+)
 
 /* the stable id of an element inside a frame — stamped as data-doop-id into
    the frame HTML if it has none yet — for a link that outlives edits around
@@ -3553,32 +3589,36 @@ app.post('/api/comments/:id/resolve', (req, res) => {
 })
 
 /* drag a thread's pin somewhere else: onto an element, a frame as a whole
-   or the canvas. The whole thread moves, and anyone who may comment may move */
-app.patch('/api/comments/:id/anchor', async (req, res) => {
-  const found = actions.findComment(req.params.id)
-  if (!found) return res.status(404).json({ error: 'comment not found' })
-  if (!requireCanvas(req, res, found.canvasId, 'comment')) return
-  const { frameId, selector, elementId, snippet, pageId, x, y, elementOrigin } = req.body ?? {}
-  let anchor: CommentAnchorInput
-  if (typeof frameId === 'string') {
-    if (!Number.isFinite(x) || !Number.isFinite(y)) return res.status(400).json({ error: 'x and y must be numbers' })
-    anchor = {
-      frameId,
-      ...(typeof selector === 'string' ? { selector } : {}),
-      ...(typeof elementId === 'string' ? { elementId } : {}),
-      elementOrigin,
-      snippet: String(snippet ?? ''),
-      x: Number(x),
-      y: Number(y),
-    }
-  } else if (typeof pageId === 'string') {
-    if (!Number.isFinite(x) || !Number.isFinite(y)) return res.status(400).json({ error: 'x and y must be numbers' })
-    anchor = { pageId, x: Number(x), y: Number(y) }
-  } else return res.status(400).json({ error: 'frameId or pageId required' })
-  const moved = await actions.moveComment(req.params.id, anchor, req.user!.name)
-  if (!moved) return res.status(404).json({ error: 'frame or page not found' })
-  res.json(moved)
-})
+   or the canvas. The whole thread moves, and anyone who may comment may move. Through
+   writeRoute, as a new comment: a stamp's rejection undoes the request */
+app.patch(
+  '/api/comments/:id/anchor',
+  writeRoute(async (req, res) => {
+    const found = actions.findComment(req.params.id)
+    if (!found) return res.status(404).json({ error: 'comment not found' })
+    if (!requireCanvas(req, res, found.canvasId, 'comment')) return
+    const { frameId, selector, elementId, snippet, pageId, x, y, elementOrigin } = req.body ?? {}
+    let anchor: CommentAnchorInput
+    if (typeof frameId === 'string') {
+      if (!Number.isFinite(x) || !Number.isFinite(y)) return res.status(400).json({ error: 'x and y must be numbers' })
+      anchor = {
+        frameId,
+        ...(typeof selector === 'string' ? { selector } : {}),
+        ...(typeof elementId === 'string' ? { elementId } : {}),
+        elementOrigin,
+        snippet: String(snippet ?? ''),
+        x: Number(x),
+        y: Number(y),
+      }
+    } else if (typeof pageId === 'string') {
+      if (!Number.isFinite(x) || !Number.isFinite(y)) return res.status(400).json({ error: 'x and y must be numbers' })
+      anchor = { pageId, x: Number(x), y: Number(y) }
+    } else return res.status(400).json({ error: 'frameId or pageId required' })
+    const moved = await actions.moveComment(req.params.id, anchor, req.user!.name)
+    if (!moved) return res.status(404).json({ error: 'frame or page not found' })
+    res.json(moved)
+  }),
+)
 
 app.post('/api/comments/:id/retry', async (req, res) => {
   const found = actions.findComment(req.params.id)
@@ -3617,12 +3657,14 @@ app.post('/api/canvases/:id/import/discover', async (req, res) => {
   }
 })
 
-app.post('/api/canvases/:id/import', async (req, res) => {
-  const canvas = requireCanvas(req, res, req.params.id, 'edit')
-  if (!canvas) return
-  try {
-    const { importPage, importSitePages, assertPublicHttpUrl, isSameSiteUrl, MAX_SITE_PAGES } =
-      await import('./importer.ts')
+/* Imports write through the canvas write entry. Whatever fails (a capture, a file that cannot
+   be read, a refused write) goes to `importRefusal`, which undoes the request first */
+app.post<{ id: string }>(
+  '/api/canvases/:id/import',
+  writeRoute(async (req, res) => {
+    const canvas = requireCanvas(req, res, req.params.id, 'edit')
+    if (!canvas) return
+    const { importSitePages, assertPublicHttpUrl, isSameSiteUrl, MAX_SITE_PAGES } = await import('./importer.ts')
     const requested: string[] | null = Array.isArray(req.body?.urls)
       ? (req.body.urls as unknown[]).map((value) => String(value))
       : null
@@ -3658,9 +3700,11 @@ app.post('/api/canvases/:id/import', async (req, res) => {
           continue
         }
         const imported = capture.page
-        const frame = actions.createFrame(
-          canvas.id,
-          {
+        /* page by page: one refused is reported like a page that could not be captured, and
+           the pages already landed stay */
+        const landed = await landImportFrame('website import', canvas.id, {
+          type: 'create-frame',
+          input: {
             name: imported.title.slice(0, 80),
             x: startX + column * (imported.width + 80),
             y,
@@ -3669,12 +3713,12 @@ app.post('/api/canvases/:id/import', async (req, res) => {
             html: imported.html,
           },
           actor,
-        )
-        if (!frame) {
-          failures.push({ url: capture.url, error: 'canvas not found' })
+        })
+        if (!landed.ok || !landed.result) {
+          failures.push({ url: capture.url, error: landed.ok ? 'canvas not found' : landed.error.message })
           continue
         }
-        frames.push(frame)
+        frames.push(landed.result)
         rowHeight = Math.max(rowHeight, imported.height)
         column++
         if (column === columns) {
@@ -3690,19 +3734,12 @@ app.post('/api/canvases/:id/import', async (req, res) => {
     /* Validate before consuming a rate-limit slot — typos shouldn't burn quota. */
     assertPublicHttpUrl(url)
     if (!takeImportSlot(req.user!.id)) return res.status(429).json({ error: 'too many imports — wait a minute' })
-    const imported = await importPage(url)
-    const actor = userActor(req)
-    const frame = actions.createFrame(
-      canvas.id,
-      { name: imported.title.slice(0, 80), width: imported.width, height: imported.height, html: imported.html },
-      actor,
-    )
+    const { frame } = await createImportedWebpageFrame({ canvasId: canvas.id, url, actor: userActor(req) })
     if (!frame) return res.status(404).json({ error: 'canvas not found' })
     res.json(frame)
-  } catch (e) {
-    res.status(400).json({ error: e instanceof Error ? e.message : 'import failed' })
-  }
-})
+  }),
+  importRefusal('import failed'),
+)
 
 app.post('/api/canvases/:id/cards', async (req, res) => {
   if (!requireCanvas(req, res, req.params.id, 'edit')) return

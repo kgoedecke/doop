@@ -6,7 +6,7 @@ import { db } from './db/index.ts'
 import { integrations } from './db/schema.ts'
 import { createAsset, fetchRemote } from './assets.ts'
 import { store } from './store.ts'
-import * as actions from './actions.ts'
+import { landImportFrame } from './canvasWrites.ts'
 import type { Actor, Frame } from '../shared/types.ts'
 import type { PullFilter } from '../shared/automations.ts'
 
@@ -497,6 +497,8 @@ export interface PullResult {
   /** ads already on the canvas from an earlier pull */
   skipped: number
   total: number
+  /** creatives whose frame could not be written */
+  failed: number
 }
 
 /** Land the account's creatives on the canvas as frames, one row grid below
@@ -524,6 +526,7 @@ export async function pullCreatives(input: {
   const bottom = canvas.frames.reduce((my, f) => Math.max(my, f.y + f.height), 0)
   const startY = canvas.frames.length ? bottom + 80 : 120
   const created: Frame[] = []
+  let failed = 0
   let y = startY
   let rowHeight = 0
   for (const [i, ad] of fresh.entries()) {
@@ -535,9 +538,10 @@ export async function pullCreatives(input: {
     const src = await keepImage(ad.imageUrl, input.canvasId, input.ownerId)
     const height = frameHeight(ad)
     rowHeight = Math.max(rowHeight, height)
-    const frame = actions.createFrame(
-      input.canvasId,
-      {
+    /* each creative its own write: one refused is counted, and the ones before it stand */
+    const landed = await landImportFrame('Meta pull', input.canvasId, {
+      type: 'create-frame',
+      input: {
         name: ad.name.slice(0, 80),
         x: 120 + column * (FRAME_W + GAP),
         y,
@@ -545,9 +549,12 @@ export async function pullCreatives(input: {
         height,
         html: creativeHtml(ad, src),
       },
-      input.actor,
-    )
-    if (frame) created.push(frame)
+      actor: input.actor,
+    })
+    if (!landed.ok) {
+      failed++
+      console.error(`[meta] creative ${ad.adId} not written:`, landed.error)
+    } else if (landed.result) created.push(landed.result)
   }
-  return { created, skipped: ads.length - fresh.length, total: ads.length }
+  return { created, skipped: ads.length - fresh.length, total: ads.length, failed }
 }

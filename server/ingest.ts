@@ -7,6 +7,7 @@ import { syncEdges, syncKeys, syncLinks } from './db/schema.ts'
 import { store } from './store.ts'
 import { sourceHtml } from './frameCompose.ts'
 import * as actions from './actions.ts'
+import { runImportWrite } from './canvasWrites.ts'
 import type { Frame } from '../shared/types.ts'
 import { MAX_FRAME_HTML_BYTES } from './limits.ts'
 
@@ -364,7 +365,12 @@ export async function handleIngest(req: express.Request, res: express.Response) 
     }
     pageLastWrite.set(marker, Date.now())
     /* geometry the user may have arranged stays; content and height track the app */
-    actions.updateFrame(existing.id, { html: wrapped, name: title.slice(0, 80), height }, actor)
+    await runImportWrite('design sync', canvas.id, {
+      type: 'write-frame',
+      frameId: existing.id,
+      patch: { html: wrapped, name: title.slice(0, 80), height },
+      actor,
+    })
     await saveLinks(key.id, page, links)
     return res.json({ ok: true, frameId: existing.id, updated: true })
   }
@@ -382,7 +388,11 @@ export async function handleIngest(req: express.Request, res: express.Response) 
     y = 120
   }
   pageLastWrite.set(marker, Date.now())
-  const frame = actions.createFrame(canvas.id, { name: title.slice(0, 80), x, y, width, height, html: wrapped }, actor)
+  const frame = await runImportWrite('design sync', canvas.id, {
+    type: 'create-frame',
+    input: { name: title.slice(0, 80), x, y, width, height, html: wrapped },
+    actor,
+  })
   if (!frame) return res.status(410).json({ error: 'canvas vanished mid-sync' })
   await saveLinks(key.id, page, links)
   res.json({ ok: true, frameId: frame.id, created: true })
