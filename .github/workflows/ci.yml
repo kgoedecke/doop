@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, debug/clipboard-flake-matrix]
   pull_request:
 
 # A new push to the same PR supersedes the run in flight; main is never cancelled.
