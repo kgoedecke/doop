@@ -4,7 +4,8 @@ import type { Canvas, Frame } from '../shared/types.ts'
 import { readingOrder } from '../shared/frameOrder.ts'
 import { canvasPages, pageFrames } from '../shared/pages.ts'
 import { MAX_PDF_FRAMES, PDF_RENDER_CONCURRENCY } from '../shared/pdfLimits.ts'
-import { loadFramePage, rendererAvailable } from './screenshot.ts'
+import { designPx } from './renderLimits.ts'
+import { frameViewport, loadFramePage, rendererAvailable } from './screenshot.ts'
 
 /**
  * Vector PDF export: each frame prints through headless Chrome onto one page
@@ -48,8 +49,8 @@ interface PageSize {
 /** The paper for a frame, in CSS px, and the print scale that lays the
  *  frame out at its own width on it. */
 export function pageSizeFor(frame: Pick<Frame, 'width' | 'height'>): PageSize {
-  const width = Math.max(1, Math.round(frame.width))
-  const height = Math.max(1, Math.round(frame.height))
+  const width = designPx(frame.width)
+  const height = designPx(frame.height)
   const scale = Math.max(MIN_PRINT_SCALE, Math.min(1, MAX_PAGE_PX / Math.max(width, height)))
   return { width: Math.round(width * scale), height: Math.round(height * scale), scale }
 }
@@ -74,8 +75,8 @@ function escapeAttribute(value: string): string {
  * `<base>`, which a srcdoc document inherits.
  */
 function printShell(frame: Pick<Frame, 'width' | 'height' | 'html'>): string {
-  const width = Math.max(1, Math.round(frame.width))
-  const height = Math.max(1, Math.round(frame.height))
+  const width = designPx(frame.width)
+  const height = designPx(frame.height)
   const html = frame.html || '<!doctype html><html><body></body></html>'
   return (
     '<!doctype html><html><head><style>html,body{margin:0;overflow:hidden}' +
@@ -91,11 +92,7 @@ export async function renderFramePdfPage(frame: Frame): Promise<Uint8Array> {
   const { page } = loaded
   try {
     const size = pageSizeFor(frame)
-    await page.setViewport({
-      width: Math.max(1, Math.round(frame.width)),
-      height: Math.max(1, Math.round(frame.height)),
-      deviceScaleFactor: 1,
-    })
+    await page.setViewport(frameViewport(frame.width, frame.height))
     await page.emulateMediaType('screen')
     await waitForFonts(page.mainFrame().childFrames()[0] ?? page.mainFrame())
     return await page.pdf({

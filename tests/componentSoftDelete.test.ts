@@ -19,7 +19,7 @@ vi.mock('../server/db/persist.ts', () => ({
 }))
 
 import { buildMcpServer } from '../server/mcp.ts'
-import { execTool, RESIDENT_TOOL_NAMES } from '../server/resident.ts'
+import { execTool, newRunState, RESIDENT_TOOL_NAMES } from '../server/resident.ts'
 import { store } from '../server/store.ts'
 import * as actions from '../server/actions.ts'
 import * as propagation from '../server/propagation.ts'
@@ -569,20 +569,7 @@ describe('agents', () => {
     await propagation.whenIdle()
     const before = allHtml(canvas.id)
     const resident = actions.resolveActor({ name: roleName(DEFAULT_ROLE_ID), kind: 'agent' })
-    const runState = {
-      mutatedFrames: new Set<string>(),
-      sourceFrames: new Set<string>(),
-      verificationFrames: new Set<string>(),
-      verifiedFrames: new Set<string>(),
-      seenVerified: new Set<string>(),
-      rewriteDrafts: new Map<string, string>(),
-      vision: false,
-      imagesGenerated: 0,
-      repliedThreads: new Set<string>(),
-      awaitingThreads: new Set<string>(),
-      tokenWrites: 0,
-      arrangeWrites: 0,
-    }
+    const runState = newRunState()
     const call = (name: string, input: unknown) => ({ type: 'tool_use' as const, id: 't1', name, input })
 
     const deleted = await execTool(call('delete_component', { component: 'Button' }), canvas.id, resident, runState)

@@ -6,8 +6,9 @@ import type { Frame } from '../shared/types.ts'
 import { guardPublicPageRequests } from './publicUrl.ts'
 import { withHostedIcons } from './iconProxy.ts'
 import { withHostedPhotos } from './photoProxy.ts'
-import { renderedHeight } from './renderLimits.ts'
+import { designPx, renderedHeight } from './renderLimits.ts'
 import { LayerNotFoundError } from './layerExport.ts'
+import { installNameShim } from './pageShim.ts'
 import {
   createRenderer,
   remoteConnectFailure,
@@ -165,6 +166,11 @@ export async function loadFramePage(frame: Frame, options?: PageOptions): Promis
   }
 }
 
+/** A viewport of the frame's design px, whole and at least 1 each way. */
+export function frameViewport(width: number, height: number, deviceScaleFactor = 1) {
+  return { width: designPx(width), height: designPx(height), deviceScaleFactor }
+}
+
 async function loadFrameInto(page: Page, frame: Frame): Promise<void> {
   const assetOrigin = new URL(env.BETTER_AUTH_URL).origin
   await guardPublicPageRequests(page, {
@@ -175,21 +181,26 @@ async function loadFrameInto(page: Page, frame: Frame): Promise<void> {
       url.origin === 'https://fonts.googleapis.com' ||
       url.origin === 'https://fonts.gstatic.com',
   })
-  await page.setViewport({
-    width: Math.max(1, Math.round(frame.width)),
-    /* A viewport does not need to span an entire imported landing page for
-       layout/computed-style inspection; full-page content remains in the DOM. */
-    height: Math.max(1, Math.min(Math.round(frame.height), 4000)),
-    deviceScaleFactor: 1,
-  })
+  /* A viewport does not need to span an entire imported landing page for
+     layout/computed-style inspection; full-page content remains in the DOM. */
+  await page.setViewport(frameViewport(frame.width, Math.min(frame.height, 4000)))
   /* setContent leaves the page on about:blank, where the relative /a/...
      asset URLs of imported frames resolve nowhere. In the app an iframe
      inherits the page origin; here a <base> stands in for it — unless the
      frame brought its own (website imports do). */
   let html = withHostedPhotos(withHostedIcons(frame.html || '<!doctype html><html><body></body></html>'))
+  /* the editor morphs every design into a standards-mode document (FRAME_BOOTSTRAP in
+     src/lib/frameRuntime.ts), so a design without a doctype renders the same way here */
+  if (!/^\s*<!doctype/i.test(html)) html = `<!doctype html>${html}`
   if (!/<base\s/i.test(html)) {
     const baseTag = `<base href="${assetOrigin.replace(/"/g, '&quot;')}/">`
-    html = /<head[^>]*>/i.test(html) ? html.replace(/<head([^>]*)>/i, `<head$1>${baseTag}`) : baseTag + html
+    /* never ahead of the doctype, which would put the page in quirks mode */
+    /* <head>, never <header> */
+    html = /<head(?=[\s>])[^>]*>/i.test(html)
+      ? html.replace(/<head(?=[\s>])([^>]*)>/i, `<head$1>${baseTag}`)
+      : /<html[^>]*>/i.test(html)
+        ? html.replace(/<html([^>]*)>/i, `<html$1><head>${baseTag}</head>`)
+        : html.replace(/^\s*<!doctype[^>]*>/i, (doctype) => doctype + baseTag)
   }
   try {
     await page.setContent(html, {
@@ -259,10 +270,7 @@ const MAX_PROBLEMS = 30
 async function inspectOn(page: Page, frame: Frame, options: InspectOptions): Promise<FrameInspection> {
   await loadFrameInto(page, frame)
   {
-    /* tsx/esbuild annotates nested functions with __name; page.evaluate
-       serializes the callback without that runtime helper. A tiny in-page
-       identity shim keeps the evaluated code independent of the loader. */
-    await page.evaluate('globalThis.__name = (target) => target')
+    await installNameShim(page)
     const inspection = await page.evaluate(
       ({ asked, frameWidth, frameHeight, maxProblems }) => {
         const MAX_ELEMENTS = 64
@@ -648,6 +656,236 @@ async function inspectOn(page: Page, frame: Frame, options: InspectOptions): Pro
   }
 }
 
+/** A frame's content in design px: `painted` is the lowest thing it paints, `flow` the bottom of
+ *  the root's own box (what flows, overflow left out), `right` the rightmost thing it paints.
+ *  `shell` says the design, as loaded, is an app shell: it fits its viewport and a large part of
+ *  it scrolls inside. `spills` counts the boxes in flow that run out of their parent's content box
+ *  (into its padding or past it): a box held at the viewport's height spills its content once the
+ *  viewport is too short for it, where a box that grows with its content never does. */
+export interface ContentExtent {
+  painted: number
+  flow: number
+  right: number
+  shell: boolean
+  spills: number
+}
+
+/** Measures on one loaded page, at a viewport of `width` × `height`. A design sized in vh changes
+ *  with the viewport, so the fit may measure at several heights (server/frameFit.ts). */
+export interface ContentProbe {
+  /** the content's height, the root and body let go of a height that follows the viewport */
+  height: (width: number, height: number) => Promise<ContentExtent>
+  /** the width the content hugs to: the root shrunk to fit its content, never past `width` */
+  width: (width: number, height: number) => Promise<number>
+}
+
+/** How much taller the viewport is made to tell a root height that follows it from a fixed one. */
+const FOLLOW_PROBE_PX = 200
+
+/** Loads the frame once and hands `settle` a probe on it. Before the first height measure at a
+ *  width, the root and body are read at two viewport heights: one whose height follows the
+ *  viewport (100vh, 100%, a script sizing it) is let go of while measuring the height, one that
+ *  keeps its height (px, rem, calc of those, whatever rule set it) is the design's own and stays.
+ *  They are read again whenever the width changes, since a width media query can fix a height
+ *  that followed the viewport. A width is hugged with nothing let go of, as the canvas lays the
+ *  design out. */
+export function measureContent<T>(frame: Frame, settle: (probe: ContentProbe) => Promise<T>): Promise<T> {
+  return renderer.withPage('measuring the frame', RENDER_TIMEOUT_MS, async (page) => {
+    await loadFrameInto(page, frame)
+    await installNameShim(page)
+    let released: { width: number; rule: string } | undefined
+    const layOut = async (width: number, height: number, release: boolean) => {
+      await page.evaluate(holdRelease, release, released?.rule ?? '')
+      await page.setViewport(frameViewport(width, height))
+      await page.evaluate(settleDocument)
+    }
+    const followers = async (width: number, height: number) => {
+      await layOut(width, height, false)
+      const before = await page.evaluate(rootHeights)
+      await layOut(width, height + FOLLOW_PROBE_PX, false)
+      const after = await page.evaluate(rootHeights)
+      return (['html', 'body'] as const).filter((name) => before[name] !== after[name])
+    }
+    const measure = async (width: number, height: number, hug: boolean) => {
+      if (!hug && released?.width !== width) released = { width, rule: releaseRule(await followers(width, height)) }
+      await layOut(width, height, !hug)
+      return page.evaluate(contentExtent, hug, released?.rule ?? '')
+    }
+    return settle({
+      height: (width, height) => measure(width, height, false),
+      width: async (width, height) => (await measure(width, height, true)).right,
+    })
+  })
+}
+
+/** Runs in the frame's page: switches the height release (`contentExtent` installs it) on or off
+ *  and sets it to `rule`, ahead of a viewport change, so the frame's resize handlers run against
+ *  the layout measured. */
+function holdRelease(on: boolean, rule: string): void {
+  const release = document.querySelector<HTMLStyleElement>('style[data-doop-fit]')
+  if (!release) return
+  release.textContent = rule
+  if (release.sheet) release.sheet.disabled = !on
+}
+
+/** The rule letting go of the heights of the root and body in `released`. */
+function releaseRule(released: string[]): string {
+  return released.length ? `${released.join(',')}{height:auto!important;max-height:none!important}` : ''
+}
+
+/** Runs in the frame's page: the root's and body's heights. */
+function rootHeights(): { html: number; body: number } {
+  return {
+    html: document.documentElement.getBoundingClientRect().height,
+    body: document.body.getBoundingClientRect().height,
+  }
+}
+
+/** Runs in the frame's page before each measure. The frame's own resize, ResizeObserver and
+ *  matchMedia handlers run in the frames after a viewport change, so a layout built from
+ *  innerHeight is read once they have; fonts are awaited, and animations finished, since
+ *  mid-animation boxes (an entrance sliding up) measure where they will not stay. */
+async function settleDocument(): Promise<void> {
+  await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+  await document.fonts.ready
+  for (const animation of document.getAnimations()) {
+    try {
+      animation.finish()
+    } catch {
+      animation.cancel()
+    }
+  }
+}
+
+/** Runs in the frame's page. Measuring the height, `rule` lets the root and body whose height
+ *  follows the viewport go of it (a body at 100vh or 100% would hold the frame at its current
+ *  height); a min-height stays, since a px one is the design's own
+ *  floor and a vh one is found by settleHeight's 1px probe. With `hug`, the root shrinks to fit
+ *  its content for the one measure (`width: fit-content`, never wider than the viewport, held at
+ *  the left in a right-to-left page), as a Figma frame hugs. Either way the extent is the furthest
+ *  thing painted: the root's own box covers what flows, a walk adds what is positioned or
+ *  overflows its box, text running past its element and absolute ::before / ::after included,
+ *  each cut on the axis a box clips. Left out: what is invisible (a closed menu at
+ *  visibility:hidden or opacity:0) and fixed elements, which sit on the viewport rather than the
+ *  content. */
+function contentExtent(hug: boolean, rule: string): ContentExtent {
+  const MAX_ELEMENTS = 20_000
+  const hugged = hug ? document.createElement('style') : null
+  if (hugged) {
+    /* a right-to-left root shrinks against the right edge: held at the left, its width is its right */
+    const rtl = getComputedStyle(document.documentElement).direction === 'rtl'
+    hugged.textContent = `html{width:fit-content!important;min-width:0!important;max-width:none!important${rtl ? ';margin-left:0!important;margin-right:auto!important' : ''}}`
+    document.head.append(hugged)
+  }
+  let release = document.querySelector('style[data-doop-fit]')
+  if (!release && !hug) {
+    /* judged as loaded, before the root and body are released: an app shell on the body (or on
+       html,body{height:100%}) would otherwise unroll its scroller into the frame */
+    const scrolls = (el: Element) => {
+      const style = getComputedStyle(el)
+      return (
+        (style.overflowY === 'auto' || style.overflowY === 'scroll') &&
+        el.scrollHeight > el.clientHeight + 1 &&
+        el.clientHeight >= innerHeight / 2
+      )
+    }
+    /* the page fills its viewport and no more: a fixed-size panel that scrolls inside a shorter
+       page is no shell, and the page can still shrink to it */
+    const root = document.documentElement
+    const fillsViewport = root.scrollHeight <= innerHeight + 1 && root.getBoundingClientRect().bottom >= innerHeight - 1
+    const shell = fillsViewport && Array.from(document.body.querySelectorAll('*')).slice(0, MAX_ELEMENTS).some(scrolls)
+    release = document.createElement('style')
+    release.setAttribute('data-doop-fit', shell ? 'shell' : '')
+    release.textContent = rule
+    document.head.append(release)
+  }
+  const shell = release?.getAttribute('data-doop-fit') === 'shell'
+  const rootBox = document.documentElement.getBoundingClientRect()
+  const flow = rootBox.bottom
+  let bottom = flow
+  let right = rootBox.right
+  let spills = 0
+  const text = document.createRange()
+  /* an absolute ::before / ::after has no box of its own to read: its far edges are its containing
+     block's padding edges less its used offsets and margins; `own` when the element places it */
+  const pseudoEdges = (el: Element, style: CSSStyleDeclaration, which: '::before' | '::after') => {
+    const pseudo = getComputedStyle(el, which)
+    if (pseudo.content === 'none' || pseudo.content === 'normal' || pseudo.position !== 'absolute') return null
+    if (pseudo.display === 'none' || pseudo.visibility === 'hidden' || pseudo.opacity === '0') return null
+    let block: Element | null = el
+    let blockStyle = style
+    while (block && blockStyle.position === 'static' && blockStyle.transform === 'none') {
+      block = block.parentElement
+      if (block) blockStyle = getComputedStyle(block)
+    }
+    const box = block?.getBoundingClientRect()
+    const bottomEdge = box ? box.bottom - parseFloat(blockStyle.borderBottomWidth) : innerHeight - window.scrollY
+    const rightEdge = box ? box.right - parseFloat(blockStyle.borderRightWidth) : innerWidth - window.scrollX
+    return {
+      bottom: bottomEdge - parseFloat(pseudo.bottom) - parseFloat(pseudo.marginBottom),
+      right: rightEdge - parseFloat(pseudo.right) - parseFloat(pseudo.marginRight),
+      own: block === el,
+    }
+  }
+  /* `cap`: what the ancestors that clip let show, per axis; a box outside it shows nothing */
+  type Cap = { right: number; bottom: number }
+  const reach = (edges: { bottom: number; right: number; top?: number; left?: number } | null, cap: Cap) => {
+    if (!edges) return
+    if ((edges.left ?? -Infinity) >= cap.right || (edges.top ?? -Infinity) >= cap.bottom) return
+    if (Number.isFinite(edges.bottom)) bottom = Math.max(bottom, Math.min(edges.bottom, cap.bottom))
+    if (Number.isFinite(edges.right)) right = Math.max(right, Math.min(edges.right, cap.right))
+  }
+  /* the box an element lays its children out in, its border and padding taken off */
+  const contentBox = (el: Element, style: CSSStyleDeclaration) => {
+    const box = el.getBoundingClientRect()
+    return {
+      top: box.top + parseFloat(style.borderTopWidth) + parseFloat(style.paddingTop),
+      bottom: box.bottom - parseFloat(style.borderBottomWidth) - parseFloat(style.paddingBottom),
+    }
+  }
+  let seen = 0
+  const walk = (el: Element, cap: Cap, holds: { top: number; bottom: number }) => {
+    for (const child of Array.from(el.children)) {
+      if (++seen > MAX_ELEMENTS) return
+      const style = getComputedStyle(child)
+      if (style.display === 'none' || style.position === 'fixed' || style.opacity === '0') continue
+      const rect = child.getBoundingClientRect()
+      /* each axis that does not show its overflow (hidden, clip, auto, scroll) cuts what is inside */
+      const inside: Cap = {
+        right: style.overflowX === 'visible' ? cap.right : Math.min(cap.right, rect.right),
+        bottom: style.overflowY === 'visible' ? cap.bottom : Math.min(cap.bottom, rect.bottom),
+      }
+      const inFlow = style.position === 'static' || style.position === 'relative'
+      if (inFlow && rect.height > 0 && (rect.top < holds.top - 1 || rect.bottom > holds.bottom + 1)) spills++
+      /* a hidden box takes no paint, though a child of it may opt back in with visibility:visible */
+      if (style.visibility !== 'hidden') {
+        if (rect.width > 0 || rect.height > 0) reach(rect, cap)
+        /* placed by the element itself, a pseudo-element is cut where the element clips */
+        for (const which of ['::before', '::after'] as const) {
+          const edges = pseudoEdges(child, style, which)
+          reach(edges, edges?.own ? inside : cap)
+        }
+        /* its own text, which may run past its box; elements inside are walked themselves */
+        for (const node of Array.from(child.childNodes)) {
+          if (node.nodeType !== Node.TEXT_NODE || !node.textContent?.trim()) continue
+          text.selectNodeContents(node)
+          reach(text.getBoundingClientRect(), inside)
+        }
+      }
+      walk(child, inside, contentBox(child, style))
+    }
+  }
+  walk(document.body, { right: Infinity, bottom: Infinity }, contentBox(document.body, getComputedStyle(document.body)))
+  hugged?.remove()
+  return {
+    painted: Math.ceil(bottom + window.scrollY),
+    flow: Math.ceil(flow + window.scrollY),
+    right: Math.ceil(right + window.scrollX),
+    shell,
+    spills,
+  }
+}
+
 export interface RenderOptions extends PageOptions {
   type?: 'png' | 'jpeg'
   quality?: number
@@ -705,8 +943,8 @@ async function layerClip(page: Page, selector: string, frame: Frame, scale: numb
   }, selector)
   if (box === 'invalid') throw new LayerNotFoundError(`"${selector}" is not a valid CSS selector`)
   if (!box) throw new LayerNotFoundError(`no element matches ${selector}`)
-  const width = Math.max(1, Math.round(frame.width))
-  const height = Math.max(1, Math.round(frame.height))
+  const width = designPx(frame.width)
+  const height = designPx(frame.height)
   /* judged before rounding outward, which would give an empty box a pixel */
   const visible =
     Math.min(width, box.right) - Math.max(0, box.left) > 0 && Math.min(height, box.bottom) - Math.max(0, box.top) > 0
@@ -719,13 +957,13 @@ async function layerClip(page: Page, selector: string, frame: Frame, scale: numb
 }
 
 async function screenshotOn(page: Page, frame: Frame, scale: number, opts: RenderOptions): Promise<Buffer> {
-  const width = Math.max(1, Math.round(frame.width))
-  const fullHeight = Math.max(1, Math.round(frame.height))
+  const width = designPx(frame.width)
+  const fullHeight = designPx(frame.height)
   const height = renderedHeight(frame, scale, opts.maxHeight)
   /* the viewport always spans the whole frame, so 100vh, height media
      queries and bottom-fixed elements lay out as they do on the canvas; the
      pixel budget bounds only the captured image below */
-  await page.setViewport({ width, height: fullHeight, deviceScaleFactor: scale })
+  await page.setViewport(frameViewport(width, fullHeight, scale))
   const type = opts.type ?? 'png'
   const clip = opts.layer
     ? await layerClip(page, opts.layer, frame, scale)
