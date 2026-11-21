@@ -258,9 +258,10 @@ export function ElementPanel({
   }
 
   /* closing the panel is only that: the element stays picked, its outline
-     and grips in place, and a second click on it opens the panel again */
+     and grips in place, and later picks leave it closed until the rail's
+     button opens it again */
   function close() {
-    useStore.getState().setElementPanelOpen(false)
+    useStore.getState().closeElementPanel()
   }
 
   const name = node ? layerName(node) : selector.split(' > ').at(-1)

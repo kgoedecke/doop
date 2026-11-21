@@ -18,6 +18,7 @@ declare global {
       selectFrame: () => void
       deselect: () => void
       panelOpen: () => boolean
+      openPanel: () => void
       picked: () => string[]
       pickAlso: (selector: string) => void
       nudge: (dx: number, dy: number) => boolean

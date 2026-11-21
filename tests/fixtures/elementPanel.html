@@ -40,6 +40,7 @@
         remote: (frame) => useStore.getState().setCanvas({ ...useStore.getState().canvas, frames: [frame] }),
         select: (selector) => useStore.getState().pickElement({ frameId: 'f', selector }),
         panelOpen: () => useStore.getState().elementPanelOpen,
+        openPanel: () => useStore.getState().openElementPanel(),
         geometry: (selector, edit) => editElementGeometry('f', selector, edit),
         selectFrame: () => useStore.getState().select('f'),
         /* the frame Inspector, as a click on the frame's name opens it */

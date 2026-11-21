@@ -63,7 +63,13 @@ describe('selectedElement', () => {
    Layers row alike: the element is selected and its properties panel opens */
 describe('pickElement', () => {
   beforeEach(() => {
-    useStore.setState({ selectedId: 'a', selectedIds: ['a'], selectedElement: null, elementPanelOpen: false })
+    useStore.setState({
+      selectedId: 'a',
+      selectedIds: ['a'],
+      selectedElement: null,
+      elementPanelOpen: false,
+      elementPanelClosed: false,
+    })
   })
 
   it('selects the element and opens the panel', () => {
@@ -83,6 +89,44 @@ describe('pickElement', () => {
     useStore.getState().pickElement({ frameId: 'a', selector: '#hero' })
     useStore.getState().setElementPanelOpen(false)
     useStore.getState().pickElement({ frameId: 'a', selector: '#hero' })
+    expect(useStore.getState().elementPanelOpen).toBe(true)
+  })
+
+  it('keeps a panel the person closed closed when another element is picked', () => {
+    useStore.getState().pickElement({ frameId: 'a', selector: '#hero' })
+    useStore.getState().closeElementPanel()
+    useStore.getState().pickElement({ frameId: 'a', selector: '#cta' })
+    expect(useStore.getState().selectedElement).toEqual({ frameId: 'a', selector: '#cta' })
+    expect(useStore.getState().elementPanelOpen).toBe(false)
+    useStore.getState().pickElement({ frameId: 'a', selector: '#cta' })
+    expect(useStore.getState().elementPanelOpen).toBe(false)
+    useStore.getState().toggleElement({ frameId: 'a', selector: '#hero' })
+    useStore.getState().pickElements('a', ['#hero'])
+    expect(useStore.getState().elementPanelOpen).toBe(false)
+  })
+
+  it('empties the slot on a pick when the panel is closed and the frame Inspector was showing', () => {
+    useStore.getState().closeElementPanel()
+    useStore.getState().setInspectorOpen(true)
+    useStore.getState().pickElement({ frameId: 'a', selector: '#hero' })
+    expect(useStore.getState().elementPanelOpen).toBe(false)
+    expect(useStore.getState().inspectorOpen).toBe(false)
+  })
+
+  it('closing the panel closes the frame Inspector under it too', () => {
+    useStore.getState().setInspectorOpen(true)
+    useStore.getState().pickElement({ frameId: 'a', selector: '#hero' })
+    useStore.getState().closeElementPanel()
+    expect(useStore.getState().inspectorOpen).toBe(false)
+  })
+
+  it('opens on picks again once the person reopens it', () => {
+    useStore.getState().pickElement({ frameId: 'a', selector: '#hero' })
+    useStore.getState().closeElementPanel()
+    useStore.getState().openElementPanel()
+    expect(useStore.getState().elementPanelOpen).toBe(true)
+    useStore.getState().pickElement(null)
+    useStore.getState().pickElement({ frameId: 'a', selector: '#cta' })
     expect(useStore.getState().elementPanelOpen).toBe(true)
   })
 

@@ -744,11 +744,13 @@ export function CanvasPage({
   const layersOpen = useStore((s) => s.layersOpen)
   /* ⌘. — the canvas view with nothing over it; the board and PresentMode keep their chrome */
   const uiHidden = useStore((s) => s.uiHidden) && hideUiActive
-  /* the element panel takes the frame inspector's spot while a Layers row
-     has it open; it follows the element selection until it is closed */
+  /* the element panel takes the frame inspector's spot once a pick opens
+     it; it follows the element selection until it is closed, and a person
+     who closed it keeps it closed across picks (`elementPanelClosed`) */
   const selectedElement = useStore((s) => s.selectedElement)
   const elementPanelOpen = useStore((s) => s.elementPanelOpen)
-  const panelElement = elementPanelOpen && selectedElement?.frameId === selectedFrame?.id ? selectedElement : null
+  const elementPicked = !!selectedFrame && selectedElement?.frameId === selectedFrame.id
+  const panelElement = elementPanelOpen && elementPicked ? selectedElement : null
   /* with nothing selected the slot is the page's own settings, once opened
      from the rail, until closed */
   const pagePanelOpen = useStore((s) => s.pagePanelOpen)
@@ -1166,7 +1168,7 @@ export function CanvasPage({
               onToggleAgents={() => setShowActivity((open) => !open)}
               inspectorOpen={propertiesShown}
               inspectorAvailable={!readOnly}
-              inspectTarget={selectedFrame ? 'frame' : 'page'}
+              inspectTarget={selectedFrame ? (elementPicked ? 'element' : 'frame') : 'page'}
               onToggleInspector={() => {
                 const s = useStore.getState()
                 if (!selectedFrame) {
@@ -1176,9 +1178,10 @@ export function CanvasPage({
                 if (propertiesShown) {
                   /* the element panel and the inspector share the slot —
                      hiding it closes whichever is showing */
-                  s.setElementPanelOpen(false)
+                  if (panelElement) s.closeElementPanel()
                   s.setInspectorOpen(false)
-                } else s.setInspectorOpen(true)
+                } else if (elementPicked) s.openElementPanel()
+                else s.setInspectorOpen(true)
               }}
               me={meFace}
               onRenameSelf={() => setRenaming(true)}

@@ -18,6 +18,7 @@ declare global {
       selectFrame: () => void
       deselect: () => void
       panelOpen: () => boolean
+      openPanel: () => void
       picked: () => string[]
       pickAlso: (selector: string) => void
       nudge: (dx: number, dy: number) => boolean
@@ -1613,8 +1614,11 @@ describe.skipIf(!findBrowserPath())('element design controls', () => {
     await page.waitForSelector('[aria-label="Width"]', { hidden: true })
     expect(await page.evaluate(() => window.elementPanelHarness.panelOpen())).toBe(false)
     expect(await page.evaluate(() => window.elementPanelHarness.picked())).toEqual(['#box'])
-    /* picking it again reopens the panel */
+    /* a closed panel stays closed: picking again only moves the selection */
     await page.evaluate(() => window.elementPanelHarness.select('#box'))
+    expect(await page.evaluate(() => window.elementPanelHarness.panelOpen())).toBe(false)
+    /* until the person opens it again */
+    await page.evaluate(() => window.elementPanelHarness.openPanel())
     await page.waitForSelector('[aria-label="Width"]')
   })
 
