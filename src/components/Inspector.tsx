@@ -75,6 +75,10 @@ export function Inspector({
      streaming into the selected frame is pulled in at most every
      HTML_PULL_MS, the last chunk always landing */
   const lastPull = useRef(0)
+  /* focus is state, not a check of document.activeElement, so leaving the
+     editor re-runs the pull below: an update that arrived while it had focus
+     lands then, unless an edit typed there is still waiting to save */
+  const [editing, setEditing] = useState(false)
   useEffect(() => {
     const switched = frameId.current !== frame.id
     frameId.current = frame.id
@@ -89,15 +93,12 @@ export function Inspector({
       setHtmlCopy('idle')
       return
     }
-    const typing = () => document.activeElement === textareaRef.current
-    if (typing() || frame.html === draft) return
+    if (editing || queuedSave.current || frame.html === draft) return
     const wait = lastPull.current + HTML_PULL_MS - performance.now()
     if (wait <= 0) return pull()
-    const timer = window.setTimeout(() => {
-      if (!typing()) pull()
-    }, wait)
+    const timer = window.setTimeout(pull, wait)
     return () => window.clearTimeout(timer)
-  }, [frame.id, frame.html, draft])
+  }, [frame.id, frame.html, draft, editing])
 
   /* the confirmation timer must not fire after the panel is gone */
   useEffect(
@@ -388,6 +389,8 @@ export function Inspector({
               spellCheck={false}
               placeholder="<!doctype html>…"
               onChange={(e) => onHtmlChange(e.target.value)}
+              onFocus={() => setEditing(true)}
+              onBlur={() => setEditing(false)}
             />
           </div>
         </section>
