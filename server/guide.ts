@@ -198,7 +198,8 @@ export const FRAME_STYLES = `- Style an element on the element itself: style="â€
  *  guide and the resident agents' system prompt. */
 export const LEAN_FRAMES = `- Frames carry markup, never files. A frame is sent whole to every viewer and agent on each
   edit, so anything pasted into it is paid for on every round-trip. A base64 data: URI of any
-  kind is refused and nothing is written. Put each heavy thing where it belongs:
+  kind is refused and nothing is written, and so is a long block of base64 text in a script or
+  anywhere else (a packed bundle, a compressed data file). Put each heavy thing where it belongs:
   - Fonts: a family the canvas library or the hosted fonts already have is used by name alone.
     Any other font file goes into the library with upload_font, then is named in CSS: never an
     @font-face with the file inlined.
@@ -213,7 +214,9 @@ export const LEAN_FRAMES = `- Frames carry markup, never files. A frame is sent 
     <script src> or <link>, never pasted in. Better still, write only the CSS the design uses.
   - Data: a chart or table needs a few representative rows, not the dataset. Keep inline JSON to a
     few KB.
-  - Icon sets: hotlink each icon you use from search_icons, not a sprite sheet of the whole set.`
+  - Icon sets: hotlink each icon you use from search_icons, not a sprite sheet of the whole set.
+  - An application: a frame is one screen. Never pack an app's bundles and pages into a frame to
+    make it clickable; put each screen in its own frame and wire them as a prototype.`
 
 export const COMPONENTS = `A component is one design used in many places: change its main and every instance follows.
 get_canvas and list_components show a canvas's components with their props.
@@ -373,6 +376,11 @@ and fix real issues before moving on:
   that is not a <doop-use>? A hex, font or size that a token already names? Make the component
   or use the token.
 
+For Fit and overlaps, inspect_frame measures what the eye estimates: its \`problems\` list
+content past the frame's edge, text cut off by its box and text or controls on top of each
+other, with each element's selector and box. Pass selectors to read exact boxes and computed
+styles of the elements you are fixing. Judge its findings against the screenshot.
+
 Prefer targeted fixes over rewrites. Never delete and restart a mostly-good frame â€” the
 humans watching lose work they may have been reacting to.
 
@@ -441,8 +449,8 @@ ${FRAME_STYLES}
   frame's pageId. Put one screen in a frame and a body of work on a page: a second product
   surface, a platform (web vs. mobile), a round of explorations. create_canvas_page adds one
   and returns its id for create_frame's pageId; get_canvas with page_id reads one page;
-  set_canvas_pages renames, reorders or deletes pages. A link to a page is
-  /c/<canvas_id>?page=<page_id>.
+  set_canvas_pages renames, reorders or deletes pages, and update_canvas renames the canvas
+  itself. A link to a page is /c/<canvas_id>?page=<page_id>.
 - Element links: /c/<canvas_id>?frame=<frame_id>&element=<element_id> points at the one
   element carrying data-doop-id="<element_id>" in that frame's HTML. Find that attribute with
   get_frame before applying the feedback; if no element carries it any more, ask for an
@@ -778,8 +786,9 @@ reply inherits the root's element anchor, so an @mention reaches the resident ag
 the same context the conversation is about. Close the thread with resolve_comment once the
 request is carried out; resolving an @mention thread also records the exchange in the
 canvas Memory. Writing is metered only when a reply @mentions a resident role, exactly
-like a comment left in the browser. Reading does not claim work or resolve it; task
-feedback is separate (get_feedback).
+like a comment left in the browser. To tag a person, write @ and their name as a comment's
+\`from\` spells it ("@Ana Souza"): they are emailed at once. Reading does not claim work or
+resolve it; task feedback is separate (get_feedback).
 `,
   export: `# Exporting frames (images, PDF)
 

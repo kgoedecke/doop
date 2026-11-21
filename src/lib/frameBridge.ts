@@ -341,6 +341,26 @@ function infoOf(reply: Record<string, unknown> | null): ElementInfo | null {
   return reply && typeof reply.info === 'object' ? (reply.info as ElementInfo | null) : null
 }
 
+/** What ⌥ measures from the picked elements: their boxes (the primary's
+ *  first), the box around the primary, and what sits at the design point when
+ *  that is none of them. */
+export interface ElementMeasure {
+  rects: ElementInfo['rect'][]
+  parent: ElementInfo['rect']
+  over: ElementInfo['rect'] | null
+}
+
+/** Null when the selector no longer resolves or the frame is not mounted. */
+export async function measureElement(
+  frameId: string,
+  selector: string,
+  at: { x: number; y: number },
+  selected: string[],
+): Promise<ElementMeasure | null> {
+  const reply = await requestFrame(frameId, 'doop:measure', { selector, x: at.x, y: at.y, selected })
+  return (reply?.measure as ElementMeasure | null | undefined) ?? null
+}
+
 /** Computed properties of the element, or null when the selector no longer resolves. */
 export async function inspectElement(frameId: string, selector: string): Promise<ElementInfo | null> {
   return infoOf(await requestFrame(frameId, 'doop:inspect', { selector }))

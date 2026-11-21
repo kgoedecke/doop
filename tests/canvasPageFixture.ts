@@ -70,5 +70,6 @@ export async function showCanvasPage(
   await page.goto(fixtureUrl(`canvasPage.html${search}`))
   await page.waitForFunction(() => !!window.canvasPageHarness && !!document.querySelector('.stage'))
   await page.evaluate((frames, canvas) => window.canvasPageHarness.seed(frames, canvas), frames, canvas)
-  await page.waitForSelector('[data-frame-title]')
+  /* an empty canvas has no frame title to wait for: its Layers rail is what shows */
+  await page.waitForSelector(frames.length ? '[data-frame-title]' : '[data-slot="pages-panel"]')
 }

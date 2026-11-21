@@ -86,6 +86,13 @@ served for chats that hold it), served as
 `text/html;profile=mcp-app` (the MCP Apps standard, which ChatGPT now speaks) with ChatGPT's
 original `openai/*` aliases set as well:
 
+- Who is told about it (`embedsPreview`): only clients known to show the card inside the
+  conversation, ChatGPT (`openai-mcp`, OAuth application `ChatGPT`) and Claude
+  (`Anthropic/ClaudeAI`, `claude-ai`, OAuth applications `Claude` and `Doop for Claude Desktop`).
+  Every other client gets the tools without the `_meta` link and the same text results: Pi
+  supports MCP Apps with nowhere to embed a card and opened a browser tab per call. The resource
+  itself is served to everyone, so cards already rendered keep loading. A new host that embeds
+  cards is added to `EMBEDDING_CLIENTS` by both of its names.
 - Tools that carry it: `get_canvas`, `set_frame_html`, `edit_frame_html`, `update_frame`,
   `get_frame_screenshot`, `import_webpage`, `import_psd`. Each adds `structuredContent:
 CanvasPreview` (`{ canvas: {id,name,url}, frames: [{id,name,width,height,image_url,url,empty}]

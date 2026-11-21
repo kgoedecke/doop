@@ -1,6 +1,6 @@
 # Fork state (ArcticSlayy/doop)
 
-Last updated: 2026-11-18 (sync catch-up)
+Last updated: 2026-11-21 (sync catch-up)
 
 ## Purpose
 
@@ -11,11 +11,20 @@ Arctic OKs the RAM (self-hosting on `localhost:4300` waits for that and for impr
 
 ## Sync
 
-- Synced to upstream SHA: `07a5f6a324e918a935a99e1d210801ae89f4d2b9` (2026-11-18, "fix(sync): resolve a
-  stylesheet's url()s against the sheet, so synced fonts load (#506)"). The daily sync was blocked on 2026-11-16 to
-  2026-11-18 by conflicts in `server/actions.ts`, `src/components/FrameView.tsx` and `.context/TECHSTACK.md` (issue #19);
-  it was caught up by hand with a merge commit. Upstream moved `withLibraryFaces` into `server/canvasFaces.ts` (#497),
-  where our frame-paper rule now lives.
+- The 2026-11-21 sync merge contains upstream `40131c52f3e9b9a0f15bcbdf63c39f9b0dc54fe8` (21 commits since
+  `07a5f6a324e918a935a99e1d210801ae89f4d2b9`). Issue #19 tracked the recurring merge conflicts. The frame-paper
+  rule still passes through `withPaperRule` in `server/canvasFaces.ts` and the editor save path in `src/components/FrameView.tsx`.
+- `.context/TECHSTACK.md`: combined upstream's `update_canvas` documentation with the ported `fit_height` notes
+  and retained the frame-paper section.
+- `server/mcp.ts`: combined upstream's base64 detection, held HTML forms and preview metadata with the ports'
+  `fit_height` and `<doop-use>` refusals. A refused final streamed chunk still keeps its stream active.
+- `server/resident.ts`: used upstream's rename and person-mention support with the existing fit helper and
+  resident frame-write checks.
+- `server/screenshot.ts`: used upstream's selector and layout-problem inspection while keeping the shared page
+  shim, viewport helper and content-height measurement.
+- `tests/residentPageTools.test.ts`: retained both the upstream canvas-title tests and the ported fit tests.
+- Upstream's #439 pan implementation matches the merged `Stage.tsx` byte for byte. Its panel and stylesheet
+  implementations also match. The fork's workflow directory is unchanged by the merge.
 - Automation: `.github/workflows/sync-upstream.yml`, daily 09:23 UTC plus manual dispatch. It runs on GitHub, with no
   local scheduled task. Green: pushes to `main`. Red: parks the merge on `sync/upstream` and opens one PR.
   Conflict: opens one issue, pushes nothing. Nothing new: does nothing.
@@ -196,11 +205,11 @@ replaces our copy and the entry can go. The 2026-11-18 ports (#21 to #25) also e
 `server/componentActions.ts`, `server/componentEngine.ts`, `server/components.ts`, `server/componentTools.ts`,
 `server/cssPrune.ts`, `server/mcp.ts`, `server/resident.ts`, `server/screenshot.ts`, `server/pdfExport.ts`,
 `server/pageTools.ts`, `server/renderLimits.ts`, `.context/TECHSTACK.md` (fit_height, `<doop-use>` refusal);
-`src/components/Stage.tsx`, `src/components/ui/panel.tsx`, `src/styles.css` (pan restyle);
 `src/lib/frameDropRuntime.ts` (`freeSurface`); tests `frameHtml`, `inlineData`, `componentDrops`, `componentSoftDelete`,
 `residentApproval`, `residentPageTools`, `residentTokenWork`, `workBudgetCommit`, `drawingReorderBrowser`. New upstream
 files that came with them: `server/frameFit.ts`, `server/frameWriteRefusal.ts`, `server/pageShim.ts`,
-`tests/frameFit.test.ts`, `tests/measureGate.ts`, `tests/panelResizing.test.tsx`. Also: `.github/workflows/` differs from upstream by design (`android.yml` is
+`tests/frameFit.test.ts`, `tests/measureGate.ts`. Upstream #439 absorbed the pan changes and `tests/panelResizing.test.tsx`.
+Also: `.github/workflows/` differs from upstream by design (`android.yml` is
 upstream's and is not taken).
 
 ## Hygiene log

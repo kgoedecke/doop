@@ -51,10 +51,22 @@ HTML/CSS engine (Stylo + Taffy + Parley), compiled into the app as a static libr
 - **Deep zoom tiles**: a base bitmap is capped at 3 bitmap pixels per CSS pixel and
   about two screens of pixels. When the screen density exceeds what the base bitmap
   holds, the part of the frame on screen (plus a 30% margin) is painted as a tile at
-  up to 8 bitmap pixels per CSS pixel and composited over the base, so text stays
-  sharp at any zoom at roughly one screen of pixels per paint. Tiles refresh when a
-  gesture settles and when the frame's HTML changes; a tiled frame holds its
-  animations still.
+  screen density (up to 12 bitmap pixels per CSS pixel at 400% on a 3x screen) and
+  composited over the base, so text stays sharp at any zoom at roughly one screen of
+  pixels per paint. Tiles refresh when a gesture settles and when the frame's HTML
+  changes; a tiled frame holds its animations still.
+- **Pixel alignment**: Core Animation stretches each bitmap with a linear filter, so
+  a bitmap is only sharp when its pixels land on screen pixels. When the camera
+  settles its offset rests on whole device pixels (the first fit included) and each
+  frame layer's origin is snapped to the device-pixel grid at the camera's density;
+  a frame half a pixel off blurred every glyph (55-80% of full sharpness at most
+  zooms, only 100% and 200% were crisp).
+- **Scale changes start no transitions**: base and tile paint one document at
+  different scales, and a new scale recomputes lengths snapped to device pixels (a 1px
+  border is about 2 CSS px at 0.5x). The Blitz and Stylo forks restyle for a scale
+  change with `TraversalFlags::DeviceChangeOnly`, which starts no CSS transitions;
+  otherwise every `transition: all` box animated between the two widths, the frame
+  jittered by a pixel or two and repainted forever. `rust/tests/rescale_transitions.rs`.
 - **SVG**: `blitz-paint` is pulled in with `default-features = false` so the bridge
   controls what it links; its `svg` feature must stay on, or neither inline `<svg>`
   elements nor SVG images (`<img src="….svg">`, backgrounds) are painted at all.
@@ -94,11 +106,14 @@ HTML/CSS engine (Stylo + Taffy + Parley), compiled into the app as a static libr
 - **CSS animations**: a frame whose document reports running animations or
   transitions (`doopblitz_doc_is_animating`) is played by a `CADisplayLink` while
   it is on screen: each step paints only the on-screen part of the frame as a tile
-  (`doopblitz_doc_render_region_at`) at a density chosen so one step stays near
-  550k pixels, about 10-20 ms on Skia, which gives 30-40 steps a second at any
-  zoom. Playback pauses during gestures and for frames narrower than 100 pt, at
-  most two frames play at once, and when an animation ends the tile is repainted
-  at the density the camera wants. Base bitmaps keep the last animation pose.
+  (`doopblitz_doc_render_region_at`) at screen density, within a budget of one
+  screen of device pixels per step (about 15 ms on an iPhone 15 Pro Max). While a
+  frame plays, its tile is the playback tile alone: a static tile at another density
+  and an older pose between steps made it jump, and only a playback step decides
+  that the animation ended. Playback pauses during gestures and for frames narrower
+  than 100 pt, at most two frames play at once, and when an animation ends the tile
+  is repainted at the density the camera wants. Base bitmaps keep the last animation
+  pose.
 - **Element inspection**: tapping inside any frame selects it and hit tests the
   Blitz DOM automatically, without a separate mode. A compact, icon-only glass action bar
   above the prompt offers Copy, Paste, Duplicate, Delete, Comment and Export for

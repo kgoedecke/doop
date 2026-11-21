@@ -119,6 +119,7 @@ describe('human feedback on read-only MCP tools', () => {
 
   it.each([
     ['create_canvas_page', { canvas_id: CANVAS.id, name: 'Mobile', agent_name: 'Claude' }],
+    ['update_canvas', { canvas_id: CANVAS.id, name: 'Checkout', agent_name: 'Claude' }],
     [
       'set_canvas_pages',
       {
@@ -134,6 +135,7 @@ describe('human feedback on read-only MCP tools', () => {
     const page = { id: 'c1:page2', name: 'Mobile' }
     vi.spyOn(actions, 'createCanvasPage').mockReturnValue({ page, pages: [{ id: 'c1:page1', name: 'Page 1' }, page] })
     vi.spyOn(actions, 'setCanvasPages').mockImplementation((_id, pages) => pages)
+    vi.spyOn(actions, 'renameCanvas').mockReturnValue(CANVAS)
     vi.spyOn(actions, 'setPageBackground').mockReturnValue([{ id: 'c1:page1', name: 'Page 1' }])
     vi.spyOn(actions, 'setFlowStart').mockReturnValue([{ id: 'c1:page1', name: 'Page 1', startFrameId: FRAME.id }])
     const take = vi.spyOn(actions, 'takeFeedbackFor').mockReturnValue([FEEDBACK])

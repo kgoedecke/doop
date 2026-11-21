@@ -38,6 +38,7 @@ export const panels: Catalog['panels'] = {
   pagesMoveFailed: 'Não foi possível mover todos os frames selecionados para a página',
   pagesSaveFailed: 'Não foi possível salvar as páginas',
   pagesDuplicateFailed: 'Não foi possível duplicar a página',
+  pagesResize: 'Redimensionar páginas',
 
   memoryIntro: 'A Memória é como este canvas lembra do seu gosto — e como cada agente cria designs com ele.',
   memoryReferences: 'Referências',

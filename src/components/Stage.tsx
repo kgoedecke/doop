@@ -19,6 +19,7 @@ import { GhostFrames } from './GhostFrames'
 import { Cursors } from './Cursors'
 import { FollowFrame } from './FollowFrame'
 import { cameraOnCursor, cameraToFollow } from '../lib/follow'
+import { MeasureOverlay } from './MeasureOverlay'
 import { SnapGuides } from './SnapGuides'
 import { GuideLines, Rulers } from './Rulers'
 import { useIsMobile } from '../hooks/use-mobile'
@@ -46,11 +47,11 @@ import {
 } from './ui/icons'
 import { TOOLS, isDrawingTool, resolvePointerAction, toolForKey, type Tool } from '../lib/tools'
 import { useCanvasDrawing } from './CanvasDrawing'
-import { FrameLabelLayer } from './FrameLabelLayer'
+import { CommentThreadLayer, FrameLabelLayer } from './FrameLabelLayer'
 import { pixelGridLines } from './PixelGrid'
 import { layoutZoomFor } from '../lib/layoutZoom'
 import { useT, type PlainMessageKey } from '../lib/i18n'
-import { NO_INSETS, fitBox, type StageInsets } from '../lib/viewFit'
+import { NO_INSETS, fitBox, fitColumnStart, type StageInsets } from '../lib/viewFit'
 import { spaceWouldScroll } from '../lib/spaceScroll'
 import { ZOOM_DRAG_MIN, ZOOM_TOOL_STEP, zoomAtPoint, zoomToBox } from '../lib/zoomTool'
 
@@ -61,6 +62,7 @@ const MIN_ZOOM = 0.08
    viewport rather than the zoom, and frame documents never re-lay out (each
    iframe undoes the zoom). Mirrored by FOLLOW_MAX_ZOOM. */
 const MAX_ZOOM = 16
+const MAX_PAGE_CAMERAS = 64
 
 /* The Comment tool's cursor wins over everything under the stage — frames
    included, like the Hand tool's grab — except inside the comment UI itself
@@ -235,6 +237,7 @@ export function Stage({
   const gridRef = useRef<HTMLDivElement>(null)
   const pixelGridRef = useRef<HTMLDivElement>(null)
   const [labelLayer, setLabelLayer] = useState<HTMLDivElement | null>(null)
+  const [threadLayer, setThreadLayer] = useState<HTMLDivElement | null>(null)
   const zoomLabelRef = useRef<HTMLSpanElement>(null)
   const setViewport = useStore((s) => s.setViewport)
   const canvas = usePageCanvas()
@@ -275,16 +278,14 @@ export function Stage({
      per-frame viewport writes */
   const [layoutZoom, setLayoutZoom] = useState(1)
   const layoutZoomRef = useRef(1)
-  const fitted = useRef(false)
+  const pageCameras = useRef(new Map<string, Viewport>())
+  const cameraPage = useRef<string | null>(null)
   const deepLinkHandled = useRef(false)
-  const focusedPage = useRef<string | null>(null)
   const [linkSearch, setLinkSearch] = useState(location.search)
 
   useEffect(() => {
     function onPop() {
-      fitted.current = false
       deepLinkHandled.current = false
-      focusedPage.current = null
       setLinkSearch(location.search)
     }
     window.addEventListener('popstate', onPop)
@@ -334,6 +335,20 @@ export function Stage({
     apply(useStore.getState().viewport)
     let settle = 0
     const unsub = useStore.subscribe((s, prev) => {
+      const sameCanvas = s.canvas?.id === prev.canvas?.id
+      if (!sameCanvas) pageCameras.current.clear()
+      if (!sameCanvas || s.activePageId !== prev.activePageId) {
+        /* The incoming viewport may already be reset; save the outgoing one. */
+        const page = sameCanvas ? prev.activePageId : null
+        if (page && page === cameraPage.current && !prev.following) {
+          const views = pageCameras.current
+          views.delete(page)
+          views.set(page, prev.viewport)
+          if (views.size > MAX_PAGE_CAMERAS) views.delete(views.keys().next().value!)
+        }
+        cameraPage.current = null
+        refitRef.current = null
+      }
       /* a (re)connect needs the camera announced afresh — the server only
          knows what this socket has sent */
       if (s.connected && !prev.connected && ref.current) sendViewport(s.viewport, ref.current)
@@ -489,7 +504,7 @@ export function Stage({
       const el = ref.current
       if (!el) return
       select(f.id)
-      focusedPage.current = useStore.getState().activePageId
+      cameraPage.current = useStore.getState().activePageId
       const fit = () => setViewport(fitView(el, f, 1))
       fit()
       refitRef.current = fit
@@ -515,8 +530,8 @@ export function Stage({
       const el = ref.current
       if (!el) return
       const s = useStore.getState()
-      focusedPage.current = c.pageId
       s.setActivePage(c.pageId)
+      cameraPage.current = c.pageId
       setViewport({ x: el.clientWidth / 2 - c.x, y: el.clientHeight / 2 - c.y, zoom: 1 })
       s.requestOpenThread(c.id)
     },
@@ -526,7 +541,7 @@ export function Stage({
   /* fit a set of frames (with their name labels above) into the open part
      of the view; an empty set resets to the origin at 100% */
   const fitFrames = useCallback(
-    (frames: { x: number; y: number; width: number; height: number }[]) => {
+    (frames: { x: number; y: number; width: number; height: number }[], entering = false) => {
       const el = ref.current
       if (!el) return
       if (!frames.length) {
@@ -534,11 +549,32 @@ export function Stage({
         setViewport({ x: left + 80, y: top + 80, zoom: 1 })
         return
       }
-      const minX = Math.min(...frames.map((f) => f.x))
-      const minY = Math.min(...frames.map((f) => f.y - 30))
-      const maxX = Math.max(...frames.map((f) => f.x + f.width))
-      const maxY = Math.max(...frames.map((f) => f.y + f.height))
-      setViewport(fitView(el, { x: minX, y: minY, width: maxX - minX, height: maxY - minY }, 1.25))
+      let minX = Infinity
+      let minY = Infinity
+      let maxX = -Infinity
+      let maxY = -Infinity
+      let columnLeft = -Infinity
+      let columnRight = Infinity
+      for (const f of frames) {
+        const right = f.x + f.width
+        minX = Math.min(minX, f.x)
+        minY = Math.min(minY, f.y - 30)
+        maxX = Math.max(maxX, right)
+        maxY = Math.max(maxY, f.y + f.height)
+        if (entering) {
+          columnLeft = Math.max(columnLeft, f.x)
+          columnRight = Math.min(columnRight, right)
+        }
+      }
+      const box = { x: minX, y: minY, width: maxX - minX, height: maxY - minY }
+      const start =
+        entering && columnLeft < columnRight
+          ? fitColumnStart(box, { width: el.clientWidth, height: el.clientHeight }, insetsRef.current, {
+              min: MIN_ZOOM,
+              max: 1,
+            })
+          : null
+      setViewport(start ?? fitView(el, box, 1.25))
     },
     [setViewport, fitView],
   )
@@ -556,45 +592,49 @@ export function Stage({
     if (frames.length) fitFrames(frames)
   }, [fitFrames])
 
-  useEffect(() => {
-    fitted.current = focusedPage.current === activePageId
-    focusedPage.current = null
-  }, [activePageId])
-
-  /* zoom-to-fit once the canvas arrives — unless the URL deep-links a frame,
-     a comment pinned to the canvas, or a page */
-  useEffect(() => {
-    if (!canvas || fitted.current) return
-    fitted.current = true
-    if (useStore.getState().following) return
+  /* On page entry a link wins over the saved camera, which wins over the
+     first-visit view. Lay it out before the new page paints. */
+  useLayoutEffect(() => {
+    if (!canvas || !activePageId || (deepLinkHandled.current && cameraPage.current === activePageId)) return
+    const state = useStore.getState()
+    if (state.following) {
+      cameraPage.current = activePageId
+      return
+    }
     const params = deepLinkHandled.current ? null : new URLSearchParams(linkSearch)
-    const focusId = params?.get('frame')
-    const target = focusId ? useStore.getState().canvas?.frames.find((f) => f.id === focusId) : null
+    deepLinkHandled.current = true
+    /* a thread moved since its link was made is where it is now: the
+       linked root's own frame wins over the one the link names */
+    const linkedId = params?.get('comment')
+    const linked = linkedId ? state.comments.find((c) => c.id === linkedId && !c.parentId) : undefined
+    const focusId = linked ? linked.frameId : params?.get('frame')
+    const target = focusId ? state.canvas?.frames.find((f) => f.id === focusId) : null
     if (target) {
-      deepLinkHandled.current = true
       const element = params?.get('element')
       focusFrame(target, isElementId(element) ? elementIdSelector(element) : null)
+      /* the frame may be on another page, mounting already selected and
+         with the page switch's URL: ask its view to open the thread */
+      if (linked) useStore.getState().requestOpenThread(linked.id)
       return
     }
     const pinned = params ? linkedCanvasComment(params.get('comment')) : null
     if (pinned) {
-      deepLinkHandled.current = true
       focusPoint(pinned)
       return
     }
     const page = params?.get('page')
-    const whole = useStore.getState().canvas
-    if (page && whole && canvasPages(whole).some((p) => p.id === page)) {
-      /* answered once: a page the person switches to later is theirs */
-      deepLinkHandled.current = true
-      if (page !== activePageId) {
-        /* the page switch re-runs this effect, which then fits that page */
-        useStore.getState().setActivePage(page)
-        return
-      }
+    const whole = state.canvas
+    if (page && whole && page !== activePageId && canvasPages(whole).some((p) => p.id === page)) {
+      /* The page switch re-runs this effect on the requested page. */
+      useStore.getState().setActivePage(page)
+      return
     }
-    fit()
-  }, [canvas, activePageId, fit, focusFrame, focusPoint, linkSearch])
+    if (cameraPage.current === activePageId) return
+    cameraPage.current = activePageId
+    const saved = pageCameras.current.get(activePageId)
+    if (saved) setViewport(saved)
+    else fitFrames(canvas.frames, true)
+  }, [canvas, activePageId, fitFrames, focusFrame, focusPoint, linkSearch, setViewport])
 
   /* wheel: pan / pinch-zoom — needs a non-passive listener. Trackpads fire
      wheel events faster than the display refreshes, so deltas accumulate and
@@ -1170,27 +1210,33 @@ export function Stage({
               className="world absolute left-0 top-0 origin-top-left will-change-transform data-rezoom:**:transition-none!"
               ref={worldRef}
             >
-              <FrameLabelLayer.Provider value={labelLayer}>
-                <FrameStack frames={canvas?.frames ?? []} layoutZoom={layoutZoom} />
-              </FrameLabelLayer.Provider>
-              <GhostFrames />
-              <FlowOverlay />
-              <GuideLines stage={ref} />
-              <PrototypeOverlay />
-              <SnapGuides />
-              <CanvasComments composeAt={composeAt} onComposeDone={dismissCompose} />
-              {showCursors && <Cursors />}
-              {drawing.preview}
-              {marquee && (
-                <div
-                  className="pointer-events-none absolute bg-brand/10 [box-shadow:inset_0_0_0_calc(1px/var(--zoom,1))_var(--brand)]"
-                  style={{ left: marquee.x, top: marquee.y, width: marquee.width, height: marquee.height }}
-                />
-              )}
+              <CommentThreadLayer.Provider value={threadLayer}>
+                <FrameLabelLayer.Provider value={labelLayer}>
+                  <FrameStack frames={canvas?.frames ?? []} layoutZoom={layoutZoom} />
+                </FrameLabelLayer.Provider>
+                <GhostFrames />
+                <FlowOverlay />
+                <GuideLines stage={ref} />
+                <PrototypeOverlay />
+                <SnapGuides />
+                <MeasureOverlay />
+                <CanvasComments composeAt={composeAt} onComposeDone={dismissCompose} />
+                {showCursors && <Cursors />}
+                {drawing.preview}
+                {marquee && (
+                  <div
+                    className="pointer-events-none absolute bg-brand/10 [box-shadow:inset_0_0_0_calc(1px/var(--zoom,1))_var(--brand)]"
+                    style={{ left: marquee.x, top: marquee.y, width: marquee.width, height: marquee.height }}
+                  />
+                )}
+              </CommentThreadLayer.Provider>
             </div>
             {/* the selected frame's size badge, in screen px (FrameLabelLayer); after
                 the world so no frame, however it stacks, covers it */}
             <div className="pointer-events-none absolute inset-0" ref={setLabelLayer} />
+            {/* an open comment thread, in screen px above the badges, so no
+                badge covers it; CommentPin keeps it on its pin */}
+            <div data-comment-ui className="pointer-events-none absolute inset-0" ref={setThreadLayer} />
             {showRulers && <Rulers stage={ref} />}
           </div>
         </ContextMenuTrigger>

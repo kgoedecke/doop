@@ -101,6 +101,8 @@ export function CanvasComments({
     }
     function onPress(e: PointerEvent) {
       if (rootRef.current?.contains(e.target as Node)) return
+      /* an open thread is portalled out of this root (CommentPin) */
+      if (e.target instanceof Element && e.target.closest('[data-comment-thread-anchor]')) return
       close()
     }
     window.addEventListener('keydown', onKey)
@@ -111,10 +113,10 @@ export function CanvasComments({
     }
   }, [anyOpen, close])
 
-  function post(text: string) {
+  function post(text: string, mentions: string[]) {
     if (!canvasId || !pageId || !composeAt) return
     api
-      .addCanvasComment(canvasId, { pageId, x: composeAt.x, y: composeAt.y, text })
+      .addCanvasComment(canvasId, { pageId, x: composeAt.x, y: composeAt.y, text, mentions })
       .then(() => posthog.capture('canvas_comment_created'))
       .catch(reportLimit)
     onComposeDone()
@@ -144,9 +146,9 @@ export function CanvasComments({
           >
             <CommentThread
               thread={thread}
-              onReply={(text) =>
+              onReply={(text, mentions) =>
                 api
-                  .replyComment(c.id, text)
+                  .replyComment(c.id, text, mentions)
                   .then(() => posthog.capture('element_comment_replied'))
                   .catch((err) => {
                     /* the wall explains a hit limit; anything else surfaces

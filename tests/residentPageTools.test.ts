@@ -22,7 +22,7 @@ const { store } = await import('../server/store.ts')
 const { deliveredWork, execTool, newRunState } = await import('../server/resident.ts')
 const { findBrowserPath } = await import('../server/screenshot.ts')
 const { holdNextMeasure } = await import('./measureGate.ts')
-const { canvasPages, framePageId } = await import('../shared/pages.ts')
+const { canvasPages, framePageId, MAX_CANVAS_NAME } = await import('../shared/pages.ts')
 const { DEFAULT_ROLE_ID, roleName } = await import('../shared/agents.ts')
 
 const actor = () => actions.resolveActor({ name: roleName(DEFAULT_ROLE_ID), kind: 'agent' })
@@ -104,6 +104,24 @@ describe('the resident agent reorganizes pages', () => {
     expect(result.is_error).toBe(true)
     expect(String(result.content)).toContain('Mobile')
     expect(pages()).toHaveLength(2)
+  })
+
+  it('renames the canvas, and counts it as delivered only when the name changed', async () => {
+    const runState = run()
+    const result = await execTool(call('update_canvas', { name: ' Launch ' }), canvasId, actor(), runState)
+    expect(result.is_error).toBeUndefined()
+    expect(canvas().name).toBe('Launch')
+    expect(deliveredWork(runState)).toBe(true)
+
+    const again = run()
+    await execTool(call('update_canvas', { name: 'Launch' }), canvasId, actor(), again)
+    expect(deliveredWork(again)).toBe(false)
+
+    for (const name of ['  ', 'x'.repeat(MAX_CANVAS_NAME + 1)]) {
+      const refused = await execTool(call('update_canvas', { name }), canvasId, actor(), run())
+      expect(refused.is_error).toBe(true)
+    }
+    expect(canvas().name).toBe('Launch')
   })
 
   it('does not count a frame save that changed nothing as delivered work', async () => {

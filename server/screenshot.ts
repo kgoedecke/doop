@@ -226,201 +226,419 @@ export interface FrameInspection {
   }
   elements: Array<{
     selector: string
+    /** the selector asked for that found this element (inspect with `selectors`) */
+    matched?: string
     tag: string
     role?: string
     text?: string
     rect: { x: number; y: number; width: number; height: number }
     style: { color: string; background: string; font: string; fontSize: string; fontWeight: string }
   }>
+  /** asked-for selectors that matched nothing visible, or are not valid CSS */
+  unmatched?: Array<{ selector: string; reason: 'no visible match' | 'invalid selector' }>
+  /** layout faults a reviewer would flag, at most MAX_PROBLEMS of them */
+  problems: InspectionProblem[]
+  problemCount: number
+}
+
+export interface InspectionProblem {
+  /** off-frame: past the frame's edge, where the canvas cuts it off; clipped: content cut
+   *  off by its own box (overflow hidden, an ellipsis); overlap: two pieces of text or
+   *  controls on top of each other */
+  type: 'off-frame' | 'clipped' | 'overlap'
+  selector: string
+  /** the other element of an overlap */
+  other?: string
+  text?: string
+  rect: { x: number; y: number; width: number; height: number }
+  detail: string
+}
+
+export interface InspectOptions {
+  /** CSS selectors to report on instead of the automatic outline (up to 20 matches each) */
+  selectors?: string[]
 }
 
 /** A compact, rendered representation for agents. It intentionally relies on
  * visible text, semantics, geometry and computed styles rather than classes. */
-export function inspectFrame(frame: Frame): Promise<FrameInspection> {
-  return renderer.withPage('inspecting the frame', RENDER_TIMEOUT_MS, (page) => inspectOn(page, frame))
+export function inspectFrame(frame: Frame, options: InspectOptions = {}): Promise<FrameInspection> {
+  return renderer.withPage('inspecting the frame', RENDER_TIMEOUT_MS, (page) => inspectOn(page, frame, options))
 }
 
-async function inspectOn(page: Page, frame: Frame): Promise<FrameInspection> {
+const MAX_PROBLEMS = 30
+
+async function inspectOn(page: Page, frame: Frame, options: InspectOptions): Promise<FrameInspection> {
   await loadFrameInto(page, frame)
   {
     await installNameShim(page)
-    const inspection = await page.evaluate(() => {
-      const MAX_ELEMENTS = 64
-      const MAX_STYLE_SAMPLES = 500
-      const semanticTags = new Set([
-        'header',
-        'nav',
-        'main',
-        'section',
-        'article',
-        'aside',
-        'footer',
-        'h1',
-        'h2',
-        'h3',
-        'h4',
-        'h5',
-        'h6',
-        'p',
-        'a',
-        'button',
-        'input',
-        'textarea',
-        'select',
-        'form',
-        'img',
-        'ul',
-        'ol',
-        'table',
-      ])
+    const inspection = await page.evaluate(
+      ({ asked, frameWidth, frameHeight, maxProblems }) => {
+        const MAX_ELEMENTS = 64
+        const MAX_STYLE_SAMPLES = 500
+        const semanticTags = new Set([
+          'header',
+          'nav',
+          'main',
+          'section',
+          'article',
+          'aside',
+          'footer',
+          'h1',
+          'h2',
+          'h3',
+          'h4',
+          'h5',
+          'h6',
+          'p',
+          'a',
+          'button',
+          'input',
+          'textarea',
+          'select',
+          'form',
+          'img',
+          'ul',
+          'ol',
+          'table',
+        ])
 
-      function visible(el: Element): el is HTMLElement {
-        if (!(el instanceof HTMLElement)) return false
-        const style = getComputedStyle(el)
-        const rect = el.getBoundingClientRect()
-        return (
-          style.display !== 'none' &&
-          style.visibility !== 'hidden' &&
-          Number(style.opacity) > 0 &&
-          rect.width > 1 &&
-          rect.height > 1
-        )
-      }
+        function visible(el: Element): el is HTMLElement {
+          if (!(el instanceof HTMLElement)) return false
+          const style = getComputedStyle(el)
+          const rect = el.getBoundingClientRect()
+          return (
+            style.display !== 'none' &&
+            style.visibility !== 'hidden' &&
+            Number(style.opacity) > 0 &&
+            rect.width > 1 &&
+            rect.height > 1
+          )
+        }
 
-      function selectorFor(el: Element): string {
-        const doopId = el.getAttribute('data-doop-id')
-        if (doopId) return `[data-doop-id="${doopId}"]`
-        if (el.id && el.id.length < 80) return `#${CSS.escape(el.id)}`
-        const parts: string[] = []
-        let node: Element | null = el
-        while (node && node !== document.body && parts.length < 7) {
-          const tag = node.tagName.toLowerCase()
-          const parent: Element | null = node.parentElement
-          if (!parent) {
-            parts.unshift(tag)
-            break
+        function selectorFor(el: Element): string {
+          const doopId = el.getAttribute('data-doop-id')
+          if (doopId) return `[data-doop-id="${doopId}"]`
+          if (el.id && el.id.length < 80) return `#${CSS.escape(el.id)}`
+          const parts: string[] = []
+          let node: Element | null = el
+          while (node && node !== document.body && parts.length < 7) {
+            const tag = node.tagName.toLowerCase()
+            const parent: Element | null = node.parentElement
+            if (!parent) {
+              parts.unshift(tag)
+              break
+            }
+            const sameTag = Array.from(parent.children).filter((child: Element) => child.tagName === node!.tagName)
+            const suffix = sameTag.length > 1 ? `:nth-of-type(${sameTag.indexOf(node) + 1})` : ''
+            parts.unshift(tag + suffix)
+            node = parent
           }
-          const sameTag = Array.from(parent.children).filter((child: Element) => child.tagName === node!.tagName)
-          const suffix = sameTag.length > 1 ? `:nth-of-type(${sameTag.indexOf(node) + 1})` : ''
-          parts.unshift(tag + suffix)
-          node = parent
+          return `body > ${parts.join(' > ')}`
         }
-        return `body > ${parts.join(' > ')}`
-      }
 
-      function cleanText(value: string | null | undefined, max = 180): string | undefined {
-        const text = (value || '').replace(/\s+/g, ' ').trim()
-        if (!text) return undefined
-        return text.length > max ? `${text.slice(0, max - 1)}…` : text
-      }
-
-      function normalizedColor(value: string): string | undefined {
-        if (!value || value === 'rgba(0, 0, 0, 0)' || value === 'transparent') return undefined
-        return value
-      }
-
-      const counts = {
-        colors: new Map<string, number>(),
-        backgrounds: new Map<string, number>(),
-        fonts: new Map<string, number>(),
-        fontSizes: new Map<string, number>(),
-        radii: new Map<string, number>(),
-        shadows: new Map<string, number>(),
-      }
-      const bump = (map: Map<string, number>, value?: string) => {
-        if (value) map.set(value, (map.get(value) || 0) + 1)
-      }
-
-      const all = Array.from(document.body.querySelectorAll('*')).filter(visible)
-      for (const el of all.slice(0, MAX_STYLE_SAMPLES)) {
-        const style = getComputedStyle(el)
-        bump(counts.colors, normalizedColor(style.color))
-        bump(counts.backgrounds, normalizedColor(style.backgroundColor))
-        bump(counts.fonts, style.fontFamily)
-        bump(counts.fontSizes, style.fontSize)
-        if (style.borderRadius !== '0px') bump(counts.radii, style.borderRadius)
-        if (style.boxShadow !== 'none') bump(counts.shadows, style.boxShadow)
-      }
-
-      const semantic = all
-        .filter((el) => semanticTags.has(el.tagName.toLowerCase()) || !!el.getAttribute('role'))
-        .sort((a, b) => a.getBoundingClientRect().top - b.getBoundingClientRect().top)
-      const candidates: HTMLElement[] = []
-      const selected = new Set<HTMLElement>()
-      const take = (limit: number, predicate: (el: HTMLElement) => boolean) => {
-        for (const el of semantic) {
-          if (candidates.length >= MAX_ELEMENTS || limit <= 0) break
-          if (selected.has(el) || !predicate(el)) continue
-          selected.add(el)
-          candidates.push(el)
-          limit--
+        function cleanText(value: string | null | undefined, max = 180): string | undefined {
+          const text = (value || '').replace(/\s+/g, ' ').trim()
+          if (!text) return undefined
+          return text.length > max ? `${text.slice(0, max - 1)}…` : text
         }
-      }
-      take(18, (el) =>
-        ['header', 'nav', 'main', 'section', 'article', 'aside', 'footer'].includes(el.tagName.toLowerCase()),
-      )
-      take(16, (el) => /^h[1-6]$/.test(el.tagName.toLowerCase()))
-      take(
-        16,
-        (el) =>
-          ['button', 'a', 'input', 'textarea', 'select', 'form'].includes(el.tagName.toLowerCase()) ||
-          !!el.getAttribute('role'),
-      )
-      take(14, (el) => ['p', 'img', 'ul', 'ol', 'table'].includes(el.tagName.toLowerCase()))
-      take(MAX_ELEMENTS - candidates.length, () => true)
 
-      const elements = candidates.map((el) => {
-        const rect = el.getBoundingClientRect()
-        const style = getComputedStyle(el)
-        const image = el instanceof HTMLImageElement ? cleanText(el.alt || el.getAttribute('aria-label')) : undefined
+        function normalizedColor(value: string): string | undefined {
+          if (!value || value === 'rgba(0, 0, 0, 0)' || value === 'transparent') return undefined
+          return value
+        }
+
+        const counts = {
+          colors: new Map<string, number>(),
+          backgrounds: new Map<string, number>(),
+          fonts: new Map<string, number>(),
+          fontSizes: new Map<string, number>(),
+          radii: new Map<string, number>(),
+          shadows: new Map<string, number>(),
+        }
+        const bump = (map: Map<string, number>, value?: string) => {
+          if (value) map.set(value, (map.get(value) || 0) + 1)
+        }
+
+        const all = Array.from(document.body.querySelectorAll('*')).filter(visible)
+        for (const el of all.slice(0, MAX_STYLE_SAMPLES)) {
+          const style = getComputedStyle(el)
+          bump(counts.colors, normalizedColor(style.color))
+          bump(counts.backgrounds, normalizedColor(style.backgroundColor))
+          bump(counts.fonts, style.fontFamily)
+          bump(counts.fontSizes, style.fontSize)
+          if (style.borderRadius !== '0px') bump(counts.radii, style.borderRadius)
+          if (style.boxShadow !== 'none') bump(counts.shadows, style.boxShadow)
+        }
+
+        const semantic = all
+          .filter((el) => semanticTags.has(el.tagName.toLowerCase()) || !!el.getAttribute('role'))
+          .sort((a, b) => a.getBoundingClientRect().top - b.getBoundingClientRect().top)
+        const candidates: HTMLElement[] = []
+        const selected = new Set<HTMLElement>()
+        const take = (limit: number, predicate: (el: HTMLElement) => boolean) => {
+          for (const el of semantic) {
+            if (candidates.length >= MAX_ELEMENTS || limit <= 0) break
+            if (selected.has(el) || !predicate(el)) continue
+            selected.add(el)
+            candidates.push(el)
+            limit--
+          }
+        }
+        take(18, (el) =>
+          ['header', 'nav', 'main', 'section', 'article', 'aside', 'footer'].includes(el.tagName.toLowerCase()),
+        )
+        take(16, (el) => /^h[1-6]$/.test(el.tagName.toLowerCase()))
+        take(
+          16,
+          (el) =>
+            ['button', 'a', 'input', 'textarea', 'select', 'form'].includes(el.tagName.toLowerCase()) ||
+            !!el.getAttribute('role'),
+        )
+        take(14, (el) => ['p', 'img', 'ul', 'ol', 'table'].includes(el.tagName.toLowerCase()))
+        take(MAX_ELEMENTS - candidates.length, () => true)
+
+        /* with selectors, the elements they find in place of the automatic outline */
+        const matchedBy = new Map<HTMLElement, string>()
+        const unmatched: Array<{ selector: string; reason: 'no visible match' | 'invalid selector' }> = []
+        if (asked.length) {
+          candidates.length = 0
+          for (const query of asked) {
+            let found: HTMLElement[]
+            try {
+              found = Array.from(document.querySelectorAll(query)).filter(visible).slice(0, 20)
+            } catch {
+              unmatched.push({ selector: query, reason: 'invalid selector' })
+              continue
+            }
+            if (!found.length) unmatched.push({ selector: query, reason: 'no visible match' })
+            for (const el of found) {
+              /* each asked-for selector gets its 20, not a share of the outline's limit */
+              if (matchedBy.has(el)) continue
+              matchedBy.set(el, query)
+              candidates.push(el)
+            }
+          }
+        }
+
+        const boxOf = (rect: DOMRect) => ({
+          x: Math.round(rect.left + scrollX),
+          y: Math.round(rect.top + scrollY),
+          width: Math.round(rect.width),
+          height: Math.round(rect.height),
+        })
+
+        /* Layout faults. Text and controls are what a reader notices, so overlaps are
+         checked between them only: an element with text of its own, an image or a
+         control, never one inside the other. */
+        const problems: Array<{
+          type: 'off-frame' | 'clipped' | 'overlap'
+          selector: string
+          other?: string
+          text?: string
+          rect: { x: number; y: number; width: number; height: number }
+          detail: string
+        }> = []
+        let problemCount = 0
+        const report = (problem: (typeof problems)[number]) => {
+          problemCount++
+          if (problems.length < maxProblems) problems.push(problem)
+        }
+        const ownText = (el: Element) =>
+          Array.from(el.childNodes).some((node) => node.nodeType === Node.TEXT_NODE && !!node.textContent?.trim())
+
+        /* what is left of an element's box once every clipping ancestor has cut it */
+        const shownRect = (el: Element): DOMRect => {
+          let { left, top, right, bottom } = el.getBoundingClientRect()
+          for (let node = el.parentElement; node; node = node.parentElement) {
+            const style = getComputedStyle(node)
+            if (style.overflowX === 'visible' && style.overflowY === 'visible') continue
+            const clip = node.getBoundingClientRect()
+            left = Math.max(left, clip.left)
+            top = Math.max(top, clip.top)
+            right = Math.min(right, clip.right)
+            bottom = Math.min(bottom, clip.bottom)
+          }
+          return new DOMRect(left, top, Math.max(0, right - left), Math.max(0, bottom - top))
+        }
+        const leaves = all.filter(
+          (el) =>
+            ownText(el) ||
+            ['img', 'svg', 'button', 'input', 'textarea', 'select', 'video'].includes(el.tagName.toLowerCase()),
+        )
+        /* Past the left or right edge: each element, since each is its own fix. Past the
+           bottom: one line for the lot, since it is one fix (the frame's height or the
+           page's length), led by the first element it cuts. */
+        let below: { el: HTMLElement; box: ReturnType<typeof boxOf> } | undefined
+        let belowCount = 0
+        let lowest = 0
+        for (const el of leaves) {
+          const box = boxOf(shownRect(el))
+          if (!box.width || !box.height) continue
+          const sides = [
+            box.x < -1 && `${-box.x}px past the left edge`,
+            box.x + box.width > frameWidth + 1 && `${box.x + box.width - frameWidth}px past the right edge`,
+          ].filter(Boolean)
+          if (sides.length)
+            report({
+              type: 'off-frame',
+              selector: selectorFor(el),
+              text: cleanText(el.innerText, 80),
+              rect: box,
+              detail: sides.join(', '),
+            })
+          if (box.y + box.height > frameHeight + 1) {
+            belowCount++
+            lowest = Math.max(lowest, box.y + box.height)
+            if (!below || box.y < below.box.y) below = { el, box }
+          }
+        }
+        if (below)
+          report({
+            type: 'off-frame',
+            selector: selectorFor(below.el),
+            text: cleanText(below.el.innerText, 80),
+            rect: below.box,
+            detail: `content runs ${lowest - frameHeight}px below the frame's ${frameHeight}px height (${belowCount} element${
+              belowCount === 1 ? '' : 's'
+            }, from this one down): raise the frame's height or shorten the content`,
+          })
+        /* text its own box cuts off; an image a rounded card crops is meant to be */
+        const texts = leaves.filter(ownText)
+        for (const el of all) {
+          const style = getComputedStyle(el)
+          if (style.overflowX === 'visible' && style.overflowY === 'visible') continue
+          if (['auto', 'scroll'].includes(style.overflowX) || ['auto', 'scroll'].includes(style.overflowY)) continue
+          const bounds = el.getBoundingClientRect()
+          const cut = texts.find((text) => {
+            if (text !== el && !el.contains(text)) return false
+            const rect = text.getBoundingClientRect()
+            return (
+              rect.right > bounds.right + 1 ||
+              rect.bottom > bounds.bottom + 1 ||
+              rect.left < bounds.left - 1 ||
+              (text === el && (text.scrollWidth > text.clientWidth + 1 || text.scrollHeight > text.clientHeight + 1))
+            )
+          })
+          if (!cut) continue
+          report({
+            type: 'clipped',
+            selector: selectorFor(el),
+            text: cleanText(cut.innerText, 80),
+            rect: boxOf(bounds),
+            detail:
+              style.textOverflow === 'ellipsis'
+                ? 'text cut off with an ellipsis'
+                : 'text cut off by the box (overflow)',
+          })
+        }
+        /* each line box of wrapped inline text, not the box around all its lines, which
+           covers whatever sits beside the first and last line */
+        const sized = leaves.slice(0, 400).map((el) => {
+          const shown = shownRect(el)
+          const lines = Array.from(el.getClientRects())
+            .map((r) => {
+              const left = Math.max(r.left, shown.left)
+              const top = Math.max(r.top, shown.top)
+              const right = Math.min(r.right, shown.right)
+              const bottom = Math.min(r.bottom, shown.bottom)
+              return new DOMRect(left, top, right - left, bottom - top)
+            })
+            .filter((r) => r.width > 0 && r.height > 0)
+          return { el, shown, lines }
+        })
+        const overlapOf = (a: DOMRect[], b: DOMRect[]) => {
+          for (const x of a)
+            for (const y of b) {
+              const w = Math.min(x.right, y.right) - Math.max(x.left, y.left)
+              const h = Math.min(x.bottom, y.bottom) - Math.max(x.top, y.top)
+              /* a few px is a tight line height or a hairline, not an overlap */
+              if (w > 4 && h > 4) return { w, h }
+            }
+          return undefined
+        }
+        for (let i = 0; i < sized.length; i++) {
+          for (let j = i + 1; j < sized.length; j++) {
+            const a = sized[i]!
+            const b = sized[j]!
+            if (a.el.contains(b.el) || b.el.contains(a.el)) continue
+            const hit = overlapOf(a.lines, b.lines)
+            if (!hit) continue
+            report({
+              type: 'overlap',
+              selector: selectorFor(a.el),
+              other: selectorFor(b.el),
+              text: cleanText(a.el.innerText, 80),
+              rect: boxOf(a.shown),
+              detail: `overlaps ${b.el.tagName.toLowerCase()}${
+                cleanText(b.el.innerText, 40) ? ` "${cleanText(b.el.innerText, 40)}"` : ''
+              } by ${Math.round(hit.w)}×${Math.round(hit.h)}px`,
+            })
+          }
+        }
+
+        const elements = candidates.map((el) => {
+          const rect = el.getBoundingClientRect()
+          const style = getComputedStyle(el)
+          const image = el instanceof HTMLImageElement ? cleanText(el.alt || el.getAttribute('aria-label')) : undefined
+          return {
+            selector: selectorFor(el),
+            ...(matchedBy.has(el) ? { matched: matchedBy.get(el) } : {}),
+            tag: el.tagName.toLowerCase(),
+            role: el.getAttribute('role') || undefined,
+            text: image || cleanText(el.innerText || el.getAttribute('aria-label') || el.getAttribute('placeholder')),
+            rect: {
+              x: Math.round(rect.left + scrollX),
+              y: Math.round(rect.top + scrollY),
+              width: Math.round(rect.width),
+              height: Math.round(rect.height),
+            },
+            style: {
+              color: style.color,
+              background: style.backgroundColor,
+              font: style.fontFamily,
+              fontSize: style.fontSize,
+              fontWeight: style.fontWeight,
+            },
+          }
+        })
+
+        const top = (map: Map<string, number>, limit: number) =>
+          [...map.entries()]
+            .sort((a, b) => b[1] - a[1])
+            .slice(0, limit)
+            .map(([value]) => value)
+        const rootStyle = getComputedStyle(document.documentElement)
+        const cssVariables: Record<string, string> = {}
+        for (const name of Array.from(rootStyle)) {
+          if (!name.startsWith('--') || Object.keys(cssVariables).length >= 40) continue
+          const value = rootStyle.getPropertyValue(name).trim()
+          if (value && value.length <= 160) cssVariables[name] = value
+        }
+
         return {
-          selector: selectorFor(el),
-          tag: el.tagName.toLowerCase(),
-          role: el.getAttribute('role') || undefined,
-          text: image || cleanText(el.innerText || el.getAttribute('aria-label') || el.getAttribute('placeholder')),
-          rect: {
-            x: Math.round(rect.left + scrollX),
-            y: Math.round(rect.top + scrollY),
-            width: Math.round(rect.width),
-            height: Math.round(rect.height),
+          title: document.title,
+          design: {
+            colors: top(counts.colors, 10),
+            backgrounds: top(counts.backgrounds, 10),
+            fonts: top(counts.fonts, 8),
+            fontSizes: top(counts.fontSizes, 10),
+            radii: top(counts.radii, 8),
+            shadows: top(counts.shadows, 6),
+            cssVariables,
           },
-          style: {
-            color: style.color,
-            background: style.backgroundColor,
-            font: style.fontFamily,
-            fontSize: style.fontSize,
-            fontWeight: style.fontWeight,
-          },
+          elements,
+          unmatched,
+          problems,
+          problemCount,
         }
-      })
-
-      const top = (map: Map<string, number>, limit: number) =>
-        [...map.entries()]
-          .sort((a, b) => b[1] - a[1])
-          .slice(0, limit)
-          .map(([value]) => value)
-      const rootStyle = getComputedStyle(document.documentElement)
-      const cssVariables: Record<string, string> = {}
-      for (const name of Array.from(rootStyle)) {
-        if (!name.startsWith('--') || Object.keys(cssVariables).length >= 40) continue
-        const value = rootStyle.getPropertyValue(name).trim()
-        if (value && value.length <= 160) cssVariables[name] = value
-      }
-
-      return {
-        title: document.title,
-        design: {
-          colors: top(counts.colors, 10),
-          backgrounds: top(counts.backgrounds, 10),
-          fonts: top(counts.fonts, 8),
-          fontSizes: top(counts.fontSizes, 10),
-          radii: top(counts.radii, 8),
-          shadows: top(counts.shadows, 6),
-          cssVariables,
-        },
-        elements,
-      }
-    })
+      },
+      {
+        asked: (options.selectors ?? []).slice(0, 20),
+        frameWidth: Math.round(frame.width),
+        frameHeight: Math.round(frame.height),
+        maxProblems: MAX_PROBLEMS,
+      },
+    )
 
     return {
       document: {
@@ -431,6 +649,9 @@ async function inspectOn(page: Page, frame: Frame): Promise<FrameInspection> {
       },
       design: inspection.design,
       elements: inspection.elements,
+      ...(inspection.unmatched.length ? { unmatched: inspection.unmatched } : {}),
+      problems: inspection.problems,
+      problemCount: inspection.problemCount,
     }
   }
 }

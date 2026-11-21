@@ -1,5 +1,6 @@
 /* Doop in the desktop shell (desktop/src-tauri). The shell is one webview
-   with an overlay title bar; canvases open Figma-style in a tab strip the
+   with an overlay title bar (on Windows, a frame the page draws:
+   windowFrame.ts); canvases open Figma-style in a tab strip the
    web app draws itself (src/components/DesktopTabs.tsx). Tabs are ordinary
    in-page navigations — this module only keeps the strip's state and the
    shell-specific plumbing. In a plain browser every entry point returns
@@ -19,6 +20,7 @@ import {
   rememberPendingSignIn,
 } from './desktopAuth'
 import { isDesktopShell } from './shell'
+import { initWindowFrame } from './windowFrame'
 import { codexSetupTarget } from './codexConnection'
 import { forgetPendingConnect, isPendingConnect, parseDesktopConnectLink } from './desktopConnect'
 import { safeRelativeTarget } from './safeTarget'
@@ -334,6 +336,8 @@ export function openExternal(url: string): boolean {
  *  browser instead. Runs once from main.tsx; no-op outside the shell. */
 export function initDesktopShell() {
   if (!isDesktopShell()) return
+  /* Windows: the page's caption buttons take over from the native frame */
+  initWindowFrame().catch(console.error)
   /* Cmd+W: on macOS the shell's menu owns the shortcut (main.rs) and relays
      it as an event — the page never sees the keystroke. Windows has no menu
      bar, so Ctrl+W arrives as a plain keydown. Both close the active tab. */
