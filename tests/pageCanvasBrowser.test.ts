@@ -258,15 +258,35 @@ describe.skipIf(!findBrowserPath())('page camera and snapping', { timeout: 30_00
     await waitState('the canvas is deselected before trying the jump', () => !window.pageState().selectedId)
     const url = page.url()
     const mod = (await page.evaluate(() => /mac/i.test(navigator.platform))) ? 'Meta' : 'Control'
+    await page.evaluate(() => {
+      const opened: string[] = []
+      ;(window as unknown as { opened: string[] }).opened = opened
+      window.open = (target?: string | URL) => {
+        opened.push(String(target))
+        return null
+      }
+    })
+    const opened = () => page.evaluate(() => (window as unknown as { opened: string[] }).opened)
+    // hover probes are throttled to one per 40ms with no trailing probe, so each
+    // arrival waits for the last one to age out, as a real pointer would
+    const settle = () => new Promise((resolve) => setTimeout(resolve, 60))
     await page.keyboard.down(mod)
-    for (const selector of ['#external', '#missing']) {
-      const at = await point(selector)
-      await page.mouse.click(at.x, at.y)
-    }
-    expect(await page.evaluate(() => !!document.querySelector('[data-link-outline]'))).toBe(false)
-    // hover probes are throttled to one per 40ms with no trailing probe, so let
-    // the last click's probe age out before arriving, as a real pointer would
-    await new Promise((resolve) => setTimeout(resolve, 60))
+    // a web address opens in a new tab and leaves the canvas where it is
+    const external = await point('#external')
+    await page.mouse.click(external.x, external.y)
+    await page.waitForFunction(() => (window as unknown as { opened: string[] }).opened.length > 0)
+    expect(await opened()).toEqual(['https://example.com/c/c?frame=target'])
+    // a link into this canvas naming a frame that is gone reads as no link and does nothing
+    await settle()
+    const missing = await point('#missing')
+    await page.mouse.move(missing.x, missing.y)
+    await waitState(
+      'the dead link is hovered as an ordinary layer',
+      () => !!document.querySelector('[data-hover-outline]') && !document.querySelector('[data-link-outline]'),
+    )
+    await page.mouse.click(missing.x, missing.y)
+    await settle()
+    expect(await opened()).toHaveLength(1)
     await page.mouse.move(app.x, app.y)
     await waitState('with the chord held the app link reads as a link', () => {
       const surface = document.querySelector('[data-frame-surface]')
