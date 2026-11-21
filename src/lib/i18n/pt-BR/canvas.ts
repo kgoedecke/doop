@@ -133,9 +133,10 @@ export const canvas: Catalog['canvas'] = {
   followAround: 'Seguir {name} pelo canvas',
   stopFollowing: 'Parar de seguir {name}',
   stopFollowingEsc: 'Parar de seguir (Esc)',
-  goWhereWorking: '{label} — clique para ir aonde ele está trabalhando',
+  followAgent: '{label} — clique para segui-lo enquanto trabalha',
   online: '{online} online',
   following: 'Seguindo',
+  followIdle: 'aguardando o próximo frame',
 
   displayNameTitle: 'Seu nome de exibição',
   displayNameLede: 'Aparece no seu cursor, no feed de atividade e em tudo o que você deixa para um agente.',

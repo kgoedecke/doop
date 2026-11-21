@@ -175,11 +175,18 @@ interface State {
   composerDrafts: Record<string, string>
   composerSend: ComposerSend | null
   /** clientId of the peer whose camera this one is tracking (Figma-style
-   *  follow); any camera move of our own lets go */
+   *  follow); any camera move of our own lets go. An agent is followed to the
+   *  frame it works on, and stays followed while it is idle and out of the
+   *  presence roster: its clientId (`agent:<name>`) is the same when it comes back */
   following: string | null
+  /** the agent being followed, as last seen, so the follow pill can name it
+   *  while it is idle and not in `presences` */
+  followedAgent: Presence | null
 
   activePageId: string | null
-  setActivePage(id: string): void
+  /** `keepFollow`: the follow loop itself moving to its leader's page, so the
+   *  follow stays on (any other page switch lets go, as a camera move does) */
+  setActivePage(id: string, opts?: { keepFollow?: boolean }): void
   setPages(pages: import('../../shared/types').CanvasPageInfo[], canvasId?: string): void
   /** paint one page locally (this client's own edit, before or after its save) */
   setPageBackgroundLocal(pageId: string, background: string | null): void
@@ -319,6 +326,9 @@ function readRulers(): boolean {
   }
 }
 
+/** ends a follow: the leader and, for an agent, its last-seen record */
+const UNFOLLOW = { following: null, followedAgent: null }
+
 export const useStore = create<State>((set, get) => ({
   canvas: null,
   activePageId: null,
@@ -335,6 +345,7 @@ export const useStore = create<State>((set, get) => ({
   limitWall: false,
   allowanceVersion: 0,
   flyTo: null,
+  followedAgent: null,
   threadRequest: null,
   composerFocusAt: 0,
   composerDrafts: {},
@@ -381,6 +392,8 @@ export const useStore = create<State>((set, get) => ({
          hide-UI, so the next canvas never opens with its chrome gone; a
          re-join of the same canvas keeps it */
       uiHidden: canvas ? s.uiHidden : false,
+      /* an agent follow outlives the agent's presence, not the canvas */
+      ...(s.following && canvas?.id !== s.canvas?.id ? UNFOLLOW : {}),
       activePageId: canvas
         ? canvas.id === s.canvas?.id && canvasPages(canvas).some((p) => p.id === s.activePageId)
           ? s.activePageId
@@ -389,7 +402,7 @@ export const useStore = create<State>((set, get) => ({
             openingPageId(canvas, typeof location === 'undefined' ? '' : location.search)
         : null,
     })),
-  setActivePage: (id) =>
+  setActivePage: (id, opts) =>
     set((s) => {
       if (!s.canvas || !canvasPages(s.canvas).some((p) => p.id === id) || s.activePageId === id) return {}
       return {
@@ -400,7 +413,7 @@ export const useStore = create<State>((set, get) => ({
         elementPanelOpen: false,
         inspectorOpen: false,
         ctxMenu: null,
-        following: null,
+        ...(opts?.keepFollow ? {} : UNFOLLOW),
         snapGuides: [],
         selectedGuideId: null,
         viewport: { x: 0, y: 0, zoom: 1 },
@@ -438,7 +451,7 @@ export const useStore = create<State>((set, get) => ({
               inspectorOpen: false,
               elementPanelOpen: false,
               ctxMenu: null,
-              following: null,
+              ...UNFOLLOW,
             }
           : {}),
       }
@@ -451,8 +464,13 @@ export const useStore = create<State>((set, get) => ({
     set((s) => ({
       presences: Object.fromEntries(list.map((p) => [p.clientId, p])),
       peerViewports: Object.fromEntries(list.flatMap((p) => (p.viewport ? [[p.clientId, p.viewport]] : []))),
-      /* a fresh roster (new canvas, reconnect) without our leader ends the follow */
-      ...(s.following && !list.some((p) => p.clientId === s.following) ? { following: null } : {}),
+      /* a fresh roster (new canvas, reconnect) without our leader ends the
+         follow, unless the leader is an agent: it is only idle */
+      ...(s.following && !list.some((p) => p.clientId === s.following)
+        ? s.followedAgent?.clientId === s.following
+          ? { followedAgent: s.presences[s.following] ?? s.followedAgent }
+          : UNFOLLOW
+        : {}),
     })),
   upsertPresence: (p) =>
     set((s) => ({
@@ -467,15 +485,24 @@ export const useStore = create<State>((set, get) => ({
       delete presences[clientId]
       delete cursors[clientId]
       delete peerViewports[clientId]
-      /* the one we were following left: nothing to track any more */
-      return { presences, cursors, peerViewports, ...(s.following === clientId ? { following: null } : {}) }
+      /* the person we were following left: nothing to track any more. An
+         agent leaves the roster whenever it goes idle and is still followed,
+         from where it was last seen */
+      const leader =
+        s.following !== clientId
+          ? {}
+          : s.followedAgent?.clientId === clientId
+            ? { followedAgent: s.presences[clientId] ?? s.followedAgent }
+            : UNFOLLOW
+      return { presences, cursors, peerViewports, ...leader }
     }),
   setPeerViewport: (clientId, viewport) =>
     set((s) => (s.presences[clientId] ? { peerViewports: { ...s.peerViewports, [clientId]: viewport } } : {})),
   setFollowing: (following) => {
+    const leader = following ? get().presences[following] : undefined
     const pageId = following ? get().peerViewports[following]?.pageId : undefined
     if (pageId) get().setActivePage(pageId)
-    set({ following })
+    set({ following: leader || !following ? following : null, followedAgent: leader?.kind === 'agent' ? leader : null })
   },
   setViewportFollowing: (viewport) => set({ viewport }),
   setCursor: (clientId, x, y) => set((s) => ({ cursors: { ...s.cursors, [clientId]: { x, y } } })),
@@ -770,7 +797,7 @@ export const useStore = create<State>((set, get) => ({
   toggleUiHidden: () => set((s) => ({ uiHidden: !s.uiHidden, ...(s.uiHidden ? {} : { selectedGuideId: null }) })),
   setPrototypeMode: (prototypeMode) => set({ prototypeMode }),
   /* every ordinary camera move (pan, zoom, fit, fly-to) is ours, so it ends a follow */
-  setViewport: (viewport) => set({ viewport, following: null }),
+  setViewport: (viewport) => set({ viewport, ...UNFOLLOW }),
   /* fires on every pointermove during a drag — skip the no-op transitions
      so unsnapped drags don't render the (empty) guide layer each frame */
   setSnapGuides: (snapGuides) =>
