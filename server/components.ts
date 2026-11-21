@@ -33,8 +33,10 @@ import {
   unclosedUses,
   usedComponentIds,
   type EngineContext,
+  type Revision,
 } from './componentEngine.ts'
 import { adoptFromLibrary, findInLibraries, LibraryAdoptError } from './componentLibrary.ts'
+import { withHostedIcons } from './iconProxy.ts'
 import { store } from './store.ts'
 import { noteCanvas } from './workBudget.ts'
 import { WriteRefusedError } from './writeRefusal.ts'
@@ -61,6 +63,14 @@ export interface LibraryAdoption {
   added: ComponentDef[]
 }
 
+/** A template in the URL form every frame write saves (withHostedIcons): an instance whose
+ *  Iconify icon a write pointed at Doop still reads as its template, not as an override that
+ *  would stop it following the component, and a main frame reads as unchanged. */
+function hostedForm<T extends Revision>(def: T | undefined): T | undefined {
+  if (!def?.template.includes('api.iconify.design')) return def
+  return { ...def, template: withHostedIcons(def.template) }
+}
+
 export function contextFor(canvasId: string, adoption?: LibraryAdoption): EngineContext {
   const defs = () => store.getComponents(canvasId)
   const issues: ComponentIssue[] = []
@@ -73,15 +83,17 @@ export function contextFor(canvasId: string, adoption?: LibraryAdoption): Engine
     return defs().find((def) => def.id === ref) ?? named.find((def) => !isDeleted(def)) ?? named[0]
   }
   const find = (ref: string) =>
-    local(ref) ?? (adoption && ref ? fromLibrary(canvasId, ref, adoption, issues) : undefined)
+    hostedForm(local(ref) ?? (adoption && ref ? fromLibrary(canvasId, ref, adoption, issues) : undefined))
   return {
     find,
     atRev(id, rev) {
       const def = defs().find((candidate) => candidate.id === id)
       if (!def) return undefined
-      if (def.rev === rev) return def
+      if (def.rev === rev) return hostedForm(def)
       const snapshot = def.history.find((entry) => entry.rev === rev)
-      return snapshot ? { id, name: def.name, rev, template: snapshot.template, props: snapshot.props } : undefined
+      return hostedForm(
+        snapshot ? { id, name: def.name, rev, template: snapshot.template, props: snapshot.props } : undefined,
+      )
     },
     issues,
   }
@@ -253,7 +265,8 @@ function prepareMains(
     claimed.add(id)
     const stamped = stampParts(found.el)
     if (stamped) edits.push({ start: found.start, end: found.end, text: serializeOuter(found.el) })
-    const template = templateFromMain(found.el, ctx)
+    /* in the URL form the frame is saved in (withHostedIcons), whatever form the main arrived in */
+    const template = withHostedIcons(templateFromMain(found.el, ctx))
     if (wouldCycle(canvas.id, id, template)) {
       ctx.issues.push({
         code: 'nesting_cycle',
@@ -262,12 +275,15 @@ function prepareMains(
       continue
     }
     const variants = def.props.filter((prop) => prop.type === 'enum').map((prop) => `data-${prop.name}`)
-    const { css, rawCss } = extractComponentCss(sheet(), found.el, id, variants)
+    const extracted = extractComponentCss(sheet(), found.el, id, variants)
+    const css = withHostedIcons(extracted.css)
+    const rawCss = withHostedIcons(extracted.rawCss)
     const head = headTags()
     const { props, slots } = derivePropsAndSlots(template, def.props)
     const same =
-      def.template === template &&
-      def.css === css &&
+      /* a definition saved before frames were rewritten still holds Iconify hotlinks: the same icons */
+      withHostedIcons(def.template) === template &&
+      withHostedIcons(def.css) === css &&
       JSON.stringify(def.head) === JSON.stringify(head) &&
       JSON.stringify(def.props) === JSON.stringify(props) &&
       JSON.stringify(def.slots) === JSON.stringify(slots)

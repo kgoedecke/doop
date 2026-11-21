@@ -89,8 +89,11 @@
   them itself; the renderer (`loadFrameInto`) also points a frame's existing Iconify and Pexels
   hotlinks at Doop before loading it; `hostedIconSvg` and `hostedPhoto` read both in-process,
   since a private `BETTER_AUTH_URL` is refused by `fetchRemote`. Pexels' licence
-  allows rehosting; arbitrary hotlinked images are never copied. Tests: `iconProxy.test.ts`,
-  `photoProxy.test.ts`.
+  allows rehosting; arbitrary hotlinked images are never copied. Every frame write also points
+  Iconify hotlinks (slash or colon form) at Doop (`withHostedIcons` in `withCanvasFaces`, and on a
+  stream's healed partials) and starts fetching the copies two at a time (`warmHostedIcons`), since
+  viewers' browsers loading a canvas full of hotlinked icons drew a 429 from Iconify and left icons
+  blank until a reload. Tests: `iconProxy.test.ts`, `photoProxy.test.ts`, `iconFrameWrites.test.ts`.
 - Where frame CSS goes (`FRAME_STYLES` in `server/guide.ts`): agents are asked to style an element
   in its own `style` attribute, which is what the editor reads and writes, and to keep a `<style>`
   block for what an attribute cannot say (keyframes, font faces, `:root` custom properties, states,
