@@ -450,13 +450,36 @@ export function noteSaved(entry: HistoryEntry, frame: Frame) {
   }
 }
 
+/** A frame dragged around canvas shapes: it was created with them already
+ *  inside, and their shells went — one guarded step, like a shell rewrite
+ *  but with nothing rewritten (the frame is new). */
+export function recordFrameAround(frame: Frame, removed: Frame[]): HistoryEntry {
+  const entry: Entry = {
+    type: 'transfer',
+    canvasId: frame.canvasId,
+    guarded: true,
+    entries: [
+      { type: 'create', frameId: frame.id, snapshot: snapshot(frame), version: frame.updatedAt },
+      ...removed.map((f): Entry => ({ type: 'delete', frameId: f.id, snapshot: snapshot(f) })),
+    ],
+  }
+  push(entry)
+  return entry
+}
+
 /** A shell a rewrite could not delete (a save to it won): the step no
- *  longer deletes it, and redoes the host as it was saved without it. */
+ *  longer deletes it, and redoes the host as it was saved without it. When
+ *  the step created its host rather than rewriting one, the create's
+ *  snapshot carries the shell-less html instead. */
 export function keepShell(entry: HistoryEntry, frameId: string, hostAfter: Patch) {
   if (entry.type !== 'transfer') return
   entry.entries = entry.entries.filter((e) => e.type !== 'delete' || e.frameId !== frameId)
   const update = entry.entries.find((e) => e.type === 'update')
   if (update?.type === 'update') update.after = { ...update.after, ...hostAfter }
+  else {
+    const created = entry.entries.find((e) => e.type === 'create')
+    if (created?.type === 'create') created.snapshot = { ...created.snapshot, ...hostAfter }
+  }
 }
 
 /** A page duplicated together with its frames: one undo step that removes

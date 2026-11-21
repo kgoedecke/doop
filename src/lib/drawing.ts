@@ -1,6 +1,7 @@
 import type { Frame } from '../../shared/types'
 import { api, errorMessage } from './api'
-import { recordCreate, recordUpdates, trackSave } from './history'
+import { recordCreate, recordFrameAround, recordUpdates, trackSave } from './history'
+import { framedShapesDocument, saveWrappedShells, shapesInside } from './canvasGroups'
 import { currentPageCanvas } from './pages'
 import { useStore } from './store'
 import { bodyPlacementOrigin } from './frameBridge'
@@ -181,8 +182,10 @@ export function drawingDocument(drawing: Drawing, ink = DRAWING_INK): string {
 }
 
 /** Read the current document when committing, so edits received during the
- *  gesture survive. Use the normal API for collaboration and tracked history. */
-export function saveDrawing(drawing: Drawing, target: DrawingTarget): Promise<void> {
+ *  gesture survive. Use the normal API for collaboration and tracked history.
+ *  `wrap` (frames dragged out, not the click-placed one) takes in the
+ *  standalone shapes the new frame encloses, where they showed. */
+export function saveDrawing(drawing: Drawing, target: DrawingTarget, options?: { wrap?: boolean }): Promise<void> {
   // Read now, not when the queue reaches this save: the ink matches the paper the person drew on.
   const ink = drawingInk(target, currentPaper(target.pageId).tone)
   const save = async () => {
@@ -224,19 +227,52 @@ export function saveDrawing(drawing: Drawing, target: DrawingTarget): Promise<vo
         useStore.getState().pickElement({ frameId: frame.id, selector: `#${el.id}` })
       }
     } else {
-      const frame: Frame = await api.createFrame(target.canvasId, {
-        name: names[drawing.tool],
-        pageId: target.pageId ?? undefined,
+      const bounds = {
         x: round(drawing.x),
         y: round(drawing.y),
         width: Math.max(1, round(drawing.width)),
         height: Math.max(1, round(drawing.height)),
-        html: drawingDocument(drawing, ink),
+      }
+      /* a frame dragged out around standalone shapes takes them in where
+         they showed — the store as the queue reaches this save, so shapes
+         drawn or moved meanwhile are judged then */
+      let wrapped: { shapes: Frame[]; scopes: Map<string, string> } | null = null
+      let skipped: { frame: Frame; reason: string }[] = []
+      let html = drawingDocument(drawing, ink)
+      if (drawing.tool === 'frame' && options?.wrap) {
+        const live = useStore.getState().canvas
+        const canvas = live?.id === target.canvasId ? live : await api.getCanvas(target.canvasId)
+        const found = shapesInside(canvas.frames, bounds, target.pageId)
+        skipped = found.skipped
+        const built = found.shapes.length ? framedShapesDocument(html, bounds, found.shapes) : null
+        if (built) {
+          html = built.html
+          wrapped = { shapes: found.shapes, scopes: built.scopes }
+        }
+      }
+      const frame: Frame = await api.createFrame(target.canvasId, {
+        name: names[drawing.tool],
+        pageId: target.pageId ?? undefined,
+        ...bounds,
+        html,
       })
       if (useStore.getState().canvas?.id !== target.canvasId) return
+      const store = useStore.getState()
+      if (wrapped) {
+        /* one guarded step: the frame's create and the shells' deletes. A
+           shell a save won meanwhile stays on the canvas */
+        const entry = recordFrameAround(frame, wrapped.shapes)
+        store.upsertFrame(frame)
+        for (const f of wrapped.shapes) store.removeFrame(f.id)
+        if (store.activePageId === target.pageId) store.select(frame.id)
+        for (const skip of skipped) store.pushNotice(skip.reason)
+        trackSave(saveWrappedShells(frame, wrapped.shapes, wrapped.scopes, entry))
+        return
+      }
       recordCreate(frame)
-      useStore.getState().upsertFrame(frame)
-      if (useStore.getState().activePageId === target.pageId) useStore.getState().select(frame.id)
+      store.upsertFrame(frame)
+      for (const skip of skipped) store.pushNotice(skip.reason)
+      if (store.activePageId === target.pageId) store.select(frame.id)
     }
   }
   return queueDrawingSave(save, 'Couldn’t save the drawing. Please try again.')

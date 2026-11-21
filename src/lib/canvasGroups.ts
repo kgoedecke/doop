@@ -10,7 +10,7 @@ import { stackOf, sortByStack } from '../../shared/frameStack'
 import { api, ApiError, errorMessage } from './api'
 import { currentPageCanvas } from './pages'
 import { useStore } from './store'
-import { dropEntry, keepShell, noteSaved, recordShellRewrite, trackSave } from './history'
+import { dropEntry, keepShell, noteSaved, recordShellRewrite, trackSave, type HistoryEntry } from './history'
 import {
   buildLayerTree,
   elementHtml,
@@ -262,6 +262,129 @@ function withoutScope(html: string, scope: string | undefined): string {
   const doc = new DOMParser().parseFromString(html, 'text/html')
   for (const el of doc.querySelectorAll(`[${SCOPE_ATTR}="${scope}"]`)) el.remove()
   return '<!doctype html>\n' + doc.documentElement.outerHTML
+}
+
+/** Whether a frame's html can ride into a drawn frame: 'shape' when it
+ *  can, null when the frame is not a standalone shape at all, `reason`
+ *  when it must stay — comments or a component main belong to the frame
+ *  that has them, and a placement `boxIn` cannot read cannot be kept.
+ *  Position-free, so a drag can cache the answer by frame html. */
+export type ShapeVerdict = 'shape' | { reason: string } | null
+
+export function shapeVerdict(frame: Frame): ShapeVerdict {
+  if (standaloneSelector(frame) === null) return null
+  if (hasComments(frame.id) || holdsMain(frame.html))
+    return { reason: `“${frame.name}” has comments or a component main, so it stayed on the canvas` }
+  const found = shapeOf(frame)
+  const el = found && elementOf(found.html)
+  if (!found || !el || !boxIn(el, frame)) return { reason: `“${frame.name}” is placed in a way a frame can’t keep yet` }
+  return 'shape'
+}
+
+/* half or more of the shape's own area inside the box counts as in; the
+   part sticking out is cut off by the frame's edge either way */
+function covered(f: Frame, box: Box): boolean {
+  const x = Math.min(f.x + f.width, box.x + box.width) - Math.max(f.x, box.x)
+  const y = Math.min(f.y + f.height, box.y + box.height) - Math.max(f.y, box.y)
+  return x > 0 && y > 0 && x * y * 2 >= f.width * f.height
+}
+
+/** The standalone shapes of `pageId` the drawn `box` covers half or more
+ *  of, back to front — the ones a frame dragged around them takes in.
+ *  Hidden, locked or turned shapes stay (a turn puts a shape where its box
+ *  does not show), as do the shapes in `skipped`. `probe` answers the
+ *  costly, position-free half of the check so a drag can cache it. */
+export function shapesInside(
+  frames: Frame[],
+  box: Box,
+  pageId: string | null,
+  probe: (frame: Frame) => ShapeVerdict = shapeVerdict,
+): { shapes: Frame[]; skipped: { frame: Frame; reason: string }[] } {
+  const inside = frames.filter(
+    (f) => (f.pageId ?? null) === pageId && !f.hidden && !f.rotation && covered(f, box) && !isStackLocked(f),
+  )
+  const skipped: { frame: Frame; reason: string }[] = []
+  const shapes: Frame[] = []
+  for (const frame of sortByStack(inside)) {
+    const verdict = probe(frame)
+    if (verdict === 'shape') shapes.push(frame)
+    else if (verdict) skipped.push({ frame, reason: verdict.reason })
+  }
+  return { shapes, skipped }
+}
+
+/** The document for a frame dragged around `shapes` (back to front): each
+ *  shape's element placed in the body by pixels where it showed — its own
+ *  box inside its shell, moved by where the shell sat — under its own
+ *  scope, its CSS carried like a group's. `scopes` maps each shell's id to
+ *  that scope, for `withoutScope` when a shell has to stay. */
+export function framedShapesDocument(
+  frameHtml: string,
+  box: Box,
+  shapes: Frame[],
+): { html: string; scopes: Map<string, string> } | null {
+  let html = frameHtml
+  /* back to front: each lands after the last, so the stack ends in order */
+  let after: string | null = null
+  const scopes = new Map<string, string>()
+  for (const shape of shapes) {
+    const found = shapeOf(shape)
+    const scope = newScope()
+    const el = found && elementOf(scopeMarkup(found.html, scope))
+    const at = el && boxIn(el, shape)
+    if (!found || !el || !at) return null
+    el.style.setProperty('left', `${round2(shape.x - box.x + at.x)}px`)
+    el.style.setProperty('top', `${round2(shape.y - box.y + at.y)}px`)
+    el.style.setProperty('width', `${round2(at.width)}px`)
+    el.style.setProperty('height', `${round2(at.height)}px`)
+    if (shape.name !== found.node.label) el.setAttribute(NAME_ATTR, shape.name)
+    const placed = placeElement(
+      html,
+      after ? { selector: after, place: 'after' } : { selector: 'body', place: 'inside' },
+      el.outerHTML,
+    )
+    if (!placed) return null
+    html = withCarriedCss(
+      placed.html,
+      renameInCss(carriedCss(shape.html, found.node.selector, scope), placed.renamed),
+      scope,
+    )
+    scopes.set(shape.id, scope)
+    after = placed.selector
+  }
+  return { html, scopes }
+}
+
+/* the shells a drawn frame took in, deleted one by one — a save that won a
+   shell meanwhile keeps it on the canvas, and its copy leaves the frame */
+export async function saveWrappedShells(
+  frame: Frame,
+  shells: Frame[],
+  scopes: Map<string, string>,
+  entry: HistoryEntry,
+): Promise<void> {
+  let html = frame.html
+  let saved = frame
+  for (const f of shells) {
+    try {
+      await api.deleteFrame(f.id, f.updatedAt)
+    } catch (err) {
+      const remote = err instanceof ApiError && err.status === 409 ? (err.body.frame as Frame | undefined) : undefined
+      useStore.getState().upsertFrame(remote?.id === f.id ? remote : f)
+      html = withoutScope(html, scopes.get(f.id))
+      try {
+        saved = await api.updateFrame(frame.id, { html }, saved.updatedAt)
+        noteSaved(entry, saved)
+        useStore.getState().patchFrameLocal(frame.id, { html })
+        keepShell(entry, f.id, { html })
+        notice(`“${f.name}” changed while the frame drew around it, so it stayed on the canvas`)
+      } catch {
+        /* the frame was saved again meanwhile: it may still hold the copy */
+        keepShell(entry, f.id, {})
+        notice(`“${f.name}” changed while the frame drew; check the frame for a second copy`)
+      }
+    }
+  }
 }
 
 /** The selected shape on the canvas whose one layer is a group made of
