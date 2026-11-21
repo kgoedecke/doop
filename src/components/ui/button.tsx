@@ -23,6 +23,9 @@ const buttonVariants = cva(
         /* the workhorse: white surface, ink hairline, fills on press */
         default: 'border-transparent bg-surface text-ink shadow-ring hover:shadow-ring-hover active:bg-paper-deep',
         primary: 'border-transparent bg-ink text-paper hover:bg-ink/85 active:bg-ink',
+        /* the accent fill, for the one action a live signal is asking for (unpublished
+           library changes, a waiting update); never a screen's ordinary primary */
+        brand: 'border-transparent bg-brand text-white hover:bg-brand/90 active:bg-brand',
         /* quiet sibling: the soft hairline instead of the ink one */
         ghost: 'border-transparent bg-transparent text-ink shadow-ring hover:bg-paper-deep hover:shadow-ring-hover',
         danger: 'border-transparent bg-transparent text-accent-ink shadow-ring hover:bg-accent-ink/10',

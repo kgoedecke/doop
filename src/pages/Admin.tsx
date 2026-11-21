@@ -9,8 +9,17 @@ import {
 } from '../lib/api'
 import { navigate } from '../App'
 import { timeAgo } from '../lib/time'
-import { AppRail, railLayout } from '../components/AppRail'
-import { ChevronRightIcon, GridIcon, MessageSquareIcon, UsersIcon } from '../components/ui/icons'
+import { railLayout } from '../components/AppRail'
+import { AccountMenu } from '../components/DashShell'
+import {
+  ChevronLeftIcon,
+  ChevronRightIcon,
+  GridIcon,
+  LockIcon,
+  MessageSquareIcon,
+  UsersIcon,
+} from '../components/ui/icons'
+import { SignInSettings } from '../components/SignInSettings'
 import { Tabs, TabsList, TabsTrigger } from '../components/ui/tabs'
 import { Button } from '../components/ui/button'
 import { ConfirmDialog } from '../components/ui/alert-dialog'
@@ -28,6 +37,8 @@ import {
   DashMain,
   DashNavItem,
   DashSectionLabel,
+  DashSidebar,
+  DashSidebarBrand,
   DashSubtitle,
   DashTitle,
 } from '../components/ui/dash'
@@ -49,9 +60,10 @@ const LINK_TITLE = {
   edit: 'admin.linkAccessEdit',
 } as const satisfies Record<SharedAccess, PlainMessageKey>
 
-type Tab = 'canvases' | 'users' | 'feedback'
+type Tab = 'canvases' | 'users' | 'feedback' | 'signin'
 
-const SEARCH_LABEL: Record<Tab, PlainMessageKey> = {
+/* the header's search, for the tabs that are lists */
+const SEARCH_LABEL: Partial<Record<Tab, PlainMessageKey>> = {
   canvases: 'admin.searchCanvases',
   users: 'admin.searchAccounts',
   feedback: 'admin.searchFeedback',
@@ -63,7 +75,8 @@ const SEARCH_LABEL: Record<Tab, PlainMessageKey> = {
  * read-only, 15-minute) session as its owner rather than granting admins a
  * privileged read path through the canvas gate.
  *
- * Same shell as home and settings; the rail's middle carries the two indexes.
+ * Its own screen, like Settings: a rail of its panes and the way back,
+ * rather than the app rail with the instance tacked on under everything else.
  */
 export function Admin() {
   const t = useT()
@@ -123,6 +136,7 @@ export function Admin() {
     )
   }
 
+  const searchLabel = SEARCH_LABEL[tab]
   const needle = q.trim().toLowerCase()
   const canvases = (data?.canvases ?? []).filter(
     (c) =>
@@ -137,8 +151,13 @@ export function Admin() {
 
   return (
     <DashLayout className={railLayout}>
-      {/* the app rail, with the two indexes as the page's group */}
-      <AppRail active={null}>
+      <DashSidebar variant="rail">
+        <DashSidebarBrand />
+        <nav className="flex flex-col gap-0.5">
+          <DashNavItem density="rail" icon={<ChevronLeftIcon size="rail" />} onClick={() => navigate('/')}>
+            {t('admin.backToCanvases')}
+          </DashNavItem>
+        </nav>
         <DashSectionLabel density="rail">{t('admin.instance')}</DashSectionLabel>
         <nav className="flex flex-col gap-0.5">
           <DashNavItem
@@ -168,8 +187,19 @@ export function Admin() {
           >
             {t('admin.feedbackNav')}
           </DashNavItem>
+          <DashNavItem
+            density="rail"
+            icon={<LockIcon size="rail" />}
+            active={tab === 'signin'}
+            onClick={() => setTab('signin')}
+          >
+            {t('admin.signInNav')}
+          </DashNavItem>
         </nav>
-      </AppRail>
+        <div className="mt-auto flex items-center gap-2.5 px-1 pt-4">
+          <AccountMenu face side="top" align="start" />
+        </div>
+      </DashSidebar>
 
       <DashMain className="[background:var(--paper)]">
         <DashHeader variant="bare" className="max-md:min-h-[104px]">
@@ -185,13 +215,15 @@ export function Admin() {
             <ChevronRightIcon size={12} />
             <b className="font-semibold text-ink">{t('admin.admin')}</b>
           </nav>
-          <SearchField
-            size="header"
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            placeholder={`${t(SEARCH_LABEL[tab])}…`}
-            aria-label={t(SEARCH_LABEL[tab])}
-          />
+          {searchLabel && (
+            <SearchField
+              size="header"
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder={`${t(searchLabel)}…`}
+              aria-label={t(searchLabel)}
+            />
+          )}
         </DashHeader>
 
         <DashContent>
@@ -221,6 +253,9 @@ export function Admin() {
               </TabsTrigger>
               <TabsTrigger value="feedback">
                 <MessageSquareIcon size="rail" /> {t('admin.feedbackTab', { count: stats?.agentFeedback ?? '…' })}
+              </TabsTrigger>
+              <TabsTrigger value="signin">
+                <LockIcon size="rail" /> {t('admin.signInTab')}
               </TabsTrigger>
             </TabsList>
           </Tabs>
@@ -273,6 +308,8 @@ export function Admin() {
             </>
           ) : tab === 'feedback' ? (
             <AgentFeedbackList q={q} />
+          ) : tab === 'signin' ? (
+            <SignInSettings />
           ) : (
             <div className="mt-4 overflow-hidden rounded-panel border border-line bg-surface shadow-card">
               {users === null && <p className="mt-7 text-copy text-ink-soft">…</p>}

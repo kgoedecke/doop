@@ -6,6 +6,10 @@ import { db } from './db/index.ts'
 import * as authSchema from './db/auth-schema.ts'
 import { listAgentFeedback } from './agentFeedback.ts'
 import { agentFeedback } from './db/schema.ts'
+import * as workspaces from './workspaces.ts'
+import { loadOidcConfig, loginProvidersConfig } from './auth.ts'
+import { getInstanceSettings, ssoAdminSignedIn, updateInstanceSettings } from './instanceSettings.ts'
+import { isInstanceSettingsPatch } from '../shared/instanceSettings.ts'
 
 /**
  * Instance-admin surface, mounted at /api/admin (so already behind the
@@ -96,4 +100,29 @@ adminRouter.get('/agent-feedback', async (req, res) => {
     : []
   const byId = new Map(users.map((u) => [u.id, u]))
   res.json({ ...page, reports: page.reports.map((r) => ({ ...r, user: r.userId ? byId.get(r.userId) : undefined })) })
+})
+
+/** The sign-in policy with what it depends on: the providers env has wired
+ *  up (read-only here), the workspaces a newcomer could be put in, and
+ *  whether an admin has come in through SSO (the auto-redirect guard). */
+async function instanceSettingsView() {
+  return {
+    settings: getInstanceSettings(),
+    providers: loginProvidersConfig(),
+    workspaces: workspaces.listAll(),
+    ssoAdminSignedIn: await ssoAdminSignedIn(),
+  }
+}
+
+adminRouter.get('/instance-settings', async (req, res) => {
+  res.json(await instanceSettingsView())
+})
+
+/** A partial of InstanceSettings; 400 for a malformed body, 409 with the
+ *  reason when the policy itself refuses it (shared/instanceSettings.ts). */
+adminRouter.patch('/instance-settings', async (req, res) => {
+  if (!isInstanceSettingsPatch(req.body)) return res.status(400).json({ refusal: 'invalid' })
+  const result = await updateInstanceSettings(req.body, req.user!.id, loadOidcConfig() !== null)
+  if ('refusal' in result) return res.status(409).json({ refusal: result.refusal })
+  res.json(await instanceSettingsView())
 })

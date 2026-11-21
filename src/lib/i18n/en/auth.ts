@@ -51,6 +51,9 @@ export const auth = {
     'That sign-in link has expired — start again and finish in your browser within a couple of minutes.',
   ssoFailed: 'Sign-in failed — try again or use email/password.',
   startFailed: 'Could not start sign-in — try again or use email/password.',
+  redirectingTo: 'Taking you to {provider}…',
+  signInAnotherWay: 'Sign in another way',
+  signupDisabled: 'Sign-up with email and password is off on this instance.',
   browserSignInNotice: 'Finish signing in in your browser — doop signs you in here the moment you come back.',
   verificationSent: 'Verification email sent — check your inbox.',
   resetLinkSent: 'If an account exists for that email, a reset link is on its way.',
@@ -85,6 +88,18 @@ export const auth = {
   desktopConnectBody:
     'Doop finishes connecting in the app, for the account signed in there. You can close this tab afterwards.',
   desktopConnectFailed: 'Could not hand the connection over to the doop app. Go back to the app and try again.',
+
+  /* the desktop app's server settings, behind the sign-in screen's cog */
+  serverSettings: 'Server settings',
+  serverTitle: 'Doop server',
+  serverLede: 'This app is connected to {host}. Enter another address to use a self-hosted Doop server.',
+  serverLedeLoading: 'Enter the address of the Doop server this app should use.',
+  serverAddress: 'Server address',
+  serverHint: 'The app checks the server, asks you to confirm, then restarts.',
+  serverConnect: 'Connect',
+  serverConnecting: 'Checking…',
+  serverUseDefault: 'Use {host}',
+  serverFailed: 'Could not change the server. Try again.',
 
   /* "Viewing as <name> — read only, expires after 15 minutes." */
   viewingAsBefore: 'Viewing as',

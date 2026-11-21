@@ -1,7 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk'
 import { z } from 'zod'
 import { env } from './env.ts'
-import type { ModelAccount } from './modelAccounts.ts'
+import type { BuiltinAccountKind, ModelAccount } from './modelAccounts.ts'
 import { ACCOUNT_KIND_LABELS, type ModelOption } from '../shared/modelMenu.ts'
 
 /**
@@ -196,7 +196,7 @@ const keyed =
 
 type Loader = (account: ModelAccount, signal: AbortSignal) => Promise<ModelOption[]>
 
-const LOADERS: Partial<Record<ModelAccount['kind'], Loader>> = {
+const LOADERS: Partial<Record<BuiltinAccountKind, Loader>> = {
   chatgpt: chatgptModels,
   'anthropic-key': keyed(anthropicModels),
   'openai-key': keyed(openaiModels),
@@ -220,8 +220,12 @@ function merge(curated: ModelOption[], live: ModelOption[]): ModelOption[] {
  *  one, or the curated one alone for a kind with no catalog, or when the
  *  provider cannot be reached. */
 export async function modelCatalogFor(account: ModelAccount, curated: ModelOption[]): Promise<ModelCatalog> {
-  const load = LOADERS[account.kind]
-  const label = ACCOUNT_KIND_LABELS[account.kind]
+  /* a custom provider's menu is the list its person wrote, which is as live
+     as it gets: Settings fetches the endpoint's own list while editing */
+  if (account.custom) return { models: curated, live: true }
+  const kind = account.kind as BuiltinAccountKind
+  const load = LOADERS[kind]
+  const label = ACCOUNT_KIND_LABELS[kind]
   if (!load) return { models: curated, live: false }
   try {
     const models = merge(curated, await load(account, AbortSignal.timeout(8_000)))

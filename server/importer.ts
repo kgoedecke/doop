@@ -454,7 +454,7 @@ async function fetchCss(sheetUrl: string, budget: number, depth = 0): Promise<Ca
     if (!child.ok) return child
     /* Inline the import rather than leave it active in the snapshot for a
        later browser to fetch. */
-    css = css.replace(m[0], child.css)
+    css = css.replace(m[0], () => child.css)
     if (Buffer.byteLength(css) > budget) return OVERSIZED
   }
   /* relative url(...) inside the sheet must resolve against the SHEET's URL,
@@ -510,6 +510,12 @@ export async function importPage(rawUrl: string, options: { includePreview?: boo
   else await assertPublicNetworkUrl(requestedUrl)
   const isolated = await openIsolatedPage()
   const { page } = isolated
+  let captureOpen = true
+  const releaseCapture = async () => {
+    if (!captureOpen) return
+    captureOpen = false
+    await isolated.close()
+  }
   try {
     await guardPublicPageRequests(page)
     await page.setViewport({ width: VIEWPORT_WIDTH, height: 900 })
@@ -647,13 +653,17 @@ export async function importPage(rawUrl: string, options: { includePreview?: boo
       `<base href="${documentBase.replace(/&/g, '&amp;').replace(/"/g, '&quot;')}">` +
       (css.trim() ? `<style data-doop-import>\n${css.replace(/<\/style/gi, '<\\/style')}\n</style>` : '')
     const headMatch = html.match(/<head[^>]*>/i)
-    if (headMatch) html = html.replace(headMatch[0], headMatch[0] + inject)
+    if (headMatch) html = html.replace(headMatch[0], (head) => head + inject)
     else html = inject + html
     html = '<!doctype html>\n' + html
 
     if (Buffer.byteLength(html) > MAX_FRAME_HTML_BYTES) {
       throw new WebsiteCaptureUnavailableError('The captured webpage is too large to import safely')
     }
+
+    /* the capture is done: give its render slot back before the preview asks
+       for one, or a one-slot renderer waits on itself */
+    await releaseCapture()
 
     let preview: ImportedPage['preview']
     let renderedHeight = snap.height
@@ -736,6 +746,6 @@ export async function importPage(rawUrl: string, options: { includePreview?: boo
     if (error instanceof WebsiteCaptureUnavailableError) throw error
     throw new WebsiteCaptureUnavailableError('Doop could not finish rendering the webpage HTML')
   } finally {
-    await isolated.close()
+    await releaseCapture()
   }
 }

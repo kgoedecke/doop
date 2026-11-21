@@ -2,22 +2,28 @@
  * Which connection a Doop Agent task runs on.
  *
  * A person can have two connections at once: the one model account
- * (ChatGPT, or an OpenAI / Claude / OpenRouter / Gemini key) and the Claude
+ * (ChatGPT, or an OpenAI / Claude / OpenRouter / Gemini / DeepSeek / Kimi key) and the Claude
  * Plan on their desktop. The composer offers every connected one and the
  * card carries the pick, so a task runs on what the person chose for it.
  * Work the resident picks up on its own — @mention comments, automations —
  * carries no pick and runs on the Settings default.
  */
 import { ACCOUNT_KIND_LABELS, type AccountKindName } from './modelMenu.ts'
+import { isCustomProviderKind, type CustomProviderKind } from './customProvider.ts'
 
-export type RunnerProvider = 'claude-local' | AccountKindName
+/** A connection by name, or a custom provider (`custom:<id>`) a person added. */
+export type RunnerProvider = 'claude-local' | AccountKindName | CustomProviderKind
 
-export const RUNNER_PROVIDERS: readonly RunnerProvider[] = [
+/** The connections Doop knows by name; custom providers are named by their person. */
+export const RUNNER_PROVIDERS: readonly ('claude-local' | AccountKindName)[] = [
   'claude-local',
   ...(Object.keys(ACCOUNT_KIND_LABELS) as AccountKindName[]),
 ]
 
-export const RUNNER_NAMES: Record<RunnerProvider, string> = { 'claude-local': 'Claude Plan', ...ACCOUNT_KIND_LABELS }
+export const RUNNER_NAMES: Record<'claude-local' | AccountKindName, string> = {
+  'claude-local': 'Claude Plan',
+  ...ACCOUNT_KIND_LABELS,
+}
 
 /** What a card asks to run on. The model and effort are checked against the
  *  provider when the run is picked; an id the provider does not know runs on
@@ -32,7 +38,10 @@ const MAX_MODEL_ID = 120
 const MAX_EFFORT_ID = 20
 
 export function isRunnerProvider(value: unknown): value is RunnerProvider {
-  return typeof value === 'string' && RUNNER_PROVIDERS.some((provider) => provider === value)
+  return (
+    (typeof value === 'string' && RUNNER_PROVIDERS.some((provider) => provider === value)) ||
+    isCustomProviderKind(value)
+  )
 }
 
 /** The pick a request carried, or nothing when it carried none or nonsense. */

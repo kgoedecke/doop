@@ -1,5 +1,6 @@
 /* What the canvas draws over the frames, each switched from the zoom pill's
-   menu or its shortcut, and remembered per browser:
+   menu or its shortcut (bound in the action registry), and remembered per
+   browser:
    - pixelGrid (⇧'): the hairline grid that fades in from 300%
    - cursors (⌘⌥\ / Ctrl+Alt+\): everyone else's pointer
    - comments (⇧C): the comment pins; the Comment tool still shows them */
@@ -37,21 +38,6 @@ export function writeViewOptions(options: ViewOptions) {
   } catch {
     /* private mode: the choice just doesn't stick */
   }
-}
-
-/** The option a key press toggles, or null. Read by `code`: ⇧ and ⌥ change
- *  the typed character (⇧' is `"`, ⌥\ is `«` on macOS). */
-export function viewOptionForKey(
-  e: Pick<KeyboardEvent, 'code' | 'metaKey' | 'ctrlKey' | 'altKey' | 'shiftKey'>,
-): ViewOption | null {
-  const mod = e.metaKey || e.ctrlKey
-  if (e.shiftKey && !mod && !e.altKey) {
-    if (e.code === 'Quote') return 'pixelGrid'
-    if (e.code === 'KeyC') return 'comments'
-    return null
-  }
-  if (mod && e.altKey && !e.shiftKey && e.code === 'Backslash') return 'cursors'
-  return null
 }
 
 /** A typed zoom level ("150", "150%", "33.3 %") as a zoom factor, or null

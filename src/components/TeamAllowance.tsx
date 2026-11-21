@@ -9,6 +9,7 @@ import { Modal, ModalActions, ModalLede, ModalTitle } from './ui/modal'
 import { cn } from '@/lib/utils'
 import { ACCOUNT_KIND_LABELS } from '../../shared/modelMenu'
 import type { RunnerProvider } from '../../shared/agentRunner'
+import { isCustomProviderKind } from '../../shared/customProvider'
 import { t as translate, useT, type Translate } from '../lib/i18n'
 
 /**
@@ -36,12 +37,17 @@ export function isResidentLimit(err: unknown): boolean {
   return err instanceof ApiError && err.status === 403 && err.body.error === 'resident_limit'
 }
 
-/** Which of their own accounts the agent runs on, as one line. */
-function byoText(allowance: Allowance, t: Translate, provider: RunnerProvider | undefined): string {
+/** Which of their own accounts the agent runs on, as one line. `name` is
+ *  the picked connection's name, which a custom provider's line needs. */
+function byoText(allowance: Allowance, t: Translate, provider: RunnerProvider | undefined, name?: string): string {
   const kind = provider ?? allowance.byoKind
   if (kind === 'gemini-cloud') return t('home.meterGeminiCloud')
   if (kind === 'claude-local') return t('home.meterClaudeLocal')
   if (kind === 'chatgpt' || !kind) return t('home.meterChatgpt')
+  if (isCustomProviderKind(kind)) {
+    const custom = (provider ? name : undefined) ?? allowance.byoName
+    return custom ? t('home.meterCustomProvider', { provider: custom }) : t('home.meterCustomProviderUnnamed')
+  }
   return t('home.meterProviderKey', { provider: ACCOUNT_KIND_LABELS[kind] })
 }
 
@@ -53,9 +59,10 @@ export function meterText(
   allowance: Allowance | null,
   t: Translate = translate,
   provider?: RunnerProvider,
+  providerName?: string,
 ): string | null {
   if (!allowance) return null
-  if (allowance.byoModel) return byoText(allowance, t, provider)
+  if (allowance.byoModel) return byoText(allowance, t, provider, providerName)
   if (allowance.limit <= 0) return t('home.meterNoFreeTier')
   const left = Math.max(0, allowance.limit - allowance.used)
   return left === 0 ? t('home.meterUsedUp') : t('home.meterLeft', { left, count: allowance.limit })

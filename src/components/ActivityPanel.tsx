@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type CSSProperties } from 'react'
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import type { AgentTask } from '../../shared/types'
 import { canEditOpenCanvas, useStore } from '../lib/store'
 import { api } from '../lib/api'
@@ -25,6 +25,9 @@ import { Dot } from './ui/dot'
 import { isResidentLimit } from './TeamAllowance'
 import { CommentsPanel } from './CommentsPanel'
 import { PromptBar } from './PromptBar'
+import { AgentChat } from './AgentChat'
+import { isChatCard } from '../lib/agentChat'
+import { clampRecentHeight, MIN_CHAT_PX, MIN_RECENT_PX, readRecentHeight, writeRecentHeight } from '../lib/agentsSplit'
 import { taskFrameId } from '../lib/taskFrame'
 import { useOpenThreadCount } from '../lib/comments'
 import { useT } from '@/lib/i18n'
@@ -75,6 +78,7 @@ export function ActivityPanel({
   const [, tick] = useState(0)
   const openThreads = useOpenThreadCount()
   const working = useStore((s) => s.tasks.filter((t) => t.agentName && !t.endedAt && !t.failedAt).length)
+  const hasChat = useStore((s) => s.tasks.some(isChatCard))
   const t = useT()
 
   /* refresh relative timestamps and running durations */
@@ -137,12 +141,16 @@ export function ActivityPanel({
           </PanelTabs>
           <PanelClose label={t('panels.activityClosePanel')} onClick={onClose} />
         </PanelHeader>
-        {/* the Agents tab is a column: what the agents are doing scrolls above,
-            the prompt composer is docked underneath */}
+        {/* the Agents tab is a column: what the agents are doing on top, the
+            conversation with them under it, the prompt composer docked below */}
         <PanelTabPanel value="tasks" className={tabEnter}>
-          <div className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain">
-            <RecentTasks />
-          </div>
+          {hasChat ? (
+            <AgentsSplit />
+          ) : (
+            <div className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain">
+              <RecentTasks />
+            </div>
+          )}
           {/* the composer briefs agents to change frames: editors only */}
           {canEdit && <PromptBar canvasId={canvasId} />}
         </PanelTabPanel>
@@ -157,6 +165,107 @@ export function ActivityPanel({
         </PanelTabPanel>
       </PanelTabsRoot>
     </Panel>
+  )
+}
+
+/** How far one arrow key moves the line between Recent tasks and the chat. */
+const SPLIT_STEP_PX = 16
+
+/* Recent tasks over the chat, with a line between them to drag: up gives the
+   chat more room, down gives it to the tasks. Until someone drags it, Recent
+   tasks takes what it needs up to 45%; a double-click goes back to that. */
+function AgentsSplit() {
+  const column = useRef<HTMLDivElement>(null)
+  const recent = useRef<HTMLDivElement>(null)
+  /* where the line started, and where the latest move put it: a release can
+     land before React renders that move, so it saves this, not the state */
+  const drag = useRef<{ y: number; height: number; placed?: number } | null>(null)
+  const [height, setHeight] = useState<number | null>(readRecentHeight)
+  /* the rendered sizes, for the separator's value and range: the line also
+     moves when the panel or Recent tasks changes height, not only on a drag */
+  const [sizes, setSizes] = useState({ recent: 0, column: 0 })
+  const t = useT()
+
+  useEffect(() => {
+    const col = column.current
+    const top = recent.current
+    if (!col || !top) return
+    const measure = () => setSizes({ recent: top.offsetHeight, column: col.clientHeight })
+    const observer = new ResizeObserver(measure)
+    observer.observe(col)
+    observer.observe(top)
+    return () => observer.disconnect()
+  }, [])
+
+  const place = (next: number) => {
+    const placed = clampRecentHeight(next, column.current?.clientHeight ?? 0)
+    setHeight(placed)
+    if (drag.current) drag.current.placed = placed
+    return placed
+  }
+  const endDrag = () => {
+    if (drag.current?.placed !== undefined) writeRecentHeight(drag.current.placed)
+    drag.current = null
+  }
+
+  return (
+    <div ref={column} className="flex min-h-0 flex-1 flex-col">
+      <div
+        ref={recent}
+        className={cn(
+          'flex min-h-0 flex-none flex-col overflow-y-auto overscroll-contain',
+          height === null && 'max-h-[45%]',
+        )}
+        style={height === null ? undefined : { height, maxHeight: `calc(100% - ${MIN_CHAT_PX}px)` }}
+      >
+        <RecentTasks />
+      </div>
+      <div
+        role="separator"
+        tabIndex={0}
+        aria-label={t('panels.chatResize')}
+        title={t('panels.chatResize')}
+        aria-orientation="horizontal"
+        aria-valuemin={MIN_RECENT_PX}
+        aria-valuemax={Math.max(MIN_RECENT_PX, sizes.column - MIN_CHAT_PX)}
+        aria-valuenow={sizes.recent}
+        className="group relative z-[1] -my-[3px] flex h-[7px] flex-none touch-none cursor-row-resize items-center focus-visible:outline-none"
+        onPointerDown={(e) => {
+          if (e.button !== 0) return
+          e.preventDefault()
+          drag.current = { y: e.clientY, height: recent.current?.offsetHeight ?? 0 }
+          e.currentTarget.setPointerCapture(e.pointerId)
+        }}
+        onPointerMove={(e) => {
+          if (drag.current) place(drag.current.height + e.clientY - drag.current.y)
+        }}
+        onPointerUp={(e) => {
+          endDrag()
+          if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId)
+        }}
+        onLostPointerCapture={endDrag}
+        onPointerCancel={endDrag}
+        onDoubleClick={() => {
+          setHeight(null)
+          writeRecentHeight(null)
+        }}
+        onKeyDown={(e) => {
+          const current = height ?? recent.current?.offsetHeight ?? 0
+          let next: number
+          if (e.key === 'ArrowUp') next = current - SPLIT_STEP_PX
+          else if (e.key === 'ArrowDown') next = current + SPLIT_STEP_PX
+          else if (e.key === 'Home') next = MIN_RECENT_PX
+          else if (e.key === 'End') next = Number.MAX_SAFE_INTEGER
+          else return
+          e.preventDefault()
+          writeRecentHeight(place(next))
+        }}
+      >
+        {/* the hairline, which thickens while hovered, dragged or focused */}
+        <span className="h-px w-full bg-line-soft transition-[height,background-color] group-hover:h-[3px] group-hover:bg-line group-focus-visible:h-[3px] group-focus-visible:bg-brand group-active:h-[3px] group-active:bg-brand" />
+      </div>
+      <AgentChat className="flex-1" />
+    </div>
   )
 }
 

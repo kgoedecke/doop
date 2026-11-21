@@ -1,6 +1,39 @@
 /** ⌘ on Mac, Ctrl elsewhere — for the shortcut hints in menus. */
 export const MOD_KEY = /mac/i.test(navigator.platform) ? '⌘' : 'Ctrl+'
 
+/** The ⌘ / Ctrl chords the canvas page acts on, as `[shift+]key` (key
+ *  lowercased; a shifted digit by its `code`, as ⌘⇧7 types & on US keyboards). A frame document with the focus keeps them from its browser
+ *  defaults (Ctrl+D bookmarking, Ctrl+K the search bar, Ctrl+± page zoom)
+ *  before relaying them, since the page's own preventDefault arrives too
+ *  late to reach that document. ⌘[ / ⌘] would otherwise take the frame's
+ *  document back and forward in its history; `+` is listed shifted and bare,
+ *  since a number pad types it without ⇧. ⌘C and ⌘X are not relayed at all:
+ *  the clipboard is the frame's when text is selected in it. */
+export const CANVAS_MOD_CHORDS = [
+  'z',
+  'shift+z',
+  'y',
+  'k',
+  'd',
+  'a',
+  '.',
+  'shift+h',
+  'shift+l',
+  '0',
+  '=',
+  '-',
+  '+',
+  'shift++',
+  '[',
+  ']',
+  'b',
+  'i',
+  'u',
+  'shift+x',
+  'shift+7',
+  'shift+8',
+]
+
 /** Canvas shortcuts must leave native fields and rich-text editors alone. */
 export function isTypingTarget(target: EventTarget | null): target is HTMLElement {
   return target instanceof HTMLElement && (target.matches('input, textarea, select') || target.isContentEditable)
@@ -36,6 +69,15 @@ export const PRESENT_SHORTCUT_HINT = `${MOD_KEY}${ALT_KEY}↩`
 export function isPresentShortcut(e: Pick<KeyboardEvent, 'key' | 'metaKey' | 'ctrlKey' | 'altKey' | 'shiftKey'>) {
   return e.key === 'Enter' && (e.metaKey || e.ctrlKey) && e.altKey && !e.shiftKey
 }
+
+/** ⌘⌥↩ (Ctrl+Alt+Enter elsewhere) runs the open automation: the canvas's
+ *  Present chord, since both start what is on screen. ⌘R stays the
+ *  browser's reload. */
+export const RUN_SHORTCUT_HINT = PRESENT_SHORTCUT_HINT
+export const isRunShortcut = isPresentShortcut
+
+/** The hint for ⌘S / Ctrl+S, as a tooltip shows it. */
+export const SAVE_SHORTCUT_HINT = `${MOD_KEY}S`
 
 /** A key landing on a control — a button, link, menu, tab, tree — belongs to
  *  that control: ↩ presses it, Tab leaves it. The canvas's traversal keys

@@ -14,7 +14,7 @@ export async function handleGeminiCloudMcp(req: Request, res: Response) {
   const run = geminiCloudRuns.authorized(id, token)
   const canExecute = async () => {
     if (!run || !geminiCloudWorkerFor(run.userId)) return false
-    const canvas = store.getCanvas(run.request.canvasId)
+    const canvas = await store.load(run.request.canvasId)
     return !!canvas && canEditCanvas(run.userId, canvas) && !(await isBanned(run.userId))
   }
   if (!run || !(await canExecute())) {

@@ -1,5 +1,6 @@
 import type { Page } from 'puppeteer-core'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { reloadEnv } from '../server/env.ts'
 
 const dnsMocks = vi.hoisted(() => ({ lookup: vi.fn() }))
 
@@ -145,6 +146,52 @@ describe('public Chromium request guard', () => {
 
     expect(fetchUrl).not.toHaveBeenCalled()
     expect(request.continue).not.toHaveBeenCalled()
+  })
+
+  it('lets a browser off the server network fetch public URLs itself, still refusing private ones', async () => {
+    const fetchUrl = vi.fn()
+    const harness = pageHarness()
+    await guardPublicPageRequests(harness.page, { fetchUrl, offNetwork: true })
+    const page = requestStub('https://example.com/style.css', 'stylesheet')
+    const internal = requestStub('http://169.254.169.254/latest/meta-data/')
+    const socket = requestStub('file:///etc/passwd')
+
+    harness.dispatch(page)
+    harness.dispatch(internal)
+    harness.dispatch(socket)
+    await vi.waitFor(() => expect(page.continue).toHaveBeenCalledOnce())
+    await vi.waitFor(() => expect(internal.abort).toHaveBeenCalledOnce())
+    await vi.waitFor(() => expect(socket.abort).toHaveBeenCalledOnce())
+
+    expect(fetchUrl).not.toHaveBeenCalled()
+    expect(harness.client.send).toHaveBeenCalledWith('Network.setBlockedURLs', { urls: ['ws://*', 'wss://*'] })
+  })
+
+  it('keeps a remote browser on the pinned proxy unless it is declared isolated', async () => {
+    vi.stubEnv('REMOTE_BROWSER_URL', 'wss://renderer.internal/devtools/browser')
+    vi.stubEnv('REMOTE_BROWSER_ISOLATED', undefined)
+    reloadEnv()
+    try {
+      const fetchUrl = vi.fn(async () => new Response('ok', { status: 200 }))
+      const harness = pageHarness()
+      await guardPublicPageRequests(harness.page, { fetchUrl })
+      const request = requestStub('https://rebind.example/')
+
+      harness.dispatch(request)
+      await vi.waitFor(() => expect(request.respond).toHaveBeenCalledOnce())
+      expect(request.continue).not.toHaveBeenCalled()
+
+      vi.stubEnv('REMOTE_BROWSER_ISOLATED', '1')
+      reloadEnv()
+      const isolated = pageHarness()
+      await guardPublicPageRequests(isolated.page, { fetchUrl })
+      const direct = requestStub('https://example.com/')
+      isolated.dispatch(direct)
+      await vi.waitFor(() => expect(direct.continue).toHaveBeenCalledOnce())
+    } finally {
+      vi.unstubAllEnvs()
+      reloadEnv()
+    }
   })
 
   it('continues only an explicitly trusted local asset URL directly in Chromium', async () => {

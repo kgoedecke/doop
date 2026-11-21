@@ -1,40 +1,12 @@
 // @vitest-environment happy-dom
 import { afterEach, describe, expect, it } from 'vitest'
-import {
-  DEFAULT_VIEW_OPTIONS,
-  parseZoomPercent,
-  readViewOptions,
-  viewOptionForKey,
-  writeViewOptions,
-} from '../src/lib/viewOptions'
+import { DEFAULT_VIEW_OPTIONS, parseZoomPercent, readViewOptions, writeViewOptions } from '../src/lib/viewOptions'
 
 /**
  * What the canvas draws over the frames (pixel grid, other people's cursors,
  * comment pins): switched by shortcut or from the zoom pill's menu and kept per
  * browser. The menu also takes a typed zoom level.
  */
-
-const press = (over: Partial<KeyboardEvent>) =>
-  ({ code: '', metaKey: false, ctrlKey: false, altKey: false, shiftKey: false, ...over }) as KeyboardEvent
-
-describe('viewOptionForKey', () => {
-  it("maps ⇧' / ⇧C / ⌘⌥\\ (Ctrl+Alt+\\) by code", () => {
-    expect(viewOptionForKey(press({ code: 'Quote', shiftKey: true }))).toBe('pixelGrid')
-    expect(viewOptionForKey(press({ code: 'KeyC', shiftKey: true }))).toBe('comments')
-    expect(viewOptionForKey(press({ code: 'Backslash', metaKey: true, altKey: true }))).toBe('cursors')
-    expect(viewOptionForKey(press({ code: 'Backslash', ctrlKey: true, altKey: true }))).toBe('cursors')
-  })
-
-  it('leaves the bare keys and other chords alone', () => {
-    /* C alone is the Comment tool, ⌘C is copy */
-    expect(viewOptionForKey(press({ code: 'KeyC' }))).toBeNull()
-    expect(viewOptionForKey(press({ code: 'KeyC', metaKey: true }))).toBeNull()
-    expect(viewOptionForKey(press({ code: 'KeyC', shiftKey: true, metaKey: true }))).toBeNull()
-    expect(viewOptionForKey(press({ code: 'Quote' }))).toBeNull()
-    expect(viewOptionForKey(press({ code: 'Backslash', metaKey: true }))).toBeNull()
-    expect(viewOptionForKey(press({ code: 'Backslash', metaKey: true, altKey: true, shiftKey: true }))).toBeNull()
-  })
-})
 
 describe('readViewOptions / writeViewOptions', () => {
   afterEach(() => localStorage.clear())

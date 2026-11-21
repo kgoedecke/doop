@@ -1,4 +1,45 @@
 import { env } from './env.ts'
+import {
+  changeInstances,
+  componentDetail,
+  ComponentError,
+  createComponentFromElement,
+  createComponentFromHtml,
+  deleteComponent,
+  detachAllInstances,
+  findComponent,
+  importableEntry,
+  importComponent,
+  insertInstance,
+  libraryEntry,
+  LibraryPlanError,
+  libraryConsumers,
+  LibraryPublisherError,
+  libraryStatus,
+  mayPublishFrom,
+  publishToLibrary,
+  restoreComponent,
+  restoreComponentVersion,
+  syncComponent,
+  unpublishFromLibrary,
+  updateLibraryConsumers,
+  updateComponent,
+  usageOf,
+} from './componentActions.ts'
+import {
+  hydrateLibraries,
+  landingPageOf,
+  libraryBlock,
+  librariesForCanvas,
+  librariesOfWorkspace,
+  originOf,
+  snapshotAsDef,
+} from './componentLibrary.ts'
+import { z } from 'zod'
+import { previewDocument } from './componentPreview.ts'
+import { codeSchema, propSchema } from './componentTools.ts'
+import { activeComponents } from '../shared/components.ts'
+import { PRO_UPLOAD_BYTES } from '../shared/billing.ts'
 import { canvasPages, framePageId, samePages } from '../shared/pages.ts'
 import { normalizePageBackground } from '../shared/pageBackground.ts'
 import { MAX_STACK_WRITES, type StackWrite } from '../shared/frameStack.ts'
@@ -21,10 +62,14 @@ import { WebSocketServer, WebSocket } from 'ws'
 import { GuideLimitError, PageLimitError, store } from './store.ts'
 import { parseGuide } from '../shared/guides.ts'
 import { getImage } from './previews.ts'
+import { LayerNotFoundError, layerRefFromQuery, layerSelector } from './layerExport.ts'
 import * as actions from './actions.ts'
+import { captureFeature, captureTokenResults } from './featureEvents.ts'
 import { liveActivitiesRouter, logLiveActivityRequests, startLiveActivityDelivery } from './liveActivities.ts'
 import { onCanvasEvent } from './events.ts'
+import * as imageDescriptions from './imageDescriptions.ts'
 import * as commentNotifications from './commentNotifications.ts'
+import { mentionablePeople, resolveCommentMentions, threadAuthorIds } from './canvasPeople.ts'
 import { notificationsRouter } from './notifications.ts'
 import * as webhooks from './webhooks.ts'
 import { webhooksRouter } from './webhookRoutes.ts'
@@ -32,6 +77,8 @@ import { fontsRouter } from './fontRoutes.ts'
 import { AvatarInputError, clearAvatar, setAvatar } from './avatars.ts'
 import { MAX_AVATAR_BYTES, avatarUrl } from '../shared/avatar.ts'
 import { fontsForCanvas, hydrateFonts } from './fonts.ts'
+import { addCanvasFont, uploadedFontResult } from './canvasFontUpload.ts'
+import { MAX_FONT_BYTES } from '../shared/fonts.ts'
 import { tokensCss, tokensMarkdown, tokensTailwind } from '../shared/designTokens.ts'
 import {
   canEditCanvas,
@@ -44,6 +91,7 @@ import {
 } from './access.ts'
 import { isLinkAccess, roleAllows, type CanvasRole } from '../shared/canvasRole.ts'
 import { auth, initAuth, syncAdmins, getUserName, loginProvidersConfig } from './auth.ts'
+import { getInstanceSettings, hydrateInstanceSettings, loginPolicy } from './instanceSettings.ts'
 import { adminRouter } from './admin.ts'
 import { communityRouter, parseListing, publishableFrames } from './community.ts'
 import { automationsRouter, startScheduler } from './automations.ts'
@@ -51,6 +99,10 @@ import { startMcpTokenPrune } from './mcpTokens.ts'
 import { integrationsRouter, relayDesktopCallback } from './integrations.ts'
 import { extensions } from './extensions.ts'
 import * as workspaces from './workspaces.ts'
+import { uploadCap } from './entitlements.ts'
+import { startStallWatchdog } from './stallWatchdog.ts'
+import { beginOperation, endOperation, withinOperation, WorkBudgetError } from './workBudget.ts'
+import { openTransaction, outsideOperation, transaction, type OpenTransaction } from './journal.ts'
 import * as billing from './billing.ts'
 import * as demo from './demo.ts'
 import { db, initDb } from './db/index.ts'
@@ -59,17 +111,13 @@ import { encryptionConfigured } from './secretBox.ts'
 import * as authSchema from './db/auth-schema.ts'
 import * as persist from './db/persist.ts'
 import { handleMcpRequest } from './mcp.ts'
-import {
-  getAsset,
-  reconcileAssetRefs,
-  beginTicketUpload,
-  endTicketUpload,
-  createAsset,
-  MAX_ASSET_BYTES,
-} from './assets.ts'
+import { RendererBusyError } from './renderBrowser.ts'
+import { getAsset, reconcileAssetRefs, beginTicketUpload, endTicketUpload, createAsset } from './assets.ts'
 import * as ingest from './ingest.ts'
 import * as agentKeys from './agentKeys.ts'
 import * as backgrounds from './backgrounds.ts'
+import { serveIcon } from './iconProxy.ts'
+import { servePhoto } from './photoProxy.ts'
 import * as storage from './storage.ts'
 import * as github from './github.ts'
 import * as githubApp from './githubApp.ts'
@@ -80,20 +128,33 @@ import { getLocalAgentPreference } from './localAgentPreferences.ts'
 import { serverTierInfo } from './agentModel.ts'
 import { imageModelAvailability, serverImageGenEnabled } from './imageGen.ts'
 import { setImagePref } from './imagePrefs.ts'
-import { accountsView, listRunners, MODEL_MENUS } from './agentRunners.ts'
+import { accountsView, listRunners, menuFor } from './agentRunners.ts'
+import { CustomProviderError, discoverCustomModels, takeProbeSlot, testCustomProvider } from './customProviders.ts'
+import { CustomProviderUrlError, customProvidersEnabled, reachableUrl } from './customProviderFetch.ts'
+import {
+  isCustomProviderKind,
+  normalizeBaseUrl,
+  parseCustomHeaders,
+  parseCustomKey,
+  parseCustomProviderConfig,
+  CUSTOM_API_TYPES,
+} from '../shared/customProvider.ts'
 import { setStoredDefault } from './agentDefaults.ts'
 import { isRunnerProvider } from '../shared/agentRunner.ts'
 import { modelCatalogFor } from './modelCatalog.ts'
 import { mentionedRole } from '../shared/agents.ts'
+import { hydrateCustomAgents, rosterFor, teamOfCanvas } from './customAgents.ts'
+import { customAgentsRouter } from './customAgentRoutes.ts'
 import { activeAgentTasks } from '../shared/agentActivity.ts'
 import { colorFor } from '../shared/types.ts'
 import { isPeerViewport } from '../shared/viewport.ts'
 import { exportScaleSuffix, fitExportScale, parseExportScale } from '../shared/exportScale.ts'
 import { emailShare } from './canvasShares.ts'
 import * as userEvents from './userEvents.ts'
-import type { Canvas, ClientMessage, Presence, ServerMessage } from '../shared/types.ts'
+import type { Actor, Canvas, ClientMessage, Presence, ServerMessage } from '../shared/types.ts'
 
 const PORT = env.PORT
+const HOST = env.HOST
 
 /* Identifies the client bundle this process serves. Hashing dist/index.html
    works because Vite writes hashed asset names into it — any frontend change
@@ -115,14 +176,17 @@ await initDb()
 await backgrounds.initBackgrounds()
 initAuth()
 await syncAdmins() // ADMIN_EMAILS -> user.role, for accounts that already exist
+await hydrateCustomAgents() // before the logs: an interrupted claim is told apart by its agent's name
 let data = await persist.hydrate()
 if (data.canvases.length === 0 && (await persist.importLegacyJson())) {
   data = await persist.hydrate()
 }
 store.init(data.canvases)
 await workspaces.hydrateWorkspaces() // before the first request: canvasRole reads membership
+await hydrateInstanceSettings() // the sign-in policy, read on every signup
 await webhooks.hydrateWebhooks()
 await hydrateFonts() // before the first request: frame writes add the faces they use
+await hydrateLibraries() // and the workspace library components they name
 billing.reportBillingConfig()
 actions.hydrateLogs(data)
 seed()
@@ -147,15 +211,14 @@ seed()
 
 /* asset bookkeeping (no deletion): every upload records its canvas, and
    asset_refs tracks which frames reference which assets — kept in sync on
-   every durable frame write, rebuilt here from the frames hydrate just
-   loaded. Nothing is ever deleted; asset_refs is the ledger any future
-   cleanup would be built on. */
-{
-  const frames = data.canvases.flatMap((c) => c.frames)
-  reconcileAssetRefs(frames)
-    .then((n) => n && console.log(`[assets] reconciled ${n} asset ref(s)`))
-    .catch((e) => console.error('[assets] reconcile failed', e))
-}
+   every durable frame write, rebuilt here from the stored frames. Nothing
+   is ever deleted; asset_refs is the ledger any future cleanup would be
+   built on. */
+reconcileAssetRefs()
+  .then((n) => n && console.log(`[assets] reconciled ${n} asset ref(s)`))
+  .catch((e) => console.error('[assets] reconcile failed', e))
+/* image descriptions for agents: recover the backlog and listen for new assets. */
+void imageDescriptions.startImageDescriptions(broadcast)
 
 /* One stray rejection must never take down the multiplayer server: Node's
    default is to exit, which turned a single aborted analytics upload into
@@ -288,8 +351,9 @@ function agentTouch(
   agentName: string,
   frameId?: string | null,
   status?: string | null,
-  owner?: string,
+  identity?: Pick<Actor, 'owner' | 'brand'>,
 ) {
+  const owner = identity?.owner
   let byName = agentPresences.get(canvasId)
   if (!byName) agentPresences.set(canvasId, (byName = new Map()))
   let p = byName.get(agentName)
@@ -301,6 +365,7 @@ function agentTouch(
       color: colorFor(agentName),
       kind: 'agent',
       owner,
+      brand: identity?.brand,
       lastSeen: Date.now(),
       activeFrameId: frameId ?? null,
     }
@@ -308,6 +373,10 @@ function agentTouch(
   }
   p.lastSeen = Date.now()
   if (owner && !p.owner) p.owner = owner
+  /* a presence first seen through a task update has no client to read; the
+     next tool call brings one, and viewers get the presence again */
+  const learnedBrand = !isNew && !!identity?.brand && p.brand !== identity.brand
+  if (learnedBrand) p.brand = identity?.brand
   if (frameId !== undefined) p.activeFrameId = frameId
   let statusChanged = false
   if (status !== undefined) {
@@ -317,7 +386,7 @@ function agentTouch(
       statusChanged = true
     }
   }
-  if (isNew) {
+  if (isNew || learnedBrand) {
     broadcast(canvasId, { type: 'presence:join', presence: p })
   } else {
     if (frameId !== undefined) {
@@ -348,6 +417,7 @@ actions.wire(broadcast, agentTouch)
 /* after the room has been told: email for the people who were not in it */
 onCanvasEvent(commentNotifications.onCanvasEvent)
 onCanvasEvent(webhooks.onCanvasEvent)
+onCanvasEvent(imageDescriptions.onCanvasEvent)
 
 /* ------------------------------------------------- http api */
 
@@ -358,6 +428,44 @@ const app = express()
 app.set('trust proxy', 1)
 
 app.get('/healthz', (_req, res) => res.json({ ok: true }))
+
+/* how many canvases have their frame HTML in memory (store.load / evictIdle) */
+app.get('/healthz/store', (_req, res) => {
+  res.json(store.stats())
+})
+
+/* every request is one operation: the component engine's work budget is counted against
+   it, and the stall watchdog can name it while it runs (server/workBudget.ts). It is one
+   write boundary too (server/journal.ts): what its handler changed is committed as the
+   response starts (so the room hears of a write just before its author is answered, as
+   it always did), and undone when the handler threw instead (`undoRequest`, below). A
+   handler still at work when its client goes away commits what it has done by then, and
+   whatever it does afterwards commits as it goes. */
+app.use((req, res, next) => {
+  const operation = beginOperation(`${req.method} ${req.path}`, canvasOfPath(req.path))
+  const writes = openTransaction()
+  res.locals.writes = writes
+  const writeHead = res.writeHead.bind(res)
+  res.writeHead = ((...args: Parameters<typeof writeHead>) => {
+    writes.commit()
+    return writeHead(...args)
+  }) as typeof res.writeHead
+  res.once('close', () => {
+    writes.commit()
+    /* an event stream is open for as long as its reader is there: not a slow operation */
+    operation.quiet = String(res.getHeader('content-type') ?? '').includes('text/event-stream')
+    endOperation(operation)
+  })
+  withinOperation(operation, () => writes.run(next))
+})
+
+/* The headless renderer's counters, for an uptime check that alerts when
+   renders stop (kills climbing, a queue that never drains). Lazy, so a boot
+   never pays for puppeteer-core just to answer it. */
+app.get('/healthz/renderer', async (_req, res) => {
+  const { rendererStatus } = await import('./screenshot.ts')
+  res.json(rendererStatus())
+})
 
 /* ------------------------------------------------------------------ */
 /* PostHog relay: the client sends analytics + session-replay traffic  */
@@ -424,12 +532,27 @@ app.use('/relay', async (req, res) => {
 /* render dispatch live in previews.ts — this route is HTTP only.      */
 /* ------------------------------------------------------------------ */
 
+/** A full render queue is a 503 with Retry-After, not a 500: the renderer is
+ *  healthy, only busy, and the client should come back in a few seconds. */
+function sendRenderFailure(res: express.Response, error: unknown, fallback = 'render failed') {
+  if (error instanceof RendererBusyError) {
+    res.set('Retry-After', '10')
+    return res.status(503).json({ error: error.message })
+  }
+  return res.status(500).json({ error: error instanceof Error ? error.message : fallback })
+}
+
 app.get('/i/:id.:ext', async (req, res) => {
   const { id, ext } = req.params as { id: string; ext: string }
   if (ext !== 'png' && ext !== 'jpg') return res.status(404).end()
+  /* metadata only: a cached image needs no html, and a render reads the
+     one frame's html when it starts (store.renderableFrame) */
   const frame = store.getFrame(id)
   if (!frame) return res.status(404).end()
 
+  /* ?element=<data-doop-id> or ?selector=<css>: one layer, cut from the render */
+  const layer = layerRefFromQuery(req.query)
+  if (layer === null) return res.status(400).json({ error: 'element must be a data-doop-id; selector a CSS selector' })
   /* any multiplier the export picker offers; a missing or unreadable one
      is 1x, as before there was a picker */
   const scale = fitExportScale(frame, parseExportScale(req.query.scale) ?? 1)
@@ -440,7 +563,8 @@ app.get('/i/:id.:ext', async (req, res) => {
       scale,
       quality: Math.min(100, Math.max(1, Number(req.query.quality) || 90)),
       /* ?preview — the dashboard-card variant; see previews.ts */
-      preview: req.query.preview !== undefined,
+      preview: !layer && req.query.preview !== undefined,
+      layer: layer ? layerSelector(layer) : undefined,
       ip: req.ip ?? 'unknown',
       /* the render limit targets anonymous hotlink abuse — a logged-in user
          loading a dashboard of many canvases shouldn't hit it (and behind
@@ -450,7 +574,8 @@ app.get('/i/:id.:ext', async (req, res) => {
         !!(await auth.api.getSession({ headers: fromNodeHeaders(req.headers) }).catch(() => null)),
     })
   } catch (e) {
-    return res.status(500).json({ error: e instanceof Error ? e.message : 'render failed' })
+    if (e instanceof LayerNotFoundError) return res.status(404).json({ error: e.message })
+    return sendRenderFailure(res, e)
   }
   if (result.status === 'rate-limited') {
     res.set('Retry-After', '60')
@@ -462,7 +587,8 @@ app.get('/i/:id.:ext', async (req, res) => {
   res.set('Cache-Control', 'public, max-age=60')
   if (req.query.download !== undefined) {
     const safe = frame.name.replace(/[^\w\- ]+/g, '').trim() || 'frame'
-    res.set('Content-Disposition', `attachment; filename="${safe}${exportScaleSuffix(scale)}.${ext}"`)
+    const part = layer ? ` ${'elementId' in layer ? layer.elementId : 'layer'}` : ''
+    res.set('Content-Disposition', `attachment; filename="${safe}${part}${exportScaleSuffix(scale)}.${ext}"`)
   }
   res.send(buf)
 })
@@ -515,6 +641,11 @@ app.get('/bg/:file', async (req, res) => {
   }
 })
 
+/* search_icons' icons from Doop's origin (server/iconProxy.ts) */
+app.get('/icons/iconify/:prefix/:file', (req, res) => void serveIcon(req, res))
+/* search_images' photos from Doop's origin (server/photoProxy.ts) */
+app.get('/photos/pexels/:file', (req, res) => void servePhoto(req, res))
+
 /* ------------------------------------------------------------------ */
 /* One-time asset uploads: the upload_asset MCP tool mints a ticket and */
 /* the agent curls the file here (curl -T file /u/<token>), so bytes    */
@@ -523,8 +654,10 @@ app.get('/bg/:file', async (req, res) => {
 /* capability: unguessable, single-use, 15-minute TTL.                  */
 /* ------------------------------------------------------------------ */
 
-app.put('/u/:token', async (req, res) => {
-  const { token } = req.params
+/* A font ticket's command ends the URL with a slash, so curl appends the
+   local file name (/u/<token>/Oxanium-Light.ttf) and the library keeps it. */
+app.put(['/u/:token', '/u/:token/:name'], async (req, res) => {
+  const token = req.params.token ?? ''
   const ticket = beginTicketUpload(token)
   if (!ticket)
     return res
@@ -534,8 +667,12 @@ app.put('/u/:token', async (req, res) => {
   try {
     /* on any early rejection, destroy the request stream — otherwise curl
        keeps sending a body nobody reads and the connection deadlocks */
-    if (Number(req.headers['content-length'] || 0) > MAX_ASSET_BYTES) {
-      res.status(413).json({ error: 'file exceeds the 5 MB limit' })
+    const font = ticket.kind === 'font'
+    const imageCap = uploadCap({ canvasId: ticket.canvasId, userId: ticket.ownerId })
+    const cap = font ? MAX_FONT_BYTES : imageCap.bytes
+    const tooBig = font ? `file exceeds the ${cap / 1024 / 1024} MB limit` : imageCap.exceeded
+    if (Number(req.headers['content-length'] || 0) > cap) {
+      res.status(413).json({ error: tooBig })
       req.destroy()
       return
     }
@@ -543,18 +680,29 @@ app.put('/u/:token', async (req, res) => {
     let total = 0
     for await (const chunk of req) {
       total += (chunk as Buffer).length
-      if (total > MAX_ASSET_BYTES) {
-        res.status(413).json({ error: 'file exceeds the 5 MB limit' })
+      if (total > cap) {
+        res.status(413).json({ error: tooBig })
         req.destroy()
         return
       }
       chunks.push(chunk as Buffer)
     }
-    const asset = await createAsset(Buffer.concat(chunks), {
-      canvasId: ticket.canvasId,
-      ownerId: ticket.ownerId,
-      uploadedBy: ticket.uploadedBy,
-    })
+    if (font) {
+      if (!ticket.ownerId) return res.status(400).json({ error: 'fonts are added by a signed-in account' })
+      const added = await addCanvasFont(
+        ticket.canvasId,
+        { id: ticket.ownerId, name: ticket.uploadedBy },
+        Buffer.concat(chunks),
+        req.params.name ?? 'font',
+      )
+      success = true
+      return res.json(uploadedFontResult(added))
+    }
+    const asset = await createAsset(
+      Buffer.concat(chunks),
+      { canvasId: ticket.canvasId, ownerId: ticket.ownerId, uploadedBy: ticket.uploadedBy },
+      imageCap,
+    )
     success = true
     const url = `${env.BETTER_AUTH_URL}/a/${asset.id}.${asset.ext}`
     res.json({
@@ -587,6 +735,14 @@ app.put('/u/:token', async (req, res) => {
 const MCP_OAUTH_PATHS = /^\/api\/auth\/(mcp\/|oauth2\/(authorize|consent|token))/
 const VIEW_AS_ALLOWED = /^\/api\/auth\/(sign-out|admin\/stop-impersonating)$/
 app.all('/api/auth/*', async (req, res, next) => {
+  /* Admin → Sign-in turned email/password sign-up off: the form is hidden,
+     and the call it would make is refused too. Sign-in, password resets and
+     provider sign-ups go on as before. */
+  if (req.path === '/api/auth/sign-up/email' && !getInstanceSettings().emailPasswordSignup) {
+    return res
+      .status(403)
+      .json({ code: 'SIGNUP_DISABLED', message: 'Sign-up with email and password is off on this instance.' })
+  }
   const restricted = MCP_OAUTH_PATHS.test(req.path) || (req.method !== 'GET' && !VIEW_AS_ALLOWED.test(req.path))
   if (restricted) {
     const session = await auth.api.getSession({ headers: fromNodeHeaders(req.headers) }).catch(() => null)
@@ -665,7 +821,8 @@ app.post('/api/account-exists', async (req, res) => {
    build shared across self-hosted deploys can't know this at build time —
    see server/auth.ts loginProvidersConfig for what's safe to expose here. */
 app.get('/api/oidc-config', (req, res) => {
-  res.json(loginProvidersConfig())
+  const providers = loginProvidersConfig()
+  res.json({ ...providers, ...loginPolicy(providers.enabled) })
 })
 
 /* Public: the interface language for visitors who have not picked one. The
@@ -740,6 +897,35 @@ app.use('/api', async (req, res, next) => {
   }
 })
 
+/* Every route naming a canvas, frame or comment gets that canvas's frame
+   HTML loaded before its handler runs (store.load), so handlers keep
+   reading the store synchronously, and held until the response is done, so
+   a handler awaiting something slow (an import, a render) keeps it.
+   Behind the session gate, so only a signed-in request can bring a canvas
+   into memory. */
+function loadFirst(canvasOf: (id: string) => string | undefined): express.RequestHandler {
+  return (req, res, next) => {
+    const canvasId = canvasOf(String(req.params.id))
+    if (!canvasId) return next()
+    store.load(canvasId).then(() => {
+      res.once('close', store.hold(canvasId))
+      next()
+    }, next)
+  }
+}
+app.use(
+  '/api/canvases/:id',
+  loadFirst((id) => id),
+)
+app.use(
+  '/api/frames/:id',
+  loadFirst((id) => store.getFrame(id)?.canvasId),
+)
+app.use(
+  '/api/comments/:id',
+  loadFirst((id) => actions.findComment(id)?.canvasId),
+)
+
 /* Home's push channel: tells an open dashboard its canvas list changed */
 app.get('/api/me/events', userEvents.subscribe)
 
@@ -753,6 +939,8 @@ app.get('/api/me', async (req, res) => {
     admin: isAdmin(req.user),
     /* 'team' while a member of a live paid workspace — the account menu's plan line */
     plan: workspaces.planFor(id),
+    /* whether this server sells plans at all: no Upgrade anywhere without it */
+    billing: billing.billingEnabled(),
     /* the SPA cannot infer this: impersonation swaps the session cookie
        outright, so everything else on this response describes the person
        being viewed, not the admin doing the viewing */
@@ -887,7 +1075,7 @@ const ROLE_DENIED: Record<CanvasRole, string> = {
    agent would make the edits the link withholds. Answers the 403 itself. */
 function refuseAgentMention(req: express.Request, res: express.Response, canvasId: string, text: string): boolean {
   const canvas = store.getCanvas(canvasId)
-  if (!mentionedRole(text) || (canvas && canEditCanvas(req.user!.id, canvas))) return false
+  if (!mentionedRole(text, rosterFor(canvas)) || (canvas && canEditCanvas(req.user!.id, canvas))) return false
   res.status(403).json({ error: 'asking an agent to change the canvas needs edit access' })
   return true
 }
@@ -925,9 +1113,18 @@ function requireFrame(
 }
 
 app.use('/api/local-agent', localAgentRouter)
+app.use('/api/image-descriptions', imageDescriptions.imageDescriptionsRouter)
 app.use('/api/notifications', notificationsRouter)
 app.use('/api/webhooks', webhooksRouter)
 app.use('/api/fonts', fontsRouter)
+app.use('/api/agents', customAgentsRouter)
+
+/* the custom agents a canvas's team has: its workspace's, or its owner's (the
+   automation editor asks for a step's canvas) */
+app.get('/api/canvases/:id/agents', (req, res) => {
+  const canvas = requireCanvas(req, res, req.params.id, 'view')
+  if (canvas) res.json(teamOfCanvas(canvas))
+})
 
 /* the font library a canvas designs with: its workspace's, or its owner's */
 app.get('/api/canvases/:id/fonts', (req, res) => {
@@ -1004,7 +1201,7 @@ app.get('/api/model-account/models', async (req, res) => {
          must not hold the picker past the catalog's own budget */
       new Promise<typeof account>((resolve) => setTimeout(resolve, 8_000, account).unref()),
     ])
-    res.json(await modelCatalogFor(live, MODEL_MENUS[account.kind]))
+    res.json(await modelCatalogFor(live, menuFor(account)))
   } catch {
     res.status(500).json({ error: 'models unavailable' })
   }
@@ -1093,6 +1290,9 @@ const KEY_CONNECTS = {
   'anthropic-key': modelAccounts.connectAnthropicKey,
   'openrouter-key': modelAccounts.connectOpenRouterKey,
   'gemini-key': modelAccounts.connectGeminiKey,
+  'deepseek-key': modelAccounts.connectDeepSeekKey,
+  'kimi-key': modelAccounts.connectKimiKey,
+  'kimi-code': modelAccounts.connectKimiCodeKey,
 } as const
 for (const [kind, connect] of Object.entries(KEY_CONNECTS)) {
   app.post(`/api/model-account/${kind}`, async (req, res) => {
@@ -1105,6 +1305,122 @@ for (const [kind, connect] of Object.entries(KEY_CONNECTS)) {
     }
   })
 }
+
+/* ---- custom providers: any OpenAI- or Anthropic-compatible endpoint, by
+   its base URL. One is a model account of kind `custom:<id>`, so switching it
+   on or off, picking its model, making it the default and disconnecting it
+   are the routes above; these create and edit it, and help set it up. */
+
+app.use('/api/custom-providers', (_req, res, next) => {
+  if (!customProvidersEnabled()) return res.status(404).json({ error: 'custom providers are off on this server' })
+  next()
+})
+
+/** The key and headers a request carries: a field left out is undefined, so
+ *  an edit keeps the stored one; an empty key clears it. */
+function customSecrets(body: Record<string, unknown>): { apiKey?: string; headers?: Record<string, string> } {
+  const secrets: { apiKey?: string; headers?: Record<string, string> } = {}
+  if (body.apiKey !== undefined) {
+    const key = parseCustomKey(body.apiKey)
+    if (!key.ok) throw new CustomProviderError(key.error)
+    secrets.apiKey = key.value
+  }
+  if (body.headers !== undefined) {
+    const headers = parseCustomHeaders(body.headers)
+    if (!headers.ok) throw new CustomProviderError(headers.error)
+    secrets.headers = headers.value
+  }
+  return secrets
+}
+
+/** A validated provider description whose URL this server may reach. */
+function customConfig(body: unknown) {
+  const config = parseCustomProviderConfig(body)
+  if (!config.ok) throw new CustomProviderError(config.error)
+  reachableUrl(config.value.baseUrl)
+  return config.value
+}
+
+/** The secrets a set-up request should use: what it carries, else (for a
+ *  provider being edited) what is stored for it. */
+async function probeSecrets(userId: string, body: Record<string, unknown>) {
+  const given = customSecrets(body)
+  const stored = isCustomProviderKind(body.kind) ? await modelAccounts.getAccount(userId, body.kind) : null
+  const apiKey = given.apiKey ?? stored?.apiKey
+  const headers = given.headers ?? stored?.headers
+  return { ...(apiKey ? { apiKey } : {}), ...(headers ? { headers } : {}) }
+}
+
+function customFailure(res: express.Response, error: unknown, fallback: string) {
+  if (error instanceof CustomProviderError || error instanceof CustomProviderUrlError) {
+    return res.status(400).json({ error: error.message })
+  }
+  /* the provider's own error text (a 400 body, a refused model) is what the
+     person needs to fix their endpoint; never a stack */
+  const message = error instanceof Error ? error.message.slice(0, 500) : fallback
+  return res.status(400).json({ error: message || fallback })
+}
+
+app.post('/api/custom-providers', async (req, res) => {
+  try {
+    const body = (req.body ?? {}) as Record<string, unknown>
+    const config = customConfig(body)
+    await modelAccounts.connectCustomProvider(req.user!.id, config, customSecrets(body))
+    res.json(await accountsView(req.user!.id))
+    wakeUserWork(req.user!.id)
+  } catch (error) {
+    customFailure(res, error, 'could not add that provider')
+  }
+})
+
+app.put('/api/custom-providers/:kind', async (req, res) => {
+  const kind = req.params.kind
+  if (!isCustomProviderKind(kind)) return res.status(400).json({ error: 'unknown provider' })
+  try {
+    const body = (req.body ?? {}) as Record<string, unknown>
+    await modelAccounts.updateCustomProvider(req.user!.id, kind, customConfig(body), customSecrets(body))
+    res.json(await accountsView(req.user!.id))
+    wakeUserWork(req.user!.id)
+  } catch (error) {
+    customFailure(res, error, 'could not save that provider')
+  }
+})
+
+/* the endpoint's own model list, to fill the form's rows */
+app.post('/api/custom-providers/models', async (req, res) => {
+  const userId = req.user!.id
+  if (!takeProbeSlot(userId)) return res.status(429).json({ error: 'Too many requests. Wait a few minutes.' })
+  try {
+    const body = (req.body ?? {}) as Record<string, unknown>
+    const apiType = CUSTOM_API_TYPES.find((type) => type === body.apiType)
+    if (!apiType) throw new CustomProviderError('Pick the API type')
+    const baseUrl = normalizeBaseUrl(typeof body.baseUrl === 'string' ? body.baseUrl : '')
+    if (!baseUrl.ok) throw new CustomProviderError(baseUrl.error)
+    const models = await discoverCustomModels({
+      config: { apiType, baseUrl: baseUrl.value },
+      ...(await probeSecrets(userId, body)),
+    })
+    res.json({ models })
+  } catch (error) {
+    customFailure(res, error, 'could not list that endpoint’s models')
+  }
+})
+
+/* one short turn that has to call a tool: the agent cannot work without it */
+app.post('/api/custom-providers/test', async (req, res) => {
+  const userId = req.user!.id
+  if (!takeProbeSlot(userId)) return res.status(429).json({ error: 'Too many requests. Wait a few minutes.' })
+  try {
+    const body = (req.body ?? {}) as Record<string, unknown>
+    const config = customConfig(body)
+    const model = config.models.find((option) => option.id === body.model) ?? config.models[0]
+    if (!model) throw new CustomProviderError('Add a model to test')
+    await testCustomProvider({ config, ...(await probeSecrets(userId, body)) }, model)
+    res.json({ ok: true, model: model.id })
+  } catch (error) {
+    customFailure(res, error, 'the test turn failed')
+  }
+})
 
 app.delete('/api/model-account/:kind', async (req, res) => {
   const kind = req.params.kind
@@ -1246,7 +1562,13 @@ app.post('/api/canvases/:id/duplicate', async (req, res) => {
 app.get('/api/canvases/:id', (req, res) => {
   const c = requireCanvas(req, res, req.params.id, 'view')
   /* the caller's own role rides along, so the editor knows to go read-only */
-  if (c) res.json({ ...c, role: canvasRole(req.user!.id, c) })
+  if (c)
+    res.json({
+      ...c,
+      role: canvasRole(req.user!.id, c),
+      landingPageId: landingPageOf(c),
+      team: teamOfCanvas(c),
+    })
 })
 
 /* Community gallery listing — the owner's call alone, like link access.
@@ -1292,12 +1614,14 @@ app.put('/api/canvases/:id/workspace', (req, res) => {
     if (!requireGrowableWorkspace(req, res, target)) return
   }
   store.setWorkspace(c.id, target ?? undefined)
+  actions.announceTeam(c.id)
   res.json({ ok: true })
 })
 
 app.post('/api/canvases/:id/claim', (req, res) => {
   const c = store.claimCanvas(req.params.id, req.user!.id)
   if (!c) return res.status(409).json({ error: 'not found or already owned' })
+  actions.announceTeam(c.id)
   res.json({ ok: true })
 })
 
@@ -1377,6 +1701,19 @@ app.get('/api/canvases/:id/members', async (req, res) => {
       owner: id === c.ownerId,
     })),
   )
+})
+
+/* the people a comment may @mention (owner, members, workspace members),
+   names and faces only, for the comment field's picker */
+app.get('/api/canvases/:id/people', async (req, res) => {
+  const c = requireCanvas(req, res, req.params.id, 'comment')
+  if (!c) return
+  mentionablePeople(c)
+    .then((people) => res.json(people))
+    .catch((err: unknown) => {
+      console.error(`[comments] could not list the people on ${c.id}`, err)
+      res.status(500).json({ error: 'could not list the people on this canvas' })
+    })
 })
 
 app.post('/api/canvases/:id/members', async (req, res) => {
@@ -1717,6 +2054,7 @@ app.put('/api/canvases/:id/token-themes', (req, res) => {
   try {
     const themes = actions.setTokenThemes(req.params.id, req.body?.themes, userActor(req), req.body?.renames ?? [])
     if (!themes) return res.status(404).json({ error: 'not found' })
+    captureFeature(req.user!.id, 'token_themes_set', 'ui', { canvas_id: req.params.id, theme_count: themes.length })
     res.json({ themes, tokens: store.getTokens(req.params.id) })
   } catch (e) {
     res.status(400).json({ error: e instanceof Error ? e.message : 'invalid themes' })
@@ -1729,6 +2067,7 @@ app.post('/api/canvases/:id/tokens', (req, res) => {
   if (inputs.length > 200) return res.status(400).json({ error: 'at most 200 tokens per request' })
   const results = actions.createTokens(req.params.id, inputs, userActor(req))
   if (!results) return res.status(404).json({ error: 'not found' })
+  captureTokenResults(req.user!.id, req.params.id, 'ui', results)
   res.json({ results, tokens: store.getTokens(req.params.id) })
 })
 
@@ -1739,6 +2078,7 @@ app.put('/api/canvases/:id/tokens/:name', (req, res) => {
   const edit = { ...body, name: req.params.name }
   const results = actions.setTokens(req.params.id, [edit], userActor(req))
   if (!results) return res.status(404).json({ error: 'not found' })
+  captureTokenResults(req.user!.id, req.params.id, 'ui', results)
   const [result] = results
   if (result?.result === 'error') return res.status(400).json({ error: result.message })
   res.json({ result, tokens: store.getTokens(req.params.id) })
@@ -1748,6 +2088,7 @@ app.delete('/api/canvases/:id/tokens/:name', (req, res) => {
   if (!requireCanvas(req, res, req.params.id, 'edit')) return
   const results = actions.setTokens(req.params.id, [{ name: req.params.name, delete: true }], userActor(req))
   if (!results) return res.status(404).json({ error: 'not found' })
+  captureTokenResults(req.user!.id, req.params.id, 'ui', results)
   const [result] = results
   if (result?.result === 'error') return res.status(400).json({ error: result.message })
   res.json({ ok: true, tokens: store.getTokens(req.params.id) })
@@ -1837,20 +2178,22 @@ app.post('/api/canvases/:id/proposals/:pid', (req, res) => {
 
 /* Browser asset uploads (paste / drop): raw image bytes in, permanent /a/
    URL out. Same createAsset pipeline as the MCP ticket flow — the bytes are
-   sniffed for the real type and capped at 5 MB. express.json ignores the
-   image content-type, so express.raw here sees the untouched stream. */
+   sniffed for the real type and capped by the plan (5 MB on Free, 100 MB on
+   Pro). express.json ignores the image content-type, so express.raw here
+   sees the untouched stream; it reads up to the Pro cap and the plan's cap
+   is checked after, so a Free upload past 5 MB gets the reason, not a 413. */
 app.post(
   '/api/canvases/:id/assets',
-  express.raw({ type: () => true, limit: MAX_ASSET_BYTES + 1024 }),
+  express.raw({ type: () => true, limit: PRO_UPLOAD_BYTES + 1024 }),
   async (req, res) => {
     const c = requireCanvas(req, res, req.params.id, 'edit')
     if (!c) return
     try {
-      const asset = await createAsset(Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0), {
-        canvasId: c.id,
-        ownerId: req.user!.id,
-        uploadedBy: req.user!.name,
-      })
+      const asset = await createAsset(
+        Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0),
+        { canvasId: c.id, ownerId: req.user!.id, uploadedBy: req.user!.name },
+        uploadCap({ canvasId: c.id, userId: req.user!.id }),
+      )
       /* absolute like the MCP flow: frame HTML renders inside sandboxed
          srcdoc iframes where root-relative URLs don't resolve */
       res.json({ url: `${env.BETTER_AUTH_URL}/a/${asset.id}.${asset.ext}`, mime: asset.mime, size: asset.size })
@@ -1906,7 +2249,10 @@ app.put('/api/canvases/:id/pages/:pageId/background', (req, res) => {
   if (!canvasPages(canvas).some((p) => p.id === req.params.pageId))
     return res.status(404).json({ error: 'page not found' })
   const actor = userActor(req)
-  res.json(actions.setPageBackground(canvas.id, req.params.pageId, background, actor))
+  const pages = actions.setPageBackground(canvas.id, req.params.pageId, background, actor)
+  if (pages)
+    captureFeature(req.user!.id, 'page_background_changed', 'ui', { canvas_id: canvas.id, cleared: !background })
+  res.json(pages)
 })
 
 /* the frame a page's prototype flow starts on; null clears it */
@@ -1925,7 +2271,10 @@ app.put('/api/canvases/:id/pages/:pageId/flow-start', (req, res) => {
       return res.status(400).json({ error: 'the start frame must be on the same page' })
   }
   const actor = userActor(req)
-  res.json(actions.setFlowStart(canvas.id, req.params.pageId, frameId, actor))
+  const pages = actions.setFlowStart(canvas.id, req.params.pageId, frameId, actor)
+  if (pages)
+    captureFeature(req.user!.id, 'prototype_start_set', 'ui', { canvas_id: canvas.id, cleared: frameId === null })
+  res.json(pages)
 })
 
 /* Ruler guides, one per request so two people dragging different guides
@@ -2056,6 +2405,409 @@ app.patch('/api/frames/:id', (req, res) => {
   res.json(frame)
 })
 
+/* Components. Reads are for anyone who can see the canvas; everything else edits it. */
+function componentContext(req: express.Request, canvas: Canvas) {
+  return { canvas, actor: userActor(req) }
+}
+
+/* The REST bodies, typed like the MCP tools' input (the same zod pieces), so a
+   malformed field is a 400 and never reaches the engine; `head` is a library
+   pull's alone and is not accepted here. */
+const componentCreateBody = z.object({
+  name: z.string().max(200).optional(),
+  description: z.string().max(2000).optional(),
+  props: z.array(propSchema).optional(),
+  code: codeSchema.optional(),
+  frameId: z.string().optional(),
+  element: z.string().optional(),
+  autoProps: z.boolean().optional(),
+  replaceMatching: z.boolean().optional(),
+  html: z.string().optional(),
+  css: z.string().optional(),
+  width: z.number().optional(),
+  height: z.number().optional(),
+})
+const libraryPublishBody = z.object({
+  components: z.array(z.string().max(200)).max(500).optional(),
+  dryRun: z.boolean().optional(),
+})
+const libraryUpdateBody = z.object({ dryRun: z.boolean().optional() })
+const componentPatchBody = z.object({
+  name: z.string().max(200).optional(),
+  description: z.string().max(2000).optional(),
+  props: z.array(propSchema).optional(),
+  code: codeSchema.nullable().optional(),
+  html: z.string().optional(),
+  css: z.string().optional(),
+  find: z.string().optional(),
+  replace: z.string().optional(),
+  expectedRev: z.number().optional(),
+  dryRun: z.boolean().optional(),
+})
+
+function componentBody<T>(res: express.Response, schema: z.ZodType<T>, body: unknown): T | undefined {
+  const parsed = schema.safeParse(body ?? {})
+  if (parsed.success) return parsed.data
+  const issue = parsed.error.issues[0]
+  res.status(400).json({ error: `${issue?.path.join('.') || 'body'}: ${issue?.message ?? 'invalid'}` })
+  return undefined
+}
+
+function canvasOfPath(path: string): string | undefined {
+  const [, kind, id] = /^\/api\/(canvases|frames)\/([^/]+)/.exec(path) ?? []
+  if (!id) return undefined
+  return kind === 'canvases' ? id : store.getFrame(id)?.canvasId
+}
+
+function componentRoute(res: express.Response, run: () => unknown) {
+  try {
+    /* one unit: a refusal answered below (a 400, a 402) leaves nothing of the call behind */
+    res.json(transaction(run))
+  } catch (error) {
+    /* the 402 every client turns into the upgrade prompt: for the workspace
+       that needs a plan, or for making one when the canvas is personal */
+    if (error instanceof LibraryPlanError)
+      return res.status(402).json({
+        error: error.workspaceId ? 'workspace_plan_required' : 'library_needs_workspace',
+        ...(error.workspaceId ? { workspaceId: error.workspaceId } : {}),
+        message: error.message,
+      })
+    if (error instanceof LibraryPublisherError)
+      return res.status(403).json({ error: error.message, code: 'library_publish_restricted' })
+    if (error instanceof ComponentError) return res.status(400).json({ error: error.message })
+    throw error
+  }
+}
+
+/** A handler threw: what the request had changed is undone before anything answers it. */
+const undoRequest: express.ErrorRequestHandler = (error, _req, res, next) => {
+  ;(res.locals.writes as OpenTransaction | undefined)?.rollback()
+  next(error)
+}
+
+/** A request the component engine refused for costing too much: nothing was written. */
+const workBudgetRefusal: express.ErrorRequestHandler = (error, _req, res, next) => {
+  if (!(error instanceof WorkBudgetError) || res.headersSent) return next(error)
+  res.status(422).json({ error: error.message, code: 'work_budget_exceeded' })
+}
+
+app.get('/api/canvases/:id/components', (req, res) => {
+  const canvas = requireCanvas(req, res, req.params.id, 'view')
+  if (!canvas) return
+  /* the components in use; the soft-deleted ride along in the canvas itself (canvas.components) */
+  res.json(activeComponents(canvas.components).map((def) => componentDetail(canvas, def)))
+})
+
+/* what this canvas can take components from: its workspace's published libraries
+   first (`library`, read from their snapshots), then every other canvas this
+   person can read, newest edit first, as a linked copy. A canvas with no
+   components is listed too (the panel shows it greyed), so the list reads like
+   Home. Importing takes edit, and this walks every canvas the person can read,
+   so a viewer gets no such scan */
+app.get('/api/canvases/:id/component-libraries', (req, res) => {
+  const canvas = requireCanvas(req, res, req.params.id, 'edit')
+  if (!canvas) return
+  const shared = librariesForCanvas(canvas)
+  const sharedIds = new Set(shared.map((library) => library.canvasId))
+  const others = workspaces
+    .canvasesFor(req.user!.id)
+    .filter((meta) => meta.id !== canvas.id && !sharedIds.has(meta.id))
+    .sort((a, b) => b.updatedAt - a.updatedAt)
+  res.json([
+    ...shared.map((library) => ({
+      id: library.canvasId,
+      name: library.name,
+      library: true,
+      components: library.components.map((entry) => ({ ...libraryEntry(entry), instances: 0 })),
+    })),
+    ...others.flatMap((meta) => {
+      const other = store.getCanvas(meta.id)
+      if (!other) return []
+      return [
+        {
+          id: other.id,
+          name: other.name,
+          updatedAt: meta.updatedAt,
+          ...(meta.previewFrameId ? { previewFrameId: meta.previewFrameId } : {}),
+          ...(meta.shared ? { shared: true } : {}),
+          components: activeComponents(other.components).map((def) => ({ ...importableEntry(def), instances: 0 })),
+        },
+      ]
+    }),
+  ])
+})
+
+/* this canvas and the workspace library: whether it may have one (and what is
+   in the way), what it has published, and which of its linked components have
+   a newer published state waiting to be pulled */
+app.get('/api/canvases/:id/library', (req, res) => {
+  const canvas = requireCanvas(req, res, req.params.id, 'view')
+  if (!canvas) return
+  const block = libraryBlock(canvas)
+  res.json({
+    billing: billing.billingEnabled(),
+    entitled: !block,
+    ...(block ? { blocked: block.reason } : {}),
+    ...(canvas.workspaceId ? { workspaceId: canvas.workspaceId } : {}),
+    /* the workspace's publish setting, for this viewer; editing the canvas is a separate question */
+    canPublish: mayPublishFrom(canvas, req.user?.id),
+    ...libraryStatus(canvas),
+    updates: activeComponents(canvas.components).flatMap((def) => {
+      const origin = originOf(canvas, def)
+      return origin && def.source && origin.rev > def.source.rev
+        ? [{ id: def.id, name: def.name, instances: usageOf(canvas, def.id).instances }]
+        : []
+    }),
+    /* as a library: the canvases still on an older publication, among those this person can open */
+    behind: libraryConsumers(canvas).flatMap((consumer) => {
+      const other = store.getCanvas(consumer.canvas_id)
+      return consumer.update_waiting && other && roleAllows(canvasRole(req.user!.id, other), 'view')
+        ? [{ id: consumer.canvas_id, name: consumer.canvas_name, components: consumer.update_waiting }]
+        : []
+    }),
+  })
+})
+
+app.post('/api/canvases/:id/library/publish', (req, res) => {
+  const canvas = requireCanvas(req, res, req.params.id, 'edit')
+  if (!canvas) return
+  const body = componentBody(res, libraryPublishBody, req.body ?? {})
+  if (!body) return
+  componentRoute(res, () => {
+    const result = publishToLibrary(canvas.id, body.components, userActor(req), req.user!.id, body.dryRun === true)
+    if (!result.dry_run)
+      captureFeature(req.user!.id, 'library_published', 'ui', {
+        canvas_id: canvas.id,
+        published: result.published.length,
+        removed: result.removed.length,
+      })
+    return result
+  })
+})
+
+/* update everywhere: pull this library's latest publication into every canvas of
+   the workspace using it. Its own request, never part of a publish; it changes only
+   canvases this person may edit and answers with what it did, canvas by canvas */
+app.post('/api/canvases/:id/library/update-consumers', async (req, res) => {
+  const canvas = requireCanvas(req, res, req.params.id, 'edit')
+  if (!canvas) return
+  const body = componentBody(res, libraryUpdateBody, req.body ?? {})
+  if (!body) return
+  const userId = req.user!.id
+  const allowed = (need: CanvasRole) => (id: string) => {
+    const other = store.getCanvas(id)
+    return !!other && roleAllows(canvasRole(userId, other), need)
+  }
+  try {
+    const report = await updateLibraryConsumers(canvas.id, userActor(req), {
+      dryRun: body.dryRun === true,
+      canEdit: allowed('edit'),
+      canRead: allowed('view'),
+      publisherId: userId,
+    })
+    if (!report.dry_run)
+      captureFeature(userId, 'library_updated_everywhere', 'ui', {
+        canvas_id: canvas.id,
+        canvases: report.canvases.length,
+        skipped: report.skipped.length,
+      })
+    res.json(report)
+  } catch (error) {
+    /* the same answers as its neighbours: 402 for the plan, 400 for a refusal.
+       Anything else is answered here, since nothing catches an async handler's throw */
+    if (error instanceof ComponentError)
+      return componentRoute(res, () => {
+        throw error
+      })
+    console.error(`[library] could not update the canvases using ${canvas.id}:`, error)
+    res.status(500).json({ error: 'could not update the canvases using this library' })
+  }
+})
+
+/* stop sharing: the named components, or the whole library */
+app.delete('/api/canvases/:id/library', (req, res) => {
+  const canvas = requireCanvas(req, res, req.params.id, 'edit')
+  if (!canvas) return
+  const body = componentBody(res, libraryPublishBody, req.body ?? {})
+  if (!body) return
+  componentRoute(res, () => unpublishFromLibrary(canvas.id, body.components, userActor(req), req.user!.id))
+})
+
+function workspaceLibraryConsumers(libraryCanvasId: string) {
+  const library = store.getCanvas(libraryCanvasId)
+  return library ? libraryConsumers(library) : []
+}
+
+/* a workspace's libraries, for its own page: members only, like its fonts */
+app.get('/api/workspaces/:id/libraries', (req, res) => {
+  if (!workspaces.isWorkspaceMember(req.params.id, req.user!.id))
+    return res.status(404).json({ error: 'workspace not found' })
+  res.json(
+    librariesOfWorkspace(req.params.id).map((library) => ({
+      id: library.canvasId,
+      name: library.name,
+      components: library.components.length,
+      publishedAt: Math.max(...library.components.map((entry) => entry.publishedAt)),
+      usedBy: store
+        .allCanvases()
+        .filter((other) =>
+          (other.components ?? []).some((def) => def.source?.library && def.source.canvasId === library.canvasId),
+        ).length,
+      /* how many of them are on an older publication: what "Update everywhere" would reach */
+      behind: workspaceLibraryConsumers(library.canvasId).filter((consumer) => consumer.update_waiting).length,
+    })),
+  )
+})
+
+app.post('/api/canvases/:id/components', (req, res) => {
+  const canvas = requireCanvas(req, res, req.params.id, 'edit')
+  if (!canvas) return
+  const { actor } = componentContext(req, canvas)
+  const body = componentBody(res, componentCreateBody, req.body)
+  if (!body) return
+  componentRoute(res, () => {
+    if (typeof body.html === 'string') {
+      return {
+        component: createComponentFromHtml(
+          canvas.id,
+          { ...body, html: body.html, props: body.props as never, name: String(body.name ?? '') },
+          actor,
+        ).component,
+        converted: [],
+      }
+    }
+    const created = createComponentFromElement(
+      canvas.id,
+      {
+        name: String(body.name ?? ''),
+        description: body.description,
+        props: body.props as never,
+        code: body.code,
+        frameId: String(body.frameId ?? ''),
+        element: String(body.element ?? ''),
+        autoProps: body.autoProps,
+        replaceMatching: body.replaceMatching === true,
+      },
+      actor,
+    )
+    /* what the editor needs to undo this as one step */
+    const changed = new Set([String(body.frameId), ...created.converted.map((entry) => entry.frameId)])
+    return { ...created, frames: [...changed].flatMap((id) => store.getFrame(id) ?? []) }
+  })
+})
+
+app.post('/api/canvases/:id/components/import', (req, res) => {
+  const canvas = requireCanvas(req, res, req.params.id, 'edit')
+  if (!canvas) return
+  const source = String(req.body?.sourceCanvasId ?? '')
+  const origin = store.getCanvas(source)
+  /* a workspace library goes by the canvas, like its fonts: whoever may edit here may use it */
+  const shared = librariesForCanvas(canvas).some((library) => library.canvasId === source)
+  if (!shared && (!origin || !roleAllows(canvasRole(req.user!.id, origin), 'view')))
+    return res.status(403).json({ error: 'this account cannot read that canvas' })
+  componentRoute(res, () => {
+    const def = importComponent(canvas.id, source, String(req.body?.component ?? ''), userActor(req))
+    if (def.source?.library) captureFeature(req.user!.id, 'library_component_used', 'ui', { canvas_id: canvas.id })
+    return def
+  })
+})
+
+app.patch('/api/canvases/:id/components/:componentId', (req, res) => {
+  const canvas = requireCanvas(req, res, req.params.id, 'edit')
+  if (!canvas) return
+  const body = componentBody(res, componentPatchBody, req.body)
+  if (!body) return
+  componentRoute(res, () =>
+    updateComponent(canvas.id, req.params.componentId, { ...body, props: body.props as never }, userActor(req)),
+  )
+})
+
+app.delete('/api/canvases/:id/components/:componentId', (req, res) => {
+  const canvas = requireCanvas(req, res, req.params.id, 'edit')
+  if (!canvas) return
+  componentRoute(res, () => deleteComponent(canvas.id, req.params.componentId, userActor(req)))
+})
+
+/* a deleted component back in use (the `/restore` beside it puts a component back to an earlier revision) */
+app.post('/api/canvases/:id/components/:componentId/undelete', (req, res) => {
+  const canvas = requireCanvas(req, res, req.params.id, 'edit')
+  if (!canvas) return
+  componentRoute(res, () => restoreComponent(canvas.id, req.params.componentId, userActor(req)))
+})
+
+/* every instance of a component turned into plain markup, in the background queue */
+app.post('/api/canvases/:id/components/:componentId/detach-instances', (req, res) => {
+  const canvas = requireCanvas(req, res, req.params.id, 'edit')
+  if (!canvas) return
+  componentRoute(res, () => detachAllInstances(canvas.id, req.params.componentId, userActor(req)))
+})
+
+app.post('/api/canvases/:id/components/:componentId/restore', (req, res) => {
+  const canvas = requireCanvas(req, res, req.params.id, 'edit')
+  if (!canvas) return
+  componentRoute(res, () =>
+    restoreComponentVersion(canvas.id, req.params.componentId, Number(req.body?.rev), userActor(req)),
+  )
+})
+
+app.post('/api/canvases/:id/components/:componentId/sync', (req, res) => {
+  const canvas = requireCanvas(req, res, req.params.id, 'edit')
+  if (!canvas) return
+  componentRoute(res, () => {
+    const result = syncComponent(canvas.id, req.params.componentId, userActor(req), (id) => {
+      const other = store.getCanvas(id)
+      return !!other && roleAllows(canvasRole(req.user!.id, other), 'view')
+    })
+    if (result.updated && result.component.source?.library)
+      captureFeature(req.user!.id, 'library_update_pulled', 'ui', { canvas_id: canvas.id })
+    return result
+  })
+})
+
+app.get('/api/canvases/:id/components/:componentId/preview', (req, res) => {
+  const canvas = requireCanvas(req, res, req.params.id, 'view')
+  if (!canvas) return
+  /* ?library=<canvas>: a component the workspace library publishes, as published,
+     for a canvas that does not use it yet */
+  const libraryId = typeof req.query.library === 'string' ? req.query.library : ''
+  if (libraryId) {
+    const snapshot = librariesForCanvas(canvas)
+      .find((library) => library.canvasId === libraryId)
+      ?.components.find((entry) => entry.id === req.params.componentId)
+    if (!snapshot) return res.status(404).json({ error: 'component not found' })
+    return res.json(previewDocument(libraryId, snapshotAsDef(snapshot), 'default'))
+  }
+  const def = findComponent(canvas.id, req.params.componentId)
+  if (!def) return res.status(404).json({ error: 'component not found' })
+  res.json(previewDocument(canvas.id, def, 'default'))
+})
+
+app.post('/api/frames/:id/instances', (req, res) => {
+  const current = requireFrame(req, res, req.params.id, 'edit')
+  if (!current) return
+  const body = req.body ?? {}
+  componentRoute(res, () =>
+    insertInstance(
+      current.canvasId,
+      {
+        frameId: current.id,
+        component: String(body.component ?? ''),
+        props: body.props,
+        target: body.target,
+        position: body.position,
+      },
+      userActor(req),
+    ),
+  )
+})
+
+app.patch('/api/frames/:id/instances', (req, res) => {
+  const current = requireFrame(req, res, req.params.id, 'edit')
+  if (!current) return
+  const changes = Array.isArray(req.body?.changes) ? req.body.changes : []
+  componentRoute(res, () => changeInstances(current.canvasId, current.id, changes, userActor(req)))
+})
+
 app.put('/api/frames/:id/approval', (req, res) => {
   const current = requireFrame(req, res, req.params.id, 'edit', req.body?.expectedUpdatedAt)
   if (!current) return
@@ -2110,17 +2862,23 @@ app.post('/api/frames/:id/versions/:versionId/restore', async (req, res) => {
   const restored = await actions.restoreFrameVersion(req.params.id, req.params.versionId, actor)
   if (restored === null) return res.status(404).json({ error: 'version not found' })
   if (!restored) return res.status(404).json({ error: 'frame not found' })
+  captureFeature(req.user!.id, 'frame_version_restored', 'ui', { canvas_id: restored.frame.canvasId })
   res.json(restored)
 })
 
 app.post('/api/frames/:id/comments', async (req, res) => {
   const frame = requireFrame(req, res, req.params.id, 'comment')
   if (!frame) return
-  const { selector, elementId, snippet, text, x, y, elementOrigin } = req.body ?? {}
-  if (refuseAgentMention(req, res, frame.canvasId, String(text ?? ''))) return
+  const { selector, elementId, snippet, x, y, elementOrigin } = req.body ?? {}
+  const text = String(req.body?.text ?? '').trim()
+  const canvas = store.getCanvas(frame.canvasId)
+  const mentions = canvas
+    ? await resolveCommentMentions(canvas, text, { picked: req.body?.mentions })
+    : { ids: [], roleText: text }
+  if (refuseAgentMention(req, res, frame.canvasId, mentions.roleText)) return
   /* a comment that @mentions a resident agent is a new command to the team,
      so it's metered like a card; plain comments and replies stay free */
-  if (mentionedRole(String(text ?? ''))) {
+  if (mentionedRole(mentions.roleText, actions.canvasRoster(frame.canvasId))) {
     const gate = await allowance.consumeResidentTask(req.user!.id)
     if (!gate.ok) {
       return res.status(403).json({ error: 'resident_limit', used: gate.used, limit: gate.limit })
@@ -2128,7 +2886,7 @@ app.post('/api/frames/:id/comments', async (req, res) => {
   }
   const comment = await actions.addElementComment(
     req.params.id,
-    { selector, elementId, snippet, text: String(text ?? ''), x, y, elementOrigin },
+    { selector, elementId, snippet, text, x, y, elementOrigin, mentions },
     req.user!.name,
     req.user!.id,
   )
@@ -2163,11 +2921,12 @@ app.post('/api/canvases/:id/comments', async (req, res) => {
     return res.status(400).json({ error: 'page not found' })
   }
   if (!Number.isFinite(x) || !Number.isFinite(y)) return res.status(400).json({ error: 'x and y must be numbers' })
-  const body = String(text ?? '')
-  if (!body.trim()) return res.status(400).json({ error: 'empty text' })
-  if (refuseAgentMention(req, res, canvas.id, body)) return
+  const body = String(text ?? '').trim()
+  if (!body) return res.status(400).json({ error: 'empty text' })
+  const mentions = await resolveCommentMentions(canvas, body, { picked: req.body?.mentions })
+  if (refuseAgentMention(req, res, canvas.id, mentions.roleText)) return
   let gate: Awaited<ReturnType<typeof allowance.consumeResidentTask>> | undefined
-  if (mentionedRole(body)) {
+  if (mentionedRole(mentions.roleText, actions.canvasRoster(canvas.id))) {
     gate = await allowance.consumeResidentTask(req.user!.id)
     if (!gate.ok) {
       return res.status(403).json({ error: 'resident_limit', used: gate.used, limit: gate.limit })
@@ -2175,7 +2934,7 @@ app.post('/api/canvases/:id/comments', async (req, res) => {
   }
   const comment = actions.addCanvasComment(
     canvas.id,
-    { pageId, x: Number(x), y: Number(y), text: body },
+    { pageId, x: Number(x), y: Number(y), text: body, mentions },
     req.user!.name,
     req.user!.id,
   )
@@ -2196,20 +2955,25 @@ app.post('/api/comments/:id/replies', async (req, res) => {
   const found = actions.findComment(req.params.id)
   if (!found) return res.status(404).json({ error: 'comment not found' })
   if (!requireCanvas(req, res, found.canvasId, 'comment')) return
-  const text = String(req.body?.text ?? '')
-  if (!text.trim() || !actions.openThread(req.params.id)) {
+  const text = String(req.body?.text ?? '').trim()
+  const canvas = store.getCanvas(found.canvasId)
+  if (!text || !canvas || !actions.openThread(req.params.id)) {
     return res.status(404).json({ error: 'thread resolved or empty text' })
   }
-  if (refuseAgentMention(req, res, found.canvasId, text)) return
+  const mentions = await resolveCommentMentions(canvas, text, {
+    authorIds: threadAuthorIds(found),
+    picked: req.body?.mentions,
+  })
+  if (refuseAgentMention(req, res, found.canvasId, mentions.roleText)) return
   /* same rule as a fresh comment: only an @mention costs a resident task */
   let gate: Awaited<ReturnType<typeof allowance.consumeResidentTask>> | undefined
-  if (mentionedRole(text)) {
+  if (mentionedRole(mentions.roleText, actions.canvasRoster(found.canvasId))) {
     gate = await allowance.consumeResidentTask(req.user!.id)
     if (!gate.ok) {
       return res.status(403).json({ error: 'resident_limit', used: gate.used, limit: gate.limit })
     }
   }
-  const reply = actions.replyToComment(req.params.id, text, req.user!.name, req.user!.id)
+  const reply = actions.replyToComment(req.params.id, text, req.user!.name, req.user!.id, 'user', mentions)
   if (!reply) {
     /* the thread closed while the meter was being written: give the task
        back — a failed refund is logged, never turned into a 500 */
@@ -2463,7 +3227,7 @@ app.get('/api/frames/:id/screenshot.png', async (req, res) => {
     const png = await renderFrame(frame, fitExportScale(frame, parseExportScale(req.query.scale) ?? 1))
     res.type('png').send(png)
   } catch (e) {
-    res.status(500).json({ error: e instanceof Error ? e.message : 'render failed' })
+    sendRenderFailure(res, e)
   }
 })
 
@@ -2494,7 +3258,7 @@ app.get('/api/canvases/:id/export.pdf', async (req, res) => {
     return res.send(buf)
   } catch (e) {
     if (e instanceof pdf.PdfRendererUnavailableError) return res.status(503).json({ error: e.message })
-    return res.status(500).json({ error: e instanceof Error ? e.message : 'PDF export failed' })
+    return sendRenderFailure(res, e, 'PDF export failed')
   }
 })
 
@@ -2566,8 +3330,23 @@ if (env.isProduction) {
 
 /* ------------------------------------------------- websocket */
 
+/* after every route: a handler that threw is undone, and one that ran out of work budget
+   answers 422 */
+app.use(undoRequest)
+app.use(workBudgetRefusal)
+
 const server = http.createServer(app)
-const wss = new WebSocketServer({ server, path: '/ws' })
+const wss = new WebSocketServer({
+  server,
+  path: '/ws',
+  perMessageDeflate: {
+    /* Compress canvas HTML and send small cursor and presence messages directly. */
+    threshold: 1024,
+    zlibDeflateOptions: { level: 3 },
+    serverNoContextTakeover: true,
+    clientNoContextTakeover: true,
+  },
+})
 
 /* A signed-out visitor on a link-shared canvas watches it as a guest
    (guestCanvasRole): view only, silent like a view-as session (no presence,
@@ -2585,7 +3364,7 @@ function joinAsGuest(ws: WebSocket, canvasId: string, clientId: string, canvas: 
   const { guidelines: _guidelines, references: _references, memberIds: _memberIds, ...shown } = canvas
   send(ws, {
     type: 'init',
-    canvas: { ...shown, role },
+    canvas: { ...shown, role, landingPageId: landingPageOf(canvas), team: teamOfCanvas(canvas) },
     presences: [
       ...room(canvasId)
         .filter((c) => c.ws !== ws && !c.silent)
@@ -2618,8 +3397,11 @@ wss.on('connection', (ws, upgradeReq) => {
 
     if (msg.type === 'join') {
       const session = await sessionPromise
-      const canvas = store.getCanvas(msg.canvasId)
+      let canvas = store.getCanvas(msg.canvasId)
       if (!session) {
+        /* only a canvas the guest may open is loaded for them */
+        if (canvas && guestCanvasRole(canvas)) canvas = await store.load(msg.canvasId)
+        if (ws.readyState !== WebSocket.OPEN) return
         joinAsGuest(ws, msg.canvasId, msg.clientId, canvas)
         return
       }
@@ -2631,6 +3413,22 @@ wss.on('connection', (ws, upgradeReq) => {
         ws.close(4404, 'not found')
         return
       }
+      /* checked before loading, so a denied join never loads the canvas */
+      if (!canvasRole(session.user.id, canvas)) {
+        ws.close(4403, 'no access')
+        return
+      }
+      await store.load(msg.canvasId)
+      /* a socket that closed while it waited must not join: its close
+         already ran, so it would sit in the room and pin the canvas */
+      if (ws.readyState !== WebSocket.OPEN) return
+      canvas = store.getCanvas(msg.canvasId)
+      if (!canvas) {
+        ws.close(4404, 'not found')
+        return
+      }
+      /* and again after: access removed while the canvas loaded must not
+         still receive its designs and conversation */
       const role = canvasRole(session.user.id, canvas)
       if (!role) {
         ws.close(4403, 'no access')
@@ -2653,7 +3451,7 @@ wss.on('connection', (ws, upgradeReq) => {
       const agents = [...(agentPresences.get(msg.canvasId)?.values() ?? [])]
       send(ws, {
         type: 'init',
-        canvas: { ...canvas, role },
+        canvas: { ...canvas, role, landingPageId: landingPageOf(canvas), team: teamOfCanvas(canvas) },
         presences: [...others, ...agents],
         activity: actions.getActivity(msg.canvasId),
         tasks: actions.getTasks(msg.canvasId),
@@ -2740,13 +3538,50 @@ wss.on('connection', (ws, upgradeReq) => {
   })
 })
 
-server.listen(PORT, () => {
-  console.log(`⟡ doop server     http://localhost:${PORT}`)
+server.listen({ port: PORT, host: HOST }, () => {
+  const displayHost = HOST?.includes(':') ? `[${HOST}]` : (HOST ?? 'localhost')
+  console.log(`⟡ doop server     http://${displayHost}:${PORT}`)
+  /* frame HTML is loaded per canvas; a canvas nobody has used for
+     CANVAS_IDLE_MS gives it back, unless a room, agent or stream is on it.
+     Started here, once the room state it asks about exists. */
+  store.setInUse(
+    (canvasId) =>
+      room(canvasId).length > 0 || (agentPresences.get(canvasId)?.size ?? 0) > 0 || actions.isCanvasStreaming(canvasId),
+  )
+  setInterval(
+    () => {
+      const dropped = store.evictIdle(env.CANVAS_IDLE_MS)
+      if (dropped) console.log(`[store] dropped the frame HTML of ${dropped} idle canvas(es)`)
+    },
+    Math.min(60_000, Math.max(1_000, env.CANVAS_IDLE_MS / 2)),
+  ).unref()
+  /* definitions that lost their markup to an out-of-order write: given it back from their
+     mains, while serving, one canvas at a time */
+  outsideOperation('boot repair: each hollow definition is re-derived from its main by itself', () =>
+    actions.healHollowComponents(),
+  )
+    .then(({ healed, noMain, failed }) => {
+      if (healed + noMain + failed)
+        console.log(
+          `[components] hollow definitions: ${healed} healed from their mains, ${noMain} with no main, ${failed} still hollow`,
+        )
+    })
+    .catch((err) => console.error('[components] healing hollow definitions failed:', err))
+  /* instances a propagation never reached (a restart mid-drain): queued again, while serving */
+  outsideOperation('boot catch-up: each component is queued for propagation by itself', () =>
+    actions.catchUpComponentsBehind(),
+  )
+    .then(({ components, canvases }) => {
+      if (components)
+        console.log(`[components] ${components} component(s) on ${canvases} canvas(es) had instances behind: queued`)
+    })
+    .catch((err) => console.error('[components] catching up instances behind failed:', err))
   /* comments anchored before element ids: stamped now, while serving, so a
      slow or failing row can never keep the server from coming up */
   if (data.legacyCommentSelectors.size > 0) {
-    actions
-      .backfillElementIds(data.legacyCommentSelectors)
+    outsideOperation('boot backfill: each frame is stamped and stored before its comments name the ids', () =>
+      actions.backfillElementIds(data.legacyCommentSelectors),
+    )
       .then(({ stamped, lost, failed }) =>
         console.log(
           `[comments] element ids: ${stamped} comment(s) re-anchored, ${lost} lost their element, ${failed} left for the next boot`,
@@ -2782,6 +3617,8 @@ server.listen(PORT, () => {
       ? '⟡ image generation  on — each user’s connected ChatGPT/OpenAI account, else this server’s OPENAI_API_KEY'
       : '⟡ image generation  on for users with a connected ChatGPT/OpenAI account only (set OPENAI_API_KEY to cover everyone else)',
   )
+  /* from here on a blocked event loop is noticed from outside it (server/stallWatchdog.ts) */
+  startStallWatchdog()
   /* automations fire from here: one tick a minute over the due rows */
   startScheduler()
   startMcpTokenPrune()

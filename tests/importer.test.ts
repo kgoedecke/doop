@@ -424,6 +424,18 @@ describe('webpage capture', () => {
     expect(page.close).toHaveBeenCalledOnce()
   })
 
+  it('inlines stylesheets that contain $ replacement patterns as written', async () => {
+    const child = 'a::after { content: "$` $\' $& $$" }'
+    publicUrlMocks.fetchPinned
+      .mockResolvedValueOnce(css("@import url('/child.css'); body { color: red }"))
+      .mockResolvedValueOnce(css(child))
+    stubContextPageWithSheets(['https://example.com/app.css'])
+
+    const imported = await importPage('https://example.com')
+
+    expect(imported.html).toContain(`<style data-doop-import>\n${child} body { color: red }\n\n</style></head>`)
+  })
+
   it('returns a bounded screenshot and text preview when requested', async () => {
     const screenshot = Buffer.from('agent-preview')
     const page = stubPage({
@@ -454,6 +466,11 @@ describe('webpage capture', () => {
     })
     expect(browserMocks.openIsolatedPage).toHaveBeenCalledTimes(2)
     expect(page.close).toHaveBeenCalledTimes(2)
+    /* the capture's render slot is back before the preview asks for one, so
+       a one-slot renderer cannot wait on itself */
+    const [, previewOpen] = browserMocks.openIsolatedPage.mock.invocationCallOrder
+    const [captureClose] = page.close.mock.invocationCallOrder
+    expect(captureClose).toBeLessThan(previewOpen!)
   })
 
   it('renders the Context.dev HTML locally for the agent preview', async () => {

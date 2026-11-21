@@ -12,6 +12,7 @@
 
 import type { ComponentType, SVGProps } from 'react'
 import {
+  Angle,
   Bold,
   Italic,
   Underline,
@@ -27,9 +28,7 @@ import {
   AlignEndHorizontal,
   FlipHorizontal2,
   FlipVertical2,
-  CircleDashed,
   Droplet,
-  Radius,
   AlignCenter,
   AlignJustify,
   AlignLeft,
@@ -40,6 +39,8 @@ import {
   ArrowUp,
   Bell,
   Blocks,
+  Component as LucideComponent,
+  Diamond,
   Calendar,
   BookOpen,
   Brain,
@@ -55,6 +56,8 @@ import {
   Clipboard,
   CodeXml,
   Clock,
+  Hourglass,
+  Timer,
   Copy,
   CreditCard,
   Download,
@@ -110,6 +113,8 @@ import {
   SlidersHorizontal,
   AlignHorizontalSpaceAround,
   AlignVerticalSpaceAround,
+  GapHorizontal,
+  GapVertical,
   WrapText,
   SquareDashed,
   Shield,
@@ -122,6 +127,7 @@ import {
   Unlink,
   User,
   Users,
+  Bot,
   Workflow,
   Server,
   Flag,
@@ -129,12 +135,13 @@ import {
   SquareMousePointer,
   X,
   Braces,
-  ALargeSmall,
   Blend,
   Palette,
   Ruler,
   Space,
   ZoomIn,
+  Rocket,
+  Mail,
 } from 'lucide-react'
 
 type SvgProps = Omit<SVGProps<SVGSVGElement>, 'ref'>
@@ -186,6 +193,10 @@ export const XIcon = icon(X)
 export const ArrowDownIcon = icon(ArrowDown)
 export const HorizontalPaddingIcon = icon(AlignHorizontalSpaceAround)
 export const VerticalPaddingIcon = icon(AlignVerticalSpaceAround)
+/** the space between columns (`column-gap`) */
+export const ColumnGapIcon = icon(GapHorizontal)
+/** the space between rows (`row-gap`) */
+export const RowGapIcon = icon(GapVertical)
 export const WrapTextIcon = icon(WrapText)
 export const SquareDashedIcon = icon(SquareDashed)
 export const MoreHorizontalIcon = icon(Ellipsis)
@@ -204,15 +215,41 @@ export const AlignCenterHorizontalIcon = icon(AlignCenterHorizontal)
 export const AlignEndHorizontalIcon = icon(AlignEndHorizontal)
 export const FlipHorizontal2Icon = icon(FlipHorizontal2)
 export const FlipVertical2Icon = icon(FlipVertical2)
-export const CircleDashedIcon = icon(CircleDashed)
+export const RotationIcon = icon(Angle)
 export const DropletIcon = icon(Droplet)
+/** Stroke width as three rules, thin to thick. */
+export function StrokeWidthIcon(props: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeLinecap="round" aria-hidden {...sized(props)}>
+      <path d="M4 6h16" strokeWidth={ICON_STROKE} />
+      <path d="M4 12h16" strokeWidth={ICON_STROKE * 2} />
+      <path d="M4 18h16" strokeWidth={ICON_STROKE * 3} />
+    </svg>
+  )
+}
 export const BracesIcon = icon(Braces)
 export const PaletteIcon = icon(Palette)
 export const BlendIcon = icon(Blend)
 export const RulerIcon = icon(Ruler)
-export const TextSizeIcon = icon(ALargeSmall)
+export const TextSizeIcon = icon(Type)
 export const SpaceIcon = icon(Space)
-export const RadiusIcon = icon(Radius)
+/** Corner radius as one rounded corner, a stroke running up and turning right. */
+export function RadiusIcon(props: IconProps) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={ICON_STROKE}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+      {...sized(props)}
+    >
+      <path d="M5 19v-7a7 7 0 0 1 7-7h7" />
+    </svg>
+  )
+}
 export const AlignLeftIcon = icon(AlignLeft)
 export const AlignCenterIcon = icon(AlignCenter)
 export const AlignRightIcon = icon(AlignRight)
@@ -274,7 +311,12 @@ export const GridIcon = icon(LayoutGrid)
 export const ListIcon = icon(Menu)
 export const UserIcon = icon(User)
 export const UsersIcon = icon(Users)
+export const BotIcon = icon(Bot)
 export const ClockIcon = icon(Clock)
+/** a prototype interaction's delay */
+export const DelayIcon = icon(Hourglass)
+/** a prototype transition's duration */
+export const DurationIcon = icon(Timer)
 export const GearIcon = icon(Settings)
 export const ShieldIcon = icon(Shield)
 export const HelpIcon = icon(CircleHelp)
@@ -329,6 +371,10 @@ export const WorkflowIcon = icon(Workflow)
 export const ServerIcon = icon(Server)
 /** integrations: building blocks */
 export const BlocksIcon = icon(Blocks)
+/** a component's main, and components in general (the Components tab, the toolbar): four diamonds */
+export const ComponentIcon = icon(LucideComponent)
+/** an instance of a component: one hollow diamond, as Figma marks it, so it never reads as the main */
+export const InstanceIcon = icon(Diamond)
 /** connect an agent: a plus in a ring */
 export const CirclePlusIcon = icon(CirclePlus)
 /** import: the arrow entering from above */
@@ -347,4 +393,7 @@ export const HotspotIcon = icon(SquareMousePointer)
 export const MessageSquareIcon = icon(MessageSquare)
 /** draft a page: a page skeleton */
 export const LayoutTemplateIcon = icon(LayoutTemplate)
-/** the ⌘ key, in shortcut hints */
+
+/* the plan and upgrade surfaces */
+export const RocketIcon = icon(Rocket)
+export const MailIcon = icon(Mail)

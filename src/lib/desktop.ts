@@ -1,5 +1,6 @@
 /* Doop in the desktop shell (desktop/src-tauri). The shell is one webview
-   with an overlay title bar; canvases open Figma-style in a tab strip the
+   with an overlay title bar (on Windows, a frame the page draws:
+   windowFrame.ts); canvases open Figma-style in a tab strip the
    web app draws itself (src/components/DesktopTabs.tsx). Tabs are ordinary
    in-page navigations — this module only keeps the strip's state and the
    shell-specific plumbing. In a plain browser every entry point returns
@@ -19,10 +20,13 @@ import {
   rememberPendingSignIn,
 } from './desktopAuth'
 import { isDesktopShell } from './shell'
+import { initWindowFrame } from './windowFrame'
 import { codexSetupTarget } from './codexConnection'
 import { forgetPendingConnect, isPendingConnect, parseDesktopConnectLink } from './desktopConnect'
 import { safeRelativeTarget } from './safeTarget'
 import { NO_CANVAS, isViewCommand, runViewCommand, syncViewMenu } from './viewMenu'
+import { initAppMenu } from './appMenu'
+import { type Chord, matchesChord } from './actions/chords'
 
 export type CanvasTab = { id: string; name: string }
 
@@ -136,6 +140,43 @@ export function closeOtherTabs(id: string, currentPath: string) {
   if (!keep) return
   setTabs([keep])
   if (currentPath !== `/c/${id}`) navigate(`/c/${id}`)
+}
+
+/** ⌘1 (Ctrl+1 elsewhere) goes Home and ⌘2…⌘9 to the open tabs in strip
+ *  order, as Figma's desktop app binds them. By physical key, so a layout
+ *  that types another character on the digit row still switches. */
+export const TAB_SHORTCUTS: readonly Chord[] = Array.from({ length: 9 }, (_, i) => ({
+  code: `Digit${i + 1}`,
+  mod: true,
+}))
+
+/** Where a tab shortcut goes: '/' for ⌘1, a tab's canvas for ⌘2 onwards.
+ *  Null when the keys are no tab shortcut or name a tab that isn't open. */
+export function tabShortcutTarget(
+  e: Pick<KeyboardEvent, 'key' | 'code' | 'metaKey' | 'ctrlKey' | 'altKey' | 'shiftKey'>,
+  tabs: readonly CanvasTab[],
+  mac?: boolean,
+): string | null {
+  const slot = TAB_SHORTCUTS.findIndex((chord) => matchesChord(e, chord, mac))
+  if (slot < 0) return null
+  if (slot === 0) return '/'
+  const tab = tabs[slot - 1]
+  return tab ? `/c/${tab.id}` : null
+}
+
+/** ⌘, (Ctrl+, elsewhere) opens Settings, as every Mac app and most desktop
+ *  apps on Windows and Linux bind it. By physical key, like the tab chords. */
+export const SETTINGS_SHORTCUT: Chord = { code: 'Comma', mod: true }
+
+/** Where a shell-wide shortcut goes: a tab (tabShortcutTarget) or Settings.
+ *  Null when the keys are neither. */
+export function shellShortcutTarget(
+  e: Pick<KeyboardEvent, 'key' | 'code' | 'metaKey' | 'ctrlKey' | 'altKey' | 'shiftKey'>,
+  tabs: readonly CanvasTab[],
+  mac?: boolean,
+): string | null {
+  if (matchesChord(e, SETTINGS_SHORTCUT, mac)) return '/settings'
+  return tabShortcutTarget(e, tabs, mac)
 }
 
 export function closeAllTabs() {
@@ -295,12 +336,17 @@ export function openExternal(url: string): boolean {
  *  browser instead. Runs once from main.tsx; no-op outside the shell. */
 export function initDesktopShell() {
   if (!isDesktopShell()) return
+  /* Windows: the page's caption buttons take over from the native frame */
+  initWindowFrame().catch(console.error)
   /* Cmd+W: on macOS the shell's menu owns the shortcut (main.rs) and relays
      it as an event — the page never sees the keystroke. Windows has no menu
      bar, so Ctrl+W arrives as a plain keydown. Both close the active tab. */
   shellWindow.__TAURI__?.event?.listen?.('close-tab', closeActiveTab).catch(console.error)
-  /* the macOS View menu (view_menu.rs): a reload leaves it showing the last
-     canvas until a canvas reports in again, so start it out closed */
+  /* the macOS menu bar, built from the action registry (appMenu.ts); a shell
+     older than that has only the View menu (view_menu.rs), which a reload
+     leaves showing the last canvas until a canvas reports in again, so it
+     starts out closed */
+  initAppMenu()
   syncViewMenu(NO_CANVAS)
   shellWindow.__TAURI__?.event
     ?.listen?.<unknown>('view-command', (e) => {
@@ -308,6 +354,19 @@ export function initDesktopShell() {
     })
     .catch(console.error)
   listenForDesktopLinks()
+  /* capture phase, so a field that stops its keys (the zoom input, a colour
+     field) cannot swallow the tab and Settings shortcuts; a frame relays them from inside
+     too, text editing included (frameRuntime.ts) */
+  document.addEventListener(
+    'keydown',
+    (e) => {
+      const target = shellShortcutTarget(e, useTabs.getState().tabs)
+      if (target === null) return
+      e.preventDefault()
+      if (target !== location.pathname) navigate(target)
+    },
+    true,
+  )
   document.addEventListener('keydown', (e) => {
     if (e.key.toLowerCase() !== 'w' || !(e.metaKey || e.ctrlKey) || e.shiftKey || e.altKey) return
     e.preventDefault()

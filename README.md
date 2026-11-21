@@ -30,11 +30,12 @@ runs on **GPT, Claude, Gemini, DeepSeek, Kimi or Qwen** models
   then watch it sketch, stream and self-review designs on your canvas, next to your cursor.
 - **A built-in Doop Agent** — queue a card or @mention a role and it designs on its own, no client
   to connect. Runs on the model account each user connects (a **ChatGPT subscription**, or an
-  OpenAI, Claude, Gemini or OpenRouter key), or on the server's `ANTHROPIC_API_KEY` for as many
+  OpenAI, Claude, Gemini, DeepSeek, Kimi or OpenRouter key), or on the server's `ANTHROPIC_API_KEY` for as many
   free tasks as `RESIDENT_TASK_LIMIT` grants (none by default) ([setup](#the-doop-agent)); the
   first-canvas welcome performance is scripted and runs without any of it.
 - **Pages within a canvas** — organize frames into named pages from the Layers panel. Add, rename,
-  drag to reorder, double-click to rename, or right-click to rename and delete empty pages.
+  drag to reorder, or double-click to rename. Right-click for page actions, including copying
+  a link, without switching away from the open page.
   Page edits support Undo/Redo; selected frames can move between pages. Agents can list pages
   with `get_canvas`, manage them with `set_canvas_pages` (passing the original list as
   `expectedPages` to protect collaborators), and target frames with `pageId`. Each page can wear
@@ -79,8 +80,8 @@ tasks. **Connect AI** in the top bar walks you through each one.
 | Headless agents (n8n, Mastra, CI)            | An agent key as a bearer header ([setup](#headless-agents-agent-keys))          |
 
 No agent of your own? The built-in [Doop Agent](#the-doop-agent) runs on the model account you
-connect: a ChatGPT subscription, or an OpenAI, Claude, Gemini or OpenRouter key. OpenRouter brings
-DeepSeek, Kimi, Qwen, GLM and MiniMax ([details](#past-the-free-tasks-connect-your-own-chatgpt)).
+connect: a ChatGPT subscription, or an OpenAI, Claude, Gemini, DeepSeek, Kimi or OpenRouter key.
+OpenRouter brings Qwen, GLM, MiniMax and more ([details](#past-the-free-tasks-connect-your-own-chatgpt)).
 
 ## Quickstart
 
@@ -170,7 +171,9 @@ layers of that frame, so agents read and edit them like any other markup.
 - **Zoom** — 8% to 1600%. Wheel pans, ⌘/Ctrl + wheel or a pinch zooms; a 1px pixel grid fades in from
   300%. The zoom menu has 50/100/200% presets and the rulers toggle.
 - **Panels** — the right side panel has **Agents**, **Comments**, **Activity** and **Memory** tabs;
-  Layers and the side panel can be resized, and ⌘. hides all UI.
+  Layers and the side panel can be resized. Drag the divider between Pages and Layers to change
+  their split; arrow keys move it, Home and End reach its limits, and Doop remembers it per canvas.
+  Pages starts compact until you resize it. ⌘. hides all UI.
 - **Themes** — Light, Dark or System under Settings → Appearance.
 - **Phones** — the canvas works on a phone: one-finger pan, pinch zoom, tap to comment, and bottom
   sheets for canvas actions, Layers and the Inspector.
@@ -264,7 +267,10 @@ Agents can read `approvalStatus` (`draft`, `ready_for_dev`, `needs_review`) and
 `approval` attribution in `get_canvas` and `get_frame`. Call
 `get_canvas({ canvas_id, approval_status: "ready_for_dev" })` to find approved
 screens, then re-read `get_frame` before implementing. Only `ready_for_dev` is
-current sign-off. Approval is set by people in the app. In **Automations**, choose
+current sign-off. Approval is set by people in the app, or by an agent when a person asks
+it to: `set_frame_approval({ frame_id, status: "ready_for_dev" | "draft" })` (MCP and the Doop
+Agent) records the approval in that person's name, with the agent shown as "via". An agent
+never approves unasked, and automation runs cannot approve. In **Automations**, choose
 **Designs are approved** to run a workflow when frames on a selected canvas become
 ready for dev. Without an enabled workflow, approval only records sign-off.
 
@@ -311,6 +317,15 @@ The SwiftUI iOS app lives in [`ios/`](ios/README.md). Open `ios/Doop.xcodeproj`
 in Xcode to run it against Doop Cloud or your own HTTPS server. It uses SwiftUI for the app interface and a native canvas that
 renders frames with the Blitz HTML/CSS engine (Rust, no WebKit), over the same REST API and WebSocket rooms. The app is in development;
 see the iOS README for validation status and remaining release requirements.
+
+## Android app
+
+The native Kotlin/Jetpack Compose app lives in [`android/`](android/README.md).
+Open that directory in Android Studio or run `./gradlew assembleDebug` from it.
+It shares iOS's Blitz/Skia renderer and the existing REST/WebSocket backend, with
+native canvas gestures, editing, agent prompts, comments, exports and optional
+background task notifications. It targets ARM64 phones and tablets on Android 8+.
+See the Android README for setup, tests and release signing.
 
 ## Connect Claude
 
@@ -396,7 +411,7 @@ from the very next task: the free tier is a trial that gets people here, not a b
 first, and connecting stops costing the server anything from that moment. The connection is
 account-level, so it lives at **/settings** (Home → Settings); the free-tier wall links there rather
 than carrying its own copy, and "Connect an AI agent" on a canvas stays about MCP clients only. A
-user can connect five kinds of account; the Gemini cloud pilot and Claude Plan appear only where
+user can connect eight kinds of account; the Gemini cloud pilot and Claude Plan appear only where
 the operator or the desktop app provides them:
 
 - **ChatGPT subscription** — OAuth against `auth.openai.com`, then inference through the Codex
@@ -410,6 +425,15 @@ the operator or the desktop app provides them:
   the picker labels them "no visual review".
 - **Gemini API key** — Google's Gemini models through their OpenAI-compatible endpoint, plus Nano
   Banana image generation.
+- **DeepSeek API key** — DeepSeek V4.1 Flash (with vision) and V4 Pro (text-only for now) on the
+  user's own platform.deepseek.com account.
+- **Kimi API key** — Moonshot's Kimi K3 models, all with vision, on the user's own
+  platform.moonshot.ai account. A key from Moonshot's China platform needs an operator to point
+  `KIMI_CHAT_URL` at `https://api.moonshot.cn/v1/chat/completions`.
+- **Kimi Code plan** — a Kimi membership (Plus and up) through a key from the Kimi Code console,
+  billed to the membership rather than per token. Its own endpoint (`KIMI_CODE_CHAT_URL`,
+  `api.kimi.ai/coding/v1` overseas) and ids (`k3.1-pro`, `k3.1-pro-highspeed`, `k3`); requests
+  name Doop in their `User-Agent`, as Kimi Code's terms ask of every third-party tool.
 - **Gemini cloud pilot** — an operator-managed prototype running the official Gemini CLI in an
   isolated worker using Google sign-in. Disabled by default; see the
   [pilot setup and verification guide](docs/gemini-cloud-pilot.md).
@@ -425,19 +449,21 @@ same list the Codex CLI reads, asked as `CHATGPT_CODEX_CLIENT_VERSION`), OpenAI'
 Anthropic's `/v1/models`, Gemini's `/v1beta/models`. A newly released model is on the menu
 without an upgrade; the curated entries above sit on top as recommendations, a curated tier the
 account cannot run is left off, and the curated menu alone is served if the provider cannot be
-reached. OpenRouter stays on its curated roster, whose hand-checked vision flags are what the
-run relies on.
+reached. OpenRouter, DeepSeek, Kimi and Kimi Code stay on their curated rosters, whose hand-checked vision
+flags are what the run relies on. DeepSeek and Kimi return their reasoning as `reasoning_content`
+and refuse a tool-calling conversation that leaves it out, so the transport keeps it in the run's
+history and sends it back on every turn.
 
-Azure OpenAI is deliberately _not_ a connectable account kind, and the OpenRouter/Gemini endpoints
-are fixed constants: a user-supplied endpoint would be a URL the server fetches with the run's full
+Azure OpenAI is deliberately _not_ a connectable account kind, and the OpenRouter/Gemini/DeepSeek/Kimi
+endpoints are fixed constants: a user-supplied endpoint would be a URL the server fetches with the run's full
 context — an SSRF vector — so custom endpoints stay server-level configuration only.
 
 Either way the user picks their **model tier** in Settings from that provider's curated menu — on
 OpenAI, `gpt-6-astra` (the newest flagship; on a ChatGPT subscription it needs Plus or better and
 OpenAI is still rolling it out per account), `gpt-5.6-sol` (flagship), `gpt-5.6-terra` (the default
 workhorse) or `gpt-5.6-luna` (cheap and fast). They are paying for it, so the choice is theirs;
-`DOOP_AGENT_OPENAI_MODEL`, `DOOP_AGENT_OPENROUTER_MODEL` and `DOOP_AGENT_GEMINI_MODEL` only set the
-default they start on. Note that
+`DOOP_AGENT_OPENAI_MODEL`, `DOOP_AGENT_OPENROUTER_MODEL`, `DOOP_AGENT_GEMINI_MODEL`,
+`DOOP_AGENT_DEEPSEEK_MODEL`, `DOOP_AGENT_KIMI_MODEL` and `DOOP_AGENT_KIMI_CODE_MODEL` only set the default they start on. Note that
 `gpt-5.4` and `gpt-5.4-mini` retire from ChatGPT-authenticated Codex on **31 August 2026**, so
 pinning a 5.4 id via that env var will break the subscription path after that date.
 
@@ -490,6 +516,9 @@ own agent over MCP.
 | `DOOP_AGENT_OPENAI_EFFORT`      | `medium`                    | Default reasoning effort on a user's OpenAI account; each user can pick low–xhigh    |
 | `DOOP_AGENT_OPENROUTER_MODEL`   | `moonshotai/kimi-k2.6`      | Default model on a connected OpenRouter key                                          |
 | `DOOP_AGENT_GEMINI_MODEL`       | `gemini-3.7-flash`          | Default model on a connected Gemini key                                              |
+| `DOOP_AGENT_DEEPSEEK_MODEL`     | `deepseek-flash`            | Default model on a connected DeepSeek key                                            |
+| `DOOP_AGENT_KIMI_MODEL`         | `kimi-k3.1-pro`             | Default model on a connected Kimi key                                                |
+| `DOOP_AGENT_KIMI_CODE_MODEL`    | `k3.1-pro`                  | Default model on a connected Kimi Code plan                                          |
 | `CHATGPT_CONNECT_DISABLED`      | _unset_                     | `1` hides the ChatGPT flow, leaving the API-key path                                 |
 | `DOOP_DISTILL_MODEL`            | `claude-haiku-4-5-20251001` | Model for the guideline distiller                                                    |
 
@@ -687,11 +716,16 @@ docker run -p 4400:4400 -e BETTER_AUTH_URL=http://localhost:4400 -e BETTER_AUTH_
 Every variable is optional except the two marked required in production. Each one is declared and
 validated once at boot ([`server/env.ts`](server/env.ts)) and documented in
 [`.env.example`](.env.example), which also lists endpoint overrides and other rarely needed knobs.
+
+The server listens on port `4400` on all interfaces by default (IPv6 when available, otherwise IPv4;
+most operating systems also accept IPv4 on the default IPv6 listener). Set `HOST=127.0.0.1` to restrict
+it to local IPv4 connections, or `HOST=::1` for local IPv6, and `PORT` to change the listening port.
+
 This is the short list a self-hoster usually touches:
 
 | What               | Variables                                                                                                                                                            | Without them                                                                       |
 | ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
-| Core               | `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL` (both required in production), `DATABASE_URL`, `TRUSTED_ORIGINS`, `PORT`                                                     | Embedded PGlite in `data/pg`, localhost origins                                    |
+| Core               | `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL` (both required in production), `DATABASE_URL`, `TRUSTED_ORIGINS`, `HOST`, `PORT`                                             | Embedded PGlite in `data/pg`, localhost origins                                    |
 | Sign-in            | `OIDC_*`, `GOOGLE_*`, `MICROSOFT_*`, `APPLE_*`, `SIGNUP_EMAIL_DOMAINS`, `ADMIN_EMAILS` ([Accounts](#accounts))                                                       | Email/password only, open signup                                                   |
 | Email              | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `SMTP_SECURE`, `EMAIL_FROM`, `REQUIRE_EMAIL_VERIFICATION`                                                        | Emails print to the server log; no verification                                    |
 | Object storage     | `BUCKET`, `ACCESS_KEY_ID`, `SECRET_ACCESS_KEY`, `ENDPOINT`, `REGION` (any S3-compatible store)                                                                       | Uploaded assets stored under `data/assets`                                         |
@@ -861,6 +895,7 @@ read-only / destructive / idempotent annotations; the server registers no MCP pr
 | `list_canvases`          | List the canvases you can open, including workspace canvases                                                        |
 | `create_canvas`          | Create a canvas (optionally in a workspace), returns its shareable id                                               |
 | `get_canvas`             | Canvas layout: every frame's position/size/meta                                                                     |
+| `update_canvas`          | Rename a canvas                                                                                                     |
 | `set_canvas_pages`       | Create, rename, reorder or delete canvas pages                                                                      |
 | `set_page_background`    | Paint one page's canvas a colour of its own, or clear it back to the theme paper                                    |
 | **Frames**               |                                                                                                                     |
@@ -995,7 +1030,7 @@ edit the brief to choose dimensions, languages and deliverables. Generated desig
 Schedules are checked every minute; approvals and ongoing work every five seconds. One run
 per automation is active at a time. Up to ten approvals are grouped into each run, with each
 approval processed once, including after a restart or run-history cleanup. Enabling a workflow
-watches future approvals; **Run now** also picks up existing, unprocessed approvals.
+watches future approvals; **Run now** (⌘⌥↩, Ctrl+Alt+↩ elsewhere) also picks up existing, unprocessed approvals.
 Changing an approved source to draft or needs review stops its remaining workflow steps.
 Agent work times out after one hour. Sizes, languages, and asset briefs are editable presets.
 

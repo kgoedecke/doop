@@ -1210,7 +1210,7 @@ dependencies = [
 
 [[package]]
 name = "doop-desktop-chromium"
-version = "0.12.0"
+version = "0.13.0"
 dependencies = [
  "block2",
  "cef",
@@ -1218,7 +1218,10 @@ dependencies = [
  "objc2-app-kit",
  "objc2-foundation",
  "objc2-web-kit",
+ "reqwest",
  "rfd",
+ "rustls",
+ "serde",
  "serde_json",
  "tauri",
  "tauri-build",

@@ -243,6 +243,88 @@ describe('the email itself', () => {
   })
 })
 
+describe('@mentions', () => {
+  const mails = () => mocks.sendMail.mock.calls.map(([m]) => m)
+  const tagged = (ids: string[], text: string) => ({ ids, roleText: text })
+
+  async function mention(text: string, ids: string[], from = 'alice') {
+    return (await actions.addElementComment(
+      FRAME.id,
+      { selector: 'h1', snippet: '<h1/>', text, mentions: tagged(ids, text) },
+      from,
+      from,
+    ))!
+  }
+
+  it('emails a mentioned person at once, and leaves them out of the digest', async () => {
+    const root = await mention('@bob can you check the spacing?', ['bob'])
+    await vi.advanceTimersByTimeAsync(0)
+    expect(mails().map((m) => m.to)).toEqual(['bob@example.com'])
+    const [sent] = mails()
+    expect(sent!.subject).toBe('alice mentioned you on “Landing”')
+    expect(sent!.text).toContain('alice mentioned you in “Hero”:')
+    expect(sent!.text).toContain(`/c/c1?frame=f1&comment=${root.id}`)
+    mocks.sendMail.mockClear()
+    await deliver()
+    expect(sentTo()).toEqual(['carol@example.com'])
+  })
+
+  it('writes to nobody else when the person mentioned turned emails off', async () => {
+    /* the name was read against everyone, so it is bob's mention even if
+       bob is not mailable: nobody with a shorter name gets it instead */
+    mocks.mailable.mockImplementation(async (ids: string[]) =>
+      ids.filter((id) => id !== 'bob').map((id) => ({ id, name: id, email: `${id}@example.com` })),
+    )
+    await mention('@bob ok?', ['bob'])
+    await vi.advanceTimersByTimeAsync(0)
+    expect(mocks.sendMail).not.toHaveBeenCalled()
+    await deliver()
+    expect(sentTo()).toEqual(['carol@example.com'])
+    mocks.mailable.mockImplementation(async (ids: string[]) =>
+      ids.map((id) => ({ id, name: id, email: `${id}@example.com` })),
+    )
+  })
+
+  it('never mails the author about their own mention', async () => {
+    await mention('@alice note to self', ['alice'])
+    await vi.advanceTimersByTimeAsync(0)
+    expect(mocks.sendMail).not.toHaveBeenCalled()
+  })
+
+  it('never mails someone who cannot open the canvas', async () => {
+    vi.spyOn(store, 'getCanvas').mockReturnValue({ ...CANVAS, pages: PAGES, linkAccess: 'none' })
+    await mention('@erin look', ['erin'])
+    await vi.advanceTimersByTimeAsync(0)
+    expect(mocks.sendMail).not.toHaveBeenCalled()
+  })
+
+  it('reaches someone in the thread who is not a member', async () => {
+    const root = await comment('Can this be bigger?', 'dave')
+    await deliver()
+    mocks.sendMail.mockClear()
+    actions.replyToComment(root.id, 'Done, @dave', 'alice', 'alice', 'user', tagged(['dave'], 'Done, @dave'))
+    await vi.advanceTimersByTimeAsync(0)
+    expect(sentTo()).toEqual(['dave@example.com'])
+  })
+
+  it('lets an agent tag the person whose account ran it', async () => {
+    const root = await comment('Make it pop', 'dave')
+    await deliver()
+    mocks.sendMail.mockClear()
+    actions.replyToComment(root.id, 'Done. @alice', 'Doop', 'alice', 'agent', tagged(['alice'], 'Done. @alice'))
+    await vi.advanceTimersByTimeAsync(0)
+    expect(mails().find((m) => m.to === 'alice@example.com')?.subject).toBe('Doop mentioned you on “Landing”')
+  })
+
+  it('queues the digest at once, so a reply never lands before its parent', async () => {
+    await mention('@bob first', ['bob'])
+    await comment('second', 'alice')
+    await deliver()
+    const toCarol = mails().find((m) => m.to === 'carol@example.com')!
+    expect(toCarol.text.indexOf('first')).toBeLessThan(toCarol.text.indexOf('second'))
+  })
+})
+
 describe('recipientsFor', () => {
   it('is empty when nobody but the author is attached to the canvas', async () => {
     mocks.workspaceMembers.mockReturnValue([])

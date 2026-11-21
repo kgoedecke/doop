@@ -9,6 +9,7 @@ import { account } from './account'
 import { agentKeys } from './agentKeys'
 import { webhooks } from './webhooks'
 import { fonts } from './fonts'
+import { agents } from './agents'
 import { models } from './models'
 import { canvas } from './canvas'
 import { stage } from './stage'
@@ -19,6 +20,9 @@ import { workspace } from './workspace'
 import { community } from './community'
 import { admin } from './admin'
 import { ui } from './ui'
+import { components } from './components'
+import { actions } from './actions'
+import { plans } from './plans'
 
 /** The source catalog, one namespace per area of the app. */
 export const en = {
@@ -33,6 +37,7 @@ export const en = {
   agentKeys,
   webhooks,
   fonts,
+  agents,
   models,
   canvas,
   stage,
@@ -43,4 +48,7 @@ export const en = {
   community,
   admin,
   ui,
+  components,
+  actions,
+  plans,
 }

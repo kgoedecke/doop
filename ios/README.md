@@ -33,6 +33,12 @@ HTML/CSS engine (Stylo + Taffy + Parley), compiled into the app as a static libr
   Labels, selection outlines and collaborator
   cursors are native layers, so a board with many frames costs one small bitmap per
   frame instead of one web document per frame.
+  Agents at work show on their frame as on the web (`Blitz/FrameWorkBadge.swift`, who from
+  `Core/FrameWorkers.swift`): an agent streaming a design (`frame:streaming`) gets a dashed ring
+  pulsing in its colour and a "Claude is designing…" chip in the title row; an agent with the
+  frame open (`editing`) gets a solid ring and its name. A chip moves above the title when both
+  do not fit, and says less (name, then mark) on a frame narrower than its words. Like the web,
+  a stream that began before the app joined shows as an open frame.
 - **Blitz engine** (`Doop/Blitz/BlitzDocument.swift` over `BlitzKit/`): each frame's
   HTML is parsed once into a Blitz document. The canvas asks for a bitmap at the
   density the current zoom needs (up to 3 bitmap pixels per CSS pixel, 4096 px max
@@ -45,10 +51,22 @@ HTML/CSS engine (Stylo + Taffy + Parley), compiled into the app as a static libr
 - **Deep zoom tiles**: a base bitmap is capped at 3 bitmap pixels per CSS pixel and
   about two screens of pixels. When the screen density exceeds what the base bitmap
   holds, the part of the frame on screen (plus a 30% margin) is painted as a tile at
-  up to 8 bitmap pixels per CSS pixel and composited over the base, so text stays
-  sharp at any zoom at roughly one screen of pixels per paint. Tiles refresh when a
-  gesture settles and when the frame's HTML changes; a tiled frame holds its
-  animations still.
+  screen density (up to 12 bitmap pixels per CSS pixel at 400% on a 3x screen) and
+  composited over the base, so text stays sharp at any zoom at roughly one screen of
+  pixels per paint. Tiles refresh when a gesture settles and when the frame's HTML
+  changes; a tiled frame holds its animations still.
+- **Pixel alignment**: Core Animation stretches each bitmap with a linear filter, so
+  a bitmap is only sharp when its pixels land on screen pixels. When the camera
+  settles its offset rests on whole device pixels (the first fit included) and each
+  frame layer's origin is snapped to the device-pixel grid at the camera's density;
+  a frame half a pixel off blurred every glyph (55-80% of full sharpness at most
+  zooms, only 100% and 200% were crisp).
+- **Scale changes start no transitions**: base and tile paint one document at
+  different scales, and a new scale recomputes lengths snapped to device pixels (a 1px
+  border is about 2 CSS px at 0.5x). The Blitz and Stylo forks restyle for a scale
+  change with `TraversalFlags::DeviceChangeOnly`, which starts no CSS transitions;
+  otherwise every `transition: all` box animated between the two widths, the frame
+  jittered by a pixel or two and repainted forever. `rust/tests/rescale_transitions.rs`.
 - **SVG**: `blitz-paint` is pulled in with `default-features = false` so the bridge
   controls what it links; its `svg` feature must stay on, or neither inline `<svg>`
   elements nor SVG images (`<img src="….svg">`, backgrounds) are painted at all.
@@ -71,7 +89,11 @@ HTML/CSS engine (Stylo + Taffy + Parley), compiled into the app as a static libr
   as browsers' `font-optical-sizing: auto` does. Empty inputs paint their `placeholder`
   in the `::placeholder` style. `doopblitz_doc_loading` stays true while a fetched
   resource waits to be applied, since applying a stylesheet starts its font and image
-  fetches. `tests/fonts_and_inputs.rs` covers these with macOS's own variable fonts.
+  fetches. Symbols a page writes as text (★ ✓ → ⌘) fall back to the system's symbol
+  families (System Font, Apple Symbols, Hiragino Sans, Menlo, Zapf Dingbats), appended to
+  the Latin and common-script fallbacks: fontique picks fallbacks per script, symbols have
+  none, and iOS's Latin fallback lacks them, so they drew as LastResort boxes.
+  `tests/fonts_and_inputs.rs` covers these with macOS's own variable fonts.
 - **Device-pixel layout**: Taffy rounds every box to whole CSS pixels after layout,
   which at a paint scale above 1 puts a different number of device pixels on each
   side of a box sitting on a half pixel (a 1.5px outline, a handle centred on it),
@@ -84,11 +106,14 @@ HTML/CSS engine (Stylo + Taffy + Parley), compiled into the app as a static libr
 - **CSS animations**: a frame whose document reports running animations or
   transitions (`doopblitz_doc_is_animating`) is played by a `CADisplayLink` while
   it is on screen: each step paints only the on-screen part of the frame as a tile
-  (`doopblitz_doc_render_region_at`) at a density chosen so one step stays near
-  550k pixels, about 10-20 ms on Skia, which gives 30-40 steps a second at any
-  zoom. Playback pauses during gestures and for frames narrower than 100 pt, at
-  most two frames play at once, and when an animation ends the tile is repainted
-  at the density the camera wants. Base bitmaps keep the last animation pose.
+  (`doopblitz_doc_render_region_at`) at screen density, within a budget of one
+  screen of device pixels per step (about 15 ms on an iPhone 15 Pro Max). While a
+  frame plays, its tile is the playback tile alone: a static tile at another density
+  and an older pose between steps made it jump, and only a playback step decides
+  that the animation ended. Playback pauses during gestures and for frames narrower
+  than 100 pt, at most two frames play at once, and when an animation ends the tile
+  is repainted at the density the camera wants. Base bitmaps keep the last animation
+  pose.
 - **Element inspection**: tapping inside any frame selects it and hit tests the
   Blitz DOM automatically, without a separate mode. A compact, icon-only glass action bar
   above the prompt offers Copy, Paste, Duplicate, Delete, Comment and Export for
@@ -203,6 +228,17 @@ rectangle. Repeating tiles use an image brush; a weak-keyed, 16 MiB cache per pa
 thread reuses them across paints without retaining documents. Individual textures
 are capped at 4 megapixels / 4096 px per side. `rust/tests/svg_background.rs`
 checks repetition, filtered noise, and full-frame versus region rendering.
+
+Frames imported from a website keep the site's `<base href>`, and their paths
+(`/img/logo.svg`) are relative to it. Blitz takes its base URL from the embedder and
+starts image and stylesheet fetches while it parses, so `Doc::new` parses with the
+fetches held, reads the first `<base href>` (resolved against the server origin, http(s)
+only), and parses again against it when it differs; otherwise the held fetches go out.
+Every document also matches `prefers-reduced-motion: reduce` (`Viewport::reduced_motion`
+in the Blitz fork, the media feature in the Stylo fork), so content a page hides until an
+entry animation has run shows through the page's own reduced-motion fallback; frames are
+mostly painted as still pictures at time 0. A page without such a fallback still paints
+its pre-animation state there. `rust/tests/imported_pages.rs` covers both.
 As with gradients, spaced backgrounds requiring more than 500 explicit tile
 draws are skipped to keep painting bounded; repeat/round use a single brush fill.
 

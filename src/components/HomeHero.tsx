@@ -1,5 +1,12 @@
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
-import { DRAFT_OPTIONS, DRAFTS_STORAGE_KEY, isDraftCount, readStoredDrafts, type DraftCount } from '../lib/homePrompt'
+import {
+  DRAFT_OPTIONS,
+  DRAFTS_STORAGE_KEY,
+  isDraftCount,
+  parseDraftCount,
+  readStoredDrafts,
+  type DraftCount,
+} from '../lib/homePrompt'
 import { setPromptBoxHidden, usePromptBoxHidden } from '../lib/homePreferences'
 import { DoopMark } from './Logo'
 import { ModelPicker } from './ModelPicker'
@@ -9,6 +16,7 @@ import { Chip } from './ui/chip'
 import { MenuButton } from './ui/menu-button'
 import { Pressable } from './ui/pressable'
 import { Textarea } from './ui/textarea'
+import { Input } from './ui/input'
 import { Button } from './ui/button'
 import { Modal, ModalActions, ModalLede, ModalTitle } from './ui/modal'
 import {
@@ -17,20 +25,23 @@ import {
   DropdownMenuContent,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from './ui/dropdown-menu'
 import {
   ArrowUpIcon,
   AttachmentIcon,
-  CalendarIcon,
+  BlocksIcon,
   ChevronLeftIcon,
+  CheckIcon,
   ChevronRightIcon,
   CirclePlusIcon,
   CopyIcon,
-  HistoryIcon,
   LayoutTemplateIcon,
-  MessageSquareIcon,
+  MinusIcon,
+  PlusIcon,
   UploadIcon,
+  WebIcon,
   XIcon,
 } from './ui/icons'
 import { useT, type PlainMessageKey } from '../lib/i18n'
@@ -51,6 +62,7 @@ export interface HeroActions {
   onConnectAgents: () => void
   onAutomations: () => void
   onIntegrations: () => void
+  onCommunity: () => void
 }
 
 /** a chip either fills the composer with a brief or runs an action */
@@ -72,18 +84,6 @@ const CHIPS: Chip[] = [
     prompt: 'home.chipLandingPrompt',
   },
   {
-    id: 'recap',
-    label: 'home.chipRecap',
-    icon: <CalendarIcon {...chipIcon} />,
-    prompt: 'home.chipRecapPrompt',
-  },
-  {
-    id: 'changed',
-    label: 'home.chipChanged',
-    icon: <HistoryIcon {...chipIcon} />,
-    prompt: 'home.chipChangedPrompt',
-  },
-  {
     id: 'automation',
     label: 'home.chipAutomation',
     icon: <span className="font-mono text-caption">/</span>,
@@ -92,11 +92,12 @@ const CHIPS: Chip[] = [
   { id: 'agents', label: 'home.chipAgents', icon: <CirclePlusIcon {...chipIcon} />, action: 'onConnectAgents' },
   { id: 'import', label: 'home.chipImport', icon: <UploadIcon {...chipIcon} />, action: 'onImport' },
   {
-    id: 'comments',
-    label: 'home.chipComments',
-    icon: <MessageSquareIcon {...chipIcon} />,
-    prompt: 'home.chipCommentsPrompt',
+    id: 'integrations',
+    label: 'home.chipIntegrations',
+    icon: <BlocksIcon {...chipIcon} />,
+    action: 'onIntegrations',
   },
+  { id: 'templates', label: 'home.chipTemplates', icon: <WebIcon {...chipIcon} />, action: 'onCommunity' },
 ]
 
 /** the beam walks the strip while nobody hovers, like a slow carousel */
@@ -312,42 +313,13 @@ export function HomeHero({
               className="gap-[7px] rounded-row text-ink-soft transition-colors hover:text-ink"
               onClick={actions.onImport}
               title={t('home.attachTitle')}
+              aria-label={t('home.files')}
             >
-              <AttachmentIcon width={14} height={14} /> {t('home.files')}
+              {/* icon only on a phone, so the row keeps room for the model's name and the send button */}
+              <AttachmentIcon width={14} height={14} /> <span className="hidden md:inline">{t('home.files')}</span>
             </Pressable>
             <span className="flex-1" />
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <MenuButton
-                  variant="quiet"
-                  aria-label={t('home.draftsAria', { count: drafts })}
-                  className="whitespace-nowrap"
-                  icon={<CopyIcon width={14} height={14} />}
-                >
-                  {t('home.drafts', { count: drafts })}
-                </MenuButton>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent side="top" align="end" width="md">
-                <DropdownMenuCaption>{t('home.draftsCaption')}</DropdownMenuCaption>
-                <DropdownMenuRadioGroup
-                  value={String(drafts)}
-                  onValueChange={(next) => {
-                    const n = Number(next)
-                    if (isDraftCount(n)) pickDrafts(n)
-                  }}
-                >
-                  {DRAFT_OPTIONS.map((n) => (
-                    <DropdownMenuRadioItem
-                      key={n}
-                      value={String(n)}
-                      description={t('home.draftsDescription', { count: n })}
-                    >
-                      {t('home.drafts', { count: n })}
-                    </DropdownMenuRadioItem>
-                  ))}
-                </DropdownMenuRadioGroup>
-              </DropdownMenuContent>
-            </DropdownMenu>
+            <DraftsMenu drafts={drafts} onPick={pickDrafts} />
             <ModelPicker disabled={busy} />
             <IconButton
               variant="primary"
@@ -376,10 +348,10 @@ export function HomeHero({
           {/* the marks rest a little faded and desaturated; the bar's hover wakes the
               row, and the mark under the pointer comes fully to life and lifts */}
           <span
-            className="marks ml-auto flex items-center gap-[9px] [&>*]:opacity-75 [&>*]:saturate-[.8] [&>*]:transition-[opacity,filter,transform] [&>*]:duration-fast [&>*]:ease-out-quad group-hover:[&>*]:opacity-90 group-hover:[&>*]:saturate-[.95] [&>*:hover]:-translate-y-px [&>*:hover]:!opacity-100 [&>*:hover]:!saturate-100 motion-reduce:[&>*]:transition-none"
+            className="marks ml-auto flex flex-none items-center gap-[9px] [&>*]:opacity-75 [&>*]:saturate-[.8] [&>*]:transition-[opacity,filter,transform] [&>*]:duration-fast [&>*]:ease-out-quad group-hover:[&>*]:opacity-90 group-hover:[&>*]:saturate-[.95] [&>*:hover]:-translate-y-px [&>*:hover]:!opacity-100 [&>*:hover]:!saturate-100 motion-reduce:[&>*]:transition-none"
             aria-hidden
           >
-            <span className="grid size-4 place-items-center rounded-tag bg-surface shadow-ring">
+            <span className="grid size-4 flex-none place-items-center rounded-tag bg-surface shadow-ring">
               <BrandMark brand="figma" size={12} />
             </span>
             <BrandMark brand="github" size={16} className="text-ink" />
@@ -389,5 +361,113 @@ export function HomeHero({
         </Pressable>
       </div>
     </section>
+  )
+}
+
+/** The composer's draft count: the usual counts as one-click picks, and a
+ *  stepper under them for any other number. */
+function DraftsMenu({ drafts, onPick }: { drafts: DraftCount; onPick: (n: DraftCount) => void }) {
+  const t = useT()
+  const [open, setOpen] = useState(false)
+  const isPreset = (DRAFT_OPTIONS as readonly number[]).includes(drafts)
+  const [custom, setCustom] = useState(String(drafts))
+
+  function pick(n: DraftCount) {
+    onPick(n)
+    setCustom(String(n))
+  }
+
+  /** the count a step starts from: what is typed when it reads, else the current one */
+  function step(by: 1 | -1) {
+    pick(Math.max(1, (parseDraftCount(custom) ?? drafts) + by))
+  }
+
+  function commitCustom(close: boolean) {
+    const n = parseDraftCount(custom)
+    if (n === null) setCustom(String(drafts))
+    else pick(n)
+    if (close) setOpen(false)
+  }
+
+  return (
+    <DropdownMenu
+      open={open}
+      onOpenChange={(next) => {
+        setOpen(next)
+        if (next) setCustom(String(drafts))
+      }}
+    >
+      <DropdownMenuTrigger asChild>
+        <MenuButton
+          variant="quiet"
+          aria-label={t('home.draftsAria', { count: drafts })}
+          className="whitespace-nowrap"
+          icon={<CopyIcon width={14} height={14} />}
+        >
+          {t('home.drafts', { count: drafts })}
+        </MenuButton>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent side="top" align="end" width="md">
+        <DropdownMenuCaption>{t('home.draftsCaption')}</DropdownMenuCaption>
+        <DropdownMenuRadioGroup
+          value={isPreset ? String(drafts) : ''}
+          onValueChange={(next) => {
+            const n = Number(next)
+            if (isDraftCount(n)) pick(n)
+          }}
+        >
+          {DRAFT_OPTIONS.map((n) => (
+            <DropdownMenuRadioItem key={n} value={String(n)} description={t('home.draftsDescription', { count: n })}>
+              {t('home.drafts', { count: n })}
+            </DropdownMenuRadioItem>
+          ))}
+        </DropdownMenuRadioGroup>
+        <DropdownMenuSeparator />
+        {/* not a menu item: Radix would take focus and typed digits from the field */}
+        <div className="flex items-center gap-2.5 px-2.5 py-2 text-body">
+          <span className="flex min-w-0 flex-1 flex-col">
+            <span className="truncate">{t('home.draftsCustom')}</span>
+            <span className="text-caption text-ink-faint">{t('home.draftsCustomDescription')}</span>
+          </span>
+          <div className="flex flex-none items-center rounded-control bg-sub p-0.5 shadow-ring">
+            <IconButton size="sm" aria-label={t('home.draftsFewer')} disabled={drafts <= 1} onClick={() => step(-1)}>
+              <MinusIcon width={12} height={12} />
+            </IconButton>
+            <Input
+              variant="bare"
+              inputSize="auto"
+              inputMode="numeric"
+              aria-label={t('home.draftsCustomAria')}
+              value={custom}
+              onChange={(event) => {
+                /* an edit that is not all digits (a pasted "2.5") is refused whole, never joined into "25" */
+                if (/^\d*$/.test(event.target.value)) setCustom(event.target.value)
+              }}
+              onFocus={(event) => event.target.select()}
+              onBlur={() => commitCustom(false)}
+              onKeyDown={(event) => {
+                if (event.key === 'Escape') return
+                event.stopPropagation()
+                if (event.key === 'Enter') {
+                  event.preventDefault()
+                  commitCustom(true)
+                } else if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
+                  event.preventDefault()
+                  step(event.key === 'ArrowUp' ? 1 : -1)
+                }
+              }}
+              style={{ width: `${Math.max(2, custom.length) + 1}ch` }}
+              className="text-center font-mono tabular-nums md:text-body"
+            />
+            <IconButton size="sm" aria-label={t('home.draftsMore')} onClick={() => step(1)}>
+              <PlusIcon width={12} height={12} />
+            </IconButton>
+          </div>
+          <span className="flex w-3.5 flex-none text-ink">
+            {!isPreset && <CheckIcon width={14} height={14} aria-hidden />}
+          </span>
+        </div>
+      </DropdownMenuContent>
+    </DropdownMenu>
   )
 }

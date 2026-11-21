@@ -232,7 +232,7 @@ dependencies = [
 [[package]]
 name = "blitz-dom"
 version = "0.3.0-beta.2"
-source = "git+https://github.com/kgoedecke/blitz?rev=98827022abbcf9623487df590f18a815ee8c5bfb#98827022abbcf9623487df590f18a815ee8c5bfb"
+source = "git+https://github.com/kgoedecke/blitz?rev=35a984ff9958ad24bd7ca4f7b0d03b8a8d16e0a9#35a984ff9958ad24bd7ca4f7b0d03b8a8d16e0a9"
 dependencies = [
  "accesskit",
  "anyrender",
@@ -243,7 +243,7 @@ dependencies = [
  "color",
  "cssparser",
  "cursor-icon",
- "debug_timer 0.1.3 (git+https://github.com/kgoedecke/blitz?rev=98827022abbcf9623487df590f18a815ee8c5bfb)",
+ "debug_timer 0.1.3 (git+https://github.com/kgoedecke/blitz?rev=35a984ff9958ad24bd7ca4f7b0d03b8a8d16e0a9)",
  "euclid",
  "html-escape",
  "image",
@@ -277,7 +277,7 @@ dependencies = [
 [[package]]
 name = "blitz-html"
 version = "0.3.0-beta.2"
-source = "git+https://github.com/kgoedecke/blitz?rev=98827022abbcf9623487df590f18a815ee8c5bfb#98827022abbcf9623487df590f18a815ee8c5bfb"
+source = "git+https://github.com/kgoedecke/blitz?rev=35a984ff9958ad24bd7ca4f7b0d03b8a8d16e0a9#35a984ff9958ad24bd7ca4f7b0d03b8a8d16e0a9"
 dependencies = [
  "blitz-dom",
  "blitz-traits",
@@ -288,7 +288,7 @@ dependencies = [
 [[package]]
 name = "blitz-net"
 version = "0.3.0-beta.2"
-source = "git+https://github.com/kgoedecke/blitz?rev=98827022abbcf9623487df590f18a815ee8c5bfb#98827022abbcf9623487df590f18a815ee8c5bfb"
+source = "git+https://github.com/kgoedecke/blitz?rev=35a984ff9958ad24bd7ca4f7b0d03b8a8d16e0a9#35a984ff9958ad24bd7ca4f7b0d03b8a8d16e0a9"
 dependencies = [
  "blitz-traits",
  "data-url",
@@ -304,7 +304,7 @@ dependencies = [
 [[package]]
 name = "blitz-paint"
 version = "0.3.0-beta.2"
-source = "git+https://github.com/kgoedecke/blitz?rev=98827022abbcf9623487df590f18a815ee8c5bfb#98827022abbcf9623487df590f18a815ee8c5bfb"
+source = "git+https://github.com/kgoedecke/blitz?rev=35a984ff9958ad24bd7ca4f7b0d03b8a8d16e0a9#35a984ff9958ad24bd7ca4f7b0d03b8a8d16e0a9"
 dependencies = [
  "anyrender",
  "anyrender_svg",
@@ -327,7 +327,7 @@ dependencies = [
 [[package]]
 name = "blitz-traits"
 version = "0.3.0-beta.2"
-source = "git+https://github.com/kgoedecke/blitz?rev=98827022abbcf9623487df590f18a815ee8c5bfb#98827022abbcf9623487df590f18a815ee8c5bfb"
+source = "git+https://github.com/kgoedecke/blitz?rev=35a984ff9958ad24bd7ca4f7b0d03b8a8d16e0a9#35a984ff9958ad24bd7ca4f7b0d03b8a8d16e0a9"
 dependencies = [
  "atomic_refcell",
  "bitflags 2.13.2",
@@ -756,7 +756,7 @@ checksum = "da220af51a1a335e9a930beaaef53d261e41ea9eecfb3d973a3ddae1a7284b9c"
 [[package]]
 name = "debug_timer"
 version = "0.1.3"
-source = "git+https://github.com/kgoedecke/blitz?rev=98827022abbcf9623487df590f18a815ee8c5bfb#98827022abbcf9623487df590f18a815ee8c5bfb"
+source = "git+https://github.com/kgoedecke/blitz?rev=35a984ff9958ad24bd7ca4f7b0d03b8a8d16e0a9#35a984ff9958ad24bd7ca4f7b0d03b8a8d16e0a9"
 
 [[package]]
 name = "deranged"
@@ -865,6 +865,7 @@ dependencies = [
  "skia-safe",
  "taffy",
  "tokio",
+ "url",
 ]
 
 [[package]]
@@ -927,7 +928,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -2803,7 +2804,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -2877,7 +2878,7 @@ dependencies = [
 [[package]]
 name = "selectors"
 version = "0.41.0"
-source = "git+https://github.com/kgoedecke/stylo?rev=f31ec9fb0fa83b3b79cfce08016f3cb8cc777c70#f31ec9fb0fa83b3b79cfce08016f3cb8cc777c70"
+source = "git+https://github.com/kgoedecke/stylo?rev=39c0595f1a3c0ecac30f045bc440ee09e2d46a2a#39c0595f1a3c0ecac30f045bc440ee09e2d46a2a"
 dependencies = [
  "bitflags 2.13.2",
  "cssparser",
@@ -2965,7 +2966,7 @@ dependencies = [
 [[package]]
 name = "servo_arc"
 version = "0.5.0"
-source = "git+https://github.com/kgoedecke/stylo?rev=f31ec9fb0fa83b3b79cfce08016f3cb8cc777c70#f31ec9fb0fa83b3b79cfce08016f3cb8cc777c70"
+source = "git+https://github.com/kgoedecke/stylo?rev=39c0595f1a3c0ecac30f045bc440ee09e2d46a2a#39c0595f1a3c0ecac30f045bc440ee09e2d46a2a"
 dependencies = [
  "serde",
  "stable_deref_trait",
@@ -3211,7 +3212,7 @@ dependencies = [
 [[package]]
 name = "stylo"
 version = "0.22.0"
-source = "git+https://github.com/kgoedecke/stylo?rev=f31ec9fb0fa83b3b79cfce08016f3cb8cc777c70#f31ec9fb0fa83b3b79cfce08016f3cb8cc777c70"
+source = "git+https://github.com/kgoedecke/stylo?rev=39c0595f1a3c0ecac30f045bc440ee09e2d46a2a#39c0595f1a3c0ecac30f045bc440ee09e2d46a2a"
 dependencies = [
  "app_units",
  "arrayvec",
@@ -3267,7 +3268,7 @@ dependencies = [
 [[package]]
 name = "stylo_atoms"
 version = "0.22.0"
-source = "git+https://github.com/kgoedecke/stylo?rev=f31ec9fb0fa83b3b79cfce08016f3cb8cc777c70#f31ec9fb0fa83b3b79cfce08016f3cb8cc777c70"
+source = "git+https://github.com/kgoedecke/stylo?rev=39c0595f1a3c0ecac30f045bc440ee09e2d46a2a#39c0595f1a3c0ecac30f045bc440ee09e2d46a2a"
 dependencies = [
  "string_cache",
  "string_cache_codegen",
@@ -3276,7 +3277,7 @@ dependencies = [
 [[package]]
 name = "stylo_derive"
 version = "0.22.0"
-source = "git+https://github.com/kgoedecke/stylo?rev=f31ec9fb0fa83b3b79cfce08016f3cb8cc777c70#f31ec9fb0fa83b3b79cfce08016f3cb8cc777c70"
+source = "git+https://github.com/kgoedecke/stylo?rev=39c0595f1a3c0ecac30f045bc440ee09e2d46a2a#39c0595f1a3c0ecac30f045bc440ee09e2d46a2a"
 dependencies = [
  "darling",
  "proc-macro2",
@@ -3288,7 +3289,7 @@ dependencies = [
 [[package]]
 name = "stylo_dom"
 version = "0.22.0"
-source = "git+https://github.com/kgoedecke/stylo?rev=f31ec9fb0fa83b3b79cfce08016f3cb8cc777c70#f31ec9fb0fa83b3b79cfce08016f3cb8cc777c70"
+source = "git+https://github.com/kgoedecke/stylo?rev=39c0595f1a3c0ecac30f045bc440ee09e2d46a2a#39c0595f1a3c0ecac30f045bc440ee09e2d46a2a"
 dependencies = [
  "bitflags 2.13.2",
  "stylo_malloc_size_of",
@@ -3297,7 +3298,7 @@ dependencies = [
 [[package]]
 name = "stylo_malloc_size_of"
 version = "0.22.0"
-source = "git+https://github.com/kgoedecke/stylo?rev=f31ec9fb0fa83b3b79cfce08016f3cb8cc777c70#f31ec9fb0fa83b3b79cfce08016f3cb8cc777c70"
+source = "git+https://github.com/kgoedecke/stylo?rev=39c0595f1a3c0ecac30f045bc440ee09e2d46a2a#39c0595f1a3c0ecac30f045bc440ee09e2d46a2a"
 dependencies = [
  "app_units",
  "cssparser",
@@ -3315,7 +3316,7 @@ dependencies = [
 [[package]]
 name = "stylo_static_prefs"
 version = "0.22.0"
-source = "git+https://github.com/kgoedecke/stylo?rev=f31ec9fb0fa83b3b79cfce08016f3cb8cc777c70#f31ec9fb0fa83b3b79cfce08016f3cb8cc777c70"
+source = "git+https://github.com/kgoedecke/stylo?rev=39c0595f1a3c0ecac30f045bc440ee09e2d46a2a#39c0595f1a3c0ecac30f045bc440ee09e2d46a2a"
 dependencies = [
  "toml",
 ]
@@ -3323,7 +3324,7 @@ dependencies = [
 [[package]]
 name = "stylo_taffy"
 version = "0.3.0-beta.2"
-source = "git+https://github.com/kgoedecke/blitz?rev=98827022abbcf9623487df590f18a815ee8c5bfb#98827022abbcf9623487df590f18a815ee8c5bfb"
+source = "git+https://github.com/kgoedecke/blitz?rev=35a984ff9958ad24bd7ca4f7b0d03b8a8d16e0a9#35a984ff9958ad24bd7ca4f7b0d03b8a8d16e0a9"
 dependencies = [
  "bitflags 2.13.2",
  "stylo",
@@ -3334,7 +3335,7 @@ dependencies = [
 [[package]]
 name = "stylo_traits"
 version = "0.22.0"
-source = "git+https://github.com/kgoedecke/stylo?rev=f31ec9fb0fa83b3b79cfce08016f3cb8cc777c70#f31ec9fb0fa83b3b79cfce08016f3cb8cc777c70"
+source = "git+https://github.com/kgoedecke/stylo?rev=39c0595f1a3c0ecac30f045bc440ee09e2d46a2a#39c0595f1a3c0ecac30f045bc440ee09e2d46a2a"
 dependencies = [
  "app_units",
  "bitflags 2.13.2",
@@ -3446,7 +3447,7 @@ dependencies = [
  "getrandom",
  "once_cell",
  "rustix",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -3589,7 +3590,7 @@ checksum = "fd3ca314f692efd6c868f8408f53fe444634a845f96c028b97d35f6a1f79f0ee"
 [[package]]
 name = "to_shmem"
 version = "0.6.0"
-source = "git+https://github.com/kgoedecke/stylo?rev=f31ec9fb0fa83b3b79cfce08016f3cb8cc777c70#f31ec9fb0fa83b3b79cfce08016f3cb8cc777c70"
+source = "git+https://github.com/kgoedecke/stylo?rev=39c0595f1a3c0ecac30f045bc440ee09e2d46a2a#39c0595f1a3c0ecac30f045bc440ee09e2d46a2a"
 dependencies = [
  "cssparser",
  "servo_arc",
@@ -3602,7 +3603,7 @@ dependencies = [
 [[package]]
 name = "to_shmem_derive"
 version = "0.2.0"
-source = "git+https://github.com/kgoedecke/stylo?rev=f31ec9fb0fa83b3b79cfce08016f3cb8cc777c70#f31ec9fb0fa83b3b79cfce08016f3cb8cc777c70"
+source = "git+https://github.com/kgoedecke/stylo?rev=39c0595f1a3c0ecac30f045bc440ee09e2d46a2a#39c0595f1a3c0ecac30f045bc440ee09e2d46a2a"
 dependencies = [
  "darling",
  "proc-macro2",
@@ -4084,7 +4085,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]

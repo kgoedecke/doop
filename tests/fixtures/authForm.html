@@ -32,6 +32,21 @@
       window.addEventListener('unhandledrejection', function (event) {
         window.rejections.push(String(event.reason))
       })
+      /* What /api/oidc-config answers: no providers and the default policy,
+         unless the page was opened with ?login=<json> overriding parts of it
+         (set in the URL because the page asks before any test could set it). */
+      var loginConfig = {
+        enabled: false,
+        google: false,
+        microsoft: false,
+        apple: false,
+        emailPasswordSignup: true,
+        ssoAutoRedirect: false,
+      }
+      var loginOverride = new URLSearchParams(location.search).get('login')
+      if (loginOverride) Object.assign(loginConfig, JSON.parse(loginOverride))
+      /* every SSO start the page made; the "provider" is this page's #idp */
+      window.oauthStarts = []
       var realFetch = window.fetch.bind(window)
       function jsonResponse(body, status) {
         return new Response(JSON.stringify(body), { status: status, headers: { 'content-type': 'application/json' } })
@@ -39,11 +54,15 @@
       window.fetch = function (input, init) {
         /* better-auth hands fetch a URL object; the app's own calls pass strings */
         var url = typeof input === 'string' ? input : input instanceof Request ? input.url : String(input)
-        /* this deploy has no SSO or social providers configured */
-        if (url.includes('/api/oidc-config'))
-          return Promise.resolve(jsonResponse({ enabled: false, google: false, microsoft: false, apple: false }, 200))
+        if (url.includes('/api/oidc-config')) return Promise.resolve(jsonResponse(loginConfig, 200))
         if (url.includes('/api/auth/sign-up/email'))
           return Promise.resolve(jsonResponse(signUpResponse.body, signUpResponse.status))
+        if (url.includes('/api/auth/sign-in/oauth2')) {
+          window.oauthStarts.push(JSON.parse(init.body))
+          return Promise.resolve(
+            jsonResponse({ url: location.pathname + location.search + '#idp', redirect: true }, 200),
+          )
+        }
         return realFetch(input, init)
       }
     </script>

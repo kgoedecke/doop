@@ -9,6 +9,7 @@ import {
   rotateVector,
   rotatedBounds,
   rotatedBy,
+  turnedDropRect,
   unrotatePoint,
 } from '../shared/frameRotation'
 import { ROTATE_CORNERS, rotateCursor, rotateCursorAngle, rotateZoneSide } from '../src/lib/frameRotate'
@@ -165,5 +166,52 @@ describe('a turned frame on the canvas', () => {
     const corner = at({ x: 100, y: 50 })
     expect(corner.x).toBeCloseTo(250)
     expect(corner.y).toBeCloseTo(0)
+  })
+})
+
+describe('turnedDropRect', () => {
+  const box = { x: 120, y: 120, width: 40, height: 40 }
+  const down = { ...box, y: box.y + 60 }
+
+  it('leaves a drop in a frame that is not turned where the drag put it', () => {
+    const frame = { x: 100, y: 100, width: 200, height: 200 }
+    expect(turnedDropRect(box, down, frame, frame)).toEqual(down)
+  })
+
+  it("moves a drawing along a turned frame's own axes", () => {
+    const frame = { x: 100, y: 100, width: 200, height: 200, rotation: 90 }
+    /* 60px down the screen is 60px along the frame's x once turned 90° */
+    const drop = turnedDropRect(box, down, frame, frame)
+    expect(drop.x).toBeCloseTo(180)
+    expect(drop.y).toBeCloseTo(120)
+    expect(drop.width).toBe(40)
+  })
+
+  it('lifts a drawing out of a turned frame to where it shows on the canvas', () => {
+    const frame = { x: 100, y: 100, width: 200, height: 200, rotation: 90 }
+    const drop = turnedDropRect(box, down, frame)
+    expect(drop.x).toBeCloseTo(240)
+    expect(drop.y).toBeCloseTo(180)
+  })
+
+  it('places a drawing into a turned destination under the same point', () => {
+    const source = { x: 0, y: 0, width: 100, height: 100 }
+    const target = { x: 300, y: 0, width: 200, height: 100, rotation: 180 }
+    const start = { x: 10, y: 10, width: 20, height: 20 }
+    /* dragged so its centre sits at world (320, 20), near the target's
+       top-left corner on screen, which is its bottom-right once turned */
+    const moved = { ...start, x: 310, y: 10 }
+    const drop = turnedDropRect(start, moved, source, target)
+    expect(drop.x - target.x + drop.width / 2).toBeCloseTo(180)
+    expect(drop.y - target.y + drop.height / 2).toBeCloseTo(80)
+  })
+
+  it('places a standalone shape into a turned frame under the point it was let go', () => {
+    /* a standalone shape is its own frame, so its box is the source too */
+    const shape = { x: 310, y: 10, width: 20, height: 20 }
+    const target = { x: 300, y: 0, width: 200, height: 100, rotation: 180 }
+    const drop = turnedDropRect(shape, shape, shape, target)
+    expect(drop.x - target.x + drop.width / 2).toBeCloseTo(180)
+    expect(drop.y - target.y + drop.height / 2).toBeCloseTo(80)
   })
 })

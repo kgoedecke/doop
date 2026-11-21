@@ -2,6 +2,7 @@ import { clientIntegrations } from '../integrations'
 import { useEffect, useRef, useState } from 'react'
 import type { CanvasMeta } from '../../shared/types'
 import { AGENT_ROLES, roleById, roleName } from '../../shared/agents'
+import { useCanvasRoster } from '../hooks/use-roster'
 import {
   AUTOMATION_EXAMPLES,
   MAX_NAME,
@@ -20,6 +21,7 @@ import {
   type Step,
 } from '../../shared/automations'
 import { api, ApiError, type IntegrationsStatus } from '../lib/api'
+import { RUN_SHORTCUT_HINT, SAVE_SHORTCUT_HINT, isRunShortcut } from '../lib/keys'
 import { navigate } from '../App'
 import { posthog } from '../lib/posthog'
 import { FrameThumb } from '../components/FramePreview'
@@ -276,18 +278,6 @@ export function AutomationEditor({ automationId }: { automationId: string }) {
     }
   }
 
-  /* ⌘S saves — the editor is a form people will expect it from */
-  useEffect(() => {
-    function onKey(e: KeyboardEvent) {
-      if (e.key === 's' && (e.metaKey || e.ctrlKey)) {
-        e.preventDefault()
-        void save()
-      }
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  })
-
   /* the name saves on its own, like a canvas rename — it is not part of the
      draft people expect to confirm with Save */
   async function rename(name: string) {
@@ -382,6 +372,35 @@ export function AutomationEditor({ automationId }: { automationId: string }) {
   const stepCanvases = approvalCanvasId === undefined ? canvases : canvases.filter((c) => c.id === approvalCanvasId)
   const incompleteRaw = draft ? incompleteReason(draft.steps, draft.trigger) : undefined
   const incomplete = incompleteRaw && incompleteText(t, incompleteRaw)
+  const canRun = Boolean(automation && automation.enabled && !incomplete && !runningNow && !saving)
+  const canRunRef = useRef(canRun)
+  const runNowRef = useRef(runNow)
+  const saveRef = useRef(save)
+
+  useEffect(() => {
+    canRunRef.current = canRun
+    runNowRef.current = runNow
+    saveRef.current = save
+  })
+
+  /* ⌘S saves, ⌘⌥↩ runs — the editor is a form people will expect them from.
+     Run works from the step fields too: the chord types nothing, and a dirty
+     draft is saved before the run starts. */
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 's' && (e.metaKey || e.ctrlKey)) {
+        e.preventDefault()
+        void saveRef.current()
+        return
+      }
+      if (isRunShortcut(e)) {
+        e.preventDefault()
+        if (!e.repeat && canRunRef.current) void runNowRef.current()
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
 
   return (
     <div className="fixed inset-x-0 bottom-0 top-[var(--app-inset,0px)] flex flex-col">
@@ -413,12 +432,18 @@ export function AutomationEditor({ automationId }: { automationId: string }) {
               className={barGhostBtn}
               disabled={runningNow || !!incomplete || !automation.enabled}
               onClick={runNow}
-              title={incomplete ? t('automations.reasonFirst', { reason: incomplete }) : t('automations.runNowTitle')}
+              title={`${incomplete ? t('automations.reasonFirst', { reason: incomplete }) : t('automations.runNowTitle')} · ${RUN_SHORTCUT_HINT}`}
             >
               <PlayIcon className="size-3.5" />
               {runningNow ? t('automations.runningEllipsis') : t('automations.runNow')}
             </Button>
-            <Button variant="primary" className={barPrimaryBtn} disabled={!dirty || saving} onClick={() => void save()}>
+            <Button
+              variant="primary"
+              className={barPrimaryBtn}
+              disabled={!dirty || saving}
+              onClick={() => void save()}
+              title={`${t('common.save')} · ${SAVE_SHORTCUT_HINT}`}
+            >
               {saving ? t('automations.saving') : t('common.save')}
             </Button>
           </div>
@@ -1003,14 +1028,16 @@ function AgentNode({
   onRemove: () => void
 }) {
   const t = useT()
-  /* one agent per task: a pill picks that role, nothing to un-pick */
+  /* one agent per task: a pill picks that role, nothing to un-pick. The
+     step's canvas decides which custom agents there are */
   const roles = step.roles
+  const roster = useCanvasRoster(step.canvasId || undefined)
   return (
     <div data-pan-node className={nodeCls}>
       <Port side="in" />
       <Port side="out" />
       <div className="flex items-center gap-[9px]">
-        <RoleMark role={roleById(roles[0])} size={24} />
+        <RoleMark role={roleById(roles[0], roster)} size={24} />
         <div className="min-w-0 flex-1">
           <div className={kCls}>{t('automations.agentTask')}</div>
           <Input
@@ -1034,7 +1061,7 @@ function AgentNode({
         onChange={(e) => onChange({ prompt: e.target.value })}
       />
       <div className="mt-2.5 flex flex-wrap gap-1">
-        {AGENT_ROLES.map((role) => {
+        {roster.map((role) => {
           const on = roles[0] === role.id
           return (
             <Button
@@ -1056,7 +1083,9 @@ function AgentNode({
           )
         })}
       </div>
-      <p className="mt-2 text-caption text-ink-faint">{t('automations.picksUp', { role: roleName(roles[0]) })}</p>
+      <p className="mt-2 text-caption text-ink-faint">
+        {t('automations.picksUp', { role: roleName(roles[0], roster) })}
+      </p>
       <CanvasPicker
         word={t('automations.canvasOn')}
         value={step.canvasId}
@@ -1099,7 +1128,7 @@ function StepPicker({ onPick, onCancel }: { onPick: (kind: string) => void; onCa
       <div className="mt-3 grid grid-cols-2 gap-2">
         {AUTOMATION_EXAMPLES.filter((e) => e.trigger === 'approval').map((e) => (
           <button type="button" key={e.id} className={tile} onClick={() => onPick(e.id)}>
-            <RoleMark role={roleById('doop')} size={22} />
+            <RoleMark role={roleById('doop', AGENT_ROLES)} size={22} />
             <b className="text-body font-medium">{exampleName(t, e)}</b>
             <span className="text-caption text-ink-soft">{exampleBlurb(t, e)}</span>
           </button>
@@ -1255,7 +1284,13 @@ function RunsPanel({
                     ? t('automations.noRunsScheduled')
                     : t('automations.noRunsFinish')}
                 {!savedIncompleteRaw && (
-                  <Button variant="ghost" size="sm" className="mt-2.5 block" onClick={onRunNow}>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="mt-2.5 block"
+                    onClick={onRunNow}
+                    title={`${t('automations.runNowTitle')} · ${RUN_SHORTCUT_HINT}`}
+                  >
                     {t('automations.runNow')}
                   </Button>
                 )}

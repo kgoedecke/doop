@@ -19,6 +19,8 @@
       import { editElementGeometry } from '/src/lib/frameBridge.ts'
       import { nudgeSelection } from '/src/lib/layerEdits.ts'
       import '/src/styles.css'
+      /* the app's own store, for a test that seeds state the harness has no call for */
+      window.commentPositionStore = useStore
       window.elementPanelHarness = {
         /* one frame, or several stacked in order (later ones on top) */
         seed: (frame) => {

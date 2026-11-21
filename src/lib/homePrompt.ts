@@ -4,16 +4,25 @@
  * drafts of the same brief so there is something to iterate between.
  */
 
-/** how many drafts the composer offers; the default is the middle of the road */
+/** the counts the composer offers as one-click picks; the default is the middle of the road */
 export const DRAFT_OPTIONS = [1, 2, 3, 4] as const
-export type DraftCount = (typeof DRAFT_OPTIONS)[number]
+/** a whole number of drafts, at least one */
+export type DraftCount = number
 export const DEFAULT_DRAFTS: DraftCount = 3
 export const DRAFTS_STORAGE_KEY = 'doop-home-drafts'
 
 const MAX_CANVAS_NAME = 48
 
 export function isDraftCount(value: unknown): value is DraftCount {
-  return typeof value === 'number' && (DRAFT_OPTIONS as readonly number[]).includes(value)
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 1
+}
+
+/** A count typed into the menu's field: a whole number of at least one; null when nothing usable was typed. */
+export function parseDraftCount(text: string): DraftCount | null {
+  const trimmed = text.trim()
+  if (!/^\d+$/.test(trimmed)) return null
+  const n = Number(trimmed)
+  return isDraftCount(n) ? n : null
 }
 
 /** The canvas takes its name from the prompt's first line, cut at a word

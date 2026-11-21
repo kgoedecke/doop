@@ -78,13 +78,31 @@ in `.github/actions/setup-desktop`:
   provider in the system browser and returns over a `doop://integration/<id>` link; the app
   finishes it under its own session (`shared/desktopConnect.ts`). This is web-only: shells from
   0.2.1 already deliver any `doop://` link, and older shells open Integrations in the browser.
-- The macOS View menu (`desktop/src-tauri/src/view_menu.rs`) holds the canvas toggles (Rulers,
-  Show/Hide UI, Layers and Agents panels) and zoom. Items reach the page as `view-command`
-  events; the page mirrors its state back through `view_menu_state` (`src/lib/viewMenu.ts`,
-  gated on `window.__DOOP_VIEW_MENU__`), so checkmarks follow it and canvas items are disabled
-  off a canvas. Only ⌘ shortcuts are bound in the menu; ⇧R / ⇧1 / ⇧2 stay with the page.
+- The macOS menu bar is the page's (`desktop/src-tauri/src/app_menu.rs`, `src/lib/appMenu.ts`, gated
+  on `window.__DOOP_APP_MENU__`, macOS only): the page sends File, Edit, View, Object, Text, Arrange
+  and Help from the action registry (`app_menu_set`, labels in its language, each chord as the key
+  equivalent) and then only changed enabled/checked state (`app_menu_state`); the shell keeps the
+  app menu, Close Tab, the system Undo/Cut/Copy/Paste/Select All that text fields need, Full Screen
+  and Window. A pick returns as `app-menu` `{ id, key }`; the webview sees a key before the menu, and
+  a key the menu does get keeps the canvas keyboard's rules (nothing while typing or presenting).
+  Until a page sets it the bar is the old fixed one, whose View menu (`view_menu.rs`,
+  `src/lib/viewMenu.ts`, `__DOOP_VIEW_MENU__`) an older page still drives. Needs a desktop release.
+- Server choice (`desktop/src-tauri/src/server.rs`, `src/components/ServerSettings.tsx`): the
+  sign-in screen's cog (shells advertising `__DOOP_SERVER_CHOOSE__`) points an official build at a
+  self-hosted server. `server_choose` normalizes the address to an origin (https, or http on loopback only),
+  checks `/api/locale-config` answers and takes the origin any redirect lands on, confirms natively, writes `server.json` in the app data dir and
+  restarts; at launch the chosen origin gets `capabilities/default.json` as a runtime capability
+  and the navigation allowlist. A chosen server that does not answer at launch gets a native Try Again / Use doop.design dialog
+  (`check_on_launch`, every platform); macOS also has "Use doop.design…" in the app menu. Official builds
+  keep updating from the doop.design feed whatever server is chosen. Tests: the Rust unit tests in
+  `server.rs`, `serverSettings.test.tsx`.
 - The shell tells the page its platform via `window.__DOOP_DESKTOP_PLATFORM__` (read in
   `src/lib/shell.ts`); only macOS gets the overlay title bar / traffic-light inset.
+- Tab shortcuts (`TAB_SHORTCUTS` / `tabShortcutTarget` in `src/lib/desktop.ts`), shell only: ⌘1
+  (Ctrl+1 elsewhere) opens Home and ⌘2…⌘9 the open canvas tabs in strip order, as in Figma's
+  desktop app; ⌘, (Ctrl+,) opens Settings (`SETTINGS_SHORTCUT`, `shellShortcutTarget`); read
+  by physical key, from text fields and frames too. Web-only, no desktop release needed.
+  Tests: `desktopTabShortcuts.test.ts`.
 - Desktop app version is tracked separately from the root `package.json` and bumped by
   release-please (see above); after the release PR merges, tag as `desktop-vX.Y.Z`.
 - The macOS app is the Chromium (CEF) build in `desktop/src-tauri-chromium`; Windows and Linux

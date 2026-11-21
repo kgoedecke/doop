@@ -15,9 +15,10 @@ struct ServerAddressChecks {
         checks.testCardAgentAssignmentBody()
         checks.testPromptContext()
         try checks.testContextPeople()
-        try checks.testAgentModelMenu()
+        try checks.testAgentRunners()
         try checks.testAgentActivityStates()
         FrameSnappingChecks.run()
+        try FrameWorkersChecks.run()
         try PendingFrameMoveChecks.run()
         try ProviderSignInChecks.run()
         AppleSignInChecks.run()
@@ -101,16 +102,23 @@ struct ServerAddressChecks {
         checkTrue(JSONSerialization.isValidJSONObject(["title": "Make it bolder", "scope": element]))
     }
 
-    func testAgentModelMenu() throws {
-        let connected = try JSONDecoder().decode(AgentModelAccount.self, from: Data(#"{"connected":true,"kind":"chatgpt","model":"model-b","menus":{"chatgpt":[{"id":"model-a","name":"Model A"},{"id":"model-b","name":"Model B","blurb":"Everyday model"}],"anthropic-key":[{"id":"other","name":"Other"}]}}"#.utf8))
-        checkEqual(connected.options.map(\.id), ["model-a", "model-b"])
-        checkEqual(connected.label, "Model B")
-        let disconnected = try JSONDecoder().decode(AgentModelAccount.self, from: Data(#"{"connected":false}"#.utf8))
-        checkEqual(disconnected.options.count, 0)
-        checkEqual(disconnected.label, "Auto")
-        let olderServer = try JSONDecoder().decode(AgentModelAccount.self, from: Data(#"{"connected":true,"kind":"chatgpt","model":"custom"}"#.utf8))
-        checkEqual(olderServer.options.count, 0)
-        checkEqual(olderServer.label, "custom")
+    func testAgentRunners() throws {
+        let json = #"{"runners":[{"provider":"chatgpt","name":"ChatGPT","model":"model-b","effort":"medium","models":[{"id":"model-a","name":"Model A","blurb":""},{"id":"model-b","name":"Model B","blurb":"Everyday model"}],"efforts":[{"id":"low","name":"Low","blurb":""},{"id":"medium","name":"Medium","blurb":""}]},{"provider":"anthropic-key","name":"Claude","model":"other","models":[{"id":"other","name":"Other","blurb":""}]}],"default":"anthropic-key"}"#
+        let runners = try JSONDecoder().decode(AgentRunners.self, from: Data(json.utf8))
+        checkEqual(runners.runners.map(\.provider), ["chatgpt", "anthropic-key"])
+        // No pick: the Settings default, on its configured model.
+        checkEqual(runners.resolve(nil)?.pick, RunnerPick(provider: "anthropic-key", model: "other"))
+        // A pick on a connected provider keeps its model and a known effort.
+        checkEqual(runners.resolve(RunnerPick(provider: "chatgpt", model: "model-a", effort: "low"))?.pick,
+                   RunnerPick(provider: "chatgpt", model: "model-a", effort: "low"))
+        // An effort the provider does not offer falls back to the connection's own.
+        checkEqual(runners.resolve(RunnerPick(provider: "chatgpt", model: "model-a", effort: "max"))?.pick.effort, "medium")
+        // A pick naming a connection that is gone runs on the default.
+        checkEqual(runners.resolve(RunnerPick(provider: "gemini-key", model: "x"))?.pick.provider, "anthropic-key")
+        checkNil(try JSONDecoder().decode(AgentRunners.self, from: Data(#"{"runners":[]}"#.utf8)).resolve(nil), "Nothing connected: Auto")
+        let body = CardQueueRequest(title: "Go", scope: nil, runner: RunnerPick(provider: "chatgpt", model: "model-a")).body
+        checkEqual((body["runner"] as? [String: Any])?["provider"] as? String, "chatgpt")
+        checkNil(CardQueueRequest(title: "Go", scope: nil).body["runner"], "No pick sends no runner")
     }
 
     func testPromptContext() {

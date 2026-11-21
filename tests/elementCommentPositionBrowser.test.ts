@@ -1,7 +1,7 @@
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeEach, describe, expect, it } from 'vitest'
 import type { Page } from 'puppeteer-core'
 import { findBrowserPath } from '../server/screenshot'
-import { fixtureUrl, openBrowser, type TestBrowser } from './browser'
+import { fixtureUrl, pagePerTest } from './browser'
 import type { ElementComment, Frame } from '../shared/types'
 
 declare global {
@@ -40,19 +40,14 @@ const comment: ElementComment = {
 }
 
 describe.skipIf(!findBrowserPath())('element comment pin placement', () => {
-  let browser: TestBrowser
+  const pages = pagePerTest()
   let page: Page
   const errors: string[] = []
 
-  beforeAll(async () => {
-    browser = await openBrowser()
-    page = await browser.newPage()
+  beforeEach(async () => {
+    page = await pages.open()
     page.on('pageerror', (error) => errors.push(String(error)))
     await page.goto(fixtureUrl('elementPanel.html'))
-    await page.addScriptTag({
-      type: 'module',
-      content: "import { useStore } from '/src/lib/store.ts'; window.commentPositionStore = useStore",
-    })
     await page.waitForFunction(() => !!window.commentPositionStore)
     await page.evaluate(
       ({ frame, comment }) => {
@@ -65,9 +60,7 @@ describe.skipIf(!findBrowserPath())('element comment pin placement', () => {
     await page.waitForSelector('[title="Tester: Here"]')
   }, 60_000)
 
-  afterAll(async () => {
-    await page?.close()
-    await browser?.close()
+  afterAll(() => {
     expect(errors).toEqual([])
   })
 

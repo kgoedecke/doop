@@ -14,6 +14,13 @@ import {
 import { open, seal } from '../secretBox.ts'
 import type { CanvasGuide, CanvasPageInfo, FrameApproval } from '../../shared/types.ts'
 import type { AutomationRunState, AutomationTrigger, Schedule, Step } from '../../shared/automations.ts'
+import type {
+  ComponentCode,
+  ComponentDef,
+  ComponentProp,
+  ComponentSlot,
+  ComponentSnapshot,
+} from '../../shared/components.ts'
 
 /** A credential kept on a user's behalf: sealed on write and opened on read
  *  (server/secretBox.ts), so call sites see plaintext and the row does not.
@@ -103,6 +110,9 @@ export const workspaces = pgTable('workspaces', {
   interval: text('interval'),
   /** the paid seat count Stripe is billing for */
   seats: integer('seats').notNull().default(0),
+  /** the seats the owner chose to pay for: the billed quantity is this or
+   *  the member count, whichever is larger, so invites fill bought seats first */
+  seatsBought: integer('seats_bought').notNull().default(1),
   stripeCustomerId: text('stripe_customer_id'),
   stripeSubscriptionId: text('stripe_subscription_id'),
   /** epoch ms the current billing period ends (= the next renewal) */
@@ -111,6 +121,9 @@ export const workspaces = pgTable('workspaces', {
   /** Stripe's `created` of the last subscription event applied (epoch s) —
    *  an older event arriving late must not roll the mirror back */
   billingEventAt: bigint('billing_event_at', { mode: 'number' }),
+  /** who may publish to the workspace's component library: 'admins' (owner and
+   *  admins only); null is everyone who can edit the library canvas */
+  libraryPublish: text('library_publish'),
   createdAt: bigint('created_at', { mode: 'number' }).notNull(),
   updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
 })
@@ -355,6 +368,8 @@ export const tasks = pgTable(
     frameIds: text('frame_ids'),
     /** JSON RunnerPick: the connection and model the composer picked for a card */
     runner: text('runner'),
+    /** a card's agent answer: the latest run's closing words */
+    reply: text('reply'),
   },
   (t) => [index('tasks_canvas_idx').on(t.canvasId)],
 )
@@ -373,11 +388,17 @@ export const feedback = pgTable(
     at: bigint('at', { mode: 'number' }).notNull(),
     deliveredAt: bigint('delivered_at', { mode: 'number' }),
     claimedBy: text('claimed_by'),
+    /** the claim came from a resident run (in-process), not an outside agent
+     *  that happens to share a resident's name; null on claims made before
+     *  custom agents, when only built-in names were resident */
+    claimedByResident: boolean('claimed_by_resident'),
     completedAt: bigint('completed_at', { mode: 'number' }),
     failedAt: bigint('failed_at', { mode: 'number' }),
     failureReason: text('failure_reason'),
     /** JSON RunnerPick of the task it answers, kept from when it was left */
     runner: text('runner'),
+    /** the closing words of the run that handled it */
+    reply: text('reply'),
   },
   (t) => [index('feedback_canvas_idx').on(t.canvasId)],
 )
@@ -432,6 +453,17 @@ export const assets = pgTable(
     size: integer('size').notNull(),
     uploadedBy: text('uploaded_by').notNull(),
     createdAt: bigint('created_at', { mode: 'number' }).notNull(),
+    /** what the picture shows, written once by a small vision model
+     *  (server/imageDescriptions.ts) so agents reading the canvas know;
+     *  null until described, and for good after three failed attempts */
+    description: text('description'),
+    describedAt: bigint('described_at', { mode: 'number' }),
+    /** the model label that wrote it */
+    describedBy: text('described_by'),
+    describeAttempts: integer('describe_attempts').notNull().default(0),
+    /** Fixed before the first attempt; null payer means server credentials. */
+    describePayerId: text('describe_payer_id'),
+    describeProvider: text('describe_provider'),
   },
   (t) => [index('assets_canvas_idx').on(t.canvasId)],
 )
@@ -476,6 +508,50 @@ export const fonts = pgTable(
   (t) => [index('fonts_workspace_idx').on(t.workspaceId), index('fonts_owner_idx').on(t.ownerId)],
 )
 
+/** Custom agents (shared/customAgents.ts): specialists a workspace or a
+ *  person adds to the built-in team. `scope` is 'ws:<workspaceId>' or
+ *  'user:<userId>'; a handle is unique within it. */
+export const customAgents = pgTable(
+  'custom_agents',
+  {
+    id: text('id').primaryKey(),
+    scope: text('scope').notNull(),
+    handle: text('handle').notNull(),
+    name: text('name').notNull(),
+    color: text('color').notNull(),
+    blurb: text('blurb').notNull(),
+    brief: text('brief').notNull(),
+    reviewer: boolean('reviewer').notNull().default(false),
+    createdBy: text('created_by').notNull(),
+    createdAt: bigint('created_at', { mode: 'number' }).notNull(),
+    updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
+  },
+  (t) => [
+    uniqueIndex('custom_agents_scope_handle_idx').on(t.scope, t.handle),
+    uniqueIndex('custom_agents_scope_name_idx').on(t.scope, t.name),
+  ],
+)
+
+/** A workspace's or a person's changes to one built-in agent
+ *  (shared/agents.ts): switched off, or its colour, one-liner, instructions or
+ *  reviewer flag replaced. A null field keeps the built-in value; no row is
+ *  the built-in agent as it ships. `scope` as in `custom_agents`. */
+export const agentOverrides = pgTable(
+  'agent_overrides',
+  {
+    scope: text('scope').notNull(),
+    roleId: text('role_id').notNull(),
+    disabled: boolean('disabled').notNull().default(false),
+    color: text('color'),
+    blurb: text('blurb'),
+    brief: text('brief'),
+    reviewer: boolean('reviewer'),
+    updatedBy: text('updated_by').notNull(),
+    updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.scope, t.roleId] })],
+)
+
 /** Named design docs per canvas (brand rules, style recipes) — markdown
  *  written mostly for agents. Small and cold-path; hydrated with the canvas. */
 export const guidelines = pgTable(
@@ -493,6 +569,67 @@ export const guidelines = pgTable(
     y: doublePrecision('y'),
   },
   (t) => [primaryKey({ columns: [t.canvasId, t.name] })],
+)
+
+/** Reusable designs. Keyed per canvas: a copied canvas keeps its ids, so the
+ *  instance markers in its copied frames still point at the right rows. Mirrored
+ *  in memory like guidelines. `history` holds recent revisions inline because
+ *  merging a stale save needs them synchronously. */
+export const components = pgTable(
+  'components',
+  {
+    canvasId: text('canvas_id').notNull(),
+    id: text('id').notNull(),
+    name: text('name').notNull(),
+    description: text('description').notNull(),
+    template: text('template').notNull(),
+    css: text('css').notNull(),
+    rawCss: text('raw_css').notNull(),
+    head: jsonb('head').$type<string[]>().notNull(),
+    props: jsonb('props').$type<ComponentProp[]>().notNull(),
+    slots: jsonb('slots').$type<ComponentSlot[]>().notNull(),
+    rev: integer('rev').notNull(),
+    mainFrameId: text('main_frame_id'),
+    code: jsonb('code').$type<ComponentCode>(),
+    source: jsonb('source').$type<NonNullable<ComponentDef['source']>>(),
+    history: jsonb('history').$type<ComponentSnapshot[]>().notNull(),
+    /** 'deleted' is a soft delete: the row stays, so instances keep what they were
+     *  rendered from and the component can be restored */
+    status: text('status').$type<'active' | 'deleted'>().notNull().default('active'),
+    deletedAt: bigint('deleted_at', { mode: 'number' }),
+    deletedBy: text('deleted_by'),
+    createdAt: bigint('created_at', { mode: 'number' }).notNull(),
+    updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
+    updatedBy: text('updated_by').notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.canvasId, t.id] })],
+)
+
+/** What a workspace library has published: one snapshot per component of a
+ *  library canvas. A canvas is a library while it has rows here, and serves the
+ *  workspace it is in at that moment (read from the canvas, not stored). Small
+ *  and read on frame writes, so mirrored in memory (server/componentLibrary.ts). */
+export const libraryComponents = pgTable(
+  'library_components',
+  {
+    canvasId: text('canvas_id').notNull(),
+    id: text('id').notNull(),
+    name: text('name').notNull(),
+    description: text('description').notNull(),
+    template: text('template').notNull(),
+    css: text('css').notNull(),
+    rawCss: text('raw_css').notNull(),
+    head: jsonb('head').$type<string[]>().notNull(),
+    props: jsonb('props').$type<ComponentProp[]>().notNull(),
+    slots: jsonb('slots').$type<ComponentSlot[]>().notNull(),
+    code: jsonb('code').$type<ComponentCode>(),
+    /** nested components from other libraries: component id → library canvas id */
+    nested: jsonb('nested').$type<Record<string, string>>(),
+    rev: integer('rev').notNull(),
+    publishedAt: bigint('published_at', { mode: 'number' }).notNull(),
+    publishedBy: text('published_by').notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.canvasId, t.id] })],
 )
 
 /** Append-only history of guideline docs: one snapshot per save, an empty
@@ -625,7 +762,7 @@ export const modelAccounts = pgTable(
   'model_accounts',
   {
     userId: text('user_id').notNull(),
-    /** 'chatgpt' (subscription, OAuth) | 'openai-key' | 'anthropic-key' | 'openrouter-key' | 'gemini-key' */
+    /** 'chatgpt' (subscription, OAuth) | 'openai-key' | 'anthropic-key' | 'openrouter-key' | 'gemini-key' | 'deepseek-key' | 'kimi-key' | 'kimi-code' | 'custom:<id>' */
     kind: text('kind').notNull(),
     /** off keeps the credential but takes the account out of the composer and the default */
     enabled: boolean('enabled').notNull().default(true),
@@ -643,6 +780,12 @@ export const modelAccounts = pgTable(
     model: text('model'),
     /** OpenAI reasoning effort this user picked; null = the server default */
     reasoningEffort: text('reasoning_effort'),
+    /** a custom provider (kind `custom:<id>`): its name, API type, base URL,
+     *  models and options (shared/customProvider.ts); null on every other kind */
+    custom: jsonb('custom'),
+    /** a custom provider's extra request headers, as JSON; they can carry a
+     *  credential, so they are sealed like the key */
+    customHeaders: sealedText('custom_headers'),
     connectedAt: bigint('connected_at', { mode: 'number' }).notNull(),
     updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
   },
@@ -775,6 +918,15 @@ export const localAgentPreferences = pgTable('local_agent_preferences', {
 export const notificationPrefs = pgTable('notification_prefs', {
   userId: text('user_id').primaryKey(),
   commentEmails: boolean('comment_emails').notNull().default(true),
+  updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
+})
+
+/** Whether, and on whose model, images uploaded to a user's canvases get a
+ *  description for agents (shared/imageDescriptions.ts). No row = `account`:
+ *  the owner's connected model account, else the server tier. */
+export const imageDescriptionPrefs = pgTable('image_description_prefs', {
+  userId: text('user_id').primaryKey(),
+  mode: text('mode').notNull().default('account'),
   updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
 })
 
@@ -930,3 +1082,15 @@ export const agentFeedback = pgTable(
   },
   (t) => [index('agent_feedback_at_idx').on(t.at)],
 )
+
+/** The instance's sign-in policy (shared/instanceSettings.ts): one row, id
+ *  'instance', written by admins in Admin → Sign-in and read into memory at
+ *  boot. Absent row = the defaults. */
+export const instanceSettings = pgTable('instance_settings', {
+  id: text('id').primaryKey(),
+  emailPasswordSignup: boolean('email_password_signup').notNull().default(true),
+  ssoAutoRedirect: boolean('sso_auto_redirect').notNull().default(false),
+  defaultWorkspaceId: text('default_workspace_id'),
+  updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
+  updatedBy: text('updated_by'),
+})

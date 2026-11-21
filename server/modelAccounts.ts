@@ -2,17 +2,32 @@ import { env } from './env.ts'
 import type { RunnerPick } from '../shared/agentRunner.ts'
 import http from 'node:http'
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto'
-import { and, asc, eq } from 'drizzle-orm'
+import { and, asc, eq, like, sql } from 'drizzle-orm'
 import { db } from './db/index.ts'
 import { modelAccounts } from './db/schema.ts'
 import {
+  DEEPSEEK_MODELS,
   DEFAULT_ANTHROPIC_MODEL,
   GEMINI_MODELS,
+  KIMI_CODE_MODELS,
+  KIMI_MODELS,
   OPENROUTER_MODELS,
   isReasoningEffort,
+  type ModelOption,
   type ReasoningEffort,
 } from '../shared/modelMenu.ts'
 import { CLAUDE_API_MODEL, GEMINI_API_MODEL, OPENAI_API_MODEL } from './modelCatalog.ts'
+import { customProvidersEnabled } from './customProviderFetch.ts'
+import {
+  CUSTOM_PROVIDER_PREFIX,
+  MAX_CUSTOM_PROVIDERS,
+  isCustomProviderKind,
+  parseCustomHeaders,
+  parseCustomProviderConfig,
+  type CustomModel,
+  type CustomProviderConfig,
+  type CustomProviderKind,
+} from '../shared/customProvider.ts'
 import { effortFor, modelFor } from './openaiAgent.ts'
 
 /**
@@ -57,7 +72,19 @@ const REDIRECT_URI = env.CHATGPT_OAUTH_REDIRECT_URI
    fetch — an ordinary product User-Agent passes where no header at all does */
 const AUTH_USER_AGENT = env.CHATGPT_AUTH_USER_AGENT
 
-export type AccountKind = 'chatgpt' | 'openai-key' | 'anthropic-key' | 'openrouter-key' | 'gemini-key'
+/** The providers Doop knows by name. */
+export type BuiltinAccountKind =
+  | 'chatgpt'
+  | 'openai-key'
+  | 'anthropic-key'
+  | 'openrouter-key'
+  | 'gemini-key'
+  | 'deepseek-key'
+  | 'kimi-key'
+  | 'kimi-code'
+
+/** A built-in provider, or one a person connected by URL (`custom:<id>`). */
+export type AccountKind = BuiltinAccountKind | CustomProviderKind
 
 const ACCOUNT_KINDS: readonly string[] = [
   'chatgpt',
@@ -65,7 +92,10 @@ const ACCOUNT_KINDS: readonly string[] = [
   'anthropic-key',
   'openrouter-key',
   'gemini-key',
-] satisfies AccountKind[]
+  'deepseek-key',
+  'kimi-key',
+  'kimi-code',
+] satisfies BuiltinAccountKind[]
 
 export interface ModelAccount {
   userId: string
@@ -84,6 +114,17 @@ export interface ModelAccount {
   /** off keeps the credential but takes the account out of use */
   enabled: boolean
   connectedAt: number
+  /** a custom provider's description; set exactly when the kind is custom */
+  custom?: CustomProviderConfig
+  /** a custom provider's extra request headers */
+  headers?: Record<string, string>
+}
+
+/** A custom provider as Settings shows it: the description, which headers
+ *  are set and whether there is a key, never their values. */
+export interface CustomProviderStatus extends CustomProviderConfig {
+  headerNames: string[]
+  hasKey: boolean
 }
 
 /** What the browser is allowed to know about one account: never a token. */
@@ -97,13 +138,18 @@ export interface AccountStatus {
   /** the reasoning effort in effect, resolved; only the OpenAI kinds have one */
   effort?: string
   connectedAt: number
+  custom?: CustomProviderStatus
 }
 
-export function isAccountKind(value: unknown): value is AccountKind {
+export function isBuiltinAccountKind(value: unknown): value is BuiltinAccountKind {
   return typeof value === 'string' && ACCOUNT_KINDS.includes(value)
 }
 
-const OPENAI_KINDS: readonly AccountKind[] = ['chatgpt', 'openai-key']
+export function isAccountKind(value: unknown): value is AccountKind {
+  return isBuiltinAccountKind(value) || isCustomProviderKind(value)
+}
+
+const OPENAI_KINDS: readonly string[] = ['chatgpt', 'openai-key']
 
 export function takesReasoningEffort(kind: AccountKind): boolean {
   return OPENAI_KINDS.includes(kind)
@@ -117,16 +163,49 @@ export function chatgptConnectEnabled(): boolean {
 /* storage                                                          */
 /* ---------------------------------------------------------------- */
 
+/** A stored custom provider's description and headers, re-checked on the
+ *  way out so a row written by another build can never run half-valid. */
+function customOf(row: typeof modelAccounts.$inferSelect): Pick<ModelAccount, 'custom' | 'headers'> | null {
+  if (!customProvidersEnabled()) return null
+  const config = parseCustomProviderConfig(row.custom)
+  if (!config.ok) {
+    console.warn(`[doop-agent] ignoring custom provider ${row.kind} for user ${row.userId}: ${config.error}`)
+    return null
+  }
+  let stored: unknown = {}
+  try {
+    stored = row.customHeaders ? JSON.parse(row.customHeaders) : {}
+  } catch {
+    stored = null
+  }
+  const headers = parseCustomHeaders(stored)
+  if (!headers.ok) {
+    console.warn(`[doop-agent] ignoring custom provider ${row.kind} for user ${row.userId}: unreadable headers`)
+    return null
+  }
+  return { custom: config.value, ...(Object.keys(headers.value).length ? { headers: headers.value } : {}) }
+}
+
 function toAccount(row: typeof modelAccounts.$inferSelect): ModelAccount | null {
-  if (!ACCOUNT_KINDS.includes(row.kind)) {
+  if (isCustomProviderKind(row.kind)) {
+    /* switched off by the operator, or unreadable: as if not connected */
+    const custom = customOf(row)
+    if (!custom) return null
+    return { ...baseAccount(row, row.kind), ...custom }
+  }
+  if (!isBuiltinAccountKind(row.kind)) {
     /* a kind this build doesn't know (a rollback after an upgrade, say) —
        treating it as disconnected beats running it as the wrong provider */
     console.warn(`[doop-agent] ignoring model account with unknown kind "${row.kind}" for user ${row.userId}`)
     return null
   }
+  return baseAccount(row, row.kind)
+}
+
+function baseAccount(row: typeof modelAccounts.$inferSelect, kind: AccountKind): ModelAccount {
   return {
     userId: row.userId,
-    kind: row.kind as AccountKind,
+    kind,
     ...(row.accountId ? { accountId: row.accountId } : {}),
     ...(row.email ? { email: row.email } : {}),
     ...(row.plan ? { plan: row.plan } : {}),
@@ -170,15 +249,48 @@ export function statusOf(account: ModelAccount): AccountStatus {
     model: accountModelFor(account),
     ...(takesReasoningEffort(account.kind) ? { effort: effortFor(account) } : {}),
     connectedAt: account.connectedAt,
+    ...(account.custom
+      ? {
+          custom: {
+            ...account.custom,
+            headerNames: Object.keys(account.headers ?? {}),
+            hasKey: Boolean(account.apiKey),
+          },
+        }
+      : {}),
   }
 }
 
 const DEFAULT_OPENROUTER = env.DOOP_AGENT_OPENROUTER_MODEL
 const DEFAULT_GEMINI = env.DOOP_AGENT_GEMINI_MODEL
+const DEFAULT_DEEPSEEK = env.DOOP_AGENT_DEEPSEEK_MODEL
+const DEFAULT_KIMI = env.DOOP_AGENT_KIMI_MODEL
+const DEFAULT_KIMI_CODE = env.DOOP_AGENT_KIMI_CODE_MODEL
+
+/* the kinds whose menu is a hand-checked roster and nothing else: the roster's
+   vision flags are all the run-time check knows about their models */
+const ROSTERS: Partial<Record<BuiltinAccountKind, ModelOption[]>> = {
+  'openrouter-key': OPENROUTER_MODELS,
+  'deepseek-key': DEEPSEEK_MODELS,
+  'kimi-key': KIMI_MODELS,
+  'kimi-code': KIMI_CODE_MODELS,
+}
+
+function rosterPolicy(roster: ModelOption[], fallback: string) {
+  return {
+    resolve: (model?: string) => model || fallback,
+    isKnown: (model: string) => roster.some((option) => option.id === model),
+  }
+}
+
+interface ModelPolicy {
+  resolve(model?: string): string
+  isKnown(model: string): boolean
+}
 
 /* per-kind model policy: how a stored (possibly unset or stale) model id
    resolves to the one that will run, and which ids the picker may set */
-const MODEL_POLICY: Record<AccountKind, { resolve(model?: string): string; isKnown(model: string): boolean }> = {
+const MODEL_POLICY: Record<BuiltinAccountKind, ModelPolicy> = {
   /* the catalog-backed kinds take any id shaped like their provider's: the
      picker offers what the provider's catalog lists (server/modelCatalog.ts)
      and the run is the final check, as it always was */
@@ -193,23 +305,48 @@ const MODEL_POLICY: Record<AccountKind, { resolve(model?: string): string; isKno
   },
   /* OpenRouter keeps its curated roster: the roster's vision flags are what
      the run-time check knows, and its catalog mixes in text-only models */
-  'openrouter-key': {
-    resolve: (model) => model || DEFAULT_OPENROUTER,
-    isKnown: (model) => OPENROUTER_MODELS.some((option) => option.id === model),
-  },
+  'openrouter-key': rosterPolicy(OPENROUTER_MODELS, DEFAULT_OPENROUTER),
   'gemini-key': {
     resolve: (model) => model || DEFAULT_GEMINI,
     isKnown: (model) => GEMINI_API_MODEL.test(model),
   },
+  /* DeepSeek and Kimi too: their catalogs list ids without saying which see images */
+  'deepseek-key': rosterPolicy(DEEPSEEK_MODELS, DEFAULT_DEEPSEEK),
+  'kimi-key': rosterPolicy(KIMI_MODELS, DEFAULT_KIMI),
+  'kimi-code': rosterPolicy(KIMI_CODE_MODELS, DEFAULT_KIMI_CODE),
 }
 
-export function accountModelFor(account: Pick<ModelAccount, 'kind' | 'model'>): string {
-  return MODEL_POLICY[account.kind].resolve(account.model)
+/* a custom provider runs the models its person listed, and only those: an
+   unset or delisted pick runs on the first of them */
+function customPolicy(config: CustomProviderConfig): ModelPolicy {
+  const isKnown = (model: string) => config.models.some((option) => option.id === model)
+  return {
+    resolve: (model) => (model && isKnown(model) ? model : (config.models[0]?.id ?? '')),
+    isKnown,
+  }
 }
 
-/** Whether the picker may set this id on an account of this kind. */
-export function isKnownAccountModel(kind: AccountKind, model: string): boolean {
-  return MODEL_POLICY[kind].isKnown(model)
+type PolicySubject = Pick<ModelAccount, 'kind' | 'custom'>
+
+function policyFor(account: PolicySubject): ModelPolicy {
+  if (isBuiltinAccountKind(account.kind)) return MODEL_POLICY[account.kind]
+  if (!account.custom) throw new Error(`${account.kind} has no provider description`)
+  return customPolicy(account.custom)
+}
+
+export function accountModelFor(account: PolicySubject & Pick<ModelAccount, 'model'>): string {
+  return policyFor(account).resolve(account.model)
+}
+
+/** Whether the picker may set this id on this account. */
+export function isKnownAccountModel(account: PolicySubject, model: string): boolean {
+  return policyFor(account).isKnown(model)
+}
+
+/** The custom provider model this account resolves to, with its flags. */
+export function customModelFor(account: ModelAccount): CustomModel | undefined {
+  const model = accountModelFor(account)
+  return account.custom?.models.find((option) => option.id === model)
 }
 
 /** The account as one card asked to run it: the pick's model where the kind
@@ -219,30 +356,34 @@ export function accountWithPick(account: ModelAccount, pick: RunnerPick | undefi
   if (!pick || pick.provider !== account.kind) return account
   return {
     ...account,
-    ...(pick.model && isKnownAccountModel(account.kind, pick.model) ? { model: pick.model } : {}),
+    ...(pick.model && isKnownAccountModel(account, pick.model) ? { model: pick.model } : {}),
     ...(takesReasoningEffort(account.kind) && isReasoningEffort(pick.effort) ? { effort: pick.effort } : {}),
   }
 }
 
 /** Whether the model this account resolves to can see images. An id off the
  *  curated menu (a server env override) is trusted to have vision except on
- *  OpenRouter, whose roster mixes text-only models — there the conservative
- *  answer is a degraded run rather than a 400 on the first screenshot. */
-export function accountVisionFor(account: Pick<ModelAccount, 'kind' | 'model'>): boolean {
+ *  the roster kinds, whose rosters mix text-only models — there the
+ *  conservative answer is a degraded run rather than a 400 on the first
+ *  screenshot. */
+export function accountVisionFor(account: PolicySubject & Pick<ModelAccount, 'model'>): boolean {
   const model = accountModelFor(account)
-  const menu =
-    account.kind === 'openrouter-key' ? OPENROUTER_MODELS : account.kind === 'gemini-key' ? GEMINI_MODELS : null
+  /* a custom provider's models say for themselves, as their person set them */
+  if (account.custom) return account.custom.models.find((option) => option.id === model)?.vision ?? false
+  if (!isBuiltinAccountKind(account.kind)) return false
+  const roster = ROSTERS[account.kind]
+  const menu = roster ?? (account.kind === 'gemini-key' ? GEMINI_MODELS : null)
   if (!menu) return true
   const option = menu.find((entry) => entry.id === model)
   if (option) return option.vision
-  return account.kind !== 'openrouter-key'
+  return !roster
 }
 
 /** Change which model tier one account runs on. */
 export async function setAccountModel(userId: string, kind: AccountKind, model: string): Promise<void> {
   const account = await getAccount(userId, kind)
   if (!account) throw new Error('that account is not connected')
-  if (!MODEL_POLICY[account.kind].isKnown(model)) throw new Error('unknown model')
+  if (!isKnownAccountModel(account, model)) throw new Error('unknown model')
   await savePick(account, { model })
 }
 
@@ -808,7 +949,7 @@ export function startCallbackCatcher(): Promise<boolean> {
 
 /* what a plausible key looks like, per provider — a shape check only, never a
    live call; the first run surfaces a bad key as ModelAuthError anyway */
-const KEY_SHAPES: Partial<Record<AccountKind, { test(key: string): boolean; hint: string }>> = {
+const KEY_SHAPES: Partial<Record<BuiltinAccountKind, { test(key: string): boolean; hint: string }>> = {
   'openai-key': {
     test: (key) => key.startsWith('sk-'),
     hint: 'That does not look like an OpenAI API key (they start with "sk-")',
@@ -827,9 +968,22 @@ const KEY_SHAPES: Partial<Record<AccountKind, { test(key: string): boolean; hint
     test: (key) => key.length >= 30 && !/\s/.test(key),
     hint: 'That does not look like a Gemini API key (a long single token, usually starting with "AIza")',
   },
+  'deepseek-key': {
+    test: (key) => key.startsWith('sk-') && key.length >= 20 && !/\s/.test(key),
+    hint: 'That does not look like a DeepSeek API key (they start with "sk-")',
+  },
+  'kimi-key': {
+    test: (key) => key.startsWith('sk-') && key.length >= 20 && !/\s/.test(key),
+    hint: 'That does not look like a Kimi API key (they start with "sk-")',
+  },
+  'kimi-code': {
+    /* the Kimi Code console's format is not documented: one long token */
+    test: (key) => key.length >= 20 && !/\s/.test(key),
+    hint: 'That does not look like a Kimi Code key (copy it from the Kimi Code console)',
+  },
 }
 
-async function connectKey(userId: string, kind: AccountKind, apiKey: string): Promise<void> {
+async function connectKey(userId: string, kind: BuiltinAccountKind, apiKey: string): Promise<void> {
   const key = apiKey.trim()
   const shape = KEY_SHAPES[kind]
   if (!shape) throw new Error(`${kind} accounts do not connect with an API key`)
@@ -858,6 +1012,92 @@ export function connectOpenRouterKey(userId: string, apiKey: string): Promise<vo
 
 export function connectGeminiKey(userId: string, apiKey: string): Promise<void> {
   return connectKey(userId, 'gemini-key', apiKey)
+}
+
+export function connectDeepSeekKey(userId: string, apiKey: string): Promise<void> {
+  return connectKey(userId, 'deepseek-key', apiKey)
+}
+
+export function connectKimiKey(userId: string, apiKey: string): Promise<void> {
+  return connectKey(userId, 'kimi-key', apiKey)
+}
+
+export function connectKimiCodeKey(userId: string, apiKey: string): Promise<void> {
+  return connectKey(userId, 'kimi-code', apiKey)
+}
+
+/* ---------------------------------------------------------------- */
+/* custom providers                                                 */
+/* ---------------------------------------------------------------- */
+
+/** What a custom provider's key or headers become on an edit: a new value,
+ *  or (undefined) the stored one kept. */
+export interface CustomProviderSecrets {
+  apiKey?: string
+  headers?: Record<string, string>
+}
+
+function newCustomKind(): CustomProviderKind {
+  return `${CUSTOM_PROVIDER_PREFIX}${randomBytes(9).toString('hex')}`
+}
+
+/** Connect a custom provider beside everything else; its kind is minted
+ *  here, never taken from the request. */
+export async function connectCustomProvider(
+  userId: string,
+  config: CustomProviderConfig,
+  secrets: CustomProviderSecrets,
+): Promise<CustomProviderKind> {
+  const kind = newCustomKind()
+  const now = Date.now()
+  /* count and insert under a per-person lock, so two adds racing at nine
+     cannot both see room for a tenth */
+  await db.transaction(async (tx) => {
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`custom-providers:${userId}`}))`)
+    const existing = await tx
+      .select({ kind: modelAccounts.kind })
+      .from(modelAccounts)
+      .where(and(eq(modelAccounts.userId, userId), like(modelAccounts.kind, `${CUSTOM_PROVIDER_PREFIX}%`)))
+    if (existing.length >= MAX_CUSTOM_PROVIDERS) {
+      throw new Error(`You can connect at most ${MAX_CUSTOM_PROVIDERS} custom providers`)
+    }
+    await tx.insert(modelAccounts).values({
+      userId,
+      kind,
+      apiKey: secrets.apiKey || null,
+      custom: config,
+      customHeaders: secrets.headers && Object.keys(secrets.headers).length ? JSON.stringify(secrets.headers) : null,
+      model: config.models[0]?.id ?? null,
+      enabled: true,
+      connectedAt: now,
+      updatedAt: now,
+    })
+  })
+  return kind
+}
+
+/** Change a custom provider's description, and its key or headers where
+ *  new ones are given. Its on/off state, default mark and picked model stay
+ *  (a model no longer listed runs on the first one listed). */
+export async function updateCustomProvider(
+  userId: string,
+  kind: CustomProviderKind,
+  config: CustomProviderConfig,
+  secrets: CustomProviderSecrets,
+): Promise<void> {
+  const written = await db
+    .update(modelAccounts)
+    .set({
+      custom: config,
+      ...(secrets.apiKey !== undefined ? { apiKey: secrets.apiKey || null } : {}),
+      ...(secrets.headers !== undefined
+        ? { customHeaders: Object.keys(secrets.headers).length ? JSON.stringify(secrets.headers) : null }
+        : {}),
+      updatedAt: Date.now(),
+    })
+    .where(and(eq(modelAccounts.userId, userId), eq(modelAccounts.kind, kind)))
+    .returning({ userId: modelAccounts.userId })
+  if (!written.length) throw new Error('that provider is not connected')
 }
 
 /* refreshes are per-user serialized: two runs starting together must not both

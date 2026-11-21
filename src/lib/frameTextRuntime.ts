@@ -1,9 +1,10 @@
-import { TEXT_FORMAT_COMMANDS, TEXT_STYLE_PROPERTIES } from './richText'
+import { LAYER_TEXT_PROPERTIES, TEXT_FORMAT_COMMANDS, TEXT_STYLE_PROPERTIES } from './richText'
 
 /** Runs in FRAME_BOOTSTRAP's closure, sharing its active element and save path. */
 export const FRAME_TEXT_RUNTIME = `
   var textCommands = ${JSON.stringify(TEXT_FORMAT_COMMANDS)}
   var textProps = ${JSON.stringify(TEXT_STYLE_PROPERTIES)}
+  var layerTextProps = ${JSON.stringify(LAYER_TEXT_PROPERTIES)}
   var TEXT_RUN_MARK = 'doop-run'
   var textRange = null
   var lastTextSelection = ''
@@ -140,6 +141,8 @@ export const FRAME_TEXT_RUNTIME = `
         partial.push(node.getAttribute('data-doop-id'))
       }
     })
+    var host = range.commonAncestorContainer
+    if (host.nodeType !== 1) host = host.parentElement
     var fragment = range.cloneContents()
     var walker = document.createTreeWalker(fragment, NodeFilter.SHOW_TEXT)
     var nodes = []
@@ -156,7 +159,18 @@ export const FRAME_TEXT_RUNTIME = `
         node.parentNode.insertBefore(run, node)
         run.appendChild(node)
       }
-      patchStyle(run.style, styles)
+      // The copy is detached, so no ancestor selector matches it: a bare copy
+      // of the run's chain, put where the selection sits for the length of
+      // the check, stands in for it when rules are matched.
+      var standIn = run.cloneNode(false)
+      var chain = standIn
+      for (var up = run.parentNode; up && up !== fragment; up = up.parentNode) {
+        var shell = up.cloneNode(false)
+        shell.appendChild(chain)
+        chain = shell
+      }
+      host.appendChild(chain)
+      try { patchStyle(run, styles, null, standIn) } finally { host.removeChild(chain) }
       if (!run.getAttribute('style')) run.removeAttribute('style')
       run.setAttribute('data-doop-run', '')
     })
@@ -240,7 +254,7 @@ export const FRAME_TEXT_RUNTIME = `
         run.appendChild(node)
         created.push(run)
       } else before.push({ el: run, cssText: run.style.cssText })
-      patchStyle(run.style, styles)
+      patchStyle(run, styles)
       if (!run.getAttribute('style')) run.removeAttribute('style')
     })
     if (nodes.length) {
@@ -260,11 +274,44 @@ export const FRAME_TEXT_RUNTIME = `
     run.remove()
   }
 
+  /* The element whose computed type the layer's text shows: its first text
+     run's holder (a <b> made by ⌘B, say), else the layer itself. */
+  function firstTextRun(el) {
+    var node = textNodesIn(el, null)[0]
+    return node && node.parentElement ? node.parentElement : el
+  }
+
+  /* The lines a run's text is drawn with: text-decoration is not inherited
+     but painted across descendants, so an underline on the layer shows on its
+     <b> run though the run's own computed value is none. Every line set from
+     the run up to the layer counts. */
+  function runDecoration(run, layer) {
+    var lines = []
+    for (var el = run; el; el = el === layer ? null : el.parentElement) {
+      getComputedStyle(el).textDecorationLine.split(/\\s+/).forEach(function (line) {
+        if (line && line !== 'none' && lines.indexOf(line) === -1) lines.push(line)
+      })
+    }
+    return lines.length ? lines.join(' ') : 'none'
+  }
+
+  /* The type properties of a patch, for clearing a layer's runs under it. */
+  function layerTextPatch(styles) {
+    var text = {}
+    for (var key in styles) if (layerTextProps.indexOf(key) !== -1) text[key] = styles[key]
+    return text
+  }
+
+  /* The formatting tags a layer-wide value replaces: a weight set over <b>
+     runs takes their boldness with it, a style their italics, a decoration
+     their underline or strike. */
+  var FORMAT_TAGS = { 'font-weight': /^(B|STRONG)$/, 'font-style': /^(I|EM)$/, 'text-decoration-line': /^(U|S|STRIKE)$/ }
+
   /* A value set on the whole layer makes it uniform: the inline runs under it
-     drop their own copy of the property, and a weight set over <b> / <strong>
-     runs takes their boldness with it (the tag becomes a span with the same
-     attributes), as Figma applies a layer-wide value over its mixed runs.
-     Returns what a cancelled gesture must undo. */
+     drop their own copy of the property, and the formatting tags it replaces
+     (FORMAT_TAGS) become spans with the same attributes, as Figma applies a
+     layer-wide value over its mixed runs. Returns what a cancelled gesture
+     must undo. */
   function clearTextRuns(el, styles) {
     var before = []
     var renamed = []
@@ -276,7 +323,10 @@ export const FRAME_TEXT_RUNTIME = `
         before.push({ el: run, cssText: cssText })
         if (!run.getAttribute('style')) run.removeAttribute('style')
       }
-      if (!Object.prototype.hasOwnProperty.call(styles, 'font-weight') || !/^(B|STRONG)$/.test(run.tagName)) return
+      var replaced = Object.keys(FORMAT_TAGS).some(function (key) {
+        return Object.prototype.hasOwnProperty.call(styles, key) && FORMAT_TAGS[key].test(run.tagName)
+      })
+      if (!replaced) return
       var span = document.createElement('span')
       Array.prototype.forEach.call(run.attributes, function (attr) { span.setAttribute(attr.name, attr.value) })
       while (run.firstChild) span.appendChild(run.firstChild)
@@ -373,6 +423,75 @@ export const FRAME_TEXT_RUNTIME = `
     if (changed) postEdited(true)
     // A retagged layer shifts its positional neighbours too: every selector is re-read then.
     return layers.map(function (layer) { return retagged && layer.el ? cssPath(layer.el) : layer.selector })
+  }
+
+  /* Markdown shortcuts, as Notion and Google Docs have them: "- ", "* " or
+     "1. " typed at the start of a line outside a list makes that line one.
+     The marker is deleted and the list made through native commands, so ⌘Z
+     brings the typed marker back. */
+  var LIST_MARKERS = { '-': 'insertUnorderedList', '*': 'insertUnorderedList', '1.': 'insertOrderedList' }
+  document.addEventListener('input', function (ev) {
+    if (ev.inputType !== 'insertText' || ev.data !== ' ' || !editing || !activeEl || isLocked(activeEl)) return
+    var selection = getSelection()
+    if (!selection.rangeCount || !selection.isCollapsed) return
+    var node = selection.anchorNode
+    if (!node || node.nodeType !== 3 || !activeEl.contains(node)) return
+    // A text root inside a list item (<li><p>…</p></li>) is in a list too.
+    if (node.parentElement.closest('li')) return
+    var marker = lineBefore(node, selection.anchorOffset)
+    var match = marker && /^\\s*(-|\\*|1\\.)[ \\u00a0]$/.exec(marker.toString())
+    if (!match || !validTextRange(marker)) return
+    // formatText saves the list at once: the typing save would only repeat it.
+    ev.stopImmediatePropagation()
+    selection.removeAllRanges()
+    selection.addRange(marker)
+    document.execCommand('delete', false, null)
+    textRange = selection.getRangeAt(0).cloneRange()
+    formatText(LIST_MARKERS[match[1]])
+  })
+
+  /* The range from the start of the caret's line to the caret, across runs
+     (a marker typed half bold is still a marker), or null when more than a
+     marker's few characters, or anything not text, is drawn before it on the
+     line. The line starts at the text root, a <br> or a block's edge; an
+     inline-block or a replaced element shares the line. */
+  function lineBefore(node, offset) {
+    var range = document.createRange()
+    range.setStart(node, 0)
+    range.setEnd(node, offset)
+    var text = node.nodeValue.slice(0, offset)
+    var REPLACED = /^(img|svg|video|canvas|input|textarea|select|button|iframe|object|embed|math)$/
+    function isBlock(el) {
+      var display = getComputedStyle(el).display
+      return display.indexOf('inline') !== 0 && display !== 'contents' && display !== 'none'
+    }
+    // Scans a node before the caret from its end: 'line' at a line start, 'more' to go on, 'drawn' otherwise.
+    function scan(n) {
+      if (n.nodeType === 3) {
+        text = n.nodeValue + text
+        range.setStart(n, 0)
+        return text.trim().length > 3 ? 'drawn' : 'more'
+      }
+      if (n.nodeType !== 1) return 'more'
+      if (n.localName === 'br' || isBlock(n)) return 'line'
+      var display = getComputedStyle(n).display
+      if (display === 'none') return 'more'
+      if ((display !== 'inline' && display !== 'contents') || REPLACED.test(n.localName)) return 'drawn'
+      for (var child = n.lastChild; child; child = child.previousSibling) {
+        var found = scan(child)
+        if (found !== 'more') return found
+      }
+      return 'more'
+    }
+    for (var cur = node; cur !== activeEl; cur = cur.parentNode) {
+      for (var prev = cur.previousSibling; prev; prev = prev.previousSibling) {
+        var found = scan(prev)
+        if (found === 'line') return range
+        if (found === 'drawn') return null
+      }
+      if (cur.parentNode !== activeEl && isBlock(cur.parentNode)) return range
+    }
+    return range
   }
 
   document.addEventListener('selectionchange', postTextState)

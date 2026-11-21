@@ -9,8 +9,10 @@ import { Pressable } from './ui/pressable'
 import {
   ArrowDownIcon,
   ArrowRightIcon,
+  ColumnGapIcon,
   FlipHorizontal2Icon,
   HorizontalPaddingIcon,
+  RowGapIcon,
   SquareDashedIcon,
   VerticalPaddingIcon,
   WrapTextIcon,
@@ -245,6 +247,7 @@ export function FlexLayoutControls({ info, apply }: { info: ElementInfo; apply: 
                 {value === 'fixed' && (
                   <NumberField
                     label={t('inspector.gap')}
+                    prefix={column ? <RowGapIcon size="rail" /> : <ColumnGapIcon size="rail" />}
                     value={gap ?? 0}
                     unit="px"
                     onCommit={(value) => apply({ [axes.gap]: `${Math.max(0, value)}px` })}
@@ -259,6 +262,7 @@ export function FlexLayoutControls({ info, apply }: { info: ElementInfo; apply: 
         <PropertyRow label={t('inspector.lineGap')}>
           <NumberField
             label={t('inspector.lineGap')}
+            prefix={column ? <ColumnGapIcon size="rail" /> : <RowGapIcon size="rail" />}
             value={crossGap ?? 0}
             unit="px"
             onCommit={(value) => apply({ [axes.crossGap]: `${Math.max(0, value)}px` })}

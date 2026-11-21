@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useStore } from '../lib/store'
 import { roleByAgentName } from '../../shared/agents'
+import { useRoster } from '../hooks/use-roster'
 import { useIsMobile } from '../hooks/use-mobile'
 import { usePanelLayout } from '../lib/panelLayout'
 import { Sheet, SheetContent, SheetDescription, SheetTitle, SheetTrigger } from './ui/sheet'
@@ -54,15 +55,16 @@ export function Onboarding({ canvasId }: { canvasId: string }) {
   const [copied, setCopied] = useState(false)
   const [showConnect, setShowConnect] = useState(false)
 
+  const roster = useRoster()
   /* live detection — flips only ever go false -> true */
   const live = useMemo(() => {
     /* "connected" means an OUTSIDE agent over MCP — the resident team
        (Doop and the specialists) doesn't count towards the setup steps */
-    const outside = (name: string) => name !== '' && !roleByAgentName(name)
+    const outside = (name: string) => name !== '' && !roleByAgentName(name, roster)
     const agentHere = Object.values(presences).some((p) => p.kind === 'agent' && outside(p.name))
     const agentWorked = tasks.some((t) => outside(t.agentName))
     return { connected: agentHere || agentWorked, tasked: agentWorked }
-  }, [tasks, presences])
+  }, [tasks, presences, roster])
 
   /* a step, once seen live, stays done: fold the live signals into the
      stored progress as they light up */

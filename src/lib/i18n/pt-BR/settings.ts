@@ -37,6 +37,29 @@ export const settings: Catalog['settings'] = {
     other: '{left} de {count} tarefas gratuitas restantes.',
   },
 
+  imageDescriptionsTitle: 'Descrições de imagens',
+  imageDescriptionsDescription:
+    'Os agentes recebem uma descrição curta de cada imagem que você envia, para saber o que há nela sem abri-la.',
+  imageDescriptionsRow: 'Descrever com',
+  imageDescriptionsAria: 'Descrições de imagens',
+  imageDescriptionsOff: 'Desligado',
+  imageDescriptionsAccount: 'Meu modelo',
+  imageDescriptionsServer: 'Modelo do servidor',
+  imageDescriptionsRunsOn: 'Pronto: {label}',
+  imageDescriptionsAccountNote:
+    'Usa sua conta conectada e também cobre envios nos canvases que você possui quando quem enviou não tem modelo. As cobranças do seu provedor se aplicam.',
+  imageDescriptionsServerNote: 'Usa o modelo deste servidor. Sua conta nunca é cobrada.',
+  imageDescriptionsFallbackNote:
+    'Nenhuma das suas contas conectadas vê imagens, então seus envios usam o modelo deste servidor e sua conta não é cobrada. Conecte uma para usá-la no lugar.',
+  imageDescriptionsReasonOff: 'Seus envios e as imagens dos seus canvases não são descritos.',
+  imageDescriptionsReasonTextOnly:
+    'Sua conta não tem um modelo que veja imagens, e este servidor não tem nenhum. O dono de um canvas para o qual você envia ainda pode cobrir; caso contrário, as imagens ficam sem descrição.',
+  imageDescriptionsReasonNoModel:
+    'Nenhum modelo está disponível para isso. Com Meu modelo, o dono de um canvas para o qual você envia ainda pode cobrir.',
+  imageDescriptionsHowTitle: 'Quem paga por uma descrição',
+  imageDescriptionsHow:
+    'Com Meu modelo, um envio é descrito na conta de quem enviou, senão na do dono do canvas, senão na deste servidor. Modelo do servidor usa apenas este servidor e deixa sua conta fora dessa ordem. Desligado impede descrições dos seus envios e dos canvases que você possui. Uma nova tentativa é cobrada de quem pagou a primeira.',
+
   themeTitle: 'Tema',
   themeDescription:
     'Claro ou escuro, em todos os canvases e páginas deste navegador. Sistema segue o seu sistema operacional e muda sempre que ele mudar.',

@@ -32,6 +32,29 @@ export const settings = {
   meterUsedUp: 'Your free tasks are used up.',
   meterLeft: { one: '{left} of {count} free task left.', other: '{left} of {count} free tasks left.' },
 
+  imageDescriptionsTitle: 'Image descriptions',
+  imageDescriptionsDescription:
+    'Agents get a short description of every image you upload, so they know what is in it without opening it.',
+  imageDescriptionsRow: 'Describe with',
+  imageDescriptionsAria: 'Image descriptions',
+  imageDescriptionsOff: 'Off',
+  imageDescriptionsAccount: 'My model',
+  imageDescriptionsServer: 'Server model',
+  imageDescriptionsRunsOn: 'Ready: {label}',
+  imageDescriptionsAccountNote:
+    'Runs on your connected account, and also covers uploads to canvases you own when the uploader has no model. Your provider’s charges apply.',
+  imageDescriptionsServerNote: 'Runs on this server’s model. Your account is never charged.',
+  imageDescriptionsFallbackNote:
+    'None of your connected accounts can see images, so your uploads run on this server’s model and your account is not charged. Connect one to use it instead.',
+  imageDescriptionsReasonOff: 'Your uploads and images on canvases you own are not described.',
+  imageDescriptionsReasonTextOnly:
+    'Your account has no model that can see images, and this server has none. An owner of a canvas you upload to can still cover it; otherwise images stay undescribed.',
+  imageDescriptionsReasonNoModel:
+    'No model is available for this. With My model, an owner of a canvas you upload to can still cover it.',
+  imageDescriptionsHowTitle: 'Who pays for a description',
+  imageDescriptionsHow:
+    'With My model, an upload is described on the uploader’s account, else the canvas owner’s, else this server’s. Server model uses only this server and keeps your account out of that order. Off stops descriptions for your uploads and for canvases you own. A retry is charged to whoever paid the first attempt.',
+
   themeTitle: 'Theme',
   themeDescription:
     'Light or dark, across every canvas and page in this browser. System follows your operating system and switches whenever it does.',

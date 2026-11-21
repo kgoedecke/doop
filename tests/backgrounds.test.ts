@@ -174,7 +174,13 @@ describe('list_backgrounds MCP tool', () => {
       const schema = tool!.inputSchema as { properties?: Record<string, { enum?: string[] }> }
       expect(schema.properties?.tone?.enum).toEqual(['light', 'dark'])
       expect(schema.properties?.slot?.enum).toEqual(['hero', 'section', 'card'])
-      expect(client.getInstructions()).toContain('list_backgrounds')
+      /* integration and library lines live in the main guide, not the handshake's short instructions */
+      const guide = (
+        (await client.callTool({ name: 'get_guide', arguments: { topic: 'doop-instructions' } })) as {
+          content: { text: string }[]
+        }
+      ).content[0]!.text
+      expect(guide).toContain('list_backgrounds')
 
       const result = await client.callTool({
         name: 'list_backgrounds',

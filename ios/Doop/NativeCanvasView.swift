@@ -8,10 +8,12 @@ struct NativeCanvasView: View {
     @State private var sheet: Panel?
     @State private var prompt = ""
     @State private var agentAssignment = AgentAssignment.automatic
-    @State private var modelAccount: AgentModelAccount?
+    /// The connections a task may run on (`GET /api/agent-runners`).
+    @State private var runners: AgentRunners?
+    /// This phone's pick, sent with every task as the card's `runner`, as the web composer does.
+    @State private var storedPick: RunnerPick? = Self.loadPick()
     @State private var modelPickerOpen = false
     @State private var loadingModels = false
-    @State private var changingModel = false
     @State private var modelError: String?
     @State private var contextReferences: [PromptContextReference] = []
     @State private var contextPickerOpen = false
@@ -215,7 +217,7 @@ struct NativeCanvasView: View {
     }
 
     private var canSend: Bool {
-        !sending && !changingModel && model.connected && !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        !sending && model.connected && !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     private var hasComposerContext: Bool {
@@ -275,18 +277,18 @@ struct NativeCanvasView: View {
                     if modelPickerOpen { Task { await loadModels() } }
                 } label: {
                     HStack(spacing: 6) {
-                        ComposerBrandMark(name: modelAccount?.kind == "anthropic-key" ? "claude" : "chatgpt", color: ComposerColors.muted)
+                        ComposerBrandMark(name: runnerBrand, color: ComposerColors.muted)
                             .frame(width: 14, height: 14)
-                        Text(modelAccount?.label ?? "Auto")
+                        Text(runnerLabel)
                             .font(.subheadline)
                             .lineLimit(1).minimumScaleFactor(0.8)
                     }
                     .foregroundStyle(ComposerColors.muted).padding(.horizontal, 8).frame(minHeight: 44)
                     .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain).disabled(sending || changingModel)
+                .buttonStyle(.plain).disabled(sending)
                 .accessibilityLabel("Choose model")
-                .accessibilityValue(modelAccount?.label ?? "Auto")
+                .accessibilityValue(runnerLabel)
                 .accessibilityIdentifier("canvas.modelPicker")
                 Button(action: sendPrompt) {
                     Group {
@@ -441,44 +443,47 @@ struct NativeCanvasView: View {
             }.padding(.leading, 12)
             ScrollView {
                 VStack(alignment: .leading, spacing: 4) {
-                    if loadingModels || changingModel {
-                        ProgressView(changingModel ? "Saving model…" : "Loading models…")
-                            .padding(12).frame(maxWidth: .infinity)
+                    if loadingModels && runners == nil {
+                        ProgressView("Loading models…").padding(12).frame(maxWidth: .infinity)
                     }
                     if let modelError {
                         Text(modelError).font(.callout).foregroundStyle(.secondary).padding(.horizontal, 12)
                         Button("Retry") { Task { await loadModels() } }.padding(12)
                     }
-                    if let account = modelAccount, !loadingModels {
-                        if account.options.isEmpty {
-                            Text(account.connected ? "No models are available for this account." :
-                                 "Auto uses the server’s model. Connect a model account to choose your own.")
-                                .font(.callout).foregroundStyle(.secondary).padding(12)
+                    if let runners, runners.runners.isEmpty {
+                        Text("Auto uses the server’s model. Connect a model account to choose your own.")
+                            .font(.callout).foregroundStyle(.secondary).padding(12)
+                    }
+                    ForEach(runners?.runners ?? []) { runner in
+                        if (runners?.runners.count ?? 0) > 1 {
+                            Text(runner.name).font(.caption).foregroundStyle(.secondary)
+                                .padding(.horizontal, 12).padding(.top, 8)
                         }
-                        ForEach(account.options) { option in
-                            Button { Task { await chooseModel(option.id) } } label: {
+                        ForEach(runner.models) { option in
+                            let chosen = resolved?.pick.provider == runner.provider && resolved?.pick.model == option.id
+                            Button { choose(option.id, on: runner) } label: {
                                 HStack(spacing: 12) {
                                     VStack(alignment: .leading, spacing: 3) {
                                         Text(option.name).font(.body)
-                                        if let blurb = option.blurb {
+                                        if let blurb = option.blurb, !blurb.isEmpty {
                                             Text(blurb).font(.caption).foregroundStyle(.secondary)
                                                 .multilineTextAlignment(.leading)
                                         }
                                     }
                                     Spacer(minLength: 0)
-                                    if option.id == account.model { Image(systemName: "checkmark").font(.callout).foregroundStyle(ComposerColors.action) }
+                                    if chosen { Image(systemName: "checkmark").font(.callout).foregroundStyle(ComposerColors.action) }
                                 }
                                 .padding(12).frame(minHeight: 48).contentShape(Rectangle())
                             }
-                            .buttonStyle(.plain).disabled(changingModel)
-                            .accessibilityLabel("Use " + option.name)
-                            .accessibilityAddTraits(option.id == account.model ? [.isSelected] : [])
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("Use " + option.name + " on " + runner.name)
+                            .accessibilityAddTraits(chosen ? [.isSelected] : [])
                         }
                     }
                 }
-            }.frame(height: modelAccount?.options.isEmpty == false ? 240 : 100)
+            }.frame(height: runners?.runners.isEmpty == false ? 240 : 100)
             Divider().padding(.horizontal, 12)
-            Link(modelAccount?.connected == true ? "Model settings…" : "Connect a model…",
+            Link(runners?.runners.isEmpty == false ? "Model settings…" : "Connect a model…",
                  destination: modelSettingsURL)
                 .font(.callout).padding(12).frame(minHeight: 44)
         }
@@ -493,26 +498,37 @@ struct NativeCanvasView: View {
     }
 
     private func loadModels() async {
-        guard !loadingModels, !changingModel else { return }
+        guard !loadingModels else { return }
         loadingModels = true
         defer { loadingModels = false }
         do {
-            modelAccount = try await model.client.get("/api/model-account")
+            runners = try await model.client.get("/api/agent-runners")
             modelError = nil
         } catch { modelError = error.localizedDescription }
     }
 
-    private func chooseModel(_ id: String) async {
-        guard !changingModel, modelAccount?.options.contains(where: { $0.id == id }) == true else { return }
-        if id == modelAccount?.model { modelPickerOpen = false; return }
-        changingModel = true
-        defer { changingModel = false }
-        do {
-            let data = try await model.client.data("/api/model-account", method: "PATCH", body: ["model": id])
-            modelAccount = try JSONDecoder().decode(AgentModelAccount.self, from: data)
-            modelError = nil
-            modelPickerOpen = false
-        } catch { modelError = error.localizedDescription }
+    /// The pick this phone sends, against what is connected now; nil runs on the server's default.
+    private var resolved: (runner: AgentRunner, pick: RunnerPick)? { runners?.resolve(storedPick) }
+    private var runnerLabel: String {
+        guard let resolved else { return "Auto" }
+        return resolved.runner.modelName(resolved.pick.model ?? resolved.runner.model)
+    }
+    private var runnerBrand: String {
+        guard let resolved else { return "doop" }
+        return resolved.runner.provider.contains("anthropic") || resolved.runner.provider.contains("claude")
+            ? "claude" : resolved.runner.name + " " + (resolved.pick.model ?? "")
+    }
+
+    private func choose(_ modelID: String, on runner: AgentRunner) {
+        let effort = resolved?.pick.provider == runner.provider ? resolved?.pick.effort : runner.effort
+        storedPick = RunnerPick(provider: runner.provider, model: modelID, effort: effort)
+        if let data = try? JSONEncoder().encode(storedPick) { UserDefaults.standard.set(data, forKey: Self.pickKey) }
+        modelPickerOpen = false
+    }
+
+    private static let pickKey = "agentRunnerPick"
+    private static func loadPick() -> RunnerPick? {
+        UserDefaults.standard.data(forKey: pickKey).flatMap { try? JSONDecoder().decode(RunnerPick.self, from: $0) }
     }
 
     private var mentionQuery: String? { PromptContextReference.mentionQuery(in: prompt) }
@@ -711,8 +727,17 @@ struct NativeCanvasView: View {
         let assignment = agentAssignment
         let title = PromptContextReference.taskTitle(value, references: contextReferences)
         Task {
+            // A saved pick is only honoured once the runner list is known: without it the task
+            // would go out with no runner and quietly run on the server's default instead.
+            if storedPick != nil && runners == nil { await loadModels() }
+            if storedPick != nil && runners == nil {
+                model.error = "Couldn’t load your models, so the task wasn’t sent. Try again."
+                sending = false
+                return
+            }
+            let runner = resolved?.pick
             do {
-                try await model.queue(title, scope: scope, assignment: assignment)
+                try await model.queue(title, scope: scope, assignment: assignment, runner: runner)
                 prompt = ""
                 contextReferences = []
                 agentAssignment = .automatic

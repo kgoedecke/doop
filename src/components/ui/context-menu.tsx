@@ -59,7 +59,7 @@ function ContextMenuSeparator({ className, ...props }: React.ComponentProps<type
   return (
     <ContextMenuPrimitive.Separator
       data-slot="context-menu-separator"
-      className={cn('my-[5px] h-px bg-line-soft', className)}
+      className={cn('my-1.5 h-px bg-line-soft', className)}
       {...props}
     />
   )

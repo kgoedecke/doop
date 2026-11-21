@@ -15,7 +15,21 @@ import {
   DropdownMenuRadioItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
+  DropdownMenuCheckboxItem,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
 } from '@/components/ui/dropdown-menu'
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+  CommandShortcut,
+} from '@/components/ui/command'
+import { MenuHint } from '@/components/ui/menu'
 import { MenuButton } from '@/components/ui/menu-button'
 import { CopyIcon, ShareIcon, TrashIcon } from '@/components/ui/icons'
 
@@ -164,3 +178,76 @@ function DropdownDemo() {
 }
 
 export const Dropdown: Story = { name: 'Dropdown menu', render: () => <DropdownDemo /> }
+
+/** The canvas's main menu: submenus off a row, toggles with a check, chords at the end. */
+function MainMenuDemo() {
+  const [rulers, setRulers] = useState(true)
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <MenuButton aria-label="Main menu">Main menu</MenuButton>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" width="md">
+        <DropdownMenuItem>
+          Actions…<MenuHint className="font-mono">⌘K</MenuHint>
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <DropdownMenuSub>
+          <DropdownMenuSubTrigger>View</DropdownMenuSubTrigger>
+          <DropdownMenuSubContent width="lg">
+            <DropdownMenuCheckboxItem checked={rulers} onCheckedChange={setRulers}>
+              Rulers<MenuHint className="font-mono">⇧R</MenuHint>
+            </DropdownMenuCheckboxItem>
+            <DropdownMenuItem>
+              Zoom to fit<MenuHint className="font-mono">⇧1</MenuHint>
+            </DropdownMenuItem>
+          </DropdownMenuSubContent>
+        </DropdownMenuSub>
+        <DropdownMenuSub>
+          <DropdownMenuSubTrigger>Arrange</DropdownMenuSubTrigger>
+          <DropdownMenuSubContent width="lg">
+            <DropdownMenuItem>
+              Align left<MenuHint className="font-mono">⌥A</MenuHint>
+            </DropdownMenuItem>
+            <DropdownMenuItem disabled>
+              Distribute horizontal spacing<MenuHint className="font-mono">⌃⌥H</MenuHint>
+            </DropdownMenuItem>
+          </DropdownMenuSubContent>
+        </DropdownMenuSub>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
+}
+
+export const MainMenuStory: Story = { name: 'Dropdown with submenus', render: () => <MainMenuDemo /> }
+
+/** ⌘K: a filtered command list under a search line. */
+export const CommandStory: Story = {
+  name: 'Command',
+  render: () => (
+    <div className="w-[min(560px,100%)] overflow-hidden rounded-panel bg-surface shadow-pop">
+      <Command loop>
+        <CommandInput placeholder="Search actions…" />
+        <CommandList>
+          <CommandEmpty>No matching action</CommandEmpty>
+          <CommandGroup heading="Object">
+            <CommandItem>
+              Group selection<CommandShortcut>⌘G</CommandShortcut>
+            </CommandItem>
+            <CommandItem>
+              Add auto layout<CommandShortcut>⇧A</CommandShortcut>
+            </CommandItem>
+          </CommandGroup>
+          <CommandGroup heading="Arrange">
+            <CommandItem>
+              Align left<CommandShortcut>⌥A</CommandShortcut>
+            </CommandItem>
+            <CommandItem>
+              Tidy up<CommandShortcut>⌃⌥T</CommandShortcut>
+            </CommandItem>
+          </CommandGroup>
+        </CommandList>
+      </Command>
+    </div>
+  ),
+}

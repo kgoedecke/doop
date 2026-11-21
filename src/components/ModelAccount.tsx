@@ -7,6 +7,8 @@ import { api } from '../lib/api'
 import type { AgentModelCatalog, AgentModelOption, DeviceFlow, ModelAccountKind, ModelAccounts } from '../lib/api'
 import type { RunnerProvider } from '../../shared/agentRunner'
 import { AvailableRow, ConnectionRow, FieldError, ConnectionSection, ModelSelect } from './ConnectionTable'
+import { CustomProviderForm } from './CustomProviderForm'
+import { isCustomProviderKind, type CustomProviderKind } from '../../shared/customProvider'
 import { useLocalAgent } from '../lib/localAgent'
 import { posthog } from '../lib/posthog'
 import { useStore } from '../lib/store'
@@ -118,6 +120,17 @@ export function useAgentCatalogs(
  * "Prolite". Known slugs get their real product name; anything new falls back
  * to title case so an unreleased tier still reads sensibly.
  */
+/* the key kinds' connect calls; ChatGPT signs in instead */
+const KEY_CONNECTS: Partial<Record<ModelAccountKind, (apiKey: string) => Promise<ModelAccounts>>> = {
+  'openai-key': api.connectOpenAiKey,
+  'anthropic-key': api.connectAnthropicKey,
+  'openrouter-key': api.connectOpenRouterKey,
+  'gemini-key': api.connectGeminiKey,
+  'deepseek-key': api.connectDeepSeekKey,
+  'kimi-key': api.connectKimiKey,
+  'kimi-code': api.connectKimiCodeKey,
+}
+
 const PLAN_NAMES: Record<string, string> = {
   free: 'Free',
   go: 'Go',
@@ -130,6 +143,15 @@ const PLAN_NAMES: Record<string, string> = {
   team_business: 'Business',
   enterprise: 'Enterprise',
   edu: 'Edu',
+}
+
+/** A custom provider's line in Settings: the host it talks to. */
+function hostOf(baseUrl: string): string {
+  try {
+    return new URL(baseUrl).host
+  } catch {
+    return baseUrl
+  }
 }
 
 function planName(plan: string): string {
@@ -190,6 +212,8 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
   const [device, setDevice] = useState<DeviceFlow | null>(null)
   const [redirect, setRedirect] = useState('')
   const [apiKey, setApiKey] = useState('')
+  /* the custom provider form: adding one, or editing the one named */
+  const [customForm, setCustomForm] = useState<'new' | CustomProviderKind | null>(null)
 
   const settle = useCallback(
     (next: ModelAccounts) => {
@@ -320,14 +344,7 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
 
   const saveKey = () => {
     const kind = showKey || 'openai-key'
-    const connect =
-      kind === 'anthropic-key'
-        ? api.connectAnthropicKey
-        : kind === 'openrouter-key'
-          ? api.connectOpenRouterKey
-          : kind === 'gemini-key'
-            ? api.connectGeminiKey
-            : api.connectOpenAiKey
+    const connect = KEY_CONNECTS[kind] ?? api.connectOpenAiKey
     return act(
       kind,
       () => connect(apiKey),
@@ -640,6 +657,36 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
     setWaiting(false)
   }
 
+  /* every custom provider is a connection of its own, named by its person */
+  const customEntries: Entry[] = view.accounts.flatMap((account) => {
+    const kind = account.kind
+    if (!isCustomProviderKind(kind) || !account.custom) return []
+    const { name } = account.custom
+    return [
+      {
+        connected: true,
+        node: (
+          <ConnectionRow
+            key={kind}
+            mark={<AppIcon brand="headless" />}
+            name={name}
+            sub={catalogs[kind]?.error ?? subFor(kind, hostOf(account.custom.baseUrl))}
+            state={account.enabled ? 'on' : 'off'}
+            isDefault={view.default === kind}
+            busy={busy}
+            model={modelCell(kind, name)}
+            onToggle={(on) => void toggle(kind, on)}
+            onMakeDefault={() => void makeDefault(kind)}
+            onDisconnect={() => void remove(kind)}
+            menuItems={[{ label: t('models.customEdit'), onSelect: () => setCustomForm(kind) }]}
+            error={errorFor(kind)}
+          />
+        ),
+      },
+    ]
+  })
+  const editing = customForm && customForm !== 'new' ? accountOf(customForm) : undefined
+
   /* the Plan is connected when this desktop may run it; a browser never can */
   const planConnected = desktop && !!localState.native?.connected && !!localState.native.enabled
   /* the Plan's own row tells the pane when it switched on or became default */
@@ -729,6 +776,27 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
       mark: <AppIcon brand="gemini" />,
       placeholder: 'AIza…',
     }),
+    keyRow({
+      kind: 'deepseek-key',
+      title: t('models.deepseekKeyTitle'),
+      short: t('models.deepseekKeyShort'),
+      mark: <AppIcon brand="deepseek" />,
+      placeholder: 'sk-…',
+    }),
+    keyRow({
+      kind: 'kimi-key',
+      title: t('models.kimiKeyTitle'),
+      short: t('models.kimiKeyShort'),
+      mark: <AppIcon brand="kimi" />,
+      placeholder: 'sk-…',
+    }),
+    keyRow({
+      kind: 'kimi-code',
+      title: t('models.kimiCodeTitle'),
+      short: t('models.kimiCodeShort'),
+      mark: <AppIcon brand="kimi" />,
+      placeholder: t('models.kimiCodePlaceholder'),
+    }),
     /* the Plan's row decides for itself whether it is a row or a card; the
        pane only needs to know which part it belongs in */
     { connected: planConnected, node: <LocalClaudeRow key="claude-local" {...planRowProps} /> },
@@ -739,7 +807,28 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
       mark: <AppIcon brand="claude" />,
       placeholder: 'sk-ant-…',
     }),
+    ...customEntries,
   )
+  /* a person can add as many custom providers as the server allows, so this
+     card stays among the ones to add */
+  if (view.customProviders !== false) {
+    entries.push({
+      connected: false,
+      node: (
+        <AvailableRow
+          key="custom-provider"
+          mark={<AppIcon brand="headless" />}
+          name={t('models.customRowTitle')}
+          sub={t('models.customRowShort')}
+          action={
+            <Button size="sm" onClick={() => setCustomForm('new')} disabled={busy}>
+              {t('models.customAddAction')}
+            </Button>
+          }
+        />
+      ),
+    })
+  }
   const connected = entries.filter((entry) => entry.connected)
   const unconnected = entries.filter((entry) => !entry.connected)
 
@@ -759,6 +848,18 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
         <p role="alert" className="ml-1 text-body text-accent-ink">
           {error}
         </p>
+      )}
+      {customForm && (customForm === 'new' || editing) && (
+        <CustomProviderForm
+          {...(editing ? { provider: editing } : {})}
+          onClose={() => setCustomForm(null)}
+          onSaved={(next) => {
+            const added = customForm === 'new'
+            settle(next)
+            setCustomForm(null)
+            posthog.capture(added ? 'custom_provider_added' : 'custom_provider_edited')
+          }}
+        />
       )}
     </div>
   )

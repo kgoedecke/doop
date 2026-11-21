@@ -18,6 +18,7 @@ const actions = {
   onConnectAgents: vi.fn(),
   onAutomations: vi.fn(),
   onIntegrations: vi.fn(),
+  onCommunity: vi.fn(),
 }
 
 beforeEach(() => {

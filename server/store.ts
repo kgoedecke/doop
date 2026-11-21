@@ -4,7 +4,10 @@ import * as persist from './db/persist.ts'
 import type { LinkAccess } from '../shared/canvasRole.ts'
 import { MAX_GUIDES } from '../shared/guides.ts'
 import { remapFrameTargets } from '../shared/prototype.ts'
+import type { ComponentDef } from '../shared/components.ts'
 import { byStack, frontOf, stackOf } from '../shared/frameStack.ts'
+import { htmlLoaded, setHtml, setHtmlMissHandler, unloadHtml, withHtml } from './frameHtml.ts'
+import { afterCommit, inTransaction, recordUndo, requireBoundary } from './journal.ts'
 import type { DesignToken } from '../shared/designTokens.ts'
 import type {
   Canvas,
@@ -40,16 +43,103 @@ type PageCopy = {
 
 const names = (pages: CanvasPageInfo[]) => pages.map((page) => page.name)
 
+/** A frame as it stands, to put back if the write about to change it is undone. Its html
+ *  is read only when loaded: an unloaded frame goes back to unloaded. */
+function frameState(frame: Frame) {
+  const fields: Record<string, unknown> = {}
+  for (const key of Object.keys(frame)) if (key !== 'html') fields[key] = (frame as never)[key]
+  const loaded = htmlLoaded(frame)
+  return { fields, loaded, html: loaded ? frame.html : '' }
+}
+
+function restoreFrame(frame: Frame, state: ReturnType<typeof frameState>) {
+  for (const key of Object.keys(frame)) if (key !== 'html' && !(key in state.fields)) delete (frame as never)[key]
+  Object.assign(frame, state.fields)
+  if (state.loaded) setHtml(frame, state.html)
+  else unloadHtml(frame)
+}
+
 /**
  * In-memory canvas/frame state — the hot path for reads, reveals and
  * broadcasts. Every committed mutation is mirrored to the database via
  * the write-through helpers in db/persist.ts; boot hydrates from there.
+ *
+ * Every write here is journaled (server/journal.ts): memory changes at once,
+ * with a way back recorded, and the database write waits for the commit of
+ * the operation it is part of. An operation that is refused part of the way
+ * leaves memory as it was and the database untouched. An undo puts back only
+ * what is still its own: a frame or component someone else has written since
+ * is theirs. The copies (duplicateCanvas, duplicatePage) are the exception:
+ * they are durable before memory changes, and are not undone.
+ *
+ * Every canvas and frame is in memory except frame HTML, which is most of
+ * the data: boot leaves it out and `load` reads one canvas's when something
+ * needs it (frameHtml.ts). Entry points (a REST route, the room join, an MCP
+ * tool, an agent run, a job) await `load`; everything past them reads the
+ * store synchronously as before. `evictIdle` drops the HTML of a canvas
+ * nobody has used for a while, never one that is held or in use.
  */
 class Store {
   canvases = new Map<string, Canvas>()
   private frameIndex = new Map<string, string>() // frameId -> canvasId
   /** the page copy in flight per canvas, so the next one waits for it */
   private pageCopies = new Map<string, Promise<unknown>>()
+  /** canvases whose frame HTML is in memory -> when they were last used */
+  private loaded = new Map<string, number>()
+  private loading = new Map<string, Promise<void>>()
+  /** canvases an agent run or job is working on, counted */
+  private holds = new Map<string, number>()
+  /** rooms, agents and streams the store cannot see (wired by index.ts) */
+  private inUse: (canvasId: string) => boolean = () => false
+
+  /** Put these fields of the canvas back if the transaction is undone. `deep` for the ones
+   *  whose items are changed in place (tokens, guideline docs). */
+  private remember(c: Canvas, keys: readonly (keyof Canvas)[], deep = false) {
+    if (!inTransaction()) return
+    const fields = c as unknown as Record<string, unknown>
+    const before = keys.map((key) => {
+      const value = fields[key]
+      return { key, had: key in c, value: deep ? structuredClone(value) : Array.isArray(value) ? [...value] : value }
+    })
+    recordUndo(() => {
+      for (const { key, had, value } of before) {
+        if (had) fields[key] = value
+        else delete fields[key]
+      }
+    })
+  }
+
+  /** The canvas row is written once per transaction, with what the canvas holds by then. */
+  private saveCanvasLater(c: Canvas) {
+    afterCommit(() => {
+      if (this.canvases.get(c.id) === c) persist.saveCanvas(c)
+    }, `canvas:${c.id}`)
+  }
+
+  /** A design edit landed: the canvas is as recent as it. */
+  private touchCanvas(c: Canvas, at: number) {
+    const before = c.updatedAt
+    c.updatedAt = at
+    recordUndo(() => {
+      if (c.updatedAt === at) c.updatedAt = before
+    })
+  }
+
+  /** The frame row is written at the commit, as the frame stands then; `now` skips the debounce. */
+  private saveFrameLater(frame: Frame, now = false) {
+    afterCommit(() => {
+      if (this.getFrame(frame.id) === frame) persist.saveFrame(frame, now)
+    }, `frame:${frame.id}`)
+  }
+
+  constructor() {
+    /* a missed load still fails, but the canvas is on its way for a retry */
+    setHtmlMissHandler((canvasId) => {
+      this.load(canvasId).catch((error: unknown) =>
+        console.error('[store] loading after a miss failed', canvasId, error),
+      )
+    })
+  }
 
   init(canvases: Canvas[]) {
     for (const c of canvases) {
@@ -61,10 +151,151 @@ class Store {
            once) rejoins the first page instead of vanishing from every page. */
         if (!f.pageId || !c.pages.some((page) => page.id === f.pageId)) {
           f.pageId = c.pages[0]!.id
-          persist.saveFrame(f, true)
+          if (htmlLoaded(f)) persist.saveFrame(f, true)
+          else persist.saveFramePage(f.id, f.pageId)
         }
         this.frameIndex.set(f.id, c.id)
       }
+      if (c.frames.every(htmlLoaded)) this.loaded.set(c.id, Date.now())
+      else this.loaded.delete(c.id)
+    }
+  }
+
+  /** The canvas with every frame's HTML in memory, read from the database
+   *  the first time and kept until `evictIdle`. Concurrent calls share one
+   *  read. Undefined for a canvas that does not exist. */
+  async load(canvasId: string): Promise<Canvas | undefined> {
+    if (!this.canvases.has(canvasId)) return undefined
+    if (this.loaded.has(canvasId)) {
+      this.loaded.set(canvasId, Date.now())
+      return this.canvases.get(canvasId)
+    }
+    let pending = this.loading.get(canvasId)
+    if (!pending) {
+      pending = this.fill(canvasId).finally(() => this.loading.delete(canvasId))
+      this.loading.set(canvasId, pending)
+    }
+    await pending
+    return this.canvases.get(canvasId)
+  }
+
+  /** The canvas of a frame, loaded; undefined when the frame is gone. */
+  async loadFrame(frameId: string): Promise<Frame | undefined> {
+    const canvasId = this.frameIndex.get(frameId)
+    if (canvasId) await this.load(canvasId)
+    return this.getFrame(frameId)
+  }
+
+  private async fill(canvasId: string) {
+    /* a canvas whose every frame was written since boot needs no read */
+    if (this.canvases.get(canvasId)?.frames.every(htmlLoaded)) {
+      this.loaded.set(canvasId, Date.now())
+      return
+    }
+    const rows = await persist.loadFrameHtml(canvasId)
+    const canvas = this.canvases.get(canvasId)
+    if (!canvas) return
+    const stored = new Map(rows.map((row) => [row.id, row.html]))
+    /* a frame written while the read was in flight already holds newer html */
+    for (const frame of canvas.frames) {
+      if (htmlLoaded(frame)) continue
+      const html = stored.get(frame.id)
+      if (html === undefined) console.error('[store] frame has no stored html', frame.id)
+      setHtml(frame, html ?? '')
+    }
+    this.loaded.set(canvasId, Date.now())
+  }
+
+  /** Keep a canvas loaded while an agent run or job works on it; call the
+   *  returned function when done. Load it first. */
+  hold(canvasId: string): () => void {
+    this.holds.set(canvasId, (this.holds.get(canvasId) ?? 0) + 1)
+    let released = false
+    return () => {
+      if (released) return
+      released = true
+      const count = (this.holds.get(canvasId) ?? 1) - 1
+      if (count > 0) this.holds.set(canvasId, count)
+      else this.holds.delete(canvasId)
+      if (this.loaded.has(canvasId)) this.loaded.set(canvasId, Date.now())
+    }
+  }
+
+  /** Load, hold for the length of `work`, release. */
+  async withCanvas<T>(canvasId: string, work: (canvas: Canvas | undefined) => Promise<T>): Promise<T> {
+    const canvas = await this.load(canvasId)
+    const release = this.hold(canvasId)
+    try {
+      return await work(canvas)
+    } finally {
+      release()
+    }
+  }
+
+  setInUse(check: (canvasId: string) => boolean) {
+    this.inUse = check
+  }
+
+  isLoaded(canvasId: string): boolean {
+    return this.loaded.has(canvasId)
+  }
+
+  /** Drop the frame HTML of canvases unused for `idleMs`: never one that is
+   *  held, in use (a room, an agent, a stream) or waiting on a frame write.
+   *  Returns how many were dropped. */
+  evictIdle(idleMs: number, now = Date.now()): number {
+    let evicted = 0
+    for (const [canvasId, usedAt] of this.loaded) {
+      if (now - usedAt < idleMs) continue
+      /* in use counts as used: the idle wait starts when the last one leaves */
+      if (this.holds.has(canvasId) || this.inUse(canvasId)) {
+        this.loaded.set(canvasId, now)
+        continue
+      }
+      const canvas = this.canvases.get(canvasId)
+      const unsaved = canvas?.frames.filter((frame) => persist.frameWritePending(frame.id)) ?? []
+      if (unsaved.length) {
+        /* idle with unsaved frames means a write failed: try it again */
+        for (const frame of unsaved) persist.retryFrameWrite(frame)
+        continue
+      }
+      for (const frame of canvas?.frames ?? []) unloadHtml(frame)
+      this.loaded.delete(canvasId)
+      evicted++
+    }
+    return evicted
+  }
+
+  /** A standalone copy of a frame with its HTML, for a render: from memory
+   *  when its canvas is loaded, else read from the database, so one
+   *  thumbnail never pulls a whole canvas into memory. A copy, so a canvas
+   *  dropped while the render waits for a slot cannot take the html away. */
+  async renderableFrame(frameId: string): Promise<Frame | undefined> {
+    const frame = this.getFrame(frameId)
+    if (!frame) return undefined
+    if (htmlLoaded(frame)) return withHtml(frame, frame.html)
+    const html = await persist.loadOneFrameHtml(frameId)
+    const current = this.getFrame(frameId)
+    if (!current) return undefined
+    return withHtml(current, htmlLoaded(current) ? current.html : (html ?? ''))
+  }
+
+  /** The renderable copy of `frame`, for a render that was handed the
+   *  frame's metadata. A frame the store no longer holds renders as given
+   *  when it carries its html; otherwise this rejects. */
+  async renderSource(frame: Frame): Promise<Frame> {
+    const source = await this.renderableFrame(frame.id)
+    if (source) return source
+    if (htmlLoaded(frame)) return frame
+    throw new Error(`frame ${frame.id} no longer exists`)
+  }
+
+  stats() {
+    return {
+      canvases: this.canvases.size,
+      loaded: this.loaded.size,
+      loading: this.loading.size,
+      held: this.holds.size,
     }
   }
 
@@ -143,9 +374,17 @@ class Store {
     const now = Date.now()
     const canvas: Canvas = { id: nanoid(10), name, ownerId, createdAt: now, updatedAt: now, frames: [] }
     if (workspaceId) canvas.workspaceId = workspaceId
+    requireBoundary('store.createCanvas')
     this.canvases.set(canvas.id, canvas)
+    this.loaded.set(canvas.id, now)
     canvas.pages = canvasPages(canvas)
-    persist.saveCanvas(canvas)
+    recordUndo(() => {
+      if (this.canvases.get(canvas.id) !== canvas) return
+      for (const frame of canvas.frames) this.frameIndex.delete(frame.id)
+      this.canvases.delete(canvas.id)
+      this.loaded.delete(canvas.id)
+    })
+    this.saveCanvasLater(canvas)
     return canvas
   }
 
@@ -161,7 +400,7 @@ class Store {
     by: string,
     options: { name?: string; dropDemo?: boolean; workspaceId?: string } = {},
   ): Promise<Canvas | undefined> {
-    const source = this.canvases.get(id)
+    const source = await this.load(id)
     if (!source) return undefined
     const now = Date.now()
     const canvasId = nanoid(10)
@@ -202,12 +441,24 @@ class Store {
       ...(source.guides?.length ? { guides: source.guides.map((guide) => ({ ...guide })) } : {}),
       ...(options.workspaceId ? { workspaceId: options.workspaceId } : {}),
       ...(guidelines?.length ? { guidelines } : {}),
+      /* same ids: the markers in the copied frames keep pointing at them */
+      ...(source.components?.length
+        ? {
+            components: source.components.map((def) => ({
+              ...def,
+              mainFrameId: def.mainFrameId ? (frameIds.get(def.mainFrameId) ?? null) : null,
+              updatedAt: now,
+              updatedBy: by,
+            })),
+          }
+        : {}),
       ...(tokens?.length ? { tokens } : {}),
       ...(source.tokenThemes?.length ? { tokenThemes: [...source.tokenThemes] } : {}),
       ...(references?.length ? { references } : {}),
     }
     await persist.saveCanvasCopy(canvas)
     this.canvases.set(canvas.id, canvas)
+    this.loaded.set(canvas.id, Date.now())
     for (const frame of frames) this.frameIndex.set(frame.id, canvas.id)
     return canvas
   }
@@ -233,7 +484,7 @@ class Store {
   }
 
   private async copyPage(canvasId: string, pageId: string, by: string): Promise<PageCopy | undefined> {
-    const canvas = this.canvases.get(canvasId)
+    const canvas = await this.load(canvasId)
     if (!canvas) return undefined
     const pages = canvasPages(canvas)
     const source = pages.find((page) => page.id === pageId)
@@ -304,11 +555,16 @@ class Store {
   ): { pages: import('../shared/types.ts').CanvasPageInfo[]; dropped: CanvasGuide[] } | undefined {
     const canvas = this.canvases.get(canvasId)
     if (!canvas) return undefined
+    requireBoundary('store.setPages')
+    this.remember(canvas, ['pages', 'guides', 'updatedAt'])
     const firstId = canvasPages(canvas)[0]!.id
     for (const frame of canvas.frames) {
       if (!frame.pageId) {
         frame.pageId = firstId
-        persist.saveFrame(frame, true)
+        recordUndo(() => {
+          if (frame.pageId === firstId) delete frame.pageId
+        })
+        this.saveFrameLater(frame, true)
       }
     }
     /* a page-list save renames, reorders, adds or deletes pages — it never
@@ -329,7 +585,7 @@ class Store {
     const dropped = (canvas.guides ?? []).filter((guide) => !kept(guide))
     if (dropped.length) canvas.guides = canvas.guides!.filter(kept)
     canvas.updatedAt = Date.now()
-    persist.saveCanvas(canvas)
+    this.saveCanvasLater(canvas)
     return { pages: merged, dropped }
   }
 
@@ -339,13 +595,15 @@ class Store {
     if (!canvas) return undefined
     const pages = canvasPages(canvas)
     if (!pages.some((p) => p.id === pageId)) return undefined
+    requireBoundary('store.setFlowStart')
+    this.remember(canvas, ['pages', 'updatedAt'])
     canvas.pages = pages.map((page) => {
       if (page.id !== pageId) return page
       const { startFrameId: _previous, ...rest } = page
       return frameId ? { ...rest, startFrameId: frameId } : rest
     })
     canvas.updatedAt = Date.now()
-    persist.saveCanvas(canvas)
+    this.saveCanvasLater(canvas)
     return canvas.pages
   }
 
@@ -355,13 +613,15 @@ class Store {
     if (!canvas) return undefined
     const pages = canvasPages(canvas)
     if (!pages.some((p) => p.id === pageId)) return undefined
+    requireBoundary('store.setPageBackground')
+    this.remember(canvas, ['pages', 'updatedAt'])
     canvas.pages = pages.map((page) => {
       if (page.id !== pageId) return page
       const { background: _previous, ...rest } = page
       return background ? { ...rest, background } : rest
     })
     canvas.updatedAt = Date.now()
-    persist.saveCanvas(canvas)
+    this.saveCanvasLater(canvas)
     return canvas.pages
   }
 
@@ -373,8 +633,10 @@ class Store {
     const guides = canvas.guides ?? []
     const exists = guides.some((g) => g.id === guide.id)
     if (!exists && guides.length >= MAX_GUIDES) throw new GuideLimitError()
+    requireBoundary('store.setGuide')
+    this.remember(canvas, ['guides'])
     canvas.guides = exists ? guides.map((g) => (g.id === guide.id ? guide : g)) : [...guides, guide]
-    persist.saveCanvas(canvas)
+    this.saveCanvasLater(canvas)
     return guide
   }
 
@@ -382,8 +644,10 @@ class Store {
   deleteGuide(canvasId: string, guideId: string): boolean {
     const canvas = this.canvases.get(canvasId)
     if (!canvas?.guides?.some((g) => g.id === guideId)) return false
+    requireBoundary('store.deleteGuide')
+    this.remember(canvas, ['guides'])
     canvas.guides = canvas.guides.filter((g) => g.id !== guideId)
-    persist.saveCanvas(canvas)
+    this.saveCanvasLater(canvas)
     return true
   }
 
@@ -395,9 +659,20 @@ class Store {
   deleteCanvas(id: string): Canvas | undefined {
     const c = this.canvases.get(id)
     if (!c) return undefined
+    requireBoundary('store.deleteCanvas')
+    const loadedAt = this.loaded.get(id)
     for (const f of c.frames) this.frameIndex.delete(f.id)
     this.canvases.delete(id)
-    persist.deleteCanvas(id)
+    this.loaded.delete(id)
+    recordUndo(() => {
+      if (this.canvases.has(id)) return
+      this.canvases.set(id, c)
+      for (const f of c.frames) this.frameIndex.set(f.id, id)
+      if (loadedAt !== undefined) this.loaded.set(id, loadedAt)
+    })
+    afterCommit(() => {
+      if (!this.canvases.has(id)) persist.deleteCanvas(id)
+    })
     return c
   }
 
@@ -405,8 +680,10 @@ class Store {
   claimCanvas(id: string, userId: string): Canvas | undefined {
     const c = this.canvases.get(id)
     if (!c || c.ownerId) return undefined
+    requireBoundary('store.claimCanvas')
+    this.remember(c, ['ownerId'])
     c.ownerId = userId
-    persist.saveCanvas(c)
+    this.saveCanvasLater(c)
     return c
   }
 
@@ -416,9 +693,11 @@ class Store {
   setLinkAccess(id: string, mode: LinkAccess): Canvas | undefined {
     const c = this.canvases.get(id)
     if (!c) return undefined
+    requireBoundary('store.setLinkAccess')
+    this.remember(c, ['linkAccess'])
     if (mode === 'none') delete c.linkAccess
     else c.linkAccess = mode
-    persist.saveCanvas(c)
+    this.saveCanvasLater(c)
     return c
   }
 
@@ -430,9 +709,11 @@ class Store {
   setWorkspace(id: string, workspaceId: string | undefined): Canvas | undefined {
     const c = this.canvases.get(id)
     if (!c) return undefined
+    requireBoundary('store.setWorkspace')
+    this.remember(c, ['workspaceId'])
     if (workspaceId) c.workspaceId = workspaceId
     else delete c.workspaceId
-    persist.saveCanvas(c)
+    this.saveCanvasLater(c)
     return c
   }
 
@@ -442,14 +723,20 @@ class Store {
     return n
   }
 
-  /** A workspace is going away: every canvas in it becomes personal again. */
-  detachWorkspace(workspaceId: string): void {
+  /** A workspace is going away: every canvas in it becomes personal again.
+   *  Returns the ids of the canvases it moved. */
+  detachWorkspace(workspaceId: string): string[] {
+    const moved: string[] = []
     for (const c of this.canvases.values()) {
       if (c.workspaceId === workspaceId) {
+        requireBoundary('store.detachWorkspace')
+        this.remember(c, ['workspaceId'])
         delete c.workspaceId
-        persist.saveCanvas(c)
+        this.saveCanvasLater(c)
+        moved.push(c.id)
       }
     }
+    return moved
   }
 
   /* ---- community gallery ---- */
@@ -460,21 +747,25 @@ class Store {
   publishCanvas(id: string, listing: { description: string; category: CommunityCategory }): Canvas | undefined {
     const c = this.canvases.get(id)
     if (!c) return undefined
+    requireBoundary('store.publishCanvas')
+    this.remember(c, ['publishedAt', 'category', 'description'])
     c.publishedAt ??= Date.now()
     c.category = listing.category
     if (listing.description) c.description = listing.description
     else delete c.description
-    persist.saveCanvas(c)
+    this.saveCanvasLater(c)
     return c
   }
 
   unpublishCanvas(id: string): Canvas | undefined {
     const c = this.canvases.get(id)
     if (!c) return undefined
+    requireBoundary('store.unpublishCanvas')
+    this.remember(c, ['publishedAt', 'category', 'description'])
     delete c.publishedAt
     delete c.description
     delete c.category
-    persist.saveCanvas(c)
+    this.saveCanvasLater(c)
     return c
   }
 
@@ -491,17 +782,22 @@ class Store {
   recordCommunityCopy(id: string) {
     const c = this.canvases.get(id)
     if (!c) return
+    requireBoundary('store.recordCommunityCopy')
+    this.remember(c, ['copyCount'])
     c.copyCount = (c.copyCount ?? 0) + 1
-    persist.saveCanvas(c)
+    this.saveCanvasLater(c)
   }
 
   /** Invite a user to collaborate. Idempotent; the owner is never listed. */
   addMember(canvasId: string, userId: string, addedBy: string): Canvas | undefined {
     const c = this.canvases.get(canvasId)
     if (!c || c.ownerId === userId) return c
-    if (!(c.memberIds ??= []).includes(userId)) {
-      c.memberIds.push(userId)
-      persist.saveMember(canvasId, userId, addedBy, Date.now())
+    if (!c.memberIds?.includes(userId)) {
+      requireBoundary('store.addMember')
+      this.remember(c, ['memberIds'])
+      ;(c.memberIds ??= []).push(userId)
+      const at = Date.now()
+      afterCommit(() => persist.saveMember(canvasId, userId, addedBy, at))
     }
     return c
   }
@@ -510,18 +806,66 @@ class Store {
     const c = this.canvases.get(canvasId)
     const idx = c?.memberIds?.indexOf(userId) ?? -1
     if (!c || idx === -1) return false
+    requireBoundary('store.removeMember')
+    this.remember(c, ['memberIds'])
     c.memberIds!.splice(idx, 1)
-    persist.deleteMember(canvasId, userId)
+    afterCommit(() => persist.deleteMember(canvasId, userId))
     return true
   }
 
   renameCanvas(id: string, name: string) {
     const c = this.canvases.get(id)
     if (!c) return undefined
+    requireBoundary('store.renameCanvas')
+    this.remember(c, ['name', 'updatedAt'])
     c.name = name
     c.updatedAt = Date.now()
-    persist.saveCanvas(c)
+    this.saveCanvasLater(c)
     return c
+  }
+
+  getComponents(canvasId: string): ComponentDef[] {
+    return this.canvases.get(canvasId)?.components ?? []
+  }
+
+  /** Add or replace by id; the database hears at the commit. Definitions are replaced,
+   *  never changed in place, so the one this replaced is what an undo puts back. */
+  saveComponent(canvasId: string, def: ComponentDef) {
+    const c = this.canvases.get(canvasId)
+    if (!c) return
+    requireBoundary('store.saveComponent')
+    const list = (c.components ??= [])
+    const at = list.findIndex((existing) => existing.id === def.id)
+    const replaced = at === -1 ? undefined : list[at]
+    if (at === -1) list.push(def)
+    else list[at] = def
+    recordUndo(() => {
+      /* saved again since by someone else: theirs stands */
+      const now = c.components?.indexOf(def) ?? -1
+      if (now === -1) return
+      if (replaced) c.components![now] = replaced
+      else c.components!.splice(now, 1)
+    })
+    /* a definition replaced again before the commit was never the stored one */
+    afterCommit(() => {
+      if (this.canvases.get(canvasId) === c && c.components?.includes(def)) persist.saveComponent(canvasId, def)
+    })
+  }
+
+  deleteComponent(canvasId: string, id: string): boolean {
+    const c = this.canvases.get(canvasId)
+    const at = c?.components?.findIndex((def) => def.id === id) ?? -1
+    if (!c?.components || at === -1) return false
+    requireBoundary('store.deleteComponent')
+    const [removed] = c.components.splice(at, 1)
+    recordUndo(() => {
+      const list = (c.components ??= [])
+      if (removed && !list.some((def) => def.id === id)) list.splice(Math.min(at, list.length), 0, removed)
+    })
+    afterCommit(() => {
+      if (!c.components?.some((def) => def.id === id)) persist.deleteComponent(canvasId, id)
+    })
+    return true
   }
 
   getGuidelines(canvasId: string): GuidelineDoc[] {
@@ -540,6 +884,8 @@ class Store {
   ): GuidelineDoc | undefined {
     const c = this.canvases.get(canvasId)
     if (!c) return undefined
+    requireBoundary('store.setGuideline')
+    this.remember(c, ['guidelines', 'updatedAt'], true)
     const docs = (c.guidelines ??= [])
     const now = Date.now()
     let doc = docs.find((d) => d.name === name)
@@ -556,8 +902,9 @@ class Store {
       docs.sort((a, b) => a.name.localeCompare(b.name))
     }
     c.updatedAt = now
-    persist.saveGuideline(canvasId, doc)
-    persist.saveCanvas(c)
+    const saved = doc
+    afterCommit(() => persist.saveGuideline(canvasId, saved))
+    this.saveCanvasLater(c)
     return doc
   }
 
@@ -578,10 +925,13 @@ class Store {
     const c = this.canvases.get(canvasId)
     const doc = c?.guidelines?.find((d) => d.name === name)
     if (!c || !doc) return undefined
+    requireBoundary('store.patchGuideline')
+    const before = { x: doc.x, y: doc.y, title: doc.title }
+    recordUndo(() => Object.assign(doc, before))
     if (patch.x !== undefined) doc.x = patch.x
     if (patch.y !== undefined) doc.y = patch.y
     if (patch.title !== undefined) doc.title = patch.title || undefined
-    persist.saveGuideline(canvasId, doc)
+    afterCommit(() => persist.saveGuideline(canvasId, doc))
     return doc
   }
 
@@ -589,10 +939,12 @@ class Store {
     const c = this.canvases.get(canvasId)
     const idx = c?.guidelines?.findIndex((d) => d.name === name) ?? -1
     if (!c || idx === -1) return false
+    requireBoundary('store.deleteGuideline')
+    this.remember(c, ['guidelines', 'updatedAt'])
     c.guidelines!.splice(idx, 1)
     c.updatedAt = Date.now()
-    persist.deleteGuideline(canvasId, name)
-    persist.saveCanvas(c)
+    afterCommit(() => persist.deleteGuideline(canvasId, name))
+    this.saveCanvasLater(c)
     return true
   }
 
@@ -613,6 +965,8 @@ class Store {
   ): DesignToken[] | undefined {
     const c = this.canvases.get(canvasId)
     if (!c) return undefined
+    requireBoundary('store.setTokens')
+    this.remember(c, ['tokens', 'updatedAt'], true)
     const tokens = (c.tokens ??= [])
     const now = Date.now()
     const written: DesignToken[] = []
@@ -640,12 +994,13 @@ class Store {
         }
         tokens.push(token)
       }
-      persist.saveToken(canvasId, token)
+      const saved = token
+      afterCommit(() => persist.saveToken(canvasId, saved))
       written.push(token)
     }
     tokens.sort((a, b) => a.order - b.order || a.name.localeCompare(b.name))
     c.updatedAt = now
-    persist.saveCanvas(c)
+    this.saveCanvasLater(c)
     return written
   }
 
@@ -654,13 +1009,17 @@ class Store {
     const c = this.canvases.get(canvasId)
     const token = c?.tokens?.find((t) => t.name === name)
     if (!c || !token) return undefined
-    persist.deleteToken(canvasId, name)
+    requireBoundary('store.renameToken')
+    const before = { name: token.name, updatedAt: token.updatedAt, updatedBy: token.updatedBy }
+    recordUndo(() => Object.assign(token, before))
+    this.remember(c, ['updatedAt'])
+    afterCommit(() => persist.deleteToken(canvasId, name))
     token.name = newName
     token.updatedAt = Date.now()
     token.updatedBy = by
-    persist.saveToken(canvasId, token)
+    afterCommit(() => persist.saveToken(canvasId, token))
     c.updatedAt = token.updatedAt
-    persist.saveCanvas(c)
+    this.saveCanvasLater(c)
     return token
   }
 
@@ -672,6 +1031,8 @@ class Store {
   setTokenThemes(canvasId: string, themes: string[], by: string): string[] | undefined {
     const c = this.canvases.get(canvasId)
     if (!c) return undefined
+    requireBoundary('store.setTokenThemes')
+    this.remember(c, ['tokens', 'tokenThemes', 'updatedAt'], true)
     c.tokenThemes = themes.length ? [...themes] : undefined
     const now = Date.now()
     for (const token of c.tokens ?? []) {
@@ -681,10 +1042,10 @@ class Store {
       token.themes = Object.keys(kept).length ? kept : undefined
       token.updatedAt = now
       token.updatedBy = by
-      persist.saveToken(canvasId, token)
+      afterCommit(() => persist.saveToken(canvasId, token))
     }
     c.updatedAt = now
-    persist.saveCanvas(c)
+    this.saveCanvasLater(c)
     return themes
   }
 
@@ -692,6 +1053,8 @@ class Store {
   renameTokenTheme(canvasId: string, from: string, to: string, by: string): boolean {
     const c = this.canvases.get(canvasId)
     if (!c || !c.tokenThemes?.includes(from)) return false
+    requireBoundary('store.renameTokenTheme')
+    this.remember(c, ['tokens', 'tokenThemes', 'updatedAt'], true)
     c.tokenThemes = c.tokenThemes.map((theme) => (theme === from ? to : theme))
     const now = Date.now()
     for (const token of c.tokens ?? []) {
@@ -700,10 +1063,10 @@ class Store {
       token.themes = { ...rest, ...(moved === undefined ? {} : { [to]: moved }) }
       token.updatedAt = now
       token.updatedBy = by
-      persist.saveToken(canvasId, token)
+      afterCommit(() => persist.saveToken(canvasId, token))
     }
     c.updatedAt = now
-    persist.saveCanvas(c)
+    this.saveCanvasLater(c)
     return true
   }
 
@@ -711,10 +1074,12 @@ class Store {
     const c = this.canvases.get(canvasId)
     const idx = c?.tokens?.findIndex((t) => t.name === name) ?? -1
     if (!c || idx === -1) return false
+    requireBoundary('store.deleteToken')
+    this.remember(c, ['tokens', 'updatedAt'])
     c.tokens!.splice(idx, 1)
     c.updatedAt = Date.now()
-    persist.deleteToken(canvasId, name)
-    persist.saveCanvas(c)
+    afterCommit(() => persist.deleteToken(canvasId, name))
+    this.saveCanvasLater(c)
     return true
   }
 
@@ -736,8 +1101,10 @@ class Store {
       pinnedBy: by,
       pinnedAt: Date.now(),
     }
+    requireBoundary('store.addReference')
+    this.remember(c, ['references'])
     ;(c.references ??= []).unshift(ref)
-    persist.saveReference(canvasId, ref)
+    afterCommit(() => persist.saveReference(canvasId, ref))
     return ref
   }
 
@@ -745,8 +1112,10 @@ class Store {
     const c = this.canvases.get(canvasId)
     const idx = c?.references?.findIndex((r) => r.id === id) ?? -1
     if (!c || idx === -1) return undefined
+    requireBoundary('store.deleteReference')
+    this.remember(c, ['references'])
     const [ref] = c.references!.splice(idx, 1)
-    persist.deleteReference(id)
+    afterCommit(() => persist.deleteReference(id))
     return ref
   }
 
@@ -809,12 +1178,18 @@ class Store {
     if (input.hidden) frame.hidden = true
     if (input.locked) frame.locked = true
     if (input.rotation) frame.rotation = input.rotation
+    requireBoundary('store.createFrame')
     c.frames.push(frame)
     c.frames.sort(byStack)
-    c.updatedAt = now
     this.frameIndex.set(frame.id, canvasId)
-    persist.saveFrame(frame, true)
-    persist.saveCanvas(c)
+    recordUndo(() => {
+      const at = c.frames.indexOf(frame)
+      if (at !== -1) c.frames.splice(at, 1)
+      if (this.frameIndex.get(frame.id) === canvasId) this.frameIndex.delete(frame.id)
+    })
+    this.touchCanvas(c, now)
+    this.saveFrameLater(frame, true)
+    this.saveCanvasLater(c)
     return frame
   }
 
@@ -855,6 +1230,8 @@ class Store {
       !opts.annotation &&
       (['html', 'width', 'height'] as const).some((key) => patch[key] !== undefined && patch[key] !== frame[key])
     const c = this.canvases.get(frame.canvasId)!
+    requireBoundary('store.updateFrame')
+    const before = inTransaction() ? frameState(frame) : undefined
     /* a frame moved to another page lands in front there, as Figma does */
     if (patch.pageId !== undefined && patch.pageId !== frame.pageId && patch.z === undefined)
       patch = { ...patch, z: frontOf(pageFrames(c, patch.pageId)) ?? frame.z }
@@ -867,9 +1244,25 @@ class Store {
     // Also serves as the optimistic-save version, including writes in the same millisecond.
     frame.updatedAt = Math.max(Date.now(), frame.updatedAt + 1)
     frame.updatedBy = by
-    c.updatedAt = frame.updatedAt
-    persist.saveFrame(frame) // debounced: streaming appends land as one write per burst
-    persist.saveCanvas(c)
+    const stamp = frame.updatedAt
+    const restacked = patch.z !== undefined
+    if (before)
+      recordUndo(({ yielded, repair }) => {
+        /* written again since by someone else (this one awaited meanwhile), or gone: theirs stands */
+        if (this.getFrame(frame.id) !== frame || frame.updatedAt !== stamp) return
+        restoreFrame(frame, before)
+        if (restacked) c.frames.sort(byStack)
+        /* a write already on its debounce may have stored this frame while the operation
+           awaited: the row goes back to what the frame is again, once every undo has run,
+           and only if the frame is still there (one this transaction created is not) */
+        if (yielded && before.loaded)
+          repair(`frame:${frame.id}`, () => {
+            if (this.getFrame(frame.id) === frame) persist.saveFrame(frame)
+          })
+      })
+    this.touchCanvas(c, stamp)
+    this.saveFrameLater(frame) // debounced: streaming appends land as one write per burst
+    this.saveCanvasLater(c)
     return frame
   }
 
@@ -880,11 +1273,20 @@ class Store {
     if (!c) return undefined
     const idx = c.frames.findIndex((f) => f.id === frameId)
     if (idx === -1) return undefined
+    requireBoundary('store.deleteFrame')
     const [frame] = c.frames.splice(idx, 1)
-    c.updatedAt = Date.now()
     this.frameIndex.delete(frameId)
-    persist.deleteFrame(frameId)
-    persist.saveCanvas(c)
+    recordUndo(() => {
+      if (!frame || this.canvases.get(canvasId) !== c || this.frameIndex.has(frameId)) return
+      c.frames.push(frame)
+      c.frames.sort(byStack)
+      this.frameIndex.set(frameId, canvasId)
+    })
+    this.touchCanvas(c, Date.now())
+    afterCommit(() => {
+      if (!this.frameIndex.has(frameId)) persist.deleteFrame(frameId)
+    })
+    this.saveCanvasLater(c)
     return frame
   }
 }

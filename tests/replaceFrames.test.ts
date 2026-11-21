@@ -1,0 +1,174 @@
+// @vitest-environment happy-dom
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import type { Canvas, Frame } from '../shared/types'
+
+vi.mock('../src/lib/posthog', () => ({ posthog: { capture: vi.fn() } }))
+vi.mock('../src/lib/api', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../src/lib/api')>()),
+  api: { createFrame: vi.fn(), updateFrame: vi.fn(), deleteFrame: vi.fn(), getCanvas: vi.fn() },
+}))
+const { api } = await import('../src/lib/api')
+const { useStore } = await import('../src/lib/store')
+const { clearHistory, undo } = await import('../src/lib/history')
+const { copyFrames, replaceFramesWithClip } = await import('../src/lib/frameClipboard')
+
+const frame = (id: string, x: number): Frame => ({
+  id,
+  canvasId: 'c',
+  pageId: 'p',
+  name: id,
+  x,
+  y: 0,
+  width: 100,
+  height: 100,
+  html: `<p>${id}</p>`,
+  createdAt: 0,
+  updatedAt: 0,
+  updatedBy: 'Me',
+})
+let db: Map<string, Frame>
+let failCreates = 0
+
+beforeEach(() => {
+  vi.resetAllMocks()
+  clearHistory()
+  localStorage.clear()
+  failCreates = 0
+  db = new Map(['copied', 'a', 'b'].map((id, i) => [id, frame(id, i * 200)]))
+  useStore
+    .getState()
+    .setCanvas({ id: 'c', name: 'T', frames: [...db.values()], pages: [{ id: 'p', name: 'P' }] } as Canvas)
+  let n = 0
+  vi.mocked(api.createFrame).mockImplementation(async (canvasId, input) => {
+    if (failCreates > 0) {
+      failCreates--
+      throw new Error('create failed')
+    }
+    const made = { ...frame(`new-${++n}`, 0), ...input, canvasId } as Frame
+    db.set(made.id, made)
+    return made
+  })
+  vi.mocked(api.deleteFrame).mockImplementation(async (id) => {
+    db.delete(id)
+  })
+})
+
+describe('paste to replace', () => {
+  it('replaces each frame and undoes as one step', async () => {
+    copyFrames([db.get('copied')!])
+    replaceFramesWithClip('c', [db.get('a')!, db.get('b')!])
+    await vi.waitFor(() => expect(db.has('a') || db.has('b')).toBe(false))
+    expect([...db.keys()].sort()).toEqual(['copied', 'new-1', 'new-2'])
+    await undo()
+    expect(db.has('new-1') || db.has('new-2')).toBe(false)
+    expect([...db.values()].map((f) => f.name).sort()).toEqual(['a', 'b', 'copied'])
+  })
+
+  it('keeps a frame whose replacement failed', async () => {
+    copyFrames([db.get('copied')!])
+    failCreates = 1
+    replaceFramesWithClip('c', [db.get('a')!])
+    await new Promise((r) => setTimeout(r, 10))
+    expect(db.has('a')).toBe(true)
+    expect([...db.keys()].filter((id) => id.startsWith('new'))).toEqual([])
+  })
+
+  it('never removes the replacement when the original cannot come back', async () => {
+    copyFrames([db.get('copied')!])
+    replaceFramesWithClip('c', [db.get('a')!])
+    await vi.waitFor(() => expect(db.has('a')).toBe(false))
+    failCreates = 1
+    await undo()
+    expect(db.has('new-1')).toBe(true)
+  })
+
+  it('keeps every replacement, retryable, when one of several originals cannot come back', async () => {
+    copyFrames([db.get('copied')!])
+    replaceFramesWithClip('c', [db.get('a')!, db.get('b')!])
+    await vi.waitFor(() => expect(db.has('a') || db.has('b')).toBe(false))
+    failCreates = 1
+    await undo()
+    expect(db.has('new-1') && db.has('new-2')).toBe(true)
+    await undo()
+    expect([...db.values()].map((f) => f.name).sort()).toEqual(['a', 'b', 'copied'])
+  })
+
+  it('keeps a frame a teammate edited while its replacements were made', async () => {
+    copyFrames([db.get('copied')!])
+    let release!: () => void
+    const gate = new Promise<void>((r) => (release = r))
+    const create = vi.mocked(api.createFrame).getMockImplementation()!
+    vi.mocked(api.createFrame).mockImplementation(async (...args) => {
+      await gate
+      return create(...args)
+    })
+    replaceFramesWithClip('c', [db.get('a')!])
+    useStore.getState().upsertFrame({ ...db.get('a')!, html: '<p>edited</p>', updatedAt: 5 })
+    release()
+    await vi.waitFor(() => expect(api.deleteFrame).toHaveBeenCalled())
+    await new Promise((r) => setTimeout(r, 0))
+    /* the replacement went; the edited original was never touched */
+    expect(vi.mocked(api.deleteFrame).mock.calls.map(([id]) => id)).toEqual(['new-1'])
+    expect(db.has('a')).toBe(true)
+  })
+
+  it("keeps a copy it could not clean up after a teammate's edit in the undo step", async () => {
+    copyFrames([db.get('copied')!])
+    let release!: () => void
+    const gate = new Promise<void>((r) => (release = r))
+    const create = vi.mocked(api.createFrame).getMockImplementation()!
+    vi.mocked(api.createFrame).mockImplementation(async (...args) => {
+      await gate
+      return create(...args)
+    })
+    let refuse = true
+    vi.mocked(api.deleteFrame).mockImplementation(async (id) => {
+      if (refuse) throw new Error('offline')
+      db.delete(id)
+    })
+    replaceFramesWithClip('c', [db.get('a')!])
+    useStore.getState().upsertFrame({ ...db.get('a')!, html: '<p>edited</p>', updatedAt: 5 })
+    release()
+    await vi.waitFor(() => expect(useStore.getState().selectedIds).toEqual(['new-1']))
+    expect(db.has('new-1') && db.has('a')).toBe(true)
+    refuse = false
+    await undo()
+    expect(db.has('new-1')).toBe(false)
+    expect(db.has('a')).toBe(true)
+  })
+
+  it('deletes each target only as it was checked, and undoes nothing the server refused', async () => {
+    copyFrames([db.get('copied')!])
+    vi.mocked(api.deleteFrame).mockImplementation(async (id) => {
+      if (id === 'a') throw new Error('frame changed')
+      db.delete(id)
+    })
+    replaceFramesWithClip('c', [db.get('a')!])
+    await vi.waitFor(() => expect(api.deleteFrame).toHaveBeenCalledWith('a', 0))
+    await new Promise((r) => setTimeout(r, 0))
+    await undo()
+    /* the refused original stayed, so undo brings no second copy of it */
+    expect(api.createFrame).toHaveBeenCalledTimes(1)
+    expect(db.has('new-1')).toBe(false)
+    expect(db.has('a')).toBe(true)
+  })
+
+  it('takes the replacements back when the canvas changed before they landed', async () => {
+    copyFrames([db.get('copied')!])
+    let release!: () => void
+    const gate = new Promise<void>((r) => (release = r))
+    const create = vi.mocked(api.createFrame).getMockImplementation()!
+    vi.mocked(api.createFrame).mockImplementation(async (...args) => {
+      await gate
+      return create(...args)
+    })
+    replaceFramesWithClip('c', [db.get('a')!])
+    clearHistory()
+    release()
+    await new Promise((r) => setTimeout(r, 10))
+    expect(db.has('a')).toBe(true)
+    expect([...db.keys()].filter((id) => id.startsWith('new'))).toEqual([])
+    await undo()
+    expect(db.has('a')).toBe(true)
+  })
+})

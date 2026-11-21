@@ -1,4 +1,6 @@
+import { COMPONENT_ATTR, INSTANCE_ATTR, OVERRIDES_ATTR } from '../../shared/components'
 import { ELEMENT_ID_ATTR, newElementId } from '../../shared/elementId'
+import { holdsPlaced } from './groupLayout'
 
 /**
  * The Layers panel's view of a frame: the element tree of its HTML, parsed
@@ -22,6 +24,15 @@ export interface LayerNode {
   hidden: boolean
   /** carries `data-doop-locked`: the stage neither picks nor edits it */
   locked: boolean
+  /** a component's main, or an instance of one */
+  component?: 'main' | 'instance'
+  /** which component, for the row to show its name */
+  componentId?: string
+  /** the label is a name given in the Layers panel, not one read off the element */
+  named?: boolean
+  /** on an instance root: the part keys its saved overrides name, which tells
+   *  its own name from one inherited from its main */
+  namedParts?: string[]
   children: LayerNode[]
 }
 
@@ -145,7 +156,25 @@ function detailOf(el: Element): string {
 function toNode(el: Element): LayerNode {
   const node = defaultNode(el)
   const name = el.getAttribute(NAME_ATTR)?.trim()
-  return name ? { ...node, label: name, detail: '' } : node
+  if (!name) return node
+  const namedParts = nameOverrides(el)
+  return { ...node, label: name, detail: '', named: true, ...(namedParts.length ? { namedParts } : {}) }
+}
+
+/** The part keys an instance root's saved overrides give a name to. A name its
+ *  main carries is rendered onto every instance too, so the attribute alone
+ *  cannot tell an instance's own name from an inherited one. */
+function nameOverrides(el: Element): string[] {
+  if (!el.hasAttribute(INSTANCE_ATTR)) return []
+  try {
+    const parts: unknown = JSON.parse(el.getAttribute(OVERRIDES_ATTR) ?? '{}')
+    if (!parts || typeof parts !== 'object') return []
+    return Object.entries(parts as Record<string, { attrs?: Record<string, unknown> } | null>)
+      .filter(([, part]) => typeof part?.attrs?.[NAME_ATTR] === 'string')
+      .map(([key]) => key)
+  } catch {
+    return []
+  }
 }
 
 function defaultNode(el: Element): LayerNode {
@@ -157,6 +186,11 @@ function defaultNode(el: Element): LayerNode {
     detail: drawingName ? '' : detailOf(el),
     hidden: el.hasAttribute(HIDDEN_ATTR),
     locked: el.hasAttribute(LOCK_ATTR),
+    ...(el.hasAttribute(COMPONENT_ATTR)
+      ? { component: 'main' as const, componentId: el.getAttribute(COMPONENT_ATTR) ?? '' }
+      : el.hasAttribute(INSTANCE_ATTR)
+        ? { component: 'instance' as const, componentId: el.getAttribute(INSTANCE_ATTR) ?? '' }
+        : {}),
   }
   if (el.namespaceURI === 'http://www.w3.org/2000/svg')
     return { ...base, label: drawingName ?? 'svg', kind: 'svg', children: [] }
@@ -429,15 +463,21 @@ export function setElementsHidden(html: string, selectors: string[], hidden: boo
  *  and the copies' paths in document order; a picked element inside another
  *  picked one is copied with its box. The copies share one id renaming, so
  *  a label copied with its input points at the copied input. */
-export function duplicateElements(html: string, selectors: string[]): { html: string; selectors: string[] } | null {
+export function duplicateElements(
+  html: string,
+  selectors: string[],
+  /** an attribute set on every copy's root, such as a carried-style scope */
+  mark?: { name: string; value: string },
+): { html: string; selectors: string[]; renamed: Record<string, string> } | null {
   const doc = parse(html)
   const els = findAll(doc, selectors)
   if (!els?.length) return null
   const originals = inDocumentOrder(els)
   const copies = originals.map((el) => el.cloneNode(true) as Element)
-  renameIds(doc, copies)
+  const renamed = renameIds(doc, copies)
+  if (mark) for (const copy of copies) copy.setAttribute(mark.name, mark.value)
   originals.forEach((el, i) => el.after(copies[i]!))
-  return { html: serialize(doc), selectors: copies.map(elementPath) }
+  return { html: serialize(doc), selectors: copies.map(elementPath), renamed }
 }
 
 /** Rename, in `el` and its descendants, every id `doc` already uses, and
@@ -462,6 +502,58 @@ export interface FlowPlacement {
   order: string
   orderChanged?: boolean
   transform?: string
+  /** the element was in flow already: only its drag offset goes */
+  fromFlow?: boolean
+  /** the slot is in a flex box, whose items keep their size */
+  flexItem?: boolean
+  /** a box that places its layers by hand: the element goes absolute here,
+   *  in design px from the box's containing block */
+  absolute?: { left: number; top: number }
+}
+
+/* what pins an element in place, which a slot in a flow replaces */
+const PLACEMENT_PROPS = ['position', 'inset', 'left', 'top', 'right', 'bottom', 'translate', 'float', 'z-index']
+
+function placeInFlow(style: CSSStyleDeclaration, flow: FlowPlacement, el?: Element) {
+  if (flow.absolute) {
+    for (const name of ['inset', 'right', 'bottom', 'translate', 'order', 'flex-shrink', 'float'])
+      style.removeProperty(name)
+    style.setProperty('position', 'absolute')
+    style.setProperty('left', `${flow.absolute.left}px`)
+    style.setProperty('top', `${flow.absolute.top}px`)
+    return
+  }
+  const order = () => {
+    if (flow.order === '0') style.removeProperty('order')
+    else style.setProperty('order', flow.order)
+  }
+  if (flow.fromFlow) {
+    style.removeProperty('translate')
+    if (flow.orderChanged) order()
+    return
+  }
+  if (style.getPropertyValue('position')) {
+    /* placed by its own inline styles: dropping them puts it in the flow,
+       positioned still when it holds layers placed absolute in it */
+    for (const name of PLACEMENT_PROPS) style.removeProperty(name)
+    if (el && holdsPlaced(el)) style.setProperty('position', 'relative')
+    order()
+    if (flow.flexItem) style.setProperty('flex-shrink', '0')
+    return
+  }
+  // Placed by a stylesheet: override it. Relative positioning also preserves
+  // the containing block for positioned descendants.
+  for (const [name, value] of Object.entries({
+    position: 'relative',
+    inset: 'auto',
+    'inset-block': 'auto',
+    'inset-inline': 'auto',
+    translate: 'none',
+    float: 'none',
+    order: flow.order,
+    'grid-area': 'auto',
+  }))
+    style.setProperty(name, value, 'important')
 }
 
 export interface MovedElement {
@@ -562,29 +654,24 @@ function alreadyAt(el: Element, at: Element, where: DropPlace): boolean {
 
 function move(doc: Document, el: Element, at: Element, where: DropPlace, flow?: FlowPlacement): MovedElement | null {
   if (el === at || el.contains(at)) return null
-  if (alreadyAt(el, at, where) && !flow?.orderChanged && flow?.transform === undefined) return null
+  if (alreadyAt(el, at, where) && !flow?.orderChanged && flow?.transform === undefined && !flow?.absolute) return null
   if (where === 'inside' && !holdsChildren(at.tagName)) return null
   const parent = where === 'inside' ? at : at.parentElement
   if (!parent || parent.closest(`[${LOCK_ATTR}]`) || !doc.body.contains(parent)) return null
+  const left = el.parentElement
   if (where === 'inside') at.prepend(el)
   else if (where === 'before') at.before(el)
   else at.after(el)
+  /* a canvas group whose last layer left goes with it, as in a design tool */
+  if (left && left !== parent && left.getAttribute('data-doop-drawing') === 'group' && !left.children.length)
+    left.remove()
   if (flow) {
-    // Keep size, rotation and scale, but let DOM order determine layout. Relative
-    // positioning also preserves the containing block for positioned descendants.
+    // Keep size, rotation and scale, but let DOM order (or the box's own
+    // placement) determine where it lands.
     const style = (el as HTMLElement | SVGElement).style
-    for (const [name, value] of Object.entries({
-      position: 'relative',
-      inset: 'auto',
-      'inset-block': 'auto',
-      'inset-inline': 'auto',
-      translate: 'none',
-      float: 'none',
-      order: flow.order,
-      'grid-area': 'auto',
-    }))
-      style.setProperty(name, value, 'important')
+    placeInFlow(style, flow, el)
     if (flow.transform !== undefined) style.setProperty('transform', flow.transform, 'important')
+    if (!el.getAttribute('style')) el.removeAttribute('style')
   }
   const html = serialize(doc)
   const selector = elementPath(el)
@@ -744,4 +831,275 @@ function renameIds(doc: Document, copies: Element[], clashesOnly = false): Recor
     }
   }
   return Object.fromEntries(renamed)
+}
+
+/* ---- grouping: ⌘G, ⌥⌘G and ⇧⌘G as markup ---- */
+
+/* containers a wrapper may not go inside, nor be: their children are rows,
+   cells or options the parser keeps only directly under them */
+const UNWRAPPABLE_PARENTS = new Set([
+  'TABLE',
+  'THEAD',
+  'TBODY',
+  'TFOOT',
+  'TR',
+  'SELECT',
+  'OPTGROUP',
+  'DATALIST',
+  'UL',
+  'OL',
+])
+
+export interface GroupOptions {
+  /** the wrapper's layer name, as the Layers panel shows it */
+  name: string
+  /** inline styles for the wrapper (auto layout's flex), none for a plain group */
+  style?: string
+  /** inline styles each wrapped element takes on (auto layout drops their
+   *  margins), or per element, by its index in `selectors`; null removes one */
+  childStyle?: StyleChanges | ((index: number) => StyleChanges)
+  /** wrap the elements in the order `selectors` lists them (a flex group's
+   *  flow order) rather than the order the document holds them */
+  inGivenOrder?: boolean
+  /** mark the wrapper a canvas group, which a click picks as a whole */
+  drawing?: boolean
+}
+
+type StyleChanges = Record<string, string | null>
+
+function restyle(el: Element, styles: StyleChanges) {
+  const style = (el as HTMLElement).style
+  for (const [prop, value] of Object.entries(styles)) {
+    if (value === null) style.removeProperty(prop)
+    else if (value.endsWith(' !important')) style.setProperty(prop, value.slice(0, -' !important'.length), 'important')
+    else style.setProperty(prop, value)
+  }
+  if (!el.getAttribute('style')) el.removeAttribute('style')
+}
+
+/** The frame's HTML with the elements wrapped in one new `div`, placed where
+ *  the first of them was, and the wrapper's path. The elements must share a
+ *  parent (a group holds siblings); a wrapper in normal flow is static, so
+ *  absolutely positioned children keep the box they were placed in. Null when
+ *  they do not share one, sit in a table or list, or are locked. */
+export function groupElements(
+  html: string,
+  selectors: string[],
+  { name, style, childStyle, inGivenOrder, drawing }: GroupOptions,
+): { html: string; selector: string } | null {
+  const doc = parse(html)
+  const found = findAll(doc, selectors)
+  if (!found?.length) return null
+  const els = inDocumentOrder(found)
+  if (inGivenOrder && els.length !== found.length) return null
+  const parent = els[0]!.parentElement
+  if (!parent || els.some((el) => el.parentElement !== parent)) return null
+  if (UNWRAPPABLE_PARENTS.has(parent.tagName) || parent.closest(`[${LOCK_ATTR}]`)) return null
+  if (els.some((el) => el.hasAttribute(LOCK_ATTR))) return null
+  const svg = parent.namespaceURI === 'http://www.w3.org/2000/svg'
+  const wrapper = svg ? doc.createElementNS(parent.namespaceURI, 'g') : doc.createElement('div')
+  wrapper.setAttribute(NAME_ATTR, name)
+  if (drawing && !svg) wrapper.setAttribute('data-doop-drawing', 'group')
+  if (style && !svg) wrapper.setAttribute('style', style)
+  els[0]!.before(wrapper)
+  for (const el of inGivenOrder ? found : els) {
+    wrapper.append(el)
+    if (!childStyle || svg) continue
+    restyle(el, typeof childStyle === 'function' ? childStyle(found.indexOf(el)) : childStyle)
+  }
+  const next = serialize(doc)
+  const selector = elementPath(wrapper)
+  if (find(parse(next), selector)?.outerHTML !== wrapper.outerHTML) return null
+  return { html: next, selector }
+}
+
+/** The frame's HTML with each element swapped for its children, and the
+ *  children's paths: the group goes, what it held stays where it was. Only
+ *  boxes holding elements unwrap (text would lose the box that styled it);
+ *  null when none of them can. */
+export function ungroupElements(
+  html: string,
+  selectors: string[],
+  /** inline styles for freed children, by their path before the unwrap (a
+   *  positioned group's layers are placed where they were) */
+  childStyles: Record<string, StyleChanges> = {},
+): { html: string; selectors: string[] } | null {
+  const doc = parse(html)
+  const found = findAll(doc, selectors)
+  if (!found?.length) return null
+  const groups = outermost(found).filter(
+    (el) =>
+      el !== doc.body &&
+      el.children.length > 0 &&
+      !ownText(el) &&
+      !IMAGE_TAGS.has(el.tagName) &&
+      !el.closest(`[${LOCK_ATTR}]`) &&
+      (!el.hasAttribute('data-doop-drawing') || el.getAttribute('data-doop-drawing') === 'group') &&
+      !(el.parentElement && UNWRAPPABLE_PARENTS.has(el.parentElement.tagName)),
+  )
+  if (!groups.length) return null
+  const freed: Element[] = []
+  /* paths read before any unwrap, which shifts them */
+  for (const [path, styles] of Object.entries(childStyles)) {
+    const child = find(doc, path)
+    if (child && groups.includes(child.parentElement!)) restyle(child, styles)
+  }
+  for (const group of groups) {
+    const children = [...group.children]
+    group.replaceWith(...group.childNodes)
+    freed.push(...children)
+  }
+  const next = serialize(doc)
+  return { html: next, selectors: freed.map(elementPath) }
+}
+
+/* elements that hold no content of their own: a link goes around them, not inside */
+const LINK_WRAPPED = new Set(['IMG', 'PICTURE', 'VIDEO', 'CANVAS', 'IFRAME', 'INPUT', 'HR', 'BR', 'EMBED', 'OBJECT'])
+
+/** The link an element is, holds alone, or sits alone inside. */
+function linkOf(el: Element): Element | null {
+  if (el.tagName === 'A') return el
+  if (el.childNodes.length === 1 && el.firstElementChild?.tagName === 'A') return el.firstElementChild
+  const parent = el.parentElement
+  if (parent?.tagName === 'A' && parent.childNodes.length === 1) return parent
+  return null
+}
+
+/** The element's link target, or null when it has none. */
+export function elementLink(html: string, selector: string): string | null {
+  const el = find(parse(html), selector)
+  return el ? (linkOf(el)?.getAttribute('href') ?? null) : null
+}
+
+/** Link `el` to `href` (null unlinks) in its document; false when there is
+ *  nothing to unlink or the element cannot take a link. */
+/* what makes an element a link; everything else an inner link wears stays */
+const LINK_ONLY_ATTRS = [
+  'href',
+  'xlink:href',
+  'target',
+  'rel',
+  'download',
+  'hreflang',
+  'ping',
+  'referrerpolicy',
+  'type',
+]
+const SVG_NS = 'http://www.w3.org/2000/svg'
+
+/** A plain box in the link's place: a span (a `g` for a link inside SVG,
+ *  which an HTML span would be thrown out of on load), with its content and
+ *  every attribute but the ones that make it a link (class, style, id stay). */
+function demoteLink(doc: Document, link: Element): Element {
+  const box = link.namespaceURI === SVG_NS ? doc.createElementNS(SVG_NS, 'g') : doc.createElement('span')
+  for (const { name, value } of [...link.attributes]) {
+    if (!LINK_ONLY_ATTRS.includes(name)) box.setAttribute(name, value)
+  }
+  box.append(...link.childNodes)
+  link.replaceWith(box)
+  return box
+}
+
+function linkElement(doc: Document, el: Element, href: string | null, swaps: Map<Element, Element>): boolean {
+  const link = linkOf(el)
+  if (href === null) {
+    if (!link) return false
+    if (link === el) {
+      /* the link itself picked: keep the element, drop what made it a link */
+      el.removeAttribute('href')
+      el.removeAttribute('target')
+    } else link.replaceWith(...link.childNodes)
+    return true
+  }
+  if (link) {
+    link.setAttribute('href', href)
+    return true
+  }
+  /* already inside a link (a picked parent linked a moment ago): retarget
+     that one, since a link inside a link is split apart on load */
+  const around = el.parentElement?.closest('a')
+  if (around) {
+    around.setAttribute('href', href)
+    return true
+  }
+  const a = doc.createElement('a')
+  a.setAttribute('href', href)
+  if (LINK_WRAPPED.has(el.tagName) || el.namespaceURI === 'http://www.w3.org/2000/svg') {
+    if (el.parentElement?.namespaceURI === 'http://www.w3.org/2000/svg') return false
+    el.replaceWith(a)
+    a.append(el)
+  } else {
+    /* the links inside become plain spans under the one around them (a link
+       inside a link is split apart on load), keeping their looks and ids */
+    for (const inner of [...el.querySelectorAll('a')]) swaps.set(inner, demoteLink(doc, inner))
+    a.append(...el.childNodes)
+    el.append(a)
+  }
+  return true
+}
+
+/** The frame's HTML with each element linked to `href`, and every element's
+ *  path afterwards, in the order given: a link gets the new target, an image
+ *  (or any element with no content of its own, and SVG) is wrapped in one,
+ *  anything else has its content wrapped. Null `href` takes links off (the
+ *  link element, or the one link wrapping the element or its content, gives
+ *  way to its content). Every element is found before any changes, since
+ *  wrapping one shifts its siblings' positions. Null when an element no
+ *  longer resolves or none of them changed. */
+export function setElementsLink(
+  html: string,
+  selectors: string[],
+  href: string | null,
+): { html: string; selectors: string[] } | null {
+  const doc = parse(html)
+  const els = selectors.map((selector) => find(doc, selector))
+  if (els.some((el) => !el || el === doc.body)) return null
+  /* outermost first, so a picked child finds its picked parent's new link */
+  const order = [...els].sort((a, b) => (a!.compareDocumentPosition(b!) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1))
+  /* inner links a wrap turned into spans: a picked one is followed there */
+  const swaps = new Map<Element, Element>()
+  const current = (el: Element) => swaps.get(el) ?? el
+  const changed = order.map((el) => linkElement(doc, current(el!), href, swaps))
+  if (!changed.includes(true)) return null
+  return { html: serialize(doc), selectors: els.map((el) => elementPath(current(el!))) }
+}
+
+/** One element's `setElementsLink`. */
+export function setElementLink(
+  html: string,
+  selector: string,
+  href: string | null,
+): { html: string; selector: string } | null {
+  const linked = setElementsLink(html, [selector], href)
+  return linked ? { html: linked.html, selector: linked.selectors[0]! } : null
+}
+
+/** The frame's HTML with the elements swapped for the clipboard's layers,
+ *  which land where the first of them was (paste to replace), and
+ *  the pasted layers' paths. Null when an element is gone or locked, or the
+ *  markup does not survive a round trip. */
+export function replaceElementsWith(
+  html: string,
+  selectors: string[],
+  outerHtml: string,
+): { html: string; selectors: string[]; renamed: Record<string, string> } | null {
+  const doc = parse(html)
+  const found = findAll(doc, selectors)
+  if (!found?.length) return null
+  const els = inDocumentOrder(found)
+  const first = els[0]!
+  if (els.some((el) => el === doc.body || el.closest(`[${LOCK_ATTR}]`))) return null
+  const source = (first.parentElement ?? doc.body).cloneNode(false) as Element
+  source.innerHTML = outerHtml
+  if (!source.children.length) return null
+  if ([...source.childNodes].some((node) => node.nodeType === Node.TEXT_NODE && node.textContent?.trim())) return null
+  const copies = [...source.children]
+  const renamed = renameIds(doc, copies)
+  first.before(...copies)
+  for (const el of els) el.remove()
+  const next = serialize(doc)
+  const paths = copies.map(elementPath)
+  const reparsed = parse(next)
+  if (copies.some((copy, i) => find(reparsed, paths[i]!)?.outerHTML !== copy.outerHTML)) return null
+  return { html: next, selectors: paths, renamed }
 }
