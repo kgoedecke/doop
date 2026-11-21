@@ -60,6 +60,31 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
     void document.documentElement.offsetWidth
     document.adoptedStyleSheets = document.adoptedStyleSheets.filter(function (sheet) { return sheet !== stillSheet })
   }
+  /* The canvas's cursor, worn by the whole document. On the canvas the frame
+     sits under a shield that takes the pointer, but the browser can still
+     show the cursor the document asks for (a link's hand, a design's
+     cursor:pointer) instead of the canvas's. So the editor sends the cursor it
+     wants here (doop:cursor) and the document wears it; while text is edited
+     the document's own cursors apply. The prototype player never sends one,
+     so a played design keeps its cursors. Adopted, so nothing saves it. */
+  var vCursorSheet = null
+  try { vCursorSheet = new CSSStyleSheet() } catch (e) {}
+  var canvasCursor = null
+  var cursorRule = ''
+  function applyCursor() {
+    if (!vCursorSheet) return
+    var on = !!canvasCursor && !editing
+    /* a rule on every element restyles the whole document, so only when the
+       cursor or whether it applies actually changes */
+    if (on && cursorRule !== canvasCursor) {
+      vCursorSheet.replaceSync('*,*::before,*::after{cursor:' + canvasCursor + '!important}')
+      cursorRule = canvasCursor
+    }
+    var adopted = document.adoptedStyleSheets
+    if (on === (adopted.indexOf(vCursorSheet) >= 0)) return
+    var rest = adopted.filter(function (s) { return s !== vCursorSheet })
+    document.adoptedStyleSheets = on ? rest.concat(vCursorSheet) : rest
+  }
   /* ---- bleed ----
      A standalone element (a shape on the canvas, no frame around it) is the
      whole document, and an iframe paints nothing past its edge, so a stroke
@@ -259,9 +284,12 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
   /* the edited element's outline is the parent's (its selection hairline,
      drawn over the frame from the hit rect): in here only the caret cursor,
      and no focus ring of the browser's own */
+  /* a link inside the text being edited takes the text cursor too: a click
+     there places the caret, it never follows the link */
   var EDIT_CSS =
     '[data-v-hover]{cursor:text}' +
     '[data-v-active]{cursor:text}' +
+    '[data-v-hover] a[href],[data-v-hover] a[href] *,[data-v-active] a[href],[data-v-active] a[href] *{cursor:text}' +
     '[data-v-active]:focus{outline:none!important}'
 
   function hasOwnText(el) {
@@ -479,7 +507,7 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
     }
     var adopted = document.adoptedStyleSheets || []
     for (var t = 0; t < adopted.length; t++) {
-      if (adopted[t] === vSheet || adopted[t] === vOutlineSheet || adopted[t] === bleedSheet || adopted[t] === stillSheet) continue // the runtime's own
+      if (adopted[t] === vSheet || adopted[t] === vOutlineSheet || adopted[t] === vCursorSheet || adopted[t] === bleedSheet || adopted[t] === stillSheet) continue // the runtime's own
       var adoptedText = rulesText(adopted[t])
       if (adoptedText === null) continue
       var adoptedStyle = document.createElement('style')
@@ -518,6 +546,7 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
   function setEdit(on) {
     if (on === editing) return
     editing = on
+    applyCursor()
     if (on) {
       var st = document.createElement('style')
       st.setAttribute('data-v-edit', '')
@@ -533,6 +562,14 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
     }
   }
 
+  /* where the press of the coming click landed: a drag that selects text and
+     lets go past the text box clicks on their common ancestor, which is not
+     a click on nothing */
+  var pressedEditable = false
+  document.addEventListener('mousedown', function (ev) {
+    if (editing) pressedEditable = !!candidate(ev.target)
+  }, true)
+
   /* capture-phase: no link navigation or button handlers while editing */
   document.addEventListener('click', function (ev) {
     if (!editing) return
@@ -540,7 +577,15 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
     ev.stopPropagation()
     var el = candidate(ev.target)
     if (el) activate(el, ev.clientX - bleed, ev.clientY - bleed, ev.detail > 1)
-    else deactivate()
+    else if (pressedEditable) return // the end of a text drag: keep the selection
+    else {
+      /* a click on nothing editable ends the edit, as a click outside a text
+         box does in Figma. Only deactivating looked the same (no caret, no
+         toolbar) but left the frame taking the pointer and the keyboard, so
+         the canvas's keys, hover and cursors stayed off until Escape */
+      setEdit(false)
+      parent.postMessage({ type: 'doop:edit-esc' }, '*')
+    }
   }, true)
 
   document.addEventListener('mousemove', function (ev) {
@@ -1031,6 +1076,16 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
     return el ? hitInfo(el) : null
   }
 
+  function linkAt(x, y) {
+    var el = document.elementFromPoint(viewX(x), viewX(y))
+    return el && el.closest('a[href]')
+  }
+
+  function linkHrefAt(x, y) {
+    var link = linkAt(x, y)
+    return link && link.getAttribute('href')
+  }
+
   /* Right-click can reach a lock so the menu can unlock it. SVGs are one
      layer in the rail, and their paths share that same context menu. */
   function contextHit(x, y) {
@@ -1072,7 +1127,17 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
      whole, the way probe() picks it, so the hover and the pick agree */
   function hoverProbe(x, y, selected) {
     var el = probeTarget(x, y, true, selected, false)
-    return el ? { tag: el.tagName.toLowerCase(), selector: cssPath(el), rect: designRect(el) } : null
+    if (!el) return null
+    /* the link around the pointer, so the editor can outline the link itself
+       (not the span inside it) while its follow modifier is held */
+    var link = linkAt(x, y)
+    return {
+      tag: el.tagName.toLowerCase(),
+      selector: cssPath(el),
+      rect: designRect(el),
+      href: link ? link.getAttribute('href') : null,
+      linkRect: link ? designRect(link) : null
+    }
   }
 
   /* ⌥ measuring: where the picked elements are, the box around the primary
@@ -1523,7 +1588,7 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
      cross-origin sheet cannot be read and is passed over. */
   function isRuntimeSheet(sheet) {
     var owner = sheet.ownerNode
-    return sheet === vSheet || sheet === vOutlineSheet || sheet === bleedSheet || sheet === stillSheet || sheet === protoSheet ||
+    return sheet === vSheet || sheet === vOutlineSheet || sheet === vCursorSheet || sheet === bleedSheet || sheet === stillSheet || sheet === protoSheet ||
       !!(owner && owner.hasAttribute && owner.hasAttribute('data-v-edit'))
   }
   function sheetOutranksInline(el, name, value) {
@@ -1871,6 +1936,20 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
     if (d.type === 'doop:text-format' && Array.isArray(d.selectors)) {
       parent.postMessage({ type: 'doop:text-format-result', reqId: d.reqId, selectors: formatLayers(d.selectors, d.command) }, '*')
     } else if (d.type === 'doop:text-format') formatText(d.command)
+    /* a ⌘-clicked #link: to the element it names, or the top for a bare # */
+    if (d.type === 'doop:anchor' && typeof d.id === 'string') {
+      var anchorId = d.id
+      try { anchorId = decodeURIComponent(d.id) } catch (e) { /* keep it as written */ }
+      /* as a browser does: an element named so wins, even one named top */
+      var anchorEl = anchorId ? document.getElementById(anchorId) || document.getElementsByName(anchorId)[0] : null
+      if (anchorEl) anchorEl.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      else if (!anchorId || anchorId === 'top') window.scrollTo({ top: 0, behavior: 'smooth' })
+    }
+    if (d.type === 'doop:cursor') {
+      /* a cursor value, never a way to add rules: a brace is refused */
+      canvasCursor = typeof d.cursor === 'string' && d.cursor && !/[{}<]/.test(d.cursor) ? d.cursor : null
+      applyCursor()
+    }
     if (d.type === 'doop:edit') {
       setEdit(!!d.on)
       if (d.on && typeof d.x === 'number' && typeof d.y === 'number') {
@@ -1938,6 +2017,9 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
     }
     if (d.type === 'doop:probe') {
       parent.postMessage({ type: 'doop:probe-result', reqId: d.reqId, hit: probe(d.x, d.y, d.grouped === true, d.selected) }, '*')
+    }
+    if (d.type === 'doop:link-hit') {
+      parent.postMessage({ type: 'doop:link-hit-result', reqId: d.reqId, href: linkHrefAt(d.x, d.y) }, '*')
     }
     if (d.type === 'doop:enter-group') {
       /* a double-click: the layer one level into a picked group, or null
