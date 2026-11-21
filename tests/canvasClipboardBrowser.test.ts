@@ -251,7 +251,16 @@ describe.skipIf(!findBrowserPath() || !CLIPBOARD_IS_RELIABLE)('canvas clipboard 
     await chord('c')
     await chord('v')
     await expect.poll(() => count('section, p')).toBe(4)
-    expect(await page.evaluate(() => window.canvasClipboardHarness.picked())).toHaveLength(2)
+    const picked = await page.evaluate(() => window.canvasClipboardHarness.picked())
+    if (picked.length !== 2) {
+      /* DEBUG (throwaway) */
+      const log = await page.evaluate(() => (window as unknown as { __pickLog: unknown[] }).__pickLog)
+      const later = await new Promise((r) => setTimeout(r, 500)).then(() =>
+        page.evaluate(() => window.canvasClipboardHarness.picked()),
+      )
+      console.log('PICKLOG ' + JSON.stringify({ picked, later, log }, null, 1))
+    }
+    expect(picked).toHaveLength(2)
   })
 
   it('copies through the element menu and pastes with the keyboard', async () => {

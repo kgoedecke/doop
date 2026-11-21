@@ -14,6 +14,20 @@
       import { clearHistory, undo } from '/src/lib/history.ts'
       import '/src/styles.css'
 
+      /* DEBUG (throwaway): every change to the picked elements, with who made it */
+      window.__pickLog = []
+      useStore.subscribe((state, prev) => {
+        const now = JSON.stringify(pickedSelectors(state))
+        const before = JSON.stringify(pickedSelectors(prev))
+        if (now === before) return
+        window.__pickLog.push({
+          t: Math.round(performance.now()),
+          from: before,
+          to: now,
+          html: state.canvas?.frames[0]?.html.length,
+          stack: (new Error().stack || '').split('\n').slice(2, 14).join(' | '),
+        })
+      })
       window.canvasClipboardHarness = {
         seed: (frames, role = 'edit') => {
           clearHistory()
