@@ -36,16 +36,25 @@ function ToastAction({ className, ...props }: React.ComponentProps<'button'>) {
   )
 }
 
-/** Leads a toast whose action is still running (an export rendering). */
-function ToastSpinner({ className, ...props }: React.ComponentProps<'span'>) {
+/** A ring turning while something runs, in the colour of the text around
+ *  it (a busy button). */
+function Spinner({ className, ...props }: React.ComponentProps<'span'>) {
   return (
     <span
-      data-slot="toast-spinner"
+      data-slot="spinner"
       aria-hidden
-      className={cn('size-3.5 shrink-0 animate-spin rounded-full border-2 border-paper/30 border-t-paper', className)}
+      className={cn(
+        'size-3.5 shrink-0 animate-spin rounded-full border-2 border-current/30 border-t-current',
+        className,
+      )}
       {...props}
     />
   )
 }
 
-export { Toast, ToastAction, ToastSpinner }
+/** Leads a toast whose action is still running (an export rendering). */
+function ToastSpinner({ className, ...props }: React.ComponentProps<'span'>) {
+  return <Spinner data-slot="toast-spinner" className={cn('border-paper/30 border-t-paper', className)} {...props} />
+}
+
+export { Spinner, Toast, ToastAction, ToastSpinner }

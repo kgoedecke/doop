@@ -24,6 +24,8 @@ export const inspector: Catalog['inspector'] = {
   copyHtmlTitle: 'Copiar o HTML do frame',
   exportHtmlTitle: 'Salvar o HTML do frame como arquivo',
   export: 'Exportar',
+  exporting: 'Exportando…',
+  exportingTitle: 'Este frame ainda está sendo exportado',
   copyHtmlFailed: 'Não foi possível copiar o HTML. Selecione-o no editor e copie manualmente.',
   saveFailed: 'Não foi possível salvar o design. Tente novamente.',
   saving: 'salvando…',
