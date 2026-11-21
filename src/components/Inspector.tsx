@@ -13,7 +13,6 @@ import { FrameHistoryModal } from './FrameHistoryModal'
 import { FrameApprovalControl } from './FrameApproval'
 import { cn } from '@/lib/utils'
 import { Panel, PanelClose, PanelHeader, type PanelSurface } from './ui/panel'
-import { Collapsible, CollapsibleContent } from './ui/collapsible'
 import { CopyIcon, DownloadIcon, FrameIcon, LockIcon, RotationIcon } from './ui/icons'
 import { Button } from './ui/button'
 import { Input } from './ui/input'
@@ -23,8 +22,6 @@ import { normalizeRotation } from '../../shared/frameRotation'
 import { MIN_FRAME_SIZE } from '../lib/frameResize'
 import { t as translate, useT } from '../lib/i18n'
 import { trackExport, trackPngCopy } from '../lib/exportEvents'
-
-const HTML_OPEN_KEY = 'doop:inspector-html'
 
 /* the rail's filled buttons: a grey well, 28px, tall enough to hit on a phone */
 const fillBtn = 'h-7 rounded-[7px] bg-sub px-2 text-[12px] font-normal text-ink hover:bg-paper-deep max-md:min-h-10'
@@ -38,6 +35,9 @@ const BOX_KEYS: readonly BoxKey[] = ['x', 'y', 'width', 'height', 'rotation']
 function boxOf(frame: Frame): FrameBox {
   return { x: frame.x, y: frame.y, width: frame.width, height: frame.height, rotation: frame.rotation ?? 0 }
 }
+
+/* how often a frame being streamed into refreshes the always-open HTML editor */
+const HTML_PULL_MS = 250
 
 export function Inspector({
   frame,
@@ -53,9 +53,6 @@ export function Inspector({
 }) {
   const t = useT()
   const select = useStore((s) => s.select)
-  /* the raw HTML editor is a power tool — collapsed by default so the panel
-     reads as frame properties, not a code dump; the choice sticks */
-  const [showHtml, setShowHtml] = useState(() => localStorage.getItem(HTML_OPEN_KEY) === '1')
   const [draft, setDraft] = useState(frame.html)
   const [saveState, setSaveState] = useState<'idle' | 'dirty' | 'saved'>('idle')
   const [copiedUrl, setCopiedUrl] = useState(false)
@@ -73,17 +70,33 @@ export function Inspector({
   const scrubStart = useRef<{ id: string; box: FrameBox; key: BoxKey | null; value: number | undefined } | null>(null)
 
   /* switching frames resets the draft; otherwise pull in remote html
-     updates unless the user is typing */
+     updates unless the user is typing. The editor is always on screen, and
+     rewriting it costs the browser ~25ms for a 300KB frame, so an agent
+     streaming into the selected frame is pulled in at most every
+     HTML_PULL_MS, the last chunk always landing */
+  const lastPull = useRef(0)
   useEffect(() => {
     const switched = frameId.current !== frame.id
     frameId.current = frame.id
-    const typing = document.activeElement === textareaRef.current
-    if (switched || (!typing && frame.html !== draft)) {
+    const pull = () => {
+      lastPull.current = performance.now()
       setDraft(frame.html)
       setSaveState('idle')
     }
-    /* a copy confirmation belongs to the frame it was copied from */
-    if (switched) setHtmlCopy('idle')
+    if (switched) {
+      pull()
+      /* a copy confirmation belongs to the frame it was copied from */
+      setHtmlCopy('idle')
+      return
+    }
+    const typing = () => document.activeElement === textareaRef.current
+    if (typing() || frame.html === draft) return
+    const wait = lastPull.current + HTML_PULL_MS - performance.now()
+    if (wait <= 0) return pull()
+    const timer = window.setTimeout(() => {
+      if (!typing()) pull()
+    }, wait)
+    return () => window.clearTimeout(timer)
   }, [frame.id, frame.html, draft])
 
   /* the confirmation timer must not fire after the panel is gone */
@@ -132,12 +145,6 @@ export function Inspector({
       /* a failure stays up until the next attempt, so it can be read */
       setHtmlCopy('failed')
     }
-  }
-
-  /* the choice to show the raw HTML editor sticks across frames and visits */
-  function toggleHtml(next: boolean) {
-    setShowHtml(next)
-    localStorage.setItem(HTML_OPEN_KEY, next ? '1' : '0')
   }
 
   function commitMeta(patch: Partial<Frame>) {
@@ -340,18 +347,13 @@ export function Inspector({
             {t('inspector.pinReference')}
           </Button>
         </InspectorGroup>
-        <Collapsible className="flex min-h-0 flex-col" open={showHtml} onOpenChange={toggleHtml}>
+        {/* a frame is its HTML: the editor is always there, last in the panel,
+            so nobody has to find a toggle to see or change the code */}
+        <section className="flex min-h-0 flex-col">
           <div className="border-b border-line-soft px-3 py-2">
-            {/* the heading folds the raw editor; the buttons take the HTML out */}
-            <button
-              type="button"
-              aria-expanded={showHtml}
-              title={showHtml ? t('inspector.hideHtmlEditor') : t('inspector.editHtml')}
-              onClick={() => toggleHtml(!showHtml)}
-              className="mb-1.5 -ml-1 flex h-5 items-center gap-1 rounded-[5px] px-1 text-[12px] text-ink-soft hover:text-ink"
-            >
+            <h3 className="mb-1.5 flex h-5 items-center text-[12px] font-normal text-ink-soft">
               {t('inspector.code')}
-            </button>
+            </h3>
             <div className="grid grid-cols-2 gap-1.5">
               <Button
                 variant="bare"
@@ -376,9 +378,10 @@ export function Inspector({
               <p className="pt-2 text-[11px] text-accent-ink">{t('inspector.copyHtmlFailed')}</p>
             )}
           </div>
-          <CollapsibleContent className="relative flex min-h-0 flex-col">
+          <div className="relative flex min-h-0 flex-col">
             <Textarea
               ref={textareaRef}
+              aria-label={t('inspector.editHtml')}
               variant="code"
               className="h-[320px] flex-none max-md:h-auto max-md:min-h-[160px] max-md:flex-1"
               value={draft}
@@ -386,8 +389,8 @@ export function Inspector({
               placeholder="<!doctype html>…"
               onChange={(e) => onHtmlChange(e.target.value)}
             />
-          </CollapsibleContent>
-        </Collapsible>
+          </div>
+        </section>
       </div>
       <footer className="flex flex-none items-center justify-between gap-2 border-t border-line-soft py-2 pr-2 pl-3">
         <span className="min-w-0 truncate text-[11px] text-ink-faint">

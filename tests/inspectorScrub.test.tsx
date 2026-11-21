@@ -226,3 +226,22 @@ it('scrubs rotation as one save, undoes to zero, and cancels without saving', as
   expect(stored().rotation).toBe(0)
   expect(update).not.toHaveBeenCalled()
 })
+
+it('shows the HTML editor with the frame in it, with nothing to open and nothing to hide it', () => {
+  const editor = container.querySelector<HTMLTextAreaElement>('textarea[aria-label="Edit the HTML"]')
+  expect(editor?.value).toBe('<h1>Checkout</h1>')
+  /* the old fold: "Code" was a toggle titled to open or hide the editor */
+  expect(container.querySelector('[title="Edit the HTML"], [title="Hide the HTML editor"]')).toBeNull()
+})
+
+it('pulls a stream of remote updates into the editor at a capped rate, ending on the last', async () => {
+  const editor = () => container.querySelector<HTMLTextAreaElement>('textarea[aria-label="Edit the HTML"]')!.value
+  const remote = (html: string) =>
+    act(() => useStore.getState().setCanvas({ ...useStore.getState().canvas!, frames: [{ ...stored(), html }] }))
+  remote('<h1>One</h1>')
+  remote('<h1>Two</h1>')
+  remote('<h1>Three</h1>')
+  expect(editor()).not.toBe('<h1>Three</h1>')
+  await act(() => new Promise((resolve) => setTimeout(resolve, 300)))
+  expect(editor()).toBe('<h1>Three</h1>')
+})
