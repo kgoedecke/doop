@@ -6,14 +6,17 @@ import { cn } from '@/lib/utils'
 /* A tile is a card with a cover image over a short body: a canvas on Home, a
    design in the Community gallery, a canvas in the admin index. The shell is
    the raised Card surface with the panel corner; `frosted` lets the dotted
-   page show through at 72% and lifts on hover, `solid` is the plain surface. */
+   page show through at 72% and lifts on hover, `solid` is the plain surface.
+   No backdrop blur and no forced GPU layer: with both on this clipped
+   element, Safari 27.3 left the tiles unpainted, and dropping only one did
+   not help (#536). Over the flat page the blur showed nothing anyway. */
 const tileVariants = cva(
-  'group relative z-[2] flex min-w-0 transform-gpu flex-col overflow-hidden rounded-panel corner-squircle text-left text-ink shadow-elevation-1',
+  'group relative z-[2] flex min-w-0 flex-col overflow-hidden rounded-panel corner-squircle text-left text-ink shadow-elevation-1',
   {
     variants: {
       tone: {
         frosted:
-          'bg-[color-mix(in_srgb,var(--surface)_72%,transparent)] backdrop-blur-[6px] transition-[box-shadow] duration-normal ease-out-quad hover:shadow-elevation-1-hover',
+          'bg-[color-mix(in_srgb,var(--surface)_72%,transparent)] transition-[box-shadow] duration-normal ease-out-quad hover:shadow-elevation-1-hover',
         solid: 'bg-surface',
       },
     },
