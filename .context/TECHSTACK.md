@@ -56,7 +56,12 @@
   only an accelerator. `frameIcons.ts` prepares image/srcset/CSS/srcdoc dependencies before
   rendering, and `guardPublicPageRequests.resolveAsset` fulfills both local icon URLs and
   legacy Iconify URLs before any direct-browser bypass. Cold failures for preloaded dependencies propagate rather
-  than silently caching broken screenshots. Tests: `iconAssets.test.ts`, `publicUrl.test.ts`.
+  than silently caching broken screenshots. Frame writes (`withFrameAssets` in `actions.ts`: create,
+  edit, stream end or idle, version restore) rewrite every Iconify hotlink the route accepts to
+  `/a/iconify/` (`withIconAssets`; others stay as written) and start downloading its base icon
+  (`warmFrameIcons`), and a stream's healed partials are rewritten too, so viewers' browsers never
+  burst the public API (which answers with 429). Tests: `iconAssets.test.ts`, `publicUrl.test.ts`,
+  `iconFrameWrites.test.ts`.
 - Agent feedback (`server/agentFeedback.ts`, `shared/agentFeedback.ts`): agents talk to the Doop
   team through two MCP tools, which the resident agent has under the same names. `report_issue`
   (kind `issue`: `bug`, `tool_error`, `confusing`, `missing_capability`, `other`) is for where Doop

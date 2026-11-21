@@ -13,6 +13,8 @@ import { parseRunnerPick, runnerKey, type RunnerPick } from '../shared/agentRunn
 import { hasElementId, stampElementId } from './elementIds.ts'
 import { decodeEscapedHtml, looksEscapedHtml, repairEscapedHtml } from './escapedHtml.ts'
 import { fontsForCanvas } from './fonts.ts'
+import { env } from './env.ts'
+import { warmFrameIcons, withIconAssets } from './frameIcons.ts'
 import { withFontFaces } from '../shared/fonts.ts'
 import { withWebFontLinks } from '../shared/webFonts.ts'
 import {
@@ -1547,7 +1549,10 @@ export async function restoreFrameVersion(
   finishStream(frameId, false)
   finishReveal(frameId)
   const prior = priorState(before)
-  const patch = { html: version.html, width: version.width, height: version.height }
+  /* a version saved before icons were stored locally comes back pointed at them */
+  const html = withLocalIcons(version.html)
+  warmFrameIcons(html)
+  const patch = { html, width: version.width, height: version.height }
   const frame = store.updateFrame(frameId, patch, actor.name)
   if (!frame) return undefined
   noteHtmlChange(prior, actor, false)
@@ -1661,7 +1666,7 @@ function finishStream(frameId: string, logDone: boolean) {
   let renamed = current.html
   for (const rename of pendingRenames.get(frameId) ?? []) renamed = applyRename(renamed, rename)
   pendingRenames.delete(frameId)
-  const html = withLibraryFaces(current.canvasId, renamed)
+  const html = withFrameAssets(current.canvasId, renamed)
   /* compare the HTML, not the objects: updateFrame edits the frame in place */
   const htmlChanged = html !== current.html
   const frame = htmlChanged ? store.updateFrame(frameId, { html }, s.actor.name)! : current
@@ -1707,17 +1712,26 @@ setInterval(() => {
   }
 }, TICK_MS)
 
+/** Iconify hotlinks served from this deployment's stored copies (see
+ *  withIconAssets); also used on the healed partials a stream shows. */
+function withLocalIcons(html: string): string {
+  return withIconAssets(html, new URL(env.BETTER_AUTH_URL).origin)
+}
+
 /** A finished document with the @font-face rules for the canvas's library
- *  fonts it uses (shared/fonts.ts) and the stylesheet link for the hosted
- *  fonts it names (shared/webFonts.ts), so naming a family is all it takes. */
-function withLibraryFaces(canvasId: string, html: string): string {
+ *  fonts it uses (shared/fonts.ts), the stylesheet link for the hosted fonts
+ *  it names (shared/webFonts.ts), so naming a family is all it takes, and its
+ *  Iconify icons pointed at Doop's stored copies, whose download starts now. */
+function withFrameAssets(canvasId: string, html: string): string {
   const canvas = store.getCanvas(canvasId)
   if (!canvas) return html
   const library = fontsForCanvas(canvas)
   /* tokens first: a family named only through a font token is then in the
      document for the font scan to find */
   const withTokens = withTokenBlock(html, canvas.tokens ?? [], canvas.tokenThemes ?? [])
-  return withWebFontLinks(withFontFaces(withTokens, library), library)
+  const finished = withLocalIcons(withWebFontLinks(withFontFaces(withTokens, library), library))
+  warmFrameIcons(finished)
+  return finished
 }
 
 export function appendFrameHtml(
@@ -1737,7 +1751,7 @@ export function appendFrameHtml(
   const piece = escaped ? decodeEscapedHtml(chunk) : chunk
   const joined = opts.start ? piece : before.html + piece
   /* faces join once the document is whole; mid-stream it is still arriving */
-  const html = opts.done ? withLibraryFaces(before.canvasId, joined) : joined
+  const html = opts.done ? withFrameAssets(before.canvasId, joined) : joined
   const prior = priorState(before)
   const frame = store.updateFrame(frameId, { html }, actor.name)!
   /* the opening chunk replaces the design; every later one extends this burst */
@@ -1757,7 +1771,7 @@ export function appendFrameHtml(
   /* the chunk renders the moment it arrives — viewers see the agent's real progress */
   broadcast(frame.canvasId, {
     type: 'frame:updated',
-    frame: opts.done ? frame : { ...frame, html: healPartialHtml(frame.html) },
+    frame: opts.done ? frame : { ...frame, html: withLocalIcons(healPartialHtml(frame.html)) },
     actor,
   })
   if (opts.done) finishStream(frameId, true)
@@ -1847,7 +1861,7 @@ export function createFrame(
   },
   actor: Actor,
 ): Frame | undefined {
-  if (input.html !== undefined) input = { ...input, html: withLibraryFaces(canvasId, repairEscapedHtml(input.html)) }
+  if (input.html !== undefined) input = { ...input, html: withFrameAssets(canvasId, repairEscapedHtml(input.html)) }
   const frame = store.createFrame(canvasId, input, actor.name)
   if (!frame) return undefined
   bursts.set(frame.id, { actor, lastAt: frame.createdAt })
@@ -1880,7 +1894,7 @@ export function updateFrame(
   const before = store.getFrame(frameId)
   if (!before) return undefined
   if (patch.html !== undefined)
-    patch = { ...patch, html: withLibraryFaces(before.canvasId, repairEscapedHtml(patch.html)) }
+    patch = { ...patch, html: withFrameAssets(before.canvasId, repairEscapedHtml(patch.html)) }
   const prevName = before.name
   const prevHtml = before.html
   const prevHidden = !!before.hidden
@@ -2258,7 +2272,7 @@ function restyleTokenFrames(canvasId: string, actor: Actor, rename?: TokenRename
     }
     let html = frame.html
     if (rename) html = applyRename(html, rename)
-    html = withLibraryFaces(canvasId, html)
+    html = withFrameAssets(canvasId, html)
     if (html === frame.html) continue
     const prevHtml = frame.html
     const updated = store.updateFrame(frame.id, { html }, actor.name, { annotation: true })

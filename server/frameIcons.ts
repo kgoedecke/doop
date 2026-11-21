@@ -1,6 +1,6 @@
 import { parse, type DefaultTreeAdapterMap } from 'parse5'
 import { getIconAsset, iconAssetSource, iconId } from './iconAssets.ts'
-import { iconData } from './iconData.ts'
+import { iconData, validIconId } from './iconData.ts'
 
 /** A known public Iconify URL or this deployment's own icon route, never an
  * arbitrary same-path URL on another host. */
@@ -77,4 +77,35 @@ export async function frameIconResponse(
 ): Promise<{ body: Uint8Array; contentType: string } | null> {
   const source = frameIconSource(url, assetOrigin)
   return source ? { body: await getIconAsset(source), contentType: 'image/svg+xml' } : null
+}
+
+/* A hotlink as frame HTML spells it: slash or colon form, then whatever query
+   follows up to the end of the attribute or CSS url(). An attribute's query
+   may still be entity-encoded (`&amp;`); it is kept exactly as written. */
+const ICONIFY_HOTLINK = /https:\/\/api\.iconify\.design\/([a-z0-9-]+)[/:]([a-z0-9-]+)\.svg((?:\?[^\s"'<>()\\]*)?)/g
+const ICON_ROUTE = /\/a\/iconify\/([a-z0-9-]+)\/([a-z0-9-]+)\.svg/g
+const MAX_WARMED_ICONS = 512
+
+/** Point every Iconify hotlink the icon route can serve at this deployment's
+ * copy, so viewers never burst the public API (it answers a burst with 429).
+ * A URL the route would refuse (an unknown parameter) stays as written. */
+export function withIconAssets(html: string, assetOrigin: string): string {
+  if (!html.includes('api.iconify.design')) return html
+  return html.replace(ICONIFY_HOTLINK, (url, prefix: string, name: string, query: string) =>
+    iconAssetSource(url.replace(/&amp;/gi, '&')) ? `${assetOrigin}/a/iconify/${prefix}/${name}.svg${query}` : url,
+  )
+}
+
+/** Start downloading the base icons a saved frame names, so they are stored
+ * before anyone opens it. Fire and forget: a failure here only means the
+ * first viewer's request does the download instead. */
+export function warmFrameIcons(html: string): void {
+  if (!html.includes('/a/iconify/')) return
+  const ids = new Set<string>()
+  for (const [, prefix, name] of html.matchAll(ICON_ROUTE)) {
+    const id = `${prefix}:${name}`
+    if (validIconId(id)) ids.add(id)
+    if (ids.size >= MAX_WARMED_ICONS) break
+  }
+  for (const id of ids) iconData.get(id).catch(() => {})
 }
