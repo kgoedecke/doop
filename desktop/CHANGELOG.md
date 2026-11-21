@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.15.0](https://github.com/kgoedecke/doop/compare/desktop-v0.14.0...desktop-v0.15.0) (2026-11-21)
+
+
+### Features
+
+* **desktop:** draw the Windows title bar in the page ([#521](https://github.com/kgoedecke/doop/issues/521)) ([1687192](https://github.com/kgoedecke/doop/commit/1687192ac4a1e05b55737dd27bce428db190a2e9))
+
 ## [0.14.0](https://github.com/kgoedecke/doop/compare/desktop-v0.13.0...desktop-v0.14.0) (2026-11-16)
 
 
