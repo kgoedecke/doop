@@ -1030,7 +1030,7 @@ edit the brief to choose dimensions, languages and deliverables. Generated desig
 Schedules are checked every minute; approvals and ongoing work every five seconds. One run
 per automation is active at a time. Up to ten approvals are grouped into each run, with each
 approval processed once, including after a restart or run-history cleanup. Enabling a workflow
-watches future approvals; **Run now** also picks up existing, unprocessed approvals.
+watches future approvals; **Run now** (⌘⌥↩, Ctrl+Alt+↩ elsewhere) also picks up existing, unprocessed approvals.
 Changing an approved source to draft or needs review stops its remaining workflow steps.
 Agent work times out after one hour. Sizes, languages, and asset briefs are editable presets.
 
