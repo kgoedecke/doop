@@ -213,6 +213,34 @@ describe('design tokens on frame writes', () => {
     )
   })
 
+  it('writes the block into a streaming fragment from its first chunk, once', () => {
+    const canvasId = setup()
+    const frame = actions.createFrame(canvasId, { name: 'Stream' }, agent)!
+    /* create_frame takes a fragment, and agents stream one: no head or body tag ever arrives */
+    actions.appendFrameHtml(frame.id, '<style>h1{color:var(--color-ink)}</style><section><h1>Hero</h1>', agent, {
+      start: true,
+    })
+    const first = store.getFrame(frame.id)!.html
+    expect(first.startsWith(`<style ${TOKEN_BLOCK_ATTR}>:root{--color-ink:#111}</style><style>h1`)).toBe(true)
+    expect(sent.at(-1)?.html).toContain(TOKEN_BLOCK_ATTR)
+    actions.appendFrameHtml(frame.id, '<p style="padding:var(--spacing-4)">Body</p>', agent)
+    const second = store.getFrame(frame.id)!.html
+    expect(second.split(TOKEN_BLOCK_ATTR)).toHaveLength(2)
+    expect(second).toContain('--spacing-4:16px')
+    actions.appendFrameHtml(frame.id, '</section>', agent, { done: true })
+    expect(store.getFrame(frame.id)!.html.split(TOKEN_BLOCK_ATTR)).toHaveLength(2)
+  })
+
+  it('waits while a stream may still turn out to be a document', () => {
+    const canvasId = setup()
+    const frame = actions.createFrame(canvasId, { name: 'Stream' }, agent)!
+    const named = '<h1 style="color:var(--color-ink)">x</h1>'
+    for (const start of ['<', '<ht', '<!-- hero --><!doc', `<!-- hero ${named}`, `<html lang="en">${named}`]) {
+      actions.appendFrameHtml(frame.id, start, agent, { start: true })
+      expect(store.getFrame(frame.id)!.html).toBe(start)
+    }
+  })
+
   it('previews a component with the canvas tokens it names', () => {
     const canvasId = setup()
     const { component: def } = createComponentFromHtml(
