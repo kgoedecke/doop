@@ -24,6 +24,10 @@ enum WorkingAgentsChecks {
         expect(WorkingAgents.list(presences: [], tasks: [critic], now: now).first?.name == "Accessibility", "a card names its stage's role")
         expect(WorkingAgents.list(presences: [], tasks: [custom], now: now).first?.name == "@critic", "a custom role by its handle")
 
+        expect(WorkingAgents.startingExpiry(tasks: [queued, running, stale, done], now: now) == queued.startedAt + WorkingAgents.startingWindowMS,
+               "the starting pill runs out when its waiting card's window ends")
+        expect(WorkingAgents.startingExpiry(tasks: [stale, running], now: now) == nil, "no waiting card in its window, nothing to wake for")
+
         let claimed = WorkingAgents.list(presences: [], tasks: [queued, running], now: now)
         expect(claimed.map(\.status) == ["Picking a palette"], "a running task replaces the starting pill")
 

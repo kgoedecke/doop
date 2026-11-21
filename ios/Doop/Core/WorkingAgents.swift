@@ -58,6 +58,16 @@ public enum WorkingAgents {
         return result
     }
 
+    /// When the "Starting…" pill `list` shows at `now` runs out: the waiting card's ten
+    /// minutes end. Nothing the room sends marks that moment, so the canvas schedules a
+    /// redraw for it. Nil when no waiting card is inside its window.
+    public static func startingExpiry(tasks: [CanvasTask], now: Double) -> Double? {
+        tasks.filter { $0.endedAt == nil && $0.failedAt == nil && $0.agentName.isEmpty }
+            .map { $0.startedAt + startingWindowMS }
+            .filter { $0 > now }
+            .min()
+    }
+
     /// The role a waiting card is addressed to: its pipeline's current stage, else Doop.
     /// A custom agent's id is its handle, shown as it is typed in an @mention.
     private static func waitingRole(_ task: CanvasTask) -> (name: String, color: String) {
