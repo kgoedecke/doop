@@ -85,37 +85,24 @@ export function DesktopTabs({ path }: { path: string }) {
       from: index,
       target: index,
       startX: e.clientX,
+      x: e.clientX,
+      startScroll: 0,
+      pointerId: e.pointerId,
       width: 0,
       min: 0,
       max: 0,
       mids: [] as number[],
       dragging: false,
     }
-    function move(ev: PointerEvent) {
-      if (!d.dragging) {
-        /* inside the threshold the gesture is still a candidate click */
-        if (Math.abs(ev.clientX - d.startX) < 4) return
-        el.setPointerCapture(ev.pointerId)
-        /* geometry freezes here: siblings slide by transform only, so
-           their midpoints stay the drop boundaries until pointerup */
-        const rect = el.getBoundingClientRect()
-        const rects = Array.from(list.children, (c) => c.getBoundingClientRect())
-        const first = rects[0]
-        const last = rects[rects.length - 1]
-        if (!first || !last) return
-        d.width = rect.width
-        d.min = first.left - rect.left
-        d.max = last.right - rect.right
-        d.mids = rects.filter((_, i) => i !== d.from).map((r) => r.left + r.width / 2)
-        d.dragging = true
-        el.style.zIndex = '1'
-        for (const [i, child] of Array.from(list.children).entries())
-          if (i !== d.from) (child as HTMLElement).style.transition = 'transform 150ms ease-out'
-      }
-      const dx = Math.min(Math.max(ev.clientX - d.startX, d.min), d.max)
+    /* Drop geometry is worked in content coordinates (clientX + scrollLeft)
+       so a strip scroll mid-drag shifts nothing: the midpoints and the
+       clamp bounds were frozen at drag start and stay valid */
+    function place(clientX: number) {
+      const cx = clientX + list.scrollLeft
+      const dx = Math.min(Math.max(cx - (d.startX + d.startScroll), d.min), d.max)
       el.style.transform = `translateX(${dx}px)`
       /* the drop slot counts the sibling midpoints the pointer has passed */
-      d.target = d.mids.filter((m) => ev.clientX > m).length
+      d.target = d.mids.filter((m) => cx > m).length
       for (const [i, child] of Array.from(list.children).entries()) {
         if (i === d.from) continue
         const shift =
@@ -127,27 +114,69 @@ export function DesktopTabs({ path }: { path: string }) {
         ;(child as HTMLElement).style.transform = shift ? `translateX(${shift}px)` : ''
       }
     }
+    function scrolled() {
+      place(d.x)
+    }
+    function move(ev: PointerEvent) {
+      d.x = ev.clientX
+      if (!d.dragging) {
+        /* inside the threshold the gesture is still a candidate click */
+        if (Math.abs(ev.clientX - d.startX) < 4) return
+        el.setPointerCapture(ev.pointerId)
+        const rect = el.getBoundingClientRect()
+        const rects = Array.from(list.children, (c) => c.getBoundingClientRect())
+        const first = rects[0]
+        const last = rects[rects.length - 1]
+        if (!first || !last) return
+        d.startScroll = list.scrollLeft
+        d.width = rect.width
+        d.min = first.left - rect.left
+        d.max = last.right - rect.right
+        d.mids = rects.filter((_, i) => i !== d.from).map((r) => r.left + r.width / 2 + d.startScroll)
+        d.dragging = true
+        el.style.zIndex = '1'
+        for (const [i, child] of Array.from(list.children).entries())
+          if (i !== d.from) (child as HTMLElement).style.transition = 'transform 150ms ease-out'
+        list.addEventListener('scroll', scrolled)
+      }
+      place(d.x)
+    }
     function finish(commit: boolean) {
       document.removeEventListener('pointermove', move)
       document.removeEventListener('pointerup', up)
       document.removeEventListener('pointercancel', cancel)
       document.removeEventListener('keydown', key, true)
+      list.removeEventListener('scroll', scrolled)
+      unsub()
       cancelDrag.current = null
       for (const child of Array.from(list.children) as HTMLElement[]) {
         child.style.transition = ''
         child.style.transform = ''
         child.style.zIndex = ''
       }
-      if (!commit || !d.dragging) return
-      moveTab(d.id, d.target)
-      /* the click that lands after a drop must not navigate — the pointer
-         can be over a different tab by then */
+      if (!d.dragging) return
+      if (el.hasPointerCapture(d.pointerId)) el.releasePointerCapture(d.pointerId)
+      if (commit) moveTab(d.id, d.target)
+      /* the click that lands after a drop — or after a cancelled drag's
+         release — must not navigate; it can be over a different tab by
+         then. A committed drop's click shares its pointerup's task; a
+         cancelled one arrives with the press's own later release, and if
+         that release produced no click (outside the window) the next press
+         or release retires the eater rather than letting it swallow a
+         real click */
       const eat = (ev: MouseEvent) => {
         ev.preventDefault()
         ev.stopPropagation()
       }
+      const disarm = () => {
+        /* the pointerup's click companion is dispatched in the same task,
+           ahead of this timer, so the eater still sees it */
+        setTimeout(() => document.removeEventListener('click', eat, true), 0)
+      }
+      const disarmNow = () => document.removeEventListener('click', eat, true)
       document.addEventListener('click', eat, { capture: true, once: true })
-      setTimeout(() => document.removeEventListener('click', eat, true), 0)
+      document.addEventListener('pointerup', disarm, { capture: true, once: true })
+      document.addEventListener('pointerdown', disarmNow, { capture: true, once: true })
     }
     function up() {
       finish(true)
@@ -156,12 +185,25 @@ export function DesktopTabs({ path }: { path: string }) {
       finish(false)
     }
     function key(ev: KeyboardEvent) {
-      if (ev.key === 'Escape') finish(false)
+      if (ev.key !== 'Escape') return
+      /* a drag's Esc is ours: keep it from the canvas, where it would also
+         deselect or stop following. An Esc before the threshold is not ours */
+      if (d.dragging) {
+        ev.preventDefault()
+        ev.stopPropagation()
+      }
+      finish(false)
     }
     document.addEventListener('pointermove', move)
     document.addEventListener('pointerup', up)
     document.addEventListener('pointercancel', cancel)
     document.addEventListener('keydown', key, true)
+    /* the strip can change under the gesture — ⌘W closes a tab, a deep
+       link opens one — and the frozen geometry would land the drop on the
+       wrong slot; a rename keeps the same ids and must not cancel */
+    const unsub = useTabs.subscribe((s, prev) => {
+      if (s.tabs.length !== prev.tabs.length || s.tabs.some((t, i) => t.id !== prev.tabs[i]?.id)) finish(false)
+    })
     cancelDrag.current = cancel
   }
 
