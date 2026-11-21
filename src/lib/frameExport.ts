@@ -1,5 +1,12 @@
 import { pdfRenderBudgetMs } from '../../shared/pdfLimits'
-import { DEFAULT_EXPORT_SCALE, exportScaleSuffix, fitExportScale, formatExportScale } from '../../shared/exportScale'
+import {
+  DEFAULT_EXPORT_SCALE,
+  exportScaleSuffix,
+  fitExportScale,
+  formatExportScale,
+  fullFrameRenderScale,
+} from '../../shared/exportScale'
+import { MAX_LAYER_SELECTOR_CHARS } from '../../shared/elementId'
 import type { Frame } from '../../shared/types'
 import { isDesktopShell } from './shell'
 import { inspectElement } from './frameBridge'
@@ -136,25 +143,32 @@ async function measureElement(frame: Frame, selector: string): Promise<ClipRect 
   return info ? clipToFrame(info.rect, frame) : null
 }
 
-/** The server's render of the whole frame, cut down to `clip` here. */
-async function fetchClipped(frame: Frame, format: RasterFormat, scale: number, clip: ClipRect, fileName: string) {
-  const label = FORMAT_LABEL[format]
-  const whole = await fetchFile(frameExportUrl(frame, format, scale), label, fileName)
-  if (!whole.ok) return whole
-  try {
-    const blob = await cropRaster(whole.blob, clip, {
-      scale,
-      type: rasterType(format),
-      quality: JPG_QUALITY,
-    })
-    return { ok: true as const, blob, fileName }
-  } catch {
-    return { ok: false as const, message: t('panels.exportFailed', { label }) }
+/** If a full screenshot would shrink a small selection, let Chromium capture
+ *  the layer directly at its original density. Otherwise keep the live
+ *  document's measured crop, including selectors too long for a public URL. */
+function serverRasterTarget(
+  frame: Frame,
+  format: RasterFormat,
+  scale: number,
+  clip?: ClipRect,
+  element?: ElementTarget,
+) {
+  const url = frameExportUrl(frame, format, scale)
+  const fullScale = fullFrameRenderScale(frame, scale)
+  if (
+    fullScale < scale &&
+    clip &&
+    element &&
+    element.selector.length <= MAX_LAYER_SELECTOR_CHARS &&
+    fullFrameRenderScale(clip, scale) === scale
+  ) {
+    return { url: `${url}&selector=${encodeURIComponent(element.selector)}`, scale }
   }
+  return { url, scale: fullScale, clip }
 }
 
-/** Render here first; the server's Chromium is the fallback. A scale the
- *  frame is too big for comes down to the largest it allows, and says so. */
+/** Render here first; the server's Chromium is the fallback. Use the scale
+ *  of the renderer that produced the file for its name and download notice. */
 async function fetchExport(
   frame: Frame,
   format: FrameExportFormat,
@@ -164,24 +178,30 @@ async function fetchExport(
   const clip = element ? await measureElement(frame, element.selector) : undefined
   if (clip === null) return { ok: false, message: t('panels.exportElementMissing') }
   if (format === 'svg') return svgExport(frame, element, clip)
-  const scale = fitExportScale(frame, wanted)
-  const fileName = `${exportName(frame, element)}${exportScaleSuffix(scale)}.${format}`
-  const fetched = await rasterFetch(frame, format, scale, clip, fileName)
-  if (!fetched.ok || scale === wanted) return fetched
-  return { ...fetched, note: t('panels.exportScaledDown', { scale: formatExportScale(scale) }) }
-}
-
-async function rasterFetch(
-  frame: Frame,
-  format: RasterFormat,
-  scale: number,
-  clip: ClipRect | undefined,
-  fileName: string,
-): Promise<Fetched> {
-  const local = await rasterExport(frame, format, scale, clip)
-  if (local) return { ok: true, blob: local, fileName }
-  if (clip) return fetchClipped(frame, format, scale, clip, fileName)
-  return fetchFile(frameExportUrl(frame, format, scale), FORMAT_LABEL[format], fileName)
+  let scale = fitExportScale(frame, wanted)
+  let blob = await rasterExport(frame, format, scale, clip)
+  let fileName = ''
+  if (!blob) {
+    const target = serverRasterTarget(frame, format, scale, clip, element)
+    scale = target.scale
+    const fetched = await fetchFile(target.url, FORMAT_LABEL[format], '')
+    if (!fetched.ok) return fetched
+    fileName = element ? '' : fetched.fileName
+    blob = fetched.blob
+    if (target.clip) {
+      try {
+        blob = await cropRaster(blob, target.clip, { scale, type: rasterType(format), quality: JPG_QUALITY })
+      } catch {
+        return { ok: false, message: t('panels.exportFailed', { label: FORMAT_LABEL[format] }) }
+      }
+    }
+  }
+  return {
+    ok: true,
+    blob,
+    fileName: fileName || `${exportName(frame, element)}${exportScaleSuffix(scale)}.${format}`,
+    note: scale === wanted ? undefined : t('panels.exportScaledDown', { scale: formatExportScale(scale) }),
+  }
 }
 
 /** An SVG has no server fallback: the server's Chromium paints pixels, and
@@ -346,10 +366,11 @@ async function copyPng(frame: Frame, wanted: number, element?: ElementTarget): P
     const local = await rasterExport(frame, 'png', scale, clip)
     if (local) return local
     try {
-      const res = await fetch(frameExportUrl(frame, 'png', scale), { signal: AbortSignal.timeout(EXPORT_TIMEOUT_MS) })
+      const target = serverRasterTarget(frame, 'png', scale, clip, element)
+      const res = await fetch(target.url, { signal: AbortSignal.timeout(EXPORT_TIMEOUT_MS) })
       if (res.ok) {
         const whole = await res.blob()
-        return clip ? await cropRaster(whole, clip, { scale, type: 'png' }) : whole
+        return target.clip ? await cropRaster(whole, target.clip, { scale: target.scale, type: 'png' }) : whole
       }
       failure = await failureOf(res, 'png')
     } catch (err) {

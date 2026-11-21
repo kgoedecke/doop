@@ -152,7 +152,7 @@ import { skillsRouter } from './skillRoutes.ts'
 import { activeAgentTasks } from '../shared/agentActivity.ts'
 import { colorFor } from '../shared/types.ts'
 import { isPeerViewport } from '../shared/viewport.ts'
-import { exportScaleSuffix, fitExportScale, parseExportScale } from '../shared/exportScale.ts'
+import { exportScaleSuffix, fitExportScale, fullFrameRenderScale, parseExportScale } from '../shared/exportScale.ts'
 import { emailShare } from './canvasShares.ts'
 import * as userEvents from './userEvents.ts'
 import type { Actor, Canvas, ClientMessage, Presence, ServerMessage } from '../shared/types.ts'
@@ -560,7 +560,9 @@ app.get('/i/:id.:ext', async (req, res) => {
   if (layer === null) return res.status(400).json({ error: 'element must be a data-doop-id; selector a CSS selector' })
   /* any multiplier the export picker offers; a missing or unreadable one
      is 1x, as before there was a picker */
-  const scale = fitExportScale(frame, parseExportScale(req.query.scale) ?? 1)
+  const requested = fitExportScale(frame, parseExportScale(req.query.scale) ?? 1)
+  const preview = !layer && ext === 'jpg' && req.query.preview !== undefined
+  const scale = layer || preview ? requested : fullFrameRenderScale(frame, requested)
   let result: Awaited<ReturnType<typeof getImage>>
   try {
     result = await getImage(frame, {
@@ -568,7 +570,7 @@ app.get('/i/:id.:ext', async (req, res) => {
       scale,
       quality: Math.min(100, Math.max(1, Number(req.query.quality) || 90)),
       /* ?preview — the dashboard-card variant; see previews.ts */
-      preview: !layer && req.query.preview !== undefined,
+      preview,
       layer: layer ? layerSelector(layer) : undefined,
       ip: req.ip ?? 'unknown',
       /* the render limit targets anonymous hotlink abuse — a logged-in user
@@ -3254,7 +3256,8 @@ app.get('/api/frames/:id/screenshot.png', async (req, res) => {
   if (!frame) return
   try {
     const { renderFrame } = await import('./screenshot.ts')
-    const png = await renderFrame(frame, fitExportScale(frame, parseExportScale(req.query.scale) ?? 1))
+    const scale = fitExportScale(frame, parseExportScale(req.query.scale) ?? 1)
+    const png = await renderFrame(frame, fullFrameRenderScale(frame, scale))
     res.type('png').send(png)
   } catch (e) {
     sendRenderFailure(res, e)

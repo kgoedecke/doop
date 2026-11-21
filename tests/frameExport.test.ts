@@ -392,6 +392,35 @@ it('renders at the picked scale and names the file by it', async () => {
   expect(clicked.map((a) => a.download)).toEqual(['Poster@3x.png', 'Poster.jpg', 'Poster@0.5x.png'])
 })
 
+it('keeps a local 4x export and names a full server fallback by its actual density', async () => {
+  const tall = { ...frame, width: 1440, height: 2560 }
+  vi.mocked(rasterizeFrame).mockResolvedValueOnce(new Blob(['png']))
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () => new Response('full frame')),
+  )
+  await downloadFrameExport(tall, 'png', 4)
+  await downloadFrameExport(tall, 'png', 4)
+  expect(clicked.map((a) => a.download)).toEqual(['Poster@4x.png', 'Poster@3.68x.png'])
+  expect(useStore.getState().notice?.text).toContain('exported at 3.68x')
+})
+
+it('downloads and copies a small layer at 2x even at the bottom of an oversized frame', async () => {
+  const tall = { ...frame, width: 1440, height: 10_000 }
+  measured({ x: 0, y: 9900, width: 64, height: 64 })
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () => new Response('layer')),
+  )
+  const { written } = stubClipboard()
+  await downloadElementExport(tall, hero, 'png', 2)
+  await copyElementPng(tall, hero, 2)
+  const url = `/i/export-frame.png?scale=2&download&selector=${encodeURIComponent(hero.selector)}`
+  expect(vi.mocked(fetch).mock.calls.map(([request]) => request)).toEqual([url, url])
+  expect(clicked[0]?.download).toBe('Poster - divhero@2x.png')
+  expect(await written[0]?.text()).toBe('layer')
+})
+
 it('asks the server for the picked scale when the browser cannot draw the frame', async () => {
   vi.stubGlobal(
     'fetch',

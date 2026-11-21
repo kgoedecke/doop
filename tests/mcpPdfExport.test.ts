@@ -109,6 +109,13 @@ describe('export_frame scale', () => {
     expect([out.scale, out.width, out.height]).toEqual([3, 900, 1500])
   })
 
+  it('reports the full frame dimensions at the density its image URL serves', async () => {
+    vi.spyOn(store, 'getFrame').mockReturnValue({ ...POSTER, width: 1440, height: 2560 })
+    const out = await urls({ scale: 4 })
+    expect(out.image_url).toMatch(/\/i\/poster\.png\?scale=4$/)
+    expect([out.scale, out.width, out.height]).toEqual([3.68, 5299, 9421])
+  })
+
   it('refuses a scale past 4x', async () => {
     const result = await exportFrame(OWNER_ID, { frame_id: POSTER.id, scale: 8 })
     expect(result.isError).toBe(true)

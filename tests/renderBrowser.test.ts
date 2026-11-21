@@ -9,7 +9,8 @@ import {
   remoteConnectFailure,
   type RendererTuning,
 } from '../server/renderBrowser.ts'
-import { MAX_RENDER_PIXELS, renderedHeight } from '../server/renderLimits.ts'
+import { fullFrameRenderScale, MAX_RENDER_PIXELS } from '../shared/exportScale.ts'
+import { renderedHeight } from '../server/renderLimits.ts'
 
 /* On 2026-11-05 prod's one shared Chromium stopped creating pages while its
    DevTools socket stayed open, and every render timed out for two hours.
@@ -395,5 +396,25 @@ describe('renderedHeight', () => {
     const tall = renderedHeight({ width: 1440, height: 40_000 }, 2)
     expect(tall).toBeLessThan(40_000)
     expect(1440 * 2 * tall * 2).toBeLessThanOrEqual(MAX_RENDER_PIXELS)
+  })
+})
+
+describe('fullFrameRenderScale', () => {
+  it('preserves a requested density whenever the full height fits', () => {
+    expect(fullFrameRenderScale({ width: 800, height: 12_000 }, 2)).toBe(2)
+    expect(fullFrameRenderScale({ width: 1000, height: 12_500 }, 4)).toBe(2)
+  })
+
+  it.each([
+    [1440, 2560, 4],
+    [1440, 9000, 2],
+    [3000.7, 3000.8, 3],
+    [100_000, 100_000, 1],
+  ])('keeps every row of a %i × %i export at %i×', (width, height, wanted) => {
+    const frame = { width, height }
+    const scale = fullFrameRenderScale(frame, wanted)
+    expect(scale).toBeGreaterThan(0)
+    expect(scale).toBeLessThan(wanted)
+    expect(renderedHeight(frame, scale)).toBe(Math.round(height))
   })
 })
