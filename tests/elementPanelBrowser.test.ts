@@ -582,6 +582,26 @@ describe.skipIf(!findBrowserPath())('element design controls', () => {
     await expect.poll(() => saved.html).toContain('rgba(18, 52, 86, 0.75)')
   })
 
+  it('shows a full fill opacity and a two-decimal stroke width without clipping them', async () => {
+    await seedPanel(
+      '<body><svg id="pen" data-doop-drawing="path" viewBox="0 0 120 80" style="display:block;width:120px;height:80px">' +
+        '<path d="M 10 10 L 110 10 L 60 70 Z" fill="#eceee9" stroke="#111" stroke-width="12.75" /></svg></body>',
+      '#pen',
+    )
+    await page.waitForFunction(
+      () =>
+        document.querySelector<HTMLInputElement>('[aria-label="Fill opacity"]')?.value === '100' &&
+        document.querySelector<HTMLInputElement>('[aria-label="Border width"]')?.value === '12.75',
+    )
+    const clipped = await page.evaluate(() =>
+      ['Fill opacity', 'Border width'].filter((label) => {
+        const input = document.querySelector<HTMLInputElement>(`[aria-label="${label}"]`)!
+        return input.scrollWidth > input.clientWidth
+      }),
+    )
+    expect(clipped).toEqual([])
+  })
+
   it('keeps the old image after upload failure and allows retrying the same file', async () => {
     await seedPanel(`<body><img id="photo" src="${originalUrl}" style="width:120px;height:80px"></body>`, '#photo')
     await page.waitForSelector('[aria-label="Image fill"]')

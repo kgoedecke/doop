@@ -764,6 +764,10 @@ function useTokenFields(frame: Frame, info: PaintInfo, apply: (styles: StylePatc
   return { tokens, bound, chip, menu }
 }
 
+/* a colour and its number (fill opacity, stroke width): the number's column
+   fits "100 %" and "12.75 px" whole, the same in every such row */
+const COLOR_ROW = 'grid grid-cols-[minmax(0,1fr)_88px] gap-1.5'
+
 /** The Fill section: the paint's colour and opacity, token-bindable, and an
  *  image fill when the layer has one. The frame Inspector shows the same
  *  section for the frame's own fill. */
@@ -803,7 +807,7 @@ export function FillSection({
       {info.image && (
         <ImageFill key={`${frame.id}:${selector}`} frame={frame} selector={selector} image={info.image} apply={apply} />
       )}
-      <div className="grid grid-cols-[minmax(0,1fr)_64px] gap-1.5">
+      <div className={COLOR_ROW}>
         <ColorField
           label={t('inspector.fillColor')}
           value={fillAlpha === 0 && fill === '#000000' ? null : fill}
@@ -1179,7 +1183,7 @@ function DesignTab({
       </PropertySection>
       <FillSection frame={frame} selector={selector} info={info} apply={apply} />
       <PropertySection title={t('inspector.sectionStroke')}>
-        <div className="grid grid-cols-[minmax(0,1fr)_64px] gap-1.5">
+        <div className={COLOR_ROW}>
           <ColorField
             label={t('inspector.borderColor')}
             value={borderColor}
