@@ -90,11 +90,18 @@ export function isControlTarget(target: EventTarget | null): boolean {
   )
 }
 
+/** The event's key, lowercased; '' when it carries none. Chrome's autofill and
+ *  password managers dispatch `keydown` / `keyup` events with no `key` at all,
+ *  despite the DOM type saying it is always a string. */
+export function pressedKey(e: { key?: string }): string {
+  return (e.key ?? '').toLowerCase()
+}
+
 type Chord = Pick<KeyboardEvent, 'key' | 'code' | 'metaKey' | 'ctrlKey' | 'altKey' | 'shiftKey'>
 
 /** ⌘A (Ctrl+A elsewhere): Figma's select all. */
 export function isSelectAllShortcut(e: Chord) {
-  return e.key.toLowerCase() === 'a' && (e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey
+  return pressedKey(e) === 'a' && (e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey
 }
 
 export type ReorderMove = 'forward' | 'backward' | 'front' | 'back'

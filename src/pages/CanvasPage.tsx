@@ -2,7 +2,7 @@ import { CAPTURE_PREFIX, pasteWebCapture } from '../lib/webCapture'
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { canEditOpenCanvas, pickedSelectors, roleOf, useStore } from '../lib/store'
 import { followPageInUrl } from '../lib/pageUrl'
-import { MOD_KEY, PRESENT_SHORTCUT_HINT, isControlTarget, isTypingTarget } from '../lib/keys'
+import { MOD_KEY, PRESENT_SHORTCUT_HINT, isControlTarget, isTypingTarget, pressedKey } from '../lib/keys'
 import { enterSelection, exitSelection, selectSibling } from '../lib/selectionKeys'
 import { dispatchActionKey, setActionHost, type ActionHost } from '../lib/actions/registry'
 import { presentStartFrame } from '../lib/present'
@@ -410,7 +410,7 @@ export function CanvasPage({
       if (typing) return
       /* a held ⌘X cuts once: the auto-repeat would cut the frame left
          selected around a cut element next, as a held ⌫ would */
-      if ((e.metaKey || e.ctrlKey) && e.repeat && e.key.toLowerCase() === 'x') {
+      if ((e.metaKey || e.ctrlKey) && e.repeat && pressedKey(e) === 'x') {
         e.preventDefault()
         return
       }

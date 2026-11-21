@@ -26,6 +26,7 @@ import { forgetPendingConnect, isPendingConnect, parseDesktopConnectLink } from 
 import { safeRelativeTarget } from './safeTarget'
 import { NO_CANVAS, isViewCommand, runViewCommand, syncViewMenu } from './viewMenu'
 import { initAppMenu } from './appMenu'
+import { pressedKey } from './keys'
 import { type Chord, matchesChord } from './actions/chords'
 
 export type CanvasTab = { id: string; name: string }
@@ -368,7 +369,7 @@ export function initDesktopShell() {
     true,
   )
   document.addEventListener('keydown', (e) => {
-    if (e.key.toLowerCase() !== 'w' || !(e.metaKey || e.ctrlKey) || e.shiftKey || e.altKey) return
+    if (pressedKey(e) !== 'w' || !(e.metaKey || e.ctrlKey) || e.shiftKey || e.altKey) return
     e.preventDefault()
     closeActiveTab()
   })
