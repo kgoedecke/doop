@@ -70,14 +70,14 @@ export function isPresentShortcut(e: Pick<KeyboardEvent, 'key' | 'metaKey' | 'ct
   return e.key === 'Enter' && (e.metaKey || e.ctrlKey) && e.altKey && !e.shiftKey
 }
 
-/** The hint for ⌘R / Ctrl+R, as a tooltip or title shows it. */
-export const RUN_SHORTCUT_HINT = `${MOD_KEY}R`
+/** ⌘⌥↩ (Ctrl+Alt+Enter elsewhere) runs the open automation: the canvas's
+ *  Present chord, since both start what is on screen. ⌘R stays the
+ *  browser's reload. */
+export const RUN_SHORTCUT_HINT = PRESENT_SHORTCUT_HINT
+export const isRunShortcut = isPresentShortcut
 
-/** ⌘R (Ctrl+R elsewhere): runs the automation in the editor.
- *  Shift and Alt are excluded so browser hard-reload and OS chords stay free. */
-export function isRunShortcut(e: Pick<KeyboardEvent, 'key' | 'metaKey' | 'ctrlKey' | 'altKey' | 'shiftKey'>) {
-  return (e.key === 'r' || e.key === 'R') && (e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey
-}
+/** The hint for ⌘S / Ctrl+S, as a tooltip shows it. */
+export const SAVE_SHORTCUT_HINT = `${MOD_KEY}S`
 
 /** A key landing on a control — a button, link, menu, tab, tree — belongs to
  *  that control: ↩ presses it, Tab leaves it. The canvas's traversal keys

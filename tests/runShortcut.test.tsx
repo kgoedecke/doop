@@ -3,7 +3,7 @@ import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Automation, AutomationRun } from '../shared/automations'
-import { isRunShortcut, RUN_SHORTCUT_HINT } from '../src/lib/keys'
+import { isRunShortcut, RUN_SHORTCUT_HINT, SAVE_SHORTCUT_HINT } from '../src/lib/keys'
 import { TooltipProvider } from '../src/components/ui/tooltip'
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   updateAutomation: vi.fn(),
   runAutomation: vi.fn(),
   listRuns: vi.fn(),
+  canvasTeam: vi.fn(),
   capture: vi.fn(),
 }))
 
@@ -32,6 +33,7 @@ vi.mock('../src/lib/api', async (importOriginal) => {
       updateAutomation: mocks.updateAutomation,
       runAutomation: mocks.runAutomation,
       listRuns: mocks.listRuns,
+      canvasTeam: mocks.canvasTeam,
     },
   }
 })
@@ -78,51 +80,34 @@ function sampleRun(over: Partial<AutomationRun> = {}): AutomationRun {
   }
 }
 
-describe('isRunShortcut unit tests', () => {
+describe('isRunShortcut', () => {
   const chord = (over: Partial<Pick<KeyboardEvent, 'key' | 'metaKey' | 'ctrlKey' | 'altKey' | 'shiftKey'>>) => ({
-    key: 'r',
+    key: 'Enter',
     metaKey: false,
     ctrlKey: false,
-    altKey: false,
+    altKey: true,
     shiftKey: false,
     ...over,
   })
 
-  it('matches ⌘R on macOS and Ctrl+R on Windows/Linux', () => {
-    // macOS: metaKey (Command)
+  it('matches ⌘⌥↩ on macOS and Ctrl+Alt+Enter elsewhere', () => {
     expect(isRunShortcut(chord({ metaKey: true }))).toBe(true)
-    // Windows/Linux: ctrlKey (Control)
     expect(isRunShortcut(chord({ ctrlKey: true }))).toBe(true)
-    // Case-insensitive ('R' with CapsLock)
-    expect(isRunShortcut(chord({ key: 'R', metaKey: true }))).toBe(true)
-    expect(isRunShortcut(chord({ key: 'R', ctrlKey: true }))).toBe(true)
   })
 
-  it('rejects keys without Command or Control modifiers', () => {
-    // Plain 'r' while typing or viewing
+  it('leaves ⌘R to the browser', () => {
+    expect(isRunShortcut(chord({ key: 'r', metaKey: true, altKey: false }))).toBe(false)
+    expect(isRunShortcut(chord({ key: 'r', ctrlKey: true, altKey: false }))).toBe(false)
+  })
+
+  it('needs both the modifier and Alt, and no Shift', () => {
     expect(isRunShortcut(chord({}))).toBe(false)
-  })
-
-  it('rejects chords with Shift to protect browser hard-reload', () => {
-    // ⌘⇧R / Ctrl+Shift+R is hard refresh in browsers
+    expect(isRunShortcut(chord({ metaKey: true, altKey: false }))).toBe(false)
     expect(isRunShortcut(chord({ metaKey: true, shiftKey: true }))).toBe(false)
-    expect(isRunShortcut(chord({ ctrlKey: true, shiftKey: true }))).toBe(false)
   })
 
-  it('rejects chords with Alt/Option to avoid OS/app collisions', () => {
-    expect(isRunShortcut(chord({ metaKey: true, altKey: true }))).toBe(false)
-    expect(isRunShortcut(chord({ ctrlKey: true, altKey: true }))).toBe(false)
-  })
-
-  it('rejects other keys even with modifiers', () => {
-    expect(isRunShortcut(chord({ key: 's', metaKey: true }))).toBe(false)
-    expect(isRunShortcut(chord({ key: 'Enter', metaKey: true }))).toBe(false)
-    expect(isRunShortcut(chord({ key: 'z', metaKey: true }))).toBe(false)
-    expect(isRunShortcut(chord({ key: 'a', metaKey: true }))).toBe(false)
-  })
-
-  it('exposes platform-appropriate RUN_SHORTCUT_HINT', () => {
-    expect(RUN_SHORTCUT_HINT).toMatch(/^(⌘|Ctrl\+)R$/)
+  it('shows the chord as the canvas does', () => {
+    expect(RUN_SHORTCUT_HINT).toMatch(/^(⌘⌥|Ctrl\+Alt\+)↩$/)
   })
 })
 
@@ -135,6 +120,7 @@ describe('AutomationEditor Run shortcut integration tests', () => {
     mocks.listCanvases.mockResolvedValue([{ id: 'c1', name: 'Main Canvas' }])
     mocks.integrations.mockResolvedValue({})
     mocks.listRuns.mockResolvedValue([])
+    mocks.canvasTeam.mockResolvedValue([])
     mocks.runAutomation.mockResolvedValue(sampleRun())
     container = document.createElement('div')
     document.body.append(container)
@@ -165,10 +151,11 @@ describe('AutomationEditor Run shortcut integration tests', () => {
 
   function dispatchKeydown(over: Partial<KeyboardEventInit> = {}, target: EventTarget = window): KeyboardEvent {
     const event = new KeyboardEvent('keydown', {
-      key: 'r',
+      key: 'Enter',
       bubbles: true,
       cancelable: true,
       metaKey: true,
+      altKey: true,
       ...over,
     })
     target.dispatchEvent(event)
@@ -229,7 +216,7 @@ describe('AutomationEditor Run shortcut integration tests', () => {
     expect(mocks.runAutomation).toHaveBeenCalledTimes(1)
   })
 
-  it('5. Shortcut does not trigger browser refresh (preventDefault called)', async () => {
+  it('5. Shortcut keeps the browser from acting on the chord', async () => {
     await renderEditor()
 
     let event: KeyboardEvent
@@ -240,33 +227,31 @@ describe('AutomationEditor Run shortcut integration tests', () => {
     expect(event!.defaultPrevented).toBe(true)
   })
 
-  it('6. Shortcut does not execute in unrelated input fields', async () => {
+  it('6. Shortcut runs from inside a text field without typing into it', async () => {
+    await renderEditor()
+    const textarea = document.querySelector<HTMLTextAreaElement>('textarea')
+    expect(textarea).not.toBeNull()
+    textarea!.focus()
+
+    let event: KeyboardEvent
+    await act(async () => {
+      event = dispatchKeydown({ metaKey: true }, textarea!)
+    })
+
+    expect(event!.defaultPrevented).toBe(true)
+    expect(mocks.runAutomation).toHaveBeenCalledTimes(1)
+  })
+
+  it('6b. ⌘R is left to the browser', async () => {
     await renderEditor()
 
-    // Create an unrelated input field and focus it
-    const input = document.createElement('input')
-    document.body.append(input)
-    input.focus()
-
+    let event: KeyboardEvent
     await act(async () => {
-      dispatchKeydown({ metaKey: true }, input)
+      event = dispatchKeydown({ key: 'r', metaKey: true, altKey: false })
     })
 
+    expect(event!.defaultPrevented).toBe(false)
     expect(mocks.runAutomation).not.toHaveBeenCalled()
-
-    // Create a textarea and focus it
-    const textarea = document.createElement('textarea')
-    document.body.append(textarea)
-    textarea.focus()
-
-    await act(async () => {
-      dispatchKeydown({ metaKey: true }, textarea)
-    })
-
-    expect(mocks.runAutomation).not.toHaveBeenCalled()
-
-    input.remove()
-    textarea.remove()
   })
 
   it('7. Shortcut does not execute when Run is disabled', async () => {
@@ -362,15 +347,20 @@ describe('AutomationEditor Run shortcut integration tests', () => {
       textarea!.dispatchEvent(new Event('input', { bubbles: true }))
     })
 
-    // Blur textarea so focus is not on a typing target
-    textarea!.blur()
-
     await act(async () => {
-      dispatchKeydown({ metaKey: true }, window)
+      dispatchKeydown({ metaKey: true }, textarea!)
     })
 
     // Should have saved the draft first, then run
     expect(mocks.updateAutomation).toHaveBeenCalledTimes(1)
     expect(mocks.runAutomation).toHaveBeenCalledTimes(1)
+  })
+
+  it('12. Hovering Save shows ⌘S', async () => {
+    await renderEditor()
+    const saveBtn = Array.from(document.querySelectorAll<HTMLButtonElement>('button')).find(
+      (b) => b.textContent === 'Save',
+    )
+    expect(saveBtn?.getAttribute('title')).toContain(SAVE_SHORTCUT_HINT)
   })
 })

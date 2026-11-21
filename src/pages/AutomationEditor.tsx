@@ -21,7 +21,7 @@ import {
   type Step,
 } from '../../shared/automations'
 import { api, ApiError, type IntegrationsStatus } from '../lib/api'
-import { RUN_SHORTCUT_HINT, isRunShortcut, isTypingTarget } from '../lib/keys'
+import { RUN_SHORTCUT_HINT, SAVE_SHORTCUT_HINT, isRunShortcut } from '../lib/keys'
 import { navigate } from '../App'
 import { posthog } from '../lib/posthog'
 import { FrameThumb } from '../components/FramePreview'
@@ -383,21 +383,19 @@ export function AutomationEditor({ automationId }: { automationId: string }) {
     saveRef.current = save
   })
 
-  /* ⌘S saves, ⌘R runs — the editor is a form people will expect them from */
+  /* ⌘S saves, ⌘⌥↩ runs — the editor is a form people will expect them from.
+     Run works from the step fields too: the chord types nothing, and a dirty
+     draft is saved before the run starts. */
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      if (e.key === 's' && (e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey) {
+      if (e.key === 's' && (e.metaKey || e.ctrlKey)) {
         e.preventDefault()
         void saveRef.current()
         return
       }
       if (isRunShortcut(e)) {
-        if (isTypingTarget(e.target)) return
         e.preventDefault()
-        if (e.repeat) return
-        if (canRunRef.current) {
-          void runNowRef.current()
-        }
+        if (!e.repeat && canRunRef.current) void runNowRef.current()
       }
     }
     window.addEventListener('keydown', onKey)
@@ -434,16 +432,18 @@ export function AutomationEditor({ automationId }: { automationId: string }) {
               className={barGhostBtn}
               disabled={runningNow || !!incomplete || !automation.enabled}
               onClick={runNow}
-              title={
-                incomplete
-                  ? t('automations.reasonFirst', { reason: incomplete })
-                  : `${t('automations.runNowTitle')} · ${RUN_SHORTCUT_HINT}`
-              }
+              title={`${incomplete ? t('automations.reasonFirst', { reason: incomplete }) : t('automations.runNowTitle')} · ${RUN_SHORTCUT_HINT}`}
             >
               <PlayIcon className="size-3.5" />
               {runningNow ? t('automations.runningEllipsis') : t('automations.runNow')}
             </Button>
-            <Button variant="primary" className={barPrimaryBtn} disabled={!dirty || saving} onClick={() => void save()}>
+            <Button
+              variant="primary"
+              className={barPrimaryBtn}
+              disabled={!dirty || saving}
+              onClick={() => void save()}
+              title={`${t('common.save')} · ${SAVE_SHORTCUT_HINT}`}
+            >
               {saving ? t('automations.saving') : t('common.save')}
             </Button>
           </div>
