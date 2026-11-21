@@ -16,6 +16,8 @@ vi.mock('../server/db/persist.ts', () => ({
   saveCanvas: () => {},
   saveFrame: () => {},
   saveFrameVersion: () => {},
+  saveComponent: () => {},
+  deleteComponent: () => {},
 }))
 vi.mock('../server/fonts.ts', () => ({ fontsForCanvas: () => [] }))
 /* the bucket, in memory: nothing is ever stored, so every warm reaches Iconify */
@@ -28,6 +30,9 @@ vi.useFakeTimers({ now: 1_000_000 })
 const { env } = await import('../server/env.ts')
 const actions = await import('../server/actions.ts')
 const { store } = await import('../server/store.ts')
+const propagation = await import('../server/propagation.ts')
+const { blankComponent } = await import('../server/components.ts')
+const { COMPONENT_ATTR } = await import('../shared/components.ts')
 
 /**
  * Frame HTML that hotlinks Iconify is saved, and streamed to viewers, pointed
@@ -103,10 +108,11 @@ describe('icons on frame writes', () => {
     expect(store.getFrame(frame.id)!.html).toBe(`<img src="${HOSTED}"><p>done</p>`)
   })
 
-  it('warms two icons at a time, leaving the route’s other fetch slots to viewers', async () => {
+  it('warms two icons at a time across every write, leaving the route’s other fetch slots to viewers', async () => {
     const canvasId = store.createCanvas('icons', 'kevin').id
-    const html = ['a', 'b', 'c', 'd', 'e'].map((name) => `<img src="https://api.iconify.design/mdi/${name}.svg">`)
-    actions.createFrame(canvasId, { name: 'Hero', html: html.join('') }, agent)
+    const icons = (names: string[]) => names.map((name) => `<img src="https://api.iconify.design/mdi/${name}.svg">`)
+    actions.createFrame(canvasId, { name: 'One', html: icons(['a', 'b', 'c']).join('') }, agent)
+    actions.createFrame(canvasId, { name: 'Two', html: icons(['d', 'e']).join('') }, agent)
     await settle()
     expect(fetched).toHaveLength(2)
     answer()
@@ -120,5 +126,40 @@ describe('icons on frame writes', () => {
     const frame = actions.createFrame(canvasId, { name: 'Hero', html: `<img src="${HOTLINK}">` }, agent)!
     await settle()
     expect(store.getFrame(frame.id)!.html).toBe(`<img src="${HOSTED}">`)
+  })
+
+  it('keeps a component instance’s icon following its component', async () => {
+    const human: Actor = { name: 'Kevin', kind: 'user', color: '#2743ee' }
+    const canvasId = store.createCanvas('icons', 'kevin').id
+    const def = blankComponent({ name: 'Badge', by: 'Kevin' })
+    store.saveComponent(canvasId, def)
+    const main = actions.createFrame(canvasId, { name: 'Main', html: '' }, human)!
+    const badge = (icon: string) =>
+      `<html><head></head><body><span class="badge" ${COMPONENT_ATTR}="${def.id}"><img src="https://api.iconify.design/mdi/${icon}.svg">Hi</span></body></html>`
+    actions.updateFrame(main.id, { html: badge('star') }, human)
+    const page = actions.createFrame(canvasId, { name: 'Page', html: '' }, human)!
+    actions.updateFrame(
+      page.id,
+      { html: '<html><head></head><body><doop-use component="Badge"></doop-use></body></html>' },
+      human,
+    )
+    const placed = store.getFrame(page.id)!.html
+    expect(placed).toContain(`${env.BETTER_AUTH_URL}/icons/iconify/mdi/star.svg`)
+
+    /* saving either frame as it is changes nothing: no override, no new revision */
+    const rev = store.getComponents(canvasId).find((d) => d.id === def.id)!.rev
+    actions.updateFrame(page.id, { html: placed }, human)
+    actions.updateFrame(main.id, { html: store.getFrame(main.id)!.html }, human)
+    expect(store.getFrame(page.id)!.html).not.toContain('data-doop-overrides')
+    expect(store.getComponents(canvasId).find((d) => d.id === def.id)!.rev).toBe(rev)
+
+    /* and a new icon on the main reaches the instance */
+    actions.updateFrame(main.id, { html: badge('heart') }, human)
+    /* propagation runs one frame per tick, on the faked clock */
+    const idle = propagation.whenIdle()
+    await vi.advanceTimersByTimeAsync(2_000)
+    await idle
+    expect(store.getFrame(page.id)!.html).toContain(`${env.BETTER_AUTH_URL}/icons/iconify/mdi/heart.svg`)
+    expect(store.getFrame(page.id)!.html).not.toContain('data-doop-overrides')
   })
 })

@@ -99,24 +99,34 @@ export function withHostedIcons(html: string): string {
 
 /* a Doop icon link as frame HTML spells it, query included (an attribute's may be `&amp;`-encoded) */
 const HOSTED_LINK = /\/icons\/iconify\/([a-z0-9-]+)\/([a-z0-9-]+\.svg)((?:\?[^\s"'<>()\\]*)?)/g
-/** Icons a write warms at once: the route keeps the rest of its fetch slots for viewers. */
+/** Background fetches for every write on this server together: the route keeps the rest of
+ *  its fetch slots for viewers, and a write past the queue's length warms nothing more. */
 const WARM_AT_ONCE = 2
-const MAX_WARMED = 256
+const MAX_WARM_QUEUE = 512
+const warmQueue = new Set<string>()
+let warming = 0
+
+async function drainWarmQueue() {
+  warming++
+  try {
+    for (let url = warmQueue.values().next().value; url; url = warmQueue.values().next().value) {
+      warmQueue.delete(url)
+      await iconSvg(url).catch(() => null)
+    }
+  } finally {
+    warming--
+  }
+}
 
 /** Start fetching the icons a saved frame links, so they are in the bucket before anyone
- *  opens it. Fire and forget: whatever fails here is fetched by the first viewer instead. */
+ *  opens it. Fire and forget: whatever is not warmed is fetched by the first viewer instead. */
 export function warmHostedIcons(html: string): void {
   if (!html.includes('/icons/iconify/')) return
-  const upstreams = new Set<string>()
   for (const [, prefix, file, query] of html.matchAll(HOSTED_LINK)) {
+    if (warmQueue.size >= MAX_WARM_QUEUE) break
     const params = new URLSearchParams((query ?? '').slice(1).replace(/&amp;/gi, '&'))
     const upstream = upstreamFor(prefix!, file!, Object.fromEntries(params))
-    if (upstream) upstreams.add(upstream)
-    if (upstreams.size >= MAX_WARMED) break
+    if (upstream) warmQueue.add(upstream)
   }
-  const queue = [...upstreams]
-  const drain = async () => {
-    for (let url = queue.shift(); url; url = queue.shift()) await iconSvg(url).catch(() => null)
-  }
-  for (let i = 0; i < WARM_AT_ONCE; i++) void drain()
+  while (warming < WARM_AT_ONCE && warmQueue.size) void drainWarmQueue()
 }
