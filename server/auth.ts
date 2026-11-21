@@ -357,7 +357,7 @@ function assertSignupDomainAllowed(email: string): void {
 /* Which request header holds the client IP, for Better Auth's per-client rate limits.
    Unset, it reads only a single-hop X-Forwarded-For; behind a proxy that adds hops
    (Fly, Cloudflare, Railway) it finds no IP and every visitor shares one bucket.
-   Header names are lowercased, since Node's req.headers keys are. */
+   Lowercased: getIp also takes a plain headers object, whose lookup is case-sensitive. */
 export function loadIpAddressConfig() {
   const ipAddressHeaders = env.AUTH_IP_HEADERS.map((h) => h.toLowerCase())
   const trustedProxies = env.AUTH_TRUSTED_PROXIES
