@@ -25,6 +25,9 @@ Arctic OKs the RAM (self-hosting on `localhost:4300` waits for that and for impr
 - `tests/residentPageTools.test.ts`: retained both the upstream canvas-title tests and the ported fit tests.
 - Upstream's #439 pan implementation matches the merged `Stage.tsx` byte for byte. Its panel and stylesheet
   implementations also match. The fork's workflow directory is unchanged by the merge.
+- PR #29 review follow-up: collaboration IDs now identify the open tab, so grouping undo and redo see edits from
+  another tab using the same browser profile. Grouping and its undo/redo preserve shapes with saved versions,
+  including a server-side guard on deletion. Frame and Layers menus respect standalone shape locks for Cut and Delete.
 - Automation: `.github/workflows/sync-upstream.yml`, daily 09:23 UTC plus manual dispatch. It runs on GitHub, with no
   local scheduled task. Green: pushes to `main`. Red: parks the merge on `sync/upstream` and opens one PR.
   Conflict: opens one issue, pushes nothing. Nothing new: does nothing.
@@ -211,6 +214,10 @@ files that came with them: `server/frameFit.ts`, `server/frameWriteRefusal.ts`, 
 `tests/frameFit.test.ts`, `tests/measureGate.ts`. Upstream #439 absorbed the pan changes and `tests/panelResizing.test.tsx`.
 Also: `.github/workflows/` differs from upstream by design (`android.yml` is
 upstream's and is not taken).
+
+The PR #29 review fixes touch `src/lib/identity.ts`, `src/lib/api.ts`, `src/lib/canvasGroups.ts`, `src/lib/history.ts`,
+`src/components/FrameContextMenu.tsx`, `server/index.ts` and `server/db/persist.ts`. Regressions are covered in
+`tests/identity.test.ts`, `tests/canvasGroups.test.ts`, `tests/frameApprovalControl.test.tsx` and `tests/frameVersions.test.ts`.
 
 ## Hygiene log
 

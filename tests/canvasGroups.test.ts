@@ -7,14 +7,16 @@ let version = 100
 const updateFrame = vi.fn((id: string, patch: Partial<Frame>, _expected?: number) =>
   Promise.resolve({ ...frameWith(id, ''), ...patch, updatedAt: ++version } as Frame),
 )
-const deleteFrame = vi.fn((_id: string, _expected?: number) => Promise.resolve())
+const deleteFrame = vi.fn((_id: string, _expected?: number, _preserveVersions?: boolean) => Promise.resolve())
+const frameVersions = vi.fn((_id: string): Promise<Array<{ id: string }>> => Promise.resolve([]))
 const createFrame = vi.fn((canvasId: string, input: Partial<Frame> & { name: string }) =>
   Promise.resolve({ ...frameWith(`new${++nextId}`, ''), canvasId, ...input, updatedAt: ++version } as Frame),
 )
 vi.mock('../src/lib/api', () => ({
   api: {
     updateFrame: (id: string, patch: Partial<Frame>, expected?: number) => updateFrame(id, patch, expected),
-    deleteFrame: (id: string, expected?: number) => deleteFrame(id, expected),
+    deleteFrame,
+    frameVersions: (id: string) => frameVersions(id),
     createFrame: (canvasId: string, input: Partial<Frame> & { name: string }) => createFrame(canvasId, input),
   },
   errorMessage: (_err: unknown, fallback: string) => fallback,
@@ -88,6 +90,8 @@ const settle = () => new Promise((resolve) => setTimeout(resolve, 0))
 beforeEach(() => {
   updateFrame.mockClear()
   deleteFrame.mockClear()
+  frameVersions.mockReset()
+  frameVersions.mockResolvedValue([])
   createFrame.mockClear()
   updateFrame.mockImplementation((id, patch) =>
     Promise.resolve({ ...frameWith(id, ''), ...patch, updatedAt: ++version } as Frame),
@@ -117,11 +121,42 @@ describe('groupCanvasShapes', () => {
   const back = () => frameWith('a', rect(), { x: 0, y: 0, width: 100, height: 50, z: 1, updatedAt: 3 })
   const front = () => frameWith('b', rect(), { x: 300, y: 150, width: 100, height: 50, z: 2, updatedAt: 4 })
 
+  it('keeps both frames and their history when the back shape has a saved version', async () => {
+    const a = back()
+    const b = front()
+    hold(a, b)
+    frameVersions.mockResolvedValueOnce([{ id: 'version' }])
+    expect(groupCanvasShapes([a, b], 'Group')).toBe(true)
+    await settle()
+    expect(updateFrame).not.toHaveBeenCalled()
+    expect(deleteFrame).not.toHaveBeenCalled()
+    expect(ids().sort()).toEqual(['a', 'b'])
+    expect(useStore.getState().notice?.text).toContain('saved versions')
+  })
+
+  it('leaves both shapes alone when redoing a group would delete new saved versions', async () => {
+    const a = back()
+    const b = front()
+    hold(a, b)
+    groupCanvasShapes([a, b], 'Group')
+    await undo()
+    const restored = useStore.getState().canvas!.frames.find((f) => f.id !== b.id)!
+    updateFrame.mockClear()
+    deleteFrame.mockClear()
+    frameVersions.mockResolvedValueOnce([{ id: 'version' }])
+    await redo()
+    expect(frameVersions).toHaveBeenLastCalledWith(restored.id)
+    expect(updateFrame).not.toHaveBeenCalled()
+    expect(deleteFrame).not.toHaveBeenCalled()
+    expect(ids().sort()).toEqual([b.id, restored.id].sort())
+  })
+
   it('keeps the frontmost frame as the group, the others’ shapes inside it, as one undo step', async () => {
     const a = back()
     const b = front()
     hold(a, b)
     expect(groupCanvasShapes([a, b], 'Group')).toBe(true)
+    await settle()
     /* the frame, its id and its place in the stack are the front shape's */
     expect(ids()).toEqual(['b'])
     const host = live('b')!
@@ -141,7 +176,7 @@ describe('groupCanvasShapes', () => {
     /* the group is saved first, both writes conditional on what was seen */
     expect(updateFrame.mock.calls[0]?.[0]).toBe('b')
     expect(updateFrame.mock.calls[0]?.[2]).toBe(4)
-    expect(deleteFrame.mock.calls).toEqual([['a', 3]])
+    expect(deleteFrame.mock.calls).toEqual([['a', 3, true]])
 
     await undo()
     expect(ids()).toHaveLength(2)
@@ -255,7 +290,7 @@ describe('groupCanvasShapes', () => {
     await redo()
     /* the version the undo's own save of the group left */
     expect(updateFrame.mock.calls.at(-1)![2]).toEqual(expect.any(Number))
-    expect(deleteFrame).toHaveBeenCalledWith(restored.id, restored.updatedAt)
+    expect(deleteFrame).toHaveBeenCalledWith(restored.id, restored.updatedAt, true)
   })
 
   it('undoes the grouping after the person’s own move of the group, and its undo', async () => {
@@ -279,11 +314,12 @@ describe('groupCanvasShapes', () => {
     expect(groupOf(live('b')!.html).getAttribute('data-doop-drawing')).toBe('rect')
   })
 
-  it('keeps a hidden shape hidden and a renamed one named, as layers', () => {
+  it('keeps a hidden shape hidden and a renamed one named, as layers', async () => {
     const a = { ...back(), hidden: true, name: 'Backdrop' }
     const b = front()
     hold(a, b)
     groupCanvasShapes([a, b], 'Group')
+    await settle()
     const host = live('b')!
     expect(host.hidden).toBe(false)
     const [first, second] = [...groupOf(host.html).children] as HTMLElement[]
@@ -293,11 +329,12 @@ describe('groupCanvasShapes', () => {
     expect(second!.hasAttribute('data-doop-name')).toBe(false)
   })
 
-  it('gives a clashing id up and keeps each shape’s own CSS apart', () => {
+  it('gives a clashing id up and keeps each shape’s own CSS apart', async () => {
     const a = { ...back(), html: rect('id="hero"').replace('<head>', '<head><style>#hero{color:red}</style>') }
     const b = { ...front(), html: rect('id="hero"').replace('<head>', '<head><style>#hero{color:blue}</style>') }
     hold(a, b)
     groupCanvasShapes([a, b], 'Group')
+    await settle()
     const html = live('b')!.html
     const [first, second] = [...groupOf(html).children] as HTMLElement[]
     expect(second!.id).toBe('hero')
@@ -306,7 +343,7 @@ describe('groupCanvasShapes', () => {
     expect(html).toMatch(/#hero\b[^-][^{]*\{\s*color:\s*blue/)
   })
 
-  it('keeps a turned path’s own box and transform, moved by where its frame sat', () => {
+  it('keeps a turned path’s own box and transform, moved by where its frame sat', async () => {
     const path = frameWith(
       'a',
       shell(
@@ -317,6 +354,7 @@ describe('groupCanvasShapes', () => {
     const b = frameWith('b', rect(), { x: 0, y: 0, width: 100, height: 100, z: 2 })
     hold(path, b)
     groupCanvasShapes([path, b], 'Group')
+    await settle()
     const [first] = [...groupOf(live('b')!.html).children] as SVGElement[]
     /* the group is 200 × 200 from (0, 0): the path's box sits at 110, 120 */
     expect([first!.style.left, first!.style.top, first!.style.width, first!.style.height]).toEqual([
@@ -356,6 +394,7 @@ describe('groupCanvasShapes', () => {
     let fail!: (err: Error) => void
     updateFrame.mockImplementationOnce(() => new Promise<Frame>((_, reject) => (fail = reject)))
     groupCanvasShapes([a, b], 'Group')
+    await settle()
     /* a teammate's save of the back shape reaches the canvas meanwhile */
     useStore.getState().upsertFrame({ ...a, html: rect('data-edited=""'), updatedAt: 9_000 })
     fail(new Error('offline'))

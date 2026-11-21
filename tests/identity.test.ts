@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, expect, it } from 'vitest'
+import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 
 /* Reads work but writes throw: a full localStorage, or a browser that hands
    out a zero quota. One session must still keep one identity. */
@@ -43,4 +43,16 @@ it('keeps one identity per session when localStorage reads work but writes throw
   expect(data.get('doop:name')).toBe('Loud Otter')
   data.set('doop:name', 'Renamed Elsewhere')
   expect(getIdentity().name).toBe('Renamed Elsewhere')
+})
+
+it('distinguishes two tabs sharing localStorage and keeps their shared name', async () => {
+  writable = true
+  const firstTab = await import('../src/lib/identity.ts')
+  firstTab.setName('Quiet Otter')
+  const first = firstTab.getIdentity()
+  vi.resetModules()
+  const otherTab = await import('../src/lib/identity.ts')
+  expect(otherTab.getIdentity().clientId).not.toBe(first.clientId)
+  expect(otherTab.getIdentity().name).toBe(first.name)
+  expect(firstTab.getIdentity()).toEqual(first)
 })

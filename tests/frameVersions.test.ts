@@ -78,6 +78,21 @@ describe('frame version history', () => {
     expect(full.html).toBe(DOC_A)
   })
 
+  it('preserves the frame and its older design on a guarded delete', async () => {
+    const frame = await newFrame('protected shape', DOC_A)
+    const updated = await client.patch(`/api/frames/${frame.id}`, { html: DOC_B })
+    expect(updated.status).toBe(200)
+    const { updatedAt } = (await updated.json()) as { updatedAt: number }
+    const response = await client.req(`/api/frames/${frame.id}`, {
+      method: 'DELETE',
+      body: JSON.stringify({ expectedUpdatedAt: updatedAt, preserveVersions: true }),
+    })
+    expect(response.status).toBe(409)
+    expect(await response.json()).toMatchObject({ frame: { id: frame.id, html: DOC_B } })
+    const [version] = await versionsOf(client, frame.id, 1)
+    expect(version?.htmlBytes).toBe(DOC_A.length)
+  })
+
   it('folds a burst of tweaks into one version and opens a new one on the next redesign', async () => {
     const frame = await newFrame('tweaks', DOC_A)
     await client.patch(`/api/frames/${frame.id}`, { html: DOC_B })

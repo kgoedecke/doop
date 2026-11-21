@@ -154,6 +154,27 @@ it('reports partial batch failures without claiming every selected screen was ap
   expect(useStore.getState().notice?.text).toContain('1 of 2 screens updated.')
 })
 
+it('disables menu Cut for a shape locked at the layer level', () => {
+  const shape = {
+    ...frame,
+    html: '<body data-doop-canvas-element="true"><div data-doop-drawing="rect" data-doop-locked></div></body>',
+  }
+  act(() => {
+    useStore.getState().upsertFrame(shape)
+    root.render(
+      <ContextMenu>
+        <ContextMenuTrigger data-test-cut-menu>Shape</ContextMenuTrigger>
+        <FrameContextMenu frame={shape} at={{ current: { x: 0, y: 0 } }} />
+      </ContextMenu>,
+    )
+  })
+  act(() =>
+    container.querySelector('[data-test-cut-menu]')!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true })),
+  )
+  const cut = [...document.querySelectorAll('[role="menuitem"]')].find((el) => el.textContent?.startsWith('Cut'))
+  expect(cut?.hasAttribute('data-disabled')).toBe(true)
+})
+
 it('blocks context-menu approval from the first HTML keystroke until the debounced save completes', async () => {
   vi.useFakeTimers()
   localStorage.setItem('doop:inspector-html', '1')
