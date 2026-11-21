@@ -159,6 +159,54 @@ describe.skipIf(!findBrowserPath())('page camera and snapping', { timeout: 30_00
     expect(await page.$('iframe[title="original"]')).toBeNull()
   })
 
+  it('opens the web link under a ⌘-click, not the one hovered a moment before', async () => {
+    const source = {
+      ...frame('links', 'first', 0),
+      width: 1200,
+      height: 800,
+      html: `<style>body{padding:100px;font-size:32px}a{display:block;width:400px;margin:0 0 40px}</style>
+        <a id="first" href="https://example.com/first">First</a>
+        <a id="second" href="https://example.com/second">Second</a>`,
+    }
+    await load(canvas([source]), '?frame=links')
+    await page.evaluate(() => {
+      const opened: string[] = []
+      ;(window as unknown as { opened: string[] }).opened = opened
+      window.open = (url?: string | URL) => {
+        opened.push(String(url))
+        return null
+      }
+    })
+    const host = (await page.waitForSelector('iframe[title="links"]'))!
+    const doc = (await host.contentFrame())!
+    const point = async (selector: string) => {
+      const node = (await doc.waitForSelector(selector))!
+      const rect = await node.evaluate((el) => {
+        const box = el.getBoundingClientRect()
+        return { x: box.x + 60, y: box.y + box.height / 2, width: innerWidth, height: innerHeight }
+      })
+      return host.evaluate((el, { x, y, width, height }) => {
+        const box = el.getBoundingClientRect()
+        return { x: box.left + (x * box.width) / width, y: box.top + (y * box.height) / height }
+      }, rect)
+    }
+    const first = await point('#first')
+    const second = await point('#second')
+    const mod = (await page.evaluate(() => /mac/i.test(navigator.platform))) ? 'Meta' : 'Control'
+    await page.keyboard.down(mod)
+    await page.mouse.move(first.x, first.y)
+    await waitState('the first link is outlined', () => !!document.querySelector('[data-link-outline]'))
+    // inside the hover throttle: the outline still shows the first link
+    await page.mouse.move(second.x, second.y)
+    await page.mouse.down()
+    await page.mouse.up()
+    await page.keyboard.up(mod)
+    await page.waitForFunction(() => (window as unknown as { opened: string[] }).opened.length > 0)
+    expect(await page.evaluate(() => (window as unknown as { opened: string[] }).opened)).toEqual([
+      'https://example.com/second',
+    ])
+  })
+
   it('follows a same-canvas frame link on modifier-click without taking over ordinary selection', async () => {
     const source = {
       ...frame('directory', 'first', 0),

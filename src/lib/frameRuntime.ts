@@ -1940,7 +1940,8 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
     if (d.type === 'doop:anchor' && typeof d.id === 'string') {
       var anchorId = d.id
       try { anchorId = decodeURIComponent(d.id) } catch (e) { /* keep it as written */ }
-      var anchorEl = anchorId && anchorId !== 'top' ? document.getElementById(anchorId) || document.getElementsByName(anchorId)[0] : null
+      /* as a browser does: an element named so wins, even one named top */
+      var anchorEl = anchorId ? document.getElementById(anchorId) || document.getElementsByName(anchorId)[0] : null
       if (anchorEl) anchorEl.scrollIntoView({ behavior: 'smooth', block: 'start' })
       else if (!anchorId || anchorId === 'top') window.scrollTo({ top: 0, behavior: 'smooth' })
     }

@@ -118,6 +118,12 @@ describe.skipIf(!findBrowserPath())('rich text editing', { timeout: 30_000 }, ()
     await frame.waitForFunction(() => Math.abs(document.querySelector('#pricing')!.getBoundingClientRect().top) < 2)
     await send({ type: 'doop:anchor', id: '' })
     await frame.waitForFunction(() => scrollY === 0)
+    // an element named top wins over the top of the document, as in a browser
+    await frame.evaluate(() => {
+      document.querySelector('#pricing')!.id = 'top'
+    })
+    await send({ type: 'doop:anchor', id: 'top' })
+    await frame.waitForFunction(() => Math.abs(document.querySelector('#top')!.getBoundingClientRect().top) < 2)
   })
 
   it('ends the edit on a click on nothing editable, telling the canvas so', async () => {

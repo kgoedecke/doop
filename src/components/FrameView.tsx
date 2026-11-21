@@ -349,6 +349,11 @@ export const FrameView = memo(function FrameView({
   const menuRequest = useRef(0)
   const surfaceRef = useRef<HTMLDivElement>(null)
   const linkPress = useRef<{ pointerId: number; x: number; y: number } | null>(null)
+  /* the design point the latest hover probe was asked at, and the one its
+     answer (the `hover` drawn) is for: probes are throttled with no trailing
+     one, so the drawn hover can be for a spot the pointer has left */
+  const hoverAsked = useRef<{ x: number; y: number } | null>(null)
+  const hoverAnswered = useRef<{ x: number; y: number } | null>(null)
   const sentCursor = useRef<string | null>(null)
   const syncCursorRef = useRef(() => {})
   syncCursorRef.current = () => {
@@ -1089,6 +1094,7 @@ export const FrameView = memo(function FrameView({
     if (!force && now - hoverLast.current < 40) return
     hoverLast.current = now
     hoverReq.current += 1
+    hoverAsked.current = { x, y }
     iframeRef.current?.contentWindow?.postMessage(
       { type: 'doop:hover', reqId: hoverReq.current, x, y, selected: pickedHere() },
       '*',
@@ -1441,6 +1447,7 @@ export const FrameView = memo(function FrameView({
       }
       if (ev.data?.type === 'doop:hover-result' && ev.data.reqId === hoverReq.current) {
         const hit = (ev.data.hit ?? null) as HoverHit | null
+        hoverAnswered.current = hoverAsked.current
         /* only re-render when the outlined element actually changes */
         const key = hit ? JSON.stringify([hit.selector, hit.rect, hit.href, hit.linkRect]) : null
         if (key !== hoverKey.current) {
@@ -2028,16 +2035,23 @@ export const FrameView = memo(function FrameView({
                 linkPress.current = null
                 return
               }
-              /* a web link opens now, inside the click: a popup blocker
-                 refuses a tab opened after the round trip to the frame. The
-                 hovered link is the one under the press, which moved at most
-                 a few pixels */
-              if (linkHovered && linkHovered.kind === 'web' && hover?.href) {
+              const at = designPoint(e, e.currentTarget, frame.rotation)
+              /* a web link opens now, inside the click, where a popup blocker
+                 is surest to allow the tab: but only when the hover drawn was
+                 answered for this very spot. Otherwise the frame is asked
+                 what is under the press, as for every other link */
+              const answered = hoverAnswered.current
+              if (
+                linkHovered &&
+                linkHovered.kind === 'web' &&
+                hover?.href &&
+                answered &&
+                Math.hypot(at.x - answered.x, at.y - answered.y) <= 2
+              ) {
                 linkPress.current = null
                 followLink(hover.href)
                 return
               }
-              const at = designPoint(e, e.currentTarget, frame.rotation)
               void requestFrame(frame.id, 'doop:link-hit', at).then((reply) => {
                 if (linkPress.current !== press) return
                 linkPress.current = null
