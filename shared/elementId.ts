@@ -10,6 +10,9 @@
 
 export const ELEMENT_ID_ATTR = 'data-doop-id'
 
+/** A selector is free text in a public URL: long enough for any real one. */
+export const MAX_LAYER_SELECTOR_CHARS = 500
+
 const ID_ALPHABET = 'abcdefghijklmnopqrstuvwxyz0123456789'
 const ID_LENGTH = 6
 

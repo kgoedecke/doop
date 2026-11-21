@@ -46,7 +46,8 @@ export const agents = {
   brief: 'Instructions',
   briefPlaceholder:
     'You are the SEO reviewer. Check that every page has one clear h1, descriptive headings in order, and copy that names what the page is about…',
-  briefHint: '{used} / {max} characters. Say what it owns, what it checks and what it must leave alone.',
+  briefHint:
+    '{used} / {max} characters. Say what it owns, what it checks and what it must leave alone. Type / to name a skill it applies on every run.',
   color: 'Colour',
   reviewer: 'Review pass',
   reviewerHint:

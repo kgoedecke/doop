@@ -1,5 +1,5 @@
 {
-  "id": "a2b2f9c1-c51b-42ec-a6df-d74a9762954c",
+  "id": "6136cc14-a6e2-4451-af9f-b97ef51eaca8",
   "prevId": "1180ab66-a1b3-4550-970e-f586cac2f865",
   "version": "7",
   "dialect": "postgresql",
@@ -3407,6 +3407,89 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
+    "public.skills": {
+      "name": "skills",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "scope": {
+          "name": "scope",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "handle": {
+          "name": "handle",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "description": {
+          "name": "description",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "body": {
+          "name": "body",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_by": {
+          "name": "created_by",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {
+        "skills_scope_handle_idx": {
+          "name": "skills_scope_handle_idx",
+          "columns": [
+            {
+              "expression": "scope",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "handle",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
     "public.slack_installations": {
       "name": "slack_installations",
       "schema": "",
@@ -3920,12 +4003,6 @@
           "type": "text",
           "primaryKey": false,
           "notNull": true
-        },
-        "agent_key": {
-          "name": "agent_key",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
         },
         "owner": {
           "name": "owner",

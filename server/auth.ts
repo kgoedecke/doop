@@ -359,11 +359,26 @@ function assertSignupDomainAllowed(email: string): void {
   })
 }
 
+/* Which request header holds the client IP, for Better Auth's per-client rate limits.
+   Unset, it reads only a single-hop X-Forwarded-For; behind a proxy that adds hops
+   (Fly, Cloudflare, Railway) it finds no IP and every visitor shares one bucket.
+   Lowercased: getIp also takes a plain headers object, whose lookup is case-sensitive. */
+export function loadIpAddressConfig() {
+  const ipAddressHeaders = env.AUTH_IP_HEADERS.map((h) => h.toLowerCase())
+  const trustedProxies = env.AUTH_TRUSTED_PROXIES
+  if (ipAddressHeaders.length === 0 && trustedProxies.length === 0) return null
+  return {
+    ...(ipAddressHeaders.length > 0 && { ipAddressHeaders }),
+    ...(trustedProxies.length > 0 && { trustedProxies }),
+  }
+}
+
 function buildAuth() {
   const oidc = loadOidcConfig()
   const google = loadGoogleConfig()
   const microsoft = loadMicrosoftConfig()
   const apple = loadAppleConfig()
+  const ipAddressConfig = loadIpAddressConfig()
   /* BETTER_AUTH_SECRET and BETTER_AUTH_URL are required in production; a
      missing one fails at boot in server/env.ts */
   const prod = env.isProduction
@@ -375,6 +390,7 @@ function buildAuth() {
     /* the provider tokens a social or SSO sign-in leaves on its account row,
        sealed with the auth secret; doop never reads them back */
     account: { encryptOAuthTokens: true },
+    ...(ipAddressConfig && { advanced: { ipAddress: ipAddressConfig } }),
     /* prod: the public origin, plus any extras from env, plus Apple when its
        web flow is on: Apple returns the authorization code by POSTing a form
        from appleid.apple.com to /api/auth/callback/apple, and better-auth's

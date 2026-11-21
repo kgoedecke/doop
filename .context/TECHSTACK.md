@@ -113,7 +113,7 @@
   agents are `AgentRole`s with `custom: true`: a fixed handle (its role id and its only @mention
   spelling) and name (its presence identity), editable colour, one-liner, instructions (up to 2,000
   characters) and reviewer flag, at most 20 per scope, in `custom_agents`. `scope` is `ws:<id>` or
-  `user:<id>` in both tables (migration 0057), mirrored in memory. Instructions a team wrote (a
+  `user:<id>` in both tables (migration 0057), mirrored in memory. A table keyed this way (agents, overrides, skills) is dropped in both `deleteWorkspace` and `purgeUserData`; `accountDeletion.test.ts` counts the drops. Instructions a team wrote (a
   custom agent's, a rewritten built-in's: `briefByTeam`) sit in the resident's system prompt inside
   `<role_instructions>`, under the shared rules. Every role lookup takes a `Roster`
   (`actions.canvasRoster` / `rosterFor` on the server, `useRoster` / `useCanvasRoster` in the
@@ -128,7 +128,7 @@
 - Agent identity (`shared/agentIdentity.ts`): an outside agent is its account and its `agent_name`,
   not the name alone, so two people's "Claude" on a shared canvas are two agents with their own
   presence and tasks. `mcpAgentKey` hashes the two into the opaque `agentKey` on the `Actor`, the
-  presence (keyed and `clientId`'d by it) and the task (`tasks.agent_key`, migration 0060);
+  presence (keyed and `clientId`'d by it) and the task (`tasks.agent_key`, migration 0061);
   `set_status`, auto tasks, `endAgentTasks` on presence expiry and the guidelines nudge match on it
   (`isAgentsTask`), as do the editor's task and face fly-tos (`taskFrameId`, `locatePresence`).
   Not the MCP session: in PostHog's `custom_agent_connected` (one per `initialize`) Codex and the
@@ -138,6 +138,25 @@
   `OWNER_FIRST_MS` (a minute, the presence lifetime) for that agent before any agent may take it,
   and `get_feedback` and delivered feedback say whose work it is about (`whoseWork`). Tests:
   `agentIdentity.test.ts`, `agentIdentityHttp.test.ts`, the shared-name cases in `locate.test.ts`.
+- Skills (`.context/specs/skills.md`, `shared/skills.ts`, `server/skills.ts`, `server/skillRoutes.ts`,
+  `src/components/Skills.tsx`): named instructions a workspace (Workspace → Agents) or a person
+  (Settings → Doop Agent, for their personal canvases) writes once, at most 50 per scope, in
+  `skills` (migration 0060, `scope` as in `custom_agents`, mirrored in memory). A handle
+  (`brand-check`) is fixed once created. `/handle` in a request asks for one: `skillHandlesIn`
+  finds a `/handle` that starts the text or follows whitespace or `(` and ends at whitespace or
+  punctuation, so paths and URLs are never skills. The resident run scans its cards, comments,
+  feedback, each feedback's task and what came before each comment in its thread
+  and the instructions a team wrote for the running agent
+  (`requestedSkillsPrompt` in `server/resident.ts`), and `skillsBlock` adds the bodies of the
+  first five the canvas's scope has as a cached system block after the guidelines, on both the API
+  and harness paths; a handle with no skill changes nothing. Skill text never reaches canvas
+  viewers. Route: `/api/skills` (`?workspace=`, members only). Typing `/` in the composer, a
+  comment, a reply, an automation's agent step, Home's prompt box or an agent's Instructions opens `useSkillMenu` (`src/components/SkillMenu.tsx`,
+  `partialHandleAt`), fed by `GET /api/canvases/:id/skills` (edit role, handle and description
+  only, plus `addIn`: where this viewer may add one); Home, before its canvas exists, reads
+  `/api/skills` for the scope it will make the canvas in. The composer also has a Skills button that
+  writes the `/`, and its menu ends with "New skill", the skills card's form via `?skill=new`. Tests: `skills.test.ts`, `skillsHttp.test.ts`, `residentSkills.test.ts`,
+  `skillMenu.test.tsx`, `skillsCard.test.tsx`, `agentInstructionsSkills.test.tsx`.
 - Agent feedback (`server/agentFeedback.ts`, `shared/agentFeedback.ts`): agents talk to the Doop
   team through two MCP tools, which the resident agent has under the same names. `report_issue`
   (kind `issue`: `bug`, `tool_error`, `confusing`, `missing_capability`, `other`) is for where Doop
@@ -409,7 +428,8 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   `copyElementPng`): the frame is rendered whole and cut to the element's live box
   (`doop:inspect` rect, `clipToFrame`, the raster's `clip` option), so every style it inherits
   and whatever paints behind it stay in the picture; a server render is cropped here the same
-  way (`cropRaster`), and a frame off screen says so. The element panel's Design tab ends with the same
+  way (`cropRaster`), unless a full screenshot would reduce a small layer’s density, in which case Chromium captures
+  the layer by selector. A frame off screen says so. The element panel's Design tab ends with the same
   Export section (`LayerExportSection.tsx`: the shared scale and format, "Export <layer>", Copy as
   PNG), as Figma ends a layer's properties. Agents export a layer with `export_layer` (MCP and the
   resident, `server/layerExport.ts`), named by `element_id` (its `data-doop-id`) or a CSS
@@ -425,7 +445,9 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   named `Name@2x.png` as Figma does. Up to 2x a scale is honoured as before; above it,
   `fitExportScale` brings a huge frame down to 16,384 px a side and 64 MP, the same limit
   for the browser render, `/i/<id>.png?scale=` (any parsed scale, 1x when unreadable) and MCP
-  `export_frame`'s `scale`, and the toast says so. SVG is `frameSvg`: the inlined document
+  `export_frame`'s `scale`. Full-frame server exports then reduce density only when the
+  screenshot would otherwise lose rows at Chromium’s 50 MP capture limit. The download names
+  the density actually used, and the toast reports a reduction. SVG is `frameSvg`: the inlined document
   `inlineDocument` already builds, cropped by `viewBox` for an element, on white, settled for
   a file opened as a page, where the viewer's window would be the viewport (`standalone`,
   `FrameViewport`): viewport units become the frame's px, `@media` rules and `<style media>` are

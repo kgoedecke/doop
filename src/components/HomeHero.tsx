@@ -8,6 +8,8 @@ import {
   type DraftCount,
 } from '../lib/homePrompt'
 import { setPromptBoxHidden, usePromptBoxHidden } from '../lib/homePreferences'
+import type { AgentScope } from '../../shared/customAgents'
+import { useSkillMenu } from './SkillMenu'
 import { DoopMark } from './Logo'
 import { ModelPicker } from './ModelPicker'
 import { BrandMark } from './ui/brand-mark'
@@ -121,6 +123,7 @@ export function HomeHero({
   busy,
   actions,
   focusAt,
+  skillScope,
 }: {
   firstName?: string
   /** a send in flight: the composer locks until the canvas opens */
@@ -128,6 +131,8 @@ export function HomeHero({
   actions: HeroActions
   /** a timestamp — the rail's "Ask Doop" and ⌘/ ask for the keyboard */
   focusAt: number
+  /** the scope the canvas will be made in, whose skills the / menu lists */
+  skillScope: AgentScope
 }) {
   const hidden = usePromptBoxHidden()
   const [confirmHide, setConfirmHide] = useState(false)
@@ -139,6 +144,8 @@ export function HomeHero({
   const [beamAt, setBeamAt] = useState(3)
   const [hovered, setHovered] = useState<number | null>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
+  /* no "New skill" here, because this page holds the box's text and leaving it loses the text */
+  const skillMenu = useSkillMenu({ from: { scope: skillScope }, text, setText, inputRef })
   const t = useT()
 
   useLayoutEffect(() => {
@@ -171,6 +178,7 @@ export function HomeHero({
   }
 
   function onKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
+    if (skillMenu.onKeyDown(e)) return
     if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault()
       submit()
@@ -293,7 +301,8 @@ export function HomeHero({
 
       {/* the composer */}
       <div className="relative mx-auto mt-6 w-full max-w-[740px] px-4 md:mt-[34px] md:px-0">
-        <div className="rounded-panel bg-surface px-[18px] pb-3 pt-5 shadow-float">
+        <div className="relative rounded-panel bg-surface px-[18px] pb-3 pt-5 shadow-float">
+          {skillMenu.menu}
           <Textarea
             ref={inputRef}
             variant="bare"
@@ -302,7 +311,7 @@ export function HomeHero({
             disabled={busy}
             placeholder={t('home.composerPlaceholder')}
             aria-label={t('home.composerAria')}
-            onChange={(e) => setText(e.target.value)}
+            {...skillMenu.inputProps}
             onKeyDown={onKeyDown}
             className="min-h-[52px] text-lead placeholder:text-ink-ghost md:text-lead"
           />

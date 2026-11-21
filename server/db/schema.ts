@@ -534,6 +534,24 @@ export const customAgents = pgTable(
   ],
 )
 
+/** Skills (shared/skills.ts): named instructions a workspace or a person
+ *  writes once and asks for with `/handle`. `scope` as in `custom_agents`;
+ *  a handle is unique within it. */
+export const skills = pgTable(
+  'skills',
+  {
+    id: text('id').primaryKey(),
+    scope: text('scope').notNull(),
+    handle: text('handle').notNull(),
+    description: text('description').notNull(),
+    body: text('body').notNull(),
+    createdBy: text('created_by').notNull(),
+    createdAt: bigint('created_at', { mode: 'number' }).notNull(),
+    updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
+  },
+  (t) => [uniqueIndex('skills_scope_handle_idx').on(t.scope, t.handle)],
+)
+
 /** A workspace's or a person's changes to one built-in agent
  *  (shared/agents.ts): switched off, or its colour, one-liner, instructions or
  *  reviewer flag replaced. A null field keeps the built-in value; no row is

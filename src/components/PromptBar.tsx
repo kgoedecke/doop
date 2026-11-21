@@ -10,8 +10,9 @@ import { Textarea } from './ui/textarea'
 import { Note } from './ui/note'
 import { Tooltip } from './ui/tooltip'
 import { DoopMark } from './Logo'
-import { ArrowUpIcon, AttachmentIcon, FrameIcon, XIcon } from './ui/icons'
+import { ArrowUpIcon, AttachmentIcon, BookOpenIcon, FrameIcon, XIcon } from './ui/icons'
 import { ModelPicker } from './ModelPicker'
+import { useSkillMenu } from './SkillMenu'
 import { currentRunnerPick, useRunnerPick } from '../lib/runnerPick'
 import { resolveRunnerPick } from '../../shared/agentRunner'
 import { AGENT_ROLES, DEFAULT_ROLE_ID, mentionedRoles } from '../../shared/agents'
@@ -250,6 +251,14 @@ export function PromptBar({ canvasId }: { canvasId: string }) {
   const error = attachError ?? sendError
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
+  const skillMenu = useSkillMenu({
+    from: { canvasId },
+    text,
+    setText: (value) => setDraft(canvasId, value),
+    inputRef,
+    /* the store keeps the draft per canvas, so leaving to add a skill loses nothing */
+    offerNew: true,
+  })
   const t = useT()
   const meter = meterText(allowance, t, pickedProvider, picked?.runner.name)
 
@@ -309,6 +318,7 @@ export function PromptBar({ canvasId }: { canvasId: string }) {
   }
 
   function onKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
+    if (skillMenu.onKeyDown(e)) return
     if (e.key === 'Escape' && chip) {
       e.preventDefault()
       setDismissed(scopeKey(chip.scope))
@@ -371,7 +381,7 @@ export function PromptBar({ canvasId }: { canvasId: string }) {
         </div>
       )}
       <form
-        className="rounded-[10px]"
+        className="relative rounded-[10px]"
         onSubmit={(e) => {
           e.preventDefault()
           void submit(text)
@@ -416,6 +426,7 @@ export function PromptBar({ canvasId }: { canvasId: string }) {
             </span>
           </div>
         )}
+        {skillMenu.menu}
         <Textarea
           ref={inputRef}
           variant="bare"
@@ -431,8 +442,8 @@ export function PromptBar({ canvasId }: { canvasId: string }) {
                 : t('panels.promptPlaceholderElement')
               : t('panels.promptPlaceholder')
           }
+          {...skillMenu.inputProps}
           onKeyDown={onKeyDown}
-          onChange={(e) => setDraft(canvasId, e.target.value)}
           onPaste={(e) => {
             const images = [...(e.clipboardData?.files ?? [])].filter((f) => f.type.startsWith('image/'))
             if (images.length) {
@@ -452,6 +463,19 @@ export function PromptBar({ canvasId }: { canvasId: string }) {
             onClick={() => fileRef.current?.click()}
           >
             <AttachmentIcon className="size-3.5" />
+          </Button>
+          <Button
+            variant="bare"
+            size="icon-sm"
+            className="size-7 rounded-[7px] text-ink-faint hover:bg-paper-deep hover:text-ink"
+            aria-label={t('skills.menuLabel')}
+            title={t('skills.menuButton')}
+            disabled={busy}
+            /* keep the field's caret: the / goes where the person was typing */
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={skillMenu.openMenu}
+          >
+            <BookOpenIcon className="size-3.5" />
           </Button>
           <span className="flex-1" />
           <ModelPicker disabled={busy} />
