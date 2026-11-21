@@ -3,8 +3,6 @@ import { nanoid } from 'nanoid'
 /* localStorage is missing in some test runtimes and throws in locked-down
    browsers; fall back to a per-session store so identity still works. */
 const memory = new Map<string, string>()
-// Each tab has its own collaboration session, even when it shares a name and storage.
-const clientId = nanoid(12)
 const storage = {
   /* A value that only made it into memory (the write threw, e.g. quota
      exceeded, while reads still work) wins over localStorage, so one session
@@ -36,6 +34,11 @@ function randomName() {
 }
 
 export function getIdentity(): { clientId: string; name: string } {
+  let clientId = storage.get('doop:clientId')
+  if (!clientId) {
+    clientId = nanoid(12)
+    storage.set('doop:clientId', clientId)
+  }
   let name = storage.get('doop:name')
   if (!name) {
     name = randomName()

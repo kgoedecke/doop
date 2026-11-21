@@ -785,11 +785,8 @@ export const api = {
   /* several frames' stacking order at once, all or nothing */
   restackFrames: (canvasId: string, frames: StackWrite[]) =>
     req<Frame[]>(`/api/canvases/${canvasId}/stack`, { method: 'PUT', body: JSON.stringify({ frames }) }),
-  deleteFrame: (frameId: string, expectedUpdatedAt?: number, preserveVersions?: boolean) =>
-    req('/api/frames/' + frameId, {
-      method: 'DELETE',
-      body: JSON.stringify({ expectedUpdatedAt, preserveVersions, actor: actor() }),
-    }),
+  deleteFrame: (frameId: string, expectedUpdatedAt?: number) =>
+    req('/api/frames/' + frameId, { method: 'DELETE', body: JSON.stringify({ expectedUpdatedAt, actor: actor() }) }),
   setFrameApproval: (frameId: string, status: 'ready_for_dev' | 'draft', expectedUpdatedAt: number) =>
     req<Frame>(`/api/frames/${frameId}/approval`, {
       method: 'PUT',

@@ -74,14 +74,9 @@ export function FrameContextMenu({
     const group = s.canvas?.frames.filter((f) => ids.includes(f.id)) ?? [frame]
     return group.every((f) => f.locked)
   })
-  const allStackLocked = useStore((s) => {
-    const ids = s.selectedIds.includes(frame.id) ? s.selectedIds : [frame.id]
-    const group = s.canvas?.frames.filter((f) => ids.includes(f.id)) ?? [frame]
-    return group.every(isStackLocked)
-  })
   function deleteSelection() {
     /* locked frames stay, as they do on ⌫ */
-    deleteFramesTracked(groupFrames().filter((f) => !isStackLocked(f)))
+    deleteFramesTracked(groupFrames().filter((f) => !f.locked))
   }
   /* Cut copies the group, then removes what Delete would once the clipboard
      took it. The menu writes the clipboard asynchronously, so the frames are
@@ -100,7 +95,7 @@ export function FrameContextMenu({
       },
       undefined,
       () => {
-        const cut = live.filter((f) => !isStackLocked(f))
+        const cut = live.filter((f) => !f.locked)
         if (cut.length) deleteFramesTracked(cut)
       },
     )
@@ -133,7 +128,7 @@ export function FrameContextMenu({
         }}
       >
         {!readOnly && (
-          <ContextMenuItem disabled={allStackLocked} onSelect={cutSelection}>
+          <ContextMenuItem disabled={allLocked} onSelect={cutSelection}>
             {groupSize > 1 ? t('stage.cutFrames', { count: groupSize }) : t('common.cut')}
             <MenuHint>{MOD_KEY}X</MenuHint>
           </ContextMenuItem>
@@ -213,7 +208,7 @@ export function FrameContextMenu({
               <MenuHint>{MOD_KEY}⇧L</MenuHint>
             </ContextMenuItem>
             <ContextMenuSeparator />
-            <ContextMenuItem tone="danger" disabled={allStackLocked} onSelect={deleteSelection}>
+            <ContextMenuItem tone="danger" disabled={allLocked} onSelect={deleteSelection}>
               {groupSize > 1 ? t('stage.deleteFrames', { count: groupSize }) : t('stage.deleteFrame')}
               <MenuHint>⌫</MenuHint>
             </ContextMenuItem>

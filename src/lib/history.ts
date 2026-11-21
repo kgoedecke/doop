@@ -683,19 +683,6 @@ async function apply(e: Entry, direction: 'undo' | 'redo', guarded = false): Pro
       changedNotice(direction)
       throw new Error('Changed since')
     }
-    if (e.guarded) {
-      const removing = direction === 'redo' ? 'delete' : 'create'
-      const removed = e.entries.flatMap((child) =>
-        (child.type === 'create' || child.type === 'delete') && child.type === removing ? [child.frameId] : [],
-      )
-      try {
-        const versions = await Promise.all(removed.map((id) => api.frameVersions(id)))
-        if (versions.some((list) => list.length > 0))
-          throw new Error('A shape has saved versions and must keep its frame.')
-      } catch (err) {
-        throw new PrerequisiteFailed(e, null, err, e.canvasId)
-      }
-    }
     const entries = direction === 'redo' ? e.entries : [...e.entries].reverse()
     const applied: Entry[] = []
     for (const child of entries) {
@@ -803,7 +790,7 @@ async function apply(e: Entry, direction: 'undo' | 'redo', guarded = false): Pro
     await recreate(e)
   } else {
     const expected = expectedVersion(e, guarded)
-    await (guarded ? api.deleteFrame(e.frameId, expected, true) : api.deleteFrame(e.frameId))
+    await (expected === undefined ? api.deleteFrame(e.frameId) : api.deleteFrame(e.frameId, expected))
     useStore.getState().removeFrame(e.frameId)
   }
   return e

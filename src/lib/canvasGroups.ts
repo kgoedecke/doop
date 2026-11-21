@@ -190,7 +190,14 @@ export function groupCanvasShapes(shapes: Frame[], name: string): boolean {
     height: Math.round(box.height),
     hidden: false,
   }
-  trackSave(saveGroup(host, patch, others, scopes, groupPath))
+  const store = useStore.getState()
+  const hostAfter = { ...host, ...patch }
+  store.patchFrameLocal(host.id, patch)
+  for (const f of others) store.removeFrame(f.id)
+  store.select(host.id)
+  store.setSelectedElement({ frameId: host.id, selector: groupPath })
+  const entry = recordShellRewrite({ before: host, after: hostAfter }, [], others)
+  trackSave(saveGroup(host, patch, others, scopes, entry))
   return true
 }
 
@@ -203,34 +210,8 @@ async function saveGroup(
   patch: ShellPatch,
   others: Frame[],
   scopes: Map<string, string>,
-  groupPath: string,
+  entry: ReturnType<typeof recordShellRewrite>,
 ) {
-  try {
-    const versions = await Promise.all(others.map((f) => api.frameVersions(f.id)))
-    const keeps = others[versions.findIndex((list) => list.length > 0)]
-    if (keeps) {
-      notice(`“${keeps.name}” has saved versions, so it can only be grouped as the frontmost shape`)
-      return
-    }
-  } catch (err) {
-    notice(errorMessage(err, 'Couldn’t check the shapes’ version history'))
-    return
-  }
-  const store = useStore.getState()
-  if (store.canvas?.id !== host.canvasId) return
-  if (
-    [host, ...others].some(
-      (f) => !store.canvas?.frames.some((live) => live.id === f.id && live.updatedAt === f.updatedAt),
-    )
-  ) {
-    notice('A shape changed while grouping. Select the shapes and try again.')
-    return
-  }
-  store.patchFrameLocal(host.id, patch)
-  for (const f of others) store.removeFrame(f.id)
-  store.select(host.id)
-  store.setSelectedElement({ frameId: host.id, selector: groupPath })
-  const entry = recordShellRewrite({ before: host, after: { ...host, ...patch } }, [], others)
   let saved: Frame
   try {
     saved = await api.updateFrame(host.id, patch, host.updatedAt)
@@ -248,7 +229,7 @@ async function saveGroup(
   let html = patch.html
   for (const f of others) {
     try {
-      await api.deleteFrame(f.id, f.updatedAt, true)
+      await api.deleteFrame(f.id, f.updatedAt)
     } catch (err) {
       const remote = err instanceof ApiError && err.status === 409 ? (err.body.frame as Frame | undefined) : undefined
       useStore.getState().upsertFrame(remote?.id === f.id ? remote : f)

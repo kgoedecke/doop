@@ -2833,24 +2833,12 @@ app.post('/api/frames/:id/append', (req, res) => {
   res.json({ ok: true, htmlBytes: frame.html.length })
 })
 
-app.delete('/api/frames/:id', async (req, res, next) => {
-  const frame = requireFrame(req, res, req.params.id, 'edit', req.body?.expectedUpdatedAt)
-  if (!frame) return
-  try {
-    if (req.body?.preserveVersions === true) {
-      const expected = frame.updatedAt
-      const hasVersions = await persist.hasFrameVersions(frame.id)
-      // Recheck the edit permission and revision after the database read.
-      if (!requireFrame(req, res, frame.id, 'edit', expected)) return
-      if (hasVersions)
-        return res.status(409).json({ error: 'This shape has saved versions and must keep its frame.', frame })
-    }
-    const deleted = actions.deleteFrame(frame.id, userActor(req))
-    if (!deleted) return res.status(404).json({ error: 'frame not found' })
-    res.json({ ok: true })
-  } catch (err) {
-    next(err)
-  }
+app.delete('/api/frames/:id', (req, res) => {
+  if (!requireFrame(req, res, req.params.id, 'edit', req.body?.expectedUpdatedAt)) return
+  const actor = userActor(req)
+  const frame = actions.deleteFrame(req.params.id, actor)
+  if (!frame) return res.status(404).json({ error: 'frame not found' })
+  res.json({ ok: true })
 })
 
 /* design history: the states a frame had before later edits replaced them,

@@ -770,16 +770,6 @@ function frameVersionKind(kind: string | null): ActorKind | undefined {
   return kind === 'user' || kind === 'agent' ? kind : undefined
 }
 
-export async function hasFrameVersions(frameId: string): Promise<boolean> {
-  await pendingVersionWrites((id) => id === frameId)
-  const [version] = await db
-    .select({ id: t.frameVersions.id })
-    .from(t.frameVersions)
-    .where(eq(t.frameVersions.frameId, frameId))
-    .limit(1)
-  return !!version
-}
-
 /** Newest first, without the HTML — the list stays light however large the
  *  designs are; `getFrameVersion` fetches one in full. */
 export async function listFrameVersions(frameId: string): Promise<FrameVersionInfo[]> {
