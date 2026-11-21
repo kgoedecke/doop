@@ -35,6 +35,31 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
     vOutlineSheet = new CSSStyleSheet()
     vOutlineSheet.replaceSync('html,body{background:transparent!important}body *{outline:1px solid rgba(1,119,211,.6)!important;outline-offset:-1px!important;background:transparent!important;box-shadow:none!important;text-shadow:none!important}body img,body video,body canvas,body svg{opacity:.25!important}')
   } catch (e) {}
+  /* An edit is not an interaction: while one is applied (a new version of the
+     html morphed in, a drag or scrub previewing) the design's transitions are
+     held still, so an element jumps to its new box at once instead of trailing
+     the pointer or being measured mid-way by the outline. Adopted like the
+     sheets above; holds nest (a remote update can land mid-drag). Releasing
+     flushes style first, so lifting the rule starts no transition of its own.
+     In a layer: a layered !important outranks an unlayered one whatever its
+     specificity, so a design's own \`#id { transition: … !important }\` is held
+     too. Only an inline \`style="transition: … !important"\` is out of reach. */
+  var stillSheet = null
+  try {
+    stillSheet = new CSSStyleSheet()
+    stillSheet.replaceSync('@layer doop-still{*,*::before,*::after{transition:none!important}}')
+  } catch (e) {}
+  var stillHolds = 0
+  function holdStill() {
+    if (!stillSheet || stillHolds++ > 0) return
+    document.adoptedStyleSheets = document.adoptedStyleSheets.concat(stillSheet)
+  }
+  function releaseStill() {
+    if (!stillSheet || stillHolds === 0 || --stillHolds > 0) return
+    void getComputedStyle(document.documentElement).transitionProperty
+    void document.documentElement.offsetWidth
+    document.adoptedStyleSheets = document.adoptedStyleSheets.filter(function (sheet) { return sheet !== stillSheet })
+  }
   /* ---- bleed ----
      A standalone element (a shape on the canvas, no frame around it) is the
      whole document, and an iframe paints nothing past its edge, so a stroke
@@ -179,6 +204,14 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
   }
 
   function render(html) {
+    holdStill()
+    try {
+      morph(html)
+    } finally {
+      releaseStill()
+    }
+  }
+  function morph(html) {
     var doc
     try {
       doc = new DOMParser().parseFromString(html, 'text/html')
@@ -446,7 +479,7 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
     }
     var adopted = document.adoptedStyleSheets || []
     for (var t = 0; t < adopted.length; t++) {
-      if (adopted[t] === vSheet || adopted[t] === vOutlineSheet || adopted[t] === bleedSheet) continue // the runtime's own
+      if (adopted[t] === vSheet || adopted[t] === vOutlineSheet || adopted[t] === bleedSheet || adopted[t] === stillSheet) continue // the runtime's own
       var adoptedText = rulesText(adopted[t])
       if (adoptedText === null) continue
       var adoptedStyle = document.createElement('style')
@@ -1490,7 +1523,7 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
      cross-origin sheet cannot be read and is passed over. */
   function isRuntimeSheet(sheet) {
     var owner = sheet.ownerNode
-    return sheet === vSheet || sheet === vOutlineSheet || sheet === bleedSheet || sheet === protoSheet ||
+    return sheet === vSheet || sheet === vOutlineSheet || sheet === bleedSheet || sheet === stillSheet || sheet === protoSheet ||
       !!(owner && owner.hasAttribute && owner.hasAttribute('data-v-edit'))
   }
   function sheetOutranksInline(el, name, value) {
@@ -1584,13 +1617,20 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
     }
     styleEdit = { selector: selector, original: el.style.cssText, styles: {}, touched: {}, runs: [], created: [], renamed: [],
       followers: gestureFollowers(el, followers), shapes: [], paint: {} }
+    holdStill()
     return true
   }
   function endStyleEdit(selector, cancel) {
     if (!styleEdit || styleEdit.selector !== selector) return false
     var edit = styleEdit
     styleEdit = null
-    var el = styleTarget(selector)
+    try {
+      return finishStyleEdit(edit, styleTarget(selector), cancel)
+    } finally {
+      releaseStill()
+    }
+  }
+  function finishStyleEdit(edit, el, cancel) {
     if (!el) return false
     if (cancel) {
       restoreTextRuns(edit)
@@ -1676,7 +1716,17 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
       if (!shape.getAttribute('style')) shape.removeAttribute('style')
     })
   }
+  /* every style the runtime writes lands at once: a typed value, a slider, a
+     rotation or flip (doop:geometry), a nudge, a gesture's preview */
   function applyStyle(selector, styles, uniformText) {
+    holdStill()
+    try {
+      return applyStyleNow(selector, styles, uniformText)
+    } finally {
+      releaseStill()
+    }
+  }
+  function applyStyleNow(selector, styles, uniformText) {
     var el = styleTarget(selector)
     if (!el || isLocked(el)) return false
     var textPatch = isTextPatch(styles)
