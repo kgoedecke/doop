@@ -13,11 +13,14 @@ vi.mock('../server/db/persist.ts', () => ({
 }))
 
 import { buildMcpServer } from '../server/mcp.ts'
+import { execTool } from '../server/resident.ts'
+import * as screenshot from '../server/screenshot.ts'
+import { DEFAULT_ROLE_ID, roleName } from '../shared/agents.ts'
 import { store } from '../server/store.ts'
 import * as propagation from '../server/propagation.ts'
-import { takeComponentIssues } from '../server/actions.ts'
+import { resolveActor, takeComponentIssues } from '../server/actions.ts'
 import { findComponent } from '../server/componentActions.ts'
-import { previewDocument } from '../server/componentPreview.ts'
+import { previewCombinations, previewDocument } from '../server/componentPreview.ts'
 import { activeComponents } from '../shared/components.ts'
 
 const OWNER = 'owner-1'
@@ -84,6 +87,7 @@ beforeEach(async () => {
 })
 
 afterEach(async () => {
+  vi.restoreAllMocks()
   await client.close()
 })
 
@@ -101,24 +105,101 @@ describe('an agent working with components', () => {
     expect(listed.data.note).toContain('doop-use')
   })
 
-  it('previews every variant for an agent, and only the default for the panel', async () => {
+  it('renders defaults, a single selection, or just the requested comparisons', async () => {
     const canvas = newCanvas()
     const { data: created } = await call('create_component', {
       canvas_id: canvas.id,
       name: 'Button',
       html: BUTTON,
       css: CSS,
-      props: [{ name: 'tone', type: 'enum', options: ['solid', 'ghost'], default: 'ghost' }],
+      props: [
+        { name: 'tone', type: 'enum', options: ['solid', 'ghost'], default: 'ghost' },
+        { name: 'size', type: 'enum', options: ['sm', 'lg'], default: 'sm' },
+      ],
     })
     const def = findComponent(canvas.id, created.component.id)!
-    const sheet = previewDocument(canvas.id, def)
-    expect(sheet.variants).toBe(2)
-    expect(sheet.html).toContain('tone=solid')
-    const card = previewDocument(canvas.id, def, 'default')
+    const render = (props?: Record<string, string | string[]>) =>
+      previewDocument(canvas.id, def, previewCombinations(def, props))
+    const card = render()
     expect(card.variants).toBe(1)
     expect(card.html).not.toContain('<figcaption>')
     expect(card.html).toContain('data-tone="ghost"')
-    expect(card.html).not.toContain('data-tone="solid"')
+
+    const exact = render({ size: 'lg' })
+    expect(exact.variants).toBe(1)
+    expect(exact.html).toContain('data-size="lg"')
+    expect(exact.html).toContain('data-tone="ghost"')
+
+    const comparison = render({ tone: ['ghost', 'solid', 'ghost'] })
+    expect(comparison.variants).toBe(2)
+    expect(comparison.html).toContain('tone=solid</figcaption>')
+    expect(comparison.html).toContain('tone=ghost</figcaption>')
+    expect(comparison.html.match(/data-size="sm"/g)).toHaveLength(2)
+
+    expect(() => render({ tone: ['solid', 'neon'] })).toThrow('its values: solid, ghost')
+    const capture = vi.spyOn(screenshot, 'renderFrame').mockResolvedValue(Buffer.from('image'))
+    const preview = await call('get_component_preview', {
+      canvas_id: canvas.id,
+      component: 'Button',
+      props: { tone: ['ghost', 'solid'] },
+    })
+    expect(preview.isError).toBe(false)
+    expect(capture.mock.calls[0]?.[0].html.match(/<figcaption>[^<]+/g)).toEqual([
+      '<figcaption>tone=ghost',
+      '<figcaption>tone=solid',
+    ])
+    const unknown = await call('get_component_preview', {
+      canvas_id: canvas.id,
+      component: 'Button',
+      props: { colour: 'red' },
+    })
+    expect(unknown.isError).toBe(true)
+    expect(unknown.text).toContain('its props: tone, size')
+  })
+
+  it('validates the resident selection even when the model cannot view images', async () => {
+    const canvas = newCanvas()
+    await button(canvas.id)
+    const resident = resolveActor({ name: roleName(DEFAULT_ROLE_ID), kind: 'agent' })
+    const runState = {
+      mutatedFrames: new Set<string>(),
+      sourceFrames: new Set<string>(),
+      verificationFrames: new Set<string>(),
+      verifiedFrames: new Set<string>(),
+      seenVerified: new Set<string>(),
+      rewriteDrafts: new Map<string, string>(),
+      vision: false,
+      imagesGenerated: 0,
+      repliedThreads: new Set<string>(),
+      awaitingThreads: new Set<string>(),
+      tokenWrites: 0,
+      arrangeWrites: 0,
+    }
+    const shoot = (input: Record<string, unknown>) =>
+      execTool(
+        { type: 'tool_use', id: 't1', name: 'screenshot_component', input: { component: 'Button', ...input } },
+        canvas.id,
+        resident,
+        runState,
+      )
+
+    const capture = vi.spyOn(screenshot, 'renderFrame').mockResolvedValue(Buffer.from('image'))
+    const comparison = await shoot({ props: { tone: ['ghost', 'solid'] } })
+    expect(comparison.is_error).toBeUndefined()
+    expect(String(comparison.content)).toContain('cannot view images')
+    const wrong = await shoot({ props: { tone: 'outline' } })
+    expect(wrong.is_error).toBe(true)
+    expect(String(wrong.content)).toContain('its values: solid, ghost')
+    expect((await shoot({ props: { tone: [] } })).is_error).toBe(true)
+    const huge = await shoot({ props: { tone: ['solid', 'ghost'], label: ['1', '2', '3', '4', '5', '6', '7'] } })
+    expect(huge.is_error).toBe(true)
+    expect(String(huge.content)).toContain('Narrow the prop values')
+    expect(capture).not.toHaveBeenCalled()
+
+    runState.vision = true
+    const image = await shoot({ props: { tone: 'ghost' } })
+    expect(image.content).toMatchObject([{ type: 'image' }])
+    expect(capture.mock.calls[0]?.[0].html).toContain('tone=ghost</figcaption>')
   })
 
   it('reads a screen back in short form, at a fraction of the size, and can edit it', async () => {
@@ -502,6 +583,26 @@ describe('an agent working with components', () => {
       css: '.plan .btn { width: 50% }',
     })
     expect(clean.text).not.toContain('were not kept')
+  })
+
+  it('says where it could not read a component’s CSS past', async () => {
+    const canvas = newCanvas()
+    const made = await call('create_component', {
+      canvas_id: canvas.id,
+      name: 'Quote',
+      html: '<blockquote class="q"><p class="body">Hi</p></blockquote>',
+      css: ".q { padding: 8px } .q::before { content: 'open } .body { color: red }",
+    })
+    expect(made.isError).toBe(false)
+    expect(made.text).toContain('COMPONENT: the CSS for “Quote” could not be read past: .q::before')
+
+    const tailwind = await call('update_component', {
+      canvas_id: canvas.id,
+      component: 'Quote',
+      css: String.raw`.q { padding: 8px } .\[\&_p\:not\(\[class\*\=\'x\'\]\)\]\:m-0 p { margin: 0 } .body { color: red }`,
+    })
+    expect(tailwind.text).not.toContain('could not be read')
+    expect(findComponent(canvas.id, 'Quote')!.rawCss).toContain('color: red')
   })
 
   it('names inferred props after what each element is, and lists them in the result', async () => {

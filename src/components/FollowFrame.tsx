@@ -1,17 +1,23 @@
 import { useStore } from '../lib/store'
+import { agentFollowFrame, followedAgent, followedLeader } from '../lib/follow'
 import { AgentIcon } from './AgentIcon'
 import { XIcon } from './ui/icons'
 import { useT } from '../lib/i18n'
 
 /** Figma-style "you are following X": a border in the leader's colour around
- *  the stage and a pill naming them. Any pan or zoom of our own lets go, so
+ *  the stage and a pill naming them (a followed agent while it is idle too). Any pan or zoom of our own lets go, so
  *  the pill's × is for people who want to stop without moving. The pill hangs
  *  below the top bar (--chrome-top, set by the page), where the presence
  *  avatars would otherwise cover it; the 7px plus the 3px border lines it up
  *  with the tool rail. */
 export function FollowFrame() {
   const t = useT()
-  const leader = useStore((s) => (s.following ? s.presences[s.following] : undefined))
+  const leader = useStore(followedLeader)
+  /* a followed agent that is idle (out of the roster) or has no frame to show yet */
+  const waiting = useStore((s) => {
+    const agent = followedAgent(s)
+    return !!agent && (!s.presences[agent.clientId] || !agentFollowFrame(s))
+  })
   const stop = useStore((s) => s.setFollowing)
   if (!leader) return null
   return (
@@ -31,6 +37,7 @@ export function FollowFrame() {
             </>
           )}
           {leader.name}
+          {waiting && <span className="font-normal opacity-80"> · {t('canvas.followIdle')}</span>}
         </span>
         <button
           type="button"

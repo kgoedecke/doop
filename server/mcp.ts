@@ -118,8 +118,8 @@ import {
   streamChunkNotes,
 } from './componentTools.ts'
 import { componentSystemPlan } from './reuseNotes.ts'
-import { previewFrame } from './componentPreview.ts'
-import { activeComponents, INSTANCE_ATTR } from '../shared/components.ts'
+import { previewCombinations, previewDescription, previewFrame, previewProps } from './componentPreview.ts'
+import { activeComponents, componentSignature, INSTANCE_ATTR } from '../shared/components.ts'
 import { usageByComponent } from './componentUsage.ts'
 
 /* What every agent gets in the handshake. Claude Code cuts server instructions at 4,096
@@ -2350,23 +2350,27 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
     'get_component_preview',
     {
       title: 'See a component',
-      description:
-        'Render a component in every combination of its enum props (up to 12) and return one image — how you SEE variants, which exist only as CSS. Look at it after creating or changing a component.',
+      description: previewDescription,
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
-      inputSchema: { canvas_id: z.string(), component: z.string(), agent_name: agentName.optional() },
+      inputSchema: {
+        canvas_id: z.string(),
+        component: z.string(),
+        props: previewProps,
+        agent_name: agentName.optional(),
+      },
     },
-    async ({ canvas_id, component, agent_name }) => {
+    async ({ canvas_id, component, props, agent_name }) => {
       if (!canvasFor(canvas_id, 'view')) return noCanvas(canvas_id)
       arrive(canvas_id, agent_name)
       const def = findComponent(canvas_id, component)
       if (!def) return err(`no component “${component}” on this canvas`)
-      const sheet = previewFrame(canvas_id, def)
       try {
+        const sheet = previewFrame(canvas_id, def, previewCombinations(def, props))
         const png = await renderFrame(sheet, 1)
         return {
           content: [
             { type: 'image' as const, data: png.toString('base64'), mimeType: 'image/png' },
-            { type: 'text' as const, text: `“${def.name}” at revision ${def.rev}, ${sheet.variants} variant(s).` },
+            { type: 'text' as const, text: `${componentSignature(def)} at revision ${def.rev}` },
           ],
         }
       } catch (e) {

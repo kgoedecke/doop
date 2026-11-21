@@ -11,6 +11,7 @@
       import { createRoot } from 'react-dom/client'
       import { FrameView } from '/src/components/FrameView.tsx'
       import { ElementPanel } from '/src/components/ElementPanel.tsx'
+      import { Inspector } from '/src/components/Inspector.tsx'
       import { FrameLabelLayer } from '/src/components/FrameLabelLayer.ts'
       import { layoutZoomFor } from '/src/lib/layoutZoom.ts'
       import { TooltipProvider } from '/src/components/ui/tooltip.tsx'
@@ -41,6 +42,12 @@
         panelOpen: () => useStore.getState().elementPanelOpen,
         geometry: (selector, edit) => editElementGeometry('f', selector, edit),
         selectFrame: () => useStore.getState().select('f'),
+        /* the frame Inspector, as a click on the frame's name opens it */
+        inspectFrame: () => {
+          window.inspectorShown = true
+          useStore.getState().setSelectedElement(null)
+          useStore.getState().select('f')
+        },
         deselectFrame: () => useStore.getState().select(null),
         deselect: () => useStore.getState().setSelectedElement(null),
         picked: () => pickedSelectors(useStore.getState()),
@@ -58,6 +65,7 @@
         const frames = useStore((s) => s.canvas?.frames)
         const frame = frames?.[0]
         const selected = useStore((s) => s.selectedElement)
+        const selectedId = useStore((s) => s.selectedId)
         /* the panel shows while open, as CanvasPage mounts it */
         const panelOpen = useStore((s) => s.elementPanelOpen)
         const zoom = useStore((s) => s.viewport.zoom)
@@ -88,6 +96,10 @@
           selected &&
             panelOpen &&
             React.createElement(ElementPanel, { frame, selector: selected.selector, style: { right: 12 } }),
+          window.inspectorShown &&
+            !selected &&
+            selectedId === frame.id &&
+            React.createElement(Inspector, { frame, style: { right: 12 } }),
         )
       }
       createRoot(document.getElementById('root')).render(React.createElement(Fixture))

@@ -12,6 +12,8 @@ import { recordCreate } from './history'
  * pulled out so the toolbar's "Add frame" can use it too: a frame you add
  * lands where you're looking, instead of always at the right edge of the
  * canvas (which can be off-screen on a large board - see issue #98).
+ * Whole pixels: the view's centre at a fractional zoom is never a place
+ * anyone means a frame to be.
  */
 export function frameCenterPosition(
   viewport: { x: number; y: number; zoom: number },
@@ -19,8 +21,8 @@ export function frameCenterPosition(
   frameSize: { width: number; height: number },
 ): { x: number; y: number } {
   return {
-    x: (viewportSize.width / 2 - viewport.x) / viewport.zoom - frameSize.width / 2,
-    y: (viewportSize.height / 2 - viewport.y) / viewport.zoom - frameSize.height / 2,
+    x: Math.round((viewportSize.width / 2 - viewport.x) / viewport.zoom - frameSize.width / 2),
+    y: Math.round((viewportSize.height / 2 - viewport.y) / viewport.zoom - frameSize.height / 2),
   }
 }
 

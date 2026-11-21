@@ -85,6 +85,23 @@ describe.skipIf(!findBrowserPath())('frame and element context menus', () => {
     await page.waitForFunction(() => !document.querySelector('[role="menu"]'))
   }
 
+  /** Open a submenu by its row, then choose one of its items. */
+  async function chooseIn(submenu: string, label: string) {
+    const trigger = await page.waitForFunction(
+      (text) =>
+        [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(
+          (el) => el.firstChild?.textContent === text,
+        ),
+      {},
+      submenu,
+    )
+    const row = await trigger.asElement()?.toElement('div')
+    if (!row) throw new Error(`Missing submenu: ${submenu}`)
+    await row.hover()
+    await page.keyboard.press('ArrowRight')
+    await choose(label)
+  }
+
   beforeEach(async () => {
     deletedFrames = 0
     stamped = []
@@ -237,20 +254,26 @@ describe.skipIf(!findBrowserPath())('frame and element context menus', () => {
     await page.keyboard.press('Escape')
     await rightClick('#text')
     expect(await items()).toEqual([
-      'Cut',
       'Copy',
+      'Cut',
+      'Copy/Paste as',
       'Paste',
+      'Paste to replace',
       'Duplicate',
-      'Hide',
+      'Rename',
+      'Group selection',
+      'Ungroup selection',
+      'Add flex layout',
       'Create component',
-      'Copy HTML',
-      'Copy selector',
-      'Copy link to element',
-      'Export…',
-      'Copy as PNG',
-      'Move up',
-      'Move down',
+      'Bring to front',
+      'Bring forward',
+      'Send backward',
+      'Send to back',
+      'Flip horizontal',
+      'Flip vertical',
+      'Hide',
       'Lock',
+      'Export…',
       'Delete element',
     ])
     expect(await page.evaluate(() => window.contextMenuHarness.selection())).toEqual({
@@ -263,8 +286,25 @@ describe.skipIf(!findBrowserPath())('frame and element context menus', () => {
       return menu && getComputedStyle(menu).opacity === '1'
     })
     await page.screenshot({ path: '/tmp/doop-element-context-menu.png' })
-    await choose('Copy HTML')
+    await chooseIn('Copy/Paste as', 'Copy HTML')
     expect(await page.evaluate(() => navigator.clipboard.readText())).toContain('id="text"')
+  })
+
+  it('renames from the canvas menu through the layer row, as the Layers menu does', async () => {
+    const editor = 'input[aria-label="Item name"]'
+    await rightClick('#text')
+    await choose('Rename')
+    await page.waitForFunction((selector) => document.activeElement === document.querySelector(selector), {}, editor)
+    await page.keyboard.type('From canvas')
+    await page.keyboard.press('Enter')
+    await expect.poll(() => saved.html).toContain('data-doop-name="From canvas"')
+
+    await page.click('[data-frame-title]', { button: 'right' })
+    await choose('Rename')
+    await page.waitForFunction((selector) => document.activeElement === document.querySelector(selector), {}, editor)
+    await page.keyboard.type('Canvas frame')
+    await page.keyboard.press('Enter')
+    await expect.poll(() => saved.name).toBe('Canvas frame')
   })
 
   it('shares hide, unlock, and link actions with the layer panel', async () => {
@@ -283,7 +323,7 @@ describe.skipIf(!findBrowserPath())('frame and element context menus', () => {
     await choose('Show')
     await expect.poll(() => saved.html).not.toContain('data-doop-hidden')
     await rightClick('#text')
-    await choose('Copy link to element')
+    await chooseIn('Copy/Paste as', 'Copy link to element')
     /* the copy waits for the stamp, so the clipboard is read once it has landed */
     await expect
       .poll(async () => new URL(await page.evaluate(() => navigator.clipboard.readText())).searchParams.get('element'))
@@ -295,8 +335,8 @@ describe.skipIf(!findBrowserPath())('frame and element context menus', () => {
 
   it('does not open the frame or background menu in empty frame space', async () => {
     await page.mouse.click(500, 440, { button: 'right' })
-    await page.waitForFunction(() => document.querySelector('[role="menuitem"]')?.textContent?.startsWith('Cut'))
-    expect(await items()).toEqual(['Cut', 'Copy', 'Paste'])
+    await page.waitForFunction(() => document.querySelector('[role="menuitem"]')?.textContent?.startsWith('Copy'))
+    expect(await items()).toEqual(['Copy', 'Cut', 'Paste'])
     expect(await page.evaluate(() => window.contextMenuHarness.selection())).toBeNull()
   })
 
@@ -346,7 +386,7 @@ describe.skipIf(!findBrowserPath())('frame and element context menus', () => {
       el.dispatchEvent(new Event('input', { bubbles: true }))
     })
     await rightClick('#text')
-    await choose('Copy HTML')
+    await chooseIn('Copy/Paste as', 'Copy HTML')
     expect(await page.evaluate(() => navigator.clipboard.readText())).toContain('Edited text')
   })
 
@@ -368,7 +408,7 @@ describe.skipIf(!findBrowserPath())('frame and element context menus', () => {
       frameId: 'f',
       selector: '#text',
     })
-    await choose('Copy HTML')
+    await chooseIn('Copy/Paste as', 'Copy HTML')
     expect(await page.evaluate(() => navigator.clipboard.readText())).toContain('id="text"')
   })
 

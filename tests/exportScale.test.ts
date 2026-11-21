@@ -8,7 +8,7 @@ import {
   MAX_EXPORT_SIDE,
   parseExportScale,
 } from '../shared/exportScale'
-import { readExportSettings } from '../src/lib/exportSettings'
+import { elementFormat, readExportSettings } from '../src/lib/exportSettings'
 
 describe('parseExportScale', () => {
   it('reads a multiplier as typed or sent', () => {
@@ -84,5 +84,11 @@ describe('readExportSettings', () => {
     expect(readExportSettings('{"scale":3,"format":"svg"}')).toEqual({ scale: 3, format: 'svg' })
     expect(readExportSettings('{"scale":99,"format":"jpg"}')).toEqual({ scale: 2, format: 'jpg' })
     expect(readExportSettings('{"scale":1.5,"format":"gif"}')).toEqual({ scale: 1.5, format: 'png' })
+  })
+
+  it('keeps a PDF pick, which a layer exports as PNG', () => {
+    expect(readExportSettings('{"scale":2,"format":"pdf"}')).toEqual({ scale: 2, format: 'pdf' })
+    expect(elementFormat('pdf')).toBe('png')
+    expect(elementFormat('svg')).toBe('svg')
   })
 })

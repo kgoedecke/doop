@@ -39,7 +39,7 @@ import {
   refuseUnclosedUses,
   withinRevision,
 } from './components.ts'
-import { unmatchedSelectors } from './componentCss.ts'
+import { unmatchedSelectors, unreadCss } from './componentCss.ts'
 import {
   alignParts,
   attrOf,
@@ -593,14 +593,21 @@ export const createComponentFromHtml = atomic(function createComponentFromHtml(
 
 const MAX_SELECTORS_NAMED = 8
 
-/** Rules handed over as a component's CSS that it did not keep: said in the result of the call
- *  that passed them, since the main's frame still shows them and nothing else would. */
+/** Rules handed over as a component's CSS that it did not keep, or could not read: said in the
+ *  result of the call that passed them, since the main's frame still shows them and nothing else would. */
 function reportCssNotKept(def: ComponentDef, css: string) {
   const frame = def.mainFrameId ? store.getFrame(def.mainFrameId) : undefined
   const main = frame
     ? findMarked(frame.html, COMPONENT_ATTR).find((found) => attrOf(found.el, COMPONENT_ATTR) === def.id)
     : undefined
   if (!frame || !main) return
+  const unread = unreadCss(css)
+  if (unread) {
+    actions.addComponentIssue(frame.id, {
+      code: 'css_not_read',
+      message: `the CSS for “${def.name}” could not be read past: ${unread}. Rules from there on may be missing or wrong. Look for a quote, brace or bracket that is not closed or not escaped, or text outside a rule; get_component shows the CSS as stored.`,
+    })
+  }
   const variants = def.props.filter((prop) => prop.type === 'enum').map((prop) => `data-${prop.name}`)
   const selectors = unmatchedSelectors(css, main.el, variants)
   if (!selectors.length) return

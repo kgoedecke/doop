@@ -72,6 +72,10 @@ final class CanvasModel: ObservableObject {
     var frameWorkers: [String: [FrameWorker]] {
         FrameWorkers.byFrame(streams: streams, presences: presences)
     }
+    /// The agents at work on the canvas, for the pills at its top.
+    var workingAgents: [WorkingAgent] {
+        WorkingAgents.list(presences: presences, tasks: tasks, now: Date().timeIntervalSince1970 * 1000)
+    }
     var selected: DesignFrame? { pageFrames.first { $0.id == selectedID } }
     var canEdit: Bool { connected && pendingEdits == 0 && !undoing }
     var canUndo: Bool { canEdit && !undoStack.isEmpty }
@@ -244,6 +248,10 @@ final class CanvasModel: ObservableObject {
             } else {
                 streams[frameID] = nil
             }
+        case "status":
+            if let index = presences.firstIndex(where: { $0.clientId == event.clientId }) {
+                presences[index].status = event.status
+            }
         case "viewport":
             if let index = presences.firstIndex(where: { $0.clientId == event.clientId }), let viewport = event.viewport {
                 presences[index].viewport = viewport
@@ -349,7 +357,12 @@ final class CanvasModel: ObservableObject {
 
     func queue(_ prompt: String, scope: CardScope? = nil, assignment: AgentAssignment = .automatic, runner: RunnerPick? = nil) async throws {
         let request = CardQueueRequest(title: prompt, scope: scope, assignment: assignment, runner: runner)
-        _ = try await client.data("/api/canvases/\(id)/cards", method: "POST", body: request.body)
+        let data = try await client.data("/api/canvases/\(id)/cards", method: "POST", body: request.body)
+        // The answer is the queued card: show it at once, before the room's `task` echo.
+        // The room's `task` may already be here, and further along (claimed, finished): keep it.
+        if let card = try? JSONDecoder().decode(CanvasTask.self, from: data), !tasks.contains(where: { $0.id == card.id }) {
+            tasks.append(card)
+        }
     }
 
     /// A comment pinned to an element when one is selected, else to the frame body.
@@ -510,6 +523,7 @@ extension CanvasModel {
     /// `-fakeCursors 1`: three collaborators (a person and two agents) wander
     /// over the first frame, for checking the cursor chrome without a second client.
     fileprivate func startFakeCollaborators() {
+        startFakeWork()
         guard UserDefaults.standard.bool(forKey: "fakeCursors") else { return }
         let people = [("fake-kevin", "Kevin", "user", "#E8432E"), ("fake-claude", "Claude", "agent", "#D97757"), ("fake-codex", "Codex", "agent", "#2743EE")]
         var t = 0.0
@@ -522,6 +536,38 @@ extension CanvasModel {
                     let x = frame.x + frame.width * (0.3 + 0.2 * Double(index)) + sin(t + phase) * 60
                     let y = frame.y + frame.height * (0.25 + 0.2 * Double(index)) + cos(t * 0.7 + phase) * 40
                     upsert(CanvasPresence(clientId: person.0, name: person.1, color: person.3, kind: person.2, cursor: CanvasPoint(x: x, y: y)), into: &self.presences)
+                }
+            }
+        }
+    }
+
+    /// `-fakeWorking 1`: a task queued from the phone shows as "Starting…", then Claude
+    /// picks it up and posts statuses while it streams, for checking the working pills.
+    /// `-fakeWorking 2` adds Codex at work beside it.
+    fileprivate func startFakeWork() {
+        let level = UserDefaults.standard.integer(forKey: "fakeWorking")
+        guard level > 0 else { return }
+        let card = CanvasTask(id: "fake-card", agentName: "", status: "Design a pricing page", startedAt: Date().timeIntervalSince1970 * 1000)
+        let steps = ["Reading the canvas", "Laying out the pricing tiers", "Styling the plan cards", "Checking the screenshot"]
+        Task { @MainActor [weak self] in
+            // After the room's `init`, which replaces the task list.
+            // Holds no strong reference across a sleep, so closing the canvas releases it.
+            while !Task.isCancelled {
+                guard let ready = self.map({ $0.connected && $0.canvas != nil }) else { return }
+                if ready { break }
+                try? await Task.sleep(nanoseconds: 300_000_000)
+            }
+            try? await Task.sleep(nanoseconds: 1_000_000_000)
+            guard let model = self else { return }
+            upsert(card, into: &model.tasks)
+            for (index, step) in steps.enumerated() {
+                try? await Task.sleep(nanoseconds: index == 0 ? 6_000_000_000 : 5_000_000_000)
+                guard let model = self else { return }
+                model.tasks.removeAll { $0.id == card.id }
+                upsert(CanvasPresence(clientId: "fake-claude-work", name: "Claude", color: "#D97757", kind: "agent", status: step), into: &model.presences)
+                if index == 1, let frame = model.pageFrames.first { model.streams[frame.id] = FrameStream(name: "Claude", color: "#D97757") }
+                if level >= 2, index == 1 {
+                    upsert(CanvasPresence(clientId: "fake-codex-work", name: "Codex", color: "#2743EE", kind: "agent", status: "Writing the FAQ copy"), into: &model.presences)
                 }
             }
         }
