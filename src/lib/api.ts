@@ -135,6 +135,7 @@ import type {
   CustomAgentPatch,
 } from '../../shared/customAgents'
 import type { AgentRole } from '../../shared/agents'
+import type { AgentBrandChoice } from '../../shared/agentBrand'
 import type { DesignToken, DesignTokenInput, ThemeRename, TokenEdit, TokenResult } from '../../shared/designTokens'
 
 export type HomeActivity = ActivityItem & { canvasId: string; canvasName: string }
@@ -176,6 +177,13 @@ export interface AgentKeyInfo {
   start: string
   createdAt: number
   lastUsedAt: number | null
+}
+
+/** An outside agent's owner picked its icon: the product mark it wears on
+ *  every canvas, or 'doop' to opt out of the brand its client reads as. */
+export interface AgentIdentityInfo {
+  agentName: string
+  brand: AgentBrandChoice
 }
 
 /** The flow map of a canvas's synced app(s): link hotspots between frames
@@ -557,6 +565,13 @@ export const api = {
   createAgentKey: (name: string) =>
     req<AgentKeyInfo & { secret: string }>('/api/agent-keys', { method: 'POST', body: JSON.stringify({ name }) }),
   deleteAgentKey: (keyId: string) => req(`/api/agent-keys/${keyId}`, { method: 'DELETE' }),
+  /* the icons an outside agent's owner picked for it; null goes back to automatic */
+  listAgentIdentities: () => req<AgentIdentityInfo[]>('/api/agent-identities'),
+  setAgentIdentity: (agentName: string, brand: AgentBrandChoice | null) =>
+    req<AgentIdentityInfo>(`/api/agent-identities/${encodeURIComponent(agentName)}`, {
+      method: 'PUT',
+      body: JSON.stringify({ brand }),
+    }),
   /* GitHub repos connected as import sources */
   listGithubConnections: (canvasId: string) => req<GithubConnectionInfo[]>(`/api/canvases/${canvasId}/github`),
   connectGithub: (canvasId: string, input: { repo: string; token?: string; pass?: string; branch?: string }) =>

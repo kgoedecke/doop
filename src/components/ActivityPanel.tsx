@@ -1,10 +1,15 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import type { AgentTask } from '../../shared/types'
+import { roleByAgentName } from '../../shared/agents'
 import { canEditOpenCanvas, useStore } from '../lib/store'
 import { api } from '../lib/api'
+import { authClient } from '../lib/auth'
+import { useMe } from '../lib/me'
+import { useRoster } from '../hooks/use-roster'
 import { timeAgo } from '../lib/time'
 import { cn } from '@/lib/utils'
 import { AgentIcon } from './AgentIcon'
+import { AgentBrandMenu } from './AgentBrandMenu'
 import { MemoryPanel } from './MemoryPanel'
 import {
   Panel,
@@ -349,6 +354,12 @@ function RecentTaskRow({ task }: { task: AgentTask }) {
     s.requestFlyTo(frameId)
   }
   const t = useT()
+  const { data: session } = authClient.useSession()
+  const me = useMe(session?.user.id)
+  const roster = useRoster()
+  /* only the person who connected the agent picks its icon, and only for an
+     outside agent: the built-in team wears the mark its role was given */
+  const ownsAgent = !!me && me.name === task.owner && !roleByAgentName(task.agentName, roster)
   const running = !task.endedAt && !task.failedAt
   const failed = !!task.failedAt
   const reason = task.failureReason ?? t('panels.activityTaskUnfinished')
@@ -374,7 +385,11 @@ function RecentTaskRow({ task }: { task: AgentTask }) {
     >
       <span className="flex min-w-0 items-center gap-1.5 whitespace-nowrap">
         <span className="grid size-4 flex-none place-items-center">
-          <AgentIcon name={task.agentName} size={14} />
+          {ownsAgent ? (
+            <AgentBrandMenu name={task.agentName} fallbackBrand={task.brand} />
+          ) : (
+            <AgentIcon name={task.agentName} brand={task.brand} size={14} />
+          )}
         </span>
         <b className="truncate font-medium text-ink">{task.agentName}</b>
         {task.owner && (

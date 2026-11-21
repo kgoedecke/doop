@@ -21,7 +21,7 @@ import { MAX_PAGES, PageLimitError, store } from './store.ts'
 import * as persist from './db/persist.ts'
 import * as thumbs from './thumbs.ts'
 import { colorFor } from '../shared/types.ts'
-import type { AgentBrand } from '../shared/agentBrand.ts'
+import type { AgentBrand, AgentBrandChoice } from '../shared/agentBrand.ts'
 import type { StackWrite } from '../shared/frameStack.ts'
 import {
   DEFAULT_ROLE_ID,
@@ -95,7 +95,7 @@ type AgentTouch = (
   agentName: string,
   frameId?: string | null,
   status?: string | null,
-  identity?: Pick<Actor, 'owner' | 'brand'>,
+  identity?: Pick<Actor, 'owner' | 'brand' | 'detectedBrand'>,
 ) => void
 
 let send: Broadcast = () => {}
@@ -282,11 +282,28 @@ function logActivity(canvasId: string, actor: Actor, message: string, frameId?: 
 }
 
 export function resolveActor(
-  raw: { name?: string; kind?: string; clientId?: string; owner?: string; brand?: AgentBrand } | undefined,
+  raw:
+    | {
+        name?: string
+        kind?: string
+        clientId?: string
+        owner?: string
+        brand?: AgentBrandChoice
+        detectedBrand?: AgentBrand
+      }
+    | undefined,
 ): Actor {
   const kind = raw?.kind === 'agent' ? 'agent' : raw?.kind === 'user' ? 'user' : 'agent'
   const name = raw?.name?.trim() || (kind === 'agent' ? 'AI Agent' : 'Anonymous')
-  return { name, kind, color: colorFor(name), clientId: raw?.clientId, owner: raw?.owner, brand: raw?.brand }
+  return {
+    name,
+    kind,
+    color: colorFor(name),
+    clientId: raw?.clientId,
+    owner: raw?.owner,
+    brand: raw?.brand,
+    detectedBrand: raw?.detectedBrand,
+  }
 }
 
 function touch(canvasId: string, actor: Actor, frameId?: string | null) {
@@ -465,10 +482,41 @@ export function taskCanvasId(taskId: string): string | undefined {
   return undefined
 }
 
+/** Retag the tasks an agent already shows, so the work it is on wears the mark
+ *  it works under now. `owner` narrows it to one owner's tasks — an owner's
+ *  pick never reaches another person's agent of the same name. */
+function retagAgentTasks(canvasId: string, agentName: string, brand: AgentBrandChoice | undefined, owner?: string) {
+  for (const task of taskLog.get(canvasId) ?? []) {
+    if (task.agentName !== agentName || task.brand === brand) continue
+    if (owner !== undefined && task.owner !== owner) continue
+    edit(task)
+    if (brand) task.brand = brand
+    else delete task.brand
+    stored.saveTask(canvasId, task)
+    broadcast(canvasId, { type: 'task', task })
+  }
+}
+
+/** The owner picked a new mark for an agent: its existing tasks wear it too, so
+ *  a stored card keeps the icon after the presence that carried it expires.
+ *  Automatic has no mark of its own, so `detectedForCanvas` supplies the mark
+ *  each canvas's presence already learned from the agent's client. */
+export function refreshAgentTaskBrands(
+  ownerName: string,
+  agentName: string,
+  brand: AgentBrandChoice | undefined,
+  detectedForCanvas?: (canvasId: string) => AgentBrand | undefined,
+) {
+  for (const canvasId of taskLog.keys()) {
+    retagAgentTasks(canvasId, agentName, brand ?? detectedForCanvas?.(canvasId), ownerName)
+  }
+}
+
 /** Agent announces what it is working on right now (empty string clears it). */
 export function setAgentStatus(canvasId: string, actor: Actor, status: string) {
   const clean = status.trim()
   agentTouch(canvasId, actor.name, undefined, clean || null, actor)
+  retagAgentTasks(canvasId, actor.name, actor.brand, actor.owner)
 
   const list = taskLog.get(canvasId) ?? []
   /* board cards stay open until explicitly completed — a status change
@@ -490,6 +538,7 @@ export function setAgentStatus(canvasId: string, actor: Actor, status: string) {
       status: clean,
       startedAt: Date.now(),
       ...(runStartedAt ? { runStartedAt } : {}),
+      ...(actor.brand ? { brand: actor.brand } : {}),
     }
     prepend(taskLog, canvasId, task)
     stored.saveTask(canvasId, task)
@@ -1321,6 +1370,7 @@ const TASK_FRAMES_CAP = 20
  *  click on the task in the Agents panel can fly the camera there. A claimed
  *  card and a set_status task can be open side by side — both are the work. */
 function trackTaskFrame(canvasId: string, actor: Actor, frameId: string) {
+  retagAgentTasks(canvasId, actor.name, actor.brand, actor.owner)
   for (const open of taskLog.get(canvasId) ?? []) {
     if (!sameAgent(open, actor) || open.endedAt) continue
     if (open.frameIds?.at(-1) === frameId) continue
@@ -1347,6 +1397,7 @@ function autoTask(canvasId: string, actor: Actor, status: string, frameId: strin
     startedAt: Date.now(),
     auto: true,
     frameIds: [frameId],
+    ...(actor.brand ? { brand: actor.brand } : {}),
   }
   prepend(taskLog, canvasId, task)
   stored.saveTask(canvasId, task)
@@ -1627,6 +1678,7 @@ export function advanceCard(canvasId: string, cardId: string, by: Actor): AgentT
 
   edit(card).stage = next
   card.agentName = ''
+  delete card.brand
   delete card.claimedAt
   delete card.failedAt
   delete card.failureReason
@@ -1678,6 +1730,7 @@ export function retryCard(canvasId: string, cardId: string, by: string): AgentTa
   if (!card || card.endedAt) return card
   if (!card.failedAt) return card
   edit(card).agentName = ''
+  delete card.brand
   delete card.claimedAt
   delete card.failedAt
   delete card.failureReason

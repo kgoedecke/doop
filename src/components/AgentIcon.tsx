@@ -2,7 +2,7 @@
  *  themselves come from the BrandMark registry — this only knows which agent
  *  wears which brand. */
 
-import { agentBrandOf, type AgentBrand } from '../../shared/agentBrand'
+import { agentBrandOf, brandMarkOf, type AgentBrand, type AgentBrandChoice } from '../../shared/agentBrand'
 import { useStore } from '../lib/store'
 import { AppIcon, BrandMark, type AppIconBrand } from './ui/brand-mark'
 import { DoopMark, Logo } from './Logo'
@@ -14,9 +14,10 @@ export function AgentIcon({
   color,
 }: {
   name: string
-  /** the brand its presence carries (read from its MCP client); unset, the
-   *  presence of an agent by this name on the open canvas is asked, then the name */
-  brand?: AgentBrand
+  /** the icon its owner picked for it; unset, the brand its presence carries
+   *  (read from its MCP client), then the presence of an agent by this name on
+   *  the open canvas, then the name itself */
+  brand?: AgentBrandChoice
   size?: number
   color?: string
 }) {
@@ -25,7 +26,9 @@ export function AgentIcon({
     for (const p of Object.values(s.presences)) if (p.kind === 'agent' && p.name === name && p.brand) return p.brand
     return undefined
   })
-  const shown = brand ?? present ?? agentBrandOf(name)
+  /* An explicit Doop choice is an opt-out: it is not nullish, so it wins the
+     chain and resolves to the Doop mark instead of the presence or the name. */
+  const shown = brandMarkOf(brand ?? present ?? agentBrandOf(name))
   /* Anything else is a Doop agent (the built-in roles, or an unknown MCP
      client) and wears the brand's own mark, as on the marketing site. */
   if (!shown) return <DoopMark size={size} color={color} />
@@ -45,8 +48,9 @@ const AGENT_APP_ICONS: Partial<Record<AgentBrand, AppIconBrand>> = {
 /** An agent as an app icon: its brand's own tile and colours (Claude's orange,
  *  ChatGPT's knot on white), Doop's black tile for a Doop agent, and the brand
  *  mark on a plain tile for a client without an icon of its own. */
-export function AgentTile({ name, brand, size = 18 }: { name: string; brand?: AgentBrand; size?: number }) {
-  const shown = brand ?? agentBrandOf(name)
+export function AgentTile({ name, brand, size = 18 }: { name: string; brand?: AgentBrandChoice; size?: number }) {
+  /* a pinned Doop mark is a choice, not a missing brand: the name is not asked */
+  const shown = brandMarkOf(brand ?? agentBrandOf(name))
   if (!shown)
     return (
       <span aria-hidden className="flex-none" style={{ width: size, height: size }}>

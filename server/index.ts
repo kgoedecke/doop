@@ -115,6 +115,8 @@ import { RendererBusyError } from './renderBrowser.ts'
 import { getAsset, reconcileAssetRefs, beginTicketUpload, endTicketUpload, createAsset } from './assets.ts'
 import * as ingest from './ingest.ts'
 import * as agentKeys from './agentKeys.ts'
+import * as agentIdentities from './agentIdentities.ts'
+import { isAgentBrandChoice, type AgentBrand, type AgentBrandChoice } from '../shared/agentBrand.ts'
 import * as backgrounds from './backgrounds.ts'
 import { serveIcon } from './iconProxy.ts'
 import { servePhoto } from './photoProxy.ts'
@@ -346,14 +348,22 @@ interface AgentPresence extends Presence {
 }
 const agentPresences = new Map<string, Map<string, AgentPresence>>() // canvasId -> name -> presence
 
+/* The mark the agent's own client implies, remembered per canvas and name
+   while its presence lives. An owner's Automatic pick has no mark of its
+   own, so it falls back to this instead of dropping the icon until the
+   agent's next tool call. */
+const detectedBrands = new Map<string, AgentBrand>()
+const brandKey = (canvasId: string, agentName: string) => `${canvasId}\0${agentName}`
+
 function agentTouch(
   canvasId: string,
   agentName: string,
   frameId?: string | null,
   status?: string | null,
-  identity?: Pick<Actor, 'owner' | 'brand'>,
+  identity?: Pick<Actor, 'owner' | 'brand' | 'detectedBrand'>,
 ) {
   const owner = identity?.owner
+  if (identity?.detectedBrand) detectedBrands.set(brandKey(canvasId, agentName), identity.detectedBrand)
   let byName = agentPresences.get(canvasId)
   if (!byName) agentPresences.set(canvasId, (byName = new Map()))
   let p = byName.get(agentName)
@@ -398,6 +408,21 @@ function agentTouch(
   }
 }
 
+/* An owner changed one agent's icon: re-announce that agent on every canvas
+   where it is on screen, so viewers redraw the mark without a leave/join
+   flicker. Only the brand moves — the presence itself stays put. Automatic
+   (no pick) falls back to the mark the agent's client implied. */
+function refreshAgentPresence(ownerName: string, agentName: string, brand: AgentBrandChoice | undefined) {
+  for (const [canvasId, byName] of agentPresences) {
+    const next = brand ?? detectedBrands.get(brandKey(canvasId, agentName))
+    for (const p of byName.values()) {
+      if (p.name !== agentName || p.owner !== ownerName || p.brand === next) continue
+      p.brand = next
+      broadcast(canvasId, { type: 'presence:join', presence: p })
+    }
+  }
+}
+
 setInterval(() => {
   const now = Date.now()
   for (const [canvasId, byName] of agentPresences) {
@@ -406,6 +431,7 @@ setInterval(() => {
          keep it (and its status) on screen longer before expiring */
       if (now - p.lastSeen > (p.status ? 60_000 : 20_000)) {
         byName.delete(name)
+        detectedBrands.delete(brandKey(canvasId, name))
         broadcast(canvasId, { type: 'presence:leave', clientId: p.clientId })
         actions.endAgentTasks(canvasId, p.name) // an agent that went silent is no longer "working on" anything
       }
@@ -1471,6 +1497,30 @@ app.delete('/api/agent-keys/:id', async (req, res) => {
   if (!(await agentKeys.deleteAgentKey(req.user!.id, req.params.id)))
     return res.status(404).json({ error: 'agent key not found' })
   res.json({ ok: true })
+})
+
+/* ---- Agent identities: the icon an owner picked for a named agent, keyed
+   by the name the agent introduced itself with. No row means automatic — the
+   mark Doop reads off the agent's client and name. */
+
+app.get('/api/agent-identities', async (req, res) => {
+  res.json(await agentIdentities.listAgentIdentities(req.user!.id))
+})
+
+app.put('/api/agent-identities/:agentName', async (req, res) => {
+  const agentName = String(req.params.agentName ?? '').trim()
+  if (!agentName || agentName.length > 60)
+    return res.status(400).json({ error: 'agent name must be 1 to 60 characters' })
+  const raw = req.body?.brand
+  /* null is a real choice here (automatic); a missing brand is a bad request */
+  if (raw !== null && !isAgentBrandChoice(raw)) return res.status(400).json({ error: 'unknown agent brand' })
+  const brand: AgentBrandChoice | null = raw
+  await agentIdentities.setAgentIdentity(req.user!.id, agentName, brand)
+  refreshAgentPresence(req.user!.name, agentName, brand ?? undefined)
+  actions.refreshAgentTaskBrands(req.user!.name, agentName, brand ?? undefined, (canvasId) =>
+    detectedBrands.get(brandKey(canvasId, agentName)),
+  )
+  res.json({ agentName, brand })
 })
 
 app.get('/api/canvases', async (req, res) => {
