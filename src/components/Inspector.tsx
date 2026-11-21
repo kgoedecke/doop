@@ -77,7 +77,9 @@ export function Inspector({
   const lastPull = useRef(0)
   /* focus is state, not a check of document.activeElement, so leaving the
      editor re-runs the pull below: an update that arrived while it had focus
-     lands then, unless an edit typed there is still waiting to save */
+     lands then. An edit typed there that has not saved (waiting, in flight,
+     or failed: saveState stays 'dirty' until a save succeeds) is never
+     replaced; the pull waits for that save */
   const [editing, setEditing] = useState(false)
   useEffect(() => {
     const switched = frameId.current !== frame.id
@@ -93,12 +95,12 @@ export function Inspector({
       setHtmlCopy('idle')
       return
     }
-    if (editing || queuedSave.current || frame.html === draft) return
+    if (editing || saveState === 'dirty' || frame.html === draft) return
     const wait = lastPull.current + HTML_PULL_MS - performance.now()
     if (wait <= 0) return pull()
     const timer = window.setTimeout(pull, wait)
     return () => window.clearTimeout(timer)
-  }, [frame.id, frame.html, draft, editing])
+  }, [frame.id, frame.html, draft, editing, saveState])
 
   /* the confirmation timer must not fire after the panel is gone */
   useEffect(

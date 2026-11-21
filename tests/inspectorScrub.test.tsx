@@ -260,3 +260,25 @@ it('pulls in an update that arrived while the editor had focus once focus leaves
   await act(() => new Promise((resolve) => setTimeout(resolve, 300)))
   expect(editor().value).toBe('<h1>Two</h1>')
 })
+
+it('keeps an edit whose save failed when focus leaves and a remote update arrives', async () => {
+  vi.spyOn(api, 'updateFrame').mockRejectedValue(new Error('offline'))
+  const editor = () => container.querySelector<HTMLTextAreaElement>('textarea[aria-label="Edit the HTML"]')!
+  act(() => editor().focus())
+  act(() => {
+    const setValue = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!
+    setValue.call(editor(), '<h1>Typed</h1>')
+    editor().dispatchEvent(new Event('input', { bubbles: true }))
+  })
+  /* the save runs after 700ms and fails */
+  await act(() => new Promise((resolve) => setTimeout(resolve, 800)))
+  expect(api.updateFrame).toHaveBeenCalled()
+  act(() => editor().blur())
+  act(() =>
+    useStore
+      .getState()
+      .setCanvas({ ...useStore.getState().canvas!, frames: [{ ...stored(), html: '<h1>Remote</h1>' }] }),
+  )
+  await act(() => new Promise((resolve) => setTimeout(resolve, 300)))
+  expect(editor().value).toBe('<h1>Typed</h1>')
+})
