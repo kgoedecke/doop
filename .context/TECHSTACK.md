@@ -309,8 +309,9 @@
   A frame stays self-contained: `withFontFaces` adds the `@font-face` rules for the library
   families its CSS names to one `<style data-doop-fonts>` block in its own HTML (only adds, never
   removes). `actions.createFrame` / `updateFrame` / every append chunk run it on every write
-  (`withCanvasFaces` in `server/canvasFaces.ts`; mid-stream once a complete `<head>` or `<body>`
-  tag has arrived, so the first section's screenshot already has its fonts and tokens),
+  (`withCanvasFaces` in `server/canvasFaces.ts`; mid-stream a fragment from its first chunk, a
+  document once a complete `<head>` or `<body>` tag has arrived (`streamTopSettled`), so the
+  first section's screenshot already has its fonts and tokens),
   and `FrameView`'s save path runs it too, so a family picked from the Design panel's "Custom
   fonts" group renders at once. Every renderer that reads frame HTML (screenshots, PDF
   export, iOS) gets the font that way. Agents see the library as `fonts` plus a note in
