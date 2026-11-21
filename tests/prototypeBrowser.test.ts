@@ -1,7 +1,7 @@
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
 import type { Frame as PuppeteerFrame, Page } from 'puppeteer-core'
 import { findBrowserPath } from '../server/screenshot'
-import { fixtureUrl, openBrowser, type TestBrowser } from './browser'
+import { fixtureUrl, pagePerTest } from './browser'
 import type { Canvas, Frame } from '../shared/types'
 
 type Message = { type?: string; interaction?: { action?: string; target?: string } }
@@ -88,23 +88,18 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 /* The first load transforms the app through a cold Vite dev server, which can
    take longer than the default test timeout on CI. */
 describe.skipIf(!findBrowserPath())('prototype player', { timeout: 30_000 }, () => {
-  let browser: TestBrowser
+  const pages = pagePerTest()
   let page: Page
 
-  beforeAll(async () => {
-    browser = await openBrowser()
-    page = await browser.newPage()
+  beforeEach(async () => {
+    page = await pages.open()
     await page.setViewport({ width: 1000, height: 700 })
     await page.goto(fixtureUrl('prototype.html'))
     await page.waitForFunction(() => (window as unknown as Fixture).fixtureReady)
-  }, 60_000)
-  afterAll(async () => {
-    await page?.close()
-    await browser?.close()
   })
 
   async function screen(frameId: string): Promise<PuppeteerFrame> {
-    /* the previous test's player may still be unmounting: wait for a live document */
+    /* the iframe is in the page before its document is: wait for a live one */
     for (let attempt = 0; attempt < 40; attempt++) {
       const handle = await page.waitForSelector(`iframe[data-doop-proto-frame="${frameId}"]`)
       const content = await handle?.contentFrame()
@@ -180,6 +175,7 @@ describe.skipIf(!findBrowserPath())('prototype player', { timeout: 30_000 }, () 
 
   it('sits below the app inset and rescales from its scaling menu', async () => {
     await page.evaluate(() => document.documentElement.style.setProperty('--app-inset', '40px'))
+    /* the scaling pick is kept in storage, which the file's pages share */
     try {
       await page.evaluate((canvas) => (window as unknown as Fixture).seed(canvas), CANVAS)
       await page.evaluate(() => (window as unknown as Fixture).play('home'))
@@ -211,10 +207,7 @@ describe.skipIf(!findBrowserPath())('prototype player', { timeout: 30_000 }, () 
         () => document.querySelector('[data-proto-screen="home"] > div')?.getBoundingClientRect().width === 1000,
       )
     } finally {
-      await page.evaluate(() => {
-        localStorage.removeItem('doop:proto-scaling')
-        document.documentElement.style.removeProperty('--app-inset')
-      })
+      await page.evaluate(() => localStorage.removeItem('doop:proto-scaling'))
     }
   })
 
@@ -283,7 +276,6 @@ describe.skipIf(!findBrowserPath())('prototype player', { timeout: 30_000 }, () 
       /* 0.5× covers 1000 × 600: 100px cropped, 50 each side, nothing to scroll */
       expect(await playAt('fill')).toEqual({ scrolled: false, right: 0, bottom: 50, left: 0, top: -50 })
     } finally {
-      await page.setViewport({ width: 1000, height: 700 })
       await page.evaluate(() => localStorage.removeItem('doop:proto-scaling'))
     }
   })

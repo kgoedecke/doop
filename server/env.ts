@@ -1,7 +1,13 @@
 import { bool, cleanEnv, EnvMissingError, makeExactValidator, port, str } from 'envalid'
 import type { ReporterOptions } from 'envalid'
 import { createHash } from 'node:crypto'
-import { DEFAULT_GEMINI_MODEL, DEFAULT_OPENROUTER_MODEL } from '../shared/modelMenu.ts'
+import {
+  DEFAULT_DEEPSEEK_MODEL,
+  DEFAULT_GEMINI_MODEL,
+  DEFAULT_KIMI_CODE_MODEL,
+  DEFAULT_KIMI_MODEL,
+  DEFAULT_OPENROUTER_MODEL,
+} from '../shared/modelMenu.ts'
 import { FALLBACK_LOCALE, LOCALES } from '../shared/locales.ts'
 
 /**
@@ -99,6 +105,7 @@ const nonNegativeInt = int(0)
 const schema = {
   NODE_ENV: str({ choices: ['development', 'test', 'production'], default: 'development' }),
   PORT: port({ default: 4400 }),
+  HOST: str({ default: undefined }),
   /* the interface language for anyone who has not picked one in Settings */
   DEFAULT_LOCALE: str({ choices: LOCALES, default: FALLBACK_LOCALE }),
   /* unset = embedded Postgres (PGlite) under ./data/pg */
@@ -154,12 +161,35 @@ const schema = {
   AZURE_OPENAI_API_VERSION: str({ default: undefined }),
   AZURE_OPENAI_REASONING_EFFORT: str({ default: undefined }),
   RESIDENT_TASK_LIMIT: nonNegativeInt({ default: 0 }),
+  /* incident kill switch: a frame write stops pushing a changed main into every
+     other frame synchronously (each catches up on its own next write) */
+  DOOP_DEFER_COMPONENT_PROPAGATION: bool({ default: false }),
+  /* what one operation (a request, a tool call, one frame of the propagation queue) may
+     hand the component engine's HTML parser, and how long it may spend in it
+     (server/workBudget.ts); 0 lifts a limit */
+  DOOP_WORK_BUDGET_PARSE_MB: nonNegativeInt({ default: 96 }),
+  DOOP_WORK_BUDGET_MS: nonNegativeInt({ default: 2000 }),
+  /* what a store write outside any write boundary does (server/journal.ts): nothing, a
+     logged line per kind of write, or a thrown error. Unset: 'warn' in development, 'off'
+     in production and under test (the integration harness sets 'throw'). */
+  DOOP_WRITE_BOUNDARY: str({ choices: ['', 'off', 'warn', 'throw'], default: '' }),
+  /* the stall watchdog (server/stallWatchdog.ts): a watcher thread logs the operations in
+     flight once the event loop has not answered for STALL_LOG_MS, and ends the process
+     (for the supervisor to restart it) after STALL_EXIT_MS; an operation that took
+     SLOW_OP_LOG_MS is logged when it finishes. 0 switches one off. The exit is off
+     outside production, where a debugger's breakpoint looks exactly like a stall. */
+  STALL_LOG_MS: nonNegativeInt({ default: 5000 }),
+  STALL_EXIT_MS: nonNegativeInt({ default: 60_000, devDefault: 0 }),
+  SLOW_OP_LOG_MS: nonNegativeInt({ default: 2000 }),
   DOOP_AGENT_MODEL: str({ default: 'claude-opus-5' }),
   DOOP_DISTILL_MODEL: str({ default: 'claude-haiku-4-5-20251001' }),
   DOOP_AGENT_OPENAI_MODEL: str({ default: 'gpt-5.6-terra' }),
   DOOP_AGENT_OPENAI_EFFORT: str({ default: 'medium' }),
   DOOP_AGENT_OPENROUTER_MODEL: str({ default: DEFAULT_OPENROUTER_MODEL }),
   DOOP_AGENT_GEMINI_MODEL: str({ default: DEFAULT_GEMINI_MODEL }),
+  DOOP_AGENT_DEEPSEEK_MODEL: str({ default: DEFAULT_DEEPSEEK_MODEL }),
+  DOOP_AGENT_KIMI_MODEL: str({ default: DEFAULT_KIMI_MODEL }),
+  DOOP_AGENT_KIMI_CODE_MODEL: str({ default: DEFAULT_KIMI_CODE_MODEL }),
   /* JSON; parsed and shape-checked where it is used so a parse error never
      echoes the worker secrets it contains */
   DOOP_GEMINI_CLOUD_WORKERS: str({ default: undefined }),
@@ -177,11 +207,26 @@ const schema = {
   CHATGPT_CODEX_CLIENT_VERSION: str({ default: '0.163.0' }),
   CHATGPT_ORIGINATOR: str({ default: 'codex_cli_rs' }),
   OPENAI_RESPONSES_URL: str({ default: 'https://api.openai.com/v1/responses' }),
+  OPENAI_IMAGES_URL: str({ default: 'https://api.openai.com/v1/images/generations' }),
   OPENAI_MODELS_URL: str({ default: 'https://api.openai.com/v1/models' }),
   OPENROUTER_CHAT_URL: str({ default: 'https://openrouter.ai/api/v1/chat/completions' }),
   GEMINI_OPENAI_CHAT_URL: str({
     default: 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions',
   }),
+  DEEPSEEK_CHAT_URL: str({ default: 'https://api.deepseek.com/chat/completions' }),
+  /* Moonshot's international platform; keys from platform.moonshot.cn need
+     https://api.moonshot.cn/v1/chat/completions */
+  KIMI_CHAT_URL: str({ default: 'https://api.moonshot.ai/v1/chat/completions' }),
+  /* Kimi Code, a membership's coding quota; China's is
+     https://api.kimi.com/coding/v1/chat/completions */
+  KIMI_CODE_CHAT_URL: str({ default: 'https://api.kimi.ai/coding/v1/chat/completions' }),
+  /* custom providers (Settings → Doop Agent → Custom provider): any OpenAI-
+     or Anthropic-compatible endpoint a person names. Off switches the feature
+     off and takes existing ones out of use. Their URLs are user input, so they
+     are reached only over public addresses unless PRIVATE_HOSTS is on, for a
+     self-hosted instance whose models run on its own network */
+  DOOP_CUSTOM_PROVIDERS: bool({ default: true }),
+  DOOP_CUSTOM_PROVIDER_PRIVATE_HOSTS: bool({ default: false }),
 
   /* ------------------------------------------------ image generation */
   OPENAI_API_KEY: str({ default: undefined }),
@@ -232,6 +277,16 @@ const schema = {
   /* ---------------------------------------------------- screenshots */
   CHROME_PATH: str({ default: undefined }),
   CHROME_NO_SANDBOX: bool({ default: false }),
+  /* pages the shared Chromium renders at once (renderBrowser.ts) */
+  RENDER_CONCURRENCY: nonNegativeInt({ default: 4 }),
+  /* a remote Chrome over the DevTools protocol instead of the local one
+     (Cloudflare Browser Run, browserless, a renderer service) */
+  REMOTE_BROWSER_URL: str({ default: undefined }),
+  REMOTE_BROWSER_TOKEN: str({ default: undefined }),
+  /* the remote browser cannot reach this server's private network (a hosted
+     provider such as Cloudflare): it may fetch public URLs itself instead of
+     through the DNS-pinned proxy. Never set it for a self-hosted renderer */
+  REMOTE_BROWSER_ISOLATED: bool({ default: false }),
 
   /* ------------------------------------------------------ analytics */
   POSTHOG_KEY: str({ default: undefined }),
@@ -249,6 +304,13 @@ const schema = {
   MCP_IMPORTS_PER_MIN: perMinute({ default: 5 }),
   SYNC_INGESTS_PER_MIN: perMinute({ default: 30 }),
   PREVIEW_RENDERS_PER_MIN: perMinute({ default: 12 }),
+  /* image descriptions (server/imageDescriptions.ts): a day's budget per
+     canvas, and how many describe calls run at once */
+  DESCRIBE_PER_CANVAS_PER_DAY: nonNegativeInt({ default: 200 }),
+  DESCRIBE_CONCURRENCY: perMinute({ default: 2 }),
+  DESCRIBE_RETRY_MS: nonNegativeInt({ default: 30_000 }),
+  /* how long a canvas nobody uses keeps its frame HTML in memory (store.ts) */
+  CANVAS_IDLE_MS: nonNegativeInt({ default: 10 * 60_000 }),
   SYNC_PAGE_INTERVAL_MS: nonNegativeInt({ default: 30_000 }),
   SYNC_FREEZE_MS: nonNegativeInt({ default: 15 * 60_000 }),
 
@@ -295,7 +357,14 @@ function parse() {
      something other than production; doop treats an unset NODE_ENV as
      development (bun run dev, the test harness), so say so */
   source.NODE_ENV ??= 'development'
-  return cleanEnv(source, schema, { reporter })
+  const parsed = cleanEnv(source, schema, { reporter })
+  /* the stall line names what is in flight before the process is ended: a log threshold
+     above the exit threshold would be a line nobody gets to read first */
+  if (parsed.STALL_LOG_MS > 0 && parsed.STALL_EXIT_MS > 0 && parsed.STALL_LOG_MS > parsed.STALL_EXIT_MS)
+    throw new Error(
+      `Invalid environment configuration:\n  STALL_LOG_MS: ${parsed.STALL_LOG_MS} is greater than STALL_EXIT_MS (${parsed.STALL_EXIT_MS}); the log threshold must come first`,
+    )
+  return parsed
 }
 
 export type Env = ReturnType<typeof parse>

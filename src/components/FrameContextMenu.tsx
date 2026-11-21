@@ -15,6 +15,8 @@ import { ContextMenuContent, ContextMenuItem, ContextMenuSeparator } from './ui/
 import { MenuHint } from './ui/menu'
 import { FrameExportModal } from './FrameExportModal'
 import { FrameHistoryModal } from './FrameHistoryModal'
+import { trackPngCopy } from '../lib/exportEvents'
+import { copyElementLink, type LinkTarget } from '../lib/elementLink'
 
 async function copyImageUrl(frame: Frame) {
   const notify = useStore.getState().pushNotice
@@ -32,10 +34,14 @@ export function FrameContextMenu({
   frame,
   at,
   onRename,
+  element,
 }: {
   frame: Frame
   at: MutableRefObject<{ x: number; y: number }>
   onRename?: () => void
+  /** the element a reader has picked in the frame: readers get this menu
+   *  everywhere, so the element's link is offered here */
+  element?: LinkTarget
 }) {
   const t = useT()
   const renameRequested = useRef(false)
@@ -72,6 +78,28 @@ export function FrameContextMenu({
     /* locked frames stay, as they do on ⌫ */
     deleteFramesTracked(groupFrames().filter((f) => !f.locked))
   }
+  /* Cut copies the group, then removes what Delete would once the clipboard
+     took it. The menu writes the clipboard asynchronously, so the frames are
+     read again by id when it lands, and that one read is both what is copied
+     and what is deleted: an edit made meanwhile rides along in the copy, and
+     a frame deleted meanwhile is not deleted twice. */
+  function cutSelection() {
+    const ids = new Set(groupFrames().map((f) => f.id))
+    if (!ids.size) return
+    let live: Frame[] = []
+    writeCanvasClipboard(
+      () => {
+        live = (useStore.getState().canvas?.frames ?? []).filter((f) => ids.has(f.id))
+        if (!live.length) return false
+        copyFrames(live)
+      },
+      undefined,
+      () => {
+        const cut = live.filter((f) => !f.locked)
+        if (cut.length) deleteFramesTracked(cut)
+      },
+    )
+  }
   const allReady = useStore((s) => {
     const ids = s.selectedIds.includes(frame.id) ? s.selectedIds : [frame.id]
     const group = s.canvas?.frames.filter((f) => ids.includes(f.id)) ?? [frame]
@@ -99,6 +127,12 @@ export function FrameContextMenu({
           if (exportFrames || historyOpen) event.preventDefault()
         }}
       >
+        {!readOnly && (
+          <ContextMenuItem disabled={allLocked} onSelect={cutSelection}>
+            {groupSize > 1 ? t('stage.cutFrames', { count: groupSize }) : t('common.cut')}
+            <MenuHint>{MOD_KEY}X</MenuHint>
+          </ContextMenuItem>
+        )}
         <ContextMenuItem
           onSelect={() => {
             const frames = groupFrames()
@@ -140,7 +174,19 @@ export function FrameContextMenu({
         >
           {t('stage.copyLink')}
         </ContextMenuItem>
-        <ContextMenuItem onSelect={() => void copyFramePng(frame)}>{t('stage.copyAsPng')}</ContextMenuItem>
+        {element && (
+          <ContextMenuItem onSelect={() => void copyElementLink(frame, element)}>
+            {t('stage.copyLinkToElement')}
+          </ContextMenuItem>
+        )}
+        <ContextMenuItem
+          onSelect={() => {
+            trackPngCopy('frame', 'frame_menu')
+            void copyFramePng(frame)
+          }}
+        >
+          {t('stage.copyAsPng')}
+        </ContextMenuItem>
         <ContextMenuItem onSelect={() => void copyImageUrl(frame)}>{t('stage.copyImageUrl')}</ContextMenuItem>
         <ContextMenuItem onSelect={() => setExportFrames(groupFrames())}>{t('stage.exportEllipsis')}</ContextMenuItem>
         <ContextMenuItem onSelect={() => setHistoryOpen(true)}>{t('stage.versionHistory')}</ContextMenuItem>

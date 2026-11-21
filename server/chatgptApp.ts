@@ -79,6 +79,32 @@ export function previewToolMeta(invoking: string, invoked: string): Record<strin
   }
 }
 
+/* The clients known to show the card inside the conversation: ChatGPT and
+   Claude, each under the name it sends on `initialize` and the name its OAuth
+   application registered with (what handleMcpRequest falls back to after a
+   restart or a token refresh, until the client initializes again). Compared
+   in lower case, an mcp-remote bridge's suffix dropped. `openai-mcp (Codex)`
+   and `codex-mcp-client` are Codex and stay off. */
+const EMBEDDING_CLIENTS: ReadonlySet<string> = new Set([
+  'openai-mcp',
+  'chatgpt',
+  'anthropic/claudeai',
+  'claude',
+  'claude-ai',
+  'doop for claude desktop',
+])
+const BRIDGE_SUFFIX = / \(via mcp-remote [^)]*\)$/
+
+/** Whether the connecting client is told about the card. Only a listed client
+ *  is: any other one may support MCP Apps with nowhere to embed a card, as Pi
+ *  does, whose adapter opened one browser tab per get_canvas, edit and
+ *  screenshot, with "Open in Doop" landing a signed-out browser on the sign-in
+ *  page. Everyone else keeps the text results, which are the same either way. */
+export function embedsPreview(clientName: string | undefined): boolean {
+  if (!clientName) return false
+  return EMBEDDING_CLIENTS.has(clientName.trim().toLowerCase().replace(BRIDGE_SUFFIX, ''))
+}
+
 const WIDGET_DESCRIPTION =
   'Shows a rendered preview of the Doop frames this tool touched, with a button that opens the canvas.'
 

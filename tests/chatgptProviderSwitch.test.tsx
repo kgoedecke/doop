@@ -39,7 +39,16 @@ const view = (accounts: { kind: string; enabled: boolean; plan?: string }[]) => 
   accounts: accounts.map((a) => ({ connectedAt: 1, ...a })),
   default: 'claude-local',
   chatgptEnabled: true,
-  menus: { chatgpt: [], 'openai-key': [], 'anthropic-key': [], 'openrouter-key': [], 'gemini-key': [] },
+  menus: {
+    chatgpt: [],
+    'openai-key': [],
+    'anthropic-key': [],
+    'openrouter-key': [],
+    'gemini-key': [],
+    'deepseek-key': [],
+    'kimi-key': [],
+    'kimi-code': [],
+  },
 })
 const keyOnly = view([{ kind: 'openai-key', enabled: true }])
 const withChatgpt = view([

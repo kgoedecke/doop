@@ -12,6 +12,8 @@ export const inspector = {
   groupMemory: 'Memory',
   exportImageTitle: 'Download the frame at the scale and format picked above',
   copyPngTitle: 'Copy the image ({scale}) to paste anywhere',
+  exportLayer: 'Export {name}',
+  exportLayerTitle: 'Download this layer at the scale and format picked above, cut from its frame as you see it',
   copyPng: 'Copy as PNG',
   copyImageUrlTitle:
     'Public image URL — always renders the current design; paste it as og:image or a blog featured image',
@@ -188,7 +190,7 @@ export const inspector = {
   imageUrlProtocol: 'Use an http or https image URL.',
   imageUrlTimeout: 'Image took too long to load. Try another URL.',
   imageUrlLoadFailed: 'Couldn’t load that image. Check the URL and try again.',
-  imageTooLarge: 'Choose an image smaller than 5 MB.',
+  imageTooLarge: 'Choose an image smaller than 100 MB.',
   imageDesignChanged: 'The design changed. Select the image and try again.',
   imageNotEditable: 'The image is no longer editable. Select it and try again.',
   imageReplaceFailed: 'Couldn’t replace the image. Please try again.',
@@ -201,6 +203,7 @@ export const inspector = {
   imageUrl: 'Image URL',
   applyImageUrl: 'Apply image URL',
   uploadImage: 'Upload image',
+  removeImage: 'Remove image',
   currentImage: 'Current image',
   uploading: 'Uploading…',
   loading: 'Loading…',
@@ -260,9 +263,6 @@ export const inspector = {
   durationN: 'Duration {n}',
 
   // element code view
-  codeCopied: 'Code copied',
-  copyCode: 'Copy code',
-  codeCopiedStatus: 'Code copied to clipboard',
 
   // property fields
   scrubHint: 'Drag to adjust · Shift: ×10 · Alt/Option: ×0.1 · Esc: cancel',

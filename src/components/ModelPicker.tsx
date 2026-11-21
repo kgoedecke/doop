@@ -29,6 +29,9 @@ const PROVIDER_MARK: Partial<Record<RunnerProvider, Brand>> = {
   'openai-key': 'openai',
   'gemini-key': 'gemini',
   'openrouter-key': 'openrouter',
+  'deepseek-key': 'deepseek',
+  'kimi-key': 'kimi',
+  'kimi-code': 'kimi',
 }
 
 /* the effort ids stay as sent to the server; only their names are translated */
@@ -113,7 +116,7 @@ export function ModelPicker({ disabled = false }: { disabled?: boolean }) {
           variant="quiet"
           disabled={disabled || !runners}
           aria-label={t('panels.modelAria', { label })}
-          className={cn('min-w-0 gap-[5px]')}
+          className={cn('min-w-0 shrink gap-[5px]')}
           icon={
             <span className="grid size-3 flex-none place-items-center">
               {mark ? (
@@ -126,7 +129,8 @@ export function ModelPicker({ disabled = false }: { disabled?: boolean }) {
           }
         >
           <span className="truncate">{label}</span>
-          {effortLabel && <span className="flex-none text-ink-faint">{effortLabel}</span>}
+          {/* on a phone the composer row has no room for it; the menu still shows and sets it */}
+          {effortLabel && <span className="hidden flex-none text-ink-faint md:inline">{effortLabel}</span>}
         </MenuButton>
       </DropdownMenuTrigger>
       <DropdownMenuContent side="top" align="end" width="auto">

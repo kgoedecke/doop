@@ -1,7 +1,7 @@
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
 import type { Page } from 'puppeteer-core'
 import { findBrowserPath } from '../server/screenshot.ts'
-import { fixtureUrl, openBrowser, type TestBrowser } from './browser.ts'
+import { fixtureUrl, pagePerTest } from './browser.ts'
 
 type Inspect = { classes: string[]; backgroundColor: string; padding: number[] } | null
 type Message = { type: string; reqId?: string; info?: Inspect }
@@ -14,12 +14,12 @@ type Fixture = { messages: Message[]; testReady: boolean }
 // document, so the body's own attributes have to travel too or the whole
 // stylesheet matches nothing and the frame renders as browser defaults.
 describe.skipIf(!findBrowserPath())('frame runtime body attributes', () => {
-  let browser: TestBrowser
+  const pages = pagePerTest()
   let page: Page
   let seq = 0
-  beforeAll(async () => {
-    browser = await openBrowser()
-    page = await browser.newPage()
+  beforeEach(async () => {
+    seq = 0
+    page = await pages.open()
     await page.goto(fixtureUrl('frameReplay.html'))
     await page.waitForFunction(
       () =>
@@ -30,10 +30,6 @@ describe.skipIf(!findBrowserPath())('frame runtime body attributes', () => {
       },
     )
   }, 60_000)
-  afterAll(async () => {
-    await page?.close()
-    await browser?.close()
-  })
 
   async function ask<T extends Message>(message: Record<string, unknown>, reply: string): Promise<T> {
     const reqId = `req-${++seq}`
@@ -77,5 +73,21 @@ describe.skipIf(!findBrowserPath())('frame runtime body attributes', () => {
     await render('<!doctype html><html><body><p>Plain</p></body></html>')
     const plain = await inspectBody()
     expect(plain?.backgroundColor).toBe('rgba(0, 0, 0, 0)')
+  })
+
+  // A frame is an artboard: content taller than it still scrolls, but no
+  // scrollbar ever eats into its width, even when the design asks for one.
+  it('never shows a scrollbar on the frame', async () => {
+    await render(
+      '<!doctype html><html><head><style>:root,body.glaze{scrollbar-width:thin!important;overflow:scroll}</style></head>' +
+        '<body class="glaze" style="margin:0"><div style="height:5000px;width:5000px"></div></body></html>',
+    )
+    const frame = page.frames().find((f) => f !== page.mainFrame())!
+    // headless Chromium hides scrollbars itself, so the gutter cannot be measured
+    const widths = await frame.evaluate(() => [
+      getComputedStyle(document.documentElement).scrollbarWidth,
+      getComputedStyle(document.body).scrollbarWidth,
+    ])
+    expect(widths).toEqual(['none', 'none'])
   })
 })

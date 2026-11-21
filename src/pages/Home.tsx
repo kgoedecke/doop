@@ -10,11 +10,12 @@ import { useStore } from '../lib/store'
 import { isResidentLimit } from '../components/TeamAllowance'
 import { canvasNameFromPrompt, draftsCardTitle, type DraftCount } from '../lib/homePrompt'
 import { currentRunnerPick } from '../lib/runnerPick'
-import { AgentIcon } from '../components/AgentIcon'
+import { AgentTile } from '../components/AgentIcon'
 import { AppRail, railLayout } from '../components/AppRail'
 import { ConnectModal } from '../components/ConnectModal'
 import { FramePreview, FrameThumb } from '../components/FramePreview'
 import { HomeHero } from '../components/HomeHero'
+import { IosAppPrompt } from '../components/NativeAppPromo'
 import { SourcePicker } from '../components/ImportSources'
 import { importSources } from '../components/importSourceList'
 import { Modal } from '../components/ui/modal'
@@ -25,7 +26,7 @@ import { closeTab, openCanvasTab, pruneTabs } from '../lib/desktop'
 import { AvatarStack } from '../components/ui/avatar'
 import { EmptyState } from '../components/ui/empty-state'
 import { Button } from '../components/ui/button'
-import { IconButton, frostedSurface } from '../components/ui/icon-button'
+import { IconButton } from '../components/ui/icon-button'
 import { MenuButton } from '../components/ui/menu-button'
 import { Pressable } from '../components/ui/pressable'
 import { Badge } from '../components/ui/badge'
@@ -58,7 +59,6 @@ import { Toast } from '../components/ui/toast'
 import { DashContent, DashHeader, DashLayout, DashMain } from '../components/ui/dash'
 import { useT, type PlainMessageKey } from '../lib/i18n'
 import { prefetchWorkspace } from '../lib/workspaceCache'
-import { cn } from '@/lib/utils'
 
 /** the three fixed views, or one workspace (`ws:<id>`) */
 type Scope = 'all' | 'mine' | 'shared' | `ws:${string}`
@@ -358,6 +358,7 @@ export function Home() {
               onConnectAgents: () => setShowConnect(true),
               onAutomations: () => navigate('/automations'),
               onIntegrations: () => navigate('/integrations'),
+              onCommunity: () => navigate('/community'),
             }}
           />
 
@@ -501,7 +502,7 @@ export function Home() {
                       </span>
                       <span className="hidden w-[62px] flex-none gap-[3px] xs:flex">
                         {(c.agents ?? []).slice(0, 3).map((a) => (
-                          <AgentIcon key={a.name} name={a.name} size={11} color={colorFor(a.name)} />
+                          <AgentTile key={a.name} name={a.name} size={14} />
                         ))}
                       </span>
                       <span className="w-auto flex-none text-right text-caption text-ink-faint md:w-[66px]">
@@ -606,6 +607,7 @@ export function Home() {
         }}
       />
       {toast && <Toast>{toast}</Toast>}
+      <IosAppPrompt />
     </DashLayout>
   )
 }
@@ -629,13 +631,8 @@ function AgentStack({ canvas }: { canvas: CanvasMeta }) {
   return (
     <span className="absolute left-2 top-2 flex gap-1">
       {agents.map((a) => (
-        <i
-          key={a.name}
-          className={cn('grid size-5 place-items-center rounded-row', frostedSurface)}
-          style={{ color: colorFor(a.name) }}
-          title={a.name}
-        >
-          <AgentIcon name={a.name} size={11} />
+        <i key={a.name} className="flex" title={a.name}>
+          <AgentTile name={a.name} size={20} />
         </i>
       ))}
     </span>

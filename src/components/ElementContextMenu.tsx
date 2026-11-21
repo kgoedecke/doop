@@ -9,10 +9,20 @@ import { hasFrameClip, pasteFrameCentered } from '../lib/frameClipboard'
 import { deleteLayer, duplicateLayer, setLayerHidden, setLayerLocked, shiftLayer } from '../lib/layerEdits'
 import { buildLayerTree, elementHtml, findLayer, isElementHidden, isElementLocked, layerName } from '../lib/layers'
 import { MOD_KEY } from '../lib/keys'
+import { canEditOpenCanvas, useStore } from '../lib/store'
 import { useT } from '../lib/i18n'
+import {
+  changeInstance,
+  componentContextOf,
+  goToMain,
+  promptMakeComponent,
+  restoreDeletedComponent,
+} from '../lib/components'
+import { isDeleted } from '../../shared/components'
 import { ContextMenuContent, ContextMenuItem, ContextMenuSeparator } from './ui/context-menu'
 import { MenuHint } from './ui/menu'
 import { FrameExportModal } from './FrameExportModal'
+import { trackPngCopy } from '../lib/exportEvents'
 
 /** What the live document said about a right-clicked element; a Layers row
  *  has none, its selector comes from the saved HTML itself. */
@@ -67,6 +77,21 @@ export function ElementContextMenu({ frame, selector, hit, onRename }: ElementMe
   )
 }
 
+/** Copy the element, then remove it once the clipboard took the copy. The
+ *  menu writes the clipboard asynchronously; a selector is a position in the
+ *  frame's HTML, so if the frame changed meanwhile the element stays, rather
+ *  than deleting whatever now sits at that position. */
+function cutLayer(frame: Frame, selector: string) {
+  writeCanvasClipboard(
+    () => copyPicked(frame, [selector]),
+    undefined,
+    () => {
+      const live = useStore.getState().canvas?.frames.find((f) => f.id === frame.id)
+      if (live?.html === frame.html) deleteLayer(live, selector)
+    },
+  )
+}
+
 /** Radix mounts these children only while the menu is open. Closed layer
  *  rows must not parse their frame HTML just to render a dormant menu. */
 function ElementMenuItems({ frame, selector, hit, onRename, onExport }: ElementItemsProps) {
@@ -75,12 +100,27 @@ function ElementMenuItems({ frame, selector, hit, onRename, onExport }: ElementI
   const ownLock = selector ? isElementLocked(frame.html, selector, true) : false
   const locked = !!frame.locked || (selector ? isElementLocked(frame.html, selector) : false)
   const t = useT()
+  const component = selector
+    ? componentContextOf(frame.html, selector, useStore.getState().canvas?.components ?? [])
+    : null
   const { scale } = useExportSettings()
   /* a copied standalone shape is a frame on the clipboard: its paste lands
      a second element on the canvas, as ⌘V does, not a layer in this frame */
   const frameClip = hasFrameClip()
+  const readOnly = useStore((s) => !canEditOpenCanvas(s))
   return (
     <>
+      {!readOnly && (
+        <ContextMenuItem
+          disabled={!exists || locked}
+          onSelect={() => {
+            if (selector) cutLayer(frame, selector)
+          }}
+        >
+          {t('common.cut')}
+          <MenuHint>{MOD_KEY}X</MenuHint>
+        </ContextMenuItem>
+      )}
       <ContextMenuItem
         disabled={!exists}
         onSelect={() => {
@@ -116,6 +156,49 @@ function ElementMenuItems({ frame, selector, hit, onRename, onExport }: ElementI
             <MenuHint>{MOD_KEY}⇧H</MenuHint>
           </ContextMenuItem>
           <ContextMenuSeparator />
+          {!component && (
+            <ContextMenuItem disabled={locked} onSelect={() => promptMakeComponent(frame, selector)}>
+              {t('components.create')}
+              <MenuHint>{MOD_KEY}⌥K</MenuHint>
+            </ContextMenuItem>
+          )}
+          {component && !isDeleted(component.def) && (
+            <ContextMenuItem onSelect={() => goToMain(component.def)}>
+              {t('components.goToMainComponent')}
+            </ContextMenuItem>
+          )}
+          {component && isDeleted(component.def) && (
+            <ContextMenuItem onSelect={() => void restoreDeletedComponent(component.def)}>
+              {t('components.restoreComponent')}
+            </ContextMenuItem>
+          )}
+          {component?.kind === 'instance' && (
+            <>
+              {component.part && component.overriddenParts.includes(component.part) && (
+                <ContextMenuItem
+                  disabled={locked}
+                  onSelect={() =>
+                    void changeInstance(frame, { instanceId: component.instanceId, reset: [component.part!] })
+                  }
+                >
+                  {t('components.resetElement')}
+                </ContextMenuItem>
+              )}
+              <ContextMenuItem
+                disabled={locked || isDeleted(component.def)}
+                onSelect={() => void changeInstance(frame, { instanceId: component.instanceId, reset: true })}
+              >
+                {t('components.resetOverrides')}
+              </ContextMenuItem>
+              <ContextMenuItem
+                disabled={locked}
+                onSelect={() => void changeInstance(frame, { instanceId: component.instanceId, detach: true })}
+              >
+                {t('components.detachInstance')}
+              </ContextMenuItem>
+            </>
+          )}
+          <ContextMenuSeparator />
           <ContextMenuItem
             onSelect={() => {
               const html = elementHtml(frame.html, selector)
@@ -134,7 +217,12 @@ function ElementMenuItems({ frame, selector, hit, onRename, onExport }: ElementI
           <ContextMenuItem onSelect={() => onExport(exportTarget(frame, selector))}>
             {t('stage.exportEllipsis')}
           </ContextMenuItem>
-          <ContextMenuItem onSelect={() => void copyElementPng(frame, exportTarget(frame, selector), scale)}>
+          <ContextMenuItem
+            onSelect={() => {
+              trackPngCopy('element', 'element_menu')
+              void copyElementPng(frame, exportTarget(frame, selector), scale)
+            }}
+          >
             {t('stage.copyAsPng')}
           </ContextMenuItem>
           <ContextMenuSeparator />
@@ -155,6 +243,16 @@ function ElementMenuItems({ frame, selector, hit, onRename, onExport }: ElementI
           <ContextMenuItem tone="danger" disabled={locked} onSelect={() => deleteLayer(frame, selector)}>
             {t('stage.deleteElement')}
             <MenuHint>⌫</MenuHint>
+          </ContextMenuItem>
+        </>
+      )}
+      {/* an element a script made is not in the saved HTML, but one wearing
+          an id in the live document can still be linked */}
+      {selector && !exists && hit?.elementId && (
+        <>
+          <ContextMenuSeparator />
+          <ContextMenuItem onSelect={() => void copyElementLink(frame, { selector, ...hit })}>
+            {t('stage.copyLinkToElement')}
           </ContextMenuItem>
         </>
       )}

@@ -6,7 +6,7 @@ import type { Canvas } from '../shared/types'
 
 /**
  * The prompt composer lives at the bottom of the Agents tab: Enter
- * queues the card, ⇧Enter breaks the line, and a ⌘K focus request from the
+ * queues the card, ⇧Enter breaks the line, and a ⌘/ focus request from the
  * page lands the keyboard in it.
  */
 

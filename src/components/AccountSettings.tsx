@@ -13,6 +13,7 @@ import { Badge } from './ui/badge'
 import { Note } from './ui/note'
 import { Checkbox } from './ui/checkbox'
 import { CardDescription, CardHeader, CardRow, CardTitle, SettingsCard } from './ui/card'
+import { DeleteAccountCard } from './DeleteAccount'
 
 /* settings fields are a fixed column on desktop and full width on a phone */
 
@@ -29,9 +30,9 @@ function errorNotice(message: string | undefined, fallback: PlainMessageKey): No
   return message ? { text: message } : { key: fallback }
 }
 
-/** The "Your account" pane of /settings: who you are on a canvas, and how you
- *  get back into one. Everything here is better-auth's own account surface —
- *  no endpoints of ours. */
+/** The "Your account" pane of /settings: who you are on a canvas, how you
+ *  get back into one, and, last, deleting the account. Mostly better-auth's
+ *  own account surface. */
 export function AccountSettings() {
   const t = useT()
   const { data: session, refetch: refetchSession } = authClient.useSession()
@@ -333,6 +334,8 @@ export function AccountSettings() {
           )}
         </CardRow>
       </SettingsCard>
+
+      <DeleteAccountCard />
     </>
   )
 }

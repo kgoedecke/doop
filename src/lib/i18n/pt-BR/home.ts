@@ -23,8 +23,8 @@ export const home: Catalog['home'] = {
   movedToPersonal: 'Movido para Pessoal',
 
   /* upgrade reasons */
-  reasonAddCanvas: 'Adicionar um canvas a um workspace exige um plano Team.',
-  reasonMoveCanvas: 'Mover um canvas para um workspace exige um plano Team.',
+  reasonAddCanvas: 'Adicionar um canvas a um workspace exige um plano Pro.',
+  reasonMoveCanvas: 'Mover um canvas para um workspace exige um plano Pro.',
   reasonWorkspaceReady: '"{name}" está pronto — escolha um plano para começar a usá-lo.',
 
   /* scopes */
@@ -35,12 +35,12 @@ export const home: Catalog['home'] = {
   /* a workspace without a plan */
   noPlanTitle: '{name} ainda não tem plano.',
   noPlanAskOwner: 'Peça ao dono para escolher um — até lá, nenhum canvas pode ser adicionado aqui.',
-  noPlanChoose: 'Escolha um plano Team para adicionar canvases e convidar sua equipe.',
+  noPlanChoose: 'Escolha um plano Pro para adicionar canvases e convidar sua equipe.',
   choosePlan: 'Escolher um plano',
 
   /* list header */
   people: { one: '{count} pessoa', other: '{count} pessoas' },
-  teamPlan: 'Plano Team',
+  teamPlan: 'Plano Pro',
   sharedWorkspace: 'Workspace compartilhado',
   noPlanYet: 'Ainda sem plano',
   sortAria: 'Ordenar: {label}',
@@ -86,16 +86,12 @@ export const home: Catalog['home'] = {
   greeting: 'Me diga o que desenhar',
   chipLanding: 'Criar uma landing page',
   chipLandingPrompt: 'Crie uma landing page para ',
-  chipRecap: 'Resumir uma sessão',
-  chipRecapPrompt: 'Resuma o que aconteceu nos meus canvases esta semana, em um único frame de resumo.',
-  chipChanged: 'O que mudou',
-  chipChangedPrompt: 'O que mudou nos meus canvases esta semana?',
   chipAutomation: 'Rodar uma automação',
   chipAgents: 'Conectar seus agentes',
   chipImport: 'Importar um design',
-  chipComments: 'Revisar comentários',
-  chipCommentsPrompt: 'Percorra os comentários abertos nos meus canvases e resolva cada um.',
-  composerPlaceholder: 'O que mudou nos meus canvases esta semana?',
+  chipIntegrations: 'Explorar integrações',
+  chipTemplates: 'Explorar modelos',
+  composerPlaceholder: 'Descreva uma tela, um fluxo ou um site inteiro…',
   composerAria: 'Diga ao Doop o que desenhar',
   attachTitle: 'Anexe um design para começar',
   files: 'Arquivos',
@@ -103,6 +99,11 @@ export const home: Catalog['home'] = {
   drafts: { one: '{count} rascunho', other: '{count} rascunhos' },
   draftsCaption: 'Rascunhos por prompt',
   draftsDescription: { one: 'Uma versão do briefing', other: '{count} versões, lado a lado, para escolher' },
+  draftsCustom: 'Personalizado',
+  draftsCustomDescription: 'Qualquer número',
+  draftsFewer: 'Menos rascunhos',
+  draftsMore: 'Mais rascunhos',
+  draftsCustomAria: 'Número personalizado de rascunhos',
   send: 'Enviar',
   connectDesigns: 'Conecte seus designs existentes para resultados melhores',
 
@@ -111,6 +112,8 @@ export const home: Catalog['home'] = {
   meterClaudeLocal: 'Doop Agent no seu Claude CLI local',
   meterChatgpt: 'Doop Agent no seu ChatGPT',
   meterProviderKey: 'Doop Agent na sua chave da {provider}',
+  meterCustomProvider: 'Doop Agent em {provider}',
+  meterCustomProviderUnnamed: 'Doop Agent no seu provedor personalizado',
   meterNoFreeTier: 'Conecte um plano em Configurações para usar o Doop Agent',
   meterUsedUp: 'Tarefas gratuitas do Doop Agent esgotadas — conecte o ChatGPT para continuar',
   meterUsedUpLine: 'tarefas gratuitas do Doop Agent esgotadas — conecte o ChatGPT para continuar',
@@ -142,7 +145,6 @@ export const home: Catalog['home'] = {
   createWorkspaceFailed: 'Não foi possível criar o workspace',
 
   /* the upgrade wall */
-  upgradeEyebrow: 'Plano Team · {price} por assento por mês',
   plansFor: 'Planos para {name}',
   unlock: 'Desbloquear {name}',
   plans: 'Planos',
@@ -155,10 +157,9 @@ export const home: Catalog['home'] = {
   yearly: 'Anual',
   yearlyPrice: '{perMonth} por assento por mês, cobrado {perYear} por ano',
   monthlyPrice: '{price} por assento, cobrado mensalmente',
-  seats: { one: '{count} assento × {price}', other: '{count} assentos × {price}' },
   totalPerMonth: '= {total} por mês',
   totalPerYear: '= {total} por ano',
-  alreadyOnTeam: ' — já está no Team; gerencie em Cobrança.',
+  alreadyOnTeam: ' — já está no Pro; gerencie em Cobrança.',
   countingSeats: 'Contando assentos…',
   stripeNote:
     'Você vai configurar o pagamento no checkout seguro do Stripe. Cancele quando quiser pelo portal de cobrança.',
@@ -168,9 +169,6 @@ export const home: Catalog['home'] = {
   openingStripe: 'Abrindo o Stripe…',
   continueCheckout: 'Continuar para o checkout',
   checkoutFailed: 'Não foi possível iniciar o checkout',
-  receipts: 'Os recibos vão para {email}. Precisa de faturamento, SSO ou uma equipe maior?',
-  talkToUs: 'Fale com a gente',
-  receiptsEnd: '.',
   popular: 'Popular',
   current: 'Atual',
   letsTalk: 'Vamos conversar',

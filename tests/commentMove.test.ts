@@ -41,6 +41,13 @@ describe('frameAtPoint', () => {
     expect(frameAtPoint(canvas, 'first', { x: 150, y: 75 })?.id).toBe('over')
     expect(frameAtPoint(canvas, 'first', { x: 50, y: 25 })?.id).toBe('under')
     expect(frameAtPoint(canvas, 'first', { x: 450, y: 50 })).toBeUndefined()
+  })
+
+  it('hits a turned frame where it is drawn, not in its unturned box', () => {
+    /* 200×100 at (0,0), turned a quarter: it now stands 100 wide and 200 tall about (100, 50) */
+    const turned = { ...canvas, frames: [frame('turned', 0, 0, { rotation: 90 })] }
+    expect(frameAtPoint(turned, 'first', { x: 100, y: 140 })?.id).toBe('turned')
+    expect(frameAtPoint(turned, 'first', { x: 190, y: 50 })).toBeUndefined()
     expect(frameAtPoint(canvas, 'first', { x: 700, y: 700 })).toBeUndefined()
     expect(frameAtPoint(canvas, 'second', { x: 50, y: 25 })?.id).toBe('elsewhere')
   })
@@ -48,6 +55,20 @@ describe('frameAtPoint', () => {
 
 describe('resolveCommentDrop', () => {
   const noElement = async () => null
+
+  it('pins a turned frame in its own axes', async () => {
+    const turned = { ...canvas, frames: [frame('turned', 0, 0, { rotation: 90 })] }
+    const probed: { x: number; y: number }[] = []
+    const anchor = await resolveCommentDrop(turned, 'first', { x: 100, y: 140 }, async (_id, x, y) => {
+      probed.push({ x, y })
+      return null
+    })
+    expect(probed[0]!.x).toBeCloseTo(190)
+    expect(probed[0]!.y).toBeCloseTo(50)
+    expect(anchor).toMatchObject({ frameId: 'turned' })
+    expect((anchor as { x: number }).x).toBeCloseTo(190)
+    expect((anchor as { y: number }).y).toBeCloseTo(50)
+  })
 
   it('anchors to the element the frame finds under the point', async () => {
     const asked: unknown[] = []

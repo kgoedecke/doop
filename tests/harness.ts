@@ -30,6 +30,7 @@ declare module 'vitest' {
 export interface Server {
   base: string
   port: number
+  startupUrl: string
   /** PGlite lives here; pass it back to startServer to reboot the same database */
   dataDir: string
   /** Resolves after the child process exits; useful before reopening its data directory. */
@@ -77,7 +78,8 @@ async function boot(env: Record<string, string>, reuseDir: string | undefined, t
      is simply started again on another port. */
   for (let attempt = 1; ; attempt++) {
     const port = fixed ? Number(fixed) : await freePort()
-    const base = `http://localhost:${port}`
+    const host = env.HOST?.includes(':') ? `[${env.HOST}]` : 'localhost'
+    const base = `http://${host}:${port}`
     const proc: ChildProcess = spawn(
       path.join(ROOT, 'node_modules', '.bin', 'tsx'),
       [path.join(ROOT, 'server', 'index.ts')],
@@ -96,6 +98,9 @@ async function boot(env: Record<string, string>, reuseDir: string | undefined, t
              and the lifecycle-email workflows act on those */
           POSTHOG_KEY: '',
           VITE_POSTHOG_KEY: '',
+          /* a store write outside any write boundary is an error here (server/journal.ts),
+             so a path that escapes the all-or-nothing guarantee fails the test that takes it */
+          DOOP_WRITE_BOUNDARY: 'throw',
           ...env,
         },
         stdio: ['ignore', 'pipe', 'ignore'],
@@ -103,8 +108,8 @@ async function boot(env: Record<string, string>, reuseDir: string | undefined, t
     )
     const stopped = new Promise<void>((resolve) => proc.once('exit', () => resolve()))
     exits.set(dataDir, stopped)
-    const bound = await waitForBind(proc, port)
-    if (!bound) {
+    const startupUrl = await waitForBind(proc, port)
+    if (!startupUrl) {
       if (fixed || attempt >= 5) throw new Error(`server did not bind port ${port}`)
       continue
     }
@@ -123,6 +128,7 @@ async function boot(env: Record<string, string>, reuseDir: string | undefined, t
     return {
       base,
       port,
+      startupUrl,
       dataDir,
       stopped,
       stop({ keepData }: { keepData?: boolean } = {}) {
@@ -133,23 +139,25 @@ async function boot(env: Record<string, string>, reuseDir: string | undefined, t
   }
 }
 
-/** Resolves true once the child logs that it is listening on `port`, false if
+/** Resolves with the startup URL once the child is listening, or undefined if
  *  it exits first. The log keeps draining afterwards so a full pipe can
  *  never stall the server. */
-function waitForBind(proc: ChildProcess, port: number): Promise<boolean> {
+function waitForBind(proc: ChildProcess, port: number): Promise<string | undefined> {
   const out = proc.stdout
   if (!out) throw new Error('server stdout is not piped')
   return new Promise((resolve) => {
     let log = ''
+    const listening = new RegExp(`doop server     (http://\\S+:${port})(?:\\s|$)`)
     const onData = (chunk: Buffer) => {
       log += chunk.toString()
-      if (!log.includes(`doop server     http://localhost:${port}`)) return
+      const match = listening.exec(log)
+      if (!match) return
       out.off('data', onData)
       out.resume()
-      resolve(true)
+      resolve(match[1])
     }
     out.on('data', onData)
-    proc.once('exit', () => resolve(false))
+    proc.once('exit', () => resolve(undefined))
   })
 }
 

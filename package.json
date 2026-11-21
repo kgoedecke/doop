@@ -1,6 +1,6 @@
 {
   "name": "doop",
-  "version": "0.14.0",
+  "version": "0.15.0",
   "private": true,
   "type": "module",
   "packageManager": "bun@1.3.10",
@@ -11,6 +11,7 @@
     "start": "NODE_ENV=production tsx server/index.ts",
     "typecheck": "tsgo --noEmit",
     "test": "vitest run",
+    "test:linux": "sh scripts/test-linux.sh",
     "lint": "oxlint --type-aware --deny-warnings . && eslint . --max-warnings 0",
     "lint:fix": "oxlint --type-aware --deny-warnings --fix . && eslint . --fix",
     "format": "prettier --write .",
@@ -51,6 +52,8 @@
     "better-auth": "1.6.26",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "cmdk": "^1.1.1",
+    "css-select": "5.1.0",
     "drizzle-orm": "^0.45.2",
     "envalid": "8.2.0",
     "express": "^4.19.2",
@@ -74,6 +77,7 @@
     "undici": "^8.10.2",
     "ws": "^8.18.0",
     "zod": "^3.23.8",
+    "zod-to-json-schema": "^3.25.2",
     "zustand": "^4.5.4"
   },
   "devDependencies": {

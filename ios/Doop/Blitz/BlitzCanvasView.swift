@@ -25,6 +25,7 @@ final class CanvasView: UIView, UIGestureRecognizerDelegate {
     private var frames: [String: FrameLayer] = [:]
     private var labels: [String: CATextLayer] = [:]
     private var cursors: [String: CursorLayer] = [:]
+    private var workBadges: [String: FrameWorkBadge] = [:]
     private var zoom: CGFloat = 1
     private var offset = CGPoint(x: 40, y: 80)
     private var fitted = false
@@ -49,7 +50,7 @@ final class CanvasView: UIView, UIGestureRecognizerDelegate {
     #endif
 
     private static let minZoom: CGFloat = 0.03
-    private static let maxZoom: CGFloat = 4
+    static let maxZoom: CGFloat = 4
 
     init(model: CanvasModel) {
         self.model = model
@@ -159,6 +160,8 @@ final class CanvasView: UIView, UIGestureRecognizerDelegate {
             frame.layer.removeFromSuperlayer()
             labels[id]?.removeFromSuperlayer()
             labels[id] = nil
+            workBadges[id]?.remove()
+            workBadges[id] = nil
             frames[id] = nil
         }
         // Fit before creating layers so the first bitmaps are requested at the
@@ -242,7 +245,32 @@ final class CanvasView: UIView, UIGestureRecognizerDelegate {
         }
         for frame in frames.values { frame.selected = frame.id == model.selectedID }
         syncCursors()
+        syncWorkBadges()
         drawChrome()
+    }
+
+    /// One badge per frame on this page with an agent at work on it.
+    private func syncWorkBadges() {
+        // New chips appear where they belong, not faded or slid in by implicit actions.
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        defer { CATransaction.commit() }
+        let workers = model.frameWorkers.filter { frames[$0.key] != nil && !$0.value.isEmpty }
+        for (id, badge) in workBadges where workers[id] == nil {
+            badge.remove()
+            workBadges[id] = nil
+        }
+        for (id, list) in workers {
+            let badge = workBadges[id] ?? {
+                let badge = FrameWorkBadge()
+                // Under the selection outline and cursors, over the titles.
+                chrome.insertSublayer(badge.ring, below: selectionOutline)
+                chrome.insertSublayer(badge.chips, below: selectionOutline)
+                workBadges[id] = badge
+                return badge
+            }()
+            badge.update(list)
+        }
     }
 
     private func syncCursors() {
@@ -353,13 +381,23 @@ final class CanvasView: UIView, UIGestureRecognizerDelegate {
         zoom = max(Self.minZoom, min(1, available.width / CGFloat(maxX - minX), available.height / CGFloat(maxY - minY)))
         offset = CGPoint(x: viewport.midX - CGFloat(maxX + minX) * zoom / 2,
                          y: viewport.midY - CGFloat(maxY + minY) * zoom / 2)
+        restOnPixels()
         applyTransform()
     }
 
-    /// Keep fitted designs clear of the right rail and bottom prompt.
+    /// Rest the camera offset on whole device pixels; with each frame layer snapped
+    /// at the same density, bitmaps are never resampled by a fraction of a pixel.
+    private func restOnPixels() {
+        let s = UIScreen.main.scale
+        offset = CGPoint(x: (offset.x * s).rounded() / s, y: (offset.y * s).rounded() / s)
+    }
+
+    /// Keep fitted designs clear of the right rail and bottom prompt, with room
+    /// at the top for a title and an agent chip row stacked above it.
     private var unobscuredViewport: CGRect {
-        CGRect(x: 24, y: 24, width: max(1, bounds.width - 100),
-               height: max(1, bounds.height - safeAreaInsets.bottom - model.composerHeight - 100))
+        let top = 24 + FrameWorkBadge.rowHeight
+        return CGRect(x: 24, y: top, width: max(1, bounds.width - 100),
+                      height: max(1, bounds.height - safeAreaInsets.bottom - model.composerHeight - 76 - top))
     }
 
     /// After a zoom change settles, re-render visible frames at the new density.
@@ -367,9 +405,7 @@ final class CanvasView: UIView, UIGestureRecognizerDelegate {
         relayout?.cancel()
         let work = DispatchWorkItem { [weak self] in
             guard let self else { return }
-            // Rest on whole device pixels so bitmaps are never resampled by a fraction.
-            let s = UIScreen.main.scale
-            self.offset = CGPoint(x: (self.offset.x * s).rounded() / s, y: (self.offset.y * s).rounded() / s)
+            self.restOnPixels()
             self.applyTransform()
             self.rerenderVisible()
         }
@@ -414,13 +450,16 @@ final class CanvasView: UIView, UIGestureRecognizerDelegate {
             guard let frame = frames[id] else { continue }
             let origin = toScreen(frame.rect.origin)
             let width = frame.rect.width * zoom
+            // Agents at work take the right end of the title row.
+            let screenRect = CGRect(origin: origin, size: CGSize(width: width, height: frame.rect.height * zoom))
+            let chipsWidth = workBadges[id]?.layout(around: screenRect, titleRow: 20, minTitle: 44) ?? 0
             // Like Figma, titles disappear when a frame is too small to read.
-            label.isHidden = width < 44
+            label.isHidden = width - chipsWidth < 44
             guard !label.isHidden else { continue }
             let selected = id == model.selectedID
             label.string = frame.name
             label.foregroundColor = (selected ? UIColor.tintColor : UIColor.secondaryLabel).cgColor
-            label.frame = CGRect(x: origin.x, y: origin.y - 20, width: width, height: 16)
+            label.frame = CGRect(x: origin.x, y: origin.y - 20, width: width - chipsWidth, height: 16)
         }
         if let id = model.selectedID, let frame = frames[id] {
             let rect = CGRect(origin: toScreen(frame.rect.origin), size: CGSize(width: frame.rect.width * zoom, height: frame.rect.height * zoom)).insetBy(dx: -1.5, dy: -1.5)
@@ -662,13 +701,22 @@ private final class FrameLayer {
     private var tilePending: (CGRect, CGFloat)?
     /// Bumped by `clearTile()`: a tile painted for an older request is dropped.
     private var tileVersion = 0
-    /// Tiles cover about a screen, so density can go well past the base cap.
-    private static let maxTileDensity: CGFloat = 8
+    /// Tiles cover about a screen, so density can go well past the base cap: up to
+    /// screen density at the canvas's deepest zoom, so a tile is never stretched.
+    private static let maxTileDensity: CGFloat = CanvasView.maxZoom * UIScreen.main.scale
     /// Playback repaints only the on-screen part of the frame. Steps are self-paced
-    /// by the paint; the density is chosen so one step stays near `playbackPixels`
-    /// (about 16 ms on Skia), which keeps motion smooth at any zoom.
+    /// by the paint. The budget is one screen of device pixels plus the step's 10%
+    /// margin, so a frame playing on screen paints at screen density (the static
+    /// tile's density): a lower playback density rounded the layout to a coarser grid
+    /// and blurred it, and alternating the two made the frame jump by a pixel or two.
     private static let animationInterval: Double = 1.0 / 60
-    private static let playbackPixels: CGFloat = 550_000
+    private static let playbackPixels: CGFloat = {
+        let screen = UIScreen.main.nativeBounds
+        return screen.width * screen.height * 1.25
+    }()
+    /// When this frame last painted a playback step; a static tile stays out of its way.
+    private var lastPlaybackAt: CFTimeInterval = 0
+    private var playing: Bool { animating && CACurrentMediaTime() - lastPlaybackAt < 0.5 }
     /// The last camera handed to `setLOD`, so a tile can be refreshed when playback ends.
     private var lastView: CGRect?
     private var lastLOD: CGFloat = 0
@@ -763,9 +811,7 @@ private final class FrameLayer {
         if newRect != rect {
             let resized = newRect.size != rect.size
             rect = newRect
-            CATransaction.begin(); CATransaction.setDisableActions(true)
-            layer.frame = rect
-            CATransaction.commit()
+            placeLayer()
             if resized {
                 lastChange = CACurrentMediaTime()
                 let size = rect.size, scale = Float(clamp(targetScale))
@@ -798,8 +844,29 @@ private final class FrameLayer {
     /// Local drag preview; the model is updated when the drag ends.
     func move(to origin: CGPoint) {
         rect.origin = origin
+        placeLayer()
+    }
+
+    /// Screen pixels per CSS pixel at the last settled camera; 0 before the first.
+    private var pixelDensity: CGFloat = 0
+
+    /// Put the layer at `rect`, its origin snapped to the device-pixel grid at the
+    /// settled camera's density. The camera offset rests on whole device pixels too,
+    /// so the bitmap's pixels (and a tile's, painted at that density) land one on one
+    /// on screen pixels; otherwise the linear filter blurs every glyph by up to half a pixel.
+    /// The size is snapped too, to the whole pixels the engine rounds the bitmap to
+    /// (a 401 px frame at density 1.5 is a 602 px bitmap), so it is not squeezed into
+    /// 601.5 screen pixels; the frame's own geometry stays `rect`.
+    private func placeLayer() {
+        var frame = rect
+        if pixelDensity > 0 {
+            let snap = { (v: CGFloat) in (v * self.pixelDensity).rounded() / self.pixelDensity }
+            frame = CGRect(x: snap(rect.minX), y: snap(rect.minY),
+                           width: max(1, (rect.width * pixelDensity).rounded()) / pixelDensity,
+                           height: max(1, (rect.height * pixelDensity).rounded()) / pixelDensity)
+        }
         CATransaction.begin(); CATransaction.setDisableActions(true)
-        layer.frame = rect
+        layer.frame = frame
         CATransaction.commit()
     }
 
@@ -809,6 +876,8 @@ private final class FrameLayer {
         targetScale = visible ? clamp(lod) : min(currentScale == 0 ? Self.parkedScale : currentScale, Self.parkedScale)
         lastView = visible ? viewportInFrame : nil
         lastLOD = lod
+        pixelDensity = lod
+        placeLayer()
         refreshTile()
         #if DEBUG
         if StressDriver.enabled, visible {
@@ -856,8 +925,9 @@ private final class FrameLayer {
     func tickAnimation(time: Double, viewportInFrame: CGRect, lod: CGFloat) {
         guard animating, document != nil, !tileRendering, time - lastAnimationStep >= Self.animationInterval else { return }
         lastAnimationStep = time
-        let area = viewportInFrame.width * viewportInFrame.height * 1.21
-        let density = max(0.25, min(lod, (Self.playbackPixels / max(1, area)).squareRoot()))
+        lastPlaybackAt = CACurrentMediaTime()
+        let area = viewportInFrame.width * viewportInFrame.height * 1.21 * lod * lod
+        let density = max(0.25, min(lod, Self.maxTileDensity, lod * (Self.playbackPixels / max(1, area)).squareRoot()))
         requestTile(region: tileRegion(around: viewportInFrame, margin: 0.1, density: density), density: density, time: time, force: true)
     }
 
@@ -866,6 +936,9 @@ private final class FrameLayer {
     /// Deep zoom: the base bitmap cannot reach screen density, so paint just the
     /// part on screen as a tile over it, at (close to) screen density.
     private func refreshTile() {
+        // A playing frame's tile belongs to the playback loop: a static tile painted
+        // between its steps, at another density and an older pose, made it jump.
+        guard !playing else { return }
         if let view = lastView, lastLOD > targetScale + 0.05 {
             let density = min(lastLOD, Self.maxTileDensity)
             requestTile(region: tileRegion(around: view, margin: 0.3, density: density), density: density, time: animationTime)
@@ -917,7 +990,9 @@ private final class FrameLayer {
                     self.tileRegion = region
                     self.tileDensity = density
                 }
-                if self.animating, !stillAnimating {
+                // Only a playback step (painted at the current time) can tell that the
+                // animation ran out; a static tile is painted at an older pose.
+                if force, self.animating, !stillAnimating {
                     // The animation ran out: paint the base at its final pose; that
                     // render then refreshes or drops the tile, so nothing jumps back.
                     self.animating = false
@@ -1003,7 +1078,7 @@ private final class FrameLayer {
         }
         let htmlHash = html.hashValue
         BlitzDocument.queue.async {
-            let info = document.element(at: point).flatMap { document.info(for: $0) }
+            let info = document.pickableElement(at: point).flatMap { document.info(for: $0) }
             DispatchQueue.main.async { completion(info, htmlHash) }
         }
     }

@@ -1,8 +1,6 @@
-/** The shell every page repeats: the account menu and the desktop app's update card. */
+/** The shell every page repeats: the account menu, the desktop app's update card and the native-app suggestion. */
 export const shell = {
   account: 'Account',
-  teamPlan: 'Team plan',
-  personalPlan: 'Personal plan',
   settings: 'Settings',
   admin: 'Admin',
   helpDocs: 'Help & docs',
@@ -10,10 +8,22 @@ export const shell = {
   website: 'Doop website',
   appearance: 'Appearance',
   logOut: 'Log out',
+  windowMinimize: 'Minimize',
+  windowMaximize: 'Maximize',
+  windowRestore: 'Restore',
+  windowClose: 'Close',
   updateTitle: 'Update available',
   updateBody: 'Doop {version} is ready. Restart to apply the update.',
   updateAgentNote: 'Restarting stops an agent run in progress.',
   updateRestart: 'Restart to update',
   updateRestarting: 'Restarting…',
   updateLater: 'Not now',
+  appPromoDismiss: 'Hide',
+  appPromoDesktopTitle: 'Doop desktop app',
+  appPromoDesktopBody: 'Run Claude Code on your own plan, right beside the canvas.',
+  appPromoDownloadFor: 'Download for {platform}',
+  appPromoIosTitle: 'Doop for iPhone and iPad',
+  appPromoIosBody: 'Follow your agents as they design, review frames and reply to comments, all in a native app.',
+  appPromoIosGet: 'Get it on the App Store',
+  appPromoIosLater: 'Continue in browser',
 } as const

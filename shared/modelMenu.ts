@@ -100,26 +100,150 @@ export const GEMINI_MODELS: ModelOption[] = [
 export const DEFAULT_GEMINI_MODEL = 'gemini-3.7-flash'
 
 /**
+ * DeepSeek direct (a platform.deepseek.com key). A curated roster like
+ * OpenRouter's, since the vision flag differs within it and DeepSeek's
+ * catalog does not say which model sees images. Checked against
+ * api-docs.deepseek.com; Pro stays text-only until its image input is
+ * confirmed, a degraded run being safer than a 400 on the first screenshot.
+ */
+export const DEEPSEEK_MODELS: ModelOption[] = [
+  {
+    id: 'deepseek-flash',
+    name: 'DeepSeek V4.1 Flash',
+    blurb: 'Cheap and capable, with vision. A good default.',
+    vision: true,
+  },
+  {
+    id: 'deepseek-v4-pro',
+    name: 'DeepSeek V4 Pro',
+    blurb: 'DeepSeek’s strongest. Text-only: no visual review of frames.',
+    vision: false,
+  },
+]
+
+export const DEFAULT_DEEPSEEK_MODEL = 'deepseek-flash'
+
+/** Kimi direct (a platform.moonshot.ai key). Checked against
+ *  platform.kimi.ai/docs/models; every K3 tier sees images. */
+export const KIMI_MODELS: ModelOption[] = [
+  {
+    id: 'kimi-k3.1-pro',
+    name: 'Kimi K3.1 Pro',
+    blurb: 'Moonshot’s flagship — strong agentic design work.',
+    vision: true,
+  },
+  {
+    id: 'kimi-k3.1-pro-highspeed',
+    name: 'Kimi K3.1 Pro Highspeed',
+    blurb: 'The flagship, faster and pricier per token.',
+    vision: true,
+  },
+  { id: 'kimi-k3', name: 'Kimi K3', blurb: 'The previous flagship, still dependable.', vision: true },
+]
+
+export const DEFAULT_KIMI_MODEL = 'kimi-k3.1-pro'
+
+/** Kimi Code (a key from a Kimi membership's Kimi Code console, billed to the
+ *  membership). Its own endpoint and ids, per kimi.com/code/docs; the K3
+ *  tiers are the platform's, which see images. */
+export const KIMI_CODE_MODELS: ModelOption[] = [
+  {
+    id: 'k3.1-pro',
+    name: 'Kimi K3.1 Pro',
+    blurb: 'Moonshot’s flagship, on your membership.',
+    vision: true,
+  },
+  {
+    id: 'k3.1-pro-highspeed',
+    name: 'Kimi K3.1 Pro Highspeed',
+    blurb: 'The flagship, faster; uses the plan’s quota quicker.',
+    vision: true,
+  },
+  { id: 'k3', name: 'Kimi K3', blurb: 'The previous flagship, still dependable.', vision: true },
+]
+
+export const DEFAULT_KIMI_CODE_MODEL = 'k3.1-pro'
+
+/**
  * The image-model registry. `provider` names the credential family that can
  * run it — imageGen resolves a generator per provider (user account first,
  * then a server key). Adding a model later is one entry here, plus a new
  * generator in server/imageGen.ts only if it introduces a new provider.
+ *
+ * `openai` runs on a ChatGPT subscription or an OpenAI key; `openai-api` on an
+ * OpenAI key only. The ChatGPT (Codex) backend ignores the image tool's
+ * `model` (a made-up id draws the same image, probed 2026-11-12), so a
+ * subscription cannot choose: it gets the one `openai` entry, and the models
+ * an API key can pick are their own family.
  */
-export type ImageProvider = 'openai' | 'gemini' | 'ark'
+export type ImageProvider = 'openai' | 'openai-api' | 'gemini' | 'ark'
 
 export interface ImageModelOption {
   id: string
   name: string
   blurb: string
   provider: ImageProvider
+  /** the Settings row it sits in: a family with several entries is one row,
+   *  the entry picked from its dropdown by name; the pick is still its id */
+  family?: string
 }
 
 export const IMAGE_MODELS: ImageModelOption[] = [
   {
     id: 'gpt-image-2',
     name: 'GPT Image 2',
-    blurb: 'OpenAI’s image model — reliable text rendering and UI assets.',
+    family: 'GPT Image via ChatGPT subscription',
+    blurb: 'ChatGPT picks the model (GPT Image 2 today). Also runs on an OpenAI API key.',
     provider: 'openai',
+  },
+  {
+    id: 'gpt-image-2.6-sunburst',
+    name: 'GPT Image 2.6 Sunburst',
+    family: 'GPT Image API',
+    blurb: 'OpenAI’s newest image model — detailed visual work and editing.',
+    provider: 'openai-api',
+  },
+  {
+    id: 'gpt-image-2.6-flare',
+    name: 'GPT Image 2.6 Flare',
+    family: 'GPT Image API',
+    blurb: 'OpenAI’s newest image model, tuned for fast iteration.',
+    provider: 'openai-api',
+  },
+  {
+    id: 'gpt-image-2.5-sunburst',
+    name: 'GPT Image 2.5 Sunburst',
+    family: 'GPT Image API',
+    blurb: 'OpenAI’s most capable image model — precise edits and detail.',
+    provider: 'openai-api',
+  },
+  {
+    id: 'gpt-image-2.5-flare',
+    name: 'GPT Image 2.5 Flare',
+    family: 'GPT Image API',
+    blurb: 'Fast, high-quality everyday images from OpenAI.',
+    provider: 'openai-api',
+  },
+  {
+    id: 'chatgpt-image-latest',
+    name: 'ChatGPT Image (latest)',
+    family: 'GPT Image API',
+    blurb: 'The image model ChatGPT uses now, kept current by OpenAI.',
+    provider: 'openai-api',
+  },
+  {
+    id: 'gpt-image-1.5',
+    name: 'GPT Image 1.5',
+    family: 'GPT Image API',
+    blurb: 'OpenAI’s previous-generation image model.',
+    provider: 'openai-api',
+  },
+  {
+    id: 'gpt-image-1-mini',
+    name: 'GPT Image 1 Mini',
+    family: 'GPT Image API',
+    blurb: 'OpenAI’s low-cost image model, for drafts and volume.',
+    provider: 'openai-api',
   },
   {
     id: 'gemini-3.1-flash-image',
@@ -165,6 +289,23 @@ export const ANTHROPIC_MODELS: ModelOption[] = [
 export const DEFAULT_ANTHROPIC_MODEL = 'claude-sonnet-5'
 
 /**
+ * The small, vision-capable tier an image description runs on, per account
+ * kind (shared/imageDescriptions.ts): a paragraph about a screenshot never
+ * needs the model the owner picked for design work. The OpenAI kinds are
+ * absent on purpose: the ChatGPT backend answers for a short list of models
+ * that differs per subscription, so those keep the account's own model and
+ * drop to low reasoning effort instead.
+ */
+export const DESCRIBER_MODELS: Readonly<Record<string, string>> = {
+  'anthropic-key': 'claude-haiku-4-5-20251001',
+  'gemini-key': 'gemini-3.7-flash',
+  'openrouter-key': 'google/gemini-3.7-flash',
+}
+
+/** The server tier's describer when DOOP_AGENT_PROVIDER is anthropic. */
+export const DESCRIBER_ANTHROPIC_MODEL = 'claude-haiku-4-5-20251001'
+
+/**
  * How hard an OpenAI model thinks per turn, on a ChatGPT subscription or an
  * OpenAI key: the user's pick rides the account (`PATCH /api/model-account`),
  * and the server's `DOOP_AGENT_OPENAI_EFFORT` is what runs until they pick.
@@ -197,6 +338,9 @@ export const ACCOUNT_KIND_LABELS = {
   'anthropic-key': 'Claude API',
   'openrouter-key': 'OpenRouter',
   'gemini-key': 'Gemini',
+  'deepseek-key': 'DeepSeek',
+  'kimi-key': 'Kimi',
+  'kimi-code': 'Kimi Code',
 } as const
 
 export type AccountKindName = keyof typeof ACCOUNT_KIND_LABELS

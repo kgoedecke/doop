@@ -1,69 +1,26 @@
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { createServer, type ViteDevServer } from 'vite'
+import { beforeEach, describe, expect, it } from 'vitest'
 import type { Page } from 'puppeteer-core'
 import { findBrowserPath } from '../server/screenshot'
-import { fixtureServerConfig, openBrowser, type TestBrowser } from './browser'
-import { freePort, startServer, type Server } from './harness'
+import { fixtureUrl, pagePerTest } from './browser'
+import { canvasFrame, prepareCanvasPage, showCanvasPage } from './canvasPageFixture'
 
 /* ⇧2 fits the selection into the part of the stage the panels leave open,
    not the whole window under them */
 describe.skipIf(!findBrowserPath())('zoom to selection with the panels open', () => {
-  let vite: ViteDevServer
-  let server: Server
-  let browser: TestBrowser
+  const pages = pagePerTest()
   let page: Page
-  let origin: string
-  let canvasId: string
-  let frameId: string
-  beforeAll(async () => {
-    const port = await freePort()
-    vite = await createServer(
-      fixtureServerConfig({
-        proxy: {
-          '/api': { target: `http://localhost:${port}` },
-          '/ws': { target: `ws://localhost:${port}`, ws: true },
-        },
-      }),
-    )
-    await vite.listen()
-    origin = vite.resolvedUrls!.local[0]!.replace(/\/$/, '')
-    server = await startServer({ PORT: String(port), BETTER_AUTH_URL: origin })
-    browser = await openBrowser()
-    page = await browser.newPage()
+  const WIDE = canvasFrame({ id: 'wide', name: 'Wide', x: 0, y: 0, width: 1440, height: 900 })
+  beforeEach(async () => {
+    page = await pages.open()
     page.setDefaultTimeout(10_000)
     await page.setViewport({ width: 1600, height: 1000 })
-    await page.goto(origin)
-    ;({ canvasId, frameId } = await page.evaluate(async () => {
-      const signup = await fetch('/api/auth/sign-up/email', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: 'Fit Tester', email: 'fit-selection@test.dev', password: 'password12345' }),
-      })
-      if (!signup.ok) throw new Error(await signup.text())
-      const canvas = await (
-        await fetch('/api/canvases', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name: 'Fit selection' }),
-        })
-      ).json()
-      const frame = await (
-        await fetch(`/api/canvases/${canvas.id}/frames`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name: 'Wide', x: 0, y: 0, width: 1440, height: 900, html: '<body></body>' }),
-        })
-      ).json()
-      return { canvasId: canvas.id as string, frameId: frame.id as string }
-    }))
-    await page.goto(`${origin}/c/${canvasId}`)
-    await page.waitForSelector('[data-frame-title]')
-  }, 60_000)
-  afterAll(async () => {
-    await page?.close()
-    await browser?.close()
-    await vite?.close()
-    server?.stop()
+    await prepareCanvasPage(page)
+    /* localStorage belongs to the file's browser context, and the docked
+       tests leave their layout in it; it is cleared on the fixture's origin
+       before the page that reads it loads */
+    await page.goto(fixtureUrl('canvasPage.html'))
+    await page.evaluate(() => localStorage.removeItem('doop:panel-layout'))
+    await showCanvasPage(page, [WIDE])
   })
 
   /** the open stage: right of the tool rail (which follows the Layers
@@ -101,7 +58,7 @@ describe.skipIf(!findBrowserPath())('zoom to selection with the panels open', ()
   })
 
   it('fits a linked frame beside the Inspector the link opens', async () => {
-    await page.goto(`${origin}/c/${canvasId}?frame=${frameId}`)
+    await showCanvasPage(page, [WIDE], '?frame=wide')
     await page.waitForSelector('[aria-label="Account"]')
     /* the link opens the Inspector, whose header offers to close it */
     await page.waitForFunction(() => document.querySelectorAll('[data-slot="panel"]').length >= 2)
@@ -113,8 +70,7 @@ describe.skipIf(!findBrowserPath())('zoom to selection with the panels open', ()
 
   it('docked: the stage fills the gap between the columns and fits there', async () => {
     await page.evaluate(() => localStorage.setItem('doop:panel-layout', 'docked'))
-    await page.reload()
-    await page.waitForSelector('[data-frame-title]')
+    await showCanvasPage(page, [WIDE])
     const frame = await fitWithPanelsOpen()
     const area = await openArea()
     const stage = await page.$eval('.stage', (el) => {
@@ -132,7 +88,7 @@ describe.skipIf(!findBrowserPath())('zoom to selection with the panels open', ()
 
   it('docked: fits a linked frame inside the stage the Inspector narrows', async () => {
     await page.evaluate(() => localStorage.setItem('doop:panel-layout', 'docked'))
-    await page.goto(`${origin}/c/${canvasId}?frame=${frameId}`)
+    await showCanvasPage(page, [WIDE], '?frame=wide')
     await page.waitForSelector('[aria-label="Account"]')
     await page.waitForFunction(() => document.querySelectorAll('[data-slot="panel"]').length >= 2)
     await new Promise((r) => setTimeout(r, 300))

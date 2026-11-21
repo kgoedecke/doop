@@ -1,36 +1,31 @@
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
 import type { Page } from 'puppeteer-core'
 import { findBrowserPath } from '../server/screenshot'
-import { fixtureUrl, openBrowser, type TestBrowser } from './browser'
+import { fixtureUrl, pagePerTest } from './browser'
 
 declare global {
   interface Window {
     setSignUpResponse: (status: number, body: unknown) => void
     /** every unhandled rejection the page produced, the shape PostHog reports */
     rejections: string[]
+    /** every SSO start the page made (the body of POST /api/auth/sign-in/oauth2) */
+    oauthStarts: { providerId: string }[]
   }
 }
 
 /* Each test loads the whole app in its own body, which on a busy CI runner
    takes longer than the 5 s default test timeout. */
 describe.skipIf(!findBrowserPath())('sign-up form error handling', { timeout: 30_000 }, () => {
-  let browser: TestBrowser
+  const pages = pagePerTest()
   let page: Page
   let pageErrors: string[] = []
 
-  beforeAll(async () => {
-    browser = await openBrowser()
-    page = await browser.newPage()
+  beforeEach(async () => {
+    pageErrors = []
+    page = await pages.open()
     await page.setViewport({ width: 900, height: 900 })
     page.setDefaultTimeout(5_000)
     page.on('pageerror', (error) => pageErrors.push(String(error)))
-  }, 60_000)
-  afterAll(async () => {
-    await page?.close()
-    await browser?.close()
-  })
-  afterEach(() => {
-    pageErrors = []
   })
 
   /** Load the form, choose what the sign-up POST answers, and submit it. */
@@ -107,5 +102,75 @@ describe.skipIf(!findBrowserPath())('sign-up form error handling', { timeout: 30
     await signUp(400, { code: 'PASSWORD_TOO_SHORT', message: 'Password too short' })
     await noCrash()
     expect(await errorText()).toContain('Password too short')
+  })
+})
+
+/* The instance's sign-in policy (Admin → Sign-in) on the real form. */
+describe.skipIf(!findBrowserPath())('sign-in policy', { timeout: 30_000 }, () => {
+  const pages = pagePerTest()
+  let page: Page
+
+  beforeEach(async () => {
+    page = await pages.open()
+    await page.setViewport({ width: 900, height: 900 })
+    page.setDefaultTimeout(5_000)
+  })
+
+  const SSO = { enabled: true, displayName: 'Zitadel' }
+
+  /** Open the form under a policy, with any extra query the page should see. */
+  async function open(login: Record<string, unknown>, extra = '') {
+    await page.goto(`${fixtureUrl('authForm.html')}?login=${encodeURIComponent(JSON.stringify(login))}${extra}`)
+    await page.waitForSelector('[data-slot="auth-card-text"]')
+  }
+
+  function buttonLabels() {
+    return page.evaluate(() => [...document.querySelectorAll('button')].map((b) => b.textContent?.trim() ?? ''))
+  }
+
+  it('offers sign-up by default', async () => {
+    await open({})
+    expect(await buttonLabels()).toContain('No account yet? Sign up')
+  })
+
+  it('hides sign-up when email/password sign-up is off', async () => {
+    await open({ emailPasswordSignup: false })
+    const labels = await buttonLabels()
+    expect(labels).toContain('Sign in')
+    expect(labels).not.toContain('No account yet? Sign up')
+  })
+
+  it('goes straight to the provider when the policy says so', async () => {
+    await open({ ...SSO, ssoAutoRedirect: true })
+    await page.waitForFunction(() => location.hash === '#idp')
+    expect(await page.evaluate(() => window.oauthStarts.map((s) => s.providerId))).toEqual(['oidc'])
+    /* what the visitor saw meanwhile: the redirect card, with the way out */
+    expect(await buttonLabels()).toContain('Sign in another way')
+  })
+
+  it('keeps the rest of the query when the visitor asks for the card', async () => {
+    await open({ ...SSO, ssoAutoRedirect: true }, '&redirect_to=%2Fc%2Fabc')
+    await page.waitForFunction(() => location.hash === '#idp')
+    await page.evaluate(() => {
+      ;[...document.querySelectorAll('button')].find((b) => b.textContent?.includes('Sign in another way'))?.click()
+    })
+    /* a full navigation: wait for the card the new page draws, not the URL */
+    await page.waitForFunction(
+      () => [...document.querySelectorAll('button')].some((b) => b.textContent?.includes('Sign in with Zitadel')),
+      { timeout: 15_000 },
+    )
+    expect(await page.evaluate(() => new URLSearchParams(location.search).get('manual'))).toBe('1')
+    expect(await page.evaluate(() => new URLSearchParams(location.search).get('redirect_to'))).toBe('/c/abc')
+  })
+
+  it('shows the card instead when asked for it, or after the provider failed', async () => {
+    await open({ ...SSO, ssoAutoRedirect: true }, '&manual=1')
+    expect(await buttonLabels()).toContain('Sign in with Zitadel')
+    expect(await page.evaluate(() => window.oauthStarts.length)).toBe(0)
+
+    await open({ ...SSO, ssoAutoRedirect: true }, '&error=account_not_linked')
+    await page.waitForSelector('[data-slot="callout"]')
+    expect(await buttonLabels()).toContain('Sign in with Zitadel')
+    expect(await page.evaluate(() => window.oauthStarts.length)).toBe(0)
   })
 })

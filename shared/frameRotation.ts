@@ -121,3 +121,26 @@ export function frameTurnMatrix(frame: TurnedRect): [number, number, number, num
   const cy = frame.y + frame.height / 2
   return [cos, sin, -sin, cos, cx - cx * cos + cy * sin, cy - cx * sin - cy * cos]
 }
+
+/** Where a box dragged out of a (possibly turned) frame lands, in the
+ *  coordinates a drop writes: `destination`'s origin plus the box's design
+ *  position in it, or a world box when there is no destination. `start` is
+ *  the box at the press and `moved` the box after the drag's world travel,
+ *  both as the source frame's origin plus design px. The box's centre is
+ *  carried through the source's turn onto the canvas and back through the
+ *  destination's, so it stays under the pointer in either frame. */
+export function turnedDropRect<R extends { x: number; y: number; width: number; height: number }>(
+  start: R,
+  moved: R,
+  source: TurnedRect,
+  destination?: TurnedRect,
+): R {
+  const from = frameWorldPoint(
+    { x: start.x - source.x + start.width / 2, y: start.y - source.y + start.height / 2 },
+    source,
+  )
+  const center = { x: from.x + moved.x - start.x, y: from.y + moved.y - start.y }
+  const at = destination ? frameDesignPoint(center, destination) : center
+  const origin = destination ?? { x: 0, y: 0 }
+  return { ...moved, x: origin.x + at.x - moved.width / 2, y: origin.y + at.y - moved.height / 2 }
+}

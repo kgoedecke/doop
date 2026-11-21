@@ -2,7 +2,17 @@ import { en } from './en'
 import { ptBR } from './pt-BR'
 import { getLocale, useLocale, type Locale } from './locale'
 
-export { LOCALES, LOCALE_NAMES, isLocale, getLocale, setLocale, useLocale, initLocale, type Locale } from './locale'
+export {
+  LOCALES,
+  LOCALE_NAMES,
+  isLocale,
+  getLocale,
+  setLocale,
+  useLocale,
+  initLocale,
+  subscribe as onLocaleChange,
+  type Locale,
+} from './locale'
 
 /* English is the source catalog: its keys are the message keys, and its
    strings decide which {placeholders} a key takes. Every other language must

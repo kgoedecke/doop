@@ -1,4 +1,5 @@
 import { env } from './env.ts'
+import packageJson from '../package.json' with { type: 'json' }
 import { randomUUID } from 'node:crypto'
 import type Anthropic from '@anthropic-ai/sdk'
 import {
@@ -10,6 +11,7 @@ import {
   responseError,
 } from './openaiAgent.ts'
 import type { StopReason, TurnBlock, TurnRequest, TurnResult } from './openaiAgent.ts'
+import type { CustomTokenParam } from '../shared/customProvider.ts'
 
 /**
  * Runs one Doop Agent turn against an OpenAI-compatible Chat Completions
@@ -18,11 +20,15 @@ import type { StopReason, TurnBlock, TurnRequest, TurnResult } from './openaiAge
  *
  *  - OpenRouter (a user's `sk-or-` key) — one key, many vendors' models;
  *  - Google Gemini (a user's AI Studio key), through Google's own
- *    OpenAI-compatibility endpoint.
+ *    OpenAI-compatibility endpoint;
+ *  - DeepSeek and Kimi (Moonshot), whose own APIs speak Chat Completions,
+ *    and Kimi Code, a Kimi membership's coding quota.
  *
- * Both URLs are fixed constants. Like the Azure transport, this module never
- * takes a user-supplied endpoint: a configurable base URL would be a
- * server-side fetch target, i.e. an SSRF into whatever network Doop runs on.
+ * The built-in providers' URLs are fixed constants: a configurable base URL
+ * would be a server-side fetch target, i.e. an SSRF into whatever network
+ * Doop runs on. The one exception is a custom provider, whose URL a person
+ * typed; its config carries server/customProviderFetch.ts as its `fetch`,
+ * which only reaches public addresses unless the operator allows more.
  *
  * Chat Completions shares the Responses API's one real impedance mismatch:
  * `role: 'tool'` messages are text-only, so images inside tool results are
@@ -32,17 +38,26 @@ import type { StopReason, TurnBlock, TurnRequest, TurnResult } from './openaiAge
  * result or user block — is replaced by a text note here, at the one choke
  * point all seven image-producing tools pass through, so no request can 400
  * on a modality the model lacks.
+ *
+ * DeepSeek and Kimi think out loud in `reasoning_content` and refuse (400) a
+ * tool-calling conversation that drops it from an earlier assistant turn.
+ * The reasoning rides the run's history as a `thinking` block and goes back
+ * out where the config asks for it (`echoReasoning`).
  */
 
 export const OPENROUTER_URL = env.OPENROUTER_CHAT_URL
 export const GEMINI_OPENAI_URL = env.GEMINI_OPENAI_CHAT_URL
+export const DEEPSEEK_URL = env.DEEPSEEK_CHAT_URL
+export const KIMI_URL = env.KIMI_CHAT_URL
+export const KIMI_CODE_URL = env.KIMI_CODE_CHAT_URL
 
 export const IMAGE_OMITTED_NOTE = '[image omitted — the selected model cannot view images]'
 
 const APP_ORIGIN = env.BETTER_AUTH_URL
 
 export interface ChatCompletionsConfig {
-  /** one of the fixed URL constants above — never user input */
+  /** one of the fixed URL constants above, or a custom provider's URL — which
+   *  then comes with the guarded `fetch` */
   url: string
   headers: Record<string, string>
   model: string
@@ -50,6 +65,12 @@ export interface ChatCompletionsConfig {
   label: string
   /** false = strip every image into a text note before sending */
   vision: boolean
+  /** true = send earlier turns' reasoning back as `reasoning_content` */
+  echoReasoning?: boolean
+  /** the field the output budget goes in; `max_tokens` when unset */
+  tokenParam?: CustomTokenParam
+  /** the transport for the request; the global fetch when unset */
+  fetch?: (url: string, init: RequestInit) => Promise<Response>
 }
 
 export function openrouterConfig(apiKey: string, model: string, vision: boolean): ChatCompletionsConfig {
@@ -73,6 +94,41 @@ export function geminiConfig(apiKey: string, model: string, vision: boolean): Ch
   }
 }
 
+export function deepseekConfig(apiKey: string, model: string, vision: boolean): ChatCompletionsConfig {
+  return {
+    url: DEEPSEEK_URL,
+    headers: { Authorization: `Bearer ${apiKey}` },
+    model,
+    label: 'DeepSeek',
+    vision,
+    echoReasoning: true,
+  }
+}
+
+export function kimiConfig(apiKey: string, model: string, vision: boolean): ChatCompletionsConfig {
+  return {
+    url: KIMI_URL,
+    headers: { Authorization: `Bearer ${apiKey}` },
+    model,
+    label: 'Kimi',
+    vision,
+    echoReasoning: true,
+  }
+}
+
+export function kimiCodeConfig(apiKey: string, model: string, vision: boolean): ChatCompletionsConfig {
+  return {
+    url: KIMI_CODE_URL,
+    /* Kimi Code's terms ask every tool to name itself truthfully; a disguised
+       client can cost the member their plan */
+    headers: { Authorization: `Bearer ${apiKey}`, 'User-Agent': `Doop/${packageJson.version}` },
+    model,
+    label: 'Kimi Code',
+    vision,
+    echoReasoning: true,
+  }
+}
+
 /* ---------------------------------------------------------------- */
 /* Anthropic messages -> Chat Completions messages                  */
 /* ---------------------------------------------------------------- */
@@ -81,7 +137,7 @@ type ChatPart = { type: 'text'; text: string } | { type: 'image_url'; image_url:
 
 type ChatMessage =
   | { role: 'system' | 'user'; content: string | ChatPart[] }
-  | { role: 'assistant'; content: string | null; tool_calls?: ChatToolCall[] }
+  | { role: 'assistant'; content: string | null; tool_calls?: ChatToolCall[]; reasoning_content?: string }
   | { role: 'tool'; tool_call_id: string; content: string }
 
 interface ChatToolCall {
@@ -90,7 +146,12 @@ interface ChatToolCall {
   function: { name: string; arguments: string }
 }
 
-function toMessages(system: string, messages: Anthropic.MessageParam[], vision: boolean): ChatMessage[] {
+function toMessages(
+  system: string,
+  messages: Anthropic.MessageParam[],
+  vision: boolean,
+  echoReasoning = false,
+): ChatMessage[] {
   const out: ChatMessage[] = [{ role: 'system', content: system }]
   for (const message of messages) {
     if (typeof message.content === 'string') {
@@ -103,9 +164,11 @@ function toMessages(system: string, messages: Anthropic.MessageParam[], vision: 
     }
     if (message.role === 'assistant') {
       const texts: string[] = []
+      const thoughts: string[] = []
       const calls: ChatToolCall[] = []
       for (const block of message.content) {
         if (block.type === 'text') texts.push(block.text)
+        else if (block.type === 'thinking') thoughts.push(block.thinking)
         else if (block.type === 'tool_use') {
           calls.push({
             id: block.id,
@@ -118,6 +181,7 @@ function toMessages(system: string, messages: Anthropic.MessageParam[], vision: 
         role: 'assistant',
         content: texts.length > 0 ? texts.join('\n') : null,
         ...(calls.length > 0 ? { tool_calls: calls } : {}),
+        ...(echoReasoning && thoughts.length > 0 ? { reasoning_content: thoughts.join('\n') } : {}),
       })
       continue
     }
@@ -189,6 +253,7 @@ interface CompletionBody {
     finish_reason?: string
     message?: {
       content?: string | null
+      reasoning_content?: string | null
       refusal?: string | null
       tool_calls?: { id?: string; function?: { name?: string; arguments?: string } }[]
     }
@@ -204,6 +269,11 @@ function fromCompletion(body: CompletionBody, label: string): TurnResult {
   const choice = body.choices?.[0]
   if (!choice?.message) throw new Error(`${label} returned an empty response`)
   const content: TurnBlock[] = []
+  /* kept for the next request, never shown: the signature is Anthropic's and
+     this block never reaches the Messages API */
+  if (choice.message.reasoning_content) {
+    content.push({ type: 'thinking', thinking: choice.message.reasoning_content, signature: '' })
+  }
   if (choice.message.content) content.push({ type: 'text', text: choice.message.content })
   const refused = Boolean(choice.message.refusal)
   let toolCalls = 0
@@ -228,7 +298,8 @@ function fromCompletion(body: CompletionBody, label: string): TurnResult {
   const stop: StopReason = refused ? 'refusal' : toolCalls > 0 ? 'tool_use' : truncated ? 'max_tokens' : 'end_turn'
   /* a response with nothing in it would end the loop silently; make it a
      visible failure instead */
-  if (content.length === 0 && !refused) throw new Error(`${label} returned an empty response`)
+  if (!content.some((block) => block.type !== 'thinking') && !refused)
+    throw new Error(`${label} returned an empty response`)
   return { content, stop_reason: stop }
 }
 
@@ -237,17 +308,18 @@ function fromCompletion(body: CompletionBody, label: string): TurnResult {
 /* ---------------------------------------------------------------- */
 
 export async function runChatCompletionsTurn(config: ChatCompletionsConfig, req: TurnRequest): Promise<TurnResult> {
-  const res = await fetch(config.url, {
+  const send = config.fetch ?? fetch
+  const res = await send(config.url, {
     method: 'POST',
     headers: { ...config.headers, 'Content-Type': 'application/json' },
     body: JSON.stringify({
       model: config.model,
-      messages: toMessages(req.system, req.messages, config.vision),
+      messages: toMessages(req.system, req.messages, config.vision, config.echoReasoning),
       tools: toTools(req.tools),
       tool_choice: 'auto',
-      max_tokens: req.maxTokens,
+      [config.tokenParam ?? 'max_tokens']: req.maxTokens,
     }),
-    signal: req.signal,
+    ...(req.signal ? { signal: req.signal } : {}),
   })
   if (!res.ok) throw await responseError(res, config.label)
   return fromCompletion((await res.json()) as CompletionBody, config.label)

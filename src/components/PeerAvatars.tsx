@@ -18,6 +18,7 @@ export function PresenceFace(props: {
   image?: string
   color: string
   kind: Presence['kind']
+  brand?: Presence['brand']
   glaze?: boolean
   glazeDelay?: number
   size?: number
@@ -80,6 +81,7 @@ function FollowAvatar({ presence: p }: { presence: Presence }) {
         image={p.image}
         color={p.color}
         kind={p.kind}
+        brand={p.brand}
         /* a halo in their colour marks who we are following */
         style={followed ? { boxShadow: `0 0 0 2px var(--surface), 0 0 0 3.5px ${p.color}` } : undefined}
       />
@@ -91,7 +93,9 @@ function JumpAvatar({ presence: p, glazeDelay }: { presence: Presence; glazeDela
   const t = useT()
   const locatable = useStore((s) => locatePresence(p, s) !== undefined)
   const active = isActiveAgent(p)
-  const face = <PresenceFace name={p.name} color={p.color} kind={p.kind} glaze={active} glazeDelay={glazeDelay} />
+  const face = (
+    <PresenceFace name={p.name} color={p.color} kind={p.kind} brand={p.brand} glaze={active} glazeDelay={glazeDelay} />
+  )
   if (!locatable) {
     return (
       <span className={cn(stacked, 'relative', active && 'z-[2]')} title={presenceLabel(p, t)}>

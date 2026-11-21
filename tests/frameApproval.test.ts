@@ -181,6 +181,36 @@ it('exposes approval to agents, filters implementation candidates, and invalidat
   )
 })
 
+it('lets an agent set approval in its person’s name', async () => {
+  const { frame } = await create()
+  const approved = await callTool('set_frame_approval', {
+    frame_id: frame.id,
+    status: 'ready_for_dev',
+    agent_name: 'Reviewer',
+  })
+  expect(approved.frame.approval).toMatchObject({
+    status: 'ready_for_dev',
+    approvedBy: 'Review Owner',
+    approvedVia: 'Reviewer',
+    approvedFrameUpdatedAt: frame.updatedAt,
+  })
+  expect((await read(frame)).approval).toEqual(approved.frame.approval)
+
+  await callTool('set_frame_approval', { frame_id: frame.id, status: 'draft', agent_name: 'Reviewer' })
+  expect((await read(frame)).approval).toBeFalsy()
+
+  /* a frame the agent's account cannot edit */
+  const theirs: Canvas = await (await stranger.post('/api/canvases', { name: 'Not yours' })).json()
+  const other: Frame = await (
+    await stranger.post(`/api/canvases/${theirs.id}/frames`, { name: 'X', html: '<p>x</p>' })
+  ).json()
+  const refused = await agent.callTool({
+    name: 'set_frame_approval',
+    arguments: { frame_id: other.id, status: 'ready_for_dev', agent_name: 'R' },
+  })
+  expect(refused.isError).toBe(true)
+})
+
 it('copies approved screens as drafts on duplicated pages and canvases', async () => {
   const { canvas, frame } = await create()
   await approve(frame)

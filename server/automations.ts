@@ -10,14 +10,17 @@ import * as meta from './meta.ts'
 import { AutomationPullError, extensions } from './extensions.ts'
 import { hasDurableCanvasAccess } from './access.ts'
 import { getUserName, isBanned } from './auth.ts'
-import { roleName } from '../shared/agents.ts'
+import { normalizePipeline, roleName } from '../shared/agents.ts'
+import { rosterFor } from './customAgents.ts'
 import type { AgentTask } from '../shared/types.ts'
 import { env } from './env.ts'
 import {
   MAX_NAME,
+  automationQueuedBy,
   incompleteReason,
   nextRunAt,
   normalizeSchedule,
+  narrowStepRoles,
   normalizeSteps,
   normalizeTrigger,
   type ApprovedSource,
@@ -167,7 +170,7 @@ function parseInput(
   else {
     const parsed = normalizeSteps(body.steps)
     if (typeof parsed === 'string') return parsed
-    steps = parsed
+    steps = narrowStepRoles(parsed, (canvasId) => rosterFor(store.getCanvas(canvasId)))
   }
   const bad = checkCanvases(ownerId, steps)
   if (bad) return bad
@@ -288,7 +291,13 @@ class StepError extends Error {
   }
 }
 
-async function runPull(row: AutomationRow, step: Extract<Step, { type: 'pull' }>, actorName: string): Promise<string> {
+/** A pull reads and writes its canvas's frames: loaded and held for the
+ *  length of the pull (store.withCanvas). */
+function runPull(row: AutomationRow, step: Extract<Step, { type: 'pull' }>, actorName: string): Promise<string> {
+  return store.withCanvas(step.canvasId, () => pullInto(row, step, actorName))
+}
+
+async function pullInto(row: AutomationRow, step: Extract<Step, { type: 'pull' }>, actorName: string): Promise<string> {
   const connection = await meta.getConnection(row.ownerId)
   if (!connection) throw new StepError('Meta is not connected', 'reconnect')
   try {
@@ -364,15 +373,17 @@ async function queueAgent(
             '',
           ].join('\n')
         : ''
+    /* a custom agent deleted since the step was saved hands it to the default */
+    const pipeline = normalizePipeline(step.roles, rosterFor(store.getCanvas(step.canvasId))).slice(0, 1)
     const card: AgentTask = {
       id: nanoid(8),
       agentName: '',
       color: '#0177d3',
       status: `${sourceBrief}${earlierResults}${step.prompt}`,
       startedAt: Date.now(),
-      queuedBy: `Automation · ${row.name}`,
+      queuedBy: automationQueuedBy(row.name),
       queuedByUserId: row.ownerId,
-      pipeline: step.roles,
+      pipeline,
       stage: 0,
     }
     state.taskId = card.id
@@ -399,7 +410,7 @@ async function queueAgent(
         startedAt: card.startedAt,
         queuedBy: card.queuedBy,
         queuedByUserId: row.ownerId,
-        pipeline: step.roles.join(','),
+        pipeline: pipeline.join(','),
         stage: 0,
       })
     })
@@ -474,7 +485,7 @@ export async function advanceRun(id: string): Promise<void> {
           return
         }
         state.summaries.push(
-          `Completed ${step.type === 'agent' ? step.title || roleName(step.roles[0]) : 'design task'}`,
+          `Completed ${step.type === 'agent' ? step.title || roleName(step.roles[0], rosterFor(store.getCanvas(step.canvasId))) : 'design task'}`,
         )
         for (const frameId of (task.frameIds ?? '').split(',').filter(Boolean)) {
           if (store.getFrame(frameId)?.canvasId === step.canvasId && state.links.length < 30)

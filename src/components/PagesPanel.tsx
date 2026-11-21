@@ -4,10 +4,20 @@ import { canvasPages } from '../../shared/pages'
 import type { CanvasPageInfo } from '../../shared/types'
 import { canEditOpenCanvas, useStore } from '../lib/store'
 import { savePages, duplicatePage, moveFramesToPage } from '../lib/pageEdits'
+import { copyPageLink } from '../lib/pageUrl'
 import { ApiError } from '../lib/api'
 import { Button } from './ui/button'
 import { PageIcon, PlusIcon } from './ui/icons'
 import { cn } from '../lib/utils'
+import {
+  clampPagesPx,
+  pagesHeightCss,
+  pagesMaxPx,
+  pagesMinPx,
+  pagesPctOf,
+  pagesPxAfterKey,
+  usePagesPct,
+} from '../lib/pagesSplit'
 import { ContextMenu, ContextMenuTrigger, ContextMenuContent, ContextMenuItem } from './ui/context-menu'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select'
 import { useT } from '@/lib/i18n'
@@ -18,7 +28,8 @@ import { useT } from '@/lib/i18n'
 export const sectionHeading = 'text-[11px] font-normal text-ink-faint'
 const sectionBtn = 'size-5 rounded-[5px] text-ink-faint hover:bg-paper-deep hover:text-ink'
 
-export function PagesPanel({ fill = false }: { fill?: boolean }) {
+export function PagesPanel({ canvasId }: { canvasId: string }) {
+  const [pagesPct, setPagesPct] = usePagesPct(canvasId)
   const canvas = useStore((s) => s.canvas)
   const activePageId = useStore((s) => s.activePageId)
   const selectedIds = useStore((s) => s.selectedIds)
@@ -27,6 +38,11 @@ export function PagesPanel({ fill = false }: { fill?: boolean }) {
   const [busy, setBusy] = useState(false)
   const [renaming, setRenaming] = useState<string | null>(null)
   const [name, setName] = useState('')
+  /* set once Enter, Esc or a blur has settled the rename, so the blur that
+     follows (the field unmounting, or being disabled while it saves) does
+     not settle it a second time */
+  const renameSettled = useRef(false)
+  const saveQueue = useRef<Promise<unknown>>(Promise.resolve())
   const [drag, setDrag] = useState<{ id: string; targetId: string | null; after: boolean } | null>(null)
   const didDrag = useRef(false)
   const stopDrag = useRef<(() => void) | null>(null)
@@ -35,6 +51,9 @@ export function PagesPanel({ fill = false }: { fill?: boolean }) {
   if (!canvas) return null
   const pages = canvasPages(canvas)
   const movableIds = canvas.frames.filter((f) => selectedIds.includes(f.id) && !f.locked).map((f) => f.id)
+  /* the picker is there to move the selection somewhere else, so it needs a second page */
+  const showMovePicker = !readOnly && selectedIds.length > 0 && pages.length > 1
+  const minPx = pagesMinPx(showMovePicker)
 
   async function moveSelection(pageId: string) {
     if (!canvas || busy || !movableIds.length) return
@@ -48,25 +67,56 @@ export function PagesPanel({ fill = false }: { fill?: boolean }) {
     }
   }
 
-  async function save(next: CanvasPageInfo[], selectId?: string) {
-    if (!canvas || busy) return
-    setBusy(true)
-    try {
-      await savePages(canvas, next, selectId)
-      if (useStore.getState().canvas?.id !== canvas.id) return
-      setRenaming(null)
-    } catch (error) {
-      if (useStore.getState().canvas?.id !== canvas.id) return
-      useStore
-        .getState()
-        .pushNotice(
-          error instanceof ApiError && typeof error.body.error === 'string'
-            ? error.body.error
-            : t('panels.pagesSaveFailed'),
-        )
-    } finally {
-      setBusy(false)
-    }
+  /** Page-list edits run one after another, each built from the pages as the
+   *  previous one left them: a rename committed by the press that starts a
+   *  drag must not race the reorder that drag drops. Resolves to whether the
+   *  edit saved. */
+  function save(edit: (pages: CanvasPageInfo[]) => CanvasPageInfo[] | null, selectId?: string) {
+    const canvasId = canvas?.id
+    const task = saveQueue.current.then(async () => {
+      const current = useStore.getState().canvas
+      if (!current || current.id !== canvasId) return false
+      const next = edit(canvasPages(current))
+      if (!next) return false
+      setBusy(true)
+      try {
+        await savePages(current, next, selectId)
+        return true
+      } catch (error) {
+        if (useStore.getState().canvas?.id === canvasId) {
+          useStore
+            .getState()
+            .pushNotice(
+              error instanceof ApiError && typeof error.body.error === 'string'
+                ? error.body.error
+                : t('panels.pagesSaveFailed'),
+            )
+        }
+        return false
+      } finally {
+        setBusy(false)
+      }
+    })
+    saveQueue.current = task.then(() => undefined)
+    return task
+  }
+
+  function startRename(page: CanvasPageInfo) {
+    renameSettled.current = false
+    setRenaming(page.id)
+    setName(page.name)
+  }
+
+  /** Enter or a click elsewhere keeps the typed name, as in Figma; an empty or
+   *  unchanged one just closes the field. A failed save leaves it open. */
+  async function commitRename(page: CanvasPageInfo) {
+    if (renameSettled.current) return
+    renameSettled.current = true
+    const next = name.trim()
+    if (!next || next === page.name) return setRenaming(null)
+    const saved = await save((current) => current.map((p) => (p.id === page.id ? { ...p, name: next } : p)))
+    if (saved) setRenaming(null)
+    else renameSettled.current = false
   }
 
   function startDrag(e: ReactPointerEvent<HTMLButtonElement>, id: string) {
@@ -105,36 +155,44 @@ export function PagesPanel({ fill = false }: { fill?: boolean }) {
         if (event.pointerId !== pointerId) return
         cleanup()
         if (!moving || !drop) return
-        const next = pages.filter((page) => page.id !== id)
-        const position = next.findIndex((page) => page.id === drop!.targetId) + (drop.after ? 1 : 0)
-        const page = pages.find((page) => page.id === id)
-        if (page && position >= 0) {
-          next.splice(position, 0, page)
-          void save(next)
-        }
+        const { targetId, after } = drop
+        void save((current) => {
+          const page = current.find((p) => p.id === id)
+          const next = current.filter((p) => p.id !== id)
+          const target = next.findIndex((p) => p.id === targetId)
+          if (!page || target < 0) return null
+          next.splice(target + (after ? 1 : 0), 0, page)
+          return next
+        })
       },
       { signal: controller.signal },
     )
     window.addEventListener('pointercancel', cleanup, { signal: controller.signal })
   }
 
-  async function duplicate(pageId: string) {
-    if (!canvas || busy) return
-    setBusy(true)
-    try {
-      await duplicatePage(canvas, pageId)
-    } catch (error) {
-      if (useStore.getState().canvas?.id !== canvas.id) return
-      useStore
-        .getState()
-        .pushNotice(
-          error instanceof ApiError && typeof error.body.error === 'string'
-            ? error.body.error
-            : t('panels.pagesDuplicateFailed'),
-        )
-    } finally {
-      setBusy(false)
-    }
+  function duplicate(pageId: string) {
+    const canvasId = canvas?.id
+    const task = saveQueue.current.then(async () => {
+      const current = useStore.getState().canvas
+      if (!current || current.id !== canvasId) return
+      setBusy(true)
+      try {
+        await duplicatePage(current, pageId)
+      } catch (error) {
+        if (useStore.getState().canvas?.id !== canvasId) return
+        useStore
+          .getState()
+          .pushNotice(
+            error instanceof ApiError && typeof error.body.error === 'string'
+              ? error.body.error
+              : t('panels.pagesDuplicateFailed'),
+          )
+      } finally {
+        setBusy(false)
+      }
+    })
+    saveQueue.current = task
+    return task
   }
 
   const addPage = (
@@ -145,8 +203,8 @@ export function PagesPanel({ fill = false }: { fill?: boolean }) {
       aria-label={t('panels.pagesAdd')}
       disabled={busy}
       onClick={() => {
-        const page = { id: nanoid(10), name: `Page ${pages.length + 1}` }
-        void save([...pages, page], page.id)
+        const id = nanoid(10)
+        void save((current) => [...current, { id, name: `Page ${current.length + 1}` }], id)
       }}
     >
       <PlusIcon className="size-3.5" />
@@ -157,10 +215,9 @@ export function PagesPanel({ fill = false }: { fill?: boolean }) {
     <>
       {pages.map((page) => (
         <ContextMenu key={page.id}>
-          <ContextMenuTrigger asChild disabled={readOnly}>
+          <ContextMenuTrigger asChild>
             <div
               data-page-id={page.id}
-              onContextMenu={() => useStore.getState().setActivePage(page.id)}
               className={cn(
                 'group relative flex h-[27px] items-center gap-1 rounded-[7px] pr-2.5 text-[12px] text-ink-soft hover:bg-sub',
                 page.id === activePageId && 'bg-paper-deep text-ink hover:bg-paper-deep',
@@ -185,7 +242,7 @@ export function PagesPanel({ fill = false }: { fill?: boolean }) {
                   className="min-w-0 flex-1"
                   onSubmit={(e) => {
                     e.preventDefault()
-                    if (name.trim()) void save(pages.map((p) => (p.id === page.id ? { ...p, name: name.trim() } : p)))
+                    void commitRename(page)
                   }}
                 >
                   <input
@@ -197,8 +254,11 @@ export function PagesPanel({ fill = false }: { fill?: boolean }) {
                     className="w-full rounded-[6px] bg-surface px-2 py-1 text-[12px] text-ink shadow-elevation-1-focus outline-none"
                     value={name}
                     onChange={(e) => setName(e.target.value)}
+                    onBlur={() => void commitRename(page)}
                     onKeyDown={(e) => {
-                      if (e.key === 'Escape') setRenaming(null)
+                      if (e.key !== 'Escape') return
+                      renameSettled.current = true
+                      setRenaming(null)
                     }}
                   />
                 </form>
@@ -219,8 +279,7 @@ export function PagesPanel({ fill = false }: { fill?: boolean }) {
                   }}
                   onDoubleClick={() => {
                     if (busy || readOnly || didDrag.current) return
-                    setRenaming(page.id)
-                    setName(page.name)
+                    startRename(page)
                   }}
                 >
                   {page.name}
@@ -233,25 +292,31 @@ export function PagesPanel({ fill = false }: { fill?: boolean }) {
               if (renaming === page.id) e.preventDefault()
             }}
           >
-            <ContextMenuItem
-              disabled={busy}
-              onSelect={() => {
-                setRenaming(page.id)
-                setName(page.name)
-              }}
-            >
-              {t('panels.pagesRename')}
+            {!readOnly && (
+              <>
+                <ContextMenuItem disabled={busy} onSelect={() => startRename(page)}>
+                  {t('panels.pagesRename')}
+                </ContextMenuItem>
+                <ContextMenuItem disabled={busy || pages.length >= 100} onSelect={() => void duplicate(page.id)}>
+                  {t('panels.pagesDuplicate')}
+                </ContextMenuItem>
+              </>
+            )}
+            {/* the one entry a viewer has too: a link changes nothing */}
+            <ContextMenuItem onSelect={() => void copyPageLink(canvas.id, page.id)}>
+              {t('panels.pagesCopyLink')}
             </ContextMenuItem>
-            <ContextMenuItem disabled={busy || pages.length >= 100} onSelect={() => void duplicate(page.id)}>
-              {t('panels.pagesDuplicate')}
-            </ContextMenuItem>
-            <ContextMenuItem
-              tone="danger"
-              disabled={busy || pages.length === 1}
-              onSelect={() => void save(pages.filter((p) => p.id !== page.id))}
-            >
-              {t('panels.pagesDelete')}
-            </ContextMenuItem>
+            {!readOnly && (
+              <ContextMenuItem
+                tone="danger"
+                disabled={busy || pages.length === 1}
+                onSelect={() =>
+                  void save((current) => (current.length > 1 ? current.filter((p) => p.id !== page.id) : null))
+                }
+              >
+                {t('panels.pagesDelete')}
+              </ContextMenuItem>
+            )}
           </ContextMenuContent>
         </ContextMenu>
       ))}
@@ -259,20 +324,26 @@ export function PagesPanel({ fill = false }: { fill?: boolean }) {
   )
 
   return (
-    <div className={cn('flex flex-none flex-col', fill && 'min-h-0 flex-1')}>
+    <div
+      data-slot="pages-panel"
+      className="relative flex flex-none flex-col border-b border-line-soft"
+      style={
+        pagesPct === null ? { maxHeight: pagesHeightCss(100, minPx) } : { height: pagesHeightCss(pagesPct, minPx) }
+      }
+    >
       <div className={cn('mt-1.5 flex h-6 flex-none items-center justify-between pr-2.5 pl-3.5', sectionHeading)}>
         <span data-slot="page-section-heading" className={sectionHeading}>
           {t('panels.pagesTitle')}
         </span>
         {!readOnly && addPage}
       </div>
-      <div className={cn('overflow-y-auto px-2 pb-1', fill ? 'min-h-0 flex-1' : 'max-h-[30vh]')}>{list}</div>
-      {!readOnly && selectedIds.length > 0 && pages.length > 1 && (
+      <div className={cn('min-h-0 overflow-y-auto px-2 pb-1', pagesPct === null && 'max-h-[30vh]')}>{list}</div>
+      {showMovePicker && (
         /* the canvas shortcuts listen on window: ⌫ would delete the frames
            being moved and typed letters would switch tools, so the picker's
            keys stop here; React bubbles the portalled list's keys through this
            div too, before the native event reaches window */
-        <div className="px-2 pb-2" onKeyDown={(e) => e.stopPropagation()}>
+        <div className="flex-none px-2 pb-2" onKeyDown={(e) => e.stopPropagation()}>
           <Select value="" disabled={busy || !movableIds.length} onValueChange={(id) => void moveSelection(id)}>
             <SelectTrigger size="sm" className="w-full" aria-label={t('panels.pagesMoveSelection')}>
               <SelectValue placeholder={t('panels.pagesMoveSelectionPlaceholder')} />
@@ -289,6 +360,76 @@ export function PagesPanel({ fill = false }: { fill?: boolean }) {
           </Select>
         </div>
       )}
+      <PagesSplitHandle minPx={minPx} onChange={setPagesPct} />
     </div>
   )
+}
+
+/** The Pages section's bottom edge: dragged, or moved with the arrow keys, Home and End. Each step measures the
+ *  section and its rail again, so it starts from what is on screen. The separator's value and range are those
+ *  measures too: the section also changes height when its content or the window does, not only on a drag. The
+ *  browser releases the pointer's capture when the drag ends, which resets the drag. */
+function PagesSplitHandle({ minPx, onChange }: { minPx: number; onChange: (pct: number) => void }) {
+  const t = useT()
+  const handle = useRef<HTMLDivElement>(null)
+  const drag = useRef<{ y: number; pagesPx: number; railPx: number } | null>(null)
+  const [sizes, setSizes] = useState({ pagesPx: 0, railPx: 0 })
+  useEffect(() => {
+    const el = handle.current
+    if (!el) return
+    const measure = () => {
+      const next = measurePages(el)
+      setSizes((prev) => (prev.pagesPx === next.pagesPx && prev.railPx === next.railPx ? prev : next))
+    }
+    const observer = new ResizeObserver(measure)
+    observer.observe(el.closest('[data-slot="pages-panel"]')!)
+    observer.observe(el.closest('[data-slot="panel"]')!)
+    return () => observer.disconnect()
+  }, [])
+  return (
+    <div
+      ref={handle}
+      role="separator"
+      tabIndex={0}
+      aria-orientation="horizontal"
+      aria-label={t('panels.pagesResize')}
+      aria-valuemin={minPx}
+      aria-valuemax={pagesMaxPx(sizes.railPx, minPx)}
+      aria-valuenow={Math.round(sizes.pagesPx)}
+      data-slot="pages-split"
+      className="absolute inset-x-2 top-full h-1.5 cursor-row-resize touch-none rounded-full focus-visible:bg-ink/20 focus-visible:outline-none"
+      onPointerDown={(e) => {
+        if (e.button !== 0) return
+        e.preventDefault()
+        e.stopPropagation()
+        drag.current = { y: e.clientY, ...measurePages(e.currentTarget) }
+        e.currentTarget.setPointerCapture(e.pointerId)
+      }}
+      onPointerMove={(e) => {
+        const start = drag.current
+        if (!start) return
+        e.stopPropagation()
+        const px = clampPagesPx(start.pagesPx + e.clientY - start.y, start.railPx, minPx)
+        onChange(pagesPctOf(px, start.railPx))
+      }}
+      onLostPointerCapture={() => {
+        drag.current = null
+      }}
+      onKeyDown={(e) => {
+        const { pagesPx, railPx } = measurePages(e.currentTarget)
+        const px = pagesPxAfterKey(e.key, pagesPx, railPx, minPx)
+        if (px === undefined) return
+        e.preventDefault()
+        e.stopPropagation()
+        onChange(pagesPctOf(px, railPx))
+      }}
+    />
+  )
+}
+
+/** The Pages section and the rail it sits in, both in px. */
+function measurePages(handle: HTMLElement) {
+  const pages = handle.closest<HTMLElement>('[data-slot="pages-panel"]')!
+  const rail = handle.closest<HTMLElement>('[data-slot="panel"]')!
+  return { pagesPx: pages.getBoundingClientRect().height, railPx: rail.getBoundingClientRect().height }
 }

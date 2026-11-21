@@ -6,4 +6,6 @@ lists every file in this folder.
 
 ## Active
 
-(none yet)
+- [image-descriptions.md](image-descriptions.md) - Three phases, test-first: storage and the
+  describer worker, the agent read paths (`get_canvas`, `get_frame`, the resident kickoff), the
+  Settings → Agents switch.

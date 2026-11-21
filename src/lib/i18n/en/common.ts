@@ -5,6 +5,7 @@ export const common = {
   delete: 'Delete',
   close: 'Close',
   copy: 'Copy',
+  cut: 'Cut',
   copied: 'Copied',
   back: 'Back',
   loading: 'Loading…',

@@ -1,8 +1,8 @@
-# Doop Cature
+# Doop Capture
 
 Load this directory in Chrome at `chrome://extensions` → Developer mode → Load unpacked. No build or API key required.
 
-1. Open the website you want to capture and click Doop Cature.
+1. Open the website you want to capture and click Doop Capture.
 2. Choose **Capture entire page** or **Select a section**, then click an element on the page. Escape cancels selection.
 3. Click **Copy to Doop** in the page banner.
 4. Open an editable Doop canvas and paste. The capture becomes an editable HTML frame, centered in the viewport, with undo support.

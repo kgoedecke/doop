@@ -18,7 +18,7 @@ use blitz_traits::NodeId;
 use blitz_html::HtmlDocument;
 use blitz_net::Provider;
 use blitz_paint::{paint_scene, paint_scene_region};
-use blitz_traits::net::NetWaker;
+use blitz_traits::net::{NetHandler, NetProvider, NetWaker, Request};
 use blitz_traits::shell::{ColorScheme, Viewport};
 use peniko::Fill;
 use peniko::kurbo::{Affine, Rect};
@@ -43,11 +43,39 @@ fn base_font_context() -> FontContext {
                 collection: Collection::new(CollectionOptions { shared: false, system_fonts: true }),
             };
             ctx.collection.register_fonts(Blob::new(Arc::new(blitz_dom::BULLET_FONT) as _), None);
+            add_symbol_fallbacks(&mut ctx.collection);
             Mutex::new(ctx)
         })
         .lock()
         .unwrap()
         .clone()
+}
+
+/// System families that carry the symbols pages use as text (★ ✓ → ● ⌘ ✦), first match wins.
+/// System Font and Apple Symbols come first, as WebKit's cascade picks them; a family the
+/// device lacks is skipped.
+#[cfg(not(target_os = "android"))]
+const SYMBOL_FAMILIES: &[&str] =
+    &["System Font", "Apple Symbols", "Hiragino Sans", "Menlo", "Zapf Dingbats", "STIX Two Math"];
+#[cfg(target_os = "android")]
+const SYMBOL_FAMILIES: &[&str] =
+    &["Noto Sans Symbols", "Noto Sans Symbols 2", "Noto Sans Math", "Noto Color Emoji"];
+
+/// Fontique finds a fallback per script from one sample letter, and symbols belong to no
+/// script of their own: a ★ in a Latin run only gets the Latin fallback (Helvetica), and a
+/// run of symbols and digits gets none. On macOS Helvetica happens to carry ★; on iOS it
+/// does not, so the glyph came from LastResort. Append the symbol families after the
+/// system's own fallback for Latin and for the common, inherited and unknown scripts.
+fn add_symbol_fallbacks(collection: &mut parley::fontique::Collection) {
+    use parley::fontique::{FallbackKey, Script};
+    let symbols: Vec<_> = SYMBOL_FAMILIES.iter().filter_map(|name| collection.family_id(name)).collect();
+    for script in [*b"Latn", *b"Zyyy", *b"Zinh", *b"Zzzz"] {
+        let key = FallbackKey::new(Script::from_bytes(script), None);
+        // Asking first records the system's own choice, which appending would otherwise replace.
+        let system: Vec<_> = collection.fallback_families(key).collect();
+        let extra = symbols.iter().copied().filter(|id| !system.contains(id));
+        collection.append_fallbacks(key, extra);
+    }
 }
 
 fn runtime() -> &'static tokio::runtime::Runtime {
@@ -72,26 +100,100 @@ impl NetWaker for Waker {
 pub struct Doc {
     document: HtmlDocument,
     net: Arc<Provider>,
+    /// The URL the frame is served from (the Doop server's origin). The document's own
+    /// `<base href>` is resolved against it on every parse, so it is kept rather than the result.
     base_url: String,
     width: u32,
     height: u32,
     scale: f32,
 }
 
+type Fetch = (usize, Request, Box<dyn NetHandler>);
+
+/// The document's network provider. It holds the fetches a parse starts (images, linked
+/// stylesheets) until the document's base URL is known, since Blitz starts them while it
+/// parses, before a `<base>` can be read; once released it passes every fetch (fonts and
+/// images found later by stylesheets) straight to `net`.
+struct HeldFetches {
+    net: Arc<Provider>,
+    held: Mutex<Option<Vec<Fetch>>>,
+}
+
+impl NetProvider for HeldFetches {
+    fn fetch(&self, doc_id: usize, request: Request, handler: Box<dyn NetHandler>) {
+        let mut held = self.held.lock().unwrap();
+        match held.as_mut() {
+            Some(fetches) => fetches.push((doc_id, request, handler)),
+            None => {
+                drop(held);
+                self.net.fetch(doc_id, request, handler);
+            }
+        }
+    }
+}
+
+impl HeldFetches {
+    fn new(net: &Arc<Provider>) -> Self {
+        Self { net: Arc::clone(net), held: Mutex::new(Some(Vec::new())) }
+    }
+
+    fn release(&self) {
+        let fetches = self.held.lock().unwrap().take().unwrap_or_default();
+        for (doc_id, request, handler) in fetches {
+            self.net.fetch(doc_id, request, handler);
+        }
+    }
+}
+
+/// The base URL a browser gives a document served from `fallback`: the first `<base>` with an
+/// `href`, resolved against `fallback`, else `fallback` itself. Only http(s) results count: a
+/// `javascript:`, `data:` or `file:` base (or one that does not parse) leaves `fallback`, so a
+/// frame cannot point its relative URLs at the device's files.
+fn document_base_url(document: &BaseDocument, fallback: &url::Url) -> url::Url {
+    let href = document
+        .query_selector("base[href]")
+        .ok()
+        .flatten()
+        .and_then(|id| document.get_node(id))
+        .and_then(|node| node.attr(local_name!("href")));
+    href.and_then(|href| fallback.join(href).ok())
+        .filter(|url| matches!(url.scheme(), "http" | "https"))
+        .unwrap_or_else(|| fallback.clone())
+}
+
+fn parse(html: &str, base_url: &str, net: Arc<dyn NetProvider>, width: u32, height: u32, scale: f32) -> HtmlDocument {
+    HtmlDocument::from_html(
+        html,
+        DocumentConfig {
+            base_url: Some(base_url.to_string()),
+            net_provider: Some(net),
+            viewport: Some(viewport(width, height, scale)),
+            font_ctx: Some(base_font_context()),
+            ..Default::default()
+        },
+    )
+}
+
 impl Doc {
     fn new(html: &str, base_url: &str, width: u32, height: u32, scale: f32) -> Self {
         let _guard = runtime().enter();
         let net = Arc::new(Provider::new(Some(Arc::new(Waker) as Arc<dyn NetWaker>)));
-        let mut document = HtmlDocument::from_html(
-            html,
-            DocumentConfig {
-                base_url: Some(base_url.to_string()),
-                net_provider: Some(Arc::clone(&net) as _),
-                viewport: Some(viewport(width, height, scale)),
-                font_ctx: Some(base_font_context()),
-                ..Default::default()
-            },
-        );
+        // Parse against the server origin with the fetches held. An imported page carries
+        // `<base href="https://site/">` for its `/img/x.png` paths; when its base differs, parse
+        // again against it and drop the held fetches (they point at the Doop server), as a
+        // browser resolves every URL against the document's base.
+        let held = Arc::new(HeldFetches::new(&net));
+        let mut document = parse(html, base_url, Arc::clone(&held) as _, width, height, scale);
+        let own_base = url::Url::parse(base_url).ok().and_then(|fallback| {
+            Some(document_base_url(document.as_ref(), &fallback)).filter(|resolved| *resolved != fallback)
+        });
+        match own_base {
+            Some(resolved) => {
+                drop(document);
+                document = parse(html, resolved.as_str(), Arc::clone(&net) as _, width, height, scale);
+            }
+            None => held.release(),
+        }
         // Icon sprites: inline SVG is drawn from standalone markup, so `<use>` references are
         // expanded into clones that inherit from the `<use>` site, as a browser's shadow tree does.
         document.as_mut().expand_svg_use_elements();
@@ -108,12 +210,18 @@ impl Doc {
 }
 
 fn viewport(width: u32, height: u32, scale: f32) -> Viewport {
-    Viewport::new(
+    let mut viewport = Viewport::new(
         (width as f32 * scale).round().max(1.0) as u32,
         (height as f32 * scale).round().max(1.0) as u32,
         scale,
         ColorScheme::Light,
-    )
+    );
+    // Frames are mostly painted as still pictures at time 0 (playback runs only for large
+    // frames on screen), and pages hide content until an entry animation has run: `opacity: 0`
+    // plus a `forwards` fade-in, sometimes frozen at `animation-duration: 0s`, which Stylo never
+    // starts. Matching `prefers-reduced-motion: reduce` takes the fallback such pages ship.
+    viewport.reduced_motion = true;
+    viewport
 }
 
 unsafe fn cstr<'a>(ptr: *const c_char) -> &'a str {
@@ -168,7 +276,8 @@ pub extern "C" fn doopblitz_doc_id(doc: *const Doc) -> usize {
 }
 
 /// Replace the document with a fresh parse of `html` (streamed agent chunks,
-/// collaborator edits). Keeps size, scale and base URL.
+/// collaborator edits). Keeps size, scale and the server URL; the new HTML's own
+/// `<base href>`, if any, is resolved against it again.
 #[unsafe(no_mangle)]
 pub extern "C" fn doopblitz_doc_set_html(doc: *mut Doc, html: *const c_char) {
     let doc = unsafe { &mut *doc };
@@ -444,6 +553,49 @@ pub extern "C" fn doopblitz_doc_element_from_point(doc: *mut Doc, x: f32, y: f32
     raw(doc.base().element_from_point(x, y))
 }
 
+/// The element a tap at a CSS point selects, or 0, as the web runtime's
+/// `probe` picks it: the drawing (`[data-doop-drawing]`) the hit is part of,
+/// so a text layer is selected whole rather than the run of bold inside it.
+/// Outside a drawing, a hit without a box of its own (inline formatting, whose
+/// glyphs live in the parent's inline layout) resolves to the nearest ancestor
+/// that has one, or the selection would be an outline of zero size.
+#[unsafe(no_mangle)]
+pub extern "C" fn doopblitz_doc_pick_from_point(doc: *mut Doc, x: f32, y: f32) -> u64 {
+    let doc = unsafe { &mut *doc };
+    let _guard = runtime().enter();
+    doc.base_mut().resolve(0.0);
+    let base = doc.base();
+    let Some(hit) = base.element_from_point(x, y) else { return 0 };
+    if let Some(drawing) = self_or_ancestor(base, hit, |id| is_drawing(base, id)) {
+        return raw(Some(drawing));
+    }
+    raw(self_or_ancestor(base, hit, |id| has_box(base, id)).or(Some(hit)))
+}
+
+fn self_or_ancestor(base: &BaseDocument, id: NodeId, matches: impl Fn(NodeId) -> bool) -> Option<NodeId> {
+    let mut current = Some(id);
+    while let Some(node) = current {
+        if is_real_element(base, node) && matches(node) {
+            return Some(node);
+        }
+        current = element_parent(base, node);
+    }
+    None
+}
+
+fn is_drawing(base: &BaseDocument, id: NodeId) -> bool {
+    base.get_node(id)
+        .and_then(|n| n.element_data())
+        .is_some_and(|e| e.attrs().iter().any(|a| &*a.name.local == "data-doop-drawing"))
+}
+
+fn has_box(base: &BaseDocument, id: NodeId) -> bool {
+    base.get_node(id).is_some_and(|n| {
+        let size = n.final_layout().size;
+        size.width > 0.0 && size.height > 0.0
+    })
+}
+
 /// First element matching a CSS selector, or 0.
 #[unsafe(no_mangle)]
 pub extern "C" fn doopblitz_doc_query_selector(doc: *const Doc, selector: *const c_char) -> u64 {
@@ -622,4 +774,66 @@ fn selector_path(base: &BaseDocument, id: NodeId) -> String {
     }
     parts.reverse();
     parts.join(" > ")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const SERVER: &str = "https://doop.design/";
+
+    fn base_of(head: &str) -> String {
+        let html = format!("<!doctype html><html><head>{head}</head><body><p>x</p></body></html>");
+        Doc::new(&html, SERVER, 100, 100, 1.0).base().base_url().to_string()
+    }
+
+    #[test]
+    fn an_absolute_base_href_wins_over_the_server() {
+        assert_eq!(base_of("<base href='https://www.useterse.ai/'>"), "https://www.useterse.ai/");
+        assert_eq!(base_of("<base href='http://example.com/a/b'>"), "http://example.com/a/b");
+    }
+
+    #[test]
+    fn a_relative_base_href_resolves_against_the_server() {
+        assert_eq!(base_of("<base href='/site/'>"), "https://doop.design/site/");
+        assert_eq!(base_of("<base href='//cdn.example.com/x/'>"), "https://cdn.example.com/x/");
+        assert_eq!(base_of("<base href='  https://www.useterse.ai/  '>"), "https://www.useterse.ai/");
+    }
+
+    #[test]
+    fn without_a_base_href_the_server_stays() {
+        assert_eq!(base_of(""), SERVER);
+        assert_eq!(base_of("<base target='_blank'>"), SERVER);
+    }
+
+    #[test]
+    fn a_base_that_is_not_http_keeps_the_server() {
+        for href in ["javascript:alert(1)", "data:text/html,x", "file:///etc/", "about:blank", "http://[::1"] {
+            assert_eq!(base_of(&format!("<base href='{href}'>")), SERVER, "{href}");
+        }
+    }
+
+    #[test]
+    fn the_first_base_with_an_href_wins() {
+        let head = "<base target='_top'><base href='https://first.example/'><base href='https://second.example/'>";
+        assert_eq!(base_of(head), "https://first.example/");
+        // A first href that is refused is not passed over for a later one, as in browsers.
+        assert_eq!(base_of("<base href='javascript:x'><base href='https://second.example/'>"), SERVER);
+    }
+
+    #[test]
+    fn replacing_the_html_reads_its_base_again() {
+        let mut doc = Doc::new("<p>plain</p>", SERVER, 100, 100, 1.0);
+        let set = |doc: &mut Doc, html: &str| {
+            let html = CString::new(html).unwrap();
+            doopblitz_doc_set_html(doc, html.as_ptr());
+            doc.base().base_url().to_string()
+        };
+        assert_eq!(doc.base().base_url().as_str(), SERVER);
+        assert_eq!(set(&mut doc, "<base href='https://a.example/'><p>x</p>"), "https://a.example/");
+        assert_eq!(set(&mut doc, "<base href='https://b.example/'><p>x</p>"), "https://b.example/");
+        // The server URL is kept, not the last base: a base that goes away no longer applies.
+        assert_eq!(set(&mut doc, "<p>x</p>"), SERVER);
+        assert_eq!(set(&mut doc, "<base href='/relative/'><p>x</p>"), "https://doop.design/relative/");
+    }
 }

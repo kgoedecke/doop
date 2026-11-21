@@ -1,4 +1,5 @@
 import { useEffect } from 'react'
+import type { ReactNode } from 'react'
 import { api } from '../lib/api'
 import { posthog } from '../lib/posthog'
 import { navigate } from '../App'
@@ -12,8 +13,20 @@ import {
   ContextMenuTrigger,
 } from './ui/context-menu'
 import { cn } from '@/lib/utils'
-import { closeAllTabs, closeOtherTabs, closeTab, ensureTab, openCanvasTab, openExternal, useTabs } from '../lib/desktop'
+import {
+  TAB_SHORTCUTS,
+  closeAllTabs,
+  closeOtherTabs,
+  closeTab,
+  ensureTab,
+  openCanvasTab,
+  openExternal,
+  useTabs,
+} from '../lib/desktop'
+import { chordHint } from '../lib/actions/chords'
 import { hasInsetTrafficLights, isDesktopShell } from '../lib/shell'
+import { useWindowFrame } from '../lib/windowFrame'
+import { WindowControls } from './WindowControls'
 import type { CanvasTab } from '../lib/desktop'
 import { useT } from '../lib/i18n'
 
@@ -23,6 +36,8 @@ import { useT } from '../lib/i18n'
  * floating over this strip) — so the strip doubles as the window's drag
  * handle via data-tauri-drag-region, which Tauri only honours on the exact
  * element carrying the attribute, leaving the tabs themselves clickable.
+ * On Windows the page replaces the native frame too (src/lib/windowFrame.ts)
+ * and the strip ends in the caption buttons.
  */
 export function DesktopTabs({ path }: { path: string }) {
   const t = useT()
@@ -54,7 +69,7 @@ export function DesktopTabs({ path }: { path: string }) {
           !activeId && 'bg-ink/[0.08] text-ink',
         )}
         onClick={() => navigate('/')}
-        title={t('canvas.allCanvases')}
+        title={withShortcut(t('canvas.allCanvases'), 0)}
       >
         <Logo className="size-[18px]" />
       </button>
@@ -63,7 +78,7 @@ export function DesktopTabs({ path }: { path: string }) {
         aria-label={t('canvas.openCanvases')}
         className="flex min-w-0 items-end overflow-x-auto overflow-y-hidden [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
       >
-        {tabs.map((tab) => {
+        {tabs.map((tab, index) => {
           const on = tab.id === activeId
           return (
             <ContextMenu key={tab.id}>
@@ -72,6 +87,7 @@ export function DesktopTabs({ path }: { path: string }) {
                   role="tab"
                   aria-selected={on}
                   tabIndex={0}
+                  title={withShortcut(tab.name, index + 1)}
                   className={cn(
                     'group relative -mb-px flex h-[36px] min-w-[110px] max-w-[210px] flex-1 basis-[210px] cursor-default items-center gap-1 rounded-t-[9px] border border-b-0 border-transparent pb-[2px] pl-3 pr-1.5 text-[12.5px] text-ink-soft',
                     on ? 'border-line bg-surface text-ink' : 'transition-colors hover:bg-ink/[0.04]',
@@ -108,8 +124,15 @@ export function DesktopTabs({ path }: { path: string }) {
       >
         +
       </button>
+      <WindowControls className="-mr-2 ml-auto" />
     </div>
   )
+}
+
+/** A tooltip with its ⌘1…⌘9 shortcut, when the slot has one. */
+function withShortcut(label: string, slot: number): string {
+  const chord = TAB_SHORTCUTS[slot]
+  return chord ? `${label} (${chordHint(chord)})` : label
 }
 
 /** Right-click menu on a tab: the browser-tab basics (Figma has the same
@@ -142,8 +165,33 @@ function TabContextMenu({ tab, path }: { tab: CanvasTab; path: string }) {
 }
 
 /** Invisible drag handle for shell screens without the tab strip (signed
- *  out): the overlay title bar has no native drag area of its own. */
-export function ShellDragBar() {
-  if (!hasInsetTrafficLights()) return null
-  return <div data-tauri-drag-region className="fixed inset-x-0 top-0 z-[950] h-6" />
+ *  out): the overlay title bar has no native drag area of its own. On
+ *  Windows, once the page owns the frame, it also carries the caption
+ *  buttons — these screens would otherwise have no way to close the window.
+ *  A fixed-position screen passed as `children` (the guest canvas, whose
+ *  toolbar sits 14px from the top) is moved below that bar through the
+ *  --app-inset contract (App.tsx) instead of having its toolbar covered. */
+export function ShellDragBar({ children }: { children?: ReactNode }) {
+  const customFrame = useWindowFrame((s) => s.custom)
+  if (customFrame)
+    return (
+      <>
+        <div
+          data-tauri-drag-region
+          className={cn(
+            'fixed inset-x-0 top-0 z-[950] flex h-8 justify-end',
+            children && 'border-b border-line bg-paper-deep',
+          )}
+        >
+          <WindowControls />
+        </div>
+        {children && <div className="[--app-inset:32px]">{children}</div>}
+      </>
+    )
+  return (
+    <>
+      {hasInsetTrafficLights() && <div data-tauri-drag-region className="fixed inset-x-0 top-0 z-[950] h-6" />}
+      {children}
+    </>
+  )
 }

@@ -56,7 +56,8 @@ function notify(): void {
   listeners.forEach((listener) => listener())
 }
 
-function subscribe(listener: () => void): () => void {
+/** Called whenever the language changes; returns the unsubscribe. */
+export function subscribe(listener: () => void): () => void {
   listeners.add(listener)
   return () => listeners.delete(listener)
 }

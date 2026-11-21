@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProp
 import type { Frame } from '../../shared/types'
 import type { Interaction, ProtoTransition } from '../../shared/prototype'
 import { useStore } from '../lib/store'
+import { posthog } from '../lib/posthog'
 import { FRAME_BOOTSTRAP } from '../lib/frameRuntime'
 import {
   fitScale,
@@ -84,6 +85,11 @@ export function PrototypePlayer({
   const canvasId = useStore((s) => s.canvas?.id)
   const frameById = useCallback((id: string) => frames?.find((f) => f.id === id), [frames])
   const t = useT()
+
+  /* one play of the prototype: Present on the canvas, or its own page */
+  useEffect(() => {
+    posthog.capture('prototype_played', { via: syncUrl ? 'prototype_page' : 'present' })
+  }, [syncUrl])
 
   const seq = useRef(0)
   const nextKey = () => ++seq.current

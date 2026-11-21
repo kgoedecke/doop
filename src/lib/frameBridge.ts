@@ -12,14 +12,50 @@ export interface LayoutDrop {
   target: DropTarget
   styles: FlowPlacement
   container: ElementInfo['rect']
-  line: ElementInfo['rect']
+  /** the insertion mark; none for a box that places its layers by hand */
+  line: ElementInfo['rect'] | null
   /** the drop leaves the element's parent: only then is the container marked */
   reparent?: boolean
 }
 
-export async function elementMoveTarget(frameId: string, selector: string, x: number, y: number) {
-  const reply = await requestFrame(frameId, 'doop:move-target', { selector, x, y })
+/** Where a drop at (x, y) puts the layer. `at` is where the layer is drawn
+ *  when a drag shows a copy of it and leaves the layer itself in place. */
+export async function elementMoveTarget(
+  frameId: string,
+  selector: string,
+  x: number,
+  y: number,
+  at?: ElementInfo['rect'],
+) {
+  const reply = await requestFrame(frameId, 'doop:move-target', { selector, x, y, at })
   return reply?.result as { free: boolean; drop: LayoutDrop | null } | undefined
+}
+
+/** Where the frame's body places its absolute layers from, in design px
+ *  from the frame's corner (a positioned body with a margin moves it), and
+ *  the scale it draws them at; the corner itself when the frame is not
+ *  mounted. */
+export function bodyPlacementOrigin(frameId: string): PlacementOrigin | Promise<PlacementOrigin> {
+  /* nothing to ask, and no turn of the event loop spent, without a live frame */
+  if (!windows.has(frameId)) return FRAME_CORNER
+  return requestFrame(frameId, 'doop:placement-origin', {}).then(
+    (reply) => (reply?.origin as PlacementOrigin | undefined) ?? FRAME_CORNER,
+  )
+}
+
+export interface PlacementOrigin {
+  x: number
+  y: number
+  scale: { x: number; y: number }
+}
+const FRAME_CORNER: PlacementOrigin = { x: 0, y: 0, scale: { x: 1, y: 1 } }
+
+/** How the element sits once the Layers panel moves it to `target`: the
+ *  placement a canvas drag there would give it, or undefined to keep its
+ *  styles as authored (and when the frame is not mounted). */
+export async function layerPlacement(frameId: string, selector: string, target: DropTarget) {
+  const reply = await requestFrame(frameId, 'doop:layer-placement', { selector, target })
+  return (reply?.styles ?? undefined) as FlowPlacement | undefined
 }
 
 /** The runtime's summary of one element: computed styles resolved to what
@@ -92,6 +128,17 @@ export interface ElementInfo {
   borderStyle: string
   borderColor: string
   borderRadius: number | null
+  /** A vector layer's SVG paint (an `<svg>` of shapes, or a shape), read
+   *  from its first shape: Fill and Stroke edit these instead of the box's
+   *  background and border. `inline` is that shape's inline paint. */
+  vector?: {
+    fill: string
+    /** `fill-opacity`, which the panel folds into the fill's alpha */
+    fillOpacity: number | null
+    stroke: string
+    strokeWidth: number | null
+    inline: Record<string, string>
+  } | null
   color: string
   fontSize: number | null
   fontWeight: string
@@ -144,6 +191,8 @@ interface PendingAsk {
 const REPLY_TIMEOUT_MS = 2000
 
 const windows = new Map<string, Window>()
+/* ⌘Y outline mode, which a frame mounted later picks up when it registers */
+let outlines = false
 const changeListeners = new Map<string, Set<() => void>>()
 const selectionListeners = new Map<string, Set<() => void>>()
 const pending = new Map<number, PendingAsk>()
@@ -163,17 +212,25 @@ function listen() {
       return
     }
     if (typeof data?.type !== 'string' || typeof data.reqId !== 'number') return
-    const ask = pending.get(data.reqId)
-    /* the reply must come from the window that was asked — request ids are
-       predictable, so another frame's script could otherwise answer for it */
-    if (!ask || ask.replyType !== data.type || ev.source !== ask.win) return
-    pending.delete(data.reqId)
-    ask.resolve(data)
+    if (data.type !== 'doop:settle-result') finishRequest(ev.source, data.type, data.reqId, data)
   })
+}
+
+function finishRequest(source: MessageEventSource | null, type: string, reqId: number, data: Record<string, unknown>) {
+  const ask = pending.get(reqId)
+  if (!ask || ask.replyType !== type || source !== ask.win) return
+  pending.delete(reqId)
+  ask.resolve(data)
+}
+
+/** Arrives on the same private port as the edits undo is waiting for. */
+export function finishFrameSettle(win: Window, reqId: number) {
+  finishRequest(win, 'doop:settle-result', reqId, { type: 'doop:settle-result', reqId })
 }
 
 export function registerFrameWindow(frameId: string, win: Window) {
   windows.set(frameId, win)
+  if (outlines) win.postMessage({ type: 'doop:outlines', on: true }, '*')
   changeListeners.get(frameId)?.forEach((cb) => cb())
 }
 
@@ -291,6 +348,26 @@ function infoOf(reply: Record<string, unknown> | null): ElementInfo | null {
   return reply && typeof reply.info === 'object' ? (reply.info as ElementInfo | null) : null
 }
 
+/** What ⌥ measures from the picked elements: their boxes (the primary's
+ *  first), the box around the primary, and what sits at the design point when
+ *  that is none of them. */
+export interface ElementMeasure {
+  rects: ElementInfo['rect'][]
+  parent: ElementInfo['rect']
+  over: ElementInfo['rect'] | null
+}
+
+/** Null when the selector no longer resolves or the frame is not mounted. */
+export async function measureElement(
+  frameId: string,
+  selector: string,
+  at: { x: number; y: number },
+  selected: string[],
+): Promise<ElementMeasure | null> {
+  const reply = await requestFrame(frameId, 'doop:measure', { selector, x: at.x, y: at.y, selected })
+  return (reply?.measure as ElementMeasure | null | undefined) ?? null
+}
+
 /** Computed properties of the element, or null when the selector no longer resolves. */
 export async function inspectElement(frameId: string, selector: string): Promise<ElementInfo | null> {
   return infoOf(await requestFrame(frameId, 'doop:inspect', { selector }))
@@ -299,8 +376,15 @@ export async function inspectElement(frameId: string, selector: string): Promise
 /** Write inline styles onto the element. The runtime saves the edited
  *  document through the frame's normal edit path and answers with the
  *  element's fresh properties. */
-export async function styleElement(frameId: string, selector: string, styles: StylePatch): Promise<ElementInfo | null> {
-  return infoOf(await requestFrame(frameId, 'doop:style', { selector, styles }))
+/** `uniformText` makes the patch's type the whole layer's: the inline runs
+ *  under it drop their own values, and <b> / <i> / <u> runs their formatting. */
+export async function styleElement(
+  frameId: string,
+  selector: string,
+  styles: StylePatch,
+  { uniformText = false }: { uniformText?: boolean } = {},
+): Promise<ElementInfo | null> {
+  return infoOf(await requestFrame(frameId, 'doop:style', { selector, styles, uniformText }))
 }
 
 /** Replace image content through the same live edit/undo path as styles. */
@@ -327,13 +411,16 @@ export async function scanHotspots(frameId: string): Promise<ScannedHotspot[]> {
   return Array.isArray(reply?.items) ? (reply.items as ScannedHotspot[]) : []
 }
 
-/** Preview a whole scrub locally, then save once or restore its original CSS. */
+/** Preview a whole scrub locally, then save once or restore its original CSS.
+ *  `followers` (a `begin` only) are the rest of a multi-pick: a `move` of the
+ *  element carries them by the same delta, and a cancel puts them back too. */
 export async function styleGesture(
   frameId: string,
   selector: string,
   phase: 'begin' | 'commit' | 'cancel',
+  followers: string[] = [],
 ): Promise<ElementInfo | null> {
-  return infoOf(await requestFrame(frameId, 'doop:style-gesture', { selector, phase }))
+  return infoOf(await requestFrame(frameId, 'doop:style-gesture', { selector, phase, followers }))
 }
 
 /** Toggle a text format over whole layers, as ⌘B does with a text layer
@@ -346,4 +433,28 @@ export async function formatElementText(
 ): Promise<string[] | null> {
   const reply = await requestFrame(frameId, 'doop:text-format', { selectors, command })
   return Array.isArray(reply?.selectors) ? (reply.selectors as string[]) : null
+}
+
+/** The element's computed values for `properties`, or null when the selector
+ *  no longer resolves or the frame is not mounted. `fromTextRun` reads them
+ *  off the element's first text run instead, where a bold or italic run's
+ *  formatting shows. */
+export async function computedStyles(
+  frameId: string,
+  selector: string,
+  properties: readonly string[],
+  { fromTextRun = false }: { fromTextRun?: boolean } = {},
+): Promise<Record<string, string> | null> {
+  const reply = await requestFrame(frameId, 'doop:computed', { selector, properties: [...properties], fromTextRun })
+  return reply && reply.values && typeof reply.values === 'object' ? (reply.values as Record<string, string>) : null
+}
+
+/** ⌘Y: draw every mounted frame (and any frame mounted later, through
+ *  `outlinesOn`) as outlines. Nothing is saved. */
+export function setOutlines(on: boolean) {
+  outlines = on
+  for (const win of windows.values()) win.postMessage({ type: 'doop:outlines', on }, '*')
+}
+export function outlinesOn() {
+  return outlines
 }

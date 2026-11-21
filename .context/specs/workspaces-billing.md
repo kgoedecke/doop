@@ -46,12 +46,15 @@ A new workspace starts `inactive`; the client opens the plan picker immediately 
    `subscription_data.metadata.workspaceId`. Browser is sent to Stripe.
 2. Stripe returns to `/w/:id?checkout=success&session_id=…`. The page calls
    `POST …/billing/sync {sessionId}`; the server retrieves the session → subscription and applies
-   it. This is what makes local dev work without a webhook tunnel.
+   it. This is what makes local dev work without a webhook tunnel. Someone who started checkout
+   from a canvas's component library is then sent back to that canvas
+   ([workspace-component-library.md](workspace-component-library.md), "After checkout").
 3. `POST /stripe/webhook` (raw body, signature-verified, outside the session gate) handles
    `checkout.session.completed` and `customer.subscription.{created,updated,deleted}`, finds the
    workspace by `metadata.workspaceId`, applies the same `subscriptionPatch`.
 4. Seat changes: `addMember`/`removeMember` call `billing.syncSeats` in the background (updates
-   the subscription item quantity; Stripe prorates). Never blocks the invite.
+   the subscription item quantity; an added seat is invoiced at once with `always_invoice`, a
+   removed one is a credit on the next invoice). Never blocks the invite.
 5. Portal: `POST …/billing/portal` opens Stripe's hosted portal for cards, invoices, cancel,
    interval switches.
 

@@ -18,6 +18,9 @@ export const fieldVariants = cva(
         well: 'rounded-pill border border-line bg-paper px-3 focus:border-ink focus:bg-surface md:text-copy',
         /* ids, sizes, coordinates — the inspector's numeric fields */
         mono: 'rounded-control border border-line bg-surface px-2.25 font-mono focus:border-ink md:text-body',
+        /* the inspector's property well, as `NumberField` draws it */
+        field:
+          'h-[26px] rounded-[7px] bg-sub px-2 font-mono text-base focus:bg-surface focus:shadow-elevation-1-focus md:text-[11px]',
         /* lives inside another bordered shell (search rows, the prompt bar) */
         bare: 'border-0 bg-transparent p-0 focus:ring-0 md:text-copy',
         /* an editable heading: invisible until you hover or focus it */

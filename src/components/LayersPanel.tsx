@@ -10,11 +10,13 @@ import {
   type ReactNode,
 } from 'react'
 import type { Frame } from '../../shared/types'
+import type { ComponentDef } from '../../shared/components'
 import { canEditOpenCanvas, pickedSelectors, useStore } from '../lib/store'
+import { layerPlacement } from '../lib/frameBridge'
 import { currentPageCanvas, usePageCanvas } from '../lib/pages'
 import { PagesPanel, sectionHeading } from './PagesPanel'
 import { getIdentity } from '../lib/identity'
-import { deleteFramesTracked } from '../lib/history'
+import { renameComponent, rootPartKey } from '../lib/components'
 import {
   ancestorsOf,
   buildLayerTree,
@@ -26,6 +28,7 @@ import {
 } from '../lib/layers'
 import {
   deleteLayers,
+  deleteSelection,
   renameFrame,
   renameLayer,
   dropLayer,
@@ -47,6 +50,7 @@ import {
 import { cn } from '@/lib/utils'
 import { AgentIcon } from './AgentIcon'
 import { LayerKindIcon } from './LayerKindIcon'
+import { ComponentsPanel } from './ComponentsPanel'
 import { FrameContextMenu } from './FrameContextMenu'
 import { FrameApprovalBadge } from './FrameApproval'
 import {
@@ -55,6 +59,7 @@ import {
   PanelClose,
   PanelHeader,
   PanelIconTab,
+  PanelSearch,
   PanelTabs,
   PanelTabsRoot,
   type PanelResize,
@@ -75,15 +80,18 @@ import {
   EyeIcon,
   FrameIcon,
   LayersIcon,
+  ComponentIcon,
+  InstanceIcon,
   BracesIcon,
   LockIcon,
   LockOpenIcon,
   PanelCollapseIcon,
   PanelExpandIcon,
   PlusIcon,
-  SearchIcon,
 } from './ui/icons'
 import { useT } from '@/lib/i18n'
+import { libraryAttention, useLibraryStatus } from '../lib/library'
+import { Dot } from './ui/dot'
 
 /* the tree indents 16px per level; frame rows sit at depth 0 */
 const INDENT = 16
@@ -236,9 +244,15 @@ export function LayersPanel({
   const setTab = useStore((s) => s.setLayersTab)
   /* view and comment links browse the tree; nothing in it moves or changes */
   const readOnly = useStore((s) => !canEditOpenCanvas(s))
+  /* the Components tab wears a dot while its library waits on someone: changes
+     not yet published, or published updates not yet taken */
+  const libraryStatus = useLibraryStatus(useStore((s) => s.canvas?.id))
+  const attention = libraryAttention(libraryStatus)
+  const libraryWaits = !readOnly && attention.unpublished + attention.updates > 0
   const pageCanvas = usePageCanvas()
   const frames = useMemo(() => pageCanvas?.frames ?? [], [pageCanvas])
   const selectedId = useStore((s) => s.selectedId)
+  const selectedIds = useStore((s) => s.selectedIds)
   const selectedElement = useStore((s) => s.selectedElement)
   /* every row of a multi-element pick is highlighted; a string key keeps
      the selection identity-stable between store updates */
@@ -285,6 +299,14 @@ export function LayersPanel({
     }
   }
 
+  /* ⌥L (Collapse layers) folds every row */
+  const collapseAt = useStore((s) => s.layersCollapseAt)
+  const [seenCollapse, setSeenCollapse] = useState(collapseAt)
+  if (seenCollapse !== collapseAt) {
+    setSeenCollapse(collapseAt)
+    setExpanded(new Set())
+  }
+
   function setOpen(key: string, open: boolean) {
     setExpanded((prev) => {
       if (prev.has(key) === open) return prev
@@ -300,12 +322,21 @@ export function LayersPanel({
   useEffect(() => {
     rowsRef.current = rows
   }, [rows])
-  const currentKey = selectedElement ? rowKey(selectedElement.frameId, selectedElement.selector) : selectedId
+  /* a canvas shape selected as a whole is listed as its one layer's row */
+  const currentKey = selectedElement
+    ? rowKey(selectedElement.frameId, selectedElement.selector)
+    : (rows.find((r) => isRoot(r) && r.frame.id === selectedId)?.key ?? selectedId)
 
   /* a layer row opens the element properties panel; a frame row closes it
      and leaves the frame's own inspector to the frame-name click */
   function activate(row: VisibleRow, toggle = false) {
     const s = useStore.getState()
+    /* ⇧/⌘-click on a frame or a canvas shape adds it to the selection, or
+       drops it, as ⇧-click does on the canvas */
+    if (toggle && isRoot(row)) {
+      s.toggleSelect(row.frame.id)
+      return
+    }
     /* ⇧/⌘-click adds a layer to the frame's picked set, or drops it */
     if (toggle && row.kind === 'node' && s.selectedElement?.frameId === row.frame.id) {
       s.toggleElement({ frameId: row.frame.id, selector: row.node.selector })
@@ -449,8 +480,14 @@ export function LayersPanel({
         return
       }
       if (!over || row.kind !== 'node') return
-      if (over.frame.id === row.frame.id) dropLayer(row.frame, row.node.selector, targetOf(over, target.place))
-      else transferLayer(row.frame, row.node.selector, over.frame, targetOf(over, target.place))
+      if (over.frame.id === row.frame.id) {
+        /* into a flex box it flows, out onto a hand-placed box it goes
+           absolute where it shows, as a canvas drag would place it */
+        const to = targetOf(over, target.place)
+        void layerPlacement(row.frame.id, row.node.selector, to).then((flow) =>
+          dropLayer(row.frame, row.node.selector, to, flow),
+        )
+      } else transferLayer(row.frame, row.node.selector, over.frame, targetOf(over, target.place))
     }
     const onCancel = () => finish()
     window.addEventListener('pointermove', onMove)
@@ -505,9 +542,10 @@ export function LayersPanel({
         if (e.repeat || readOnly) break
         /* a locked frame stays; deleteLayers refuses a locked element itself
            and takes a standalone element's shell frame along with its layer */
-        if (row?.kind === 'frame') {
-          if (!row.frame.locked) deleteFramesTracked([row.frame])
-        } else if (row) deleteLayers(row.frame, pickedSelectors(useStore.getState()))
+        /* with no layer picked, every selected frame and canvas shape goes,
+           as ⌫ on the canvas takes them */
+        if (row && !useStore.getState().selectedElement) deleteSelection()
+        else if (row) deleteLayers(row.frame, pickedSelectors(useStore.getState()))
         break
       default:
         return
@@ -534,6 +572,18 @@ export function LayersPanel({
             <PanelIconTab value="layers" icon={<LayersIcon />} title={t('panels.layersTitle')}>
               {t('panels.layersTitle')}
             </PanelIconTab>
+            <PanelIconTab
+              value="components"
+              icon={<ComponentIcon />}
+              title={libraryWaits ? t('components.libraryTabWaiting') : t('components.title')}
+              badge={
+                libraryWaits ? (
+                  <Dot size="sm" className="absolute top-0.5 right-0.5 text-brand" data-library-dot />
+                ) : undefined
+              }
+            >
+              {t('components.title')}
+            </PanelIconTab>
             <PanelIconTab value="tokens" icon={<BracesIcon />} title={t('panels.layersTabTokens')}>
               {t('panels.layersTabTokens')}
             </PanelIconTab>
@@ -555,6 +605,7 @@ export function LayersPanel({
           )}
         </PanelHeader>
       </PanelTabsRoot>
+      {tab === 'components' && <ComponentsPanel />}
       {tab === 'tokens' && (
         <PanelBody className="flex flex-col pb-2">
           <TokensSection />
@@ -564,7 +615,7 @@ export function LayersPanel({
         <>
           {/* Figma's order: the pages at the top, the frames of the active page
           under them, the search at the bottom within thumb's reach */}
-          <PagesPanel />
+          {pageCanvas && <PagesPanel key={pageCanvas.id} canvasId={pageCanvas.id} />}
           <div className={cn('mt-1.5 flex h-6 flex-none items-center justify-between pr-2.5 pl-3.5', sectionHeading)}>
             <span data-slot="frame-section-heading" className={sectionHeading}>
               {t('panels.layersTitle')}
@@ -620,19 +671,22 @@ export function LayersPanel({
                 <FrameRow
                   key={row.key}
                   row={row}
-                  selected={row.frame.id === selectedId && !selectedElement}
+                  selected={selectedIds.includes(row.frame.id) && !selectedElement}
                   current={row.frame.id === selectedId}
                   dragging={drag?.key === row.key}
                   drop={drop?.key === row.key ? drop.place : undefined}
                   onToggle={() => setOpen(row.key, !row.open)}
-                  onActivate={() => activate(row)}
+                  onActivate={(toggle) => activate(row, toggle)}
                   onPointerDown={(e) => onRowPointerDown(e, row)}
                 />
               ) : (
                 <NodeRow
                   key={row.key}
                   row={row}
-                  selected={pickedRows.has(row.key)}
+                  selected={
+                    pickedRows.has(row.key) ||
+                    (!!row.standalone && !selectedElement && selectedIds.includes(row.frame.id))
+                  }
                   dragging={drag?.key === row.key}
                   drop={drop?.key === row.key ? drop.place : undefined}
                   onToggle={() => setOpen(row.key, !row.open)}
@@ -645,19 +699,7 @@ export function LayersPanel({
               <div aria-hidden className="pointer-events-none mx-1.5 h-0.5 rounded-full bg-brand" />
             )}
           </PanelBody>
-          <footer className="flex-none px-2.5 pt-1 pb-2.5">
-            <label className="flex h-[30px] items-center gap-2 rounded-[8px] px-2.5 text-ink-faint shadow-ring focus-within:shadow-elevation-1-focus">
-              <SearchIcon className="size-3.5 flex-none" />
-              <Input
-                variant="bare"
-                inputSize="auto"
-                className="h-full text-[12px] placeholder:text-ink-ghost md:text-[12px]"
-                placeholder={t('panels.layersSearch')}
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-              />
-            </label>
-          </footer>
+          <PanelSearch value={query} placeholder={t('panels.layersSearch')} onChange={setQuery} />
         </>
       )}
     </Panel>
@@ -693,6 +735,16 @@ export function LayersRailToggle({ docked = false }: { docked?: boolean }) {
         }}
       >
         <LayersIcon />
+      </ToolbarControl>
+      <ToolbarControl
+        label={t('components.title')}
+        side="right"
+        onClick={() => {
+          useStore.getState().setLayersTab('components')
+          setLayersOpen(true)
+        }}
+      >
+        <ComponentIcon />
       </ToolbarControl>
       <ToolbarControl
         label={t('panels.layersTabTokens')}
@@ -752,6 +804,15 @@ function ItemNameInput({
   )
 }
 
+/* A standalone main's row shows its frame's name; the server renames that
+   frame with the component only while the two names agree, so otherwise the
+   frame takes the saved name here, in turn with its other renames and without
+   an undo step, since the component rename it follows has none. */
+async function renameMain(def: ComponentDef, frame: Frame, standalone: boolean, value: string) {
+  const saved = await renameComponent(def, value)
+  if (saved && standalone) renameFrame(frame.id, saved, { record: false })
+}
+
 function useItemRename(name: string, allowed: boolean, onCommit: (value: string) => void) {
   const [renaming, setRenaming] = useState(false)
   return {
@@ -780,7 +841,7 @@ function FrameRow({
   dragging: boolean
   drop?: Drop['place']
   onToggle: () => void
-  onActivate: () => void
+  onActivate: (toggle: boolean) => void
   onPointerDown: (e: ReactPointerEvent<HTMLDivElement>) => void
 }) {
   const { frame } = row
@@ -819,11 +880,11 @@ function FrameRow({
             onToggleHidden={readOnly ? undefined : () => setFrameHidden(frame, !frame.hidden)}
             locked={!!frame.locked}
             onToggleLocked={readOnly ? undefined : () => setFramesLocked([frame], !frame.locked)}
-            onClick={onActivate}
+            onClick={(e) => onActivate(e.shiftKey || e.metaKey || e.ctrlKey)}
             onDoubleClick={startRename}
             onContextMenu={() => {
               pasteAt.current = { x: window.innerWidth / 2, y: window.innerHeight / 2 }
-              if (!useStore.getState().selectedIds.includes(frame.id)) onActivate()
+              if (!useStore.getState().selectedIds.includes(frame.id)) onActivate(false)
             }}
             onPointerDown={onPointerDown}
             trailing={
@@ -891,13 +952,28 @@ function NodeRow({
   const { frame, node } = row
   const readOnly = useStore((s) => !canEditOpenCanvas(s))
   const hasChildren = node.children.length > 0
+  const component = useStore((s) =>
+    node.componentId ? s.canvas?.components?.find((def) => def.id === node.componentId) : undefined,
+  )
+  const componentName = component?.name
   /* a standalone element is its frame: its name, eye, lock and menu all
      belong to the frame */
   const standalone = !!row.standalone
+  /* as in Figma, a component's rows are named after it: renaming the main's
+     renames the component, renaming an instance's names that layer alone (an
+     override the instance keeps, still linked) */
+  const main = node.component === 'main' ? component : undefined
+  /* a name inherited from the main is not the instance's own */
+  const rootKey = useMemo(() => (component ? rootPartKey(component) : undefined), [component])
+  const ownName = node.component === 'instance' && !!rootKey && !!node.namedParts?.includes(rootKey)
   const { label, startRename } = useItemRename(
-    standalone ? frame.name : node.label,
+    standalone ? frame.name : ownName ? node.label : (componentName ?? node.label),
     !readOnly && !frame.locked && !node.locked,
-    (value) => (standalone ? renameFrame(frame.id, value) : renameLayer(frame.id, node.selector, value)),
+    (value) => {
+      if (main) void renameMain(main, frame, standalone, value)
+      else if (standalone) renameFrame(frame.id, value)
+      else renameLayer(frame.id, node.selector, value)
+    },
   )
   const pasteAt = useRef({ x: 0, y: 0 })
   return (
@@ -909,9 +985,17 @@ function NodeRow({
           drop={drop}
           caret={<Caret open={row.open} present={hasChildren} />}
           onCaret={hasChildren ? onToggle : undefined}
-          icon={<LayerKindIcon kind={node.kind} />}
+          icon={
+            node.component === 'main' ? (
+              <ComponentIcon width={14} height={14} className="text-brand" data-component-icon="main" />
+            ) : node.component === 'instance' ? (
+              <InstanceIcon width={14} height={14} className="text-brand" data-component-icon="instance" />
+            ) : (
+              <LayerKindIcon kind={node.kind} />
+            )
+          }
           label={label}
-          detail={standalone ? undefined : node.detail}
+          detail={standalone || componentName ? undefined : node.detail}
           selected={selected}
           /* a standalone element is hidden by its frame or by its own
              attribute (⌘⇧H sets the latter): the row shows either, and its
@@ -953,7 +1037,9 @@ function NodeRow({
           }}
           onContextMenu={() => {
             pasteAt.current = { x: window.innerWidth / 2, y: window.innerHeight / 2 }
-            onActivate(false)
+            /* a right-click on a shape in a multi-selection keeps the selection */
+            const s = useStore.getState()
+            if (!(standalone && s.selectedIds.length > 1 && s.selectedIds.includes(frame.id))) onActivate(false)
           }}
           onPointerDown={onPointerDown}
           /* the row under the pointer is outlined on the canvas too, as a

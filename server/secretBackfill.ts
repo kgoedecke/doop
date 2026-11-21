@@ -16,7 +16,7 @@ const SEALED: { table: PgTable; key: AnyPgColumn; columns: AnyPgColumn[] }[] = [
   {
     table: modelAccounts,
     key: modelAccounts.userId,
-    columns: [modelAccounts.accessToken, modelAccounts.refreshToken, modelAccounts.apiKey],
+    columns: [modelAccounts.accessToken, modelAccounts.refreshToken, modelAccounts.apiKey, modelAccounts.customHeaders],
   },
   { table: integrations, key: integrations.id, columns: [integrations.accessToken] },
   { table: githubConnections, key: githubConnections.id, columns: [githubConnections.token] },

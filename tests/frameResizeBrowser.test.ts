@@ -1,7 +1,7 @@
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { Page } from 'puppeteer-core'
 import { findBrowserPath } from '../server/screenshot'
-import { fixtureUrl, openBrowser, type TestBrowser } from './browser'
+import { fixtureUrl, pagePerTest } from './browser'
 import type { Frame } from '../shared/types'
 import type { ElementInfo, GeometryEdit } from '../src/lib/frameBridge'
 
@@ -34,7 +34,7 @@ const HTML =
   '<!doctype html><html><body style="margin:0"><div style="width:100px;height:40px;background:#ddd"></div></body></html>'
 
 describe.skipIf(!findBrowserPath())('frame resize handles', () => {
-  let browser: TestBrowser
+  const pages = pagePerTest()
   let page: Page
   let saved: Frame
   let saves = 0
@@ -58,19 +58,11 @@ describe.skipIf(!findBrowserPath())('frame resize handles', () => {
     if (shift) await page.keyboard.up('Shift')
     await expect.poll(() => saves).toBe(before + 1)
   }
-  async function reset() {
-    await page.evaluate(() => window.elementPanelHarness.setZoom(1))
-    await page.evaluate(() => window.elementPanelHarness.deselect())
-    saved = { ...saved, x: 40, y: 60, width: 600, height: 500, updatedAt: saved.updatedAt + 1 }
-    await page.evaluate((frame) => window.elementPanelHarness.seed(frame), saved)
-    await page.evaluate(() => window.elementPanelHarness.selectFrame())
-    await page.waitForSelector('[data-frame-resize-handles]')
-  }
   const rect = () => ({ x: saved.x, y: saved.y, width: saved.width, height: saved.height })
 
-  beforeAll(async () => {
-    browser = await openBrowser()
-    page = await browser.newPage()
+  beforeEach(async () => {
+    saves = 0
+    page = await pages.open()
     page.setDefaultTimeout(5_000)
     page.on('pageerror', (error) => errors.push(String(error)))
     await page.setViewport({ width: 1000, height: 900 })
@@ -97,13 +89,16 @@ describe.skipIf(!findBrowserPath())('frame resize handles', () => {
       updatedBy: 'Tester',
       html: HTML,
     }
-    await reset()
+    await page.evaluate((frame) => window.elementPanelHarness.seed(frame), saved)
+    await page.evaluate(() => window.elementPanelHarness.selectFrame())
+    await page.waitForSelector('[data-frame-resize-handles]')
   }, 60_000)
 
-  afterAll(async () => {
-    await page?.screenshot({ path: '/tmp/doop-frame-resize.png' })
-    await page?.close()
-    await browser?.close()
+  afterEach(async () => {
+    await page.screenshot({ path: '/tmp/doop-frame-resize.png' })
+  })
+
+  afterAll(() => {
     expect(errors).toEqual([])
   })
 
@@ -154,7 +149,6 @@ describe.skipIf(!findBrowserPath())('frame resize handles', () => {
   })
 
   it('saves a drag under the click threshold, and nothing for a click', async () => {
-    await reset()
     const before = saves
     const from = await handle('se')
     await page.mouse.move(from.x, from.y)
@@ -169,7 +163,6 @@ describe.skipIf(!findBrowserPath())('frame resize handles', () => {
   })
 
   it('moves the near edge from a north-west grip and keeps the far corner still', async () => {
-    await reset()
     await drag('nw', 20, 10)
     expect(rect()).toEqual({ x: 60, y: 70, width: 580, height: 490 })
     await drag('w', -30, 0)
@@ -179,13 +172,11 @@ describe.skipIf(!findBrowserPath())('frame resize handles', () => {
   })
 
   it('keeps the aspect ratio with Shift', async () => {
-    await reset()
     await drag('e', 300, 0, { shift: true })
     expect(rect()).toEqual({ x: 40, y: 60, width: 900, height: 750 })
   })
 
   it('lets a frame shrink to a single pixel', async () => {
-    await reset()
     await drag('se', -700, -600)
     expect(rect()).toEqual({ x: 40, y: 60, width: 1, height: 1 })
     expect(await page.$eval('[data-frame-size]', (el) => el.textContent)).toBe('1 × 1')

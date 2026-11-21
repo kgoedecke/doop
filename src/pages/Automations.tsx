@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { CanvasMeta } from '../../shared/types'
-import { roleById } from '../../shared/agents'
+import { AGENT_ROLES, roleById } from '../../shared/agents'
 import {
   AUTOMATION_EXAMPLES,
   incompleteReason,
@@ -218,7 +218,7 @@ export function Automations() {
                         <PullMark provider={first.type} size={24} />
                       ) : first?.type === 'agent' ? (
                         <span className="grid size-6 flex-none place-items-center rounded-row border border-line bg-surface">
-                          <RoleMark role={roleById(first.roles[0])} size={14} />
+                          <RoleMark role={roleById(first.roles[0], AGENT_ROLES)} size={14} />
                         </span>
                       ) : (
                         <ClockTile size={24} />

@@ -15,6 +15,7 @@ vi.mock('../server/db/persist.ts', () => ({ saveCanvas: () => {}, saveFrame: () 
 const EQUIVALENT: Record<string, string[]> = {
   get_frame: ['get_frame_html', 'inspect_frame'],
   get_frame_screenshot: ['screenshot_frame'],
+  get_component_preview: ['screenshot_component'],
   append_frame_html: ['begin_frame_rewrite', 'append_frame_rewrite', 'commit_frame_rewrite'],
 }
 

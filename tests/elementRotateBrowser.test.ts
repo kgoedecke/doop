@@ -1,7 +1,7 @@
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeEach, describe, expect, it } from 'vitest'
 import type { Page } from 'puppeteer-core'
 import { findBrowserPath } from '../server/screenshot'
-import { fixtureUrl, openBrowser, type TestBrowser } from './browser'
+import { fixtureUrl, pagePerTest } from './browser'
 import type { Frame } from '../shared/types'
 import type { ElementInfo, GeometryEdit } from '../src/lib/frameBridge'
 
@@ -44,7 +44,7 @@ const HTML = `<!doctype html><html><head><style>
 type Box = { left: number; top: number; right: number; bottom: number; width: number; height: number }
 
 describe.skipIf(!findBrowserPath())('element rotate zones', () => {
-  let browser: TestBrowser
+  const pages = pagePerTest()
   let page: Page
   let saved: Frame
   let saves = 0
@@ -103,9 +103,9 @@ describe.skipIf(!findBrowserPath())('element rotate zones', () => {
     await frame.waitForFunction((version) => document.body.dataset.testReset === String(version), {}, updatedAt)
   }
 
-  beforeAll(async () => {
-    browser = await openBrowser()
-    page = await browser.newPage()
+  beforeEach(async () => {
+    saves = 0
+    page = await pages.open()
     page.setDefaultTimeout(5_000)
     page.on('pageerror', (error) => errors.push(String(error)))
     await page.setViewport({ width: 1000, height: 900 })
@@ -138,10 +138,7 @@ describe.skipIf(!findBrowserPath())('element rotate zones', () => {
     await page.evaluate(() => window.elementPanelHarness.setTool('select'))
   }, 60_000)
 
-  afterAll(async () => {
-    await page?.screenshot({ path: '/tmp/doop-element-rotate.png' })
-    await page?.close()
-    await browser?.close()
+  afterAll(() => {
     expect(errors).toEqual([])
   })
 

@@ -3,7 +3,9 @@ import type Anthropic from '@anthropic-ai/sdk'
 import {
   _internal,
   IMAGE_OMITTED_NOTE,
+  deepseekConfig,
   geminiConfig,
+  kimiConfig,
   openrouterConfig,
   runChatCompletionsTurn,
 } from '../server/chatCompletionsAgent.ts'
@@ -13,7 +15,8 @@ import { IMAGE_NOTE, ModelAuthError, ModelUnavailableError } from '../server/ope
  * The Chat Completions transport speaks the same Anthropic message shape the
  * agent loop is written in. These tests pin the mapping in both directions,
  * the degraded no-vision path (images become text notes), and the fixed
- * request/headers — without ever calling OpenRouter or Google.
+ * request/headers — without ever calling OpenRouter, Google, DeepSeek or
+ * Moonshot.
  */
 
 const { toMessages, toTools, fromCompletion } = _internal
@@ -206,6 +209,24 @@ describe('the request', () => {
     expect((init!.headers as Record<string, string>).Authorization).toBe('Bearer AIzaKey')
   })
 
+  it('sends DeepSeek and Kimi turns to their own fixed endpoints', async () => {
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockImplementation(async () => new Response(JSON.stringify({ choices: [{ message: { content: 'ok' } }] })))
+    await runChatCompletionsTurn(deepseekConfig('sk-deep', 'deepseek-flash', true), req)
+    await runChatCompletionsTurn(kimiConfig('sk-kimi', 'kimi-k3.1-pro', true), req)
+    const [[deepUrl, deepInit], [kimiUrl, kimiInit]] = fetchSpy.mock.calls as [
+      [string, RequestInit],
+      [string, RequestInit],
+    ]
+    expect(String(deepUrl)).toBe('https://api.deepseek.com/chat/completions')
+    expect((deepInit.headers as Record<string, string>).Authorization).toBe('Bearer sk-deep')
+    expect(String(kimiUrl)).toBe('https://api.moonshot.ai/v1/chat/completions')
+    expect((kimiInit.headers as Record<string, string>).Authorization).toBe('Bearer sk-kimi')
+    /* Kimi refuses a temperature other than its own; the transport sends none */
+    expect(JSON.parse(String(kimiInit.body))).not.toHaveProperty('temperature')
+  })
+
   it('classifies a 401 as a dead credential and a missing model as unavailable', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('nope', { status: 401 }))
     await expect(runChatCompletionsTurn(openrouterConfig('sk-or-x', 'm', true), req)).rejects.toThrow(ModelAuthError)
@@ -215,6 +236,64 @@ describe('the request', () => {
     )
     await expect(runChatCompletionsTurn(openrouterConfig('sk-or-x', 'kimi-k9', true), req)).rejects.toThrow(
       ModelUnavailableError,
+    )
+  })
+})
+
+describe('reasoning_content', () => {
+  const reasoned = {
+    choices: [
+      {
+        finish_reason: 'tool_calls',
+        message: {
+          content: null,
+          reasoning_content: 'A hero needs a headline first.',
+          tool_calls: [{ id: 'call_1', function: { name: 'create_frame', arguments: '{"name":"Hero"}' } }],
+        },
+      },
+    ],
+  }
+
+  it('keeps the reasoning as a thinking block ahead of the call', () => {
+    const result = fromCompletion(reasoned, 'DeepSeek')
+    expect(result.stop_reason).toBe('tool_use')
+    expect(result.content[0]).toEqual({ type: 'thinking', thinking: 'A hero needs a headline first.', signature: '' })
+    expect(result.content[1]).toMatchObject({ type: 'tool_use', id: 'call_1' })
+  })
+
+  it('sends it back only where the provider asks for it', () => {
+    const history: Anthropic.MessageParam[] = [
+      { role: 'user', content: 'make a hero' },
+      { role: 'assistant', content: fromCompletion(reasoned, 'Kimi').content },
+      { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'call_1', content: 'created' }] },
+    ]
+    expect(toMessages('sys', history, true, true)[2]).toMatchObject({
+      role: 'assistant',
+      content: null,
+      reasoning_content: 'A hero needs a headline first.',
+      tool_calls: [{ id: 'call_1' }],
+    })
+    expect(toMessages('sys', history, true)[2]).not.toHaveProperty('reasoning_content')
+  })
+
+  it('round-trips the reasoning through a DeepSeek run', async () => {
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockImplementationOnce(async () => new Response(JSON.stringify(reasoned)))
+      .mockImplementationOnce(async () => new Response(JSON.stringify({ choices: [{ message: { content: 'Done' } }] })))
+    const config = deepseekConfig('sk-deep', 'deepseek-flash', true)
+    const messages: Anthropic.MessageParam[] = [{ role: 'user', content: 'make a hero' }]
+    const first = await runChatCompletionsTurn(config, { system: 'sys', tools: [TOOL], messages, maxTokens: 16000 })
+    messages.push({ role: 'assistant', content: first.content })
+    messages.push({ role: 'user', content: [{ type: 'tool_result', tool_use_id: 'call_1', content: 'created' }] })
+    await runChatCompletionsTurn(config, { system: 'sys', tools: [TOOL], messages, maxTokens: 16000 })
+    const second = JSON.parse(String(fetchSpy.mock.calls[1]![1]!.body)) as { messages: Record<string, unknown>[] }
+    expect(second.messages[2]).toMatchObject({ role: 'assistant', reasoning_content: 'A hero needs a headline first.' })
+  })
+
+  it('still fails a response that only thought', () => {
+    expect(() => fromCompletion({ choices: [{ message: { reasoning_content: 'hmm' } }] }, 'Kimi')).toThrow(
+      /empty response/,
     )
   })
 })
