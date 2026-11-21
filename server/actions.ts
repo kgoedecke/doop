@@ -49,6 +49,7 @@ import { hasElementId, stampElementId } from './elementIds.ts'
 import { decodeEscapedHtml, looksEscapedHtml, repairEscapedHtml } from './escapedHtml.ts'
 import { forgetLibrary } from './componentLibrary.ts'
 import { withCanvasFaces, withCanvasFacesMidStream } from './canvasFaces.ts'
+import { withHostedIcons } from './iconProxy.ts'
 import { EMBEDDED_MIN_LENGTH } from './inlineData.ts'
 import { WriteRefusedError } from './writeRefusal.ts'
 import {
@@ -2505,7 +2506,8 @@ const appendChunk = atomic(function appendChunk(
   /* the chunk renders the moment it arrives — viewers see the agent's real progress */
   broadcast(frame.canvasId, {
     type: 'frame:updated',
-    frame: opts.done ? frame : { ...frame, html: healPartialHtml(frame.html) },
+    /* hotlinks too: a stream's top may not have settled yet, and a pending rename skips the faces */
+    frame: opts.done ? frame : { ...frame, html: withHostedIcons(healPartialHtml(frame.html)) },
     actor,
   })
   if (opts.done) {
