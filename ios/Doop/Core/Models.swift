@@ -329,6 +329,8 @@ public struct CanvasPresence: Codable, Identifiable {
     public var viewport: CanvasViewport?
     /// The frame this collaborator has open; for an agent, the one it last worked on.
     public var activeFrameId: String? = nil
+    /// An agent's one-line "what I'm working on" (set_status); nil when idle.
+    public var status: String? = nil
     public var id: String { clientId }
 }
 
@@ -375,6 +377,8 @@ public struct CanvasEvent: Decodable {
     /// `frame:streaming`: whether the actor started or stopped streaming.
     public var active: Bool?
     public var actor: CanvasActor?
+    /// `status`: an agent's new status line, null when it went idle.
+    public var status: String?
 }
 
 /// Who caused a room event (a frame write, a stream).

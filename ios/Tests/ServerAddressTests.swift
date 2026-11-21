@@ -19,6 +19,7 @@ struct ServerAddressChecks {
         try checks.testAgentActivityStates()
         FrameSnappingChecks.run()
         try FrameWorkersChecks.run()
+        try WorkingAgentsChecks.run()
         try PendingFrameMoveChecks.run()
         try ProviderSignInChecks.run()
         AppleSignInChecks.run()
