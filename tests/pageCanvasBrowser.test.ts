@@ -249,6 +249,21 @@ describe.skipIf(!findBrowserPath())('page camera and snapping', { timeout: 30_00
     await directory.waitForFunction(() => getComputedStyle(document.querySelector('#app')!).cursor === 'grab')
     await page.keyboard.press('v')
     await directory.waitForFunction(() => getComputedStyle(document.querySelector('#app')!).cursor === 'default')
+    // and so does a cursor the Stage changes by itself: ⌥ turns the Zoom tool to zoom-out
+    const docCursor = (cursor: string) =>
+      directory.waitForFunction(
+        (cursor) => getComputedStyle(document.querySelector('#app')!).cursor === cursor,
+        {},
+        cursor,
+      )
+    await page.keyboard.down('z')
+    await docCursor('zoom-in')
+    await page.keyboard.down('Alt')
+    await docCursor('zoom-out')
+    await page.keyboard.up('Alt')
+    await docCursor('zoom-in')
+    await page.keyboard.up('z')
+    await docCursor('default')
     await page.mouse.click(app.x, app.y)
     await waitState(
       'ordinary click stays in selection',

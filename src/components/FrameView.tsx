@@ -1751,6 +1751,16 @@ export const FrameView = memo(function FrameView({
     if (!runtimeReady) return
     syncCursorRef.current()
   }, [runtimeReady, surfaceCursor, tool, panMode, editing])
+  /* the Stage changes its cursor without this frame re-rendering (⌥ turning
+     the Zoom tool's magnifier to zoom-out, the Path tool's pen badges, a pan
+     grabbing), always through its own classes: follow those too */
+  useEffect(() => {
+    const stage = surfaceRef.current?.closest('.stage')
+    if (!runtimeReady || !stage) return
+    const watch = new MutationObserver(() => syncCursorRef.current())
+    watch.observe(stage, { attributes: true, attributeFilter: ['class'] })
+    return () => watch.disconnect()
+  }, [runtimeReady])
 
   return (
     <ContextMenu
