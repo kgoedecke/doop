@@ -20,7 +20,6 @@ export const inspector = {
   copyImageUrl: 'Copy image URL',
   pinReferenceTitle: 'Add to design memory — will be used as reference',
   pinReference: 'Pin as reference',
-  hideHtmlEditor: 'Hide the HTML editor',
   editHtml: 'Edit the HTML',
   code: 'Code',
   copyHtmlTitle: 'Copy the frame’s HTML',
