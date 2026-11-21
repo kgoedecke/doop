@@ -3,7 +3,7 @@ import { resolveAgentBrand } from '../shared/agentBrand.ts'
 import { agentKeyOf, isAgentsTask } from '../shared/agentIdentity.ts'
 import { MAX_DECISION_CHARS } from '../shared/designDecisions.ts'
 import packageJson from '../package.json' with { type: 'json' }
-import { createHash, randomUUID } from 'node:crypto'
+import { createHash } from 'node:crypto'
 import { eq } from 'drizzle-orm'
 import { db } from './db/index.ts'
 import * as authSchema from './db/auth-schema.ts'
@@ -251,17 +251,25 @@ function withGuidelinesNudge<T extends { content: { type: 'text' | 'image'; [k: 
   return result
 }
 
+/** Whose work a task is, as the agent reading about it should hear it: its
+ *  own, another agent's, or another agent going by its own name (two
+ *  people's agents may both be "Claude"). */
+function whoseWork(task: { agentName: string; agentKey?: string }, actor: Actor): string {
+  if (isAgentsTask(task, actor)) return 'your'
+  if (task.agentName === actor.name) return `another ${task.agentName}’s`
+  return `${task.agentName}’s`
+}
+
 /** Append any undelivered human feedback for this agent to a tool result.
  *  MCP is pull-based, so this is the channel through which humans steer agents. */
 function appendFeedback<T extends ToolContent>(result: T, canvasId: string, actor?: Actor): T {
   if (!actor) return result
-  const pending = actions.takeFeedbackFor(canvasId, actor.name)
+  const pending = actions.takeFeedbackFor(canvasId, actor)
   if (pending.length === 0) return result
   const tasks = actions.getTasks(canvasId)
   const lines = pending.map((f) => {
     const task = tasks.find((t) => t.id === f.taskId)
-    const mine = task && isAgentsTask(task, actor)
-    const about = task ? ` (about ${mine ? 'your' : `${task.agentName}’s`} work: “${task.status}”)` : ''
+    const about = task ? ` (about ${whoseWork(task, actor)} work: “${task.status}”)` : ''
     return `- ${f.from}${about}: ${f.text}`
   })
   result.content.push({
@@ -276,7 +284,7 @@ function appendFeedback<T extends ToolContent>(result: T, canvasId: string, acto
  *  stays with get_feedback and the tools that change the canvas. */
 function appendFeedbackNotice<T extends ToolContent>(result: T, canvasId: string, actor?: Actor): T {
   if (!actor) return result
-  const open = actions.openFeedbackFor(canvasId, actor.name).length
+  const open = actions.openFeedbackFor(canvasId, actor).length
   if (open === 0) return result
   result.content.push({
     type: 'text' as const,
@@ -376,10 +384,8 @@ function frameSummary(
  *  same isolation the web UI gets. clientName names the connecting client
  *  (handleMcpRequest builds one server per stateless request, so it is the
  *  name remembered from initialize, else the OAuth application's): feedback
- *  records it and agent presence reads its brand from it. sessionId is the
- *  client's MCP session (mcpSessionId), which tells apart two connections of
- *  one account; with the account it makes the agent's identity. */
-export function buildMcpServer(owner?: string, ownerId?: string, clientName?: string, sessionId?: string): McpServer {
+ *  records it and agent presence reads its brand from it. */
+export function buildMcpServer(owner?: string, ownerId?: string, clientName?: string): McpServer {
   const actorFrom = (agent_name?: string) => {
     const actor = actions.resolveActor({
       name: agent_name,
@@ -387,7 +393,7 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
       owner,
       brand: resolveAgentBrand(clientName, agent_name),
     })
-    return { ...actor, agentKey: mcpAgentKey(ownerId, sessionId, actor.name) }
+    return { ...actor, agentKey: mcpAgentKey(ownerId, actor.name) }
   }
   /* Canvas access for agents mirrors the web UI: the OAuth user's id runs
      through the same canvasRole gate as browser sessions, so an agent
@@ -1280,7 +1286,8 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
     },
     async ({ canvas_id, agent_name }) => {
       if (!canvasFor(canvas_id, 'edit')) return noCanvas(canvas_id)
-      const fbs = actions.takeFeedbackFor(canvas_id, actorFrom(agent_name).name)
+      const actor = actorFrom(agent_name)
+      const fbs = actions.takeFeedbackFor(canvas_id, actor)
       if (fbs.length === 0) return text({ feedback: [], note: 'No open feedback requests right now.' })
       const tasks = actions.getTasks(canvas_id)
       return text({
@@ -1289,7 +1296,7 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
           return {
             from: f.from,
             text: f.text,
-            about: task ? `${task.agentName}: “${task.status}”` : undefined,
+            about: task ? `${whoseWork(task, actor)} work: “${task.status}”` : undefined,
             at: new Date(f.at).toISOString(),
           }
         }),
@@ -2702,32 +2709,19 @@ const oauthClientNames = new Map<string, string | undefined>()
 
 const credentialKey = (bearer: string) => createHash('sha256').update(bearer).digest('hex')
 
-/** An outside agent's identity (shared/agentIdentity.ts): its account, its MCP
- *  session and the name it goes by, hashed so it can be shown and stored. Two
- *  agents sharing a name are two agents unless all three match. */
-export function mcpAgentKey(ownerId: string | undefined, sessionId: string | undefined, name: string): string {
+/** An outside agent's identity (shared/agentIdentity.ts): its account and
+ *  the name it goes by, hashed so it can be shown and stored. Two people's
+ *  agents sharing a name are two agents.
+ *
+ *  Not the MCP session: clients start sessions far more often than an agent
+ *  starts work (Codex and other OpenAI clients one per tool call, Claude Code
+ *  in bursts), so a session-scoped key would split one agent into many. One
+ *  person's two agents of one name are therefore one agent. */
+export function mcpAgentKey(ownerId: string | undefined, name: string): string {
   const digest = createHash('sha256')
-    .update(JSON.stringify([ownerId ?? '', sessionId ?? '', name]))
+    .update(JSON.stringify([ownerId ?? '', name]))
     .digest('base64url')
   return `mcp:${digest.slice(0, 22)}`
-}
-
-const SESSION_ID = /^[\x21-\x7e]{1,128}$/
-
-/** The client's MCP session. /mcp keeps no sessions, but it hands each
- *  `initialize` a fresh `Mcp-Session-Id`, which clients send back on every
- *  later request (the SDK's stateless transport does not check it), so two
- *  connections of one account — two Claude Code windows — stay two agents.
- *  A client that does not send it back is known by its account alone. */
-function mcpSessionId(req: Request, res: Response): string | undefined {
-  const msgs: unknown[] = Array.isArray(req.body) ? req.body : [req.body]
-  if (msgs.some((m) => (m as { method?: unknown } | null)?.method === 'initialize')) {
-    const minted = randomUUID()
-    res.setHeader('Mcp-Session-Id', minted)
-    return minted
-  }
-  const sent = req.headers['mcp-session-id']
-  return typeof sent === 'string' && SESSION_ID.test(sent) ? sent : undefined
 }
 
 function rememberClientName(bearer: string, name: unknown) {
@@ -2847,7 +2841,7 @@ export async function handleMcpRequest(req: Request, res: Response) {
   const clientName =
     (bearer ? clientNamesByCredential.get(credentialKey(bearer)) : undefined) ??
     (oauthClientId ? await oauthClientName(oauthClientId) : undefined)
-  const server = buildMcpServer(owner, session?.userId ?? undefined, clientName, mcpSessionId(req, res))
+  const server = buildMcpServer(owner, session?.userId ?? undefined, clientName)
   /* Stateless, and plain JSON rather than an SSE stream per response: no
      tool here sends notifications mid-call, so a stream carries nothing a
      JSON body does not, and JSON is what every client — including ChatGPT's

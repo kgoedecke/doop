@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AgentTask } from '../shared/types'
-import { distinctAgentNames, isAgentsTask } from '../shared/agentIdentity'
+import { isAgentsTask } from '../shared/agentIdentity'
 
 /* Tasks mirror into Postgres and broadcast; these tests read the log itself. */
 vi.mock('../server/db/persist.ts', () => ({
@@ -20,9 +20,9 @@ const { mcpAgentKey } = await import('../server/mcp.ts')
 
 /**
  * Two outside agents may go by one name: two people's Claude Code on a shared
- * canvas, or one person's two sessions. Each is its own agent: its own
- * presence, and its own tasks, which another agent's status or disconnect
- * never ends. shared/agentIdentity.ts
+ * canvas. Each is its own agent: its own presence, its own tasks, which
+ * another agent's status or disconnect never ends, and first pick of the
+ * feedback left on its work. shared/agentIdentity.ts
  */
 
 let canvasId: string
@@ -52,17 +52,16 @@ const claude = (agentKey: string, owner: string) => ({
 const open = (key: string) => actions.getTasks(canvasId).filter((t) => t.agentKey === key && !t.endedAt)
 
 describe('mcpAgentKey', () => {
-  it('is one agent only when account, session and name all match', () => {
-    const key = mcpAgentKey('user-a', 'session-1', 'Claude')
-    expect(mcpAgentKey('user-a', 'session-1', 'Claude')).toBe(key)
-    expect(mcpAgentKey('user-b', 'session-1', 'Claude')).not.toBe(key)
-    expect(mcpAgentKey('user-a', 'session-2', 'Claude')).not.toBe(key)
-    expect(mcpAgentKey('user-a', 'session-1', 'Codex')).not.toBe(key)
-    expect(mcpAgentKey('user-a', undefined, 'Claude')).not.toBe(key)
+  it('is one agent only when account and name both match', () => {
+    const key = mcpAgentKey('user-a', 'Claude')
+    expect(mcpAgentKey('user-a', 'Claude')).toBe(key)
+    expect(mcpAgentKey('user-b', 'Claude')).not.toBe(key)
+    expect(mcpAgentKey('user-a', 'Codex')).not.toBe(key)
+    expect(mcpAgentKey(undefined, 'Claude')).not.toBe(key)
   })
 
   it('names nobody: an opaque, short id', () => {
-    const key = mcpAgentKey('user-a', 'session-1', 'Claude')
+    const key = mcpAgentKey('user-a', 'Claude')
     expect(key).toMatch(/^mcp:[\w-]{22}$/)
     expect(key).not.toContain('user-a')
   })
@@ -117,15 +116,32 @@ describe('isAgentsTask', () => {
   })
 })
 
-describe('distinctAgentNames', () => {
-  it('numbers one owner’s agents sharing a name, and leaves everyone else alone', () => {
-    const names = distinctAgentNames([
-      { clientId: 'a1', name: 'Claude', kind: 'agent', owner: 'Ana' },
-      { clientId: 'b1', name: 'Claude', kind: 'agent', owner: 'Ben' },
-      { clientId: 'a2', name: 'Claude', kind: 'agent', owner: 'Ana' },
-      { clientId: 'u1', name: 'Claude', kind: 'user' },
-      { clientId: 'a3', name: 'Claude', kind: 'agent', owner: 'Ana' },
-    ])
-    expect(Object.fromEntries(names)).toEqual({ a2: 'Claude 2', a3: 'Claude 3' })
+describe('feedback on an agent’s work', () => {
+  const taskOf = (agent: ReturnType<typeof claude>, status: string) => {
+    actions.setAgentStatus(canvasId, agent, status)
+    return actions.getTasks(canvasId).find((t) => t.agentKey === agent.agentKey && !t.endedAt)!
+  }
+
+  it('waits a minute for the agent whose work it is about, then goes to whoever asks', () => {
+    vi.useFakeTimers()
+    try {
+      const ana = claude('mcp:ana', 'Ana')
+      const ben = claude('mcp:ben', 'Ben')
+      const fb = actions.addTaskFeedback(taskOf(ben, 'Building the footer').id, 'Kevin', 'Make it darker')!
+
+      expect(actions.openFeedbackFor(canvasId, ana)).toEqual([])
+      expect(actions.takeFeedbackFor(canvasId, ana)).toEqual([])
+      vi.advanceTimersByTime(actions.OWNER_FIRST_MS)
+      expect(actions.takeFeedbackFor(canvasId, ana).map((f) => f.id)).toEqual([fb.id])
+      expect(actions.takeFeedbackFor(canvasId, ben)).toEqual([])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('goes to its own agent at once', () => {
+    const ben = claude('mcp:ben', 'Ben')
+    const fb = actions.addTaskFeedback(taskOf(ben, 'Building the footer').id, 'Kevin', 'Make it darker')!
+    expect(actions.takeFeedbackFor(canvasId, ben).map((f) => f.id)).toEqual([fb.id])
   })
 })

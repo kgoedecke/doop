@@ -125,18 +125,19 @@
   is checked again when it runs) and `get_canvas` (`customAgents`) read it. Work left for an agent
   that is deleted or off goes to Doop. Routes: `/api/agents` and `/api/agents/builtin`
   (`?workspace=`, members only). Tests: `customAgents.test.ts`, `customAgentsHttp.test.ts`.
-- Agent identity (`shared/agentIdentity.ts`): an outside agent is its account, its MCP session and
-  its `agent_name`, not the name alone, so two people's "Claude" on a shared canvas, or one person's
-  two Claude Code sessions, are two agents with their own presence and tasks. `/mcp` is stateless,
-  but `mcpSessionId` hands each `initialize` a fresh `Mcp-Session-Id` that clients send back (the
-  SDK's stateless transport does not check it); `mcpAgentKey` hashes the three into the opaque
-  `agentKey` on the `Actor`, the presence (keyed and `clientId`'d by it) and the task
-  (`tasks.agent_key`, migration 0060). `set_status`, auto tasks, `endAgentTasks` on presence expiry
-  and the guidelines nudge match on it; a client that sends no session back is known by its account
-  alone. Resident roles carry no key and are their name. Work is still addressed by name
-  (`@Claude`, feedback, card pipelines): the first agent of that name to ask takes it. One owner's
-  same-named agents read "Claude", "Claude 2" in the presence stack (`distinctAgentNames`). Tests:
-  `agentIdentity.test.ts`, `agentIdentityHttp.test.ts`.
+- Agent identity (`shared/agentIdentity.ts`): an outside agent is its account and its `agent_name`,
+  not the name alone, so two people's "Claude" on a shared canvas are two agents with their own
+  presence and tasks. `mcpAgentKey` hashes the two into the opaque `agentKey` on the `Actor`, the
+  presence (keyed and `clientId`'d by it) and the task (`tasks.agent_key`, migration 0060);
+  `set_status`, auto tasks, `endAgentTasks` on presence expiry and the guidelines nudge match on it
+  (`isAgentsTask`), as do the editor's task and face fly-tos (`taskFrameId`, `locatePresence`).
+  Not the MCP session: in PostHog's `custom_agent_connected` (one per `initialize`) Codex and the
+  `openai-mcp` clients start a session every few seconds and Claude Code in bursts, so a session key
+  would split one agent into many; one person's two agents of one name stay one agent. Resident
+  roles carry no key and are their name. Feedback on an outside agent's task waits
+  `OWNER_FIRST_MS` (a minute, the presence lifetime) for that agent before any agent may take it,
+  and `get_feedback` and delivered feedback say whose work it is about (`whoseWork`). Tests:
+  `agentIdentity.test.ts`, `agentIdentityHttp.test.ts`, the shared-name cases in `locate.test.ts`.
 - Agent feedback (`server/agentFeedback.ts`, `shared/agentFeedback.ts`): agents talk to the Doop
   team through two MCP tools, which the resident agent has under the same names. `report_issue`
   (kind `issue`: `bug`, `tool_error`, `confusing`, `missing_capability`, `other`) is for where Doop

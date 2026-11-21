@@ -110,7 +110,10 @@ describe('human feedback on read-only MCP tools', () => {
         new_str: 'Hello',
         agent_name: 'Claude',
       })
-      expect(take).toHaveBeenCalledWith(CANVAS.id, 'Claude')
+      expect(take).toHaveBeenCalledWith(
+        CANVAS.id,
+        expect.objectContaining({ name: 'Claude', agentKey: expect.any(String) }),
+      )
       expect(raw).toContain(FEEDBACK.text)
     } finally {
       await close()
@@ -142,7 +145,10 @@ describe('human feedback on read-only MCP tools', () => {
     const { client, close } = await connect()
     try {
       const raw = await callText(client, tool, args)
-      expect(take).toHaveBeenCalledWith(CANVAS.id, 'Claude')
+      expect(take).toHaveBeenCalledWith(
+        CANVAS.id,
+        expect.objectContaining({ name: 'Claude', agentKey: expect.any(String) }),
+      )
       expect(raw).toContain(FEEDBACK.text)
     } finally {
       await close()
@@ -162,10 +168,10 @@ describe('openFeedbackFor', () => {
       decisions: empty,
       proposals: empty,
     })
-    expect(actions.openFeedbackFor('c-open', 'Claude').map((f) => f.id)).toEqual(['fb-real'])
+    expect(actions.openFeedbackFor('c-open', { name: 'Claude' }).map((f) => f.id)).toEqual(['fb-real'])
     expect(entry.deliveredAt).toBeUndefined()
-    expect(actions.takeFeedbackFor('c-open', 'Claude').map((f) => f.id)).toEqual(['fb-real'])
+    expect(actions.takeFeedbackFor('c-open', { name: 'Claude' }).map((f) => f.id)).toEqual(['fb-real'])
     expect(entry.claimedBy).toBe('Claude')
-    expect(actions.openFeedbackFor('c-open', 'Claude')).toEqual([])
+    expect(actions.openFeedbackFor('c-open', { name: 'Claude' })).toEqual([])
   })
 })

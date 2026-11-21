@@ -21,7 +21,7 @@ import { MAX_PAGES, PageLimitError, store } from './store.ts'
 import * as persist from './db/persist.ts'
 import * as thumbs from './thumbs.ts'
 import { colorFor } from '../shared/types.ts'
-import { agentKeyOf, isAgentsTask, taskAgentKey } from '../shared/agentIdentity.ts'
+import { agentKeyOf, isAgentsTask } from '../shared/agentIdentity.ts'
 import type { AgentBrand } from '../shared/agentBrand.ts'
 import type { StackWrite } from '../shared/frameStack.ts'
 import {
@@ -311,12 +311,6 @@ export function heartbeatAgent(canvasId: string, actor: Actor) {
   touch(canvasId, actor)
 }
 
-/** Same agent = same identity: its key where it has one (an outside agent,
- *  scoped to its account and MCP session), else its name. */
-function sameAgent(t: AgentTask, actor: Actor): boolean {
-  return isAgentsTask(t, actor)
-}
-
 /* ------------------------------------------------------------------ */
 /* Agent routing: a board card carries an ordered pipeline of roles and */
 /* is only ever visible to the role at its current stage. Feedback and  */
@@ -484,7 +478,7 @@ export function setAgentStatus(canvasId: string, actor: Actor, status: string) {
   const list = taskLog.get(canvasId) ?? []
   /* board cards stay open until explicitly completed — a status change
      narrates work ON a card, it doesn't end it */
-  const open = list.find((t) => sameAgent(t, actor) && !t.endedAt && !t.queuedBy)
+  const open = list.find((t) => isAgentsTask(t, actor) && !t.endedAt && !t.queuedBy)
   if (open?.status === clean) return // same status re-posted: nothing new
   const runStartedAt = open ? (open.runStartedAt ?? open.startedAt) : undefined
   if (open) {
@@ -550,6 +544,7 @@ export function addTaskFeedback(
       taskId,
       canvasId,
       agentName: task.agentName,
+      ...(task.agentKey ? { agentKey: task.agentKey } : {}),
       ...(target ? { targetAgent: target } : {}),
       from,
       ...(fromUserId ? { fromUserId } : {}),
@@ -573,26 +568,51 @@ export function addTaskFeedback(
   return undefined
 }
 
+/** How long feedback on an outside agent's task waits for that agent before
+ *  any agent may take it: the longest an agent's presence outlives its last
+ *  tool call (server/index.ts), so an agent still at work is asked first. */
+export const OWNER_FIRST_MS = 60_000
+
+/** Whether an outside agent may take feedback yet: anything once the agent
+ *  whose work it is about has had its minute, and its own feedback at once.
+ *  Resident roles (no key) are routed by `targetAgent` and never wait. */
+function ownerFirst(f: TaskFeedback, agent: Pick<Actor, 'name' | 'agentKey'>, now: number): boolean {
+  if (!f.agentKey || !agent.agentKey || f.agentKey === agent.agentKey) return true
+  return now - f.at >= OWNER_FIRST_MS
+}
+
 /** The feedback takeFeedbackFor would claim, left unclaimed: what read-only
  *  tools mention without assigning anything. */
-export function openFeedbackFor(canvasId: string, agentName: string, payer?: string, runner?: string): TaskFeedback[] {
+export function openFeedbackFor(
+  canvasId: string,
+  agent: Pick<Actor, 'name' | 'agentKey'>,
+  payer?: string,
+  runner?: string,
+): TaskFeedback[] {
   const roster = canvasRoster(canvasId)
+  const now = Date.now()
   return (feedbackLog.get(canvasId) ?? []).filter(
     (f) =>
       !f.deliveredAt &&
       !f.failedAt &&
-      feedbackFor(f, agentName, roster) &&
+      feedbackFor(f, agent.name, roster) &&
+      ownerFirst(f, agent, now) &&
       (payer === undefined || (f.fromUserId ?? '') === payer) &&
       (runner === undefined || runnerKey(feedbackRunner(f)) === runner),
   )
 }
 
-/** Open feedback this agent may take: everything addressed to it, plus
- *  untargeted feedback — that part stays a canvas-level queue where the first
- *  identified agent call wins. `runner` (a `runnerKey`) narrows the claim to
- *  one connection, since a run calls one model. */
-export function takeFeedbackFor(canvasId: string, agentName: string, payer?: string, runner?: string): TaskFeedback[] {
-  return claimFeedback(canvasId, agentName, false, payer, runner)
+/** Open feedback this outside agent may take: everything addressed to it,
+ *  plus untargeted feedback — that part stays a canvas-level queue where the
+ *  first identified agent call wins, after the agent whose work it is about
+ *  has had first pick (OWNER_FIRST_MS). */
+export function takeFeedbackFor(
+  canvasId: string,
+  agent: Pick<Actor, 'name' | 'agentKey'>,
+  payer?: string,
+  runner?: string,
+): TaskFeedback[] {
+  return claimFeedback(canvasId, agent, false, payer, runner)
 }
 
 /** takeFeedbackFor for a resident run: the claim is marked in-process, which
@@ -603,20 +623,22 @@ export function takeResidentFeedbackFor(
   payer?: string,
   runner?: string,
 ): TaskFeedback[] {
-  return claimFeedback(canvasId, agentName, true, payer, runner)
+  return claimFeedback(canvasId, { name: agentName }, true, payer, runner)
 }
 
+/** `runner` (a `runnerKey`) narrows the claim to one connection, since a run
+ *  calls one model. */
 function claimFeedback(
   canvasId: string,
-  agentName: string,
+  agent: Pick<Actor, 'name' | 'agentKey'>,
   resident: boolean,
   payer?: string,
   runner?: string,
 ): TaskFeedback[] {
-  const pending = openFeedbackFor(canvasId, agentName, payer, runner)
+  const pending = openFeedbackFor(canvasId, agent, payer, runner)
   for (const f of pending) {
     edit(f).deliveredAt = Date.now()
-    f.claimedBy = agentName
+    f.claimedBy = agent.name
     f.claimedByResident = resident
     stored.saveFeedback(f)
     broadcast(canvasId, { type: 'feedback', feedback: f }) // clients flip the entry to "picked up"
@@ -1322,7 +1344,7 @@ export function recordWorkReply(canvasId: string, work: { cardIds: string[]; fee
 
 /** True if the agent has an explicitly announced (non-auto) task open. */
 export function hasAnnouncedTask(canvasId: string, actor: Actor): boolean {
-  return (taskLog.get(canvasId) ?? []).some((t) => sameAgent(t, actor) && !t.endedAt && !t.auto)
+  return (taskLog.get(canvasId) ?? []).some((t) => isAgentsTask(t, actor) && !t.endedAt && !t.auto)
 }
 
 /** How many frames a task remembers — the Agents panel only ever jumps to the
@@ -1334,7 +1356,7 @@ const TASK_FRAMES_CAP = 20
  *  card and a set_status task can be open side by side — both are the work. */
 function trackTaskFrame(canvasId: string, actor: Actor, frameId: string) {
   for (const open of taskLog.get(canvasId) ?? []) {
-    if (!sameAgent(open, actor) || open.endedAt) continue
+    if (!isAgentsTask(open, actor) || open.endedAt) continue
     if (open.frameIds?.at(-1) === frameId) continue
     edit(open).frameIds = [...(open.frameIds ?? []).filter((id) => id !== frameId), frameId].slice(-TASK_FRAMES_CAP)
     stored.saveTask(canvasId, open)
@@ -1346,7 +1368,7 @@ function trackTaskFrame(canvasId: string, actor: Actor, frameId: string) {
    they are visibly doing, so the Tasks panel is never silently empty. */
 function autoTask(canvasId: string, actor: Actor, status: string, frameId: string) {
   const list = taskLog.get(canvasId) ?? []
-  if (list.some((t) => sameAgent(t, actor) && !t.endedAt)) {
+  if (list.some((t) => isAgentsTask(t, actor) && !t.endedAt)) {
     trackTaskFrame(canvasId, actor, frameId) // any open task wins — it just gains the frame
     return
   }
@@ -1367,7 +1389,7 @@ function autoTask(canvasId: string, actor: Actor, status: string, frameId: strin
 }
 
 function endAutoTask(canvasId: string, actor: Actor) {
-  const open = (taskLog.get(canvasId) ?? []).find((t) => sameAgent(t, actor) && !t.endedAt && t.auto)
+  const open = (taskLog.get(canvasId) ?? []).find((t) => isAgentsTask(t, actor) && !t.endedAt && t.auto)
   if (open) {
     edit(open).endedAt = Date.now()
     stored.saveTask(canvasId, open)
@@ -1379,9 +1401,8 @@ function endAutoTask(canvasId: string, actor: Actor) {
  *  agent's: another one sharing its name keeps working. */
 export function endAgentTasks(canvasId: string, agent: Pick<Actor, 'name' | 'agentKey'>) {
   const agentName = agent.name
-  const key = agentKeyOf(agent)
   for (const t of taskLog.get(canvasId) ?? []) {
-    if (t.agentName && taskAgentKey(t) === key && !t.endedAt) {
+    if (isAgentsTask(t, agent) && !t.endedAt) {
       if (t.queuedBy && t.failedAt) continue
       edit(t)
       if (t.queuedBy) {

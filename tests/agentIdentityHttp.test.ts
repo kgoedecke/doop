@@ -5,9 +5,10 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 import type { AgentTask, Presence } from '../shared/types'
 import { Client, startServer, type Server } from './harness.ts'
 
-/* Outside agents are told apart by account and MCP session, not by the name
-   they send: /mcp keeps no sessions, but hands each initialize an
-   Mcp-Session-Id that clients send back. shared/agentIdentity.ts */
+/* Outside agents are told apart by account and name, not by the name alone:
+   two people's "Claude" on a shared canvas are two agents. Not by MCP session,
+   which clients restart far more often than an agent starts work.
+   shared/agentIdentity.ts */
 
 let server: Server
 let owner: Client
@@ -26,20 +27,6 @@ async function connect(secret: string): Promise<McpClient> {
   )
   agents.push(agent)
   return agent
-}
-
-/** One tools/call on its own, with no session header: a client that never initialized. */
-async function bareCall(secret: string, name: string, args: Record<string, unknown>) {
-  const res = await fetch(`${server.base}/mcp`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Accept: 'application/json, text/event-stream',
-      Authorization: `Bearer ${secret}`,
-    },
-    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args } }),
-  })
-  expect(res.status).toBe(200)
 }
 
 /** What the room shows someone joining now: agent presences and open tasks. */
@@ -63,7 +50,8 @@ async function roomState(): Promise<{ agents: Presence[]; open: AgentTask[] }> {
 }
 
 beforeAll(async () => {
-  server = await startServer()
+  /* room for the feedback a person leaves (it counts against the resident allowance) */
+  server = await startServer({ RESIDENT_TASK_LIMIT: '100' })
   owner = await new Client(server).signUp('identity-owner@test.dev', 'Ana')
   visitor = await new Client(server).signUp('identity-visitor@test.dev', 'Ben')
   canvasId = (await (await owner.post('/api/canvases', { name: 'Shared' })).json()).id
@@ -77,62 +65,43 @@ afterAll(async () => {
   server?.stop()
 })
 
-it('hands each initialize its own session id', async () => {
-  const initialize = () =>
-    fetch(`${server.base}/mcp`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Accept: 'application/json, text/event-stream',
-        Authorization: `Bearer ${ownerKey}`,
-      },
-      body: JSON.stringify({
-        jsonrpc: '2.0',
-        id: 1,
-        method: 'initialize',
-        params: { protocolVersion: '2025-03-26', capabilities: {}, clientInfo: { name: 'probe', version: '1' } },
-      }),
-    })
-  const [first, second] = await Promise.all([initialize(), initialize()])
-  expect(first.status).toBe(200)
-  const ids = [first.headers.get('mcp-session-id'), second.headers.get('mcp-session-id')]
-  expect(ids[0]).toBeTruthy()
-  expect(ids[1]).toBeTruthy()
-  expect(ids[0]).not.toBe(ids[1])
-})
+const status = (agent: McpClient, text: string, name = 'Claude') =>
+  agent.callTool({ name: 'set_status', arguments: { canvas_id: canvasId, status: text, agent_name: name } })
 
-it('keeps two accounts’ and two sessions’ agents named "Claude" apart', async () => {
-  const anaFirst = await connect(ownerKey)
-  const anaSecond = await connect(ownerKey)
+it('keeps two accounts’ agents named "Claude" apart', async () => {
+  const ana = await connect(ownerKey)
   const ben = await connect(visitorKey)
-  const status = (agent: McpClient, text: string) =>
-    agent.callTool({ name: 'set_status', arguments: { canvas_id: canvasId, status: text, agent_name: 'Claude' } })
-
-  for (const result of [
-    await status(anaFirst, 'Drawing the hero'),
-    await status(anaSecond, 'Writing the pricing page'),
-    await status(ben, 'Building the footer'),
-  ])
-    expect(result.isError).toBeFalsy()
-  /* a new status ends the agent's own previous task, never another's */
-  expect((await status(anaFirst, 'Reviewing the hero')).isError).toBeFalsy()
+  expect((await status(ana, 'Drawing the hero')).isError).toBeFalsy()
+  expect((await status(ben, 'Building the footer')).isError).toBeFalsy()
+  /* a new status ends the agent's own previous task, never the other's */
+  expect((await status(ana, 'Reviewing the hero')).isError).toBeFalsy()
 
   const { agents: faces, open } = await roomState()
-  expect(faces).toHaveLength(3)
-  expect(new Set(faces.map((p) => p.clientId)).size).toBe(3)
-  expect(faces.map((p) => p.owner).sort()).toEqual(['Ana', 'Ana', 'Ben'])
-  expect(open.map((t) => t.status).sort()).toEqual([
-    'Building the footer',
-    'Reviewing the hero',
-    'Writing the pricing page',
-  ])
-  expect(new Set(open.map((t) => t.agentKey)).size).toBe(3)
+  const claudes = faces.filter((p) => p.name === 'Claude')
+  expect(claudes.map((p) => p.owner).sort()).toEqual(['Ana', 'Ben'])
+  expect(new Set(claudes.map((p) => p.clientId)).size).toBe(2)
+  const claudeTasks = open.filter((t) => t.agentName === 'Claude')
+  expect(claudeTasks.map((t) => t.status).sort()).toEqual(['Building the footer', 'Reviewing the hero'])
+  expect(new Set(claudeTasks.map((t) => t.agentKey)).size).toBe(2)
 })
 
-it('knows a client that sends no session back by its account', async () => {
-  await bareCall(visitorKey, 'set_status', { canvas_id: canvasId, status: 'Checking contrast', agent_name: 'Scout' })
-  await bareCall(visitorKey, 'set_status', { canvas_id: canvasId, status: 'Checking spacing', agent_name: 'Scout' })
+it('knows one account’s connections going by one name as one agent', async () => {
+  const first = await connect(ownerKey)
+  const second = await connect(ownerKey)
+  await status(first, 'Checking contrast', 'Scout')
+  await status(second, 'Checking spacing', 'Scout')
   const { agents: faces, open } = await roomState()
   expect(faces.filter((p) => p.name === 'Scout')).toHaveLength(1)
   expect(open.filter((t) => t.agentName === 'Scout').map((t) => t.status)).toEqual(['Checking spacing'])
+})
+
+it('tells an agent the feedback it claims is another Claude’s work', async () => {
+  const { open } = await roomState()
+  const bens = open.find((t) => t.status === 'Building the footer')!
+  expect((await owner.post(`/api/tasks/${bens.id}/feedback`, { text: 'Darker, please' })).status).toBe(200)
+  /* Ben's Claude gets first pick; Ana's would wait out OWNER_FIRST_MS */
+  const ben = await connect(visitorKey)
+  const result = await ben.callTool({ name: 'get_feedback', arguments: { canvas_id: canvasId, agent_name: 'Claude' } })
+  const body = JSON.parse((result.content as { text: string }[])[0]!.text) as { feedback: { about?: string }[] }
+  expect(body.feedback.map((f) => f.about)).toEqual(['your work: “Building the footer”'])
 })

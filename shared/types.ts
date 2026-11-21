@@ -496,6 +496,10 @@ export interface TaskFeedback {
   canvasId: string
   /** whose work the feedback is about (the task's agent), not who must handle it */
   agentName: string
+  /** that agent's identity (shared/agentIdentity.ts), which gets first pick
+   *  for a minute (OWNER_FIRST_MS). Not stored: after a restart nobody is
+   *  still at work to wait for. */
+  agentKey?: string
   /** the resident agent this is routed to; unset = open to any agent */
   targetAgent?: string
   from: string
