@@ -1,5 +1,5 @@
-import { useEffect } from 'react'
-import type { ReactNode } from 'react'
+import { useEffect, useRef } from 'react'
+import type { PointerEvent as ReactPointerEvent, ReactNode } from 'react'
 import { api } from '../lib/api'
 import { posthog } from '../lib/posthog'
 import { navigate } from '../App'
@@ -19,6 +19,7 @@ import {
   closeOtherTabs,
   closeTab,
   ensureTab,
+  moveTab,
   openCanvasTab,
   openExternal,
   useTabs,
@@ -43,11 +44,16 @@ export function DesktopTabs({ path }: { path: string }) {
   const t = useT()
   const tabs = useTabs((s) => s.tabs)
   const activeId = path.match(/^\/c\/([^/]+)/)?.[1] ?? null
+  const listRef = useRef<HTMLDivElement>(null)
+  const cancelDrag = useRef<(() => void) | null>(null)
 
   /* deep links and back/forward can land on a canvas the strip never opened */
   useEffect(() => {
     if (activeId) ensureTab(activeId)
   }, [activeId])
+
+  /* an unmount mid-drag drops the document listeners the gesture added */
+  useEffect(() => () => cancelDrag.current?.(), [])
 
   if (!isDesktopShell()) return null
 
@@ -55,6 +61,108 @@ export function DesktopTabs({ path }: { path: string }) {
     const canvas = await api.createCanvas('Untitled canvas')
     posthog.capture('canvas_created')
     openCanvasTab(canvas.id, canvas.name)
+  }
+
+  /* Reordering is a pointer gesture, not HTML5 drag-and-drop: the shell's
+     webview drag-drop handler swallows those events on Linux and Windows.
+     The DOM never reorders mid-gesture — siblings slide by transform to
+     open the gap and the drop commits moveTab — so a cancel has nothing
+     to undo. Listeners live on the document because the drag only starts
+     (and captures the pointer) after a 4px move, by which point the
+     pointer may already be off the tab. */
+  function onTabPointerDown(e: ReactPointerEvent<HTMLDivElement>, tab: CanvasTab, index: number) {
+    /* only the primary button drags: middle click stays Close, right click
+       stays the context menu, and a touch keeps scrolling the strip */
+    if (e.button !== 0 || e.pointerType === 'touch') return
+    /* the close button is the tab's only button — a press there is its own gesture */
+    if ((e.target as Element).closest('button')) return
+    if (!listRef.current) return
+    const list = listRef.current
+    cancelDrag.current?.()
+    const el = e.currentTarget
+    const d = {
+      id: tab.id,
+      from: index,
+      target: index,
+      startX: e.clientX,
+      width: 0,
+      min: 0,
+      max: 0,
+      mids: [] as number[],
+      dragging: false,
+    }
+    function move(ev: PointerEvent) {
+      if (!d.dragging) {
+        /* inside the threshold the gesture is still a candidate click */
+        if (Math.abs(ev.clientX - d.startX) < 4) return
+        el.setPointerCapture(ev.pointerId)
+        /* geometry freezes here: siblings slide by transform only, so
+           their midpoints stay the drop boundaries until pointerup */
+        const rect = el.getBoundingClientRect()
+        const rects = Array.from(list.children, (c) => c.getBoundingClientRect())
+        const first = rects[0]
+        const last = rects[rects.length - 1]
+        if (!first || !last) return
+        d.width = rect.width
+        d.min = first.left - rect.left
+        d.max = last.right - rect.right
+        d.mids = rects.filter((_, i) => i !== d.from).map((r) => r.left + r.width / 2)
+        d.dragging = true
+        el.style.zIndex = '1'
+        for (const [i, child] of Array.from(list.children).entries())
+          if (i !== d.from) (child as HTMLElement).style.transition = 'transform 150ms ease-out'
+      }
+      const dx = Math.min(Math.max(ev.clientX - d.startX, d.min), d.max)
+      el.style.transform = `translateX(${dx}px)`
+      /* the drop slot counts the sibling midpoints the pointer has passed */
+      d.target = d.mids.filter((m) => ev.clientX > m).length
+      for (const [i, child] of Array.from(list.children).entries()) {
+        if (i === d.from) continue
+        const shift =
+          d.target > d.from && i > d.from && i <= d.target
+            ? -d.width
+            : d.target < d.from && i >= d.target && i < d.from
+              ? d.width
+              : 0
+        ;(child as HTMLElement).style.transform = shift ? `translateX(${shift}px)` : ''
+      }
+    }
+    function finish(commit: boolean) {
+      document.removeEventListener('pointermove', move)
+      document.removeEventListener('pointerup', up)
+      document.removeEventListener('pointercancel', cancel)
+      document.removeEventListener('keydown', key, true)
+      cancelDrag.current = null
+      for (const child of Array.from(list.children) as HTMLElement[]) {
+        child.style.transition = ''
+        child.style.transform = ''
+        child.style.zIndex = ''
+      }
+      if (!commit || !d.dragging) return
+      moveTab(d.id, d.target)
+      /* the click that lands after a drop must not navigate — the pointer
+         can be over a different tab by then */
+      const eat = (ev: MouseEvent) => {
+        ev.preventDefault()
+        ev.stopPropagation()
+      }
+      document.addEventListener('click', eat, { capture: true, once: true })
+      setTimeout(() => document.removeEventListener('click', eat, true), 0)
+    }
+    function up() {
+      finish(true)
+    }
+    function cancel() {
+      finish(false)
+    }
+    function key(ev: KeyboardEvent) {
+      if (ev.key === 'Escape') finish(false)
+    }
+    document.addEventListener('pointermove', move)
+    document.addEventListener('pointerup', up)
+    document.addEventListener('pointercancel', cancel)
+    document.addEventListener('keydown', key, true)
+    cancelDrag.current = cancel
   }
 
   return (
@@ -74,6 +182,7 @@ export function DesktopTabs({ path }: { path: string }) {
         <Logo className="size-[18px]" />
       </button>
       <div
+        ref={listRef}
         role="tablist"
         aria-label={t('canvas.openCanvases')}
         className="flex min-w-0 items-end overflow-x-auto overflow-y-hidden [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
@@ -89,9 +198,10 @@ export function DesktopTabs({ path }: { path: string }) {
                   tabIndex={0}
                   title={withShortcut(tab.name, index + 1)}
                   className={cn(
-                    'group relative -mb-px flex h-[36px] min-w-[110px] max-w-[210px] flex-1 basis-[210px] cursor-default items-center gap-1 rounded-t-[9px] border border-b-0 border-transparent pb-[2px] pl-3 pr-1.5 text-[12.5px] text-ink-soft',
+                    'group relative -mb-px flex h-[36px] min-w-[110px] max-w-[210px] flex-1 basis-[210px] cursor-default select-none items-center gap-1 rounded-t-[9px] border border-b-0 border-transparent pb-[2px] pl-3 pr-1.5 text-[12.5px] text-ink-soft',
                     on ? 'border-line bg-surface text-ink' : 'transition-colors hover:bg-ink/[0.04]',
                   )}
+                  onPointerDown={(e) => onTabPointerDown(e, tab, index)}
                   onClick={() => navigate(`/c/${tab.id}`)}
                   onKeyDown={(e) => e.key === 'Enter' && navigate(`/c/${tab.id}`)}
                   onAuxClick={(e) => e.button === 1 && closeTab(tab.id, path)}
