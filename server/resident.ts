@@ -1,5 +1,6 @@
 import { env } from './env.ts'
 import { MAX_DECISION_CHARS } from '../shared/designDecisions.ts'
+import { isAgentsTask } from '../shared/agentIdentity.ts'
 import type Anthropic from '@anthropic-ai/sdk'
 import { store } from './store.ts'
 import { layerExport } from './layerExport.ts'
@@ -1229,7 +1230,7 @@ export function settleComments(
 
 /** What the agent's panel entry currently says, or '' when nothing is open. */
 function currentStatus(canvasId: string, actor: Actor): string {
-  return actions.getTasks(canvasId).find((t) => t.agentName === actor.name && !t.endedAt && !t.queuedBy)?.status ?? ''
+  return actions.getTasks(canvasId).find((t) => isAgentsTask(t, actor) && !t.endedAt && !t.queuedBy)?.status ?? ''
 }
 
 const TOOLS: Anthropic.Tool[] = [

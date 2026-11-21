@@ -1,5 +1,6 @@
 import { env } from './env.ts'
 import { resolveAgentBrand } from '../shared/agentBrand.ts'
+import { agentKeyOf, isAgentsTask } from '../shared/agentIdentity.ts'
 import { MAX_DECISION_CHARS } from '../shared/designDecisions.ts'
 import packageJson from '../package.json' with { type: 'json' }
 import { createHash } from 'node:crypto'
@@ -244,7 +245,7 @@ function withGuidelinesNudge<T extends { content: { type: 'text' | 'image'; [k: 
 ): T {
   if (!actor) return result
   const docs = store.getGuidelines(canvasId)
-  if (docs.length === 0 || actions.hasSeenGuidelines(canvasId, actor.name)) return result
+  if (docs.length === 0 || actions.hasSeenGuidelines(canvasId, agentKeyOf(actor))) return result
   result.content.push({
     type: 'text' as const,
     text: `This canvas has style guides you have not read: ${docs.map((d) => d.name).join(', ')}. Call get_guidelines({ canvas_id, name }) for each relevant one NOW and make your design follow them.`,
@@ -252,17 +253,25 @@ function withGuidelinesNudge<T extends { content: { type: 'text' | 'image'; [k: 
   return result
 }
 
+/** Whose work a task is, as the agent reading about it should hear it: its
+ *  own, another agent's, or another agent going by its own name (two
+ *  people's agents may both be "Claude"). */
+function whoseWork(task: { agentName: string; agentKey?: string }, actor: Actor): string {
+  if (isAgentsTask(task, actor)) return 'your'
+  if (task.agentName === actor.name) return `another ${task.agentName}’s`
+  return `${task.agentName}’s`
+}
+
 /** Append any undelivered human feedback for this agent to a tool result.
  *  MCP is pull-based, so this is the channel through which humans steer agents. */
 function appendFeedback<T extends ToolContent>(result: T, canvasId: string, actor?: Actor): T {
   if (!actor) return result
-  const pending = actions.takeFeedbackFor(canvasId, actor.name)
+  const pending = actions.takeFeedbackFor(canvasId, actor)
   if (pending.length === 0) return result
   const tasks = actions.getTasks(canvasId)
   const lines = pending.map((f) => {
     const task = tasks.find((t) => t.id === f.taskId)
-    const mine = task && task.agentName === actor.name
-    const about = task ? ` (about ${mine ? 'your' : `${task.agentName}’s`} work: “${task.status}”)` : ''
+    const about = task ? ` (about ${whoseWork(task, actor)} work: “${task.status}”)` : ''
     return `- ${f.from}${about}: ${f.text}`
   })
   result.content.push({
@@ -277,7 +286,7 @@ function appendFeedback<T extends ToolContent>(result: T, canvasId: string, acto
  *  stays with get_feedback and the tools that change the canvas. */
 function appendFeedbackNotice<T extends ToolContent>(result: T, canvasId: string, actor?: Actor): T {
   if (!actor) return result
-  const open = actions.openFeedbackFor(canvasId, actor.name).length
+  const open = actions.openFeedbackFor(canvasId, actor).length
   if (open === 0) return result
   result.content.push({
     type: 'text' as const,
@@ -379,8 +388,15 @@ function frameSummary(
  *  name remembered from initialize, else the OAuth application's): feedback
  *  records it and agent presence reads its brand from it. */
 export function buildMcpServer(owner?: string, ownerId?: string, clientName?: string): McpServer {
-  const actorFrom = (agent_name?: string) =>
-    actions.resolveActor({ name: agent_name, kind: 'agent', owner, brand: resolveAgentBrand(clientName, agent_name) })
+  const actorFrom = (agent_name?: string) => {
+    const actor = actions.resolveActor({
+      name: agent_name,
+      kind: 'agent',
+      owner,
+      brand: resolveAgentBrand(clientName, agent_name),
+    })
+    return { ...actor, agentKey: mcpAgentKey(ownerId, actor.name) }
+  }
   /* Canvas access for agents mirrors the web UI: the OAuth user's id runs
      through the same canvasRole gate as browser sessions, so an agent
      connected by someone holding a view or comment link reads but cannot
@@ -769,7 +785,7 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
     },
     async ({ canvas_id, agent_name }) => {
       if (!canvasFor(canvas_id, 'view')) return noCanvas(canvas_id)
-      if (agent_name) actions.markGuidelinesSeen(canvas_id, actorFrom(agent_name).name)
+      if (agent_name) actions.markGuidelinesSeen(canvas_id, agentKeyOf(actorFrom(agent_name)))
       const docs = store.getGuidelines(canvas_id)
       if (docs.length === 0)
         return text({
@@ -817,7 +833,7 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
             : `no style guides on this canvas yet`,
         )
       }
-      if (agent_name) actions.markGuidelinesSeen(canvas_id, actorFrom(agent_name).name)
+      if (agent_name) actions.markGuidelinesSeen(canvas_id, agentKeyOf(actorFrom(agent_name)))
       return withFeedbackNotice(text(doc.markdown), canvas_id, agent_name ? actorFrom(agent_name) : undefined)
     },
   )
@@ -849,7 +865,7 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
       const actor = actorFrom(agent_name)
       try {
         const doc = actions.setGuideline(canvas_id, name, markdown, actor, undefined, title)
-        actions.markGuidelinesSeen(canvas_id, actor.name)
+        actions.markGuidelinesSeen(canvas_id, agentKeyOf(actor))
         return withFeedback(
           text(
             doc
@@ -1272,7 +1288,8 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
     },
     async ({ canvas_id, agent_name }) => {
       if (!canvasFor(canvas_id, 'edit')) return noCanvas(canvas_id)
-      const fbs = actions.takeFeedbackFor(canvas_id, actorFrom(agent_name).name)
+      const actor = actorFrom(agent_name)
+      const fbs = actions.takeFeedbackFor(canvas_id, actor)
       if (fbs.length === 0) return text({ feedback: [], note: 'No open feedback requests right now.' })
       const tasks = actions.getTasks(canvas_id)
       return text({
@@ -1281,7 +1298,7 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
           return {
             from: f.from,
             text: f.text,
-            about: task ? `${task.agentName}: “${task.status}”` : undefined,
+            about: task ? `${whoseWork(task, actor)} work: “${task.status}”` : undefined,
             at: new Date(f.at).toISOString(),
           }
         }),
@@ -2694,6 +2711,21 @@ const clientNamesByCredential = new Map<string, string>()
 const oauthClientNames = new Map<string, string | undefined>()
 
 const credentialKey = (bearer: string) => createHash('sha256').update(bearer).digest('hex')
+
+/** An outside agent's identity (shared/agentIdentity.ts): its account and
+ *  the name it goes by, hashed so it can be shown and stored. Two people's
+ *  agents sharing a name are two agents.
+ *
+ *  Not the MCP session: clients start sessions far more often than an agent
+ *  starts work (Codex and other OpenAI clients one per tool call, Claude Code
+ *  in bursts), so a session-scoped key would split one agent into many. One
+ *  person's two agents of one name are therefore one agent. */
+export function mcpAgentKey(ownerId: string | undefined, name: string): string {
+  const digest = createHash('sha256')
+    .update(JSON.stringify([ownerId ?? '', name]))
+    .digest('base64url')
+  return `mcp:${digest.slice(0, 22)}`
+}
 
 function rememberClientName(bearer: string, name: unknown) {
   if (typeof name !== 'string' || !name.trim()) return

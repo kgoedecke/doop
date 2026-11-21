@@ -341,6 +341,8 @@ export const tasks = pgTable(
     id: text('id').primaryKey(),
     canvasId: text('canvas_id').notNull(),
     agentName: text('agent_name').notNull(),
+    /** an outside agent's identity when its name is not enough (shared/agentIdentity.ts) */
+    agentKey: text('agent_key'),
     owner: text('owner'),
     color: text('color').notNull(),
     status: text('status').notNull(),

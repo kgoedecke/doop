@@ -1,4 +1,5 @@
 import type { AgentTask } from '../../shared/types'
+import { isAgentsTask } from '../../shared/agentIdentity'
 import type { useStore } from './store'
 
 type State = ReturnType<typeof useStore.getState>
@@ -14,8 +15,9 @@ export function taskFrameId(task: AgentTask, s: State): string | undefined {
     if (id) return id
   }
   if (task.endedAt || task.failedAt) return undefined
-  const live = Object.values(s.presences).find((p) => p.kind === 'agent' && p.name === task.agentName)
+  /* by the task's agent, not its name: two agents may both be "Claude" */
+  const live = Object.values(s.presences).find((p) => p.kind === 'agent' && isAgentsTask(task, p))
   const focused = exists(live?.activeFrameId)
   if (focused) return focused
-  return exists(Object.entries(s.streams).find(([, actor]) => actor.name === task.agentName)?.[0])
+  return exists(Object.entries(s.streams).find(([, actor]) => isAgentsTask(task, actor))?.[0])
 }

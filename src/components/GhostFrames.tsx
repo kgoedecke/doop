@@ -1,4 +1,5 @@
 import { canvasPages } from '../../shared/pages'
+import { isAgentsTask } from '../../shared/agentIdentity'
 import { useStore } from '../lib/store'
 import { useT } from '../lib/i18n'
 import { AgentIcon } from './AgentIcon'
@@ -23,7 +24,7 @@ export function GhostFrames() {
       p.kind === 'agent' &&
       p.status &&
       !p.activeFrameId &&
-      tasks.some((task) => task.queuedBy && task.agentName === p.name && !task.endedAt && !task.failedAt),
+      tasks.some((task) => task.queuedBy && isAgentsTask(task, p) && !task.endedAt && !task.failedAt),
   )
   if (working.length === 0) return null
   /* mirror store.createFrame's auto-placement: right of the right-most frame */

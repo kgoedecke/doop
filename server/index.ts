@@ -151,6 +151,7 @@ import type { CanvasSkills } from '../shared/skills.ts'
 import { skillsRouter } from './skillRoutes.ts'
 import { activeAgentTasks } from '../shared/agentActivity.ts'
 import { colorFor } from '../shared/types.ts'
+import { agentKeyOf } from '../shared/agentIdentity.ts'
 import { isPeerViewport } from '../shared/viewport.ts'
 import { exportScaleSuffix, fitExportScale, fullFrameRenderScale, parseExportScale } from '../shared/exportScale.ts'
 import { emailShare } from './canvasShares.ts'
@@ -349,39 +350,42 @@ function broadcast(canvasId: string, msg: ServerMessage, excludeClientId?: strin
 interface AgentPresence extends Presence {
   lastSeen: number
 }
-const agentPresences = new Map<string, Map<string, AgentPresence>>() // canvasId -> name -> presence
+const agentPresences = new Map<string, Map<string, AgentPresence>>() // canvasId -> agent identity -> presence
 
 function agentTouch(
   canvasId: string,
-  agentName: string,
+  agent: Pick<Actor, 'name' | 'owner' | 'brand' | 'agentKey'>,
   frameId?: string | null,
   status?: string | null,
-  identity?: Pick<Actor, 'owner' | 'brand'>,
 ) {
-  const owner = identity?.owner
-  let byName = agentPresences.get(canvasId)
-  if (!byName) agentPresences.set(canvasId, (byName = new Map()))
-  let p = byName.get(agentName)
+  const owner = agent.owner
+  /* one presence per agent identity (shared/agentIdentity.ts), not per name:
+     two agents both called "Claude" are two faces */
+  const key = agentKeyOf(agent)
+  let byKey = agentPresences.get(canvasId)
+  if (!byKey) agentPresences.set(canvasId, (byKey = new Map()))
+  let p = byKey.get(key)
   const isNew = !p
   if (!p) {
     p = {
-      clientId: `agent:${agentName}`,
-      name: agentName,
-      color: colorFor(agentName),
+      clientId: `agent:${key}`,
+      name: agent.name,
+      color: colorFor(agent.name),
       kind: 'agent',
       owner,
-      brand: identity?.brand,
+      brand: agent.brand,
+      ...(agent.agentKey ? { agentKey: agent.agentKey } : {}),
       lastSeen: Date.now(),
       activeFrameId: frameId ?? null,
     }
-    byName.set(agentName, p)
+    byKey.set(key, p)
   }
   p.lastSeen = Date.now()
   if (owner && !p.owner) p.owner = owner
   /* a presence first seen through a task update has no client to read; the
      next tool call brings one, and viewers get the presence again */
-  const learnedBrand = !isNew && !!identity?.brand && p.brand !== identity.brand
-  if (learnedBrand) p.brand = identity?.brand
+  const learnedBrand = !isNew && !!agent.brand && p.brand !== agent.brand
+  if (learnedBrand) p.brand = agent.brand
   if (frameId !== undefined) p.activeFrameId = frameId
   let statusChanged = false
   if (status !== undefined) {
@@ -405,14 +409,14 @@ function agentTouch(
 
 setInterval(() => {
   const now = Date.now()
-  for (const [canvasId, byName] of agentPresences) {
-    for (const [name, p] of byName) {
+  for (const [canvasId, byKey] of agentPresences) {
+    for (const [key, p] of byKey) {
       /* an agent with a posted status is likely thinking between tool calls —
          keep it (and its status) on screen longer before expiring */
       if (now - p.lastSeen > (p.status ? 60_000 : 20_000)) {
-        byName.delete(name)
+        byKey.delete(key)
         broadcast(canvasId, { type: 'presence:leave', clientId: p.clientId })
-        actions.endAgentTasks(canvasId, p.name) // an agent that went silent is no longer "working on" anything
+        actions.endAgentTasks(canvasId, p) // an agent that went silent is no longer "working on" anything
       }
     }
   }
