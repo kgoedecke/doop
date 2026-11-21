@@ -736,4 +736,94 @@ describe.skipIf(!findBrowserPath())('element resize handles', () => {
     await page.mouse.move(surface.left - 20, surface.top - 20)
     await page.waitForFunction(() => !document.querySelector('[data-hover-outline]'))
   }, 20_000)
+
+  /* a box under a slow `transition: all`: an edit must land at once, while
+     the design keeps its transition for everything that is not an edit */
+  const slowBox = (padding: number, important = false) => `<!doctype html><html><head><style>
+    body { margin: 0; padding: 20px }
+    #slow { width: 100px; height: 40px; padding: 0 ${padding}px; background: #111;
+      transition: all 10s linear${important ? ' !important' : ''} }
+  </style></head><body><div id="slow"></div></body></html>`
+  async function slowWidth() {
+    const frame = (await frameDoc())!
+    return frame.$eval('#slow', (el) => el.getBoundingClientRect().width)
+  }
+  async function slowTransition() {
+    const frame = (await frameDoc())!
+    return frame.$eval('#slow', (el) => getComputedStyle(el).transitionDuration)
+  }
+  async function grips() {
+    return page.$eval('[data-resize-handles]', (el) => (el instanceof HTMLElement ? parseFloat(el.style.width) : null))
+  }
+
+  it('keeps a transitioning element under the pointer while a grip is dragged', async () => {
+    await reset(slowBox(10))
+    const frame = (await frameDoc())!
+    await frame.waitForFunction(() => document.getElementById('slow')!.getAnimations().length === 0)
+    await select('#slow')
+    const from = await handle('e')
+    await page.mouse.move(from.x, from.y)
+    await page.mouse.down()
+    await page.mouse.move(from.x + 40, from.y, { steps: 3 })
+    await expect.poll(slowWidth, { timeout: 1_000 }).toBe(160)
+    await expect.poll(grips, { timeout: 1_000 }).toBe(160)
+    /* Escape puts it back at once, too, not over ten seconds */
+    await page.keyboard.press('Escape')
+    await expect.poll(slowWidth, { timeout: 1_000 }).toBe(120)
+    await page.mouse.up()
+
+    await select('#slow')
+    await drag('e', 30, 0)
+    await expect.poll(slowWidth, { timeout: 1_000 }).toBe(150)
+    await expect.poll(() => saved.html).toContain('width: 130px')
+    /* the hold is lifted: the design's own transition is back */
+    /* the hold lifts when the gesture's end reaches the frame, a message away */
+    await expect.poll(slowTransition, { timeout: 1_000 }).toBe('10s')
+  }, 20_000)
+
+  it('outlines the size an update settles at, not a frame of its transition', async () => {
+    await reset(slowBox(10))
+    const frame = (await frameDoc())!
+    await frame.waitForFunction(() => document.getElementById('slow')!.getAnimations().length === 0)
+    await select('#slow')
+    expect(await grips()).toBe(120)
+    saved = { ...saved, html: slowBox(40), updatedAt: saved.updatedAt + 1 }
+    await page.evaluate((next) => window.elementPanelHarness.remote(next), saved)
+    await expect.poll(slowWidth, { timeout: 1_000 }).toBe(180)
+    await expect.poll(grips, { timeout: 1_000 }).toBe(180)
+    expect(await frame.$eval('#slow', (el) => el.getAnimations().length)).toBe(0)
+    /* the hold lifts when the gesture's end reaches the frame, a message away */
+    await expect.poll(slowTransition, { timeout: 1_000 }).toBe('10s')
+  }, 20_000)
+
+  it("holds a design's own !important transition while a grip is dragged", async () => {
+    await reset(slowBox(10, true))
+    const frame = (await frameDoc())!
+    await frame.waitForFunction(() => document.getElementById('slow')!.getAnimations().length === 0)
+    await select('#slow')
+    const from = await handle('e')
+    await page.mouse.move(from.x, from.y)
+    await page.mouse.down()
+    await page.mouse.move(from.x + 40, from.y, { steps: 3 })
+    await expect.poll(slowWidth, { timeout: 1_000 }).toBe(160)
+    await page.keyboard.press('Escape')
+    await page.mouse.up()
+    /* the hold lifts when the gesture's end reaches the frame, a message away */
+    await expect.poll(slowTransition, { timeout: 1_000 }).toBe('10s')
+  }, 20_000)
+
+  it('turns an element at once when the Rotation control sets it', async () => {
+    await reset(slowBox(10))
+    const frame = (await frameDoc())!
+    await frame.waitForFunction(() => document.getElementById('slow')!.getAnimations().length === 0)
+    await select('#slow')
+    await page.evaluate(() => window.elementPanelHarness.geometry('#slow', { kind: 'rotate', value: 30 }))
+    expect(await frame.$eval('#slow', (el) => [getComputedStyle(el).rotate, el.getAnimations().length])).toEqual([
+      '30deg',
+      0,
+    ])
+    await expect.poll(() => saved.html).toContain('rotate: 30deg')
+    /* the hold lifts when the gesture's end reaches the frame, a message away */
+    await expect.poll(slowTransition, { timeout: 1_000 }).toBe('10s')
+  }, 20_000)
 })

@@ -249,8 +249,6 @@ interface RenderOptions {
   shallow?: boolean
   /** the instance being rendered: what a nested instance's id is derived from */
   ownerId?: string
-  /** a whole write: nothing more is coming, so an unclosed <doop-use> in slot or override content is placed too */
-  final?: boolean
 }
 
 /** A nested instance has no place of its own to keep an id: the template owns its markup, and the
@@ -348,7 +346,7 @@ function renderPart(
   setAttr(el, SLOT_SUGGEST_ATTR, null)
   if (part) applyPartOverride(el, part)
   const isSlot = attrOf(el, SLOT_ATTR) !== undefined
-  const content = (html: string) => expandUses(html, options.ctx, [], options.depth, { final: options.final })
+  const content = (html: string) => expandOverride(html, options.ctx, options.depth)
   if (part?.html !== undefined) {
     setChildrenFromHtml(el, options.shallow ? part.html : content(part.html))
     return
@@ -1039,7 +1037,8 @@ function serializeOuterWithoutSlot(el: Element): string {
 /* one out of a <table>, and the rest of the document stays byte-exact. */
 /* ------------------------------------------------------------------ */
 
-const OPAQUE = /<(script|style|textarea|title)\b[\s\S]*?<\/\1\s*>|<!--[\s\S]*?-->/gi
+/* the name ends where the tag's does: `<style-chip>` is a custom element, not a stylesheet */
+const OPAQUE = /<(script|style|textarea|title)(?=[\s/>])[\s\S]*?<\/\1\s*>|<!--[\s\S]*?-->/gi
 
 function opaqueRanges(html: string): [number, number][] {
   return [...html.matchAll(OPAQUE)].map((match) => [match.index, match.index + match[0].length])
@@ -1067,18 +1066,25 @@ interface UseSpan {
   unclosed?: boolean
 }
 
+/** The next `tag` (`<doop-use` or `</doop-use`) from `from` that is one: followed by the end of
+ *  its name (not `<doop-user-chip>`), and outside a script, style, textarea, title or comment. */
+function nextTag(html: string, tag: string, from: number, opaque: [number, number][]): number {
+  let at = indexOfAscii(html, tag, from)
+  while (at !== -1) {
+    const following = html[at + tag.length]
+    const inOpaque = opaque.some(([a, b]) => at >= a && at < b)
+    if (following && /[\s/>]/.test(following) && !inOpaque) return at
+    at = indexOfAscii(html, tag, at + 1)
+  }
+  return -1
+}
+
 /** The next complete `<doop-use>` from `from`. `lenient` (a whole write, nothing more to come)
  *  takes an open tag whose end never came as empty, so the ones after it still expand. */
 function nextUse(html: string, from: number, opaque: [number, number][], lenient = false): UseSpan | undefined {
   const open = `<${USE_TAG}`
   const close = `</${USE_TAG}`
-  let start = indexOfAscii(html, open, from)
-  while (start !== -1) {
-    const at = start
-    const following = html[at + open.length]
-    if (following && /[\s/>]/.test(following) && !opaque.some(([a, b]) => at >= a && at < b)) break
-    start = indexOfAscii(html, open, at + 1)
-  }
+  const start = nextTag(html, open, from, opaque)
   if (start === -1) return undefined
   const openEnd = tagEnd(html, start)
   if (openEnd === -1) return undefined
@@ -1088,8 +1094,8 @@ function nextUse(html: string, from: number, opaque: [number, number][], lenient
   let depth = 1
   let cursor = openEnd + 1
   while (depth > 0) {
-    const nextOpen = indexOfAscii(html, open, cursor)
-    const nextClose = indexOfAscii(html, close, cursor)
+    const nextOpen = nextTag(html, open, cursor, opaque)
+    const nextClose = nextTag(html, close, cursor, opaque)
     if (nextClose === -1)
       return lenient
         ? { start, end: openEnd + 1, openEnd, closeStart: openEnd + 1, selfClosing: true, unclosed: true }
@@ -1110,6 +1116,49 @@ function nextUse(html: string, from: number, opaque: [number, number][], lenient
   return undefined
 }
 
+/* the attribute itself, never the end of another's name (data-component) */
+const COMPONENT_ATTR_VALUE = /\scomponent\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>/]+))/i
+
+/** The component an open tag names, as written. */
+function componentRefIn(openTag: string): string {
+  const match = COMPONENT_ATTR_VALUE.exec(openTag)
+  return match?.[1] ?? match?.[2] ?? match?.[3] ?? ''
+}
+
+/** What a whole write does with a `<doop-use>` it leaves open: places it with no slot content. */
+function unclosedIssue(ref: string): ComponentIssue {
+  return {
+    code: 'unclosed_use',
+    component: ref,
+    message: `<${USE_TAG} component="${ref}"> was never closed with </${USE_TAG}>, so it was placed with no slot content. Close every <${USE_TAG}>, or write it self-closing.`,
+  }
+}
+
+/** The `<doop-use>` a whole write cannot read to its end (a quote never closed): the reader stops
+ *  there, so it and everything after it stay as written. */
+function stuckUse(html: string, from: number, opaque: [number, number][]): string | undefined {
+  const at = nextTag(html, `<${USE_TAG}`, from, opaque)
+  if (at === -1) return undefined
+  const end = html.indexOf('>', at)
+  return componentRefIn(html.slice(at, end === -1 ? undefined : end + 1))
+}
+
+/** The component of each `<doop-use>` a whole write of this markup would leave open, in document
+ *  order: what `expandUses` reports as `unclosed_use`, for markup that is parsed rather than
+ *  expanded (a component's template). A tag nested in an open one counts towards its parent. */
+export function unclosedUses(html: string): string[] {
+  if (indexOfAscii(html, `<${USE_TAG}`) === -1) return []
+  const opaque = opaqueRanges(html)
+  const refs: string[] = []
+  let cursor = 0
+  for (let span = nextUse(html, 0, opaque, true); span; span = nextUse(html, cursor, opaque, true)) {
+    if (span.unclosed) refs.push(componentRefIn(html.slice(span.start, span.openEnd)))
+    cursor = span.end
+  }
+  const stuck = stuckUse(html, cursor, opaque)
+  return stuck === undefined ? refs : [...refs, stuck]
+}
+
 /** Every complete `<doop-use>` in the HTML, written out in full. One still missing
  *  its end (mid-stream) stays as it is until a later pass; on a whole write (`final`)
  *  nothing more is coming, so it is taken as empty and reported. */
@@ -1126,27 +1175,27 @@ export function expandUses(
   let cursor = 0
   for (let span = nextUse(html, 0, opaque, final); span; span = nextUse(html, cursor, opaque, final)) {
     out += html.slice(cursor, span.start)
-    if (span.unclosed) {
-      const ref = /\bcomponent\s*=\s*["']([^"']*)["']/i.exec(html.slice(span.start, span.openEnd))?.[1] ?? ''
-      ctx.issues.push({
-        code: 'unclosed_use',
-        message: `<${USE_TAG} component="${ref}"> was never closed with </${USE_TAG}>, so it was placed with no slot content. Close every <${USE_TAG}>, or write it self-closing.`,
-      })
-    }
-    out += expandOne(html, span, ctx, stack, depth, final)
+    if (span.unclosed) ctx.issues.push(unclosedIssue(componentRefIn(html.slice(span.start, span.openEnd))))
+    out += expandOne(html, span, ctx, stack, depth)
     cursor = span.end
   }
+  /* a tag that cannot be read to its end leaves it and the rest as written: no less left open */
+  const stuck = final ? stuckUse(html, cursor, opaque) : undefined
+  if (stuck !== undefined) ctx.issues.push(unclosedIssue(stuck))
   return out + html.slice(cursor)
 }
 
-function expandOne(
-  html: string,
-  span: UseSpan,
-  ctx: EngineContext,
-  stack: string[],
-  depth: number,
-  final: boolean,
-): string {
+/** Slot or override content, which is whole by the time it renders (a closed use's slot, an
+ *  overrides string), mid-stream too: a <doop-use> it leaves open is placed empty, never left for
+ *  the parser to close, and its issue says no later chunk can close it (`inOverride`). */
+function expandOverride(html: string, ctx: EngineContext, depth: number | undefined): string {
+  const from = ctx.issues.length
+  const out = expandUses(html, ctx, [], depth, { final: true })
+  for (const issue of ctx.issues.slice(from)) if (issue.code === 'unclosed_use') issue.inOverride = true
+  return out
+}
+
+function expandOne(html: string, span: UseSpan, ctx: EngineContext, stack: string[], depth: number): string {
   const openTag = html.slice(span.start, span.openEnd + 1).replace(/\/>$/, '>')
   const inner = span.selfClosing ? '' : html.slice(span.openEnd + 1, span.closeStart)
   const use = elementKids(parseFragment(`${openTag}${inner}</${USE_TAG}>`))[0]
@@ -1170,7 +1219,7 @@ function expandOne(
     return ''
   }
   const state = stateFromUseAttrs(use, def, ctx)
-  const root = renderInstance(def, def, state.overrides, state.instanceId, { ctx, stack, depth, final })
+  const root = renderInstance(def, def, state.overrides, state.instanceId, { ctx, stack, depth })
   if (!root) return ''
   /* a template read back by update_component keeps the nested instance's key, and its overrides
      with it. One that names none gets no key from the component it renders: that is the

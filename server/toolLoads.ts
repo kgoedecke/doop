@@ -3,6 +3,7 @@ import { settleForRead } from './propagation.ts'
 import { store } from './store.ts'
 import { detached } from './journal.ts'
 import { runOperation } from './workBudget.ts'
+import { WriteRefusedError } from './writeRefusal.ts'
 
 /** The canvases a tool call names: `canvas_id`, and the canvases of
  *  `frame_id` / `frame_ids`. */
@@ -48,6 +49,13 @@ export function loadToolTargets(server: McpServer): void {
   server.registerTool = ((name: string, config: Parameters<Register>[1], callback: Callback) =>
     register(name, config, (async (...params: unknown[]) => {
       const forward = () => (callback as (...forwarded: unknown[]) => unknown)(...params)
-      return params.length > 1 ? withArgsCanvases(params[0], forward, name) : forward()
+      try {
+        return await (params.length > 1 ? withArgsCanvases(params[0], forward, name) : forward())
+      } catch (error) {
+        /* thrown out of the operation, which undid the write: the agent hears why */
+        if (error instanceof WriteRefusedError)
+          return { content: [{ type: 'text' as const, text: `Error: ${error.message}` }], isError: true }
+        throw error
+      }
     }) as unknown as Callback)) as Register
 }

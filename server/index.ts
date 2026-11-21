@@ -3336,7 +3336,17 @@ app.use(undoRequest)
 app.use(workBudgetRefusal)
 
 const server = http.createServer(app)
-const wss = new WebSocketServer({ server, path: '/ws' })
+const wss = new WebSocketServer({
+  server,
+  path: '/ws',
+  perMessageDeflate: {
+    /* Compress canvas HTML and send small cursor and presence messages directly. */
+    threshold: 1024,
+    zlibDeflateOptions: { level: 3 },
+    serverNoContextTakeover: true,
+    clientNoContextTakeover: true,
+  },
+})
 
 /* A signed-out visitor on a link-shared canvas watches it as a guest
    (guestCanvasRole): view only, silent like a view-as session (no presence,

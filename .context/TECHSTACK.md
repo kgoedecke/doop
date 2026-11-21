@@ -35,6 +35,21 @@
   back to frame details if nothing carries the id. Browser regressions in
   `tests/pageCanvasBrowser.test.ts` cover initial loading, cross-page links, stamping on copy,
   clipboard round trips, history and script-created or script-removed elements.
+  Links inside a frame are followed with ⌘-click (Ctrl elsewhere) in Select (`resolveFrameLink`),
+  every link the way a browser would take it: a link to a frame of the open canvas moves the camera
+  there (`Stage.followFrameLink`), a page link switches to that page, `#id` scrolls the frame's own
+  document (`doop:anchor`; a bare `#` to the top), and anything else opens in a new tab (a relative
+  path against Doop's origin; the system browser in the desktop shell), `mailto:` and `tel:` in
+  their app. Never followed: a scheme outside http(s), mailto and tel (`javascript:`, `data:`), and
+  a link into this canvas naming a frame or page that is gone or hidden. Only while the chord is
+  held does a followable link wear a hand cursor and a brand outline (`useLinkModifier`, the
+  runtime's `linkRect`); a plain click still selects. The browser can show a frame document's own
+  cursor through the shield (a link's hand), so the frame wears the surface's cursor (`doop:cursor`,
+  the runtime's `vCursorSheet`) except while text is edited; the prototype player sends none, so a
+  played design keeps its cursors. In a text edit, a click on nothing editable ends the edit as
+  Escape does (not the click ending a text drag that let go past the text). Tests:
+  `frameLinkTarget.test.ts`, the link case in `tests/pageCanvasBrowser.test.ts`, the cursor case in
+  `richTextBrowser.test.ts`.
 - Page links are `/c/<canvasId>?page=<pageId>` (`src/lib/pageLink.ts`, pure). `openingPageId` is
   the one rule for the page a canvas URL opens: the page of the frame it links, else the page it
   names, else the default (the first page; on a library canvas its components page, see Workspace
@@ -731,7 +746,14 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   finger. Shift keeps the aspect ratio (letting go puts the other axis back); Esc, or the grips
   leaving mid-drag, cancels. The runtime's hit info carries `sizable` and `locked`, so inline
   text runs, rotated or skewed elements, locked layers, locked frames and the Comment tool get no
-  grips. `tests/elementResize.test.ts` covers the geometry and `tests/elementResizeBrowser.test.ts`
+  grips. An edit is not an interaction: while the runtime morphs in a new version of the html,
+  applies any style (Design panel values, rotation and flip, nudges) or holds a style gesture
+  open, an adopted sheet (`holdStill` / `releaseStill`) sets `transition: none !important` on
+  everything from a cascade layer, which outranks a design's unlayered `!important` (an inline
+  `!important` transition still wins), so an element under
+  `transition: all` jumps to its new box, tracks the pointer, and is outlined at the size it
+  settles at; the design's own transitions are back once the edit lands.
+  `tests/elementResize.test.ts` covers the geometry and `tests/elementResizeBrowser.test.ts`
   drags the grips in Chromium.
 - A selected frame wears the same furniture as a selected element (`FrameResizeHandles.tsx`,
   geometry in `src/lib/frameResize.ts`): a grip in each corner, grabbable edges, a two-pixel
@@ -971,7 +993,21 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   takes the tag). A `<doop-use>` that renders nothing is reported, never dropped quietly: a main with
   no markup (`empty_template`), and on a whole write one never closed (`unclosed_use`), which is
   placed with no slot content so the ones after it still expand (mid-stream it waits for its
-  end). Tests: `componentDrops.test.ts`.
+  end). That placement is a person's only (editor, REST `/append`, an idle stream's settling): an
+  agent's whole write is refused instead (#528), from the engine's own report
+  (`prepareFrameHtml`'s `refuseUnclosed`, set by `updateFrame`, `createFrame` and a stream's `done`
+  chunk for agent actors, override markup included; `changeInstances` likewise), and a component
+  template by `refuseUnclosedTemplate` (`unclosedUses`, the same scanner). The refusal is a
+  `WriteRefusedError` (`server/writeRefusal.ts`): the operation undoes the write, and the MCP tool
+  wrapper (`toolLoads.ts`), `runComponentTool` and the resident's tool call answer with its message.
+  Slot and override markup is whole, so it always expands as a whole write, mid-stream too
+  (`expandOverride`, its issues `inOverride`): a stream chunk whose override leaves a use open is
+  refused at once, since no later chunk closes it. A refused chunk leaves the stream open, its idle
+  clock restarted. Mid-stream, the streaming
+  agent's own edit is not a whole write; another agent's is refused unless it replaces the design
+  (`replace`: MCP and resident `set_frame_html`, the resident's rewrite commit). The scanner skips
+  `<doop-use` text in scripts, styles, textareas, titles and comments and in names like
+  `<doop-user-chip>`. Tests: `componentDrops.test.ts`, the `<doop-use>` cases in `inlineData.test.ts`.
 - Component system first (`SYSTEM_FIRST`, `COMPOSE_CHECK` in `server/guide.ts`): the guide opens
   with a must-do list (tokens, then a component system set up the way a designer sets up a Figma
   file, then screens composed from it; themes are tokens, never a copied frame), the brief creates

@@ -8,6 +8,7 @@ declare global {
   interface Window {
     delayContextMessage?: 'doop:html' | 'doop:context-hit'
     releaseContextMessage?: () => void
+    heldFrameMessage?: unknown
     contextMenuHarness: {
       seed: (frames: Frame[], zoom?: number) => void
       selection: () => { frameId: string; selector: string } | null
@@ -36,6 +37,20 @@ describe.skipIf(!findBrowserPath())('frame and element context menus', () => {
 
   async function frameDoc() {
     return (await page.$('iframe[data-doop-frame]'))!.contentFrame()
+  }
+
+  async function releaseFrameMessage() {
+    const doc = (await frameDoc())!
+    const held = await doc.evaluate(() => {
+      const data = window.heldFrameMessage
+      window.heldFrameMessage = undefined
+      return data
+    })
+    await page.$eval(
+      'iframe[data-doop-frame]',
+      (el, data) => (el as HTMLIFrameElement).contentWindow!.postMessage(data, '*'),
+      held,
+    )
   }
 
   async function rightClick(selector: string, wait = true) {
@@ -74,18 +89,28 @@ describe.skipIf(!findBrowserPath())('frame and element context menus', () => {
     deletedFrames = 0
     stamped = []
     page = await pages.open()
-    // Install before the iframe bootstrap registers its listener. A handler
-    // added later cannot stop a message the runtime has already processed.
+    // Install before the iframe bootstrap registers its listener, and in the capture
+    // phase as the runtime's is: a handler that runs after it cannot hold a message back.
     await page.evaluateOnNewDocument(() => {
-      window.addEventListener('message', (event) => {
-        if (!window.delayContextMessage || event.data?.type !== window.delayContextMessage) return
-        window.delayContextMessage = undefined
-        event.stopImmediatePropagation()
-        window.releaseContextMessage = () => {
-          window.releaseContextMessage = undefined
-          window.dispatchEvent(new MessageEvent('message', { data: event.data, source: event.source }))
-        }
-      })
+      window.addEventListener(
+        'message',
+        (event) => {
+          if (!window.delayContextMessage || event.data?.type !== window.delayContextMessage) return
+          window.delayContextMessage = undefined
+          event.stopImmediatePropagation()
+          /* the frame runtime ignores a synthetic event, so a message held in the frame
+             is posted again by the editor page (releaseFrameMessage) */
+          if (window !== window.parent) {
+            window.heldFrameMessage = event.data
+            return
+          }
+          window.releaseContextMessage = () => {
+            window.releaseContextMessage = undefined
+            window.dispatchEvent(new MessageEvent('message', { data: event.data, source: event.source }))
+          }
+        },
+        true,
+      )
     })
     page.setDefaultTimeout(5_000)
     page.on('pageerror', (err) => errors.push(String(err)))
@@ -373,12 +398,12 @@ describe.skipIf(!findBrowserPath())('frame and element context menus', () => {
     })
     const updated = original.replace('<main>', '<main><div style="position:absolute;top:200px">Inserted</div>')
     await page.evaluate((html) => window.contextMenuHarness.updateHtml(html), updated)
-    await doc.waitForFunction(() => !!window.releaseContextMessage)
+    await doc.waitForFunction(() => !!window.heldFrameMessage)
     expect(await doc.$eval('main', (el) => el.textContent)).toBe('KeepTarget')
     await rightClick('main > div:nth-of-type(2)', false)
     await page.waitForFunction(() => document.querySelector('[role="menu"]')?.textContent === 'Finding element…')
     expect(await page.evaluate(() => window.contextMenuHarness.selection())).toBeNull()
-    await doc.evaluate(() => window.releaseContextMessage?.())
+    await releaseFrameMessage()
     await page.waitForFunction(
       () =>
         window.contextMenuHarness.selection()?.selector ===

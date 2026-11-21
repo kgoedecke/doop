@@ -159,6 +159,174 @@ describe.skipIf(!findBrowserPath())('page camera and snapping', { timeout: 30_00
     expect(await page.$('iframe[title="original"]')).toBeNull()
   })
 
+  it('opens the web link under a ⌘-click, not the one hovered a moment before', async () => {
+    const source = {
+      ...frame('links', 'first', 0),
+      width: 1200,
+      height: 800,
+      html: `<style>body{padding:100px;font-size:32px}a{display:block;width:400px;margin:0 0 40px}</style>
+        <a id="first" href="https://example.com/first">First</a>
+        <a id="second" href="https://example.com/second">Second</a>`,
+    }
+    await load(canvas([source]), '?frame=links')
+    await page.evaluate(() => {
+      const opened: string[] = []
+      ;(window as unknown as { opened: string[] }).opened = opened
+      window.open = (url?: string | URL) => {
+        opened.push(String(url))
+        return null
+      }
+    })
+    const host = (await page.waitForSelector('iframe[title="links"]'))!
+    const doc = (await host.contentFrame())!
+    const point = async (selector: string) => {
+      const node = (await doc.waitForSelector(selector))!
+      const rect = await node.evaluate((el) => {
+        const box = el.getBoundingClientRect()
+        return { x: box.x + 60, y: box.y + box.height / 2, width: innerWidth, height: innerHeight }
+      })
+      return host.evaluate((el, { x, y, width, height }) => {
+        const box = el.getBoundingClientRect()
+        return { x: box.left + (x * box.width) / width, y: box.top + (y * box.height) / height }
+      }, rect)
+    }
+    const first = await point('#first')
+    const second = await point('#second')
+    const mod = (await page.evaluate(() => /mac/i.test(navigator.platform))) ? 'Meta' : 'Control'
+    await page.keyboard.down(mod)
+    await page.mouse.move(first.x, first.y)
+    await waitState('the first link is outlined', () => !!document.querySelector('[data-link-outline]'))
+    // inside the hover throttle: the outline still shows the first link
+    await page.mouse.move(second.x, second.y)
+    await page.mouse.down()
+    await page.mouse.up()
+    await page.keyboard.up(mod)
+    await page.waitForFunction(() => (window as unknown as { opened: string[] }).opened.length > 0)
+    expect(await page.evaluate(() => (window as unknown as { opened: string[] }).opened)).toEqual([
+      'https://example.com/second',
+    ])
+  })
+
+  it('follows a same-canvas frame link on modifier-click without taking over ordinary selection', async () => {
+    const source = {
+      ...frame('directory', 'first', 0),
+      width: 1200,
+      height: 3500,
+      html: `<style>body{padding:160px 100px;font-size:32px}a{display:inline-block;min-width:380px}</style>
+        <p><a href="/c/c?frame=target&element=h1h1h1"><strong id="app">App research</strong></a></p>
+        <p><a id="external" href="https://example.com/c/c?frame=target">External site</a></p>
+        <p><a id="missing" href="/c/c?frame=missing">Missing frame</a></p>`,
+    }
+    const target = { ...frame('target', 'second', 3000), html: '<h1 data-doop-id="h1h1h1">Research</h1>' }
+    await load(canvas([source, target, frame('distant', 'second', 12000)]), '?frame=directory')
+    const host = (await page.waitForSelector('iframe[title="directory"]'))!
+    const directory = (await host.contentFrame())!
+    await page.waitForSelector('[data-frame-selection]')
+    const point = async (selector: string) => {
+      const node = (await directory.waitForSelector(selector))!
+      const rect = await node.evaluate((el) => {
+        const box = el.getBoundingClientRect()
+        return { x: box.x + box.width / 2, y: box.y + box.height / 2, width: innerWidth, height: innerHeight }
+      })
+      return host.evaluate((el, { x, y, width, height }) => {
+        const box = el.getBoundingClientRect()
+        return { x: box.left + (x * box.width) / width, y: box.top + (y * box.height) / height }
+      }, rect)
+    }
+    const app = await point('#app')
+    await page.mouse.move(app.x, app.y)
+    await waitState('the link is hovered as an ordinary layer', () => !!document.querySelector('[data-hover-outline]'))
+    expect(
+      await page.evaluate(() => ({
+        cursor: getComputedStyle(document.querySelector('[data-frame-surface]')!).cursor,
+        outlined: !!document.querySelector('[data-link-outline]'),
+      })),
+    ).toEqual({ cursor: 'default', outlined: false })
+    // the browser may show the document's cursor under the shield: it wears the canvas's
+    await directory.waitForFunction(() => getComputedStyle(document.querySelector('#app')!).cursor === 'default')
+    // another tool's cursor reaches the document too
+    await page.keyboard.press('h')
+    await directory.waitForFunction(() => getComputedStyle(document.querySelector('#app')!).cursor === 'grab')
+    await page.keyboard.press('v')
+    await directory.waitForFunction(() => getComputedStyle(document.querySelector('#app')!).cursor === 'default')
+    // and so does a cursor the Stage changes by itself: ⌥ turns the Zoom tool to zoom-out
+    const docCursor = (cursor: string) =>
+      directory.waitForFunction(
+        (cursor) => getComputedStyle(document.querySelector('#app')!).cursor === cursor,
+        {},
+        cursor,
+      )
+    await page.keyboard.down('z')
+    await docCursor('zoom-in')
+    await page.keyboard.down('Alt')
+    await docCursor('zoom-out')
+    await page.keyboard.up('Alt')
+    await docCursor('zoom-in')
+    await page.keyboard.up('z')
+    await docCursor('default')
+    await page.mouse.click(app.x, app.y)
+    await waitState(
+      'ordinary click stays in selection',
+      () => window.pageState().selectedElement?.frameId === 'directory',
+    )
+    await page.mouse.click(80, 600)
+    await waitState('the canvas is deselected before trying the jump', () => !window.pageState().selectedId)
+    const url = page.url()
+    const mod = (await page.evaluate(() => /mac/i.test(navigator.platform))) ? 'Meta' : 'Control'
+    await page.evaluate(() => {
+      const opened: string[] = []
+      ;(window as unknown as { opened: string[] }).opened = opened
+      window.open = (target?: string | URL) => {
+        opened.push(String(target))
+        return null
+      }
+    })
+    const opened = () => page.evaluate(() => (window as unknown as { opened: string[] }).opened)
+    // hover probes are throttled to one per 40ms with no trailing probe, so each
+    // arrival waits for the last one to age out, as a real pointer would
+    const settle = () => new Promise((resolve) => setTimeout(resolve, 60))
+    await page.keyboard.down(mod)
+    // a web address opens in a new tab and leaves the canvas where it is
+    const external = await point('#external')
+    await page.mouse.click(external.x, external.y)
+    await page.waitForFunction(() => (window as unknown as { opened: string[] }).opened.length > 0)
+    expect(await opened()).toEqual(['https://example.com/c/c?frame=target'])
+    // a link into this canvas naming a frame that is gone reads as no link and does nothing
+    await settle()
+    const missing = await point('#missing')
+    await page.mouse.move(missing.x, missing.y)
+    await waitState(
+      'the dead link is hovered as an ordinary layer',
+      () => !!document.querySelector('[data-hover-outline]') && !document.querySelector('[data-link-outline]'),
+    )
+    await page.mouse.click(missing.x, missing.y)
+    await settle()
+    expect(await opened()).toHaveLength(1)
+    await page.mouse.move(app.x, app.y)
+    await waitState('with the chord held the app link reads as a link', () => {
+      const surface = document.querySelector('[data-frame-surface]')
+      return (
+        !!surface && getComputedStyle(surface).cursor === 'pointer' && !!document.querySelector('[data-link-outline]')
+      )
+    })
+    await directory.waitForFunction(() => getComputedStyle(document.querySelector('#app')!).cursor === 'pointer')
+    await page.mouse.down()
+    await page.mouse.move(app.x + 20, app.y)
+    await page.mouse.up()
+    expect(await page.evaluate(() => window.pageState().activePageId)).toBe('first')
+    await page.mouse.click(app.x, app.y)
+    await page.keyboard.up(mod)
+    await waitState(
+      'modifier-click picks the linked element on the destination page',
+      () => window.pageState().activePageId === 'second' && window.pageState().selectedElement?.frameId === 'target',
+    )
+    expect(await page.evaluate(() => window.pageState())).toMatchObject({
+      selectedId: 'target',
+      viewport: { x: -2500, y: 300, zoom: 1 },
+    })
+    expect(new URL(page.url()).pathname).toBe(new URL(url).pathname)
+  })
+
   it.each(['first', 'second'])('selects a linked element after its frame mounts on the %s page', async (pageId) => {
     const target = {
       ...frame('target', pageId, 3000),
