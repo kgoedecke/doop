@@ -14,7 +14,7 @@ import { useT } from '../lib/i18n'
 import { isLayerLocked } from '../lib/layerEdits'
 import { canEditOpenCanvas, useStore } from '../lib/store'
 import { Button } from './ui/button'
-import { ComponentIcon } from './ui/icons'
+import { ComponentIcon, InstanceIcon } from './ui/icons'
 import { ImagePicker } from './ImageFill'
 import { PropertyRow, SelectField, TextField } from './ui/property-field'
 import { Switch } from './ui/switch'
@@ -29,7 +29,11 @@ export function ComponentSection({ frame, selector }: { frame: Frame; selector: 
   return (
     <section data-slot="component-section" className="flex flex-col border-b border-line-soft px-3 pt-3 pb-2.5">
       <header className="mb-[5px] flex min-h-5 min-w-0 items-center gap-1.5 text-body font-medium text-ink">
-        <ComponentIcon size="rail" className="flex-none text-brand" />
+        {context.kind === 'main' ? (
+          <ComponentIcon size="rail" className="flex-none text-brand" data-component-icon="main" />
+        ) : (
+          <InstanceIcon size="rail" className="flex-none text-brand" data-component-icon="instance" />
+        )}
         <span className="truncate">{context.def.name}</span>
         <span className="ml-auto flex-none text-caption font-normal text-ink-faint">
           {context.kind === 'main' ? t('components.main') : t('components.instance')}
