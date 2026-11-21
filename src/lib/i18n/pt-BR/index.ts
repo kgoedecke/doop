@@ -11,6 +11,7 @@ import { agentKeys } from './agentKeys'
 import { webhooks } from './webhooks'
 import { fonts } from './fonts'
 import { agents } from './agents'
+import { skills } from './skills'
 import { models } from './models'
 import { canvas } from './canvas'
 import { stage } from './stage'
@@ -38,6 +39,7 @@ export const ptBR: Catalog = {
   webhooks,
   fonts,
   agents,
+  skills,
   models,
   canvas,
   stage,

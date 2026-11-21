@@ -3,6 +3,7 @@ import { db } from './db/index.ts'
 import { linearOAuthStates, liveActivities, liveActivityStarters, slackOAuthStates } from './db/schema.ts'
 import { forgetLibrary } from './componentLibrary.ts'
 import { dropPersonalAgents } from './customAgents.ts'
+import { dropPersonalSkills } from './skills.ts'
 import { store } from './store.ts'
 import { removeMember as leaveWorkspace, workspaceIdsFor } from './workspaces.ts'
 
@@ -37,5 +38,6 @@ export async function purgeUserData(userId: string): Promise<{ deletedCanvases: 
   await db.delete(liveActivities).where(eq(liveActivities.userId, userId))
   await db.delete(liveActivityStarters).where(eq(liveActivityStarters.userId, userId))
   await dropPersonalAgents(userId)
+  await dropPersonalSkills(userId)
   return { deletedCanvases }
 }

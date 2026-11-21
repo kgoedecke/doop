@@ -145,6 +145,10 @@ import { modelCatalogFor } from './modelCatalog.ts'
 import { mentionedRole } from '../shared/agents.ts'
 import { hydrateCustomAgents, rosterFor, teamOfCanvas } from './customAgents.ts'
 import { customAgentsRouter } from './customAgentRoutes.ts'
+import { hydrateSkills, skillsForCanvas } from './skills.ts'
+import type { AgentScope } from '../shared/customAgents.ts'
+import type { CanvasSkills } from '../shared/skills.ts'
+import { skillsRouter } from './skillRoutes.ts'
 import { activeAgentTasks } from '../shared/agentActivity.ts'
 import { colorFor } from '../shared/types.ts'
 import { isPeerViewport } from '../shared/viewport.ts'
@@ -177,6 +181,7 @@ await backgrounds.initBackgrounds()
 initAuth()
 await syncAdmins() // ADMIN_EMAILS -> user.role, for accounts that already exist
 await hydrateCustomAgents() // before the logs: an interrupted claim is told apart by its agent's name
+await hydrateSkills()
 let data = await persist.hydrate()
 if (data.canvases.length === 0 && (await persist.importLegacyJson())) {
   data = await persist.hydrate()
@@ -1118,6 +1123,7 @@ app.use('/api/notifications', notificationsRouter)
 app.use('/api/webhooks', webhooksRouter)
 app.use('/api/fonts', fontsRouter)
 app.use('/api/agents', customAgentsRouter)
+app.use('/api/skills', skillsRouter)
 
 /* the custom agents a canvas's team has: its workspace's, or its owner's (the
    automation editor asks for a step's canvas) */
@@ -1130,6 +1136,30 @@ app.get('/api/canvases/:id/agents', (req, res) => {
 app.get('/api/canvases/:id/fonts', (req, res) => {
   const canvas = requireCanvas(req, res, req.params.id, 'view')
   if (canvas) res.json(fontsForCanvas(canvas))
+})
+/* the skills a request on this canvas can name, for the /handle menu. Only
+   an editor can ask an agent for work (refuseAgentMention turns a commenter's
+   @mention away), so the route needs edit; it sends handles and descriptions,
+   never bodies.
+   `addIn` is the scope this viewer may add a skill to (a member's workspace,
+   an owner's own), else null. */
+app.get('/api/canvases/:id/skills', (req, res) => {
+  const canvas = requireCanvas(req, res, req.params.id, 'edit')
+  if (!canvas) return
+  const userId = req.user?.id
+  const addIn: AgentScope | null = !userId
+    ? null
+    : canvas.workspaceId
+      ? workspaces.isWorkspaceMember(canvas.workspaceId, userId)
+        ? { workspaceId: canvas.workspaceId }
+        : null
+      : canvas.ownerId === userId
+        ? { personal: true }
+        : null
+  res.json({
+    skills: skillsForCanvas(canvas).map(({ handle, description }) => ({ handle, description })),
+    addIn,
+  } satisfies CanvasSkills)
 })
 app.use('/api/admin', adminRouter)
 app.use('/api/community', communityRouter)
