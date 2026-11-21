@@ -110,7 +110,11 @@ export function Inspector({
     [],
   )
 
+  /* which typed edit is the newest: only its own save may clear 'dirty', so
+     an older save finishing late never marks a newer edit as saved */
+  const editSeq = useRef(0)
   function onHtmlChange(value: string) {
+    const seq = ++editSeq.current
     setDraft(value)
     setSaveState('dirty')
     if (queuedSave.current) {
@@ -124,6 +128,7 @@ export function Inspector({
       if (before !== undefined) recordUpdate(frame.id, { html: before }, { html: value })
       try {
         await api.updateFrame(frame.id, { html: value })
+        if (seq !== editSeq.current) return
         setSaveState('saved')
         window.setTimeout(() => setSaveState((s) => (s === 'saved' ? 'idle' : s)), 1500)
       } catch (err) {

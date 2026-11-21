@@ -282,3 +282,28 @@ it('keeps an edit whose save failed when focus leaves and a remote update arrive
   await act(() => new Promise((resolve) => setTimeout(resolve, 300)))
   expect(editor().value).toBe('<h1>Typed</h1>')
 })
+
+it('keeps a newer edit when an older save finishes after it was typed', async () => {
+  let finishOlder: (frame: Frame) => void = () => {}
+  const update = vi
+    .spyOn(api, 'updateFrame')
+    .mockImplementationOnce(() => new Promise<Frame>((resolve) => (finishOlder = resolve)))
+    .mockImplementation(() => new Promise<Frame>(() => {}))
+  const editor = () => container.querySelector<HTMLTextAreaElement>('textarea[aria-label="Edit the HTML"]')!
+  const type = (html: string) =>
+    act(() => {
+      const setValue = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!
+      setValue.call(editor(), html)
+      editor().dispatchEvent(new Event('input', { bubbles: true }))
+    })
+  act(() => editor().focus())
+  type('<h1>Older</h1>')
+  /* the older edit's save starts after 700ms and stays in flight */
+  await act(() => new Promise((resolve) => setTimeout(resolve, 750)))
+  expect(update).toHaveBeenCalledTimes(1)
+  type('<h1>Newer</h1>')
+  await act(async () => finishOlder({ ...stored(), html: '<h1>Older</h1>' }))
+  act(() => editor().blur())
+  await act(() => new Promise((resolve) => setTimeout(resolve, 300)))
+  expect(editor().value).toBe('<h1>Newer</h1>')
+})
