@@ -4,7 +4,13 @@ import { useStore } from '../lib/store'
 import { frameHtmlReady } from '../lib/pages'
 import { api, errorMessage } from '../lib/api'
 import { beginFrameSave } from '../lib/frameSaves'
-import { copyFramePng, downloadFrameExport, downloadFrameHtml, downloadFramesPdf } from '../lib/frameExport'
+import {
+  copyFramePng,
+  downloadFrameExport,
+  downloadFrameHtml,
+  downloadFramesPdf,
+  useFrameExporting,
+} from '../lib/frameExport'
 import { setExportSettings, useExportSettings } from '../lib/exportSettings'
 import { fitExportScale, formatExportScale } from '../../shared/exportScale'
 import { ExportOptions, FRAME_FORMATS } from './ExportOptions'
@@ -16,6 +22,7 @@ import { cn } from '@/lib/utils'
 import { Panel, PanelClose, PanelHeader, type PanelSurface } from './ui/panel'
 import { CopyIcon, DownloadIcon, FrameIcon, LockIcon, RotationIcon } from './ui/icons'
 import { Button } from './ui/button'
+import { Spinner } from './ui/toast'
 import { Input } from './ui/input'
 import { Textarea } from './ui/textarea'
 import { NumberField, PropertyScrubContext, PropertySection, StaticField } from './ui/property-field'
@@ -67,6 +74,9 @@ export function Inspector({
   const [draft, setDraft] = useState(frame.html)
   const [saveState, setSaveState] = useState<'idle' | 'dirty' | 'saved'>('idle')
   const [copiedUrl, setCopiedUrl] = useState(false)
+  /* a PDF can take a while, and the button is where the person is looking,
+     so it says so until the export lands */
+  const exporting = useFrameExporting(frame.id)
   const exportSettings = useExportSettings()
   /* what the frame actually renders at: a huge frame caps a large pick */
   const exportScale = fitExportScale(frame, exportSettings.scale)
@@ -333,15 +343,17 @@ export function Inspector({
             <Button
               variant="bare"
               className={cn(fillBtn, 'col-span-2 gap-1.5')}
-              title={t('inspector.exportImageTitle')}
+              title={exporting ? t('inspector.exportingTitle') : t('inspector.exportImageTitle')}
+              disabled={exporting}
+              aria-busy={exporting}
               onClick={() => {
                 trackExport(exportSettings.format, 1, 'inspector')
                 if (exportSettings.format === 'pdf') void downloadFramesPdf(frame.canvasId, [frame])
                 else void downloadFrameExport(frame, exportSettings.format, exportSettings.scale)
               }}
             >
-              <DownloadIcon className="size-3.5" />
-              {t('inspector.export')}
+              {exporting ? <Spinner className="size-3.5" /> : <DownloadIcon className="size-3.5" />}
+              {exporting ? t('inspector.exporting') : t('inspector.export')}
             </Button>
             <Button
               variant="bare"

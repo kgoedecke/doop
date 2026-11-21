@@ -25,6 +25,8 @@ export const inspector = {
   copyHtmlTitle: 'Copy the frame’s HTML',
   exportHtmlTitle: 'Save the frame’s HTML as a file',
   export: 'Export',
+  exporting: 'Exporting…',
+  exportingTitle: 'This frame is still exporting',
   copyHtmlFailed: 'Couldn’t copy the HTML. Select it in the editor and copy it by hand.',
   saveFailed: 'Couldn’t save the design. Please try again.',
   saving: 'saving…',

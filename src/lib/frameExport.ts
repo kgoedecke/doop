@@ -12,6 +12,7 @@ import { isDesktopShell } from './shell'
 import { inspectElement } from './frameBridge'
 import { composeFrame } from './frameCompose'
 import { clipToFrame, cropRaster, frameSvg, rasterizeFrame, type ClipRect } from './frameRaster'
+import { useSyncExternalStore } from 'react'
 import { useStore } from './store'
 import { t } from './i18n'
 
@@ -93,6 +94,48 @@ const RASTER_TIMEOUT_MS = 20_000
 /* Exports share the one canvas toast, so an outcome must not claim the
    spinner while another export is still rendering. */
 let inFlight = 0
+
+/* The frames with a download rendering, so a control can say so wherever it
+   is mounted (the Inspector remounts on every selection) and whichever
+   surface started it. A count per frame, since one frame may export twice. */
+const exportingFrames = new Map<string, number>()
+const exportListeners = new Set<() => void>()
+
+function markExporting(frameIds: readonly string[], delta: 1 | -1) {
+  for (const id of frameIds) {
+    const next = (exportingFrames.get(id) ?? 0) + delta
+    if (next > 0) exportingFrames.set(id, next)
+    else exportingFrames.delete(id)
+  }
+  for (const listener of exportListeners) listener()
+}
+
+function subscribeExporting(listener: () => void) {
+  exportListeners.add(listener)
+  return () => exportListeners.delete(listener)
+}
+
+export function isFrameExporting(frameId: string): boolean {
+  return exportingFrames.has(frameId)
+}
+
+/** Whether a download of this frame is rendering right now. */
+export function useFrameExporting(frameId: string): boolean {
+  return useSyncExternalStore(subscribeExporting, () => isFrameExporting(frameId))
+}
+
+/** Run one export with its frames marked busy and counted in the shared
+ *  toast, both undone however the export ends. */
+async function tracked<T>(frameIds: readonly string[], run: () => Promise<T>): Promise<T> {
+  inFlight += 1
+  markExporting(frameIds, 1)
+  try {
+    return await run()
+  } finally {
+    inFlight -= 1
+    markExporting(frameIds, -1)
+  }
+}
 
 /** `outcome` null: nothing to say — the desktop shell's save panel is the
  *  feedback, and it may yet be cancelled, so "ready" would be a claim. */
@@ -298,10 +341,10 @@ async function downloadExport(
   scale: number,
   element?: ElementTarget,
 ): Promise<void> {
-  inFlight += 1
-  useStore.getState().pushNotice(t('panels.exportingFormat', { label: FORMAT_LABEL[format] }), { busy: true })
-  const outcome = await exportOutcome(fetchExport(frame, format, scale, element))
-  inFlight -= 1
+  const outcome = await tracked([frame.id], () => {
+    useStore.getState().pushNotice(t('panels.exportingFormat', { label: FORMAT_LABEL[format] }), { busy: true })
+    return exportOutcome(fetchExport(frame, format, scale, element))
+  })
   report(outcome)
 }
 
@@ -312,17 +355,20 @@ async function downloadExport(
 export async function downloadFramesPdf(canvasId: string, frames: readonly Frame[]): Promise<void> {
   const [first] = frames
   if (!first) return
-  inFlight += 1
-  useStore
-    .getState()
-    .pushNotice(
-      frames.length === 1 ? t('panels.exportingPdf') : t('panels.exportingPdfFrames', { count: frames.length }),
-      { busy: true },
-    )
-  const fallback = `${(frames.length === 1 && first.name) || 'frames'}.pdf`
-  const timeoutMs = Math.max(EXPORT_TIMEOUT_MS, pdfRenderBudgetMs(frames.length))
-  const outcome = await exportOutcome(fetchFile(framesPdfUrl(canvasId, frames), 'PDF', fallback, timeoutMs))
-  inFlight -= 1
+  const outcome = await tracked(
+    frames.map((frame) => frame.id),
+    () => {
+      useStore
+        .getState()
+        .pushNotice(
+          frames.length === 1 ? t('panels.exportingPdf') : t('panels.exportingPdfFrames', { count: frames.length }),
+          { busy: true },
+        )
+      const fallback = `${(frames.length === 1 && first.name) || 'frames'}.pdf`
+      const timeoutMs = Math.max(EXPORT_TIMEOUT_MS, pdfRenderBudgetMs(frames.length))
+      return exportOutcome(fetchFile(framesPdfUrl(canvasId, frames), 'PDF', fallback, timeoutMs))
+    },
+  )
   report(outcome)
 }
 
