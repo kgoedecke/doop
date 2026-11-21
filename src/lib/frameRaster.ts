@@ -220,6 +220,32 @@ function stripExecutable(doc: Document): void {
   }
 }
 
+/* an XML name without a colon (XML 1.0 NCName) */
+const NAME_START =
+  'A-Z_a-z\\u00C0-\\u00D6\\u00D8-\\u00F6\\u00F8-\\u02FF\\u0370-\\u037D\\u037F-\\u1FFF\\u200C-\\u200D' +
+  '\\u2070-\\u218F\\u2C00-\\u2FEF\\u3001-\\uD7FF\\uF900-\\uFDCF\\uFDF0-\\uFFFD\\u{10000}-\\u{EFFFF}'
+const NAME_REST = `${NAME_START}\\-.0-9\\u00B7\\u0300-\\u036F\\u203F-\\u2040`
+const XML_ATTR_NAME = new RegExp(`^(xml:)?[${NAME_START}][${NAME_REST}]*$`, 'u')
+
+/* HTML the XML serializer writes out verbatim but no XML parser reads back,
+   which would make the SVG unreadable (and its raster fail): a comment
+   holding `--` or ending in `-`, and an attribute named the way only HTML
+   allows (`@click`, `:class`, `x-on:click`). Neither paints anything, the
+   bindings least of all once the scripts are gone, so both go. A template's
+   content is serialized too, though no walk of the document reaches it. */
+function dropNonXml(root: Document | DocumentFragment): void {
+  const comments = (root.ownerDocument ?? (root as Document)).createTreeWalker(root, NodeFilter.SHOW_COMMENT)
+  const found: Node[] = []
+  while (comments.nextNode()) found.push(comments.currentNode)
+  for (const comment of found) comment.parentNode?.removeChild(comment)
+  for (const el of root.querySelectorAll('*')) {
+    for (const attr of Array.from(el.attributes)) {
+      if (attr.namespaceURI === null && !XML_ATTR_NAME.test(attr.name)) el.removeAttributeNode(attr)
+    }
+    if (el instanceof HTMLTemplateElement) dropNonXml(el.content)
+  }
+}
+
 /** One SVG, sized to the frame, holding the document with every external
  *  resource inlined. Exported for tests. */
 export async function inlineDocument(html: string, opts: InlineOptions): Promise<string> {
@@ -249,6 +275,7 @@ async function inlineInto(
   /* nothing runs inside one either: scripts, and the <base> that has done its job */
   for (const el of doc.querySelectorAll('script, base, link:not([rel~="stylesheet"])')) el.remove()
   stripExecutable(doc)
+  dropNonXml(doc)
 
   const work: Promise<void>[] = []
   for (const link of doc.querySelectorAll('link[rel~="stylesheet"][href]')) {
