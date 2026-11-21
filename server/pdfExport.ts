@@ -1,9 +1,9 @@
 import { PDFDocument } from 'pdf-lib'
-import type { Frame as PageFrame } from 'puppeteer-core'
 import type { Canvas, Frame } from '../shared/types.ts'
 import { readingOrder } from '../shared/frameOrder.ts'
 import { canvasPages, pageFrames } from '../shared/pages.ts'
 import { MAX_PDF_FRAMES, PDF_RENDER_CONCURRENCY } from '../shared/pdfLimits.ts'
+import { settleFonts } from './renderFonts.ts'
 import { loadFramePage, rendererAvailable } from './screenshot.ts'
 
 /**
@@ -21,8 +21,6 @@ const MAX_PAGE_PX = 19_200
 
 /** Chrome's own print-scale floor. */
 const MIN_PRINT_SCALE = 0.1
-
-const FONT_WAIT_MS = 3000
 
 export const PDF_UNAVAILABLE_MESSAGE =
   'PDF export is unavailable: this server has no Chrome or Chromium to render with (set CHROME_PATH)'
@@ -52,12 +50,6 @@ export function pageSizeFor(frame: Pick<Frame, 'width' | 'height'>): PageSize {
   const height = Math.max(1, Math.round(frame.height))
   const scale = Math.max(MIN_PRINT_SCALE, Math.min(1, MAX_PAGE_PX / Math.max(width, height)))
   return { width: Math.round(width * scale), height: Math.round(height * scale), scale }
-}
-
-async function waitForFonts(frame: PageFrame): Promise<void> {
-  const timeout = new Promise<void>((resolve) => setTimeout(resolve, FONT_WAIT_MS))
-  const ready = frame.evaluate(() => document.fonts.ready.then(() => undefined)).catch(() => undefined)
-  await Promise.race([ready, timeout])
 }
 
 function escapeAttribute(value: string): string {
@@ -97,7 +89,7 @@ export async function renderFramePdfPage(frame: Frame): Promise<Uint8Array> {
       deviceScaleFactor: 1,
     })
     await page.emulateMediaType('screen')
-    await waitForFonts(page.mainFrame().childFrames()[0] ?? page.mainFrame())
+    await settleFonts(page.mainFrame().childFrames()[0] ?? page.mainFrame())
     return await page.pdf({
       width: `${size.width}px`,
       height: `${size.height}px`,

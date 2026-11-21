@@ -467,6 +467,11 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   runs a health probe outside the gate and is retried once if the probe kills the browser; a
   browser is recycled after 500 pages or an hour. DevTools commands time out at 60s, not 180s.
   Screenshots are capped at 50M device px (`server/renderLimits.ts`; MCP says when it cropped).
+  Every render waits for its fonts before capturing (`settleFonts` in `server/renderFonts.ts`,
+  for `/i/`, MCP screenshots, inspection and PDF export): `load` does not cover a face from a
+  linked stylesheet (a frame's Google Fonts link), which layout requests only after it, so the
+  page is laid out to start those loads and `document.fonts.ready` is awaited, at most 5s, before
+  the capture proceeds with whatever loaded. Tests: `screenshotFonts.test.ts`.
   `GET /healthz/renderer` reports the counters (`kills`, `lastOpenedAt`, `failedOpensInARow`,
   queue depth) for an uptime check. Context: the 2026-11-05 wedge, where one browser stopped
   making pages for two hours. Tests: `renderBrowser.test.ts`.
