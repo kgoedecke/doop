@@ -579,6 +579,13 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   fly-tos fit into the stage area the top bar and floating panels leave open: `CanvasPage` passes
   `Stage` the `insets` its chrome covers and `fitBox` (`src/lib/viewFit.ts`) centres there.
   Tests: `viewFit.test.ts`, `fitSelectionBrowser.test.ts`.
+- Following (`src/lib/follow.ts`, the loop in `Stage.tsx`, `FollowFrame.tsx`): every face in the
+  presence stack is a toggle. A person is followed by their camera (`cameraToFollow`). An agent is
+  followed to the frame it works on (`agentFollowFrame`, by `locatePresence`), fitted into the open
+  stage, onto its page first, and again whenever that frame changes, moves or grows. Agents leave
+  the roster whenever they go idle and come back as the same `agent:<name>` clientId, so an agent
+  follow outlives that (`followedAgent` keeps it named; the pill says it is idle) and ends only on a
+  camera move of our own, Esc, the pill's ✕ or another canvas. Tests: `follow.test.ts`.
 - View options (`src/lib/viewOptions.ts`, per browser under `doop:view-options`): the zoom pill's
   menu opens on a field for a typed level (`150`, `150%`; `parseZoomPercent`) and switches the
   pixel grid (⇧'), other people's cursors (⌘⌥\ / Ctrl+Alt+\) and the comment pins (⇧C), each read
