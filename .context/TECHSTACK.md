@@ -418,7 +418,7 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   does not answer within its 15s is unreadable, and the server renders), `inlineDocument` turns it
   into one SVG sized to the frame, every image, stylesheet (both `@import` forms, cycles cut)
   and font fetched and inlined as a data: URL (an SVG drawn as an image loads nothing itself;
-  scripts and `srcset` are dropped, a link's `media` kept; a nested document (iframe, object, embed) sends
+  scripts and `srcset` are dropped, as are comments and attribute names only HTML reads (`@click`, `:class`), which no XML parser takes back (#508), a link's `media` kept; a nested document (iframe, object, embed) sends
   the frame to the server, since it would be a hole in the picture),
   and the SVG is drawn onto a canvas at 2x from a data: URL (a blob: URL taints the canvas in
   Chromium) and encoded. A resource the browser cannot fetch (an image host without CORS)
