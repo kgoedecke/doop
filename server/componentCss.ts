@@ -266,15 +266,26 @@ function compoundTokens(compound: string): Tokens {
   return tokens
 }
 
+const within = (names: Set<string>, available: Set<string>) => [...names].every((name) => available.has(name))
+
 function compoundMatches(compound: string, tokens: Tokens): boolean {
   const wanted = compoundTokens(compound)
-  const within = (names: Set<string>, available: Set<string>) => [...names].every((name) => available.has(name))
   return (
     within(wanted.tags, tokens.tags) &&
     within(wanted.classes, tokens.classes) &&
     within(wanted.ids, tokens.ids) &&
     within(wanted.attrs, tokens.attrs)
   )
+}
+
+/** A compound naming one of the main's elements in a state it is not in yet (`.faq-row[open]`,
+ *  `details[open]`, `.card.is-on`): its tag and id are there and so is one of its classes (or,
+ *  naming none, its tag or id), and what is missing is a state an element switches into. #517 */
+function compoundInState(compound: string, tokens: Tokens): boolean {
+  const wanted = compoundTokens(compound)
+  if (!within(wanted.tags, tokens.tags) || !within(wanted.ids, tokens.ids)) return false
+  if (wanted.classes.size) return [...wanted.classes].some((name) => tokens.classes.has(name))
+  return wanted.tags.size + wanted.ids.size > 0
 }
 
 /** What a main is made of: its own elements, and apart from them the components nested in it;
@@ -300,15 +311,23 @@ function relevantSelector(selector: string, { own, nested, ancestors }: SubtreeT
   const compounds = compoundsOf(selector)
   if (!compounds.length) return null
   const isOwn = (index: number) => compoundMatches(compounds[index]!.compound, own)
+  const inState = (index: number) => compoundInState(compounds[index]!.compound, own)
   const isNested = (index: number) => compoundMatches(compounds[index]!.compound, nested)
   let first = compounds.length - 1
-  if (!isOwn(first)) {
+  if (!isOwn(first) && !inState(first)) {
     if (!isNested(first)) return null
     while (first > 0 && !isOwn(first - 1) && isNested(first - 1)) first--
     if (first === 0 || !isOwn(first - 1)) return null
   }
   while (first > 0 && isOwn(first - 1)) first--
-  const prefix = keptAncestors(compounds, first, ancestors)
+  let prefix = keptAncestors(compounds, first, ancestors)
+  /* what the main sits in is read first; a compound left over that names one of its own
+     elements in another state stays in the selector as its condition */
+  while (prefix === null && first > 0 && inState(first - 1)) {
+    first--
+    while (first > 0 && isOwn(first - 1)) first--
+    prefix = keptAncestors(compounds, first, ancestors)
+  }
   if (prefix === null) return null
   return { selector: joinCompounds(compounds.slice(first)), prefix }
 }
