@@ -256,19 +256,27 @@ export function saveDrawing(drawing: Drawing, target: DrawingTarget, options?: {
         ...bounds,
         html,
       })
-      if (useStore.getState().canvas?.id !== target.canvasId) return
-      const store = useStore.getState()
       if (wrapped) {
-        /* one guarded step: the frame's create and the shells' deletes. A
-           shell a save won meanwhile stays on the canvas */
-        const entry = recordFrameAround(frame, wrapped.shapes)
-        store.upsertFrame(frame)
-        for (const f of wrapped.shapes) store.removeFrame(f.id)
-        if (store.activePageId === target.pageId) store.select(frame.id)
-        for (const skip of skipped) store.pushNotice(skip.reason)
-        trackSave(saveWrappedShells(frame, wrapped.shapes, wrapped.scopes, entry))
+        /* the transfer finishes on the server wherever the person went:
+           the shells' deletes run either way, but only a canvas still open
+           gets the guarded step, the local move and the notices */
+        const entry =
+          useStore.getState().canvas?.id === target.canvasId ? recordFrameAround(frame, wrapped.shapes) : null
+        if (entry) {
+          const store = useStore.getState()
+          store.upsertFrame(frame)
+          for (const f of wrapped.shapes) store.removeFrame(f.id)
+          if (store.activePageId === target.pageId) store.select(frame.id)
+          for (const skip of skipped) store.pushNotice(skip.reason)
+        }
+        /* awaited inside the queue, not tracked beside it: the next
+           queued drawing must read the frame after a kept shell's copy
+           was stripped from it, not before */
+        await saveWrappedShells(frame, wrapped.shapes, wrapped.scopes, entry)
         return
       }
+      if (useStore.getState().canvas?.id !== target.canvasId) return
+      const store = useStore.getState()
       recordCreate(frame)
       store.upsertFrame(frame)
       for (const skip of skipped) store.pushNotice(skip.reason)

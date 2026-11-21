@@ -271,14 +271,29 @@ function withoutScope(html: string, scope: string | undefined): string {
  *  Position-free, so a drag can cache the answer by frame html. */
 export type ShapeVerdict = 'shape' | { reason: string } | null
 
-export function shapeVerdict(frame: Frame): ShapeVerdict {
+const staysReason = (name: string) => `“${name}” has comments or a component main, so it stayed on the canvas`
+
+/** The html-only half of the verdict — everything it reads comes off the
+ *  markup and the frame's box, so a drag can cache it by the frame's html. */
+export function htmlVerdict(frame: Frame): ShapeVerdict {
   if (standaloneSelector(frame) === null) return null
-  if (hasComments(frame.id) || holdsMain(frame.html))
-    return { reason: `“${frame.name}” has comments or a component main, so it stayed on the canvas` }
+  if (holdsMain(frame.html)) return { reason: staysReason(frame.name) }
   const found = shapeOf(frame)
   const el = found && elementOf(found.html)
   if (!found || !el || !boxIn(el, frame)) return { reason: `“${frame.name}” is placed in a way a frame can’t keep yet` }
   return 'shape'
+}
+
+/** Comments live in the store, not the html: this half runs fresh over a
+ *  cached `htmlVerdict`, so a comment left mid-drag still keeps the shape
+ *  out. A non-shape (`null`) stays silent — a real frame is not skipped,
+ *  it was never a candidate. */
+export function commentsVerdict(frame: Frame, verdict: ShapeVerdict): ShapeVerdict {
+  return verdict !== null && hasComments(frame.id) ? { reason: staysReason(frame.name) } : verdict
+}
+
+export function shapeVerdict(frame: Frame): ShapeVerdict {
+  return commentsVerdict(frame, htmlVerdict(frame))
 }
 
 /* half or more of the shape's own area inside the box counts as in; the
@@ -337,6 +352,13 @@ export function framedShapesDocument(
     el.style.setProperty('top', `${round2(shape.y - box.y + at.y)}px`)
     el.style.setProperty('width', `${round2(at.width)}px`)
     el.style.setProperty('height', `${round2(at.height)}px`)
+    /* a z-index the shape carried alone in its shell meant nothing; shared
+       in the frame it could lift a back shape over a front one. Each root
+       is its own stacking context, so the run paints in DOM order — back
+       to front as inserted — and layers placed into the frame later stack
+       on it the same way */
+    el.style.setProperty('isolation', 'isolate')
+    el.style.setProperty('z-index', 'auto')
     if (shape.name !== found.node.label) el.setAttribute(NAME_ATTR, shape.name)
     const placed = placeElement(
       html,
@@ -356,12 +378,14 @@ export function framedShapesDocument(
 }
 
 /* the shells a drawn frame took in, deleted one by one — a save that won a
-   shell meanwhile keeps it on the canvas, and its copy leaves the frame */
+   shell meanwhile keeps it on the canvas, and its copy leaves the frame.
+   `entry` is the step the deletes sit under; null when the canvas was left
+   mid-save, when the deletes still have to run but no step mends them */
 export async function saveWrappedShells(
   frame: Frame,
   shells: Frame[],
   scopes: Map<string, string>,
-  entry: HistoryEntry,
+  entry: HistoryEntry | null,
 ): Promise<void> {
   let html = frame.html
   let saved = frame
@@ -374,13 +398,15 @@ export async function saveWrappedShells(
       html = withoutScope(html, scopes.get(f.id))
       try {
         saved = await api.updateFrame(frame.id, { html }, saved.updatedAt)
-        noteSaved(entry, saved)
+        if (entry) {
+          noteSaved(entry, saved)
+          keepShell(entry, f.id, { html })
+        }
         useStore.getState().patchFrameLocal(frame.id, { html })
-        keepShell(entry, f.id, { html })
         notice(`“${f.name}” changed while the frame drew around it, so it stayed on the canvas`)
       } catch {
         /* the frame was saved again meanwhile: it may still hold the copy */
-        keepShell(entry, f.id, {})
+        if (entry) keepShell(entry, f.id, {})
         notice(`“${f.name}” changed while the frame drew; check the frame for a second copy`)
       }
     }

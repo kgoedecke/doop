@@ -10,7 +10,7 @@ import {
 import type { Frame } from '../../shared/types'
 import { useStore } from '../lib/store'
 import { currentPageCanvas } from '../lib/pages'
-import { shapeVerdict, shapesInside } from '../lib/canvasGroups'
+import { commentsVerdict, htmlVerdict, shapesInside } from '../lib/canvasGroups'
 import { isDrawingTool, resolvePointerAction, type DrawingTool } from '../lib/tools'
 import { gesture } from '../lib/gesture'
 import { visibleGuides } from '../lib/guides'
@@ -41,7 +41,7 @@ interface Draft {
   wrap?: boolean
   /* the shape checks a frame drag asks on every move, cached by frame html
      for the gesture so a move only redoes the cheap geometry */
-  verdicts?: Map<string, { html: string; verdict: ReturnType<typeof shapeVerdict> }>
+  verdicts?: Map<string, { html: string; verdict: ReturnType<typeof htmlVerdict> }>
 }
 
 /** Stage owns the pointer capture, including presses over a frame's shield.
@@ -298,11 +298,12 @@ export function useCanvasDrawing(stage: RefObject<HTMLDivElement>) {
     if (!draft || !d || d.tool !== 'frame' || draft.wrap !== undefined) return null
     const verdicts = draft.verdicts ?? new Map()
     const probe = (frame: Frame) => {
+      /* the html reads are cached for the gesture; the comment check runs
+         fresh over them — a comment left mid-drag still keeps the shape out */
       const cached = verdicts.get(frame.id)
-      if (cached?.html === frame.html) return cached.verdict
-      const verdict = shapeVerdict(frame)
-      verdicts.set(frame.id, { html: frame.html, verdict })
-      return verdict
+      const verdict = cached?.html === frame.html ? cached.verdict : htmlVerdict(frame)
+      if (cached?.html !== frame.html) verdicts.set(frame.id, { html: frame.html, verdict })
+      return commentsVerdict(frame, verdict)
     }
     return shapesInside(currentPageCanvas()?.frames ?? [], d, draft.target.pageId, probe).shapes
   }, [draft])

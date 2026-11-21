@@ -40,7 +40,7 @@ vi.mock('../src/lib/frameBridge', () => ({
 const { useStore } = await import('../src/lib/store')
 const { ApiError } = await import('../src/lib/api')
 const { clearHistory, undo } = await import('../src/lib/history')
-const { framedShapesDocument, shapesInside } = await import('../src/lib/canvasGroups')
+const { framedShapesDocument, htmlVerdict, shapeVerdict, shapesInside } = await import('../src/lib/canvasGroups')
 const { saveDrawing } = await import('../src/lib/drawing')
 
 const shell = (inner: string) =>
@@ -152,6 +152,18 @@ describe('shapesInside', () => {
     expect(skipped[0]!.reason).toContain('comments or a component main')
     expect(skipped[2]!.reason).toContain('a way a frame can’t keep yet')
   })
+
+  it('sees a comment left after the shape’s html verdict was cached', () => {
+    const a = frameWith('a', rect(), { x: 10, y: 10, name: 'Pinned' })
+    hold(a)
+    /* the drag probe caches this much by the frame's html… */
+    expect(htmlVerdict(a)).toBe('shape')
+    useStore.setState({ comments: [{ id: 'k', frameId: 'a', x: 1, y: 1 } as unknown as ElementComment] })
+    /* …and the comment half of the check runs fresh over it */
+    expect(shapeVerdict(a)).toEqual({
+      reason: '“Pinned” has comments or a component main, so it stayed on the canvas',
+    })
+  })
 })
 
 describe('framedShapesDocument', () => {
@@ -187,6 +199,27 @@ describe('framedShapesDocument', () => {
     /* front-most last */
     expect(built!.scopes.get('a')).toBeTruthy()
     expect(built!.scopes.get('b')).toBeTruthy()
+  })
+
+  it('paints the run in DOM order, not by a z-index a shape carried in', () => {
+    /* z-index 5 meant nothing alone in the back shell; shared in the frame
+       it would lift the back shape over the front one */
+    const back = frameWith('a', rect('', 'position:absolute;left:0;top:0;width:100%;height:100%;z-index:5'), {
+      x: 10,
+      y: 10,
+      name: 'Back',
+      z: 1,
+    })
+    const front = frameWith('b', rect(), { x: 50, y: 50, name: 'Front', z: 2 })
+    const built = framedShapesDocument(frameDoc, { x: 0, y: 0, width: 400, height: 400 }, [back, front])
+    const [first, second] = [...doc(built!.html).body.children] as HTMLElement[]
+    /* back to front as inserted, each root its own stacking context */
+    expect(first!.getAttribute('data-doop-name')).toBe('Back')
+    expect(first!.style.getPropertyValue('isolation')).toBe('isolate')
+    expect(first!.style.getPropertyValue('z-index')).toBe('auto')
+    expect(second!.getAttribute('data-doop-name')).toBe('Front')
+    expect(second!.style.getPropertyValue('isolation')).toBe('isolate')
+    expect(second!.style.getPropertyValue('z-index')).toBe('auto')
   })
 
   it('carries each shape’s own CSS and keeps the shell’s name as the layer’s', () => {
@@ -289,6 +322,55 @@ describe('saveDrawing wrap', () => {
     expect(createFrame.mock.calls.map(([, input]) => [input.x, input.y])).toEqual([[50, 50]])
     expect(live('a')).toBeTruthy()
     expect(useStore.getState().canvas!.frames.find((f) => f.name === 'Frame')).toBeUndefined()
+  })
+
+  it('still finishes the transfer on the server when the canvas was left mid-save', async () => {
+    const a = frameWith('a', rect(), { x: 10, y: 10, z: 1, updatedAt: 3 })
+    hold(a)
+    createFrame.mockImplementationOnce(async (canvasId, input) => {
+      /* the person opened another canvas while the frame was being created */
+      useStore.setState({
+        canvas: { id: 'c2', name: 'Other', frames: [], pages: [], createdAt: 0, updatedAt: 0 } as Canvas,
+        activePageId: null,
+      })
+      return { ...frameWith('new-mid', ''), canvasId, ...input, updatedAt: ++version } as Frame
+    })
+    await saveDrawing(around, target, { wrap: true })
+    /* the resolve came after the deletes: the shells went on the server */
+    expect(deleteFrame.mock.calls.map(([id]) => id)).toEqual(['a'])
+    /* nothing changed on the canvas now open, and no step was recorded */
+    expect(useStore.getState().canvas!.id).toBe('c2')
+    expect(useStore.getState().canvas!.frames).toHaveLength(0)
+    expect(useStore.getState().notice).toBeNull()
+    updateFrame.mockClear()
+    deleteFrame.mockClear()
+    await undo()
+    expect(updateFrame).not.toHaveBeenCalled()
+    expect(deleteFrame).not.toHaveBeenCalled()
+  })
+
+  it('keeps the next drawing queued until a kept shell’s copy is stripped', async () => {
+    const a = frameWith('a', rect(), { x: 10, y: 10, z: 1, updatedAt: 3 })
+    const b = frameWith('b', rect(), { x: 50, y: 50, z: 2, updatedAt: 4 })
+    hold(a, b)
+    /* a's delete loses to a teammate save: the copy comes out of the frame next */
+    deleteFrame.mockImplementationOnce(() =>
+      Promise.reject(new ApiError(409, JSON.stringify({ frame: { ...a, updatedAt: 9 } }))),
+    )
+    const order: string[] = []
+    createFrame.mockImplementation((canvasId, input) => {
+      order.push('create')
+      return Promise.resolve({ ...frameWith(`new${++nextId}`, ''), canvasId, ...input, updatedAt: ++version } as Frame)
+    })
+    updateFrame.mockImplementation((id, patch) => {
+      order.push('update')
+      return Promise.resolve({ ...frameWith(id, ''), ...patch, updatedAt: ++version } as Frame)
+    })
+    const first = saveDrawing(around, target, { wrap: true })
+    /* a drawing queued behind it sees only the stripped frame */
+    const second = saveDrawing({ tool: 'frame', x: 500, y: 500, width: 100, height: 100 }, target)
+    await Promise.all([first, second])
+    expect(order).toEqual(['create', 'update', 'create'])
   })
 })
 
