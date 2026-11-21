@@ -296,9 +296,12 @@ function appendFeedbackNotice<T extends ToolContent>(result: T, canvasId: string
 }
 
 /** Attaches the data behind the ChatGPT preview card (server/chatgptApp.ts):
- *  the frames a tool touched, as `structuredContent`. Clients without a
- *  component host ignore it; the model keeps reading `content` as before. */
-function withPreview<T extends { content: unknown[] }>(
+ *  the frames a tool touched, as `structuredContent`. Only for a client that
+ *  embeds the card: the card's data is not the tool's answer, and a client
+ *  that reads `structuredContent` in place of `content` (Claude Code,
+ *  opencode, Codex) would see nothing else, no pages, positions, notes or
+ *  HUMAN FEEDBACK (#526). */
+function attachPreview<T extends { content: unknown[] }>(
   result: T,
   canvasId: string,
   frames: Frame[],
@@ -481,8 +484,11 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
   loadToolTargets(server)
   registerFramePreview(server)
   /* only for a client that shows the card inside the conversation (embedsPreview) */
+  const embedsCard = embedsPreview(clientName)
   const previewMeta = (invoking: string, invoked: string) =>
-    embedsPreview(clientName) ? previewToolMeta(invoking, invoked) : undefined
+    embedsCard ? previewToolMeta(invoking, invoked) : undefined
+  const withPreview = <T extends { content: unknown[] }>(result: T, canvasId: string, frames: Frame[]) =>
+    embedsCard ? attachPreview(result, canvasId, frames) : result
 
   server.registerTool(
     'get_guide',

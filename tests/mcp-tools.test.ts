@@ -153,10 +153,13 @@ it('requires the original page list and rejects stale agent replacements', async
   }
 })
 
-async function pagesClient(canvas: { id: string; ownerId: string; name: string; pages?: unknown; frames: unknown[] }) {
+async function pagesClient(
+  canvas: { id: string; ownerId: string; name: string; pages?: unknown; frames: unknown[] },
+  clientName?: string,
+) {
   const { store } = await import('../server/store.ts')
   store.canvases.set(canvas.id, { createdAt: 0, updatedAt: 0, ...canvas } as never)
-  const server = buildMcpServer('Test Owner', 'test-owner-id')
+  const server = buildMcpServer('Test Owner', 'test-owner-id', clientName)
   const client = new Client({ name: 'pages-test', version: '1.0.0' })
   const [a, b] = InMemoryTransport.createLinkedPair()
   await server.connect(b)
@@ -308,6 +311,36 @@ it('get_canvas lists the pages and narrows the frames to page_id', async () => {
     })
     expect(missing.isError).toBe(true)
     expect(JSON.stringify(missing)).toContain('No page nope')
+  } finally {
+    await close()
+  }
+})
+
+/* A client that reads structuredContent in place of content (Claude Code did)
+   saw only the preview card's frames: no pages, positions or notes (#526) */
+it.each([
+  ['claude-code', false],
+  ['opencode', false],
+  ['openai-mcp', true],
+])('get_canvas sends %s structuredContent: %s', async (clientName, card) => {
+  const { client, close, body } = await pagesClient(
+    {
+      id: `mcp-structured-${clientName}`,
+      ownerId: 'test-owner-id',
+      name: 'Structured',
+      pages: [{ id: 'first', name: 'Main' }],
+      frames: [],
+    },
+    clientName,
+  )
+  try {
+    const result = await client.callTool({
+      name: 'get_canvas',
+      arguments: { canvas_id: `mcp-structured-${clientName}` },
+    })
+    expect(body(result).pages).toEqual([{ id: 'first', name: 'Main' }])
+    if (card) expect(result.structuredContent).toMatchObject({ frames: [] })
+    else expect(result.structuredContent).toBeUndefined()
   } finally {
     await close()
   }
