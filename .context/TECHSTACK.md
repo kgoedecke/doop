@@ -396,7 +396,8 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   `copyElementPng`): the frame is rendered whole and cut to the element's live box
   (`doop:inspect` rect, `clipToFrame`, the raster's `clip` option), so every style it inherits
   and whatever paints behind it stay in the picture; a server render is cropped here the same
-  way (`cropRaster`), and a frame off screen says so. The element panel's Design tab ends with the same
+  way (`cropRaster`), unless a full screenshot would reduce a small layer’s density, in which case Chromium captures
+  the layer by selector. A frame off screen says so. The element panel's Design tab ends with the same
   Export section (`LayerExportSection.tsx`: the shared scale and format, "Export <layer>", Copy as
   PNG), as Figma ends a layer's properties. Agents export a layer with `export_layer` (MCP and the
   resident, `server/layerExport.ts`), named by `element_id` (its `data-doop-id`) or a CSS
@@ -412,7 +413,9 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   named `Name@2x.png` as Figma does. Up to 2x a scale is honoured as before; above it,
   `fitExportScale` brings a huge frame down to 16,384 px a side and 64 MP, the same limit
   for the browser render, `/i/<id>.png?scale=` (any parsed scale, 1x when unreadable) and MCP
-  `export_frame`'s `scale`, and the toast says so. SVG is `frameSvg`: the inlined document
+  `export_frame`'s `scale`. Full-frame server exports then reduce density only when the
+  screenshot would otherwise lose rows at Chromium’s 50 MP capture limit. The download names
+  the density actually used, and the toast reports a reduction. SVG is `frameSvg`: the inlined document
   `inlineDocument` already builds, cropped by `viewBox` for an element, on white, settled for
   a file opened as a page, where the viewer's window would be the viewport (`standalone`,
   `FrameViewport`): viewport units become the frame's px, `@media` rules and `<style media>` are

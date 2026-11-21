@@ -54,13 +54,15 @@ import {
   takePdfExportSlot,
 } from './pdfExport.ts'
 import { primeImage } from './previews.ts'
-import { MAX_LAYER_SELECTOR_CHARS, layerExport } from './layerExport.ts'
+import { MAX_LAYER_SELECTOR_CHARS } from '../shared/elementId.ts'
+import { layerExport } from './layerExport.ts'
 import {
   DEFAULT_EXPORT_SCALE,
   MAX_EXPORT_SCALE,
   MIN_EXPORT_SCALE,
   exportPixelSize,
   fitExportScale,
+  fullFrameRenderScale,
   parseExportScale,
 } from '../shared/exportScale.ts'
 import { COMPOSE_CHECK, GUIDE_TOPIC_SUMMARIES, GUIDE_TOPICS, guideFor } from './guide.ts'
@@ -1658,11 +1660,12 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
       if (format === 'pdf') return exportPdf(f, frame_ids ?? [])
       const ext = format === 'jpg' ? 'jpg' : 'png'
       const q = ext === 'jpg' ? `&quality=${quality ?? 90}` : ''
-      const density = fitExportScale(f, parseExportScale(scale ?? DEFAULT_EXPORT_SCALE) ?? DEFAULT_EXPORT_SCALE)
-      const pixels = exportPixelSize(f, density)
+      const requested = fitExportScale(f, parseExportScale(scale ?? DEFAULT_EXPORT_SCALE) ?? DEFAULT_EXPORT_SCALE)
+      const density = fullFrameRenderScale(f, requested)
+      const pixels = exportPixelSize({ width: Math.round(f.width), height: Math.round(f.height) }, density)
       return text({
-        image_url: `${env.BETTER_AUTH_URL}/i/${frame_id}.${ext}?scale=${density}${q}`,
-        download_url: `${env.BETTER_AUTH_URL}/i/${frame_id}.${ext}?scale=${density}${q}&download`,
+        image_url: `${env.BETTER_AUTH_URL}/i/${frame_id}.${ext}?scale=${requested}${q}`,
+        download_url: `${env.BETTER_AUTH_URL}/i/${frame_id}.${ext}?scale=${requested}${q}&download`,
         scale: density,
         width: pixels.width,
         height: pixels.height,
