@@ -139,6 +139,21 @@ describe('feedback on an agent’s work', () => {
     }
   })
 
+  it('makes the resident agents wait the minute too', () => {
+    vi.useFakeTimers()
+    try {
+      const ben = claude('mcp:ben', 'Ben')
+      const fb = actions.addTaskFeedback(taskOf(ben, 'Building the footer').id, 'Kevin', 'Make it darker')!
+      expect(actions.pendingWorkAgents(canvasId)).toEqual([])
+      expect(actions.takeResidentFeedbackFor(canvasId, 'Doop')).toEqual([])
+      vi.advanceTimersByTime(actions.OWNER_FIRST_MS)
+      expect(actions.pendingWorkAgents(canvasId)).toEqual(['Doop'])
+      expect(actions.takeResidentFeedbackFor(canvasId, 'Doop').map((f) => f.id)).toEqual([fb.id])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('goes to its own agent at once', () => {
     const ben = claude('mcp:ben', 'Ben')
     const fb = actions.addTaskFeedback(taskOf(ben, 'Building the footer').id, 'Kevin', 'Make it darker')!

@@ -354,8 +354,12 @@ export function pendingWorkAgents(canvasId: string): string[] {
   for (const card of [...(taskLog.get(canvasId) ?? [])].reverse()) {
     if (card.queuedBy && !card.agentName && !card.failedAt && !card.endedAt) add(stageAgent(card, roster))
   }
+  const now = Date.now()
   for (const f of [...(feedbackLog.get(canvasId) ?? [])].reverse()) {
-    if (!f.deliveredAt && !f.failedAt) add(addressee(f.targetAgent, roster) ?? DEFAULT_ROLE_NAME)
+    /* feedback still waiting for the outside agent whose work it is about is
+       no resident's yet: addTaskFeedback wakes them when the wait is over */
+    if (!f.deliveredAt && !f.failedAt && !awaitingOwner(f, now))
+      add(addressee(f.targetAgent, roster) ?? DEFAULT_ROLE_NAME)
   }
   for (const c of [...(commentLog.get(canvasId) ?? [])].reverse()) {
     if (c.forAgent && !c.claimedBy && !c.failedAt && !c.resolvedAt)
@@ -430,8 +434,9 @@ function oldestWork(canvasId: string, agentName: string, passOver: (work: NextWo
       consider(c.at, c.fromUserId, undefined)
     }
   }
+  const now = Date.now()
   for (const f of feedbackLog.get(canvasId) ?? []) {
-    if (!f.deliveredAt && !f.failedAt && feedbackFor(f, agentName, roster)) {
+    if (!f.deliveredAt && !f.failedAt && feedbackFor(f, { name: agentName }, roster, now)) {
       consider(f.at, f.fromUserId, feedbackRunner(f))
     }
   }
@@ -439,10 +444,12 @@ function oldestWork(canvasId: string, agentName: string, passOver: (work: NextWo
 }
 
 /** Whether this agent may take a reply: one addressed to it, or one left for
- *  whoever shows up (the work it answers was an outside agent's). */
-function feedbackFor(f: TaskFeedback, agentName: string, roster: Roster): boolean {
+ *  whoever shows up (the work it answers was an outside agent's), once that
+ *  agent has had first pick. */
+function feedbackFor(f: TaskFeedback, agent: Pick<Actor, 'name' | 'agentKey'>, roster: Roster, now: number): boolean {
   const target = addressee(f.targetAgent, roster)
-  return !target || target === agentName
+  if (target && target !== agent.name) return false
+  return f.agentKey === agentKeyOf(agent) || !awaitingOwner(f, now)
 }
 
 /** The requester behind the oldest work, for callers that bill but do not
@@ -556,8 +563,11 @@ export function addTaskFeedback(
     stored.saveFeedback(fb)
     broadcast(canvasId, { type: 'feedback', feedback: fb })
     /* resident Doop agent picks feedback up instantly (no-op without an API
-       key). Dynamic import: resident depends on this module. */
+       key). Dynamic import: resident depends on this module. Feedback on an
+       outside agent's work is that agent's for a minute: the residents hear
+       again when it is open to them. */
     kickResident(canvasId)
+    if (fb.agentKey) afterCommit(() => setTimeout(() => kickResident(canvasId), OWNER_FIRST_MS).unref())
     logActivity(
       canvasId,
       resolveActor({ name: from, kind: 'user' }),
@@ -573,12 +583,10 @@ export function addTaskFeedback(
  *  tool call (server/index.ts), so an agent still at work is asked first. */
 export const OWNER_FIRST_MS = 60_000
 
-/** Whether an outside agent may take feedback yet: anything once the agent
- *  whose work it is about has had its minute, and its own feedback at once.
- *  Resident roles (no key) are routed by `targetAgent` and never wait. */
-function ownerFirst(f: TaskFeedback, agent: Pick<Actor, 'name' | 'agentKey'>, now: number): boolean {
-  if (!f.agentKey || !agent.agentKey || f.agentKey === agent.agentKey) return true
-  return now - f.at >= OWNER_FIRST_MS
+/** Feedback on an outside agent's work that is still that agent's alone:
+ *  every other agent, a resident one too, waits out OWNER_FIRST_MS. */
+function awaitingOwner(f: TaskFeedback, now: number): boolean {
+  return !!f.agentKey && now - f.at < OWNER_FIRST_MS
 }
 
 /** The feedback takeFeedbackFor would claim, left unclaimed: what read-only
@@ -595,8 +603,7 @@ export function openFeedbackFor(
     (f) =>
       !f.deliveredAt &&
       !f.failedAt &&
-      feedbackFor(f, agent.name, roster) &&
-      ownerFirst(f, agent, now) &&
+      feedbackFor(f, agent, roster, now) &&
       (payer === undefined || (f.fromUserId ?? '') === payer) &&
       (runner === undefined || runnerKey(feedbackRunner(f)) === runner),
   )
