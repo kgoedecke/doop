@@ -414,18 +414,12 @@ export interface CreateFromElement {
   /** a data-doop-id, or an element path */
   element: string
   autoProps?: boolean
-  /** also turn every other element of the same shape on the canvas into an instance */
-  replaceMatching?: boolean
 }
 
 export interface CreateResult {
   component: ComponentDef
-  converted: { frameId: string; instances: number }[]
   /** props named for the author, from what each element is: worth a look, and a rename */
   inferred: string[]
-  /** replace_matching ran out of work budget part of the way: the component is made and
-   *  `converted` lists what was linked, but frames after those were not looked at */
-  matching_stopped?: true
 }
 
 function checkCapacity(canvasId: string) {
@@ -474,7 +468,6 @@ export const createComponentFromElement = atomic(function createComponentFromEle
   if (attrOf(el, INSTANCE_ATTR)) fail('that element is an instance — detach it first to make a new component from it')
   if (withinInstance(el)) fail('that element sits inside an instance — edit its main, or detach the instance first')
 
-  const shape = shapeOf(el)
   const def = blankComponent({ name, description: clip(input.description), props, code: input.code, by: actor.name })
   /* one unit: a write that fails leaves no main-less component holding the name */
   const inferred = transaction(() => {
@@ -487,16 +480,7 @@ export const createComponentFromElement = atomic(function createComponentFromEle
     actions.logComponent(canvasId, actor, `made “${requireComponent(canvasId, def.id).name}” a component`)
     return bound
   })
-  const saved = requireComponent(canvasId, def.id)
-  const matching = input.replaceMatching
-    ? convertMatching(canvasId, shape, saved, actor)
-    : { converted: [], stopped: false }
-  return {
-    component: requireComponent(canvasId, def.id),
-    converted: matching.converted,
-    inferred,
-    ...(matching.stopped ? { matching_stopped: true as const } : {}),
-  }
+  return { component: requireComponent(canvasId, def.id), inferred }
 })
 
 const clip = (text: string | undefined) => text?.slice(0, MAX_COMPONENT_DESCRIPTION)
@@ -588,7 +572,7 @@ export const createComponentFromHtml = atomic(function createComponentFromHtml(
   /* the component is made: a note that cannot be worked out within budget is left out */
   if (input.css) optional(() => reportCssNotKept(component, input.css!))
   actions.logComponent(canvasId, actor, `created component “${name}”`)
-  return { component, converted: [], inferred }
+  return { component, inferred }
 })
 
 const MAX_SELECTORS_NAMED = 8
@@ -1360,84 +1344,6 @@ function describeCandidate(shape: string, occurrences: Occurrence[], size: numbe
     example: { frame_id: first.frame.id, frame_name: first.frame.name, element: pathTo(first.el) },
     shape: shape.slice(0, 160),
   }
-}
-
-function convertMatching(canvasId: string, shape: string | undefined, def: ComponentDef, actor: Actor) {
-  const canvas = store.getCanvas(canvasId)
-  const converted: CreateResult['converted'] = []
-  if (!canvas || !shape) return { converted, stopped: false }
-  /* a sub-commit: the component is made and stays, whatever becomes of the matching */
-  checkpoint()
-  try {
-    const template = parseTemplateRoot(def.template)
-    if (!template) return { converted, stopped: false }
-    convertFrames(canvas, shape, template, def, actor, converted)
-  } catch (error) {
-    /* the component exists and the frames so far are linked (each was sub-committed as it
-       was done): out of budget, the rest is left for another call rather than reported as
-       a change that never happened */
-    if (!(error instanceof WorkBudgetError)) throw error
-    return { converted, stopped: true }
-  }
-  return { converted, stopped: false }
-}
-
-function convertFrames(
-  canvas: Canvas,
-  shape: string,
-  template: Element,
-  def: ComponentDef,
-  actor: Actor,
-  converted: CreateResult['converted'],
-) {
-  for (const frame of [...canvas.frames]) {
-    /* a locked frame is not to be edited, however good the reason */
-    if (frame.demo || frame.locked) continue
-    const doc = parse(frame.html, { sourceCodeLocationInfo: true })
-    const measured = measureTree(doc)
-    const edits: { start: number; end: number; text: string }[] = []
-    const stack: Tree.ChildNode[] = [...doc.childNodes]
-    for (let node = stack.pop(); node; node = stack.pop()) {
-      if (!isElement(node)) continue
-      if (attrOf(node, INSTANCE_ATTR) !== undefined || attrOf(node, COMPONENT_ATTR) !== undefined) continue
-      const location = node.sourceCodeLocation
-      if (location && measured.get(node)?.shape === shape) {
-        keyLike(node, template)
-        setAttr(node, INSTANCE_ATTR, def.id)
-        setAttr(node, REV_ATTR, String(def.rev))
-        if (!attrOf(node, ELEMENT_ID_ATTR)) setAttr(node, ELEMENT_ID_ATTR, newId())
-        edits.push({ start: location.startOffset, end: location.endOffset, text: serializeOuter(node) })
-        continue
-      }
-      stack.push(...node.childNodes)
-    }
-    if (!edits.length) continue
-    /* the next prepare diffs each against the template: differing words become props */
-    actions.updateFrame(frame.id, { html: splice(frame.html, edits) }, actor)
-    converted.push({ frameId: frame.id, instances: edits.length })
-    /* a sub-commit per frame: one that is linked stays linked if a later one is refused */
-    checkpoint()
-  }
-}
-
-function keyLike(el: Element, template: Element) {
-  const key = attrOf(template, PART_ATTR)
-  if (key) setAttr(el, PART_ATTR, key)
-  const kids = kidsOf(el).filter((kid) => kid.tagName !== 'style' && kid.tagName !== 'script')
-  const templateKids = kidsOf(template).filter((kid) => kid.tagName !== 'style' && kid.tagName !== 'script')
-  kids.forEach((kid, index) => {
-    const match = templateKids[index]
-    if (match) keyLike(kid, match)
-  })
-}
-
-function newId(): string {
-  const bytes = new Uint8Array(6)
-  crypto.getRandomValues(bytes)
-  const alphabet = 'abcdefghijklmnopqrstuvwxyz0123456789'
-  let id = ''
-  for (const byte of bytes) id += alphabet[byte % alphabet.length]
-  return id
 }
 
 /** Elements on a frame that look exactly like an existing component but are not instances of it. */

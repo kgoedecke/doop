@@ -112,7 +112,7 @@ export function existingStyleBrief(style: ExistingStyle, { tokens }: { tokens: b
     )
   }
   lines.push(
-    'Do not rewrite the existing frames to use new tokens or components (no replace_matching) unless the human asked: ' +
+    'Do not rewrite the existing frames to use new tokens or components unless the human asked: ' +
       'when you finish, offer to bring them onto the same tokens and components.',
   )
   return lines.join(' ')

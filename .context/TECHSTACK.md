@@ -518,7 +518,7 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   queue. Inside an open transaction `transaction` / `atomic` is a savepoint; the frame, token and
   component actions are `atomic`, so one called outside any operation (a job, a timer) is still
   all-or-nothing. `checkpoint()` is a sub-commit, for partial progress that is meant to stay
-  (`replace_matching` per frame, a pulled component of an import, each canvas of
+  (a pulled component of an import, each canvas of
   `update_library_everywhere`) and before an await that depends on committed work (the element-id
   stamp's durable write). No isolation: an undo restores only what is still its own write (a
   frame's `updatedAt`, a definition's identity). Presence touches are never queued.
@@ -1100,8 +1100,8 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
 - Reuse notes (`server/reuseNotes.ts`): a whole-frame write (MCP `create_frame`, `set_frame_html`, the
   `done` chunk of a stream; the resident's `create_frame`, `set_frame_html`, `commit_frame_rewrite`)
   gets `componentWriteNotes(frame, { review: true })`, which adds what the frame should have reused:
-  a block written out three or more times (`REUSE`, with the `create_component` + `replace_matching`
-  call), colours the canvas has as tokens (`TOKENS`, `#hex → var(--name)`, aliases resolved), a
+  a block written out three or more times (`REUSE`: make one a component with `create_component`,
+  then replace the other copies with `<doop-use>` through `edit_frame_html`), colours the canvas has as tokens (`TOKENS`, `#hex → var(--name)`, aliases resolved), a
   colour palette declared on `:root` or tokens redefined there, and on a canvas with no tokens a frame
   hardcoding four or more colours. Doop's own blocks (tokens, fonts, component CSS) are not counted;
   `edit_frame_html` stays quiet. `create_component` / `update_component` name rows a main repeats by
@@ -1114,7 +1114,7 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   and the resident kickoff an "Existing style" block: with no tokens, the colours and fonts the
   frames share (by how many frames name each). The brief (`existingStyleBrief`, replacing
   `NO_TOKENS_BRIEF` there) asks for tokens from those values before the first new frame, and says to leave the existing
-  frames alone (no `replace_matching`) unless asked, offering the clean-up at the end;
+  frames alone unless asked, offering the clean-up at the end;
   `DESIGN_BRIEF` and `COMPONENTS` say the same. Tests: `existingStyle.test.ts`.
 - Workspace component libraries (`.context/specs/workspace-component-library.md`,
   `server/componentLibrary.ts`): a workspace canvas publishes snapshots of its components

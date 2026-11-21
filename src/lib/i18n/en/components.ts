@@ -139,10 +139,6 @@ export const components = {
   detachInstance: 'Detach instance',
   /* notices */
   created: '“{name}” created',
-  createdLinked: {
-    one: '“{name}” created, {count} matching element linked',
-    other: '“{name}” created, {count} matching elements linked',
-  },
   createFailed: 'Couldn’t create the component. Please try again.',
   changeFailed: 'Couldn’t change that instance. Please try again.',
   placeFailed: 'Couldn’t place the component. Please try again.',

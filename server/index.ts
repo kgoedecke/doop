@@ -2457,7 +2457,6 @@ const componentCreateBody = z.object({
   frameId: z.string().optional(),
   element: z.string().optional(),
   autoProps: z.boolean().optional(),
-  replaceMatching: z.boolean().optional(),
   html: z.string().optional(),
   css: z.string().optional(),
   width: z.number().optional(),
@@ -2709,7 +2708,6 @@ app.post('/api/canvases/:id/components', (req, res) => {
           { ...body, html: body.html, props: body.props as never, name: String(body.name ?? '') },
           actor,
         ).component,
-        converted: [],
       }
     }
     const created = createComponentFromElement(
@@ -2722,13 +2720,12 @@ app.post('/api/canvases/:id/components', (req, res) => {
         frameId: String(body.frameId ?? ''),
         element: String(body.element ?? ''),
         autoProps: body.autoProps,
-        replaceMatching: body.replaceMatching === true,
       },
       actor,
     )
     /* what the editor needs to undo this as one step */
-    const changed = new Set([String(body.frameId), ...created.converted.map((entry) => entry.frameId)])
-    return { ...created, frames: [...changed].flatMap((id) => store.getFrame(id) ?? []) }
+    const frame = store.getFrame(String(body.frameId))
+    return { ...created, frames: frame ? [frame] : [] }
   })
 })
 
