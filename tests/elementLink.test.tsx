@@ -107,9 +107,13 @@ it('copies the right-clicked layer even when another element is selected', async
   act(() => {
     row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2 }))
   })
-  const item = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(
-    (el) => el.textContent === 'Copy link to element',
-  )!
+  /* the link sits under "Copy/Paste as", as in Figma's layer menu */
+  const menuItem = (label: string) =>
+    [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find((el) => el.firstChild?.textContent === label)
+  const sub = menuItem('Copy/Paste as')!
+  expect(sub).toBeDefined()
+  act(() => sub.click())
+  const item = menuItem('Copy link to element')!
   expect(item).toBeDefined()
   await act(async () => item.click())
   /* a Layers row names the element from the saved HTML itself: nothing live to vouch */
