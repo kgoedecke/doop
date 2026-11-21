@@ -354,34 +354,16 @@ function assertSignupDomainAllowed(email: string): void {
   })
 }
 
-export interface IpAddressConfig {
-  ipAddressHeaders?: string[]
-  trustedProxies?: string[]
-}
-
-/**
- * IP resolution settings for Better Auth rate limiting and session tracking.
- *
- * Behind reverse proxies (Fly.io, Cloudflare, etc.), X-Forwarded-For often carries
- * multiple hops. Without trusted proxy CIDRs, Better Auth refuses to guess which hop is
- * untrusted and returns null, causing rate limits to collapse into a single shared
- * bucket ("no-trusted-ip") across all clients.
- *
- * AUTH_IP_HEADERS configures which headers to inspect in priority order (e.g. fly-client-ip,
- * cf-connecting-ip). Header names are normalized to lowercase for reliable matching across
- * both Web Headers and Node incoming message dictionaries.
- *
- * AUTH_TRUSTED_PROXIES specifies trusted reverse-proxy IPs or CIDRs so that multi-hop
- * X-Forwarded-For chains can be safely walked right-to-left.
- *
- * Returns null when neither is configured, preserving Better Auth's default behavior.
- */
-export function loadIpAddressConfig(): IpAddressConfig | null {
-  const headers = env.AUTH_IP_HEADERS.map((h) => h.toLowerCase().trim()).filter(Boolean)
-  const trustedProxies = env.AUTH_TRUSTED_PROXIES.map((p) => p.trim()).filter(Boolean)
-  if (headers.length === 0 && trustedProxies.length === 0) return null
+/* Which request header holds the client IP, for Better Auth's per-client rate limits.
+   Unset, it reads only a single-hop X-Forwarded-For; behind a proxy that adds hops
+   (Fly, Cloudflare, Railway) it finds no IP and every visitor shares one bucket.
+   Header names are lowercased, since Node's req.headers keys are. */
+export function loadIpAddressConfig() {
+  const ipAddressHeaders = env.AUTH_IP_HEADERS.map((h) => h.toLowerCase())
+  const trustedProxies = env.AUTH_TRUSTED_PROXIES
+  if (ipAddressHeaders.length === 0 && trustedProxies.length === 0) return null
   return {
-    ...(headers.length > 0 && { ipAddressHeaders: headers }),
+    ...(ipAddressHeaders.length > 0 && { ipAddressHeaders }),
     ...(trustedProxies.length > 0 && { trustedProxies }),
   }
 }
@@ -403,11 +385,7 @@ function buildAuth() {
     /* the provider tokens a social or SSO sign-in leaves on its account row,
        sealed with the auth secret; doop never reads them back */
     account: { encryptOAuthTokens: true },
-    ...(ipAddressConfig && {
-      advanced: {
-        ipAddress: ipAddressConfig,
-      },
-    }),
+    ...(ipAddressConfig && { advanced: { ipAddress: ipAddressConfig } }),
     /* prod: the public origin, plus any extras from env, plus Apple when its
        web flow is on: Apple returns the authorization code by POSTing a form
        from appleid.apple.com to /api/auth/callback/apple, and better-auth's
