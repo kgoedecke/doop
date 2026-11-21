@@ -21,7 +21,13 @@ import { FrameLabelLayer } from './FrameLabelLayer'
 import { PathEditor } from './PathEditor'
 import { loadPathEdit, type PathEditSource } from '../lib/pathEditing'
 import { currentPageCanvas } from '../lib/pages'
-import { noteFrameDocument, registerFrameWindow, requestFrame, unregisterFrameWindow } from '../lib/frameBridge'
+import {
+  finishFrameSettle,
+  noteFrameDocument,
+  registerFrameWindow,
+  requestFrame,
+  unregisterFrameWindow,
+} from '../lib/frameBridge'
 import { api } from '../lib/api'
 import { resolveFrameLink } from '../lib/elementLink'
 import { sendWs } from '../lib/ws'
@@ -912,9 +918,9 @@ export const FrameView = memo(function FrameView({
   /* the margin the iframe reaches past a standalone shape's box, so a stroke
      spills past it as in Figma (the runtime asks, see `bleed` there) */
   const [bleed, setBleed] = useState(0)
-  /* the port the runtime relays keys over; see `replayKey` */
-  const keyPort = useRef<MessagePort | null>(null)
-  /* saves a document the runtime serialized after a text edit (set below) */
+  /* Private to the bootstrap runtime, established before the first design renders. */
+  const runtimePort = useRef<MessagePort | null>(null)
+  /* saves a document the runtime serialized after an edit (set below) */
   const saveEditedRef = useRef<(html: string, discrete: boolean) => void>(() => {})
   useEffect(() => {
     /* a key pressed while the focus sits in this frame's document: replay
@@ -923,16 +929,25 @@ export const FrameView = memo(function FrameView({
        runtime before any design script runs, so a script in the frame
        cannot forge one; a frame without the focus is not heard anyway, and
        the keys that remove things (⌫, Delete) never travel */
-    function replayKey(ev: MessageEvent) {
+    function onRuntimeMessage(ev: MessageEvent) {
       const iframe = iframeRef.current
-      if (!iframe || document.activeElement !== iframe || !document.hasFocus()) return
-      const relay = ev.data as Partial<KeyRelay> | { event: 'edited'; html?: unknown } | undefined
-      /* text typed just before a key that leaves the canvas (⌘1…⌘9): sent
-         down this same port ahead of the key, so it is saved first */
+      if (!iframe?.contentWindow) return
+      const relay = ev.data as
+        | Partial<KeyRelay>
+        | { event: 'edited'; html?: unknown; discrete?: boolean }
+        | { event: 'settled'; reqId?: unknown }
+        | undefined
+      /* Inspector edits arrive while the panel holds focus. Only keys need
+         the iframe to be focused. */
       if (relay?.event === 'edited') {
-        if (typeof relay.html === 'string') saveEditedRef.current(relay.html, false)
+        if (typeof relay.html === 'string') saveEditedRef.current(relay.html, relay.discrete === true)
         return
       }
+      if (relay?.event === 'settled') {
+        if (typeof relay.reqId === 'number') finishFrameSettle(iframe.contentWindow, relay.reqId)
+        return
+      }
+      if (document.activeElement !== iframe || !document.hasFocus()) return
       if (!relay || (relay.event !== 'keydown' && relay.event !== 'keyup')) return
       if (typeof relay.key !== 'string' || typeof relay.code !== 'string') return
       const { event, key, code } = relay
@@ -961,11 +976,11 @@ export const FrameView = memo(function FrameView({
         window.requestAnimationFrame(() => syncCursorRef.current())
         /* once per document: the ready signal arrives before the design's
            HTML, so only the runtime can be listening for the port */
-        if (!keyPort.current) {
+        if (!runtimePort.current) {
           const channel = new MessageChannel()
-          channel.port1.onmessage = replayKey
-          keyPort.current = channel.port1
-          win.postMessage({ type: 'doop:key-port' }, '*', [channel.port2])
+          channel.port1.onmessage = onRuntimeMessage
+          runtimePort.current = channel.port1
+          win.postMessage({ type: 'doop:runtime-port' }, '*', [channel.port2])
         }
         setRuntimeReady(true)
       }
@@ -977,8 +992,8 @@ export const FrameView = memo(function FrameView({
     window.addEventListener('message', onMsg)
     return () => {
       window.removeEventListener('message', onMsg)
-      keyPort.current?.close()
-      keyPort.current = null
+      runtimePort.current?.close()
+      runtimePort.current = null
     }
   }, [])
   /* the runtime insets its body by the margin once the iframe has grown by it */
@@ -1663,9 +1678,6 @@ export const FrameView = memo(function FrameView({
     saveEditedRef.current = saveEdited
     function onMsg(ev: MessageEvent) {
       if (ev.source !== iframeRef.current?.contentWindow) return
-      if (ev.data?.type === 'doop:edited' && typeof ev.data.html === 'string') {
-        saveEdited(ev.data.html, ev.data.discrete === true)
-      }
       if (ev.data?.type === 'doop:edit-esc') {
         setEditing(false)
         /* the keyboard was in the frame's document while the text was being

@@ -130,6 +130,24 @@ describe.skipIf(!findBrowserPath())('element design controls', () => {
     expect(errors).toEqual([])
   })
 
+  it('accepts an inspector edit after ignoring a public frame-save notification', async () => {
+    await page.evaluate(() => {
+      const source = document.querySelector('iframe')!.contentWindow
+      window.dispatchEvent(
+        new MessageEvent('message', { source, data: { type: 'doop:edited', html: '<p>Old protocol</p>' } }),
+      )
+    })
+    await page.click('[aria-label="Align center"]')
+    await expect.poll(() => saved.html).toContain('text-align: center')
+    expect(framePatches.filter((patch) => patch.html)).toHaveLength(1)
+    expect(saved.html).toContain('Typography controls should edit')
+    await page.reload()
+    await page.waitForFunction(() => !!window.elementPanelHarness)
+    await page.evaluate((frame) => window.elementPanelHarness.seed(frame), saved)
+    const iframe = (await (await page.waitForSelector('iframe'))!.contentFrame())!
+    await iframe.waitForFunction(() => document.querySelector<HTMLElement>('#text')?.style.textAlign === 'center')
+  })
+
   it('edits fonts and alignment through the sandbox, persists them, and supports undo and RTL', async () => {
     const selector = 'select[aria-label="Font family"]'
     const frame = (await (await page.$('iframe'))!.contentFrame())!
