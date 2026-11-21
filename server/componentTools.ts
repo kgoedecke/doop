@@ -8,6 +8,7 @@ import {
   componentDetail,
   ComponentError,
   createComponentFromElement,
+  MAX_SKIPPED_LISTED,
   createComponentFromHtml,
   deleteComponent,
   detachAllInstances,
@@ -273,7 +274,7 @@ export const COMPONENT_TOOLS: ComponentTool[] = [
       }
       if (typeof input.frame_id !== 'string' || typeof input.element !== 'string')
         throw new ComponentError('pass html, or frame_id with element')
-      const { component, converted, inferred, matching_stopped } = createComponentFromElement(
+      const { component, converted, skipped, inferred, matching_stopped } = createComponentFromElement(
         canvas.id,
         {
           ...shared,
@@ -289,11 +290,17 @@ export const COMPONENT_TOOLS: ComponentTool[] = [
           component: summary(canvas, component),
           main_frame_id: component.mainFrameId,
           converted,
+          ...(skipped ? { skipped } : {}),
           ...(matching_stopped ? { matching_stopped } : {}),
           ...inferredProps(inferred),
         },
         note: [
           `Use it with ${usageExample(component)}.${inferredNote(inferred)}`,
+          ...(skipped
+            ? [
+                `replace_matching skipped ${skipped.length === MAX_SKIPPED_LISTED ? `at least ${MAX_SKIPPED_LISTED}` : skipped.length} block(s) with the same tags but another look (listed in \`skipped\` with why): linking them would have pinned that look as overrides. Leave them if they are a different design; if they should be this component, replace each with ${usageExample(component)} in edit_frame_html.`,
+              ]
+            : []),
           ...(matching_stopped
             ? [
                 'replace_matching stopped part of the way (the work budget for one call): the frames in `converted` are linked, later frames were not looked at and their copies stay plain markup.',

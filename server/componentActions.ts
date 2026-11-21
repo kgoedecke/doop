@@ -51,6 +51,7 @@ import {
   inferBindings,
   innermost,
   isElement,
+  keyLike,
   kidsOf,
   measureTree,
   parseTemplateRoot,
@@ -67,6 +68,7 @@ import {
   splice,
   stampParts,
   useMarkup,
+  whyNotLinkable,
   withDetachedCss,
 } from './componentEngine.ts'
 import {
@@ -418,9 +420,21 @@ export interface CreateFromElement {
   replaceMatching?: boolean
 }
 
+/** A block replace_matching found with the component's shape but left alone: it differs
+ *  in look, not only in words, so linking it would pin that difference as an override. */
+export interface SkippedMatch {
+  frameId: string
+  /** its data-doop-id, else a CSS path to it */
+  element: string
+  text: string
+  reason: string
+}
+
 export interface CreateResult {
   component: ComponentDef
   converted: { frameId: string; instances: number }[]
+  /** replace_matching's near-matches, at most MAX_SKIPPED_LISTED */
+  skipped?: SkippedMatch[]
   /** props named for the author, from what each element is: worth a look, and a rename */
   inferred: string[]
   /** replace_matching ran out of work budget part of the way: the component is made and
@@ -490,10 +504,11 @@ export const createComponentFromElement = atomic(function createComponentFromEle
   const saved = requireComponent(canvasId, def.id)
   const matching = input.replaceMatching
     ? convertMatching(canvasId, shape, saved, actor)
-    : { converted: [], stopped: false }
+    : { converted: [], skipped: [], stopped: false }
   return {
     component: requireComponent(canvasId, def.id),
     converted: matching.converted,
+    ...(matching.skipped.length ? { skipped: matching.skipped } : {}),
     inferred,
     ...(matching.stopped ? { matching_stopped: true as const } : {}),
   }
@@ -1362,24 +1377,27 @@ function describeCandidate(shape: string, occurrences: Occurrence[], size: numbe
   }
 }
 
+export const MAX_SKIPPED_LISTED = 10
+
 function convertMatching(canvasId: string, shape: string | undefined, def: ComponentDef, actor: Actor) {
   const canvas = store.getCanvas(canvasId)
   const converted: CreateResult['converted'] = []
-  if (!canvas || !shape) return { converted, stopped: false }
+  const skipped: SkippedMatch[] = []
+  if (!canvas || !shape) return { converted, skipped, stopped: false }
   /* a sub-commit: the component is made and stays, whatever becomes of the matching */
   checkpoint()
   try {
     const template = parseTemplateRoot(def.template)
-    if (!template) return { converted, stopped: false }
-    convertFrames(canvas, shape, template, def, actor, converted)
+    if (!template) return { converted, skipped, stopped: false }
+    convertFrames(canvas, shape, template, def, actor, converted, skipped)
   } catch (error) {
     /* the component exists and the frames so far are linked (each was sub-committed as it
        was done): out of budget, the rest is left for another call rather than reported as
        a change that never happened */
     if (!(error instanceof WorkBudgetError)) throw error
-    return { converted, stopped: true }
+    return { converted, skipped, stopped: true }
   }
-  return { converted, stopped: false }
+  return { converted, skipped, stopped: false }
 }
 
 function convertFrames(
@@ -1389,7 +1407,9 @@ function convertFrames(
   def: ComponentDef,
   actor: Actor,
   converted: CreateResult['converted'],
+  skipped: SkippedMatch[],
 ) {
+  const ctx = contextFor(canvas.id)
   for (const frame of [...canvas.frames]) {
     /* a locked frame is not to be edited, however good the reason */
     if (frame.demo || frame.locked) continue
@@ -1402,6 +1422,18 @@ function convertFrames(
       if (attrOf(node, INSTANCE_ATTR) !== undefined || attrOf(node, COMPONENT_ATTR) !== undefined) continue
       const location = node.sourceCodeLocation
       if (location && measured.get(node)?.shape === shape) {
+        /* the same tags are not the same design: only a block that differs in words is linked */
+        const reason = whyNotLinkable(node, def, ctx)
+        if (reason) {
+          if (skipped.length < MAX_SKIPPED_LISTED)
+            skipped.push({
+              frameId: frame.id,
+              element: attrOf(node, ELEMENT_ID_ATTR) ?? pathTo(node),
+              text: textSample(node),
+              reason,
+            })
+          continue
+        }
         keyLike(node, template)
         setAttr(node, INSTANCE_ATTR, def.id)
         setAttr(node, REV_ATTR, String(def.rev))
@@ -1418,17 +1450,6 @@ function convertFrames(
     /* a sub-commit per frame: one that is linked stays linked if a later one is refused */
     checkpoint()
   }
-}
-
-function keyLike(el: Element, template: Element) {
-  const key = attrOf(template, PART_ATTR)
-  if (key) setAttr(el, PART_ATTR, key)
-  const kids = kidsOf(el).filter((kid) => kid.tagName !== 'style' && kid.tagName !== 'script')
-  const templateKids = kidsOf(template).filter((kid) => kid.tagName !== 'style' && kid.tagName !== 'script')
-  kids.forEach((kid, index) => {
-    const match = templateKids[index]
-    if (match) keyLike(kid, match)
-  })
 }
 
 function newId(): string {

@@ -371,6 +371,52 @@ describe('an agent working with components', () => {
     expect(store.getFrame(b)!.html).toContain('Three')
   })
 
+  it('links only true look-alikes with replace_matching, and names the near-matches it left alone', async () => {
+    const canvas = newCanvas()
+    /* styled inline, as the guide asks: no classes to tell blocks apart by */
+    const icon = (paths: number) =>
+      `<svg viewBox="0 0 24 24" width="16" height="16">${'<path d="M4 4h16v16H4z"></path>'.repeat(paths)}</svg>`
+    const stat = (label: string, value: string, extra = '', paths = 1) =>
+      `<div${extra} style="padding: 16px; background: #fff; border-radius: 12px">${icon(paths)}<span style="font-size: 12px; color: #666">${label}</span><strong style="font-size: 28px">${value}</strong></div>`
+    const a = await framed(canvas.id, stat('Revenue', '€4k', ' data-doop-id="stat-one"'), 'A')
+    const b = await framed(
+      canvas.id,
+      [
+        /* the same block with other words: a look-alike */
+        stat('Orders', '312'),
+        /* another icon is content, not a different design */
+        stat('Visitors', '9.1k', '', 2),
+        /* and a state class is a state, not a different design */
+        stat('Signups', '40', ' class="is-active"'),
+        /* same tags, different look: an unrelated stat group */
+        `<div style="display: flex; gap: 4px">${icon(1)}<span style="color: gray">Laatste 7 dagen</span><strong>12</strong></div>`,
+      ].join(''),
+      'B',
+    )
+
+    const made = await call('create_component', {
+      canvas_id: canvas.id,
+      name: 'Stat',
+      frame_id: a,
+      element: 'stat-one',
+      replace_matching: true,
+    })
+    expect(made.isError).toBe(false)
+    expect(made.data.converted).toEqual([{ frameId: b, instances: 3 }])
+    const html = store.getFrame(b)!.html
+    expect(html.match(/data-doop-instance=/g)).toHaveLength(3)
+    expect(html).toContain('is-active')
+    /* nothing of the look was stored as an override: only words and the icon differ */
+    expect(html).not.toMatch(/data-doop-overrides="[^"]*style/)
+    const unrelated = html.slice(html.indexOf('display: flex') - 200)
+    expect(unrelated.slice(unrelated.indexOf('<div'))).not.toContain('data-doop-instance')
+    expect(made.data.skipped).toHaveLength(1)
+    expect(made.data.skipped[0]).toMatchObject({ frameId: b })
+    expect(made.data.skipped[0].reason).toContain('style')
+    expect(made.data.skipped[0].text).toContain('Laatste 7 dagen')
+    expect(made.text).toContain('skipped')
+  })
+
   it('places instances and changes several in one write', async () => {
     const canvas = newCanvas()
     await button(canvas.id)

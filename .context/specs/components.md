@@ -49,6 +49,12 @@ component loses nothing visually: deleting writes no frame at all (see Deleting 
   utility class, else what the element or its nearest ancestor is (`h1`-`h6` title, `button` / `a`
   label, `img` image, `li` item, otherwise text); a link's target is `link` or `<name>-link`.
   `create_component` lists them as `inferred_props`.
+- **Linking look-alikes** (`replace_matching`): a candidate is an element with the main's shape
+  (`measureTree`: tags and classes, leaving out an `<svg>`'s drawing and state or variant classes such as
+  `is-active`, `card--wide`). Styled inline, unrelated blocks share their tags, so each candidate is also
+  reconciled against the template (`whyNotLinkable`) and linked only when what differs is what an
+  instance varies anyway: words, image sources, link targets, an icon, a state class. One that would
+  need a style, attribute, tag or markup override is left alone and listed in `skipped` with the reason.
 - **CSS**: the server has no CSSOM, so rules are matched on what their selectors name, over-keeping
   occasionally. A rule whose subject is inside a nested component is kept when its selector reaches
   there from one of the component's own elements (`.plan .btn`), and applies inside this component's

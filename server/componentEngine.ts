@@ -1694,10 +1694,26 @@ export interface Measured {
 
 const skipsShape = (el: Element) => el.tagName === 'style' || el.tagName === 'script'
 
+/** A class naming a state or a variant rather than the design: `is-active`, `has-icon`,
+ *  `card--wide`, `active`. Two blocks that differ only in these are the same design. */
+const MODIFIER_CLASS = /^(?:is|has)-|--|^(?:active|selected|current|open|checked|disabled|expanded)$/
+
+export const isModifierClass = (name: string) => MODIFIER_CLASS.test(name)
+
+function designClasses(el: Element): string {
+  return (attrOf(el, 'class') ?? '')
+    .split(/\s+/)
+    .filter((name) => name && !isModifierClass(name))
+    .sort()
+    .join('.')
+}
+
 /** Every element's size and shape below a node, bottom-up and without recursion or
  *  re-walking: frame HTML is untrusted, and may nest deeper than the call stack allows.
- *  A shape is tags and classes in order, ignoring content: two elements that share one
- *  are the same design with different words in it. */
+ *  A shape is tags and design classes in order, ignoring content (an `<svg>`'s insides
+ *  are its content: an icon), so two elements that share one are candidates for the same
+ *  design with different words in it. Whether they are is `whyNotLinkable`'s question:
+ *  styled inline, unrelated blocks share their tags. */
 export function measureTree(root: ParentNode): Map<Element, Measured> {
   const measured = new Map<Element, Measured>()
   const order: Element[] = []
@@ -1712,12 +1728,13 @@ export function measureTree(root: ParentNode): Map<Element, Measured> {
     const kids = elementKids(el)
     const kidValues = kids.map((kid) => measured.get(kid))
     const size = 1 + kidValues.reduce((total, kid) => total + (kid?.size ?? 0), 0)
-    const counted = kids.flatMap((kid, index) => (skipsShape(kid) ? [] : [kidValues[index]]))
+    const counted =
+      el.tagName === 'svg' ? [] : kids.flatMap((kid, index) => (skipsShape(kid) ? [] : [kidValues[index]]))
     if (size > MAX_SHAPE_ELEMENTS || counted.some((kid) => kid?.shape === undefined)) {
       measured.set(el, { size })
       continue
     }
-    const classes = (attrOf(el, 'class') ?? '').split(/\s+/).filter(Boolean).sort().join('.')
+    const classes = designClasses(el)
     const inner = counted.map((kid) => kid?.shape).join(',')
     measured.set(el, { size, shape: `${el.tagName}${classes ? `.${classes}` : ''}(${inner})` })
   }
@@ -1734,4 +1751,135 @@ export function elementCount(el: Element): number {
 
 export function kidsOf(el: ParentNode): Element[] {
   return elementKids(el)
+}
+
+/* ------------------------------------------------------------------ */
+/* Linking a look-alike: same design, or only the same tags?           */
+/* ------------------------------------------------------------------ */
+
+/** Attributes that carry what a block says or points at, not how it looks. */
+const CONTENT_ATTRS = new Set([
+  'src',
+  'srcset',
+  'href',
+  'alt',
+  'title',
+  'aria-label',
+  'id',
+  'data-name',
+  'data-doop-name',
+  /* an icon's own drawing area */
+  'viewBox',
+  ELEMENT_ID_ATTR,
+])
+
+/** Part keys from a template onto a copy of it, child by child: what reconciling
+ *  matches the two by. Styles and scripts are left out on both sides, as shapes leave them. */
+export function keyLike(el: Element, template: Element) {
+  const key = attrOf(template, PART_ATTR)
+  if (key) setAttr(el, PART_ATTR, key)
+  const kids = elementKids(el).filter((kid) => !skipsShape(kid))
+  const templateKids = elementKids(template).filter((kid) => !skipsShape(kid))
+  kids.forEach((kid, index) => {
+    const match = templateKids[index]
+    if (match) keyLike(kid, match)
+  })
+}
+
+const MAX_REASONS = 3
+
+/**
+ * Why `candidate` (an element with the template's shape) should not become an instance
+ * of `def`, or undefined when it should. It is linked the way replace_matching links it
+ * and reconciled against the template: what differs must be what an instance varies
+ * anyway (words, image sources, link targets, an icon, a state class). A difference in
+ * look (a style, another attribute, other markup) would be kept as an override that pins
+ * this block apart from the component forever: it is a different design that happens to
+ * share the tags, and is left alone.
+ */
+export function whyNotLinkable(candidate: Element, def: Revision, ctx: EngineContext): string | undefined {
+  const template = parseTemplateRoot(def.template)
+  const probe = elementKids(rootFragment(serializeOuter(candidate)))[0]
+  if (!template || !probe) return 'could not be read'
+  keyLike(probe, template)
+  setAttr(probe, INSTANCE_ATTR, def.id)
+  setAttr(probe, REV_ATTR, String(def.rev))
+  const scoped: EngineContext = {
+    find: ctx.find,
+    atRev: (id, rev) => (id === def.id && rev === def.rev ? def : ctx.atRev(id, rev)),
+    issues: [],
+  }
+  const state = reconcileInstance(probe, scoped)
+  if (!state) return 'could not be read'
+  const reasons = lookDifferences(state.overrides, partsOf(def.template), probe)
+  return reasons.length ? reasons.slice(0, MAX_REASONS).join('; ') : undefined
+}
+
+function lookDifferences(
+  overrides: InstanceOverrides,
+  parts: Map<string, PartInfo> | undefined,
+  probe: Element | undefined,
+): string[] {
+  const reasons: string[] = []
+  for (const [key, part] of Object.entries(overrides.parts ?? {})) {
+    const info = parts?.get(key)
+    const tag = info ? `<${info.el.tagName}>` : 'an element'
+    if (info && insideIcon(info.el)) continue
+    if (part.tag !== undefined) reasons.push(`${tag} is a <${part.tag}>`)
+    if (part.hidden) reasons.push(`${tag} is missing`)
+    if (part.style) reasons.push(`style differs on ${tag}: ${Object.keys(part.style).sort().join(', ')}`)
+    const attrs = Object.entries(part.attrs ?? {}).filter(([name, value]) => !contentAttr(name, value, info))
+    if (attrs.length) reasons.push(`${attrs.map(([name]) => name).join(', ')} differs on ${tag}`)
+    const drawing = info?.el.tagName === 'svg'
+    if (part.html !== undefined && !drawing && !(info && probe && sameMarkupButWords(info.el, partIn(probe, key))))
+      reasons.push(`markup inside ${tag} differs`)
+    if (part.use) reasons.push(...lookDifferences(part.use, undefined, undefined).map((why) => `in ${tag}: ${why}`))
+  }
+  return reasons
+}
+
+/** An icon's drawing is its content: another path inside an `<svg>` is another icon, not another design. */
+function insideIcon(el: Element): boolean {
+  for (let node = el.parentNode; node && isElement(node); node = node.parentNode) {
+    if (node.tagName === 'svg') return true
+  }
+  return false
+}
+
+function contentAttr(name: string, value: string | null, info: PartInfo | undefined): boolean {
+  if (CONTENT_ATTRS.has(name)) return true
+  if (name !== 'class') return false
+  /* a state or variant class added or dropped: `is-active` on one tab of several */
+  const before = new Set((info ? (attrOf(info.el, 'class') ?? '') : '').split(/\s+/).filter(Boolean))
+  const after = new Set((value ?? '').split(/\s+/).filter(Boolean))
+  const changed = [...before, ...after].filter((cls) => before.has(cls) !== after.has(cls))
+  return changed.every(isModifierClass)
+}
+
+function partIn(root: Element, key: string): Element | undefined {
+  const stack = [root]
+  for (let el = stack.pop(); el; el = stack.pop()) {
+    if (attrOf(el, PART_ATTR) === key) return el
+    stack.push(...elementKids(el))
+  }
+  return undefined
+}
+
+/** The same elements with the same attributes, only the words between them differing. */
+function sameMarkupButWords(template: Element, incoming: Element | undefined): boolean {
+  if (!incoming) return false
+  const bare = (el: Element) => {
+    const clone = fragmentIn(serialize(el), el.tagName)
+    const strip = (node: ParentNode) => {
+      node.childNodes = node.childNodes.filter((child) => isElement(child) || child.nodeName !== '#text')
+      for (const child of elementKids(node)) {
+        setAttr(child, PART_ATTR, null)
+        setAttr(child, ELEMENT_ID_ATTR, null)
+        strip(child)
+      }
+    }
+    strip(clone)
+    return serialize(clone)
+  }
+  return bare(template) === bare(incoming)
 }
