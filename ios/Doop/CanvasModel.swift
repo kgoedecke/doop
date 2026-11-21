@@ -106,6 +106,8 @@ final class CanvasModel: ObservableObject {
         connectionID = generation
         connecting = true
         connectionError = nil
+        // stop() cancelled the wake-up: the cards still shown need theirs before the room answers.
+        scheduleStartingExpiry()
         #if DEBUG
         startFakeCollaborators()
         #endif
