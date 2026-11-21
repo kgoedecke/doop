@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, expect, it } from 'vitest'
-import { buildLayerTree, holdsChildren, moveElement } from '../src/lib/layers'
+import { buildLayerTree, holdsChildren, moveElement, moveElements } from '../src/lib/layers'
 
 const page = (body: string) => `<!doctype html><html><head></head><body>${body}</body></html>`
 
@@ -117,6 +117,72 @@ describe('moveElement', () => {
     expect(
       moveElement(page('<p>Text</p><div>Box</div>'), 'div', { selector: 'p', place: 'inside' }, { order: '0' }),
     ).toBeNull()
+  })
+})
+
+describe('moveElements', () => {
+  const body = (html: string) => new DOMParser().parseFromString(html, 'text/html').body.innerHTML
+
+  it('moves the elements as one run, in document order however they were picked', () => {
+    const moved = moveElements(page('<p>a</p><i>x</i><p>b</p><em>y</em>'), ['p:nth-of-type(2)', 'p:nth-of-type(1)'], {
+      selector: 'em',
+      place: 'before',
+    })!
+    expect(body(moved.html)).toBe('<i>x</i><p>a</p><p>b</p><em>y</em>')
+    /* the returned selectors follow the input order, primary last as given */
+    const doc = new DOMParser().parseFromString(moved.html, 'text/html')
+    expect(doc.querySelector(moved.selectors[0]!)?.textContent).toBe('b')
+    expect(doc.querySelector(moved.selectors[1]!)?.textContent).toBe('a')
+  })
+
+  it('moves them after a target, first after it and each after the last', () => {
+    const moved = moveElements(page('<i>x</i><p>a</p><p>b</p>'), ['i', 'p:nth-of-type(1)'], {
+      selector: 'p:nth-of-type(2)',
+      place: 'after',
+    })!
+    expect(body(moved.html)).toBe('<p>b</p><i>x</i><p>a</p>')
+  })
+
+  it('moves them into a box, keeping their order', () => {
+    const moved = moveElements(
+      page('<p>a</p><p>b</p><section><i>x</i></section>'),
+      ['p:nth-of-type(1)', 'p:nth-of-type(2)'],
+      {
+        selector: 'section',
+        place: 'inside',
+      },
+    )!
+    expect(body(moved.html)).toBe('<section><p>a</p><p>b</p><i>x</i></section>')
+  })
+
+  it('lets a member inside another member ride along with it', () => {
+    const moved = moveElements(page('<i>x</i><div><p>in</p></div>'), ['div > p', 'div'], {
+      selector: 'i',
+      place: 'before',
+    })!
+    expect(body(moved.html)).toBe('<div><p>in</p></div><i>x</i>')
+    const doc = new DOMParser().parseFromString(moved.html, 'text/html')
+    /* the absorbed child's path still resolves after the move */
+    expect(doc.querySelector(moved.selectors[0]!)?.textContent).toBe('in')
+    expect(doc.querySelector(moved.selectors[1]!)?.tagName).toBe('DIV')
+  })
+
+  it('refuses a target that is a member or sits inside one', () => {
+    const html = page('<div><p>in</p></div><i>x</i><p>out</p>')
+    expect(moveElements(html, ['div', 'i'], { selector: 'div > p', place: 'before' })).toBeNull()
+    expect(moveElements(html, ['div', 'i'], { selector: 'div', place: 'after' })).toBeNull()
+  })
+
+  it('refuses a drop that changes nothing, a locked destination, and a missing member', () => {
+    expect(
+      moveElements(page('<p>a</p><p>b</p><i>x</i>'), ['p:nth-of-type(1)', 'p:nth-of-type(2)'], {
+        selector: 'i',
+        place: 'before',
+      }),
+    ).toBeNull()
+    const locked = page('<div data-doop-locked><p>a</p></div><i>x</i><p>b</p>')
+    expect(moveElements(locked, ['i', 'p'], { selector: 'div > p', place: 'after' })).toBeNull()
+    expect(moveElements(page('<p>a</p><i>x</i>'), ['p', 'gone'], { selector: 'i', place: 'after' })).toBeNull()
   })
 })
 
