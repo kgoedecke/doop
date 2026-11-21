@@ -1,11 +1,11 @@
-import { useRef, useState } from 'react'
+import { useState } from 'react'
 import type { Frame } from '../../shared/types'
 import { copyElementLink } from '../lib/elementLink'
 import { copyElementPng, type ElementTarget } from '../lib/frameExport'
 import { useExportSettings } from '../lib/exportSettings'
 import { copyPicked, hasElementClip, pasteLayer } from '../lib/elementClipboard'
 import { writeCanvasClipboard } from '../lib/canvasClipboard'
-import { hasFrameClip, pasteFrameCentered } from '../lib/frameClipboard'
+import { copyFrames, cutFrames, hasFrameClip, pasteFrameCentered } from '../lib/frameClipboard'
 import {
   deleteLayers,
   setFramesHidden,
@@ -41,37 +41,22 @@ export interface LiveHit {
 }
 
 /** Shared by a layer row and the element under a canvas right-click. */
-type ElementMenuProps = { frame: Frame; selector: string | null; hit?: LiveHit; onRename?: () => void }
+type ElementMenuProps = { frame: Frame; selector: string | null; hit?: LiveHit }
 
 /** The items also ask for the export dialog, which outlives the menu. */
 type ElementItemsProps = ElementMenuProps & { onExport: (target: ElementTarget) => void }
 
-export function ElementContextMenu({ frame, selector, hit, onRename }: ElementMenuProps) {
-  const renameRequested = useRef(false)
+export function ElementContextMenu({ frame, selector, hit }: ElementMenuProps) {
   const [exporting, setExporting] = useState<ElementTarget | null>(null)
   return (
     <>
       <ContextMenuContent
         onCloseAutoFocus={(event) => {
           // The export dialog owns focus once the menu closes.
-          if (exporting) return event.preventDefault()
-          if (!renameRequested.current) return
-          event.preventDefault()
-          renameRequested.current = false
-          /* off the Layers panel, its row for this layer takes the rename */
-          if (onRename) onRename()
-          else if (selector) useStore.getState().requestRename(frame.id, selector)
+          if (exporting) event.preventDefault()
         }}
       >
-        <ElementMenuItems
-          frame={frame}
-          selector={selector}
-          hit={hit}
-          onExport={setExporting}
-          onRename={() => {
-            renameRequested.current = true
-          }}
-        />
+        <ElementMenuItems frame={frame} selector={selector} hit={hit} onExport={setExporting} />
       </ContextMenuContent>
       {exporting && <FrameExportModal frame={frame} element={exporting} onClose={() => setExporting(null)} />}
     </>
@@ -100,7 +85,7 @@ function cutLayers(frame: Frame, selectors: string[]) {
  *  structure, stacking, transform, visibility. Commands that act on the
  *  selection are registry rows (`ActionMenuItem`); the right-click picked the
  *  layer first, or kept the multi-pick it landed in. */
-function ElementMenuItems({ frame, selector, hit, onRename, onExport }: ElementItemsProps) {
+function ElementMenuItems({ frame, selector, hit, onExport }: ElementItemsProps) {
   const hidden = selector ? isElementHidden(frame.html, selector) : null
   const exists = hidden !== null
   const locked = !!frame.locked || (selector ? isElementLocked(frame.html, selector) : false)
@@ -122,17 +107,19 @@ function ElementMenuItems({ frame, selector, hit, onRename, onExport }: ElementI
   const ownLock = selector ? isElementLocked(frame.html, selector, true) : false
   const allPickedLocked = ownLock && others.every((s) => isElementLocked(frame.html, s, true))
   /* a standalone shape is its frame: it moves between pages, stacks on the
-     page and is selected with the other shapes the selection holds */
+     page and is selected with the other shapes the selection holds, so with
+     others selected the clipboard takes them all, as ⌘C and ⌘X do */
   const standalone = !!selector && standaloneSelector(frame) === selector
-  const shapeFrames = standalone
-    ? (state.canvas?.frames.filter((f) => f.id === frame.id || state.selectedIds.includes(f.id)) ?? [frame])
-    : []
+  const group = state.selectedIds.includes(frame.id) ? state.selectedIds : [frame.id]
+  const shapeFrames = standalone ? (state.canvas?.frames.filter((f) => group.includes(f.id)) ?? [frame]) : []
+  const asFrames = shapeFrames.length > 1
   return (
     <>
       <ContextMenuItem
         disabled={!exists}
         onSelect={() => {
-          if (selectors.length) writeCanvasClipboard(() => copyPicked(frame, selectors))
+          if (asFrames) writeCanvasClipboard(() => copyFrames(shapeFrames))
+          else if (selectors.length) writeCanvasClipboard(() => copyPicked(frame, selectors))
         }}
       >
         {t('common.copy')}
@@ -142,7 +129,8 @@ function ElementMenuItems({ frame, selector, hit, onRename, onExport }: ElementI
         <ContextMenuItem
           disabled={!exists || locked}
           onSelect={() => {
-            if (selectors.length) cutLayers(frame, selectors)
+            if (asFrames) cutFrames(shapeFrames)
+            else if (selectors.length) cutLayers(frame, selectors)
           }}
         >
           {t('common.cut')}
@@ -206,11 +194,6 @@ function ElementMenuItems({ frame, selector, hit, onRename, onExport }: ElementI
       {selector && exists && !readOnly && (
         <>
           <ContextMenuSeparator />
-          {onRename && (
-            <ContextMenuItem disabled={locked} onSelect={onRename}>
-              {t('panels.layersRename')}
-            </ContextMenuItem>
-          )}
           <ActionMenuItem id="group" disabled={locked} />
           <ActionMenuItem id="ungroup" disabled={locked} />
           {!standalone && <ActionMenuItem id="auto-layout" disabled={locked} />}

@@ -2,7 +2,8 @@ import type { Frame } from '../../shared/types'
 import { api } from './api'
 import { useStore } from './store'
 import { posthog } from './posthog'
-import { historyEpoch, recordCreates, replaceFramesTracked } from './history'
+import { deleteFramesTracked, historyEpoch, recordCreates, replaceFramesTracked } from './history'
+import { writeCanvasClipboard } from './canvasClipboard'
 import { ELEMENT_CLIP_KEY, FRAME_CLIP_KEY as CLIP_KEY } from './clipboardKeys'
 import { stageViewportSize } from './framePlacement'
 import { importSvgInBrowser, looksLikeSvg } from './svgImport'
@@ -42,6 +43,29 @@ export function copyFrames(frames: Frame[]) {
   }
   localStorage.setItem(CLIP_KEY, JSON.stringify(clip))
   localStorage.removeItem(ELEMENT_CLIP_KEY)
+}
+
+/** Cut copies the frames, then removes what Delete would once the clipboard took
+ *  them. The clipboard is written asynchronously, so the frames are read again by
+ *  id when it lands, and that one read is both what is copied and what is deleted:
+ *  an edit made meanwhile rides along in the copy, a frame deleted meanwhile is not
+ *  deleted twice, and a locked frame stays, as it does on ⌫. */
+export function cutFrames(frames: Frame[]) {
+  const ids = new Set(frames.map((f) => f.id))
+  if (!ids.size) return
+  let live: Frame[] = []
+  writeCanvasClipboard(
+    () => {
+      live = (useStore.getState().canvas?.frames ?? []).filter((f) => ids.has(f.id))
+      if (!live.length) return false
+      copyFrames(live)
+    },
+    undefined,
+    () => {
+      const cut = live.filter((f) => !f.locked)
+      if (cut.length) deleteFramesTracked(cut)
+    },
+  )
 }
 
 function readClip(): ClipFrame[] {

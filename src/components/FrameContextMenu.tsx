@@ -1,12 +1,12 @@
-import { useRef, useState, type MutableRefObject } from 'react'
+import { useState, type MutableRefObject } from 'react'
 import type { Frame } from '../../shared/types'
 import { errorMessage } from '../lib/api'
-import { copyFrames, duplicateFrames, hasFrameClip, pasteFrameAtScreen } from '../lib/frameClipboard'
+import { copyFrames, cutFrames, duplicateFrames, hasFrameClip, pasteFrameAtScreen } from '../lib/frameClipboard'
 import { writeCanvasClipboard } from '../lib/canvasClipboard'
 import { copyFramePng } from '../lib/frameExport'
 import { getExportSettings } from '../lib/exportSettings'
 import { deleteFramesTracked } from '../lib/history'
-import { isStackLocked, setFramesHidden, setFramesLocked } from '../lib/layerEdits'
+import { setFramesHidden, setFramesLocked } from '../lib/layerEdits'
 import { canEditOpenCanvas, useStore } from '../lib/store'
 import { setFramesApproval } from '../lib/frameApproval'
 import { useFrameSaves } from '../lib/frameSaves'
@@ -35,18 +35,15 @@ async function copyImageUrl(frame: Frame) {
 export function FrameContextMenu({
   frame,
   at,
-  onRename,
   element,
 }: {
   frame: Frame
   at: MutableRefObject<{ x: number; y: number }>
-  onRename?: () => void
   /** the element a reader has picked in the frame: readers get this menu
    *  everywhere, so the element's link is offered here */
   element?: LinkTarget
 }) {
   const t = useT()
-  const renameRequested = useRef(false)
   /* the frames Export… acts on: this one, or the selection it belongs to */
   const [exportFrames, setExportFrames] = useState<Frame[] | null>(null)
   const [historyOpen, setHistoryOpen] = useState(false)
@@ -80,28 +77,6 @@ export function FrameContextMenu({
     /* locked frames stay, as they do on ⌫ */
     deleteFramesTracked(groupFrames().filter((f) => !f.locked))
   }
-  /* Cut copies the group, then removes what Delete would once the clipboard
-     took it. The menu writes the clipboard asynchronously, so the frames are
-     read again by id when it lands, and that one read is both what is copied
-     and what is deleted: an edit made meanwhile rides along in the copy, and
-     a frame deleted meanwhile is not deleted twice. */
-  function cutSelection() {
-    const ids = new Set(groupFrames().map((f) => f.id))
-    if (!ids.size) return
-    let live: Frame[] = []
-    writeCanvasClipboard(
-      () => {
-        live = (useStore.getState().canvas?.frames ?? []).filter((f) => ids.has(f.id))
-        if (!live.length) return false
-        copyFrames(live)
-      },
-      undefined,
-      () => {
-        const cut = live.filter((f) => !f.locked)
-        if (cut.length) deleteFramesTracked(cut)
-      },
-    )
-  }
   const allReady = useStore((s) => {
     const ids = s.selectedIds.includes(frame.id) ? s.selectedIds : [frame.id]
     const group = s.canvas?.frames.filter((f) => ids.includes(f.id)) ?? [frame]
@@ -119,20 +94,12 @@ export function FrameContextMenu({
     <>
       <ContextMenuContent
         onCloseAutoFocus={(event) => {
-          // Mount the editor after the menu releases focus, so it stays focused.
-          if (renameRequested.current) {
-            event.preventDefault()
-            renameRequested.current = false
-            /* off the Layers panel, the frame's row there takes the rename */
-            if (onRename) onRename()
-            else useStore.getState().requestRename(frame.id, null)
-          }
           // The export dialog owns focus once the menu closes.
           if (exportFrames || historyOpen) event.preventDefault()
         }}
       >
         {!readOnly && (
-          <ContextMenuItem disabled={allLocked} onSelect={cutSelection}>
+          <ContextMenuItem disabled={allLocked} onSelect={() => cutFrames(groupFrames())}>
             {groupSize > 1 ? t('stage.cutFrames', { count: groupSize }) : t('common.cut')}
             <MenuHint>{MOD_KEY}X</MenuHint>
           </ContextMenuItem>
@@ -148,9 +115,6 @@ export function FrameContextMenu({
         </ContextMenuItem>
         {!readOnly && (
           <>
-            <ContextMenuItem disabled={isStackLocked(frame)} onSelect={() => (renameRequested.current = true)}>
-              {t('panels.layersRename')}
-            </ContextMenuItem>
             <ContextMenuItem
               disabled={!hasFrameClip()}
               onSelect={() => pasteFrameAtScreen(frame.canvasId, at.current.x, at.current.y)}

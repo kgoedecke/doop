@@ -813,23 +813,8 @@ async function renameMain(def: ComponentDef, frame: Frame, standalone: boolean, 
   if (saved && standalone) renameFrame(frame.id, saved, { record: false })
 }
 
-function useItemRename(
-  name: string,
-  allowed: boolean,
-  onCommit: (value: string) => void,
-  target: { frameId: string; selector: string | null },
-) {
+function useItemRename(name: string, allowed: boolean, onCommit: (value: string) => void) {
   const [renaming, setRenaming] = useState(false)
-  /* a Rename picked from a canvas menu lands here, so the canvas and the
-     panel rename the same way; the row may mount after the request */
-  const request = useStore((s) => s.renameRequest)
-  const requested = !!request && request.frameId === target.frameId && request.selector === target.selector
-  useEffect(() => {
-    if (!request || !requested) return
-    useStore.getState().clearRenameRequest(request.nonce)
-    // eslint-disable-next-line react/set-state-in-effect -- the request comes from the store, outside this row
-    if (allowed) setRenaming(true)
-  }, [request, requested, allowed])
   return {
     label:
       renaming && allowed ? <ItemNameInput name={name} onCommit={onCommit} onDone={() => setRenaming(false)} /> : name,
@@ -861,11 +846,8 @@ function FrameRow({
 }) {
   const { frame } = row
   const readOnly = useStore((s) => !canEditOpenCanvas(s))
-  const { label, startRename } = useItemRename(
-    frame.name,
-    !readOnly && !frame.locked,
-    (value) => renameFrame(frame.id, value),
-    { frameId: frame.id, selector: null },
+  const { label, startRename } = useItemRename(frame.name, !readOnly && !frame.locked, (value) =>
+    renameFrame(frame.id, value),
   )
   const stream = useStore((s) => s.streams[frame.id])
   const presences = useStore((s) => s.presences)
@@ -928,7 +910,7 @@ function FrameRow({
             }
           />
         </ContextMenuTrigger>
-        <FrameContextMenu frame={frame} at={pasteAt} onRename={startRename} />
+        <FrameContextMenu frame={frame} at={pasteAt} />
       </ContextMenu>
       {/* the caption stands in for the frame's body, so a layer dragged
           onto it lands in the frame as a drop on the frame row would; the
@@ -992,7 +974,6 @@ function NodeRow({
       else if (standalone) renameFrame(frame.id, value)
       else renameLayer(frame.id, node.selector, value)
     },
-    { frameId: frame.id, selector: node.selector },
   )
   return (
     <ContextMenu>
@@ -1076,7 +1057,7 @@ function NodeRow({
         />
       </ContextMenuTrigger>
       {/* the menu a right-click on the canvas opens, a shape's included */}
-      <ElementContextMenu frame={frame} selector={node.selector} onRename={startRename} />
+      <ElementContextMenu frame={frame} selector={node.selector} />
     </ContextMenu>
   )
 }
