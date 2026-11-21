@@ -43,9 +43,9 @@ function shellVersionAtLeast(major: number, minor: number, patch: number): boole
 
 /** The overlay title bar (traffic lights floating over the page) arrived
  *  with shell 0.1.2; older shells keep a native title bar and need no inset.
- *  Only macOS has an overlay title bar: Windows shells keep the native frame,
- *  so the page must not reserve room for traffic lights or act as the
- *  window's drag handle there. */
+ *  Only macOS has traffic lights: Windows shells open with the native frame,
+ *  which the page may swap for caption buttons of its own on the right
+ *  (src/lib/windowFrame.ts), so no room is reserved on the left there. */
 export function hasInsetTrafficLights(): boolean {
   return desktopPlatform() === 'macos' && shellVersionAtLeast(0, 1, 2)
 }
