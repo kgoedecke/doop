@@ -1,7 +1,7 @@
 import { posthog } from './posthog'
 
 /** The control an export started from. */
-export type ExportSource = 'export_modal' | 'frame_menu' | 'inspector' | 'element_menu' | 'element_panel'
+export type ExportSource = 'export_modal' | 'frame_menu' | 'inspector' | 'element_menu' | 'element_panel' | 'shortcut'
 
 /** Where an export went. */
 export type ExportDestination = 'png' | 'jpg' | 'svg' | 'pdf'

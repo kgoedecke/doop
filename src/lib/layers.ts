@@ -125,6 +125,12 @@ export function findLayer(nodes: LayerNode[], selector: string): LayerNode | nul
   return null
 }
 
+/** The layer as an export names it: by the Layers panel's name for it. */
+export function elementExportTarget(frame: { html: string }, selector: string): { selector: string; name: string } {
+  const node = findLayer(buildLayerTree(frame.html), selector)
+  return { selector, name: node ? layerName(node) : 'element' }
+}
+
 /** The name a node shows for itself: "aside.rail", "#nav", or its text. */
 export function layerName(node: LayerNode): string {
   return node.detail ? `${node.tag}${node.detail}` : node.label

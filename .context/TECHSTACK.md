@@ -637,6 +637,11 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   palette (`CommandPalette.tsx`, cmdk through `ui/command.tsx`; text that names no command goes to
   the agent's composer as a prompt), the main menu off the bar's Doop mark (`MainMenu.tsx`: Go to files, then File,
   Edit, View, Object, Text, Arrange, Help) and the ⌃⇧? sheet (`ShortcutsSheet.tsx`) all read it.
+  The layer right-click menu (`ElementContextMenu.tsx`) is mostly registry rows (`ActionMenuItem.tsx`),
+  ordered as Figma's and Paper's (select, clipboard with a Copy/Paste as submenu, structure, stacking,
+  flip, visibility); a right-click inside a multi-pick keeps it. A Layers row opens the same menu the canvas
+  does (a shape's row too), and Rename from a canvas menu opens that row's name field (`renameRequest`). Frames and standalone shapes get Move to
+  page (`MoveToPageMenu`). ⌘L copies a link and ⇧⌘C a PNG of the selection.
   `CanvasPage` lends the registry its modals and panels as the `ActionHost`. Chords (`chords.ts`)
   are `mod` (⌘ on a Mac, Ctrl elsewhere), ⌥ chords by `code`, `macOnly` / `notMac` per platform (⌘Y
   is outlines on a Mac, redo elsewhere), `global` for the two that act from fields (⌘K palette, ⌘/
