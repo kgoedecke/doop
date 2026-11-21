@@ -101,6 +101,25 @@ describe.skipIf(!findBrowserPath())('font readiness in server renders', () => {
     }
   }, 30_000)
 
+  /* a stylesheet that failed before the wait began (a 404, or a CDN the render
+     guard blocks) never fires load or error again: it must not hold the
+     render until the deadline, nor skip the wait for the fonts */
+  it('does not wait on a stylesheet that already failed', async () => {
+    const { page, close } = await openIsolatedPage()
+    try {
+      await page.setContent(
+        `<!doctype html><html><head><base href="${origin}/"><link rel="stylesheet" href="/a/missing.css">` +
+          `<link rel="stylesheet" href="/a/face.css?font-delay=500"></head><body>${TEXT}</body></html>`,
+      )
+      const started = Date.now()
+      expect(await settleFonts(page.mainFrame())).toBe('loaded')
+      expect(Date.now() - started).toBeLessThan(3000)
+      expect(await page.evaluate(() => document.fonts.check('italic 700 32px Probe'))).toBe(true)
+    } finally {
+      await close()
+    }
+  }, 30_000)
+
   it('reports loaded once the fonts the text uses are in', async () => {
     const { page, close } = await openIsolatedPage()
     try {
