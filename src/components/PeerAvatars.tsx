@@ -5,6 +5,7 @@ import { locatePresence } from '../lib/locate'
 import { Avatar } from './ui/avatar'
 import { cn } from '@/lib/utils'
 import { useT, type Translate } from '../lib/i18n'
+import { distinctAgentNames } from '../../shared/agentIdentity'
 
 /** True for an agent that is working right now — it posted a status. */
 export function isActiveAgent(p: Presence): boolean {
@@ -35,6 +36,8 @@ export function PresenceFace(props: {
 export function PeerAvatars({ others }: { others: Presence[] }) {
   /* the second, third… active agent offsets its sweep so they alternate */
   let glazed = 0
+  /* one person's two agents going by one name read "Claude" and "Claude 2" */
+  const names = distinctAgentNames(others)
   return (
     <>
       {others.map((p) => {
@@ -42,7 +45,7 @@ export function PeerAvatars({ others }: { others: Presence[] }) {
         return p.kind === 'user' ? (
           <FollowAvatar key={p.clientId} presence={p} />
         ) : (
-          <JumpAvatar key={p.clientId} presence={p} glazeDelay={glazeDelay} />
+          <JumpAvatar key={p.clientId} presence={p} name={names.get(p.clientId) ?? p.name} glazeDelay={glazeDelay} />
         )
       })}
     </>
@@ -58,9 +61,9 @@ const stacked = 'relative z-[1] -ml-[7px] rounded-full first:ml-0'
 const clickable =
   'transition-transform hover:z-10 hover:-translate-y-px focus-visible:z-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink-faint'
 
-function presenceLabel(p: Presence, t: Translate) {
+function presenceLabel(p: Presence, t: Translate, name = p.name) {
   const agent = p.owner ? t('canvas.agentOf', { owner: p.owner }) : t('canvas.agent')
-  return `${p.name}${p.kind === 'agent' ? ` (${agent})` : ''}${p.status ? ` — ${p.status}` : ''}`
+  return `${name}${p.kind === 'agent' ? ` (${agent})` : ''}${p.status ? ` — ${p.status}` : ''}`
 }
 
 function FollowAvatar({ presence: p }: { presence: Presence }) {
@@ -89,7 +92,7 @@ function FollowAvatar({ presence: p }: { presence: Presence }) {
   )
 }
 
-function JumpAvatar({ presence: p, glazeDelay }: { presence: Presence; glazeDelay: number }) {
+function JumpAvatar({ presence: p, name, glazeDelay }: { presence: Presence; name: string; glazeDelay: number }) {
   const t = useT()
   const locatable = useStore((s) => locatePresence(p, s) !== undefined)
   const active = isActiveAgent(p)
@@ -98,7 +101,7 @@ function JumpAvatar({ presence: p, glazeDelay }: { presence: Presence; glazeDela
   )
   if (!locatable) {
     return (
-      <span className={cn(stacked, 'relative', active && 'z-[2]')} title={presenceLabel(p, t)}>
+      <span className={cn(stacked, 'relative', active && 'z-[2]')} title={presenceLabel(p, t, name)}>
         {face}
       </span>
     )
@@ -107,7 +110,7 @@ function JumpAvatar({ presence: p, glazeDelay }: { presence: Presence; glazeDela
     <button
       type="button"
       className={cn(stacked, clickable, 'relative', active && 'z-[2]')}
-      title={t('canvas.goWhereWorking', { label: presenceLabel(p, t) })}
+      title={t('canvas.goWhereWorking', { label: presenceLabel(p, t, name) })}
       onClick={() => {
         const s = useStore.getState()
         const at = locatePresence(p, s)

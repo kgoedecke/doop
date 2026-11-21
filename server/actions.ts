@@ -21,6 +21,7 @@ import { MAX_PAGES, PageLimitError, store } from './store.ts'
 import * as persist from './db/persist.ts'
 import * as thumbs from './thumbs.ts'
 import { colorFor } from '../shared/types.ts'
+import { agentKeyOf, isAgentsTask, taskAgentKey } from '../shared/agentIdentity.ts'
 import type { AgentBrand } from '../shared/agentBrand.ts'
 import type { StackWrite } from '../shared/frameStack.ts'
 import {
@@ -92,10 +93,9 @@ import type {
 type Broadcast = (canvasId: string, msg: ServerMessage, excludeClientId?: string) => void
 type AgentTouch = (
   canvasId: string,
-  agentName: string,
+  agent: Pick<Actor, 'name' | 'owner' | 'brand' | 'agentKey'>,
   frameId?: string | null,
   status?: string | null,
-  identity?: Pick<Actor, 'owner' | 'brand'>,
 ) => void
 
 let send: Broadcast = () => {}
@@ -282,15 +282,25 @@ function logActivity(canvasId: string, actor: Actor, message: string, frameId?: 
 }
 
 export function resolveActor(
-  raw: { name?: string; kind?: string; clientId?: string; owner?: string; brand?: AgentBrand } | undefined,
+  raw:
+    | { name?: string; kind?: string; clientId?: string; owner?: string; brand?: AgentBrand; agentKey?: string }
+    | undefined,
 ): Actor {
   const kind = raw?.kind === 'agent' ? 'agent' : raw?.kind === 'user' ? 'user' : 'agent'
   const name = raw?.name?.trim() || (kind === 'agent' ? 'AI Agent' : 'Anonymous')
-  return { name, kind, color: colorFor(name), clientId: raw?.clientId, owner: raw?.owner, brand: raw?.brand }
+  return {
+    name,
+    kind,
+    color: colorFor(name),
+    clientId: raw?.clientId,
+    owner: raw?.owner,
+    brand: raw?.brand,
+    ...(kind === 'agent' && raw?.agentKey ? { agentKey: raw.agentKey } : {}),
+  }
 }
 
 function touch(canvasId: string, actor: Actor, frameId?: string | null) {
-  if (actor.kind === 'agent') agentTouch(canvasId, actor.name, frameId, undefined, actor)
+  if (actor.kind === 'agent') agentTouch(canvasId, actor, frameId)
 }
 
 /** Refresh an agent's presence without changing its frame or status. A model
@@ -301,9 +311,10 @@ export function heartbeatAgent(canvasId: string, actor: Actor) {
   touch(canvasId, actor)
 }
 
-/** Same agent identity = same name. (Owner-scoping deferred until MCP auth.) */
-function sameAgent(t: { agentName: string }, actor: Actor): boolean {
-  return t.agentName === actor.name
+/** Same agent = same identity: its key where it has one (an outside agent,
+ *  scoped to its account and MCP session), else its name. */
+function sameAgent(t: AgentTask, actor: Actor): boolean {
+  return isAgentsTask(t, actor)
 }
 
 /* ------------------------------------------------------------------ */
@@ -468,7 +479,7 @@ export function taskCanvasId(taskId: string): string | undefined {
 /** Agent announces what it is working on right now (empty string clears it). */
 export function setAgentStatus(canvasId: string, actor: Actor, status: string) {
   const clean = status.trim()
-  agentTouch(canvasId, actor.name, undefined, clean || null, actor)
+  agentTouch(canvasId, actor, undefined, clean || null)
 
   const list = taskLog.get(canvasId) ?? []
   /* board cards stay open until explicitly completed — a status change
@@ -485,6 +496,7 @@ export function setAgentStatus(canvasId: string, actor: Actor, status: string) {
     const task: AgentTask = {
       id: nanoid(8),
       agentName: actor.name,
+      ...(actor.agentKey ? { agentKey: actor.agentKey } : {}),
       owner: actor.owner,
       color: actor.color,
       status: clean,
@@ -1341,6 +1353,7 @@ function autoTask(canvasId: string, actor: Actor, status: string, frameId: strin
   const task: AgentTask = {
     id: nanoid(8),
     agentName: actor.name,
+    ...(actor.agentKey ? { agentKey: actor.agentKey } : {}),
     owner: actor.owner,
     color: actor.color,
     status,
@@ -1362,10 +1375,13 @@ function endAutoTask(canvasId: string, actor: Actor) {
   }
 }
 
-/** Close an agent's open tasks, e.g. when its presence expires. */
-export function endAgentTasks(canvasId: string, agentName: string) {
+/** Close an agent's open tasks, e.g. when its presence expires. Only that
+ *  agent's: another one sharing its name keeps working. */
+export function endAgentTasks(canvasId: string, agent: Pick<Actor, 'name' | 'agentKey'>) {
+  const agentName = agent.name
+  const key = agentKeyOf(agent)
   for (const t of taskLog.get(canvasId) ?? []) {
-    if (t.agentName === agentName && !t.endedAt) {
+    if (t.agentName && taskAgentKey(t) === key && !t.endedAt) {
       if (t.queuedBy && t.failedAt) continue
       edit(t)
       if (t.queuedBy) {
@@ -1726,7 +1742,7 @@ function noteHtmlChange(prior: PriorState, actor: Actor, tweak: boolean) {
   const joins =
     tweak &&
     open !== undefined &&
-    open.actor.name === actor.name &&
+    agentKeyOf(open.actor) === agentKeyOf(actor) &&
     open.actor.kind === actor.kind &&
     now - open.lastAt < BURST_IDLE_MS
   setKey(bursts, prior.id, { actor, lastAt: now })
@@ -2858,12 +2874,12 @@ export function patchGuideline(
    task log's announce tracking. */
 const guidelinesSeen = new Set<string>()
 
-export function markGuidelinesSeen(canvasId: string, agentName: string) {
-  guidelinesSeen.add(`${canvasId}:${agentName}`)
+export function markGuidelinesSeen(canvasId: string, agentKey: string) {
+  guidelinesSeen.add(`${canvasId}:${agentKey}`)
 }
 
-export function hasSeenGuidelines(canvasId: string, agentName: string): boolean {
-  return guidelinesSeen.has(`${canvasId}:${agentName}`)
+export function hasSeenGuidelines(canvasId: string, agentKey: string): boolean {
+  return guidelinesSeen.has(`${canvasId}:${agentKey}`)
 }
 
 /* ------------------------------------------------------------------ */
