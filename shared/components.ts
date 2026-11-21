@@ -204,6 +204,8 @@ export type ComponentIssueCode =
 export interface ComponentIssue {
   code: ComponentIssueCode
   message: string
+  /** `unclosed_use`: the component the open tag names, as written */
+  component?: string
 }
 
 /** One instance's identity as the editor needs it, read from the frame's markup. */

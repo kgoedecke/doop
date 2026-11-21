@@ -42,6 +42,7 @@ import { decodeEscapedHtml, looksEscapedHtml, repairEscapedHtml } from './escape
 import { forgetLibrary } from './componentLibrary.ts'
 import { withCanvasFaces, withCanvasFacesMidStream } from './canvasFaces.ts'
 import { EMBEDDED_MIN_LENGTH } from './inlineData.ts'
+import { WriteRefusedError } from './writeRefusal.ts'
 import {
   MAX_TOKENS,
   MAX_TOKEN_DESCRIPTION,
@@ -2057,11 +2058,11 @@ function prepareWrite(
   html: string,
   priorHtml: string,
   by: string,
-  carried: ComponentIssue[] = [],
+  { carried = [], refuseUnclosed = false }: { carried?: ComponentIssue[]; refuseUnclosed?: boolean } = {},
 ) {
   const canvas = store.getCanvas(canvasId)
   if (!canvas) return { html, changed: [] as ComponentDef[] }
-  const prepared = prepareFrameHtml(canvas, frameId, html, by, priorHtml)
+  const prepared = prepareFrameHtml(canvas, frameId, html, by, priorHtml, { refuseUnclosed })
   const issues = dedupeIssues([...carried, ...prepared.issues])
   if (issues.length) setKey(componentIssues, frameId, issues)
   else dropKey(componentIssues, frameId)
@@ -2367,11 +2368,29 @@ function healFromMain(canvas: Canvas, frame: Frame, ids: ReadonlySet<string>) {
   if (next) broadcast(canvas.id, { type: 'frame:updated', frame: next, actor })
 }
 
-export const appendFrameHtml = atomic(function appendFrameHtml(
+export function appendFrameHtml(
   frameId: string,
   chunk: string,
   actor: Actor,
   opts: { start?: boolean; done?: boolean } = {},
+): Frame | undefined {
+  try {
+    return appendChunk(frameId, chunk, actor, opts)
+  } catch (error) {
+    /* a last chunk refused for a <doop-use> it leaves open: the stream stays open for it to come
+       again, and that counts as the agent at work, so the idle sweep does not settle the stream
+       meanwhile. Set past the chunk's undo, and not journaled, so the refusal's undo keeps it */
+    const stream = error instanceof WriteRefusedError ? streams.get(frameId) : undefined
+    if (stream) stream.lastActivity = Date.now()
+    throw error
+  }
+}
+
+const appendChunk = atomic(function appendChunk(
+  frameId: string,
+  chunk: string,
+  actor: Actor,
+  opts: { start?: boolean; done?: boolean },
 ): Frame | undefined {
   const before = store.getFrame(frameId)
   if (!before) return undefined
@@ -2400,7 +2419,10 @@ export const appendFrameHtml = atomic(function appendFrameHtml(
      until then the block stays as written, under the names the frame uses. */
   const joined = opts.start ? expanded : before.html + expanded
   const prepared = opts.done
-    ? prepareWrite(before.canvasId, before.id, joined, before.html, actor.name, carried)
+    ? prepareWrite(before.canvasId, before.id, joined, before.html, actor.name, {
+        carried,
+        refuseUnclosed: actor.kind === 'agent',
+      })
     : {
         html: pendingRenames.has(frameId) ? joined : withCanvasFacesMidStream(before.canvasId, joined),
         changed: [] as ComponentDef[],
@@ -2528,7 +2550,9 @@ export const createFrame = atomic(function createFrame(
 ): Frame | undefined {
   if (input.html !== undefined) {
     /* no id yet: a main marker arriving in a new frame is a copy of that main */
-    const prepared = prepareWrite(canvasId, '', repairEscapedHtml(input.html), '', actor.name)
+    const prepared = prepareWrite(canvasId, '', repairEscapedHtml(input.html), '', actor.name, {
+      refuseUnclosed: actor.kind === 'agent',
+    })
     input = { ...input, html: prepared.html }
   }
   const frame = store.createFrame(canvasId, input, actor.name)
@@ -2550,6 +2574,20 @@ export const createFrame = atomic(function createFrame(
   return frame
 })
 
+/** Whether this design write is refused, rather than saved with a note, when it leaves a
+ *  `<doop-use>` open: an agent's whole write. A frame mid-stream holds its stream's waiting tags:
+ *  the streaming agent's own edit of it is not whole (its next chunks close them), another
+ *  agent's is refused outright unless it replaces the design (set_frame_html). */
+function refusesUnclosed(frameId: string, actor: Actor, replace: boolean): boolean {
+  if (actor.kind !== 'agent') return false
+  const stream = streams.get(frameId)
+  if (!stream || replace) return true
+  if (stream.actor.name === actor.name) return false
+  throw new WriteRefusedError(
+    `Refused, nothing was written: ${stream.actor.name} is streaming this frame. Wait for its stream to finish, or replace the whole design with set_frame_html.`,
+  )
+}
+
 /** `replace` marks a deliberate whole-document write (set_frame_html): it
  *  always opens a history burst, even when the new document keeps most of
  *  the old one's wrapper — only the reveal-or-morph choice stays similarity
@@ -2566,7 +2604,9 @@ export const updateFrame = atomic(function updateFrame(
   if (!before) return undefined
   let changedComponents: ComponentDef[] = []
   if (patch.html !== undefined) {
-    const prepared = prepareWrite(before.canvasId, frameId, repairEscapedHtml(patch.html), before.html, actor.name)
+    const prepared = prepareWrite(before.canvasId, frameId, repairEscapedHtml(patch.html), before.html, actor.name, {
+      refuseUnclosed: refusesUnclosed(frameId, actor, opts.replace === true),
+    })
     patch = { ...patch, html: prepared.html }
     changedComponents = prepared.changed
   }

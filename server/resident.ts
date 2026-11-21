@@ -2073,7 +2073,8 @@ async function runResidentTool(
         }
         const inline = inlineDataRefusal(html, existingHtml(f), 'resident')
         if (inline) return fail(inline)
-        actions.updateFrame(input.frame_id, { html }, actor)
+        /* a whole-document write, as MCP set_frame_html: it may replace a design another agent streams */
+        actions.updateFrame(input.frame_id, { html }, actor, { replace: true })
         runState.mutatedFrames.add(input.frame_id)
         unverify(runState, input.frame_id)
         return ok(
@@ -2122,7 +2123,7 @@ async function runResidentTool(
         /* again at the commit: the frame may have changed since the chunks were checked */
         const inline = inlineDataRefusal(html, existingHtml(f), 'resident')
         if (inline) return fail(inline)
-        actions.updateFrame(input.frame_id, { html }, actor)
+        actions.updateFrame(input.frame_id, { html }, actor, { replace: true })
         runState.rewriteDrafts.delete(input.frame_id)
         runState.mutatedFrames.add(input.frame_id)
         unverify(runState, input.frame_id)
