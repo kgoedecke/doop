@@ -40,11 +40,14 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
      held still, so an element jumps to its new box at once instead of trailing
      the pointer or being measured mid-way by the outline. Adopted like the
      sheets above; holds nest (a remote update can land mid-drag). Releasing
-     flushes style first, so lifting the rule starts no transition of its own. */
+     flushes style first, so lifting the rule starts no transition of its own.
+     In a layer: a layered !important outranks an unlayered one whatever its
+     specificity, so a design's own \`#id { transition: … !important }\` is held
+     too. Only an inline \`style="transition: … !important"\` is out of reach. */
   var stillSheet = null
   try {
     stillSheet = new CSSStyleSheet()
-    stillSheet.replaceSync('*,*::before,*::after{transition:none!important}')
+    stillSheet.replaceSync('@layer doop-still{*,*::before,*::after{transition:none!important}}')
   } catch (e) {}
   var stillHolds = 0
   function holdStill() {
@@ -1713,7 +1716,17 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
       if (!shape.getAttribute('style')) shape.removeAttribute('style')
     })
   }
+  /* every style the runtime writes lands at once: a typed value, a slider, a
+     rotation or flip (doop:geometry), a nudge, a gesture's preview */
   function applyStyle(selector, styles, uniformText) {
+    holdStill()
+    try {
+      return applyStyleNow(selector, styles, uniformText)
+    } finally {
+      releaseStill()
+    }
+  }
+  function applyStyleNow(selector, styles, uniformText) {
     var el = styleTarget(selector)
     if (!el || isLocked(el)) return false
     var textPatch = isTextPatch(styles)
@@ -1824,14 +1837,7 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
       parent.postMessage({ type: 'doop:settle-result', reqId: d.reqId }, '*')
     }
     if (d.type === 'doop:style' && d.styles && typeof d.styles === 'object') {
-      /* a typed value or a slider outside a gesture lands at once too */
-      var applied
-      holdStill()
-      try {
-        applied = applyStyle(d.selector, d.styles, d.uniformText === true)
-      } finally {
-        releaseStill()
-      }
+      var applied = applyStyle(d.selector, d.styles, d.uniformText === true)
       parent.postMessage({ type: 'doop:style-result', reqId: d.reqId, ok: applied, info: applied ? inspect(d.selector) : null }, '*')
     }
     if (d.type === 'doop:replace-image') {

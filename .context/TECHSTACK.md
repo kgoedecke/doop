@@ -732,8 +732,10 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   leaving mid-drag, cancels. The runtime's hit info carries `sizable` and `locked`, so inline
   text runs, rotated or skewed elements, locked layers, locked frames and the Comment tool get no
   grips. An edit is not an interaction: while the runtime morphs in a new version of the html,
-  applies a Design panel value or holds a style gesture open, an adopted sheet
-  (`holdStill` / `releaseStill`) sets `transition: none` on everything, so an element under
+  applies any style (Design panel values, rotation and flip, nudges) or holds a style gesture
+  open, an adopted sheet (`holdStill` / `releaseStill`) sets `transition: none !important` on
+  everything from a cascade layer, which outranks a design's unlayered `!important` (an inline
+  `!important` transition still wins), so an element under
   `transition: all` jumps to its new box, tracks the pointer, and is outlined at the size it
   settles at; the design's own transitions are back once the edit lands.
   `tests/elementResize.test.ts` covers the geometry and `tests/elementResizeBrowser.test.ts`
