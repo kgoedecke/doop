@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { chordHint, firstChord, matchesChord } from '../src/lib/actions/chords'
+import { isSelectAllShortcut, pressedKey } from '../src/lib/keys'
 
 const key = (k: string, mods: Partial<KeyboardEvent> = {}, code = '') =>
   ({ key: k, code, metaKey: false, ctrlKey: false, altKey: false, shiftKey: false, ...mods }) as KeyboardEvent
@@ -26,6 +27,13 @@ describe('matchesChord', () => {
   it('names ⌥ chords by the physical key, since macOS types another character', () => {
     const optionA = key('å', { altKey: true }, 'KeyA')
     expect(matchesChord(optionA, { code: 'KeyA', alt: true }, true)).toBe(true)
+  })
+
+  it('passes over an event with no key, as autofill dispatches', () => {
+    const autofill = { code: '', metaKey: true, ctrlKey: false, altKey: false, shiftKey: false } as KeyboardEvent
+    expect(matchesChord(autofill, { key: 'k', mod: true }, true)).toBe(false)
+    expect(isSelectAllShortcut(autofill)).toBe(false)
+    expect(pressedKey(autofill)).toBe('')
   })
 
   it('keeps a Mac-only chord off other systems', () => {
