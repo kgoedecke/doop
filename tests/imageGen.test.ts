@@ -133,8 +133,43 @@ describe('who pays', () => {
   it('explains what to connect when nothing can pay', async () => {
     mockedGetAccounts.mockResolvedValue([])
     await expect(generateImage('u1', { prompt: 'x' })).rejects.toThrow(
-      /connect a ChatGPT subscription or OpenAI API key/,
+      /connect a ChatGPT subscription, an OpenAI API key or a Gemini API key in Settings → Doop Agent/,
     )
+  })
+
+  /* The agent reports: "GPT Image 2 is not available: connect a ChatGPT
+     subscription or OpenAI API key". The person never picked GPT Image 2; it
+     was the server default, and their only connection was a text provider. */
+  it('tells a person whose connections cannot draw what to connect, not why the default model failed', async () => {
+    mockedGetAccounts.mockResolvedValue([
+      { enabled: true, userId: 'u1', kind: 'anthropic-key', apiKey: 'sk-ant', connectedAt: 1 },
+    ])
+    stubEnv('OPENAI_API_KEY', 'sk-server')
+    const fetchSpy = vi.spyOn(globalThis, 'fetch')
+    const failure = generateImage('u1', { prompt: 'x' })
+    await expect(failure).rejects.toThrow(/Gemini API key/)
+    await expect(failure).rejects.toThrow(/Claude API connection cannot draw images/)
+    await expect(failure).rejects.not.toThrow(/GPT Image 2/)
+    expect(fetchSpy).not.toHaveBeenCalled()
+  })
+
+  it('says which image account is switched off when that is all that stands in the way', async () => {
+    mockedGetAccounts.mockResolvedValue([
+      { enabled: false, userId: 'u1', kind: 'chatgpt', accessToken: 'tok', connectedAt: 1 },
+      { enabled: true, userId: 'u1', kind: 'anthropic-key', apiKey: 'sk-ant', connectedAt: 2 },
+    ])
+    await expect(generateImage('u1', { prompt: 'x' })).rejects.toThrow(
+      /ChatGPT connection is switched off\. Switch it on in Settings → Doop Agent/,
+    )
+  })
+
+  it('draws on a connected Gemini key when the server default needs an OpenAI account', async () => {
+    mockedGetAccounts.mockResolvedValue([
+      { enabled: true, userId: 'u1', kind: 'anthropic-key', apiKey: 'sk-ant', connectedAt: 1 },
+      { enabled: true, userId: 'u1', kind: 'gemini-key', apiKey: 'gm-user', connectedAt: 2 },
+    ])
+    const generator = await generatorFor('u1')
+    expect(generator.ok && generator.label).toBe('Gemini')
   })
 })
 

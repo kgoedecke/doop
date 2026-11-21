@@ -1402,8 +1402,7 @@ const TOOLS: Anthropic.Tool[] = [
   },
   {
     name: 'generate_image',
-    description:
-      "Generate an image from a text prompt with AI and get a permanent URL to embed, plus a preview to judge. For visuals stock search cannot supply: brand-specific illustration, product renders, mascots, abstract hero art in the frame's exact palette. Prefer search_images for ordinary photography. It spends the requester's ChatGPT quota or OpenAI money and takes 20–60 seconds, so write ONE considered prompt (subject, style, composition, palette hexes, lighting, what to leave out) and refine a near miss by prompt.",
+    description: `Generate an image from a text prompt with AI and get a permanent URL to embed, plus a preview to judge. ${imageGen.IMAGE_PROVIDER_NOTE} For visuals stock search cannot supply: brand-specific illustration, product renders, mascots, abstract hero art in the frame's exact palette. Prefer search_images for ordinary photography. It spends the requester's quota or money and takes 20–60 seconds, so write ONE considered prompt (subject, style, composition, palette hexes, lighting, what to leave out) and refine a near miss by prompt.`,
     input_schema: {
       type: 'object',
       properties: {
@@ -1538,8 +1537,8 @@ const TOOLS: Anthropic.Tool[] = [
       properties: {
         decision: {
           type: 'string',
-          description:
-            'The decision and its reason, e.g. "Followed oatside-soft-shelf: its candlelit warmth suits an evening grocery brand better than the bright, clinical set"',
+          maxLength: MAX_DECISION_CHARS,
+          description: `The decision and its reason, at most ${MAX_DECISION_CHARS} characters; split longer feedback into separate calls by topic. E.g. "Followed oatside-soft-shelf: its candlelit warmth suits an evening grocery brand better than the bright, clinical set"`,
         },
       },
       required: ['decision'],
