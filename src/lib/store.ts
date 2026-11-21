@@ -41,6 +41,9 @@ export type ComposerSend =
   | { canvasId: string; status: 'sent'; at: number }
   | { canvasId: string; status: 'error'; message: string; at: number }
 
+/** Who is streaming into a frame: enough to name, colour and identify them. */
+export type StreamActor = { name: string; color: string; agentKey?: string }
+
 interface State {
   canvas: Canvas | null
   presences: Record<string, Presence>
@@ -142,7 +145,8 @@ interface State {
   /** frameId -> color, set briefly when a remote actor updates a frame */
   flashes: Record<string, { color: string; at: number }>
   /** frameId -> actor currently streaming a design into it */
-  streams: Record<string, { name: string; color: string }>
+  /** frame id -> the agent streaming into it (agentKey: shared/agentIdentity.ts) */
+  streams: Record<string, StreamActor>
   /** a transient toast — in the store so long actions fired from surfaces
    *  that close at once (a context menu) can still report back. A `busy`
    *  notice (an export in flight) stays up until the next notice replaces it. */
@@ -284,7 +288,7 @@ interface State {
   /** add or move (guide set) or remove (null) a ruler guide on the open canvas */
   setGuideLocal(id: string, guide: CanvasGuide | null): void
   flash(frameId: string, color: string): void
-  setStream(frameId: string, actor: { name: string; color: string } | null): void
+  setStream(frameId: string, actor: StreamActor | null): void
 }
 
 const LAYERS_OPEN_KEY = 'doop:layers-open'

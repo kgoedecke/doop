@@ -178,7 +178,16 @@ function handle(msg: ServerMessage) {
       if (msg.actor.clientId !== me && !s.streams[msg.frame.id]) s.flash(msg.frame.id, msg.actor.color)
       break
     case 'frame:streaming':
-      s.setStream(msg.frameId, msg.active ? { name: msg.actor.name, color: msg.actor.color } : null)
+      s.setStream(
+        msg.frameId,
+        msg.active
+          ? {
+              name: msg.actor.name,
+              color: msg.actor.color,
+              ...(msg.actor.agentKey ? { agentKey: msg.actor.agentKey } : {}),
+            }
+          : null,
+      )
       break
     case 'frame:deleted':
       s.removeFrame(msg.frameId)
