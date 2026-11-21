@@ -30,12 +30,14 @@ import {
   stampParts,
   syncComponentHead,
   templateFromMain,
+  unclosedUses,
   usedComponentIds,
   type EngineContext,
 } from './componentEngine.ts'
 import { adoptFromLibrary, findInLibraries, LibraryAdoptError } from './componentLibrary.ts'
 import { store } from './store.ts'
 import { noteCanvas } from './workBudget.ts'
+import { WriteRefusedError } from './writeRefusal.ts'
 import type { Canvas } from '../shared/types.ts'
 
 /**
@@ -326,7 +328,7 @@ function prepareInstances(html: string, ctx: EngineContext) {
     const state = reconcileInstance(found.el, ctx)
     if (!state) continue
     /* only a whole write gets here: nothing more is coming for the content it holds */
-    const rendered = renderInstance(def, def, state.overrides, state.instanceId, { ctx, stack: [], final: true })
+    const rendered = renderInstance(def, def, state.overrides, state.instanceId, { ctx, stack: [] })
     if (!rendered) continue
     /* the key it has is its place in what holds it (a main), not the component's own root key */
     setAttr(rendered, PART_ATTR, attrOf(found.el, PART_ATTR) ?? null)
@@ -347,12 +349,15 @@ export interface PreparedHtml {
   adopted: ComponentDef[]
 }
 
+/** `refuseUnclosed`: an agent's whole write, refused (`WriteRefusedError`) rather than saved when it
+ *  leaves a `<doop-use>` open; anyone else's places it empty with an `unclosed_use` note. */
 export function prepareFrameHtml(
   canvas: Canvas,
   frameId: string,
   incoming: string,
   by: string,
   priorHtml = '',
+  { refuseUnclosed = false }: { refuseUnclosed?: boolean } = {},
 ): PreparedHtml {
   if (!touchesComponents(incoming)) {
     const lost = frameId && priorHtml.includes(`${COMPONENT_ATTR}="`)
@@ -364,6 +369,7 @@ export function prepareFrameHtml(
   noteCanvas(canvas.id)
   try {
     const expanded = expandUses(incoming, ctx, [], 0, { final: true })
+    if (refuseUnclosed) refuseUnclosedUses(ctx.issues)
     const mains = prepareMains(canvas, frameId, expanded, by, ctx)
     const instances = prepareInstances(mains.html, ctx)
     const html = syncComponentHead(instances, closureOf(usedComponentIds(instances), canvas.id))
@@ -466,4 +472,39 @@ export function blankComponent(input: {
     updatedAt: now,
     updatedBy: input.by,
   }
+}
+
+/** What a `<doop-use>` left open does once saved, by where it is written: `subject` is "it" or
+ *  "each". */
+const UNCLOSED_CONSEQUENCE = {
+  /* the engine reads it as self-closing (a frame, and an instance override's markup) */
+  frame: (subject: string) =>
+    `Saved, ${subject} would be placed with no slot content, and the markup meant for its slots would land after it.`,
+  /* a template is parsed first, which closes it at its parent's end */
+  template: (subject: string) =>
+    `Saved, ${subject} would be closed where its parent ends, taking whatever follows it into its slots.`,
+}
+
+/** What to tell an agent whose whole write leaves these `<doop-use>` open (their components, as
+ *  written): a breakage that would otherwise only show in a screenshot (#528). */
+export function unclosedUseRefusal(refs: readonly string[], target: keyof typeof UNCLOSED_CONSEQUENCE): string {
+  const tags = refs.map((ref) => (ref ? `<${USE_TAG} component="${ref}">` : `a <${USE_TAG}>`))
+  return [
+    `Refused, nothing was written: ${tags.join(', ')} ${refs.length === 1 ? 'is' : 'are'} opened and never closed with </${USE_TAG}> (or one nested inside it is: the tags are counted in pairs).`,
+    UNCLOSED_CONSEQUENCE[target](refs.length === 1 ? 'it' : 'each'),
+    `Close each with </${USE_TAG}> where its content ends, or write it self-closing (<${USE_TAG} component="…" />) when it has none, then send the HTML again.`,
+  ].join('\n')
+}
+
+/** Refuse the write whose expansion reported a `<doop-use>` left open (`unclosed_use`). */
+export function refuseUnclosedUses(issues: readonly ComponentIssue[]): void {
+  const refs = issues.filter((issue) => issue.code === 'unclosed_use').map((issue) => issue.component ?? '')
+  if (refs.length) throw new WriteRefusedError(unclosedUseRefusal(refs, 'frame'))
+}
+
+/** Refuse a component template that leaves a `<doop-use>` open. It is parsed before it is kept,
+ *  which closes the tag at its parent's end, and every instance would inherit that guess. */
+export function refuseUnclosedTemplate(template: string): void {
+  const refs = unclosedUses(template)
+  if (refs.length) throw new WriteRefusedError(unclosedUseRefusal(refs, 'template'))
 }

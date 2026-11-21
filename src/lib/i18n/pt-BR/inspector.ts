@@ -19,7 +19,6 @@ export const inspector: Catalog['inspector'] = {
   copyImageUrl: 'Copiar URL da imagem',
   pinReferenceTitle: 'Adicionar à memória de design — será usado como referência',
   pinReference: 'Fixar como referência',
-  hideHtmlEditor: 'Ocultar o editor de HTML',
   editHtml: 'Editar o HTML',
   code: 'Código',
   copyHtmlTitle: 'Copiar o HTML do frame',

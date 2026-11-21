@@ -13,6 +13,7 @@ import { CANVAS_MOD_CHORDS } from './keys'
 export const FRAME_BOOTSTRAP = `<!doctype html>
 <html><head></head><body><script data-v-boot>
 (function () {
+  'use strict'
   ${FRAME_REPLAY_RUNTIME}
   ${FRAME_DROP_RUNTIME}
   ${FRAME_PROTO_RUNTIME}
@@ -538,7 +539,7 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
   }
 
   function postEdited(discrete) {
-    parent.postMessage({ type: 'doop:edited', html: serialize(), discrete: discrete === true }, '*')
+    if (runtimePort) apply(portSend, runtimePort, [{ event: 'edited', html: serialize(), discrete: discrete === true }])
     /* typing can move/grow the element — keep the parent's toolbar anchored */
     if (editing && activeEl) postActive()
   }
@@ -629,7 +630,11 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
      Reflect.apply (so no patched Function.prototype.call ever sees the port)
      and the event's own getters (so a patched prototype cannot turn the key
      the person pressed into another). */
-  var keyPort = null
+  var runtimePort = null
+  var hasOwn = Object.hasOwn
+  var editorWindow = parent
+  var readMessageSource = getter(MessageEvent.prototype, 'source')
+  var readMessageData = getter(MessageEvent.prototype, 'data')
   var portSend = MessagePort.prototype.postMessage
   var apply = Reflect.apply
   function getter(proto, name) {
@@ -646,7 +651,7 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
   var KEY_FIELDS = ['key', 'code', 'ctrlKey', 'metaKey', 'shiftKey', 'altKey', 'repeat']
   for (var kf = 0; kf < KEY_FIELDS.length; kf++) keyGetters[KEY_FIELDS[kf]] = getter(KeyboardEvent.prototype, KEY_FIELDS[kf])
   function relayKey(ev) {
-    if (!keyPort) return
+    if (!runtimePort) return
     /* isTrusted is the event's own, unforgeable property; it is read through
        the prototype getter only where an engine puts it there */
     if (!(readTrusted ? apply(readTrusted, ev, []) : ev.isTrusted)) return
@@ -663,7 +668,7 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
     if (tabChord && editing && editTimer && apply(readType, ev, []) === 'keydown') {
       clearTimeout(editTimer)
       editTimer = null
-      apply(portSend, keyPort, [{ event: 'edited', html: serialize() }])
+      apply(portSend, runtimePort, [{ event: 'edited', html: serialize() }])
     }
     if (!tabChord) {
       if (editing || protoOn) return
@@ -692,7 +697,7 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
       (CANVAS_MOD_CHORDS.indexOf(chord) >= 0 || CANVAS_MOD_CHORDS.indexOf(byCode) >= 0)
     )
       ev.preventDefault()
-    apply(portSend, keyPort, [
+    apply(portSend, runtimePort, [
       {
         event: type,
         key: k.key,
@@ -1869,12 +1874,14 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
   window.addEventListener('message', function (ev) {
     /* only the parent drives this document — a script inside the frame must
        not be able to pose as the panel and push edits into the save path */
-    if (ev.source !== parent) return
-    var d = ev.data
-    if (!d) return
+    if (!(readTrusted ? apply(readTrusted, ev, []) : ev.isTrusted) || apply(readMessageSource, ev, []) !== editorWindow) return
+    var data = apply(readMessageData, ev, [])
+    if (!data || !hasOwn(data, 'type')) return
+    // A design can run during render. Keep the command independent of the live event.
+    var d = { ...data }
     /* the first port offered is the one for life: a later message carrying
        one could be answering a design script's forged ready signal */
-    if (d.type === 'doop:key-port' && !keyPort && ev.ports && ev.ports[0]) keyPort = ev.ports[0]
+    if (d.type === 'doop:runtime-port' && !runtimePort && ev.ports && ev.ports[0]) runtimePort = ev.ports[0]
     if (d.type === 'doop:inspect') {
       parent.postMessage({ type: 'doop:inspect-result', reqId: d.reqId, info: inspect(d.selector) }, '*')
     }
@@ -1899,7 +1906,8 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
         styleTimer = null
         postEdited()
       }
-      parent.postMessage({ type: 'doop:settle-result', reqId: d.reqId }, '*')
+      // Undo must receive all pending saves before this acknowledgement.
+      if (runtimePort) apply(portSend, runtimePort, [{ event: 'settled', reqId: d.reqId }])
     }
     if (d.type === 'doop:style' && d.styles && typeof d.styles === 'object') {
       var applied = applyStyle(d.selector, d.styles, d.uniformText === true)
@@ -2097,7 +2105,7 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
         box: target && found ? renderedBox(target, found) : null,
       }, '*')
     }
-  })
+  }, true) // consume editor commands before any design listener can modify them
   parent.postMessage({ type: 'doop:frame-ready' }, '*')
 })()
 </script></body></html>`

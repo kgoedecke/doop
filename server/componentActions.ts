@@ -30,7 +30,15 @@ import type { Actor, Canvas, Frame } from '../shared/types.ts'
 import { decodeQuotes, familyKey, fontFaceRule, usesFamily, type CustomFont } from '../shared/fonts.ts'
 import { fontsForCanvas } from './fonts.ts'
 import * as actions from './actions.ts'
-import { blankComponent, bumpRevision, contextFor, referencesComponent, withinRevision } from './components.ts'
+import {
+  blankComponent,
+  bumpRevision,
+  contextFor,
+  referencesComponent,
+  refuseUnclosedTemplate,
+  refuseUnclosedUses,
+  withinRevision,
+} from './components.ts'
 import { unmatchedSelectors } from './componentCss.ts'
 import {
   alignParts,
@@ -560,6 +568,7 @@ export const createComponentFromHtml = atomic(function createComponentFromHtml(
   actor: Actor,
 ): CreateResult {
   checkCapacity(canvasId)
+  if (actor.kind === 'agent') refuseUnclosedTemplate(input.html)
   const name = validName(input.name, canvasId)
   const def = blankComponent({
     name,
@@ -748,6 +757,8 @@ export const updateComponent = atomic(function updateComponent(
       `component “${def.name}” is at revision ${def.rev}, not ${input.expectedRev} — someone changed it; read it again`,
     )
   const html = nextHtml(def, input)
+  /* the template as it would stand (a find + replace applied), a dry run's included */
+  if (html !== undefined && actor.kind === 'agent') refuseUnclosedTemplate(html)
   const nextRoot = html !== undefined ? alignedRoot(html, def) : undefined
   const usage = usageOf(canvas, def.id)
   const overrides = nextRoot
@@ -1027,6 +1038,7 @@ export const changeInstances = atomic(function changeInstances(
     }
     html = detached.reduce(withDetachedCss, splice(html, edits))
   }
+  if (actor.kind === 'agent') refuseUnclosedUses(ctx.issues)
   const next = html !== frame.html ? actions.updateFrame(frame.id, { html }, actor) : frame
   if (!next) fail('frame not found')
   return { frame: next, missing: changes.map((change) => change.instanceId).filter((id) => !seen.has(id)) }

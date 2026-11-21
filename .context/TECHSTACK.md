@@ -1006,7 +1006,21 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   takes the tag). A `<doop-use>` that renders nothing is reported, never dropped quietly: a main with
   no markup (`empty_template`), and on a whole write one never closed (`unclosed_use`), which is
   placed with no slot content so the ones after it still expand (mid-stream it waits for its
-  end). Tests: `componentDrops.test.ts`.
+  end). That placement is a person's only (editor, REST `/append`, an idle stream's settling): an
+  agent's whole write is refused instead (#528), from the engine's own report
+  (`prepareFrameHtml`'s `refuseUnclosed`, set by `updateFrame`, `createFrame` and a stream's `done`
+  chunk for agent actors, override markup included; `changeInstances` likewise), and a component
+  template by `refuseUnclosedTemplate` (`unclosedUses`, the same scanner). The refusal is a
+  `WriteRefusedError` (`server/writeRefusal.ts`): the operation undoes the write, and the MCP tool
+  wrapper (`toolLoads.ts`), `runComponentTool` and the resident's tool call answer with its message.
+  Slot and override markup is whole, so it always expands as a whole write, mid-stream too
+  (`expandOverride`, its issues `inOverride`): a stream chunk whose override leaves a use open is
+  refused at once, since no later chunk closes it. A refused chunk leaves the stream open, its idle
+  clock restarted. Mid-stream, the streaming
+  agent's own edit is not a whole write; another agent's is refused unless it replaces the design
+  (`replace`: MCP and resident `set_frame_html`, the resident's rewrite commit). The scanner skips
+  `<doop-use` text in scripts, styles, textareas, titles and comments and in names like
+  `<doop-user-chip>`. Tests: `componentDrops.test.ts`, the `<doop-use>` cases in `inlineData.test.ts`.
 - Component system first (`SYSTEM_FIRST`, `COMPOSE_CHECK` in `server/guide.ts`): the guide opens
   with a must-do list (tokens, then a component system set up the way a designer sets up a Figma
   file, then screens composed from it; themes are tokens, never a copied frame), the brief creates

@@ -15,7 +15,17 @@
       }
       window.events = []
       window.messages = []
-      window.addEventListener('message', (ev) => window.messages.push(ev.data))
+      window.addEventListener('message', (ev) => {
+        if (ev.data?.type === 'doop:frame-ready') {
+          const channel = new MessageChannel()
+          channel.port1.onmessage = ({ data }) => {
+            if (data.event === 'edited') window.messages.push({ ...data, type: 'doop:edited' })
+            if (data.event === 'settled') window.messages.push({ ...data, type: 'doop:settle-result' })
+          }
+          ev.source.postMessage({ type: 'doop:runtime-port' }, '*', [channel.port2])
+        }
+        if (ev.data?.type !== 'doop:edited' && ev.data?.type !== 'doop:settle-result') window.messages.push(ev.data)
+      })
       window.addFrame = (attribute = 'data-doop-frame') => {
         const frame = document.createElement('iframe')
         frame.setAttribute(attribute, '')
