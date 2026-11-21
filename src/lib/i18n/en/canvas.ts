@@ -77,6 +77,7 @@ export const canvas = {
   /* side rail */
   canvasPanels: 'Canvas panels',
   inspectFrame: 'Inspect frame',
+  inspectElement: 'Element properties',
   pageSettings: 'Page settings',
   help: 'Help',
   docs: 'Docs',

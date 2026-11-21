@@ -109,9 +109,13 @@ export interface State {
    *  every frame, while the pin itself hides */
   commentDrag: { id: string; x: number; y: number } | null
   /** the element properties panel is showing — opened by a pick (a click on
-   *  the frame surface or a Layers row), it then follows whatever element is
-   *  selected until it is closed */
+   *  the frame surface or a Layers row) unless `elementPanelClosed`, it then
+   *  follows whatever element is selected until it is closed. Picks go through
+   *  `panelOnPick`, never a bare `setElementPanelOpen(true)` */
   elementPanelOpen: boolean
+  /** the person closed the element panel: picks no longer open it until they
+   *  open it again from the rail. Per browser, so it sticks across visits */
+  elementPanelClosed: boolean
   /** the Layers rail is showing (desktop); the choice sticks across visits */
   layersOpen: boolean
   /** which face the Layers panel shows: the layer tree, or the design tokens */
@@ -302,6 +306,10 @@ export interface State {
    *  the primary (⌘A inside a frame, a keyboard walk of the tree) */
   pickElements(frameId: string, selectors: string[]): void
   setElementPanelOpen(v: boolean): void
+  /** the person closed the element panel: it stays closed across picks */
+  closeElementPanel(): void
+  /** the person opened the element panel again: picks open it once more */
+  openElementPanel(): void
   setLayersOpen(v: boolean): void
   setLayersTab(tab: 'layers' | 'components' | 'tokens'): void
   toggleUiHidden(): void
@@ -320,23 +328,26 @@ export interface State {
 }
 
 const LAYERS_OPEN_KEY = 'doop:layers-open'
+const ELEMENT_PANEL_CLOSED_KEY = 'doop:element-panel-closed'
 const RULERS_KEY = 'doop:rulers'
 /* longer than the slowest real export (Canva: render + verify, ~3 min) */
 const BUSY_NOTICE_MAX_MS = 5 * 60_000
 
-function readLayersOpen(): boolean {
+/** a per-browser on/off choice, stored as '1' / '0'; unset or unreadable is `fallback` */
+function readFlag(key: string, fallback: boolean): boolean {
   try {
-    return localStorage.getItem(LAYERS_OPEN_KEY) !== '0'
+    const value = localStorage.getItem(key)
+    return value === null ? fallback : value === '1'
   } catch {
-    return true
+    return fallback
   }
 }
 
-function readRulers(): boolean {
+function writeFlag(key: string, on: boolean): void {
   try {
-    return localStorage.getItem(RULERS_KEY) === '1'
+    localStorage.setItem(key, on ? '1' : '0')
   } catch {
-    return false
+    /* private mode: the choice just doesn't stick */
   }
 }
 
@@ -403,13 +414,14 @@ export const useStore = create<State>((set, get) => ({
   hoveredLayer: null,
   commentDrag: null,
   elementPanelOpen: false,
-  layersOpen: readLayersOpen(),
+  elementPanelClosed: readFlag(ELEMENT_PANEL_CLOSED_KEY, false),
+  layersOpen: readFlag(LAYERS_OPEN_KEY, true),
   layersTab: 'layers',
   uiHidden: false,
   prototypeMode: false,
   viewport: { x: 0, y: 0, zoom: 1 },
   snapGuides: [],
-  rulers: readRulers(),
+  rulers: readFlag(RULERS_KEY, false),
   viewOptions: readViewOptions(),
   selectedGuideId: null,
   outlines: false,
@@ -850,16 +862,20 @@ export const useStore = create<State>((set, get) => ({
           : s
       const same = s.selectedElement?.frameId === el.frameId && s.selectedElement?.selector === el.selector
       const collapse = only && pickedSelectors(s).length > 1
-      if (same && s.elementPanelOpen && !collapse) return s
+      if (same && (s.elementPanelOpen || s.elementPanelClosed) && !collapse) return s
       return same && !collapse
         ? { elementPanelOpen: true }
-        : { selectedElement: el, selectedElements: [el.selector], elementPanelOpen: true }
+        : { selectedElement: el, selectedElements: [el.selector], ...panelOnPick(s) }
     }),
   toggleElement: (el) =>
     set((s) => {
       const picked = s.selectedElement?.frameId === el.frameId ? pickedSelectors(s) : []
       if (!picked.includes(el.selector)) {
-        return { selectedElement: el, selectedElements: [...picked, el.selector], elementPanelOpen: true }
+        return {
+          selectedElement: el,
+          selectedElements: [...picked, el.selector],
+          ...panelOnPick(s),
+        }
       }
       const rest = picked.filter((x) => x !== el.selector)
       const primary = rest.at(-1)
@@ -870,15 +886,24 @@ export const useStore = create<State>((set, get) => ({
   pickElements: (frameId, selectors) => {
     const primary = selectors.at(-1)
     if (!primary) return
-    set({ selectedElement: { frameId, selector: primary }, selectedElements: selectors, elementPanelOpen: true })
+    set((s) => ({
+      selectedElement: { frameId, selector: primary },
+      selectedElements: selectors,
+      ...panelOnPick(s),
+    }))
   },
   setElementPanelOpen: (elementPanelOpen) => set({ elementPanelOpen }),
+  /* closing the panel empties the slot: the frame Inspector it covered goes too */
+  closeElementPanel: () => {
+    writeFlag(ELEMENT_PANEL_CLOSED_KEY, true)
+    set({ elementPanelOpen: false, elementPanelClosed: true, inspectorOpen: false })
+  },
+  openElementPanel: () => {
+    writeFlag(ELEMENT_PANEL_CLOSED_KEY, false)
+    set({ elementPanelOpen: true, elementPanelClosed: false })
+  },
   setLayersOpen: (layersOpen) => {
-    try {
-      localStorage.setItem(LAYERS_OPEN_KEY, layersOpen ? '1' : '0')
-    } catch {
-      /* private mode: the choice just doesn't stick */
-    }
+    writeFlag(LAYERS_OPEN_KEY, layersOpen)
     set({ layersOpen })
   },
   setLayersTab: (layersTab) => set({ layersTab }),
@@ -893,11 +918,7 @@ export const useStore = create<State>((set, get) => ({
     set((s) => (snapGuides.length === 0 && s.snapGuides.length === 0 ? s : { snapGuides })),
   toggleRulers: () =>
     set((s) => {
-      try {
-        localStorage.setItem(RULERS_KEY, s.rulers ? '0' : '1')
-      } catch {
-        /* private mode: the choice just doesn't stick */
-      }
+      writeFlag(RULERS_KEY, !s.rulers)
       return { rulers: !s.rulers, ...(s.rulers ? { selectedGuideId: null } : {}) }
     }),
   toggleOutlines: () =>
@@ -983,6 +1004,13 @@ export function toolAllowed(tool: Tool, role: CanvasRole): boolean {
 
 /** A frame from the room as the store keeps it: one sent without its HTML
  *  keeps the copy here (stale, its page not loaded) or ''. */
+/** What a pick does to the properties slot: the element panel opens, unless the
+ *  person closed it, when the slot empties (a frame Inspector left showing would
+ *  describe the frame while an element is picked, and hide the rail's way back). */
+function panelOnPick(s: State): Partial<State> {
+  return s.elementPanelClosed ? { elementPanelOpen: false, inspectorOpen: false } : { elementPanelOpen: true }
+}
+
 function withHtml(frame: Frame | WireFrame, canvas: ClientCanvas | null): Frame {
   if (typeof frame.html === 'string') return frame as Frame
   const kept = canvas?.id === frame.canvasId ? canvas.frames.find((f) => f.id === frame.id)?.html : undefined
