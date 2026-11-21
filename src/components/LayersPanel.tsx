@@ -358,9 +358,11 @@ export function LayersPanel({
      and the click does what ⌘-click does (false). */
   function range(row: VisibleRow): boolean {
     const s = useStore.getState()
-    /* collapsed, filtered or deleted, the anchor falls back to the current row */
+    /* collapsed, filtered or deleted, the anchor falls back to the current
+       row — and stays there, so the next ⇧-click starts from it too */
     const anchor = rows.find((r) => r.key === anchorKey.current) ?? rows.find((r) => r.key === currentKey)
     if (!anchor) return false
+    anchorKey.current = anchor.key
     const lo = Math.min(rows.indexOf(anchor), rows.indexOf(row))
     const hi = Math.max(rows.indexOf(anchor), rows.indexOf(row))
     const between = rows.slice(lo, hi + 1)
@@ -721,6 +723,7 @@ export function LayersPanel({
                   row={row}
                   selected={selectedIds.includes(row.frame.id) && !selectedElement}
                   current={row.frame.id === selectedId}
+                  reveal={row.key === currentKey}
                   dragging={drag?.key === row.key}
                   drop={drop?.key === row.key ? drop.place : undefined}
                   onToggle={() => setOpen(row.key, !row.open)}
@@ -735,6 +738,7 @@ export function LayersPanel({
                     pickedRows.has(row.key) ||
                     (!!row.standalone && !selectedElement && selectedIds.includes(row.frame.id))
                   }
+                  reveal={row.key === currentKey}
                   dragging={drag?.key === row.key}
                   drop={drop?.key === row.key ? drop.place : undefined}
                   onToggle={() => setOpen(row.key, !row.open)}
@@ -876,6 +880,7 @@ function FrameRow({
   row,
   selected,
   current,
+  reveal,
   dragging,
   drop,
   onToggle,
@@ -886,6 +891,8 @@ function FrameRow({
   selected: boolean
   /** the frame is selected, whether or not an element inside it is */
   current: boolean
+  /** the selection's primary row: the one scrolled into view */
+  reveal: boolean
   dragging: boolean
   drop?: Drop['place']
   onToggle: () => void
@@ -923,6 +930,7 @@ function FrameRow({
             label={label}
             className={cn(current && !selected && 'text-ink', dragging && 'opacity-40')}
             selected={selected}
+            reveal={reveal}
             hidden={!!frame.hidden}
             dimmed={!!frame.hidden}
             onToggleHidden={readOnly ? undefined : () => setFrameHidden(frame, !frame.hidden)}
@@ -983,6 +991,7 @@ function FrameRow({
 function NodeRow({
   row,
   selected,
+  reveal,
   dragging,
   drop,
   onToggle,
@@ -991,6 +1000,8 @@ function NodeRow({
 }: {
   row: NodeVisibleRow
   selected: boolean
+  /** the selection's primary row: the one scrolled into view */
+  reveal: boolean
   dragging: boolean
   drop?: Drop['place']
   onToggle: () => void
@@ -1045,6 +1056,7 @@ function NodeRow({
           label={label}
           detail={standalone || componentName ? undefined : node.detail}
           selected={selected}
+          reveal={reveal}
           /* a standalone element is hidden by its frame or by its own
              attribute (⌘⇧H sets the latter): the row shows either, and its
              eye clears both or hides the frame */
@@ -1120,6 +1132,9 @@ type RowProps = Omit<HTMLAttributes<HTMLDivElement>, 'onClick'> & {
   label: ReactNode
   detail?: string
   selected: boolean
+  /** the selection's primary row — a ⇧ range selects many rows at once, and
+   *  only the clicked one scrolls itself into view */
+  reveal?: boolean
   /** where a dragged layer would land on this row; `root` is a line above
    *  it at the root, out of every frame */
   drop?: Drop['place']
@@ -1145,6 +1160,7 @@ function Row({
   label,
   detail,
   selected,
+  reveal,
   drop,
   className,
   trailing,
@@ -1158,10 +1174,11 @@ function Row({
 }: RowProps) {
   const ref = useRef<HTMLDivElement>(null)
   const t = useT()
-  /* a selection made in the frame may sit far down the tree — bring it into view */
+  /* a selection made in the frame may sit far down the tree — bring its
+     primary row into view; the rest of a range leaves the scroll alone */
   useEffect(() => {
-    if (selected) ref.current?.scrollIntoView({ block: 'nearest' })
-  }, [selected])
+    if (selected && reveal) ref.current?.scrollIntoView({ block: 'nearest' })
+  }, [selected, reveal])
   return (
     <div
       {...rest}

@@ -162,4 +162,33 @@ describe('LayersPanel ⇧-click ranges', () => {
     expect(ids()).toEqual(['s1', 'f2', 'f1'])
     expect(useStore.getState().selectedId).toBe('f1')
   })
+
+  it('keeps ranging from the current row the anchor fell back to', () => {
+    act(() => useStore.getState().select('s1'))
+    click(row('f1'), { shiftKey: true })
+    expect(ids()).toEqual(['s1', 'f2', 'f1'])
+    /* the fallback landed the anchor on s1: the next ⇧-click ranges
+       from it again rather than from f1 */
+    click(row('f2'), { shiftKey: true })
+    expect(ids()).toEqual(['s1', 'f2'])
+    expect(useStore.getState().selectedId).toBe('f2')
+  })
+
+  it('scrolls only the ⇧-clicked row of a range into view', () => {
+    const previous = Element.prototype.scrollIntoView
+    const seen: Element[] = []
+    Element.prototype.scrollIntoView = function (this: Element) {
+      seen.push(this)
+    }
+    try {
+      click(row('s1'))
+      seen.length = 0
+      click(row('f1'), { shiftKey: true })
+      /* s1..f1 selects three rows; only the clicked one is revealed */
+      expect(ids()).toEqual(['s1', 'f2', 'f1'])
+      expect(seen).toEqual([row('f1')])
+    } finally {
+      Element.prototype.scrollIntoView = previous
+    }
+  })
 })
