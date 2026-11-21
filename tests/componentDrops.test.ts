@@ -126,7 +126,7 @@ describe('a <doop-use> that would render nothing', () => {
     /* override html is stored as written, so an unclosed tag in it survives to the render */
     const html = '<doop-use component="Badge" label="One"><doop-use component="Badge" label="Two"></doop-use>'
     const ctx = contextFor(canvasId)
-    const rendered = renderInstance(card, card, { parts: { [key]: { html } } }, 'x1', { ctx, stack: [], final: true })!
+    const rendered = renderInstance(card, card, { parts: { [key]: { html } } }, 'x1', { ctx, stack: [] })!
     const { serializeOuter } = await import('parse5')
     const out = serializeOuter(rendered)
     expect(out).toContain('>One</span>')

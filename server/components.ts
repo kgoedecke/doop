@@ -328,7 +328,7 @@ function prepareInstances(html: string, ctx: EngineContext) {
     const state = reconcileInstance(found.el, ctx)
     if (!state) continue
     /* only a whole write gets here: nothing more is coming for the content it holds */
-    const rendered = renderInstance(def, def, state.overrides, state.instanceId, { ctx, stack: [], final: true })
+    const rendered = renderInstance(def, def, state.overrides, state.instanceId, { ctx, stack: [] })
     if (!rendered) continue
     /* the key it has is its place in what holds it (a main), not the component's own root key */
     setAttr(rendered, PART_ATTR, attrOf(found.el, PART_ATTR) ?? null)

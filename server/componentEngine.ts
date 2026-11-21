@@ -249,8 +249,6 @@ interface RenderOptions {
   shallow?: boolean
   /** the instance being rendered: what a nested instance's id is derived from */
   ownerId?: string
-  /** a whole write: nothing more is coming, so an unclosed <doop-use> in slot or override content is placed too */
-  final?: boolean
 }
 
 /** A nested instance has no place of its own to keep an id: the template owns its markup, and the
@@ -348,7 +346,7 @@ function renderPart(
   setAttr(el, SLOT_SUGGEST_ATTR, null)
   if (part) applyPartOverride(el, part)
   const isSlot = attrOf(el, SLOT_ATTR) !== undefined
-  const content = (html: string) => expandUses(html, options.ctx, [], options.depth, { final: options.final })
+  const content = (html: string) => expandOverride(html, options.ctx, options.depth)
   if (part?.html !== undefined) {
     setChildrenFromHtml(el, options.shallow ? part.html : content(part.html))
     return
@@ -1178,7 +1176,7 @@ export function expandUses(
   for (let span = nextUse(html, 0, opaque, final); span; span = nextUse(html, cursor, opaque, final)) {
     out += html.slice(cursor, span.start)
     if (span.unclosed) ctx.issues.push(unclosedIssue(componentRefIn(html.slice(span.start, span.openEnd))))
-    out += expandOne(html, span, ctx, stack, depth, final)
+    out += expandOne(html, span, ctx, stack, depth)
     cursor = span.end
   }
   /* a tag that cannot be read to its end leaves it and the rest as written: no less left open */
@@ -1187,14 +1185,17 @@ export function expandUses(
   return out + html.slice(cursor)
 }
 
-function expandOne(
-  html: string,
-  span: UseSpan,
-  ctx: EngineContext,
-  stack: string[],
-  depth: number,
-  final: boolean,
-): string {
+/** Slot or override content, which is whole by the time it renders (a closed use's slot, an
+ *  overrides string), mid-stream too: a <doop-use> it leaves open is placed empty, never left for
+ *  the parser to close, and its issue says no later chunk can close it (`inOverride`). */
+function expandOverride(html: string, ctx: EngineContext, depth: number | undefined): string {
+  const from = ctx.issues.length
+  const out = expandUses(html, ctx, [], depth, { final: true })
+  for (const issue of ctx.issues.slice(from)) if (issue.code === 'unclosed_use') issue.inOverride = true
+  return out
+}
+
+function expandOne(html: string, span: UseSpan, ctx: EngineContext, stack: string[], depth: number): string {
   const openTag = html.slice(span.start, span.openEnd + 1).replace(/\/>$/, '>')
   const inner = span.selfClosing ? '' : html.slice(span.openEnd + 1, span.closeStart)
   const use = elementKids(parseFragment(`${openTag}${inner}</${USE_TAG}>`))[0]
@@ -1218,7 +1219,7 @@ function expandOne(
     return ''
   }
   const state = stateFromUseAttrs(use, def, ctx)
-  const root = renderInstance(def, def, state.overrides, state.instanceId, { ctx, stack, depth, final })
+  const root = renderInstance(def, def, state.overrides, state.instanceId, { ctx, stack, depth })
   if (!root) return ''
   /* a template read back by update_component keeps the nested instance's key, and its overrides
      with it. One that names none gets no key from the component it renders: that is the

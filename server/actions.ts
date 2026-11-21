@@ -14,7 +14,14 @@ import {
   recordUndo,
   transaction,
 } from './journal.ts'
-import { dedupeIssues, prepareChunk, prepareFrameHtml, referencesComponent, rederiveFromMains } from './components.ts'
+import {
+  dedupeIssues,
+  prepareChunk,
+  prepareFrameHtml,
+  referencesComponent,
+  rederiveFromMains,
+  refuseUnclosedUses,
+} from './components.ts'
 import { COMPONENT_ATTR, isDeleted, isHollow, type ComponentDef, type ComponentIssue } from '../shared/components.ts'
 import { MAX_DECISION_CHARS } from '../shared/designDecisions.ts'
 import { MAX_PAGES, PageLimitError, store } from './store.ts'
@@ -2409,6 +2416,9 @@ const appendChunk = atomic(function appendChunk(
   const chunked = canvas
     ? prepareChunk(canvas, piece, opts.start ? '' : before.html, actor.name)
     : { html: piece, issues: [], adopted: [] }
+  /* a tag left open in an override is whole already: no later chunk closes it, and waiting for the
+     done chunk would leave this one saved, so the chunk is refused now */
+  if (actor.kind === 'agent') refuseUnclosedUses(chunked.issues.filter((issue) => issue.inOverride))
   const expanded = chunked.html
   const carried = [...(starting ? [] : (streamIssues.get(frameId) ?? [])), ...chunked.issues]
   /* the last chunk settles the whole document: a <doop-use> split across

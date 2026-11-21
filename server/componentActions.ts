@@ -1029,13 +1029,7 @@ export const changeInstances = atomic(function changeInstances(
       const state = readInstance(located.el, ctx.atRev(def.id, Number(attrOf(located.el, REV_ATTR))) ?? def, ctx)
       if (!state) continue
       validateProps(def, change.props)
-      /* a whole write of the override: markup in it that leaves a <doop-use> open is placed empty
-         and reported, as when the instance is rendered again, rather than closed by the parser */
-      const rendered = renderInstance(def, def, applyChange(state.overrides, change), id, {
-        ctx,
-        stack: [],
-        final: true,
-      })
+      const rendered = renderInstance(def, def, applyChange(state.overrides, change), id, { ctx, stack: [] })
       if (!rendered) continue
       /* below another instance, this root is that instance's part */
       const part = attrOf(located.el, PART_ATTR)

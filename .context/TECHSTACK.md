@@ -985,7 +985,10 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   template by `refuseUnclosedTemplate` (`unclosedUses`, the same scanner). The refusal is a
   `WriteRefusedError` (`server/writeRefusal.ts`): the operation undoes the write, and the MCP tool
   wrapper (`toolLoads.ts`), `runComponentTool` and the resident's tool call answer with its message.
-  A refused `done` chunk leaves the stream open, its idle clock restarted. Mid-stream, the streaming
+  Slot and override markup is whole, so it always expands as a whole write, mid-stream too
+  (`expandOverride`, its issues `inOverride`): a stream chunk whose override leaves a use open is
+  refused at once, since no later chunk closes it. A refused chunk leaves the stream open, its idle
+  clock restarted. Mid-stream, the streaming
   agent's own edit is not a whole write; another agent's is refused unless it replaces the design
   (`replace`: MCP and resident `set_frame_html`, the resident's rewrite commit). The scanner skips
   `<doop-use` text in scripts, styles, textareas, titles and comments and in names like
