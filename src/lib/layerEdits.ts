@@ -8,7 +8,8 @@ import { t } from './i18n'
 import { api, ApiError, errorMessage } from './api'
 import { formatElementText, inspectElement, nudgeElements, requestFrame } from './frameBridge'
 import { isCanvasElement } from './drawing'
-import { duplicateFrames } from './frameClipboard'
+import { copyFrames, duplicateFrames } from './frameClipboard'
+import { writeCanvasClipboard } from './canvasClipboard'
 import { carriedCss, newScope, renameInCss, scopeMarkup, SCOPE_ATTR, withCarriedCss } from './styleCarry'
 import {
   deleteFramesTracked,
@@ -264,6 +265,29 @@ export function deleteSelection(): boolean {
   if (!selected.length) return false
   deleteFramesTracked(selected)
   return true
+}
+
+/** Cut copies the frames, then removes what Delete would once the clipboard took
+ *  them. The clipboard is written asynchronously, so the frames are read again by
+ *  id when it lands, and that one read is both what is copied and what is deleted:
+ *  an edit made meanwhile rides along in the copy, a frame deleted meanwhile is not
+ *  deleted twice, and a locked frame or a shape locked on its own layer stays, as on ⌫. */
+export function cutFrames(frames: Frame[]) {
+  const ids = new Set(frames.map((f) => f.id))
+  if (!ids.size) return
+  let live: Frame[] = []
+  writeCanvasClipboard(
+    () => {
+      live = (useStore.getState().canvas?.frames ?? []).filter((f) => ids.has(f.id))
+      if (!live.length) return false
+      copyFrames(live)
+    },
+    undefined,
+    () => {
+      const cut = live.filter((f) => !isStackLocked(f))
+      if (cut.length) deleteFramesTracked(cut)
+    },
+  )
 }
 
 export function nudgeSelection(dx: number, dy: number): boolean {

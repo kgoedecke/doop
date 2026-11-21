@@ -410,21 +410,22 @@ describe.skipIf(!findBrowserPath())('frame and element context menus', () => {
   })
 
   it("copies and cuts every selected canvas shape from one shape's Layers row", async () => {
-    const shape = (id: string, x: number): Frame => ({
+    const shape = (id: string, x: number, locked = false): Frame => ({
       ...saved,
       id,
       name: `Shape ${id}`,
       x,
       width: 40,
       height: 40,
-      html: `<body data-doop-canvas-element="true"><div id="${id}-box" data-doop-drawing="rect" style="width:40px;height:40px;background:red"></div></body>`,
+      html: `<body data-doop-canvas-element="true"><div id="${id}-box" data-doop-drawing="rect"${locked ? ' data-doop-locked="true"' : ''} style="width:40px;height:40px;background:red"></div></body>`,
     })
     await page.evaluate(
       (frames) => {
         window.contextMenuHarness.seed(frames)
-        window.contextMenuHarness.selectMany(['f', 'g'])
+        window.contextMenuHarness.selectMany(['f', 'g', 'h'])
       },
-      [shape('f', 60), shape('g', 200)],
+      /* h is locked on its own layer (⌘⇧L): copied with the rest, never cut */
+      [shape('f', 60), shape('g', 200), shape('h', 340, true)],
     )
     const row = '[data-row-key="f|#f-box"]'
     const clip = () =>
@@ -432,13 +433,13 @@ describe.skipIf(!findBrowserPath())('frame and element context menus', () => {
 
     await page.click(row, { button: 'right' })
     await choose('Copy')
-    await expect.poll(clip).toBe(2)
+    await expect.poll(clip).toBe(3)
 
     await page.evaluate(() => localStorage.removeItem('doop:frame-clipboard'))
-    await page.evaluate(() => window.contextMenuHarness.selectMany(['f', 'g']))
+    await page.evaluate(() => window.contextMenuHarness.selectMany(['f', 'g', 'h']))
     await page.click(row, { button: 'right' })
     await choose('Cut')
-    await expect.poll(clip).toBe(2)
+    await expect.poll(clip).toBe(3)
     await expect.poll(() => [...deletedIds].sort()).toEqual(['f', 'g'])
   })
 

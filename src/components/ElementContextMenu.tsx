@@ -5,8 +5,9 @@ import { copyElementPng, type ElementTarget } from '../lib/frameExport'
 import { useExportSettings } from '../lib/exportSettings'
 import { copyPicked, hasElementClip, pasteLayer } from '../lib/elementClipboard'
 import { writeCanvasClipboard } from '../lib/canvasClipboard'
-import { copyFrames, cutFrames, hasFrameClip, pasteFrameCentered } from '../lib/frameClipboard'
+import { copyFrames, hasFrameClip, pasteFrameCentered } from '../lib/frameClipboard'
 import {
+  cutFrames,
   deleteLayers,
   setFramesHidden,
   setFramesLocked,
