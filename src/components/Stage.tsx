@@ -12,7 +12,8 @@ import { CanvasComments, type CanvasComposeAt } from './CanvasComments'
 import { placeComposer } from '../lib/composerPlacement'
 import { isCanvasComment, type CanvasComment } from '../../shared/comments'
 import { elementIdSelector, isElementId } from '../../shared/elementId'
-import { resolveLocalFrameLink } from '../lib/elementLink'
+import { resolveFrameLink } from '../lib/elementLink'
+import { openExternal } from '../lib/desktop'
 import { canvasPages, framePageId } from '../../shared/pages'
 import { FlowOverlay } from './FlowOverlay'
 import { PrototypeOverlay } from './PrototypeOverlay'
@@ -528,8 +529,24 @@ export function Stage({
     (source: Frame, href: string) => {
       const { canvas, activePageId } = useStore.getState()
       if (!canvas || source.canvasId !== canvas.id || framePageId(canvas, source) !== activePageId) return
-      const target = resolveLocalFrameLink(canvas, href)
+      const target = resolveFrameLink(canvas, href)
       if (!target) return
+      if (target.kind === 'web') {
+        /* the desktop shell hands it to the system browser (its webview drops
+           popups); a browser opens a tab with no way back to this page */
+        if (openExternal(target.url)) return
+        /* mail and phone links go to the app the system has for them: a new
+           tab would stay behind empty */
+        if (/^(mailto|tel):/i.test(target.url)) window.location.href = target.url
+        else window.open(target.url, '_blank', 'noopener,noreferrer')
+        return
+      }
+      if (target.kind === 'anchor') return // the frame scrolls itself (FrameView)
+      if (target.kind === 'page') {
+        /* as a pick in the Pages panel: the Stage fits the page it opens */
+        useStore.getState().setActivePage(target.pageId)
+        return
+      }
       focusFrame(target.frame, isElementId(target.element) ? elementIdSelector(target.element) : null)
     },
     [focusFrame],

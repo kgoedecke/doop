@@ -187,10 +187,20 @@ describe.skipIf(!findBrowserPath())('page camera and snapping', { timeout: 30_00
     }
     const app = await point('#app')
     await page.mouse.move(app.x, app.y)
-    await waitState('the app link gets a pointer cursor', () => {
-      const surface = document.querySelector('[data-frame-surface]')
-      return !!surface && getComputedStyle(surface).cursor === 'pointer'
-    })
+    await waitState('the link is hovered as an ordinary layer', () => !!document.querySelector('[data-hover-outline]'))
+    expect(
+      await page.evaluate(() => ({
+        cursor: getComputedStyle(document.querySelector('[data-frame-surface]')!).cursor,
+        outlined: !!document.querySelector('[data-link-outline]'),
+      })),
+    ).toEqual({ cursor: 'default', outlined: false })
+    // the browser may show the document's cursor under the shield: it wears the canvas's
+    await directory.waitForFunction(() => getComputedStyle(document.querySelector('#app')!).cursor === 'default')
+    // another tool's cursor reaches the document too
+    await page.keyboard.press('h')
+    await directory.waitForFunction(() => getComputedStyle(document.querySelector('#app')!).cursor === 'grab')
+    await page.keyboard.press('v')
+    await directory.waitForFunction(() => getComputedStyle(document.querySelector('#app')!).cursor === 'default')
     await page.mouse.click(app.x, app.y)
     await waitState(
       'ordinary click stays in selection',
@@ -205,7 +215,18 @@ describe.skipIf(!findBrowserPath())('page camera and snapping', { timeout: 30_00
       const at = await point(selector)
       await page.mouse.click(at.x, at.y)
     }
+    expect(await page.evaluate(() => !!document.querySelector('[data-link-outline]'))).toBe(false)
+    // hover probes are throttled to one per 40ms with no trailing probe, so let
+    // the last click's probe age out before arriving, as a real pointer would
+    await new Promise((resolve) => setTimeout(resolve, 60))
     await page.mouse.move(app.x, app.y)
+    await waitState('with the chord held the app link reads as a link', () => {
+      const surface = document.querySelector('[data-frame-surface]')
+      return (
+        !!surface && getComputedStyle(surface).cursor === 'pointer' && !!document.querySelector('[data-link-outline]')
+      )
+    })
+    await directory.waitForFunction(() => getComputedStyle(document.querySelector('#app')!).cursor === 'pointer')
     await page.mouse.down()
     await page.mouse.move(app.x + 20, app.y)
     await page.mouse.up()

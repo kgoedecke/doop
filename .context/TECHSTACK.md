@@ -35,6 +35,21 @@
   back to frame details if nothing carries the id. Browser regressions in
   `tests/pageCanvasBrowser.test.ts` cover initial loading, cross-page links, stamping on copy,
   clipboard round trips, history and script-created or script-removed elements.
+  Links inside a frame are followed with ⌘-click (Ctrl elsewhere) in Select (`resolveFrameLink`),
+  every link the way a browser would take it: a link to a frame of the open canvas moves the camera
+  there (`Stage.followFrameLink`), a page link switches to that page, `#id` scrolls the frame's own
+  document (`doop:anchor`; a bare `#` to the top), and anything else opens in a new tab (a relative
+  path against Doop's origin; the system browser in the desktop shell), `mailto:` and `tel:` in
+  their app. Never followed: a scheme outside http(s), mailto and tel (`javascript:`, `data:`), and
+  a link into this canvas naming a frame or page that is gone or hidden. Only while the chord is
+  held does a followable link wear a hand cursor and a brand outline (`useLinkModifier`, the
+  runtime's `linkRect`); a plain click still selects. The browser can show a frame document's own
+  cursor through the shield (a link's hand), so the frame wears the surface's cursor (`doop:cursor`,
+  the runtime's `vCursorSheet`) except while text is edited; the prototype player sends none, so a
+  played design keeps its cursors. In a text edit, a click on nothing editable ends the edit as
+  Escape does (not the click ending a text drag that let go past the text). Tests:
+  `frameLinkTarget.test.ts`, the link case in `tests/pageCanvasBrowser.test.ts`, the cursor case in
+  `richTextBrowser.test.ts`.
 - Page links are `/c/<canvasId>?page=<pageId>` (`src/lib/pageLink.ts`, pure). `openingPageId` is
   the one rule for the page a canvas URL opens: the page of the frame it links, else the page it
   names, else the default (the first page; on a library canvas its components page, see Workspace

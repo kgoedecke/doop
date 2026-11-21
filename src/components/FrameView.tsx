@@ -1,4 +1,14 @@
-import { memo, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import {
+  memo,
+  useCallback,
+  useContext,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from 'react'
 import { createPortal } from 'react-dom'
 import type { ElementComment, Frame } from '../../shared/types'
 import { canEditOpenCanvas, pickedSelectors, useStore } from '../lib/store'
@@ -13,7 +23,7 @@ import { loadPathEdit, type PathEditSource } from '../lib/pathEditing'
 import { currentPageCanvas } from '../lib/pages'
 import { noteFrameDocument, registerFrameWindow, requestFrame, unregisterFrameWindow } from '../lib/frameBridge'
 import { api } from '../lib/api'
-import { resolveLocalFrameLink } from '../lib/elementLink'
+import { resolveFrameLink } from '../lib/elementLink'
 import { sendWs } from '../lib/ws'
 import { throttle } from '../lib/throttle'
 import { getIdentity } from '../lib/identity'
@@ -93,8 +103,70 @@ function designOffset(e: React.PointerEvent<HTMLElement>, rotation = 0): { x: nu
   return designPoint(e, e.target instanceof HTMLElement ? e.target : e.currentTarget, rotation)
 }
 
-function linkModifier(e: React.MouseEvent): boolean {
+interface ModifierState {
+  metaKey: boolean
+  ctrlKey: boolean
+  altKey: boolean
+  shiftKey: boolean
+}
+
+/** ⌘ alone on a Mac, Ctrl alone elsewhere: the chord that follows a link. */
+function linkModifier(e: ModifierState): boolean {
   return (MOD_KEY === '⌘' ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey) && !e.altKey && !e.shiftKey
+}
+
+/** Whether the link chord is held, shared by every frame: one set of
+ *  listeners for the page, not one per frame on the pointer's hottest path.
+ *  Every key and every pointer move or press re-reads the chord from the event
+ *  itself, so a key-up the page never saw (released while another window or a
+ *  frame had focus) cannot leave it stuck on. */
+const linkChord = (() => {
+  let held = false
+  const listeners = new Set<() => void>()
+  const set = (next: boolean) => {
+    if (next === held) return
+    held = next
+    for (const listener of listeners) listener()
+  }
+  const read = (e: KeyboardEvent | PointerEvent) => set(linkModifier(e))
+  const reset = () => set(false)
+  const onKey = (e: KeyboardEvent) => read(e)
+  const onPointer = (e: PointerEvent) => read(e)
+  function attach() {
+    window.addEventListener('keydown', onKey)
+    window.addEventListener('keyup', onKey)
+    window.addEventListener('pointermove', onPointer, true)
+    window.addEventListener('pointerdown', onPointer, true)
+    window.addEventListener('blur', reset)
+    document.addEventListener('visibilitychange', reset)
+  }
+  function detach() {
+    window.removeEventListener('keydown', onKey)
+    window.removeEventListener('keyup', onKey)
+    window.removeEventListener('pointermove', onPointer, true)
+    window.removeEventListener('pointerdown', onPointer, true)
+    window.removeEventListener('blur', reset)
+    document.removeEventListener('visibilitychange', reset)
+  }
+  return {
+    subscribe(listener: () => void) {
+      if (!listeners.size) attach()
+      listeners.add(listener)
+      return () => {
+        listeners.delete(listener)
+        if (listeners.size) return
+        detach()
+        held = false
+      }
+    },
+    held: () => held,
+  }
+})()
+
+/** True while the link chord is held, so links only look followable when a
+ *  click would follow them. */
+function useLinkModifier(): boolean {
+  return useSyncExternalStore(linkChord.subscribe, linkChord.held)
 }
 
 /* Counter-scale contract: chrome that keeps constant on-screen size divides
@@ -246,6 +318,8 @@ interface HoverHit {
   selector: string
   rect: { x: number; y: number; width: number; height: number }
   href?: string | null
+  /** the box of the link around the pointer, in design px */
+  linkRect?: { x: number; y: number; width: number; height: number } | null
 }
 
 /* Counter-scaled overlays (labels, pins, popovers) get their scale from the
@@ -275,6 +349,17 @@ export const FrameView = memo(function FrameView({
   const menuRequest = useRef(0)
   const surfaceRef = useRef<HTMLDivElement>(null)
   const linkPress = useRef<{ pointerId: number; x: number; y: number } | null>(null)
+  const sentCursor = useRef<string | null>(null)
+  const syncCursorRef = useRef(() => {})
+  syncCursorRef.current = () => {
+    const surface = surfaceRef.current
+    const win = iframeRef.current?.contentWindow
+    if (!surface || !win) return
+    const cursor = getComputedStyle(surface).cursor || 'default'
+    if (cursor === sentCursor.current) return
+    sentCursor.current = cursor
+    win.postMessage({ type: 'doop:cursor', cursor }, '*')
+  }
   const elementMove = useElementMove(frame, layoutZoom)
   const labelLayer = useContext(FrameLabelLayer)
   const [pathEdit, setPathEdit] = useState<PathEditSource | null>(null)
@@ -318,6 +403,7 @@ export const FrameView = memo(function FrameView({
      rides the cursor — the doubled cursor shows from the moment ⌥⇧ is held */
   const [duping, setDuping] = useState(false)
   const dupKeyHeld = useDupModifier()
+  const linkKeyHeld = useLinkModifier()
   const [editing, setEditing] = useState(false)
   /* after exiting edit mode, hold renders until the final serialized HTML
      lands in the store — otherwise a stale post would morph the edit away */
@@ -863,6 +949,11 @@ export const FrameView = memo(function FrameView({
     function onMsg(ev: MessageEvent) {
       const win = iframeRef.current?.contentWindow
       if (ev.data?.type === 'doop:frame-ready' && win && ev.source === win) {
+        /* a fresh document wears no canvas cursor yet: forget what the last
+           one was sent, and send it once the first render has settled (the
+           effect below sends it too on the first boot; the second is a no-op) */
+        sentCursor.current = null
+        window.requestAnimationFrame(() => syncCursorRef.current())
         /* once per document: the ready signal arrives before the design's
            HTML, so only the runtime can be listening for the port */
         if (!keyPort.current) {
@@ -1351,7 +1442,7 @@ export const FrameView = memo(function FrameView({
       if (ev.data?.type === 'doop:hover-result' && ev.data.reqId === hoverReq.current) {
         const hit = (ev.data.hit ?? null) as HoverHit | null
         /* only re-render when the outlined element actually changes */
-        const key = hit ? JSON.stringify([hit.selector, hit.rect, hit.href]) : null
+        const key = hit ? JSON.stringify([hit.selector, hit.rect, hit.href, hit.linkRect]) : null
         if (key !== hoverKey.current) {
           hoverKey.current = key
           setHover(hit)
@@ -1616,7 +1707,9 @@ export const FrameView = memo(function FrameView({
     if ((frame.locked || readOnly) && editing) exitEdit()
   }, [frame.locked, readOnly]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const linkCanvas = onFollowLink && hover?.href ? useStore.getState().canvas : null
+  /* only while the chord is held: without it a click selects, so the link
+     must look like any other layer */
+  const linkCanvas = onFollowLink && linkKeyHeld && hover?.href ? useStore.getState().canvas : null
   const linkHovered =
     linkCanvas &&
     hover?.href &&
@@ -1627,7 +1720,30 @@ export const FrameView = memo(function FrameView({
     !dragging &&
     !elementMove.moving &&
     !resizing &&
-    resolveLocalFrameLink(linkCanvas, hover.href)
+    resolveFrameLink(linkCanvas, hover.href)
+
+  /* a link to a spot in this frame's own document scrolls it there; the
+     canvas takes everything else */
+  function followLink(href: string) {
+    const canvas = useStore.getState().canvas
+    const target = canvas ? resolveFrameLink(canvas, href) : null
+    if (target?.kind === 'anchor') {
+      iframeRef.current?.contentWindow?.postMessage({ type: 'doop:anchor', id: target.id }, '*')
+      return
+    }
+    onFollowLink?.(frame, href)
+  }
+
+  const surfaceCursor = duping || (dupKeyHeld && !editing) ? DUP_CURSOR : linkHovered ? 'pointer' : undefined
+  /* The browser may show the frame document's cursor rather than the
+     surface's (a link's hand under the shield), so the document wears the
+     cursor the surface shows: its own (the hand over a followable link, the
+     duplicate arrow) or the Stage's for the tool (grab, comment, zoom). Sent
+     again whenever the document boots, which starts with no cursor. */
+  useEffect(() => {
+    if (!runtimeReady) return
+    syncCursorRef.current()
+  }, [runtimeReady, surfaceCursor, tool, panMode, editing])
 
   return (
     <ContextMenu
@@ -1877,7 +1993,7 @@ export const FrameView = memo(function FrameView({
             style={{
               outlineWidth: 'calc(2px / var(--zoom, 1))',
               outlineOffset: 'calc(-1px / var(--zoom, 1))',
-              cursor: duping || (dupKeyHeld && !editing) ? DUP_CURSOR : linkHovered ? 'pointer' : undefined,
+              cursor: surfaceCursor,
               /* only while selected, when the wrapper gives up its place: inside
                  an unselected frame's own stacking context a z-index here would
                  cover the frame's pins and hover outlines */
@@ -1912,11 +2028,20 @@ export const FrameView = memo(function FrameView({
                 linkPress.current = null
                 return
               }
+              /* a web link opens now, inside the click: a popup blocker
+                 refuses a tab opened after the round trip to the frame. The
+                 hovered link is the one under the press, which moved at most
+                 a few pixels */
+              if (linkHovered && linkHovered.kind === 'web' && hover?.href) {
+                linkPress.current = null
+                followLink(hover.href)
+                return
+              }
               const at = designPoint(e, e.currentTarget, frame.rotation)
               void requestFrame(frame.id, 'doop:link-hit', at).then((reply) => {
                 if (linkPress.current !== press) return
                 linkPress.current = null
-                if (typeof reply?.href === 'string') onFollowLink?.(frame, reply.href)
+                if (typeof reply?.href === 'string') followLink(reply.href)
               })
             }}
             onDoubleClick={(e) => {
@@ -2041,48 +2166,69 @@ export const FrameView = memo(function FrameView({
               )}
               {/* above the selection outline (z-[3]), or that outline covers the
               hovered element's tag */}
-              {hover && !hoverOnSelected && !editing && !pathEdit && !dragging && !elementMove.moving && !resizing && (
-                <>
-                  {/* the wash stays inside the frame: a root element taller or
+              {/* a followable link under the held chord: the link's own box in
+                brand, in place of the layer hover, so it reads as a link */}
+              {linkHovered && hover?.linkRect && (
+                <div
+                  data-link-outline=""
+                  className="pointer-events-none absolute z-[4] rounded-[calc(2px/var(--zoom,1))] bg-[color-mix(in_srgb,var(--brand)_8%,transparent)] shadow-[0_0_0_calc(1.5px/var(--zoom,1))_var(--brand)]"
+                  style={{
+                    left: hover.linkRect.x,
+                    top: hover.linkRect.y,
+                    width: hover.linkRect.width,
+                    height: hover.linkRect.height,
+                  }}
+                />
+              )}
+              {hover &&
+                !linkHovered &&
+                !hoverOnSelected &&
+                !editing &&
+                !pathEdit &&
+                !dragging &&
+                !elementMove.moving &&
+                !resizing && (
+                  <>
+                    {/* the wash stays inside the frame: a root element taller or
                     wider than its frame (a page whose content runs past the
                     artboard) would otherwise tint the canvas around it, which
                     reads as the whole canvas being selected. The hairline and
                     tag below stay unclipped like the selection outline */}
-                  <div className="pointer-events-none absolute inset-0 z-[4] overflow-hidden">
+                    <div className="pointer-events-none absolute inset-0 z-[4] overflow-hidden">
+                      <div
+                        data-hover-wash=""
+                        className="absolute bg-[rgba(60,130,246,0.06)]"
+                        style={{
+                          left: hover.rect.x,
+                          top: hover.rect.y,
+                          width: hover.rect.width,
+                          height: hover.rect.height,
+                        }}
+                      />
+                    </div>
                     <div
-                      data-hover-wash=""
-                      className="absolute bg-[rgba(60,130,246,0.06)]"
+                      data-hover-outline=""
+                      className="pointer-events-none absolute z-[4] shadow-[inset_0_0_0_calc(1px/var(--zoom,1))_#3c82f6]"
                       style={{
                         left: hover.rect.x,
                         top: hover.rect.y,
                         width: hover.rect.width,
                         height: hover.rect.height,
                       }}
-                    />
-                  </div>
-                  <div
-                    data-hover-outline=""
-                    className="pointer-events-none absolute z-[4] shadow-[inset_0_0_0_calc(1px/var(--zoom,1))_#3c82f6]"
-                    style={{
-                      left: hover.rect.x,
-                      top: hover.rect.y,
-                      width: hover.rect.width,
-                      height: hover.rect.height,
-                    }}
-                  >
-                    <span
-                      className={cn(
-                        'absolute top-0 left-0 whitespace-nowrap bg-[#3c82f6] px-1.5 py-[3px] text-[10px] font-bold leading-none text-white [font-family:ui-monospace,monospace]',
-                        hover.rect.y < 18
-                          ? 'origin-top-left rounded-[0_0_4px_0] [transform:translateY(0)_scale(min(calc(1/var(--zoom,1)),2.4))]'
-                          : 'origin-bottom-left rounded-[4px_4px_4px_0] [transform:translateY(-100%)_scale(min(calc(1/var(--zoom,1)),2.4))]',
-                      )}
                     >
-                      {hover.tag}
-                    </span>
-                  </div>
-                </>
-              )}
+                      <span
+                        className={cn(
+                          'absolute top-0 left-0 whitespace-nowrap bg-[#3c82f6] px-1.5 py-[3px] text-[10px] font-bold leading-none text-white [font-family:ui-monospace,monospace]',
+                          hover.rect.y < 18
+                            ? 'origin-top-left rounded-[0_0_4px_0] [transform:translateY(0)_scale(min(calc(1/var(--zoom,1)),2.4))]'
+                            : 'origin-bottom-left rounded-[4px_4px_4px_0] [transform:translateY(-100%)_scale(min(calc(1/var(--zoom,1)),2.4))]',
+                        )}
+                      >
+                        {hover.tag}
+                      </span>
+                    </div>
+                  </>
+                )}
               {probe &&
                 probe.selector !== FRAME_COMMENT_SELECTOR &&
                 probe.selector !== shellSel &&
