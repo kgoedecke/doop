@@ -212,13 +212,20 @@ function listen() {
       return
     }
     if (typeof data?.type !== 'string' || typeof data.reqId !== 'number') return
-    const ask = pending.get(data.reqId)
-    /* the reply must come from the window that was asked — request ids are
-       predictable, so another frame's script could otherwise answer for it */
-    if (!ask || ask.replyType !== data.type || ev.source !== ask.win) return
-    pending.delete(data.reqId)
-    ask.resolve(data)
+    if (data.type !== 'doop:settle-result') finishRequest(ev.source, data.type, data.reqId, data)
   })
+}
+
+function finishRequest(source: MessageEventSource | null, type: string, reqId: number, data: Record<string, unknown>) {
+  const ask = pending.get(reqId)
+  if (!ask || ask.replyType !== type || source !== ask.win) return
+  pending.delete(reqId)
+  ask.resolve(data)
+}
+
+/** Arrives on the same private port as the edits undo is waiting for. */
+export function finishFrameSettle(win: Window, reqId: number) {
+  finishRequest(win, 'doop:settle-result', reqId, { type: 'doop:settle-result', reqId })
 }
 
 export function registerFrameWindow(frameId: string, win: Window) {
