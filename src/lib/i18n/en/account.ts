@@ -48,6 +48,12 @@ export const account = {
   updatingPassword: 'Updating…',
   updatePassword: 'Update password',
   passwordMinLength: 'At least 8 characters',
+  setPasswordDescription:
+    'You signed in without a password. Set one to also sign in with your email — every other browser and device is signed out.',
+  confirmPassword: 'Confirm password',
+  setPassword: 'Set password',
+  passwordMismatch: 'The two passwords do not match',
+  passwordSetFailed: 'That password could not be set',
 
   deleteTitle: 'Delete account',
   deleteDescription: 'Permanently deletes your account on this server. This action cannot be undone.',

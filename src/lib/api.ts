@@ -468,6 +468,9 @@ export const api = {
       headers: { 'Content-Type': 'application/octet-stream' },
       body: file,
     }),
+  /** a first password for an account that has none (no old password asked); the server refuses one that has it */
+  setPassword: (newPassword: string) =>
+    req<{ ok: boolean }>('/api/me/password', { method: 'POST', body: JSON.stringify({ newPassword }) }),
   removeAvatar: () => req<{ ok: boolean }>('/api/me/avatar', { method: 'DELETE' }),
   canvasFonts: (canvasId: string) => req<CustomFont[]>(`/api/canvases/${canvasId}/fonts`),
   /** custom agents: a workspace's, or without one the signed-in person's own */

@@ -208,6 +208,60 @@ describe('OIDC account linking against a real (faked-IdP) callback', () => {
   })
 })
 
+describe('POST /api/me/password: a first password for an SSO-only account', () => {
+  async function ssoClient(name: string): Promise<Client> {
+    const client = new Client(server)
+    codeToClaims.set(`code-${name}`, { sub: `oidc-sub-${name}`, email: `${name}@test.dev`, email_verified: true, name })
+    expect((await driveSsoCallback(client, `code-${name}`)).status).toBe(302)
+    return client
+  }
+  const signIn = (email: string, password: string) =>
+    new Client(server).post('/api/auth/sign-in/email', { email, password })
+
+  it('sets a password with no old one, makes it a working login, and signs out the other sessions', async () => {
+    const client = await ssoClient('sandra')
+    const otherDevice = await ssoClient('sandra')
+    expect((await signIn('sandra@test.dev', 'a-brand-new-password')).status).not.toBe(200)
+
+    const set = await client.post('/api/me/password', { newPassword: 'a-brand-new-password' })
+    expect(set.status).toBe(200)
+
+    expect((await signIn('sandra@test.dev', 'a-brand-new-password')).status).toBe(200)
+    expect((await client.get('/api/me')).status).toBe(200)
+    expect((await otherDevice.get('/api/me')).status).toBe(401)
+  })
+
+  it('refuses a second set: once there is a password, only change-password with the old one may replace it', async () => {
+    const client = await ssoClient('tomas')
+    expect((await client.post('/api/me/password', { newPassword: 'first-password-1' })).status).toBe(200)
+    const again = await client.post('/api/me/password', { newPassword: 'attacker-chosen-1' })
+    expect(again.status).toBe(400)
+    expect((await signIn('tomas@test.dev', 'attacker-chosen-1')).status).not.toBe(200)
+    expect((await signIn('tomas@test.dev', 'first-password-1')).status).toBe(200)
+  })
+
+  it('refuses an account that signed up with a password, leaving it untouched', async () => {
+    const client = await new Client(server).signUp('ursula@test.dev', 'Ursula')
+    const attempt = await client.post('/api/me/password', { newPassword: 'attacker-chosen-1' })
+    expect(attempt.status).toBe(400)
+    expect((await signIn('ursula@test.dev', 'attacker-chosen-1')).status).not.toBe(200)
+    expect((await signIn('ursula@test.dev', 'password12345')).status).toBe(200)
+  })
+
+  it('applies the password length rules', async () => {
+    const client = await ssoClient('viktor')
+    expect((await client.post('/api/me/password', { newPassword: 'short' })).status).toBe(400)
+    expect((await client.post('/api/me/password', {})).status).toBe(400)
+    expect((await client.post('/api/me/password', { newPassword: 'x'.repeat(129) })).status).toBe(400)
+    expect((await signIn('viktor@test.dev', 'short')).status).not.toBe(200)
+  })
+
+  it('needs a signed-in session', async () => {
+    const anonymous = await new Client(server).post('/api/me/password', { newPassword: 'a-brand-new-password' })
+    expect(anonymous.status).toBe(401)
+  })
+})
+
 describe('SIGNUP_EMAIL_DOMAINS on the OAuth path', () => {
   it('bounces a provider sign-up from an unlisted domain back to /auth with the message, creating no account', async () => {
     const client = new Client(restricted)

@@ -51,6 +51,12 @@ export const account: Catalog['account'] = {
   updatingPassword: 'Atualizando…',
   updatePassword: 'Atualizar senha',
   passwordMinLength: 'Pelo menos 8 caracteres',
+  setPasswordDescription:
+    'Você entrou sem senha. Defina uma para também entrar com o seu e-mail — todos os outros navegadores e dispositivos serão desconectados.',
+  confirmPassword: 'Confirmar senha',
+  setPassword: 'Definir senha',
+  passwordMismatch: 'As duas senhas não coincidem',
+  passwordSetFailed: 'Não foi possível definir essa senha',
 
   deleteTitle: 'Excluir conta',
   deleteDescription: 'Exclui sua conta neste servidor permanentemente. Esta ação não pode ser desfeita.',

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { authClient } from '../lib/auth'
-import { api } from '../lib/api'
+import { api, ApiError } from '../lib/api'
 import type { NotificationSettings } from '../../shared/notifications'
 import { AVATAR_ACCEPT, MAX_AVATAR_BYTES, avatarUrl } from '../../shared/avatar'
 import { colorFor } from '../../shared/types'
@@ -13,7 +13,7 @@ import { Badge } from './ui/badge'
 import { Note } from './ui/note'
 import { Checkbox } from './ui/checkbox'
 import { CardDescription, CardHeader, CardRow, CardTitle, SettingsCard } from './ui/card'
-import { DeleteAccountCard } from './DeleteAccount'
+import { DeleteAccountCard, accountHasPassword } from './DeleteAccount'
 
 /* settings fields are a fixed column on desktop and full width on a phone */
 
@@ -57,6 +57,9 @@ export function AccountSettings() {
 
   const [current, setCurrent] = useState('')
   const [next, setNext] = useState('')
+  const [confirm, setConfirm] = useState('')
+  /* null until the lookup answers; an account with none sets its first password instead of changing one */
+  const [hasPassword, setHasPassword] = useState<boolean | null>(null)
   const [savingPw, setSavingPw] = useState(false)
   const [pwNote, setPwNote] = useState<Notice | null>(null)
   const [pwError, setPwError] = useState<Notice | null>(null)
@@ -72,6 +75,10 @@ export function AccountSettings() {
     api.notificationSettings().then(setNotify, () => {})
   }, [])
   useEffect(refreshNotify, [refreshNotify])
+  useEffect(() => {
+    /* a failed lookup keeps the change form, which is what every account got before */
+    accountHasPassword().then(setHasPassword, () => setHasPassword(true))
+  }, [])
 
   async function uploadPhoto(file: File) {
     setPhotoNote(null)
@@ -134,6 +141,25 @@ export function AccountSettings() {
     posthog.capture('account_password_changed')
     setCurrent('')
     setNext('')
+    setPwNote({ key: 'account.passwordUpdated' })
+  }
+
+  async function setFirstPassword() {
+    setSavingPw(true)
+    setPwNote(null)
+    setPwError(null)
+    try {
+      await api.setPassword(next)
+    } catch (e) {
+      setSavingPw(false)
+      const message = e instanceof ApiError ? (e.body.error as string | undefined) : undefined
+      return setPwError(errorNotice(message, 'account.passwordSetFailed'))
+    }
+    setSavingPw(false)
+    posthog.capture('account_password_set')
+    setNext('')
+    setConfirm('')
+    setHasPassword(true)
     setPwNote({ key: 'account.passwordUpdated' })
   }
 
@@ -288,28 +314,42 @@ export function AccountSettings() {
       <SettingsCard>
         <CardHeader>
           <CardTitle>{t('account.passwordTitle')}</CardTitle>
-          <CardDescription>{t('account.passwordDescription')}</CardDescription>
+          <CardDescription>
+            {t(hasPassword === false ? 'account.setPasswordDescription' : 'account.passwordDescription')}
+          </CardDescription>
         </CardHeader>
-        <CardRow
-          label={t('account.currentPassword')}
-          control={
-            <Input
-              type="password"
-              value={current}
-              onChange={(e) => {
-                setCurrent(e.target.value)
-                setPwError(null)
-              }}
-              autoComplete="current-password"
-              aria-label={t('account.currentPassword')}
-            />
-          }
-        />
+        {hasPassword !== false && (
+          <CardRow
+            label={t('account.currentPassword')}
+            control={
+              <Input
+                type="password"
+                value={current}
+                onChange={(e) => {
+                  setCurrent(e.target.value)
+                  setPwError(null)
+                }}
+                autoComplete="current-password"
+                aria-label={t('account.currentPassword')}
+              />
+            }
+          />
+        )}
         <CardRow
           label={t('account.newPassword')}
           action={
-            <Button size="sm" disabled={savingPw || !current || next.length < 8} onClick={savePassword}>
-              {savingPw ? t('account.updatingPassword') : t('account.updatePassword')}
+            <Button
+              size="sm"
+              disabled={
+                savingPw || hasPassword === null || next.length < 8 || (hasPassword ? !current : next !== confirm)
+              }
+              onClick={hasPassword ? savePassword : setFirstPassword}
+            >
+              {savingPw
+                ? t('account.updatingPassword')
+                : hasPassword
+                  ? t('account.updatePassword')
+                  : t('account.setPassword')}
             </Button>
           }
           control={
@@ -333,6 +373,25 @@ export function AccountSettings() {
             <Note>{t('account.passwordMinLength')}</Note>
           )}
         </CardRow>
+        {hasPassword === false && (
+          <CardRow
+            label={t('account.confirmPassword')}
+            control={
+              <Input
+                type="password"
+                value={confirm}
+                onChange={(e) => {
+                  setConfirm(e.target.value)
+                  setPwError(null)
+                }}
+                autoComplete="new-password"
+                aria-label={t('account.confirmPassword')}
+              />
+            }
+          >
+            {confirm && next !== confirm && <Note tone="error">{t('account.passwordMismatch')}</Note>}
+          </CardRow>
+        )}
       </SettingsCard>
 
       <DeleteAccountCard />
