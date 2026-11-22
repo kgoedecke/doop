@@ -211,7 +211,8 @@ describe.skipIf(!findBrowserPath())('drawing on the canvas', { timeout: 30_000 }
     await page.mouse.up()
     await expect.poll(() => patchRequests).toBe(1)
     const moved = await visibleDrawing('Layers', '#rect')
-    expect(moved.y).toBeCloseTo(before.y + 25, 0)
+    // a layer lands on whole design px: 25 screen px at zoom 2 is 12.5, saved as 13
+    expect(moved.y).toBeCloseTo(before.y + Math.round(25 / zoom) * zoom, 0)
     expect(saved[0]).toMatchObject({ x: source.x, y: source.y, width: source.width, height: source.height })
     expect(saved[0]!.html).toContain('<p id="sibling" style="margin:0">Keep me</p>')
     expect(await page.evaluate(() => window.drawingHarness.state().selectedElement?.selector)).toBe('#rect')

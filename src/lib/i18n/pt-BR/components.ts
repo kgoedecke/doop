@@ -147,10 +147,6 @@ export const components: Catalog['components'] = {
   detachInstance: 'Desvincular instância',
   /* notices */
   created: '“{name}” criado',
-  createdLinked: {
-    one: '“{name}” criado, {count} elemento correspondente vinculado',
-    other: '“{name}” criado, {count} elementos correspondentes vinculados',
-  },
   createFailed: 'Não foi possível criar o componente. Tente novamente.',
   changeFailed: 'Não foi possível alterar essa instância. Tente novamente.',
   placeFailed: 'Não foi possível inserir o componente. Tente novamente.',

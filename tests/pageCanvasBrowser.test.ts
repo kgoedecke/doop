@@ -79,19 +79,31 @@ describe.skipIf(!findBrowserPath())('page camera and snapping', { timeout: 30_00
     await page.waitForSelector('iframe[data-doop-frame]')
   }
 
-  /* right-click an element of the target frame and take its menu's link item */
-  async function copyLinkTo(selector: string) {
+  /* a menu row by its label, ignoring the chord hint after it */
+  function menuItem(label: string) {
+    return page.waitForFunction(
+      (label) =>
+        [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(
+          (el) => el.firstChild?.textContent === label,
+        ),
+      {},
+      label,
+    )
+  }
+
+  /* right-click an element of the target frame and take its menu's link item:
+     the layer menu of an element in the saved HTML keeps it under "Copy/Paste
+     as", as Figma's does; a reader's frame menu and a script-made element's
+     menu list it at the top */
+  async function copyLinkTo(selector: string, { nested = false } = {}) {
     const iframe = (await page.$('iframe[title="target"]'))!
     const doc = (await iframe.contentFrame())!
     const inner = await doc.$eval(selector, (el) => el.getBoundingClientRect().toJSON())
     const outer = await iframe.evaluate((el) => el.getBoundingClientRect().toJSON())
     const zoom = outer.width / 200
     await page.mouse.click(outer.x + (inner.x + 5) * zoom, outer.y + (inner.y + 5) * zoom, { button: 'right' })
-    const item = await page.waitForFunction(() =>
-      [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(
-        (el) => el.firstChild?.textContent === 'Copy link to element',
-      ),
-    )
+    if (nested) await (await (await menuItem('Copy/Paste as')).asElement()!.toElement('div')).click()
+    const item = await menuItem('Copy link to element')
     await (await item.asElement()!.toElement('div')).click()
   }
 
@@ -350,7 +362,7 @@ describe.skipIf(!findBrowserPath())('page camera and snapping', { timeout: 30_00
     })
 
     // Copy through the element's own menu, then reopen the resulting URL.
-    await copyLinkTo('h1')
+    await copyLinkTo('h1', { nested: true })
     await page.waitForFunction(() => window.pageState().notice === 'Element link copied')
     const copied = await page.evaluate(() => navigator.clipboard.readText())
     const url = new URL(copied)
@@ -372,7 +384,7 @@ describe.skipIf(!findBrowserPath())('page camera and snapping', { timeout: 30_00
     await load(canvas([target]), '?frame=target')
     await page.evaluate(() => window.pickElement('target', '#hero > p:nth-of-type(1)'))
     await page.waitForFunction(() => window.pageState().selectedElement?.selector === '#hero > p:nth-of-type(1)')
-    await copyLinkTo('p')
+    await copyLinkTo('p', { nested: true })
     await page.waitForFunction(() => window.pageState().notice === 'Element link copied')
     const url = new URL(await page.evaluate(() => navigator.clipboard.readText()))
     const elementId = url.searchParams.get('element')!

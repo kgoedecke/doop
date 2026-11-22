@@ -130,6 +130,24 @@ function round(value: number): number {
   return Math.round(value * 100) / 100
 }
 
+/** A layer lands on whole pixels, as in Figma: the pointer's world position at
+ *  a fractional zoom is never what a person means. A box rounds its corner and
+ *  its size apart, so a circle or a Shift-squared box stays square; a path's
+ *  box grows out to the next whole pixel on every side, so the ink stays
+ *  exactly where it was drawn. */
+export function onPixelGrid(drawing: Drawing): Drawing {
+  if (drawing.tool !== 'path') {
+    const width = Math.max(1, Math.round(drawing.width))
+    const height = Math.max(1, Math.round(drawing.height))
+    return { ...drawing, x: Math.round(drawing.x), y: Math.round(drawing.y), width, height }
+  }
+  const x = Math.floor(drawing.x)
+  const y = Math.floor(drawing.y)
+  const width = Math.max(1, Math.ceil(drawing.x + drawing.width) - x)
+  const height = Math.max(1, Math.ceil(drawing.y + drawing.height) - y)
+  return { ...drawing, x, y, width, height }
+}
+
 /** DOM creation keeps typed text literal, including HTML-looking strings. */
 export function drawingElement(doc: Document, drawing: Drawing, standalone: boolean, ink = DRAWING_INK): Element {
   const el =
@@ -210,9 +228,13 @@ export function saveDrawing(drawing: Drawing, target: DrawingTarget, options?: {
       const doc = new DOMParser().parseFromString(frame.html, 'text/html')
       const dx = frame.x + at.x
       const dy = frame.y + at.y
-      const local = { ...drawing, x: drawing.x - dx, y: drawing.y - dy }
       // Path points and bounds must use the same coordinate system.
-      local.points = drawing.points?.map((p) => ({ ...p, x: p.x - dx, y: p.y - dy }))
+      const local = onPixelGrid({
+        ...drawing,
+        x: drawing.x - dx,
+        y: drawing.y - dy,
+        points: drawing.points?.map((p) => ({ ...p, x: p.x - dx, y: p.y - dy })),
+      })
       const el = drawingElement(doc, local, false)
       el.id = `doop-drawing-${crypto.randomUUID()}`
       doc.body.append(el)
@@ -227,18 +249,14 @@ export function saveDrawing(drawing: Drawing, target: DrawingTarget, options?: {
         useStore.getState().pickElement({ frameId: frame.id, selector: `#${el.id}` })
       }
     } else {
-      const bounds = {
-        x: round(drawing.x),
-        y: round(drawing.y),
-        width: Math.max(1, round(drawing.width)),
-        height: Math.max(1, round(drawing.height)),
-      }
+      const placed = onPixelGrid(drawing)
+      const bounds = { x: placed.x, y: placed.y, width: placed.width, height: placed.height }
       /* a frame dragged out around standalone shapes takes them in where
          they showed — the store as the queue reaches this save, so shapes
          drawn or moved meanwhile are judged then */
       let wrapped: { shapes: Frame[]; scopes: Map<string, string> } | null = null
       let skipped: { frame: Frame; reason: string }[] = []
-      let html = drawingDocument(drawing, ink)
+      let html = drawingDocument(placed, ink)
       if (drawing.tool === 'frame' && options?.wrap) {
         const live = useStore.getState().canvas
         const canvas = live?.id === target.canvasId ? live : await api.getCanvas(target.canvasId)

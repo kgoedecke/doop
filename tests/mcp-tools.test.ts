@@ -3,6 +3,9 @@ import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
 import { describe, expect, it, vi } from 'vitest'
 import { buildMcpServer } from '../server/mcp.ts'
 import { FRAME_PREVIEW_URI } from '../server/chatgptApp.ts'
+import { IMAGE_PROVIDER_NOTE } from '../server/imageGen.ts'
+import { RESIDENT_TOOLS } from '../server/resident.ts'
+import { MAX_DECISION_CHARS } from '../shared/designDecisions.ts'
 import packageJson from '../package.json' with { type: 'json' }
 
 vi.mock('../server/db/persist.ts', () => ({ saveCanvas: () => {}, saveFrame: () => {}, saveActivity: () => {} }))
@@ -97,6 +100,8 @@ describe('MCP generate_image tool contract', () => {
       )
       expect(new Set(schema.required)).toEqual(new Set(['prompt', 'canvas_id', 'agent_name']))
       expect(client.getInstructions()).toContain('generate_image')
+      /* an agent learns up front that the call needs an image provider */
+      expect(generate!.description).toContain(IMAGE_PROVIDER_NOTE)
 
       /* an unknown canvas must be refused before anything is spent */
       const result = await client.callTool({
@@ -108,6 +113,42 @@ describe('MCP generate_image tool contract', () => {
       await client.close()
       await server.close()
     }
+  })
+})
+
+describe('save_decision length limit', () => {
+  /* agents reported "save_decision rejects decision >500 characters but its
+     schema omits maxLength": the schema has to carry the limit the server enforces */
+  it('states the server limit in the MCP schema', async () => {
+    const server = buildMcpServer('Test Owner', 'test-owner-id')
+    const client = new Client({ name: 'doop-tool-contract-test', version: '1.0.0' })
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair()
+    await server.connect(serverTransport)
+    await client.connect(clientTransport)
+    try {
+      const tool = (await client.listTools()).tools.find((entry) => entry.name === 'save_decision')!
+      const decision = (tool.inputSchema.properties as Record<string, { maxLength?: number; description?: string }>)
+        .decision!
+      expect(decision.maxLength).toBe(MAX_DECISION_CHARS)
+      expect(decision.description).toContain(`at most ${MAX_DECISION_CHARS} characters`)
+      expect(tool.description).toContain(`at most ${MAX_DECISION_CHARS} characters`)
+    } finally {
+      await client.close()
+      await server.close()
+    }
+  })
+
+  it('states the server limit in the resident agent schema', () => {
+    const tool = RESIDENT_TOOLS.find((entry) => entry.name === 'save_decision')!
+    const decision = (tool.input_schema.properties as Record<string, { maxLength?: number; description?: string }>)
+      .decision!
+    expect(decision.maxLength).toBe(MAX_DECISION_CHARS)
+    expect(decision.description).toContain(`at most ${MAX_DECISION_CHARS} characters`)
+  })
+
+  it('tells the resident agent its generate_image needs an image provider', () => {
+    const tool = RESIDENT_TOOLS.find((entry) => entry.name === 'generate_image')!
+    expect(tool.description).toContain(IMAGE_PROVIDER_NOTE)
   })
 })
 

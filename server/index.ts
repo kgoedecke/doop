@@ -2457,7 +2457,6 @@ const componentCreateBody = z.object({
   frameId: z.string().optional(),
   element: z.string().optional(),
   autoProps: z.boolean().optional(),
-  replaceMatching: z.boolean().optional(),
   html: z.string().optional(),
   css: z.string().optional(),
   width: z.number().optional(),
@@ -2709,7 +2708,6 @@ app.post('/api/canvases/:id/components', (req, res) => {
           { ...body, html: body.html, props: body.props as never, name: String(body.name ?? '') },
           actor,
         ).component,
-        converted: [],
       }
     }
     const created = createComponentFromElement(
@@ -2722,13 +2720,12 @@ app.post('/api/canvases/:id/components', (req, res) => {
         frameId: String(body.frameId ?? ''),
         element: String(body.element ?? ''),
         autoProps: body.autoProps,
-        replaceMatching: body.replaceMatching === true,
       },
       actor,
     )
     /* what the editor needs to undo this as one step */
-    const changed = new Set([String(body.frameId), ...created.converted.map((entry) => entry.frameId)])
-    return { ...created, frames: [...changed].flatMap((id) => store.getFrame(id) ?? []) }
+    const frame = store.getFrame(String(body.frameId))
+    return { ...created, frames: frame ? [frame] : [] }
   })
 })
 
@@ -2811,11 +2808,11 @@ app.get('/api/canvases/:id/components/:componentId/preview', (req, res) => {
       .find((library) => library.canvasId === libraryId)
       ?.components.find((entry) => entry.id === req.params.componentId)
     if (!snapshot) return res.status(404).json({ error: 'component not found' })
-    return res.json(previewDocument(libraryId, snapshotAsDef(snapshot), 'default'))
+    return res.json(previewDocument(libraryId, snapshotAsDef(snapshot)))
   }
   const def = findComponent(canvas.id, req.params.componentId)
   if (!def) return res.status(404).json({ error: 'component not found' })
-  res.json(previewDocument(canvas.id, def, 'default'))
+  res.json(previewDocument(canvas.id, def))
 })
 
 app.post('/api/frames/:id/instances', (req, res) => {

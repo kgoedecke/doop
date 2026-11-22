@@ -20,7 +20,14 @@ import { PrototypeOverlay } from './PrototypeOverlay'
 import { GhostFrames } from './GhostFrames'
 import { Cursors } from './Cursors'
 import { FollowFrame } from './FollowFrame'
-import { cameraOnCursor, cameraToFollow } from '../lib/follow'
+import {
+  agentFollowFrame,
+  agentFollowInputsChanged,
+  agentFollowKey,
+  cameraOnCursor,
+  cameraToFollow,
+  followedAgent,
+} from '../lib/follow'
 import { MeasureOverlay } from './MeasureOverlay'
 import { SnapGuides } from './SnapGuides'
 import { GuideLines, Rulers } from './Rulers'
@@ -387,12 +394,17 @@ export function Stage({
   }, [layoutZoom])
 
   /* following a peer: whenever their camera (or, lacking one, their cursor)
-     moves, ease ours toward the same view. Writes go through
+     moves, ease ours toward the same view. Following an agent: whenever the
+     frame it works on changes (another frame, or this one growing), ease
+     ours onto that frame, onto its page first; an idle agent leaves the
+     camera where it is until it works again. Writes go through
      setViewportFollowing so they don't count as "our own move" and end the
      follow — everything else that touches the camera does. */
   useEffect(() => {
     let raf = 0
     let target: { x: number; y: number; zoom: number } | null = null
+    /* the agent frame the camera last went to (agentFollowKey) */
+    let agentKey = ''
     function step() {
       raf = 0
       const s = useStore.getState()
@@ -415,13 +427,21 @@ export function Stage({
       const el = ref.current
       const s = useStore.getState()
       if (!el || !s.following) return
+      if (followedAgent(s)) {
+        const frame = agentFollowFrame(s)
+        agentKey = agentFollowKey(frame)
+        if (!frame || !s.canvas) return
+        const pageId = framePageId(s.canvas, frame)
+        if (pageId !== s.activePageId) s.setActivePage(pageId, { keepFollow: true })
+        target = fitView(el, frame, 1)
+        if (!raf) raf = requestAnimationFrame(step)
+        return
+      }
       const leaderViewport = s.peerViewports[s.following]
       const cursor = s.cursors[s.following]
       const stage = { width: el.clientWidth, height: el.clientHeight }
-      if (leaderViewport?.pageId && leaderViewport.pageId !== s.activePageId) {
-        s.setActivePage(leaderViewport.pageId)
-        useStore.setState({ following: s.following })
-      }
+      if (leaderViewport?.pageId && leaderViewport.pageId !== s.activePageId)
+        s.setActivePage(leaderViewport.pageId, { keepFollow: true })
       if (leaderViewport) target = cameraToFollow(leaderViewport, stage)
       else if (cursor) target = cameraOnCursor(cursor, stage, s.viewport.zoom)
       else return
@@ -430,9 +450,15 @@ export function Stage({
     const unsub = useStore.subscribe((s, prev) => {
       if (!s.following) {
         target = null
+        agentKey = ''
         return
       }
       const started = s.following !== prev.following
+      if (followedAgent(s)) {
+        if (started || (agentFollowInputsChanged(s, prev) && agentFollowKey(agentFollowFrame(s)) !== agentKey))
+          retarget()
+        return
+      }
       const moved =
         s.peerViewports[s.following] !== prev.peerViewports[s.following] ||
         s.cursors[s.following] !== prev.cursors[s.following]
@@ -453,7 +479,7 @@ export function Stage({
       ro.disconnect()
       if (raf) cancelAnimationFrame(raf)
     }
-  }, [])
+  }, [fitView])
 
   /** where a fly-to lands: a frame fitted with padding, or a bare world
    *  point centred at the zoom we already have (a peer's cursor) */

@@ -548,7 +548,8 @@ export function partsOf(template: string): Map<string, PartInfo> {
 }
 
 /** Read an instance's whole state from its markup: the marker's props and overrides,
- *  plus slot content and nested instances found in place. Nothing is diffed here. */
+ *  plus slot content and nested instances found in place. Nothing is diffed here, except that a
+ *  nested instance matching the template's own `<doop-use>` is no override. */
 export function readInstance(el: Element, def: Revision | undefined, ctx: EngineContext): InstanceState | undefined {
   const state = readMarker(el)
   if (!state) return undefined
@@ -568,7 +569,15 @@ export function readInstance(el: Element, def: Revision | undefined, ctx: Engine
     if (key && info?.isUse && attrOf(child, INSTANCE_ATTR)) {
       const nestedDef = ctx.atRev(attrOf(child, INSTANCE_ATTR)!, Number(attrOf(child, REV_ATTR)) || 0)
       const nested = readInstance(child, nestedDef, ctx)
-      if (nested) merged[key] = { ...merged[key], use: nested.overrides }
+      if (nested) {
+        /* the template's own <doop-use> is the main's value, not this instance's override:
+           recorded, it would pin every instance and the main's next change would stop here */
+        const { use: _template, ...rest } = merged[key] ?? {}
+        const same = isTemplateUse(info.el, nested, { ...ctx, issues: [] })
+        if (!same) merged[key] = { ...rest, use: nested.overrides }
+        else if (Object.keys(rest).length) merged[key] = rest
+        else delete merged[key]
+      }
       continue
     }
     if (attrOf(child, INSTANCE_ATTR)) continue
@@ -736,10 +745,14 @@ function diffNested(
   const reconciled = reconcileInstance(incoming, ctx)
   const use = parts.get(key)?.el
   if (!reconciled || !use) return
-  const nested = ctx.find(reconciled.componentId)
-  const defaults = nested ? stateFromUseAttrs(use, nested, ctx).overrides : {}
-  const same = stableJson(defaults) === stableJson(reconciled.overrides)
-  mergeInto(state, key, {}, { use: same ? undefined : reconciled.overrides })
+  mergeInto(state, key, {}, { use: isTemplateUse(use, reconciled, ctx) ? undefined : reconciled.overrides })
+}
+
+/** Whether a nested instance is exactly what the template's own `<doop-use>` renders. */
+function isTemplateUse(use: Element, nested: InstanceState, ctx: EngineContext): boolean {
+  const def = ctx.find(nested.componentId)
+  const defaults = def ? stateFromUseAttrs(use, def, ctx).overrides : {}
+  return stableJson(defaults) === stableJson(nested.overrides)
 }
 
 function mergeInto(
