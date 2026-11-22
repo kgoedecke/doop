@@ -193,6 +193,29 @@ describe.skipIf(!findBrowserPath())('zooming over a frame being edited', { timeo
     expect(before.left - (await surface()).left).toBeCloseTo(100, 0)
   })
 
+  it('scrolls a reversed box (a chat log) up from its bottom', async () => {
+    const html =
+      '<body style="margin:0"><div id="box" style="height:300px;overflow:auto;display:flex;flex-direction:column-reverse">' +
+      '<p id="copy" style="font:32px/1.4 Arial;margin:40px;flex:none">Edit me</p><div style="height:400px;flex:none"></div></div></body>'
+    await showCanvasPage(page, [{ ...TEXT, html }])
+    const frame = page.frames().find((f) => f !== page.mainFrame() && !f.detached)!
+    /* the text sits at the box's bottom, where it starts scrolled */
+    const text = await frame.$eval('#copy', (el) => {
+      const r = el.getBoundingClientRect()
+      return { x: r.left + 30, y: r.top + r.height / 2 }
+    })
+    await page.click('[data-frame-title]')
+    const box = await surface()
+    const zoom = box.width / 600
+    const at = { x: box.left + text.x * zoom, y: box.top + text.y * zoom }
+    await page.mouse.click(at.x, at.y, { count: 2 })
+    const editing = await editingFrame()
+    const before = await surface()
+    await plainWheel(at, -100)
+    await editing.waitForFunction(() => document.getElementById('box')!.scrollTop < 0)
+    expect(await surface()).toEqual(before)
+  })
+
   it('scrolls a box in the design that can take the wheel, and pans once it cannot', async () => {
     const html =
       '<body style="margin:0"><div id="box" style="height:300px;overflow:auto">' +

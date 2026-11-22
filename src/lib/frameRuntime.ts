@@ -772,13 +772,19 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
     { capture: true, passive: false },
   )
 
-  /* how far a box can still scroll one way, in px. A right-to-left box
-     counts its scrollLeft from 0 at its right edge down to minus its range */
+  /* how far a box can still scroll one way, in px. A box whose content
+     starts at its far end (right-to-left, or a reversed flex box such as a
+     chat log) counts its scroll offset from 0 there down to minus its range */
   function scrollRoom(el, cs, dx, dy) {
-    if (dy) return dy < 0 ? el.scrollTop : el.scrollHeight - el.clientHeight - el.scrollTop
-    var range = el.scrollWidth - el.clientWidth
-    var left = cs.direction === 'rtl' ? range + el.scrollLeft : el.scrollLeft
-    return dx < 0 ? left : range - left
+    var flex = cs.display === 'flex' || cs.display === 'inline-flex'
+    var vertical = !!dy
+    var range = vertical ? el.scrollHeight - el.clientHeight : el.scrollWidth - el.clientWidth
+    var reversed = vertical
+      ? flex && cs.flexDirection === 'column-reverse'
+      : (cs.direction === 'rtl') !== (flex && cs.flexDirection === 'row-reverse')
+    var offset = vertical ? el.scrollTop : el.scrollLeft
+    var before = reversed ? range + offset : offset
+    return (vertical ? dy : dx) < 0 ? before : range - before
   }
   /* does a box on the event's path (shadow roots included) take the wheel?
      The page scrolls unless told not to; any other box only when it says so.
