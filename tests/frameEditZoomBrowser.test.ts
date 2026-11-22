@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import type { Page } from 'puppeteer-core'
 import { findBrowserPath } from '../server/screenshot'
 import { pagePerTest } from './browser'
-import { canvasFrame, openCanvasPage } from './canvasPageFixture'
+import { canvasFrame, openCanvasPage, showCanvasPage } from './canvasPageFixture'
 
 /* While a frame's text is being edited the canvas lifts its shield, so a
    ⌘/Ctrl+wheel (a trackpad pinch) over the frame lands in the frame's own
@@ -27,13 +27,26 @@ describe.skipIf(!findBrowserPath())('zooming over a frame being edited', { timeo
       return { left: r.left, top: r.top, width: r.width }
     })
 
-  /** select the frame by its title, then double-click its text into editing */
-  async function editText() {
+  /** select the frame by its title, then double-click its text into editing;
+   *  returns the screen point clicked, inside the text near its start */
+  async function editText(rotation = 0) {
     await page.click('[data-frame-title]')
-    const box = await surface()
-    const at = { x: box.left + 80 * (box.width / 600), y: box.top + 70 * (box.width / 600) }
-    await page.mouse.click(at.x, at.y, { count: 2 })
     const frame = page.frames().find((f) => f !== page.mainFrame())!
+    /* a point in the text (design px 70, 62), turned with the frame about
+       its centre; the zoom read off the turned box's width */
+    const box = await page.$eval('[data-frame-surface]', (el) => {
+      const r = el.getBoundingClientRect()
+      return { x: r.left + r.width / 2, y: r.top + r.height / 2, width: r.width }
+    })
+    const turn = (rotation * Math.PI) / 180
+    const zoom = box.width / (600 * Math.abs(Math.cos(turn)) + 400 * Math.abs(Math.sin(turn)))
+    const dx = (70 - 300) * zoom
+    const dy = (62 - 200) * zoom
+    const at = {
+      x: box.x + dx * Math.cos(turn) - dy * Math.sin(turn),
+      y: box.y + dx * Math.sin(turn) + dy * Math.cos(turn),
+    }
+    await page.mouse.click(at.x, at.y, { count: 2 })
     await frame.waitForSelector('style[data-v-edit]')
     return at
   }
@@ -61,6 +74,24 @@ describe.skipIf(!findBrowserPath())('zooming over a frame being edited', { timeo
     expect(await page.evaluate(() => window.visualViewport?.scale ?? 1)).toBe(1)
     const frame = page.frames().find((f) => f !== page.mainFrame())!
     expect(await frame.$('style[data-v-edit]')).not.toBeNull()
+  })
+
+  it('zooms about the pointer on a rotated frame', async () => {
+    await showCanvasPage(page, [{ ...TEXT, rotation: 30 }])
+    const centre = () =>
+      page.$eval('[data-frame-surface]', (el) => {
+        const r = el.getBoundingClientRect()
+        return { x: r.left + r.width / 2, y: r.top + r.height / 2, width: r.width }
+      })
+    const at = await editText(30)
+    const before = await centre()
+    await wheelWith('Control', at, -100)
+    const after = await centre()
+    const scale = after.width / before.width
+    expect(scale).toBeGreaterThan(1.3)
+    /* zooming by s about the pointer p moves the frame's centre c to p + s(c - p) */
+    expect(Math.abs(at.x + scale * (before.x - at.x) - after.x)).toBeLessThan(2)
+    expect(Math.abs(at.y + scale * (before.y - at.y) - after.y)).toBeLessThan(2)
   })
 
   it('leaves a plain wheel to the frame being edited', async () => {

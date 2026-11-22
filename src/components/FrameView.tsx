@@ -933,6 +933,9 @@ export const FrameView = memo(function FrameView({
   const runtimePort = useRef<MessagePort | null>(null)
   /* saves a document the runtime serialized after an edit (set below) */
   const saveEditedRef = useRef<(html: string, discrete: boolean) => void>(() => {})
+  /* the frame's box, which a relayed wheel's point is mapped through */
+  const wheelFrameRef = useRef({ width: frame.width, height: frame.height, rotation: frame.rotation ?? 0 })
+  wheelFrameRef.current = { width: frame.width, height: frame.height, rotation: frame.rotation ?? 0 }
   useEffect(() => {
     /* a key pressed while the focus sits in this frame's document: replay
        it on the iframe, where it bubbles to the canvas shortcuts as if the
@@ -964,15 +967,19 @@ export const FrameView = memo(function FrameView({
       if (relay?.event === 'wheel') {
         const { x, y, deltaY } = relay
         if (typeof x !== 'number' || typeof y !== 'number' || typeof deltaY !== 'number') return
-        const rect = documentRect(iframe) ?? iframe.getBoundingClientRect()
+        /* the iframe's box shares the frame's centre whatever its bleed or
+           turn: the point is taken from the centre, turned with the frame */
+        const box = iframe.getBoundingClientRect()
+        const { width, height, rotation } = wheelFrameRef.current
         const zoom = useStore.getState().viewport.zoom
+        const offset = rotateVector({ x: (x - width / 2) * zoom, y: (y - height / 2) * zoom }, rotation)
         iframe.dispatchEvent(
           new WheelEvent('wheel', {
             deltaY,
             ctrlKey: relay.ctrlKey === true,
             metaKey: relay.metaKey === true,
-            clientX: rect.left + x * zoom,
-            clientY: rect.top + y * zoom,
+            clientX: box.left + box.width / 2 + offset.x,
+            clientY: box.top + box.height / 2 + offset.y,
             bubbles: true,
             cancelable: true,
           }),

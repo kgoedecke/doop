@@ -717,7 +717,10 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
      reaches this document only while it is being edited, when the canvas
      lifts its shield off the frame. Left alone it zooms the whole page; it
      is the canvas's zoom instead, so it travels over the port at the
-     pointer's spot in design px. A plain wheel stays here. */
+     pointer's spot in design px. It is caught on the window in the capture
+     phase, ahead of any design script, and only while editing: a playing
+     prototype, or a runtime without the canvas's port (the prototype
+     player), leaves the browser its own. A plain wheel stays here. */
   var wheelGetters = {
     deltaY: getter(WheelEvent.prototype, 'deltaY'),
     deltaMode: getter(WheelEvent.prototype, 'deltaMode'),
@@ -728,12 +731,11 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
   }
   var preventDefault = Event.prototype.preventDefault
   function relayZoomWheel(ev) {
+    if (!runtimePort || !editing || protoOn) return
     if (!(readTrusted ? apply(readTrusted, ev, []) : ev.isTrusted)) return
     var ctrlKey = apply(wheelGetters.ctrlKey, ev, [])
     var metaKey = apply(wheelGetters.metaKey, ev, [])
     if (!ctrlKey && !metaKey) return
-    /* no canvas to hand it to (the prototype player): the browser keeps it */
-    if (!runtimePort) return
     apply(preventDefault, ev, [])
     var deltaY = apply(wheelGetters.deltaY, ev, [])
     var deltaMode = apply(wheelGetters.deltaMode, ev, [])
@@ -751,7 +753,7 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
       },
     ])
   }
-  document.addEventListener('wheel', relayZoomWheel, { passive: false })
+  window.addEventListener('wheel', relayZoomWheel, { capture: true, passive: false })
 
   /* Escape pressed with focus inside the frame: the parent never sees the
      key event itself, so relay it (present mode closes on it) */
