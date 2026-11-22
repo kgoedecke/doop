@@ -1,0 +1,13 @@
+# Doop
+
+> Doop is a multiplayer design canvas for people and AI agents. Canvases contain frames that render HTML.
+
+Connect an MCP client to https://doop.design/mcp over Streamable HTTP. Sign in and approve access in your browser. Headless clients can use a Doop agent key. Access to canvases follows the connected account's permissions.
+
+## Docs
+
+- [Getting started](https://doop.design/docs/get-started): Start a canvas and connect an agent.
+- [Connect an AI agent](https://github.com/kgoedecke/doop#connect-an-ai-agent): Client configuration and OAuth setup.
+- [Headless agents](https://github.com/kgoedecke/doop#headless-agents-agent-keys): Configure a bearer key.
+- [MCP tools](https://github.com/kgoedecke/doop#mcp-tools): Discover tools for reading and editing canvases and frames.
+- [Self-hosting](https://github.com/kgoedecke/doop#deploy): Run Doop and connect a client to your own instance.

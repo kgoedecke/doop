@@ -1,0 +1,8 @@
+{
+  "url": "https://doop.design/mcp",
+  "transport": "streamable-http",
+  "authentication": {
+    "type": "oauth2",
+    "authorization_server": "https://doop.design"
+  }
+}

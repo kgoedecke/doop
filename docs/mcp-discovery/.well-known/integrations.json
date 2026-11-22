@@ -1,0 +1,54 @@
+{
+  "version": 3,
+  "summary": "Doop is a multiplayer design canvas. MCP clients can read and edit canvases according to the connected account's permissions.",
+  "credentials": {
+    "doop_mcp_oauth": {
+      "type": "oauth2",
+      "label": "OAuth 2.0",
+      "setup": "Add https://doop.design/mcp to an OAuth-capable MCP client, then sign in to Doop and approve access in your browser. Doop supports dynamic client registration."
+    },
+    "doop_agent_key": {
+      "type": "bearer",
+      "label": "Doop agent key",
+      "setup": "In Doop, open Settings → Agent keys and create a key. Configure your headless client to send it as an Authorization bearer token."
+    }
+  },
+  "surfaces": [
+    {
+      "slug": "doop-mcp-server",
+      "name": "Doop MCP server",
+      "type": "mcp",
+      "url": "https://doop.design/mcp",
+      "transports": ["streamable-http"],
+      "docs": "https://github.com/kgoedecke/doop#connect-an-ai-agent",
+      "basis": {
+        "via": "declared",
+        "source": "https://doop.design/.well-known/integrations.json"
+      },
+      "auth": {
+        "status": "required",
+        "entries": [
+          {
+            "use": [{ "id": "doop_mcp_oauth", "mechanics": { "source": "well-known" } }],
+            "basis": {
+              "via": "declared",
+              "source": "https://doop.design/.well-known/integrations.json"
+            }
+          },
+          {
+            "use": [
+              {
+                "id": "doop_agent_key",
+                "mechanics": { "source": "http", "in": "header", "headerName": "Authorization", "scheme": "Bearer" }
+              }
+            ],
+            "basis": {
+              "via": "declared",
+              "source": "https://doop.design/.well-known/integrations.json"
+            }
+          }
+        ]
+      }
+    }
+  ]
+}
