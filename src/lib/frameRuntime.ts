@@ -697,7 +697,7 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
     var chord = (k.shiftKey ? 'shift+' : '') + letter
     /* Space would scroll this document while the page pans on it */
     if (type === 'keydown' && k.key === ' ' && !mod) ev.preventDefault()
-    if (type === 'keydown' && (tabChord || (mod && CANVAS_MOD_CHORDS.indexOf(chord) >= 0)))
+    if (type === 'keydown' && ((desktopShell && tabChord) || (mod && CANVAS_MOD_CHORDS.indexOf(chord) >= 0)))
       ev.preventDefault()
     apply(portSend, runtimePort, [
       {
