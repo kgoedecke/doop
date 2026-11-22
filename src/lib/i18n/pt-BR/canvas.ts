@@ -83,7 +83,6 @@ export const canvas: Catalog['canvas'] = {
   docs: 'Documentação',
   contactSupport: 'Falar com o suporte',
   youAre: 'Você é “{name}” — clique para mudar seu nome',
-  changeDisplayName: 'Mudar seu nome de exibição',
   agents: 'Agentes · ⌘/ para pedir ao Doop Agent',
   agentsWorking: 'Agentes · {working} trabalhando · ⌘/ para pedir ao Doop Agent',
   comments: 'Comentários',
