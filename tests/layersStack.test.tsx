@@ -123,20 +123,20 @@ describe('LayersPanel stacking', () => {
     container.remove()
   })
 
-  it('adds a frame or a canvas shape to the selection with ⇧- or ⌘-click, and drops it again', () => {
+  it('adds a frame or a canvas shape to the selection with ⌘/Ctrl-click, and drops it again', () => {
     const click = (key: string, init: MouseEventInit = {}) =>
       act(() => {
         row(key).dispatchEvent(new MouseEvent('click', { bubbles: true, ...init }))
       })
     const selected = () => [...useStore.getState().selectedIds].sort()
     click('s1')
-    click('f1', { shiftKey: true })
+    click('f1', { metaKey: true })
     expect(selected()).toEqual(['f1', 's1'])
     expect(row('s1').getAttribute('aria-selected')).toBe('true')
     expect(row('f1').getAttribute('aria-selected')).toBe('true')
-    click('f2', { metaKey: true })
+    click('f2', { ctrlKey: true })
     expect(selected()).toEqual(['f1', 'f2', 's1'])
-    click('f1', { shiftKey: true })
+    click('f1', { metaKey: true })
     expect(selected()).toEqual(['f2', 's1'])
     /* a plain click narrows to the one row */
     click('f2')

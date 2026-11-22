@@ -289,6 +289,9 @@ export function LayersPanel({
   const [drop, setDrop] = useState<Drop | null>(null)
   const rowsRef = useRef<VisibleRow[]>([])
   const didDrag = useRef(false)
+  /* the row a ⇧-click ranges from: the last plainly or ⌘-clicked row (and
+     the row an arrow-key walk lands on). A range itself never moves it */
+  const anchorKey = useRef<string | null>(null)
 
   /* the selected frame opens on its own, and a selection made inside a frame
      opens every row above it — derived from the selection during render, not
@@ -343,15 +346,15 @@ export function LayersPanel({
 
   /* a layer row opens the element properties panel; a frame row closes it
      and leaves the frame's own inspector to the frame-name click */
-  function activate(row: VisibleRow, toggle = false) {
+  function pick(row: VisibleRow, toggle = false) {
     const s = useStore.getState()
-    /* ⇧/⌘-click on a frame or a canvas shape adds it to the selection, or
-       drops it, as ⇧-click does on the canvas */
+    /* ⌘/Ctrl-click on a frame or a canvas shape adds it to the selection,
+       or drops it, as ⇧-click does on the canvas */
     if (toggle && isRoot(row)) {
       s.toggleSelect(row.frame.id)
       return
     }
-    /* ⇧/⌘-click adds a layer to the frame's picked set, or drops it */
+    /* ⌘/Ctrl-click adds a layer to the frame's picked set, or drops it */
     if (toggle && row.kind === 'node' && s.selectedElement?.frameId === row.frame.id) {
       s.toggleElement({ frameId: row.frame.id, selector: row.node.selector })
       return
@@ -359,6 +362,53 @@ export function LayersPanel({
     s.select(row.frame.id)
     /* a plain click narrows a multi-element pick to this row, as on the canvas */
     s.pickElement(row.kind === 'node' ? { frameId: row.frame.id, selector: row.node.selector } : null, true)
+  }
+
+  /* ⇧-click takes the range from the anchor row to this one, in list order,
+     replacing the selection and making the clicked row the primary — the
+     same range a file list's ⇧-click takes. The store only holds one kind
+     of multi-selection — top-level rows, or the elements of a single
+     frame — so a root and a layer, or layers of two frames, take no range
+     and the click does what ⌘-click does (false). */
+  function range(row: VisibleRow): boolean {
+    const s = useStore.getState()
+    /* collapsed, filtered or deleted, the anchor falls back to the current
+       row — and stays there, so the next ⇧-click starts from it too */
+    const anchor = rows.find((r) => r.key === anchorKey.current) ?? rows.find((r) => r.key === currentKey)
+    if (!anchor) return false
+    anchorKey.current = anchor.key
+    const lo = Math.min(rows.indexOf(anchor), rows.indexOf(row))
+    const hi = Math.max(rows.indexOf(anchor), rows.indexOf(row))
+    const between = rows.slice(lo, hi + 1)
+    if (isRoot(anchor) && isRoot(row)) {
+      /* the layers of an expanded frame between two root rows are not part of it */
+      const ids = between.filter(isRoot).map((r) => r.frame.id)
+      s.selectMany([...ids.filter((id) => id !== row.frame.id), row.frame.id])
+      /* an element pick clears, as a plain root click clears it */
+      s.pickElement(null, true)
+      return true
+    }
+    if (anchor.kind === 'node' && row.kind === 'node' && anchor.frame.id === row.frame.id) {
+      const selectors = between
+        .filter((r): r is NodeVisibleRow => r.kind === 'node' && r.frame.id === row.frame.id)
+        .map((r) => r.node.selector)
+      s.select(row.frame.id)
+      s.pickElements(row.frame.id, [...selectors.filter((x) => x !== row.node.selector), row.node.selector])
+      return true
+    }
+    return false
+  }
+
+  function activate(row: VisibleRow, mode?: 'toggle' | 'range') {
+    /* ⇧-click takes a range and never moves the anchor; a pair no range
+       covers does what ⌘-click does, anchor untouched either way */
+    if (mode === 'range') {
+      if (range(row)) return
+      pick(row, true)
+      return
+    }
+    anchorKey.current = row.key
+    pick(row, mode === 'toggle')
   }
 
   /* the root drop just past `root`: the line above the next top-level row,
@@ -826,10 +876,11 @@ export function LayersPanel({
                   row={row}
                   selected={selectedIds.includes(row.frame.id) && !selectedElement}
                   current={row.frame.id === selectedId}
+                  reveal={row.key === currentKey}
                   dragging={dragKeys?.has(row.key) ?? false}
                   drop={drop?.key === row.key ? drop.place : undefined}
                   onToggle={() => setOpen(row.key, !row.open)}
-                  onActivate={(toggle) => activate(row, toggle)}
+                  onActivate={(mode) => activate(row, mode)}
                   onPointerDown={(e) => onRowPointerDown(e, row)}
                 />
               ) : (
@@ -840,10 +891,11 @@ export function LayersPanel({
                     pickedRows.has(row.key) ||
                     (!!row.standalone && !selectedElement && selectedIds.includes(row.frame.id))
                   }
+                  reveal={row.key === currentKey}
                   dragging={dragKeys?.has(row.key) ?? false}
                   drop={drop?.key === row.key ? drop.place : undefined}
                   onToggle={() => setOpen(row.key, !row.open)}
-                  onActivate={(toggle) => activate(row, toggle)}
+                  onActivate={(mode) => activate(row, mode)}
                   onPointerDown={(e) => onRowPointerDown(e, row)}
                 />
               ),
@@ -996,6 +1048,7 @@ function FrameRow({
   row,
   selected,
   current,
+  reveal,
   dragging,
   drop,
   onToggle,
@@ -1006,10 +1059,12 @@ function FrameRow({
   selected: boolean
   /** the frame is selected, whether or not an element inside it is */
   current: boolean
+  /** the selection's primary row: the one scrolled into view */
+  reveal: boolean
   dragging: boolean
   drop?: Drop['place']
   onToggle: () => void
-  onActivate: (toggle: boolean) => void
+  onActivate: (mode?: 'toggle' | 'range') => void
   onPointerDown: (e: ReactPointerEvent<HTMLDivElement>) => void
 }) {
   const { frame } = row
@@ -1046,16 +1101,17 @@ function FrameRow({
             label={label}
             className={cn(current && !selected && 'text-ink', dragging && 'opacity-40')}
             selected={selected}
+            reveal={reveal}
             hidden={!!frame.hidden}
             dimmed={!!frame.hidden}
             onToggleHidden={readOnly ? undefined : () => setFrameHidden(frame, !frame.hidden)}
             locked={!!frame.locked}
             onToggleLocked={readOnly ? undefined : () => setFramesLocked([frame], !frame.locked)}
-            onClick={(e) => onActivate(e.shiftKey || e.metaKey || e.ctrlKey)}
+            onClick={(e) => onActivate(e.shiftKey ? 'range' : e.metaKey || e.ctrlKey ? 'toggle' : undefined)}
             onDoubleClick={startRename}
             onContextMenu={() => {
               pasteAt.current = { x: window.innerWidth / 2, y: window.innerHeight / 2 }
-              if (!useStore.getState().selectedIds.includes(frame.id)) onActivate(false)
+              if (!useStore.getState().selectedIds.includes(frame.id)) onActivate()
             }}
             onPointerDown={onPointerDown}
             trailing={
@@ -1106,6 +1162,7 @@ function FrameRow({
 function NodeRow({
   row,
   selected,
+  reveal,
   dragging,
   drop,
   onToggle,
@@ -1114,10 +1171,12 @@ function NodeRow({
 }: {
   row: NodeVisibleRow
   selected: boolean
+  /** the selection's primary row: the one scrolled into view */
+  reveal: boolean
   dragging: boolean
   drop?: Drop['place']
   onToggle: () => void
-  onActivate: (toggle: boolean) => void
+  onActivate: (mode?: 'toggle' | 'range') => void
   onPointerDown: (e: ReactPointerEvent<HTMLDivElement>) => void
 }) {
   const { frame, node } = row
@@ -1168,6 +1227,7 @@ function NodeRow({
           label={label}
           detail={standalone || componentName ? undefined : node.detail}
           selected={selected}
+          reveal={reveal}
           /* a standalone element is hidden by its frame or by its own
              attribute (⌘⇧H sets the latter): the row shows either, and its
              eye clears both or hides the frame */
@@ -1202,7 +1262,7 @@ function NodeRow({
                 : () => setLayerLocked(frame, node.selector, !node.locked)
           }
           className={cn(dragging && 'opacity-40')}
-          onClick={(e) => onActivate(e.shiftKey || e.metaKey || e.ctrlKey)}
+          onClick={(e) => onActivate(e.shiftKey ? 'range' : e.metaKey || e.ctrlKey ? 'toggle' : undefined)}
           onDoubleClick={() => {
             if (!isLayerLocked(frame, node.selector)) startRename()
           }}
@@ -1212,7 +1272,7 @@ function NodeRow({
                its primary, as a right-click on the canvas does */
             const s = useStore.getState()
             const kept = standalone ? s.selectedIds.length > 1 && s.selectedIds.includes(frame.id) : selected
-            if (!kept) return onActivate(false)
+            if (!kept) return onActivate()
             if (standalone) return
             const picked = pickedSelectors(s)
             s.pickElements(frame.id, [...picked.filter((sel) => sel !== node.selector), node.selector])
@@ -1245,6 +1305,9 @@ type RowProps = Omit<HTMLAttributes<HTMLDivElement>, 'onClick'> & {
   label: ReactNode
   detail?: string
   selected: boolean
+  /** the selection's primary row — a ⇧ range selects many rows at once, and
+   *  only the clicked one scrolls itself into view */
+  reveal?: boolean
   /** where a dragged layer would land on this row; `root` is a line above
    *  it at the root, out of every frame */
   drop?: Drop['place']
@@ -1270,6 +1333,7 @@ function Row({
   label,
   detail,
   selected,
+  reveal,
   drop,
   className,
   trailing,
@@ -1283,10 +1347,11 @@ function Row({
 }: RowProps) {
   const ref = useRef<HTMLDivElement>(null)
   const t = useT()
-  /* a selection made in the frame may sit far down the tree — bring it into view */
+  /* a selection made in the frame may sit far down the tree — bring its
+     primary row into view; the rest of a range leaves the scroll alone */
   useEffect(() => {
-    if (selected) ref.current?.scrollIntoView({ block: 'nearest' })
-  }, [selected])
+    if (selected && reveal) ref.current?.scrollIntoView({ block: 'nearest' })
+  }, [selected, reveal])
   return (
     <div
       {...rest}

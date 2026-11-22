@@ -93,8 +93,9 @@ interface State {
    *  the frame and the highlighted row stay in step */
   selectedElement: { frameId: string; selector: string } | null
   /** every element picked in `selectedElement`'s frame, the primary last:
-   *  ⇧-click on the surface or ⇧/⌘-click in the Layers rail adds to it.
-   *  Read it through `pickedSelectors`, which ignores a list that no longer
+   *  ⇧-click on the surface or ⌘/Ctrl-click in the Layers rail adds to it
+   *  (⇧-click there replaces it with a range). Read it through
+   *  `pickedSelectors`, which ignores a list that no longer
    *  holds the primary */
   selectedElements: string[]
   /** the element under the pointer in the Layers panel — its frame outlines
