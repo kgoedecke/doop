@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { frontOf, restack, roomAt, sortByStack, stackOf, zAt } from '../shared/frameStack'
+import { frontOf, restack, restackMany, roomAt, sortByStack, stackOf, zAt } from '../shared/frameStack'
 
 const f = (id: string, createdAt: number, z?: number) => ({ id, createdAt, ...(z === undefined ? {} : { z }) })
 const ids = (frames: { id: string }[]) => frames.map((frame) => frame.id)
@@ -73,5 +73,77 @@ describe('frame stacking', () => {
       ],
     })
     expect(roomAt([], 0)).toEqual({ z: undefined, renumber: [] })
+  })
+})
+
+/* apply restackMany's writes and read the order back */
+function movedMany(frames: ReturnType<typeof f>[], group: string[], index: number) {
+  const writes = restackMany(frames, group, index)
+  const next = frames.map((frame) => ({ ...frame, z: writes.find((w) => w.id === frame.id)?.z ?? frame.z }))
+  return { writes, order: ids(sortByStack(next)) }
+}
+
+describe('frame stacking together', () => {
+  it('moves a group as one run between two neighbours', () => {
+    const frames = [f('a', 0, 0), f('b', 0, 1), f('c', 0, 2), f('d', 0, 3)]
+    const { writes, order } = movedMany(frames, ['b', 'd'], 1)
+    /* between a (0) and c (2), a third and two thirds of the gap */
+    expect(writes).toEqual([
+      { id: 'b', z: 2 / 3 },
+      { id: 'd', z: 4 / 3 },
+    ])
+    expect(order).toEqual(['a', 'b', 'd', 'c'])
+  })
+
+  it('numbers on from the one neighbour at an end', () => {
+    const frames = [f('a', 0, 0), f('b', 0, 1), f('c', 0, 2), f('d', 0, 3)]
+    /* to the front: behind c and d, then the run */
+    expect(movedMany(frames, ['a', 'b'], 2)).toEqual({
+      writes: [
+        { id: 'a', z: 4 },
+        { id: 'b', z: 5 },
+      ],
+      order: ['c', 'd', 'a', 'b'],
+    })
+    /* to the back: the run, then a and c */
+    expect(movedMany(frames, ['b', 'd'], 0)).toEqual({
+      writes: [
+        { id: 'b', z: -2 },
+        { id: 'd', z: -1 },
+      ],
+      order: ['b', 'd', 'a', 'c'],
+    })
+  })
+
+  it('gathers scattered members, keeping their stack order whatever order they came in', () => {
+    const frames = [f('a', 0, 0), f('b', 0, 1), f('c', 0, 2)]
+    expect(movedMany(frames, ['c', 'a'], 0)).toEqual({
+      writes: [
+        { id: 'a', z: -1 },
+        { id: 'c', z: 0 },
+      ],
+      order: ['a', 'c', 'b'],
+    })
+  })
+
+  it('writes nothing when the run already sits in the slot', () => {
+    const frames = [f('a', 0, 0), f('b', 0, 1), f('c', 0, 2), f('d', 0, 3)]
+    expect(restackMany(frames, ['b', 'c'], 1)).toEqual([])
+    expect(restackMany(frames, ['b', 'c'], 2)).not.toEqual([])
+    expect(restackMany(frames, ['gone'], 0)).toEqual([])
+  })
+
+  it('renumbers the page when the gap fits nothing, keeping the run together', () => {
+    const lo = 1_700_000_000_000
+    const hi = lo + 2 ** -12
+    const frames = [f('a', 0, lo), f('b', 0, hi), f('c', 0, hi + 1), f('d', 0, hi + 2)]
+    const { writes, order } = movedMany(frames, ['c', 'd'], 1)
+    expect(order).toEqual(['a', 'c', 'd', 'b'])
+    expect(writes).toEqual([
+      { id: 'a', z: 0 },
+      { id: 'c', z: 1 },
+      { id: 'd', z: 2 },
+      { id: 'b', z: 3 },
+    ])
   })
 })
