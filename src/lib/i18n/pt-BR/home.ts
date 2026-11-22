@@ -79,6 +79,11 @@ export const home: Catalog['home'] = {
   share: 'Compartilhar',
   duplicating: 'Duplicando…',
   duplicate: 'Duplicar',
+  rename: 'Renomear…',
+  renameTitle: 'Renomear canvas',
+  canvasNameAria: 'Nome do canvas',
+  renaming: 'Salvando…',
+  renameFailed: 'Não foi possível renomear o canvas',
   move: 'Mover…',
   moveToWorkspace: 'Mover para um workspace…',
 
