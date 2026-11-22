@@ -16,7 +16,9 @@ final class CanvasModel: ObservableObject {
             pruneSelection()
         }
     }
-    @Published var tasks: [CanvasTask] = []
+    @Published var tasks: [CanvasTask] = [] {
+        didSet { scheduleStartingExpiry() }
+    }
     @Published var comments: [CanvasComment] = []
     @Published var presences: [CanvasPresence] = []
     /// Frames an agent is streaming a design into right now, by frame id.
@@ -43,6 +45,10 @@ final class CanvasModel: ObservableObject {
         var body: [String: Any]
     }
     private var connection: Task<Void, Never>?
+    /// Wakes the canvas when a "Starting…" pill's window ends (`WorkingAgents.startingExpiry`).
+    private var startingExpiry: Task<Void, Never>?
+    /// Bumped by that wake-up: a change the pills redraw on, since time passing is none.
+    @Published private var startingTick = 0
     private var connectionID: UUID?
     private var socket: URLSessionWebSocketTask?
     private let clientID = "ios-" + UUID().uuidString
@@ -76,6 +82,20 @@ final class CanvasModel: ObservableObject {
     var workingAgents: [WorkingAgent] {
         WorkingAgents.list(presences: presences, tasks: tasks, now: Date().timeIntervalSince1970 * 1000)
     }
+    /// Redraw the pills when the waiting card they show stops counting as starting, and
+    /// again for the next one.
+    private func scheduleStartingExpiry() {
+        startingExpiry?.cancel()
+        let now = Date().timeIntervalSince1970 * 1000
+        guard let expiry = WorkingAgents.startingExpiry(tasks: tasks, now: now) else { return }
+        let delay = UInt64(max(0, expiry - now) * 1_000_000)
+        startingExpiry = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: delay)
+            guard !Task.isCancelled, let self else { return }
+            self.startingTick += 1
+            self.scheduleStartingExpiry()
+        }
+    }
     var selected: DesignFrame? { pageFrames.first { $0.id == selectedID } }
     var canEdit: Bool { connected && pendingEdits == 0 && !undoing }
     var canUndo: Bool { canEdit && !undoStack.isEmpty }
@@ -86,6 +106,8 @@ final class CanvasModel: ObservableObject {
         connectionID = generation
         connecting = true
         connectionError = nil
+        // stop() cancelled the wake-up: the cards still shown need theirs before the room answers.
+        scheduleStartingExpiry()
         #if DEBUG
         startFakeCollaborators()
         #endif
@@ -160,6 +182,8 @@ final class CanvasModel: ObservableObject {
         connectionID = nil
         connection?.cancel()
         connection = nil
+        startingExpiry?.cancel()
+        startingExpiry = nil
         socket?.cancel(with: .goingAway, reason: nil)
         socket = nil
         connected = false
