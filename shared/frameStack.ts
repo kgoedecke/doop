@@ -74,12 +74,42 @@ export function restack(
   frameId: string,
   index: number,
 ): StackWrite[] {
-  const from = frames.findIndex((f) => f.id === frameId)
-  if (from === -1) return []
-  const rest = frames.filter((f) => f.id !== frameId)
+  return restackMany(frames, [frameId], index)
+}
+
+/** The writes that move `ids` to `index` of `rest` — the page's
+ *  back-to-front order (`frames`, already sorted, the group among them)
+ *  without the group — landing as one run in their current stack order,
+ *  wherever they sat before. Usually only the group is written: `z`s evenly
+ *  between its new neighbours, or numbered on from the end's one neighbour;
+ *  when they cannot all fit strictly between, every frame on the page is
+ *  renumbered. Empty when the group is already there. */
+export function restackMany(
+  frames: readonly Pick<Frame, 'id' | 'z' | 'createdAt'>[],
+  ids: readonly string[],
+  index: number,
+): StackWrite[] {
+  const set = new Set(ids)
+  const group = frames.filter((f) => set.has(f.id))
+  if (!group.length) return []
+  const rest = frames.filter((f) => !set.has(f.id))
   const at = Math.max(0, Math.min(index, rest.length))
-  if (at === from) return []
-  const z = zAt(rest, at)
-  if (z !== undefined) return [{ id: frameId, z }]
-  return renumber([...rest.slice(0, at), frames[from]!, ...rest.slice(at)])
+  const order = [...rest.slice(0, at), ...group, ...rest.slice(at)]
+  if (order.every((f, i) => f.id === frames[i]?.id)) return []
+  const n = group.length
+  const below = rest[at - 1]
+  const above = rest[at]
+  const zs = below
+    ? above
+      ? group.map((_, k) => stackOf(below) + ((stackOf(above) - stackOf(below)) * (k + 1)) / (n + 1))
+      : group.map((_, k) => stackOf(below) + 1 + k)
+    : above
+      ? group.map((_, k) => stackOf(above) - n + k)
+      : []
+  /* floating-point room can run out before the writes are counted */
+  const fits =
+    zs.length === n &&
+    zs.every((z, k) => (k === 0 || z > zs[k - 1]!) && (!below || z > stackOf(below)) && (!above || z < stackOf(above)))
+  if (fits) return group.map((f, k) => ({ id: f.id, z: zs[k]! }))
+  return renumber(order)
 }

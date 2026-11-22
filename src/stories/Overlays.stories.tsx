@@ -235,7 +235,7 @@ export const CommandStory: Story = {
               Group selection<CommandShortcut>⌘G</CommandShortcut>
             </CommandItem>
             <CommandItem>
-              Add auto layout<CommandShortcut>⇧A</CommandShortcut>
+              Add flex layout<CommandShortcut>⇧A</CommandShortcut>
             </CommandItem>
           </CommandGroup>
           <CommandGroup heading="Arrange">

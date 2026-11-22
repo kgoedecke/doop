@@ -16,6 +16,7 @@
 		000000000000000000000358 /* Core/AppleSignIn.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000359 /* Core/AppleSignIn.swift */; };
 		000000000000000000000356 /* WebSignIn.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000357 /* WebSignIn.swift */; };
 		000000000000000000000362 /* Core/FrameWorkers.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000363 /* Core/FrameWorkers.swift */; };
+		000000000000000000000392 /* Core/WorkingAgents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000393 /* Core/WorkingAgents.swift */; };
 		000000000000000000000350 /* Core/FrameSnapping.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000351 /* Core/FrameSnapping.swift */; };
 		000000000000000000000300 /* Blitz/BlitzDocument.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000310 /* Blitz/BlitzDocument.swift */; };
 		000000000000000000000390 /* Blitz/FrameWorkBadge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000391 /* Blitz/FrameWorkBadge.swift */; };
@@ -80,6 +81,7 @@
 		000000000000000000000359 /* Core/AppleSignIn.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Core/AppleSignIn.swift; sourceTree = "<group>"; };
 		000000000000000000000357 /* WebSignIn.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebSignIn.swift; sourceTree = "<group>"; };
 		000000000000000000000363 /* Core/FrameWorkers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Core/FrameWorkers.swift; sourceTree = "<group>"; };
+		000000000000000000000393 /* Core/WorkingAgents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Core/WorkingAgents.swift; sourceTree = "<group>"; };
 		000000000000000000000351 /* Core/FrameSnapping.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Core/FrameSnapping.swift; sourceTree = "<group>"; };
 		000000000000000000000310 /* Blitz/BlitzDocument.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Blitz/BlitzDocument.swift; sourceTree = "<group>"; };
 		000000000000000000000391 /* Blitz/FrameWorkBadge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Blitz/FrameWorkBadge.swift; sourceTree = "<group>"; };
@@ -147,6 +149,7 @@
 				00000000000000000000012C /* Core/Models.swift */,
 				000000000000000000000351 /* Core/FrameSnapping.swift */,
 				000000000000000000000363 /* Core/FrameWorkers.swift */,
+				000000000000000000000393 /* Core/WorkingAgents.swift */,
 				000000000000000000000361 /* Core/CanvasSocket.swift */,
 				000000000000000000000353 /* Core/PendingFrameMoves.swift */,
 				000000000000000000000355 /* Core/ProviderSignIn.swift */,
@@ -304,6 +307,7 @@
 				000000000000000000000190 /* Core/Models.swift in Sources */,
 				000000000000000000000350 /* Core/FrameSnapping.swift in Sources */,
 				000000000000000000000362 /* Core/FrameWorkers.swift in Sources */,
+				000000000000000000000392 /* Core/WorkingAgents.swift in Sources */,
 				000000000000000000000360 /* Core/CanvasSocket.swift in Sources */,
 				000000000000000000000352 /* Core/PendingFrameMoves.swift in Sources */,
 				000000000000000000000354 /* Core/ProviderSignIn.swift in Sources */,

@@ -110,13 +110,13 @@ describe('LayersPanel ⌫', () => {
     expect(useStore.getState().canvas?.frames[0]?.locked).toBe(true)
   })
 
-  it('highlights every picked row, toggles with ⇧, and narrows to the row on a plain click', () => {
+  it('highlights every picked row, toggles with ⌘, and narrows to the row on a plain click', () => {
     const P = `${DIV} > p:nth-of-type(1)`
     const row = (selector: string) => container.querySelector<HTMLElement>(`[data-row-key="f1|${selector}"]`)!
     const picked = () => pickedSelectors(useStore.getState())
     /* picking the paragraph opens its parent's row */
     act(() => useStore.getState().pickElement({ frameId: 'f1', selector: P }))
-    act(() => row(DIV).dispatchEvent(new MouseEvent('click', { bubbles: true, shiftKey: true })))
+    act(() => row(DIV).dispatchEvent(new MouseEvent('click', { bubbles: true, metaKey: true })))
     expect(picked()).toEqual([P, DIV])
     expect(row(DIV).getAttribute('aria-selected')).toBe('true')
     expect(row(P).getAttribute('aria-selected')).toBe('true')

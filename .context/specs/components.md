@@ -17,7 +17,7 @@ through tools, and read them back in a short form.
 | Edits break the link, or get thrown away            | Any edit becomes the narrowest override that holds it; no detach needed             |
 | Sweeping edits have unknown blast radius            | `update_component` reports impact, with `dry_run`                                   |
 | Variant explosion                                   | An enum prop is `data-<name>` on the root, and variants are CSS                     |
-| Canvases that grew without components               | `create_component` + `replace_matching` retrofit them                               |
+| Canvases that grew without components               | `create_component` from one copy, then `<doop-use>` in place of the others          |
 | Components disconnected from code                   | Optional `code` mapping; compact form reads like JSX                                |
 | Libraries silently change consumers, or are one-way | Linked copies; updates shown, pulled on request                                     |
 
@@ -159,7 +159,7 @@ refused, and the room hears of an adoption only after the chunk is in the frame)
 import of several components takes back the ones it had made. A check that runs after a write has landed
 (the css-not-kept note, lookalike and reuse notes, reading instances back, an inserted instance's id) goes
 through `optional()`: out of budget it is left out, never turned into a refusal of a finished write.
-`replace_matching` stops instead and reports `matching_stopped`; a sync that had already updated a
+A sync that had already updated a
 dependency says what it updated (`WorkBudgetError.afterPartialWork`). `workBudgetCommit.test.ts` makes each
 parse of each writing operation the one that goes over, and requires the operation to land whole or leave
 the canvas exactly as it was.

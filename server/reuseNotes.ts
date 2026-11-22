@@ -207,7 +207,7 @@ export function frameReuseNotes(canvas: Canvas, frame: Frame): string[] {
   const notes = componentSystemNotes(canvas, frame)
   const repeats = repeatsIn(canvas, frame).map(
     (repeat) =>
-      `REUSE: ${repeat.occurrences} blocks in this frame share one structure (“${repeat.suggested_name}”${repeat.sample_text ? `, e.g. “${repeat.sample_text.slice(0, 40)}”` : ''}). Make it a component: create_component with frame_id "${frame.id}", element "${repeat.example.element}" and replace_matching=true turns them all into instances.`,
+      `REUSE: ${repeat.occurrences} blocks in this frame share one structure (“${repeat.suggested_name}”${repeat.sample_text ? `, e.g. “${repeat.sample_text.slice(0, 40)}”` : ''}). Make one a component (create_component with frame_id "${frame.id}" and element "${repeat.example.element}"), then replace each other copy with <doop-use component="${repeat.suggested_name}" …> in edit_frame_html, its differing text as props.`,
   )
   return [...notes, ...repeats, ...tokenNotes(canvas, frame)]
 }

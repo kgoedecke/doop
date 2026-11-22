@@ -29,7 +29,7 @@ vi.mock('../src/lib/frameBridge', () => ({
 const { useStore } = await import('../src/lib/store')
 const { ApiError } = await import('../src/lib/api')
 const { placeElement } = await import('../src/lib/layers')
-const { detachLayer, standaloneSelector, transferLayer } = await import('../src/lib/layerEdits')
+const { detachLayer, standaloneSelector, transferLayer, transferLayers } = await import('../src/lib/layerEdits')
 const { clearHistory, undo, redo } = await import('../src/lib/history')
 
 const page = (body: string) => `<!doctype html>\n<html><head></head><body>${body}</body></html>`
@@ -580,5 +580,197 @@ describe('detachLayer', () => {
     useStore.getState().patchFrameLocal('f1', { html: page('<div><p>Z</p><p>A</p><p>B</p></div>') })
     expect(await detachLayer(source, P_B)).toBe(false)
     expect(createFrame).not.toHaveBeenCalled()
+  })
+})
+
+const P_A = 'body:nth-of-type(1) > div:nth-of-type(1) > p:nth-of-type(1)'
+const P_C = 'body:nth-of-type(1) > div:nth-of-type(1) > p:nth-of-type(3)'
+const ONLY_P = 'body:nth-of-type(1) > p:nth-of-type(1)'
+
+describe('transferLayers', () => {
+  beforeEach(() => {
+    updateFrame.mockClear()
+    deleteFrame.mockClear()
+    clearHistory()
+  })
+
+  it('moves a picked set into another frame as one run, one undo step', async () => {
+    const source = frameWith('f1', page('<div><p>A</p><p>B</p><p>C</p></div>'))
+    const dest = frameWith('f2', page('<section><i>x</i></section>'))
+    holdCanvas(source, dest)
+    /* picked out of order, they still land in document order */
+    expect(
+      transferLayers([{ pressed: source, selectors: [P_C, P_A] }], dest, {
+        selector: SECTION,
+        place: 'inside',
+      }),
+    ).toBe(true)
+    expect(html('f2')).toMatch(/<section><p[^>]*>A<\/p><p[^>]*>C<\/p><i>x<\/i><\/section>/)
+    expect(html('f1')).toContain('<div><p>B</p></div>')
+    const picked = useStore.getState()
+    expect(picked.selectedElement?.frameId).toBe('f2')
+    expect(picked.selectedElements).toHaveLength(2)
+    for (let i = 0; i < 6; i++) await Promise.resolve()
+    expect(updateFrame.mock.calls.map(([id]) => id)).toEqual(['f2', 'f1'])
+    await undo()
+    expect(html('f1')).toBe(source.html)
+    expect(html('f2')).toBe(dest.html)
+    await redo()
+    expect(html('f1')).toContain('<div><p>B</p></div>')
+    expect(html('f2')).toMatch(/<section><p[^>]*>A<\/p><p[^>]*>C<\/p><i>x<\/i><\/section>/)
+  })
+
+  it('carries the CSS every member relies on into the destination', () => {
+    const source = frameWith(
+      'f1',
+      page('<div><p class="a">A</p><p>B</p><p class="c">C</p></div>').replace(
+        '<head>',
+        '<head><style>.a{color:red}.c{color:blue}</style>',
+      ),
+    )
+    const dest = frameWith('f2', page('<section></section>'))
+    holdCanvas(source, dest)
+    expect(
+      transferLayers([{ pressed: source, selectors: [P_A, P_C] }], dest, { selector: SECTION, place: 'inside' }),
+    ).toBe(true)
+    expect(html('f2')).toContain('.a')
+    expect(html('f2')).toContain('.c')
+    expect(html('f1')).toContain('<div><p>B</p></div>')
+  })
+
+  it('takes several canvas shapes into a frame and removes their shells', async () => {
+    const s1 = frameWith('s1', STANDALONE('<div data-doop-drawing="rect" style="position:absolute">a</div>'))
+    const s2 = frameWith('s2', STANDALONE('<div data-doop-drawing="rect" style="position:absolute">b</div>'))
+    const dest = frameWith('f2', page('<section></section>'))
+    holdCanvas(s1, s2, dest)
+    expect(
+      transferLayers(
+        [
+          { pressed: s1, selectors: [SHAPE] },
+          { pressed: s2, selectors: [SHAPE] },
+        ],
+        dest,
+        { selector: SECTION, place: 'inside' },
+      ),
+    ).toBe(true)
+    expect(html('f2')).toMatch(/<section><div[^>]*>a<\/div><div[^>]*>b<\/div><\/section>/)
+    expect(useStore.getState().canvas?.frames.map((f) => f.id)).toEqual(['f2'])
+    for (let i = 0; i < 6; i++) await Promise.resolve()
+    expect(updateFrame.mock.calls.map(([id]) => id)).toEqual(['f2'])
+    expect(deleteFrame.mock.calls.map(([id]) => id).sort()).toEqual(['s1', 's2'])
+  })
+
+  it('puts everything back when the destination save fails', async () => {
+    const shell = frameWith('s1', STANDALONE('<div data-doop-drawing="rect" style="position:absolute">a</div>'))
+    const source = frameWith('f1', page('<div><p>A</p><p>B</p></div>'))
+    const dest = frameWith('f2', page('<section></section>'))
+    holdCanvas(shell, source, dest)
+    updateFrame.mockImplementationOnce(() => Promise.reject(new Error('nope')))
+    expect(
+      transferLayers(
+        [
+          { pressed: shell, selectors: [SHAPE] },
+          { pressed: source, selectors: [P_B] },
+        ],
+        dest,
+        { selector: SECTION, place: 'inside' },
+      ),
+    ).toBe(true)
+    for (let i = 0; i < 6; i++) await Promise.resolve()
+    expect(useStore.getState().canvas?.frames.some((f) => f.id === 's1')).toBe(true)
+    expect(html('f1')).toBe(source.html)
+    expect(html('f2')).toBe(dest.html)
+    expect(useStore.getState().notice?.text).toBe('Couldn’t move the layers to “f2”')
+    /* the step was rolled back with it: nothing to undo */
+    updateFrame.mockClear()
+    await undo()
+    expect(updateFrame).not.toHaveBeenCalled()
+    expect(html('f2')).toBe(dest.html)
+  })
+
+  it('restores the source another save won, keeping the destination copy', async () => {
+    const source = frameWith('f1', page('<div><p>A</p><p>B</p></div>'))
+    const other = frameWith('f3', page('<p>C</p>'))
+    const dest = frameWith('f2', page('<section></section>'))
+    holdCanvas(source, other, dest)
+    /* f1's newer save still holds B: the source stays as the server has it */
+    const remote = { ...source, html: page('<div><p>A</p><p>B</p></div><footer>edited</footer>'), updatedAt: 9 }
+    updateFrame
+      .mockImplementationOnce(() => Promise.resolve({ ...frameWith('f2', ''), updatedAt: 7 } as Frame))
+      .mockImplementationOnce(() =>
+        Promise.reject(Object.assign(new ApiError(409, '{}'), { status: 409, body: { frame: remote } })),
+      )
+    expect(
+      transferLayers(
+        [
+          { pressed: source, selectors: [P_B] },
+          { pressed: other, selectors: [ONLY_P] },
+        ],
+        dest,
+        { selector: SECTION, place: 'inside' },
+      ),
+    ).toBe(true)
+    for (let i = 0; i < 8; i++) await Promise.resolve()
+    /* the destination keeps its copy — a copy too many can be deleted */
+    expect(html('f2')).toMatch(/<p[^>]*>B<\/p><p[^>]*>C<\/p>/)
+    expect(html('f1')).toBe(remote.html)
+    expect(html('f3')).not.toContain('<p>C</p>')
+    expect(useStore.getState().notice?.text).toBe('“f1” changed while the layers moved; check it for a second copy')
+    /* f1's side fell out of the step: undo restores f3 and the destination only */
+    await undo()
+    expect(html('f1')).toBe(remote.html)
+    expect(html('f3')).toBe(other.html)
+    expect(html('f2')).toBe(dest.html)
+  })
+
+  it('lets the move stand for a source whose newer save already dropped the elements', async () => {
+    const source = frameWith('f1', page('<div><p>A</p><p>B</p></div>'))
+    const dest = frameWith('f2', page('<section></section>'))
+    holdCanvas(source, dest)
+    /* the quick edit's save carried B's removal along */
+    const remote = { ...source, html: page('<div><p>A</p></div><footer>edited</footer>'), updatedAt: 9 }
+    updateFrame
+      .mockImplementationOnce(() => Promise.resolve({ ...frameWith('f2', ''), updatedAt: 7 } as Frame))
+      .mockImplementationOnce(() =>
+        Promise.reject(Object.assign(new ApiError(409, '{}'), { status: 409, body: { frame: remote } })),
+      )
+    expect(transferLayers([{ pressed: source, selectors: [P_B] }], dest, { selector: SECTION, place: 'inside' })).toBe(
+      true,
+    )
+    for (let i = 0; i < 6; i++) await Promise.resolve()
+    expect(html('f2')).toMatch(/<p[^>]*>B<\/p>/)
+    expect(html('f1')).toBe(remote.html)
+  })
+
+  it('refuses a locked member, a changed source, and the destination itself', () => {
+    const locked = frameWith('f1', page('<div><p>A</p><p data-doop-locked="true">B</p></div>'))
+    const dest = frameWith('f2', page('<section></section>'))
+    holdCanvas(locked, dest)
+    expect(transferLayers([{ pressed: locked, selectors: [P_B] }], dest, { selector: SECTION, place: 'inside' })).toBe(
+      false,
+    )
+
+    const source = frameWith('f1', page('<div><p>A</p><p>B</p></div>'))
+    holdCanvas(source, dest)
+    useStore.getState().patchFrameLocal('f1', { html: page('<div><p>Z</p></div>') })
+    expect(transferLayers([{ pressed: source, selectors: [P_B] }], dest, { selector: SECTION, place: 'inside' })).toBe(
+      false,
+    )
+
+    holdCanvas(source, dest)
+    expect(
+      transferLayers(
+        [
+          { pressed: source, selectors: [P_B] },
+          { pressed: dest, selectors: [SECTION] },
+        ],
+        dest,
+        {
+          selector: SECTION,
+          place: 'inside',
+        },
+      ),
+    ).toBe(false)
+    expect(updateFrame).not.toHaveBeenCalled()
   })
 })

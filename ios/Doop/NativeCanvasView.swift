@@ -132,15 +132,27 @@ struct NativeCanvasView: View {
             }
             .animation(.snappy(duration: 0.25), value: sidePanel?.id)
             .overlay(alignment: .top) {
-                // A live connection needs no badge; say so only while it is not.
-                if !model.connected {
-                    Label(model.connecting ? "Connecting…" : "Offline", systemImage: model.connecting ? "arrow.triangle.2.circlepath" : "wifi.slash")
-                        .font(.caption).foregroundStyle(.secondary)
-                        .padding(.horizontal, 10).padding(.vertical, 5)
-                        .background(.regularMaterial, in: Capsule())
-                        .padding(.top, 12)
-                        .accessibilityIdentifier("canvas.connectionStatus")
+                VStack(spacing: 6) {
+                    // A live connection needs no badge; say so only while it is not.
+                    if !model.connected {
+                        Label(model.connecting ? "Connecting…" : "Offline", systemImage: model.connecting ? "arrow.triangle.2.circlepath" : "wifi.slash")
+                            .font(.caption).foregroundStyle(.secondary)
+                            .padding(.horizontal, 10).padding(.vertical, 5)
+                            .background(.regularMaterial, in: Capsule())
+                            .accessibilityIdentifier("canvas.connectionStatus")
+                    }
+                    // Agents at work, as the web's WorkingNow pills: tap for the task list.
+                    // With a side rail they sit in the bar beside the canvas name instead.
+                    ForEach(sideRailWidth > 0 ? [] : model.workingAgents) { agent in
+                        Button { sheet = .tasks } label: { WorkingAgentPill(agent: agent) }
+                            .buttonStyle(.plain)
+                            .transition(.move(edge: .top).combined(with: .opacity))
+                    }
                 }
+                .frame(maxWidth: 420)
+                .padding(.horizontal, 64)
+                .padding(.top, 12)
+                .animation(.snappy(duration: 0.25), value: model.workingAgents)
             }
         }
         .background(CanvasBackSwipeGuard())
@@ -158,6 +170,19 @@ struct NativeCanvasView: View {
                     }
                     .accessibilityLabel("Canvas \(model.canvas?.name ?? summary.name), pages")
                     .accessibilityIdentifier("canvas.name")
+                }
+                // Agents at work, level with the name: the first one, and how many more.
+                if let agent = model.workingAgents.first {
+                    // A pill of its own, not merged into the name's glass.
+                    #if compiler(>=6.2)
+                    if #available(iOS 26.0, *) { ToolbarSpacer(.fixed, placement: .topBarLeading) }
+                    #endif
+                    ToolbarItem(placement: .topBarLeading) {
+                        Button { sheet = .tasks } label: {
+                            WorkingAgentLabel(agent: agent, others: model.workingAgents.count - 1)
+                        }
+                        .accessibilityIdentifier("canvas.workingAgent")
+                    }
                 }
             }
             ToolbarItem(placement: .primaryAction) {
@@ -1003,6 +1028,79 @@ private struct PresenceAvatar: View {
                     .font(.caption.weight(.medium)).foregroundStyle(color)
             }
         }.accessibilityHidden(true)
+    }
+}
+
+/// One agent at work and what it is doing: its brand mark, its name and its status,
+/// and the web's twinkling dot matrix, which says the work is underway.
+private struct WorkingAgentPill: View {
+    let agent: WorkingAgent
+    var body: some View {
+        WorkingAgentLabel(agent: agent)
+            .padding(.leading, 10).padding(.trailing, 12).frame(height: 32)
+            .modifier(ComposerGlass(cornerRadius: 16))
+            .contentShape(Capsule())
+            .accessibilityIdentifier("canvas.workingAgent")
+    }
+}
+
+/// What a working pill says; in the bar (side rail) the system draws the glass around it.
+private struct WorkingAgentLabel: View {
+    let agent: WorkingAgent
+    /// Further agents at work, shown as "+N" when the bar has room for one pill only.
+    var others = 0
+    var body: some View {
+        let color = Color(UIColor(hex: agent.color) ?? .systemBlue)
+        HStack(spacing: 7) {
+            ComposerBrandMark(name: agent.name, color: color).frame(width: 14, height: 14)
+            Text(agent.name).font(.footnote.weight(.semibold)).foregroundStyle(.primary).fixedSize()
+            // Truncates to the room it is given; the name, count and matrix keep theirs.
+            Text(agent.status).font(.footnote).foregroundStyle(.secondary).lineLimit(1).truncationMode(.tail)
+                .frame(maxWidth: 320, alignment: .leading)
+            if others > 0 { Text("+\(others)").font(.footnote.weight(.medium)).foregroundStyle(.secondary).fixedSize() }
+            DotMatrix()
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(agent.name): \(agent.status)\(others > 0 ? ", and \(others) more" : "")")
+        .accessibilityHint("Shows agent tasks")
+    }
+}
+
+/// The web's 3×3 "working" matrix (`ui/dot-matrix.tsx`): nine 3 pt dots, each twinkling
+/// on its own offset into a 1.8 s cycle, so it reads as busy rather than as a marching wave.
+struct DotMatrix: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// Each dot's offset into the cycle, in seconds, as on the web.
+    private static let delays: [Double] = [0.9, 0.3, 1.4, 1.1, 0, 0.6, 0.45, 1.6, 0.2]
+    private static let period = 1.8
+    var body: some View {
+        // 20 redraws a second is smooth for a 1.8 s twinkle and far cheaper than every display frame.
+        TimelineView(.periodic(from: .now, by: reduceMotion ? 3600 : 1.0 / 20)) { context in
+            let time = context.date.timeIntervalSinceReferenceDate
+            Grid(horizontalSpacing: 2, verticalSpacing: 2) {
+                ForEach(0..<3, id: \.self) { row in
+                    GridRow {
+                        ForEach(0..<3, id: \.self) { column in
+                            Circle().fill(Color.secondary).frame(width: 3, height: 3)
+                                .opacity(reduceMotion ? 0.3 : Self.opacity(at: time - Self.delays[row * 3 + column]))
+                        }
+                    }
+                }
+            }
+        }
+        .fixedSize()
+        .accessibilityHidden(true)
+    }
+
+    /// The web's `twinkle`: 0.3 at rest, up to 1 at 20% of the cycle, back to 0.3 by 70%,
+    /// each step eased in and out.
+    static func opacity(at time: Double) -> Double {
+        let phase = time.truncatingRemainder(dividingBy: period) / period
+        let p = phase < 0 ? phase + 1 : phase
+        let ease = { (t: Double) in t * t * (3 - 2 * t) }
+        if p < 0.2 { return 0.3 + 0.7 * ease(p / 0.2) }
+        if p < 0.7 { return 1 - 0.7 * ease((p - 0.2) / 0.5) }
+        return 0.3
     }
 }
 

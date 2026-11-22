@@ -71,7 +71,13 @@ import {
 import { canvasRole } from './access.ts'
 import { roleAllows } from '../shared/canvasRole.ts'
 import { canvasesFor } from './workspaces.ts'
-import { previewFrame } from './componentPreview.ts'
+import {
+  PreviewQueryError,
+  previewCombinations,
+  previewDescription,
+  previewFrame,
+  previewProps,
+} from './componentPreview.ts'
 import { prototypeReport, setPrototypeStart } from './prototypeTools.ts'
 import {
   describeInspiration,
@@ -1407,8 +1413,7 @@ const TOOLS: Anthropic.Tool[] = [
   },
   {
     name: 'generate_image',
-    description:
-      "Generate an image from a text prompt with AI and get a permanent URL to embed, plus a preview to judge. For visuals stock search cannot supply: brand-specific illustration, product renders, mascots, abstract hero art in the frame's exact palette. Prefer search_images for ordinary photography. It spends the requester's ChatGPT quota or OpenAI money and takes 20–60 seconds, so write ONE considered prompt (subject, style, composition, palette hexes, lighting, what to leave out) and refine a near miss by prompt.",
+    description: `Generate an image from a text prompt with AI and get a permanent URL to embed, plus a preview to judge. ${imageGen.IMAGE_PROVIDER_NOTE} For visuals stock search cannot supply: brand-specific illustration, product renders, mascots, abstract hero art in the frame's exact palette. Prefer search_images for ordinary photography. It spends the requester's quota or money and takes 20–60 seconds, so write ONE considered prompt (subject, style, composition, palette hexes, lighting, what to leave out) and refine a near miss by prompt.`,
     input_schema: {
       type: 'object',
       properties: {
@@ -1543,8 +1548,8 @@ const TOOLS: Anthropic.Tool[] = [
       properties: {
         decision: {
           type: 'string',
-          description:
-            'The decision and its reason, e.g. "Followed oatside-soft-shelf: its candlelit warmth suits an evening grocery brand better than the bright, clinical set"',
+          maxLength: MAX_DECISION_CHARS,
+          description: `The decision and its reason, at most ${MAX_DECISION_CHARS} characters; split longer feedback into separate calls by topic. E.g. "Followed oatside-soft-shelf: its candlelit warmth suits an evening grocery brand better than the bright, clinical set"`,
         },
       },
       required: ['decision'],
@@ -1857,13 +1862,10 @@ for (const tool of COMPONENT_TOOLS) {
 }
 TOOLS.push({
   name: 'screenshot_component',
-  description:
-    'Render a component in every combination of its enum props and see it. Look at it after creating or changing a component.',
-  input_schema: {
-    type: 'object',
-    properties: { component: { type: 'string', description: 'Component name or id' } },
-    required: ['component'],
-  },
+  description: previewDescription,
+  input_schema: zodToJsonSchema(
+    z.object({ component: z.string(), props: previewProps }),
+  ) as Anthropic.Tool['input_schema'],
 })
 
 function canReadCanvas(userId: string, canvasId: string): boolean {
@@ -2761,8 +2763,16 @@ async function runResidentTool(
       case 'screenshot_component': {
         const def = findComponent(canvasId, String(input.component ?? ''))
         if (!def) return fail(`no component "${String(input.component)}" on this canvas`)
-        if (!runState.vision) return ok('Preview skipped: the selected model cannot view images.')
-        return ok(await frameImageBlocks(previewFrame(canvasId, def)))
+        const props = previewProps.safeParse(input.props)
+        if (!props.success) return fail(props.error.message)
+        try {
+          const combos = previewCombinations(def, props.data)
+          if (!runState.vision) return ok('Preview skipped: the selected model cannot view images.')
+          return ok(await frameImageBlocks(previewFrame(canvasId, def, combos)))
+        } catch (e) {
+          if (e instanceof PreviewQueryError) return fail(e.message)
+          throw e
+        }
       }
       default: {
         if (!COMPONENT_TOOL_NAMES.includes(block.name)) return fail(`unknown tool ${block.name}`)

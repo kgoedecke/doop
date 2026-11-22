@@ -43,8 +43,10 @@ const { store } = await import('../server/store.ts')
 
 const agent: Actor = { name: 'Claude', kind: 'agent', color: '#e5533c' }
 const DESIGN = `<!doctype html><html><head></head><body><h1 style="font-family:'Brand Sans'">Hi</h1>`
-/* a stream with no head or body tag yet: nothing can be placed until it ends */
+/* a fragment: create_frame takes one, and agents stream one */
 const FRAGMENT = `<h1 style="font-family:'Brand Sans'">Hi</h1>`
+/* a document with no head or body tag yet: nothing can be placed until one arrives */
+const HEADLESS = `<!doctype html><html lang="en">${FRAGMENT}`
 
 /* what open canvases are sent: the frame HTML each frame:updated carried */
 const sent: { frameId: string; html: string }[] = []
@@ -105,10 +107,25 @@ describe('library faces on frame writes', () => {
     expect(store.getFrame(frame.id)!.html.split(BRAND.url)).toHaveLength(2)
   })
 
+  it('adds them from the first chunk of a streamed fragment, once', () => {
+    const canvasId = store.createCanvas('fonts', 'kevin').id
+    const frame = actions.createFrame(canvasId, { name: 'Hero' }, agent)!
+    sent.length = 0
+    actions.appendFrameHtml(frame.id, `<style>h1{margin:0}</style>${FRAGMENT}`, agent, { start: true })
+    expect(store.getFrame(frame.id)!.html).toContain(BRAND.url)
+    expect(sent.at(-1)?.html).toContain(BRAND.url)
+    actions.appendFrameHtml(frame.id, `<p style="font-family: 'Space Grotesk'">x</p>`, agent)
+    expect(store.getFrame(frame.id)!.html.split('data-doop-webfonts')).toHaveLength(2)
+    actions.appendFrameHtml(frame.id, '<footer>end</footer>', agent, { done: true })
+    const saved = store.getFrame(frame.id)!.html
+    expect(saved.split(BRAND.url)).toHaveLength(2)
+    expect(saved.split('data-doop-webfonts')).toHaveLength(2)
+  })
+
   it('adds them when an unfinished stream goes idle', () => {
     const canvasId = store.createCanvas('fonts', 'kevin').id
     const frame = actions.createFrame(canvasId, { name: 'Hero' }, agent)!
-    actions.appendFrameHtml(frame.id, FRAGMENT, agent, { start: true })
+    actions.appendFrameHtml(frame.id, HEADLESS, agent, { start: true })
     expect(store.getFrame(frame.id)!.html).not.toContain(BRAND.url)
     sent.length = 0
     vi.advanceTimersByTime(31_000)
@@ -120,7 +137,7 @@ describe('library faces on frame writes', () => {
   it('never sends viewers a script the stream left unfinished', () => {
     const canvasId = store.createCanvas('fonts', 'kevin').id
     const frame = actions.createFrame(canvasId, { name: 'Hero' }, agent)!
-    actions.appendFrameHtml(frame.id, `${FRAGMENT}<script>document.body.innerHTML = ''; // and then`, agent, {
+    actions.appendFrameHtml(frame.id, `${HEADLESS}<script>document.body.innerHTML = ''; // and then`, agent, {
       start: true,
     })
     sent.length = 0

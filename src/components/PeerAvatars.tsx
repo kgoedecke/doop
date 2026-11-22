@@ -1,7 +1,6 @@
 import type { CSSProperties } from 'react'
 import type { Presence } from '../../shared/types'
 import { useStore } from '../lib/store'
-import { locatePresence } from '../lib/locate'
 import { Avatar } from './ui/avatar'
 import { cn } from '@/lib/utils'
 import { useT, type Translate } from '../lib/i18n'
@@ -29,9 +28,10 @@ export function PresenceFace(props: {
 }
 
 /** The other people and agents on the canvas, as faces in the presence
- *  stack. A person's face is a toggle: click to follow their camera around,
- *  click again to let go. An agent's face jumps the camera to the frame it is
- *  working on. The stack is a fixed roster — working agents glaze in place. */
+ *  stack. Every face is a toggle: click to follow, click again to let go. A
+ *  person is followed by their camera; an agent to the frame it works on, and
+ *  on through its idle spells (FollowFrame keeps it named while it is out of
+ *  the stack). The stack is a fixed roster — working agents glaze in place. */
 export function PeerAvatars({ others }: { others: Presence[] }) {
   /* the second, third… active agent offsets its sweep so they alternate */
   let glazed = 0
@@ -39,11 +39,7 @@ export function PeerAvatars({ others }: { others: Presence[] }) {
     <>
       {others.map((p) => {
         const glazeDelay = isActiveAgent(p) ? (glazed++ % 2) * 1.3 : 0
-        return p.kind === 'user' ? (
-          <FollowAvatar key={p.clientId} presence={p} />
-        ) : (
-          <JumpAvatar key={p.clientId} presence={p} glazeDelay={glazeDelay} />
-        )
+        return <FollowAvatar key={p.clientId} presence={p} glazeDelay={glazeDelay} />
       })}
     </>
   )
@@ -63,17 +59,23 @@ function presenceLabel(p: Presence, t: Translate) {
   return `${p.name}${p.kind === 'agent' ? ` (${agent})` : ''}${p.status ? ` — ${p.status}` : ''}`
 }
 
-function FollowAvatar({ presence: p }: { presence: Presence }) {
+function FollowAvatar({ presence: p, glazeDelay }: { presence: Presence; glazeDelay: number }) {
   const t = useT()
   const followed = useStore((s) => s.following === p.clientId)
   const setFollowing = useStore((s) => s.setFollowing)
+  const active = isActiveAgent(p)
+  const title = followed
+    ? t('canvas.stopFollowing', { name: p.name })
+    : p.kind === 'agent'
+      ? t('canvas.followAgent', { label: presenceLabel(p, t) })
+      : t('canvas.followAround', { name: p.name })
   return (
     <button
       type="button"
       /* lifted so the next avatar in the stack does not paint over the halo */
-      className={cn(stacked, clickable, followed && 'relative z-10')}
+      className={cn(stacked, clickable, 'relative', active && 'z-[2]', followed && 'z-10')}
       aria-pressed={followed}
-      title={followed ? t('canvas.stopFollowing', { name: p.name }) : t('canvas.followAround', { name: p.name })}
+      title={title}
       onClick={() => setFollowing(followed ? null : p.clientId)}
     >
       <PresenceFace
@@ -82,41 +84,11 @@ function FollowAvatar({ presence: p }: { presence: Presence }) {
         color={p.color}
         kind={p.kind}
         brand={p.brand}
+        glaze={active}
+        glazeDelay={glazeDelay}
         /* a halo in their colour marks who we are following */
         style={followed ? { boxShadow: `0 0 0 2px var(--surface), 0 0 0 3.5px ${p.color}` } : undefined}
       />
-    </button>
-  )
-}
-
-function JumpAvatar({ presence: p, glazeDelay }: { presence: Presence; glazeDelay: number }) {
-  const t = useT()
-  const locatable = useStore((s) => locatePresence(p, s) !== undefined)
-  const active = isActiveAgent(p)
-  const face = (
-    <PresenceFace name={p.name} color={p.color} kind={p.kind} brand={p.brand} glaze={active} glazeDelay={glazeDelay} />
-  )
-  if (!locatable) {
-    return (
-      <span className={cn(stacked, 'relative', active && 'z-[2]')} title={presenceLabel(p, t)}>
-        {face}
-      </span>
-    )
-  }
-  return (
-    <button
-      type="button"
-      className={cn(stacked, clickable, 'relative', active && 'z-[2]')}
-      title={t('canvas.goWhereWorking', { label: presenceLabel(p, t) })}
-      onClick={() => {
-        const s = useStore.getState()
-        const at = locatePresence(p, s)
-        if (!at) return
-        if ('frameId' in at) s.requestFlyTo(at.frameId)
-        else s.requestFlyToPoint(at.point.x, at.point.y)
-      }}
-    >
-      {face}
     </button>
   )
 }

@@ -44,25 +44,36 @@ type CssNode =
   | { kind: 'group'; prelude: string; nodes: CssNode[] }
   | { kind: 'atomic'; name: string; text: string; prelude: string; body: string }
 
-/** The end of a block whose `{` sits at `open`, skipping strings. */
+/** The end of a block whose `{` sits at `open`, skipping strings and escapes. An escaped
+ *  quote or brace (Tailwind's `\'` in `[class*='size-']`) is part of a name, not a string.
+ *  -1 when the block never closes. */
 function blockEnd(css: string, open: number): number {
   let depth = 0
   let quote = ''
   for (let i = open; i < css.length; i++) {
     const char = css[i]
-    if (quote) {
-      if (char === '\\') i++
-      else if (char === quote) quote = ''
+    if (char === '\\') i++
+    else if (quote) {
+      if (char === quote) quote = ''
     } else if (char === '"' || char === "'") quote = char
     else if (char === '{') depth++
     else if (char === '}' && --depth === 0) return i
   }
-  return css.length
+  return -1
 }
 
-function parseCss(source: string): CssNode[] {
+interface ReadCss {
+  nodes: CssNode[]
+  /** The first place reading went wrong, to the end of the sheet: text outside any rule
+   *  (skipped), or a block or string never closed (everything after it folded into it). */
+  unread: string | null
+}
+
+function readCss(source: string): ReadCss {
   const css = source.replace(/\/\*[\s\S]*?\*\//g, '')
   const nodes: CssNode[] = []
+  let unread: string | null = null
+  const note = (from: number) => (unread ??= css.slice(from).trim() || null)
   let at = 0
   while (at < css.length) {
     let open = -1
@@ -70,9 +81,9 @@ function parseCss(source: string): CssNode[] {
     let quote = ''
     for (let i = at; i < css.length; i++) {
       const char = css[i]
-      if (quote) {
-        if (char === '\\') i++
-        else if (char === quote) quote = ''
+      if (char === '\\') i++
+      else if (quote) {
+        if (char === quote) quote = ''
       } else if (char === '"' || char === "'") quote = char
       else if (char === '{') {
         open = i
@@ -86,23 +97,48 @@ function parseCss(source: string): CssNode[] {
       const text = css.slice(at, semi).trim()
       if (text.startsWith('@'))
         nodes.push({ kind: 'atomic', name: atName(text), text: `${text};`, prelude: '', body: '' })
+      else if (text) note(at)
       at = semi + 1
       continue
     }
-    if (open === -1) break
-    const end = blockEnd(css, open)
+    if (open === -1) {
+      note(at)
+      break
+    }
+    const closed = blockEnd(css, open)
+    /* never closed: like a browser, the block runs to the end, but whatever followed it
+       (the rest of the sheet, behind an unclosed string) is read as part of it */
+    const end = closed === -1 ? css.length : closed
     const prelude = css.slice(at, open).trim()
     const body = css.slice(open + 1, end)
     if (prelude.startsWith('@')) {
       const name = atName(prelude)
-      if (GROUP_AT_RULES.has(name)) nodes.push({ kind: 'group', prelude, nodes: parseCss(body) })
-      else nodes.push({ kind: 'atomic', name, text: `${prelude}{${body}}`, prelude, body })
+      if (GROUP_AT_RULES.has(name)) {
+        const inner = readCss(body)
+        nodes.push({ kind: 'group', prelude, nodes: inner.nodes })
+        unread ??= inner.unread
+      } else nodes.push({ kind: 'atomic', name, text: `${prelude}{${body}}`, prelude, body })
     } else if (prelude) {
       nodes.push({ kind: 'rule', selector: prelude, body })
     }
+    if (closed === -1) note(at)
     at = end + 1
   }
-  return nodes
+  return { nodes, unread }
+}
+
+function parseCss(source: string): CssNode[] {
+  return readCss(source).nodes
+}
+
+const UNREAD_EXCERPT = 120
+
+/** Where a stylesheet stops reading as its author meant, as an excerpt, or null when it reads
+ *  cleanly. What follows may be lost, so its author should hear about it. */
+export function unreadCss(sheet: string): string | null {
+  const { unread } = readCss(sheet)
+  if (!unread) return null
+  return unread.length > UNREAD_EXCERPT ? `${unread.slice(0, UNREAD_EXCERPT)}…` : unread
 }
 
 function atName(prelude: string): string {

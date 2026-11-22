@@ -385,6 +385,16 @@ export function keepTransferDestination(entry: HistoryEntry) {
   if (entry.type === 'transfer') entry.entries = entry.entries.slice(0, -1)
 }
 
+/* one side of a transfer: the frame's new html, its creation, or — after
+   null — its deletion */
+function movedEntry(before: Frame | null, after: Frame | null): Entry {
+  if (after)
+    return before
+      ? updateEntry(after.id, { html: before.html }, { html: after.html })!
+      : { type: 'create', frameId: after.id, snapshot: snapshot(after) }
+  return { type: 'delete', frameId: before!.id, snapshot: snapshot(before!) }
+}
+
 export function recordDrawingTransfer(
   destination: { before: Frame | null; after: Frame },
   source: { before: Frame; after: Frame | null },
@@ -393,18 +403,42 @@ export function recordDrawingTransfer(
    *  it comes back */
   stack?: { before: StackWrite[]; after: StackWrite[] },
 ): HistoryEntry {
-  const added: Entry = destination.before
-    ? updateEntry(destination.after.id, { html: destination.before.html }, { html: destination.after.html })!
-    : { type: 'create', frameId: destination.after.id, snapshot: snapshot(destination.after) }
-  const removed: Entry = source.after
-    ? updateEntry(source.before.id, { html: source.before.html }, { html: source.after.html })!
-    : { type: 'delete', frameId: source.before.id, snapshot: snapshot(source.before) }
   const canvasId = source.before.canvasId
-  const entries: Entry[] = [added, removed]
+  const entries: Entry[] = [movedEntry(destination.before, destination.after), movedEntry(source.before, source.after)]
   if (stack?.after.length) entries.unshift({ type: 'stack', canvasId, before: stack.before, after: stack.after })
   const entry: Entry = { type: 'transfer', canvasId, entries }
   push(entry)
   return entry
+}
+
+/** Layers moved between frames as one undo step: the destination's new
+ *  html first, then each source's change — a shell's delete. Undo runs
+ *  them reversed, so the sources are whole again before the destination
+ *  loses the elements. */
+export function recordLayersTransfer(
+  destination: { before: Frame; after: Frame },
+  sources: { before: Frame; after: Frame | null }[],
+): HistoryEntry {
+  const entry: Entry = {
+    type: 'transfer',
+    canvasId: destination.before.canvasId,
+    entries: [
+      movedEntry(destination.before, destination.after),
+      ...sources.map((source) => movedEntry(source.before, source.after)),
+    ],
+  }
+  push(entry)
+  return entry
+}
+
+/** One source of a layers transfer never left (a save to it won): its
+ *  child entry comes out, so undo writes nothing over the newer save. The
+ *  destination's child, first in the list, is not a source's. */
+export function dropTransferSource(entry: HistoryEntry, frameId: string) {
+  if (entry.type !== 'transfer') return
+  entry.entries = entry.entries.filter(
+    (e, i) => i === 0 || !((e.type === 'update' || e.type === 'delete') && e.frameId === frameId),
+  )
 }
 
 /** A canvas shape's shell rewritten in place (shapes grouped into it, or
@@ -450,13 +484,36 @@ export function noteSaved(entry: HistoryEntry, frame: Frame) {
   }
 }
 
+/** A frame dragged around canvas shapes: it was created with them already
+ *  inside, and their shells went — one guarded step, like a shell rewrite
+ *  but with nothing rewritten (the frame is new). */
+export function recordFrameAround(frame: Frame, removed: Frame[]): HistoryEntry {
+  const entry: Entry = {
+    type: 'transfer',
+    canvasId: frame.canvasId,
+    guarded: true,
+    entries: [
+      { type: 'create', frameId: frame.id, snapshot: snapshot(frame), version: frame.updatedAt },
+      ...removed.map((f): Entry => ({ type: 'delete', frameId: f.id, snapshot: snapshot(f) })),
+    ],
+  }
+  push(entry)
+  return entry
+}
+
 /** A shell a rewrite could not delete (a save to it won): the step no
- *  longer deletes it, and redoes the host as it was saved without it. */
+ *  longer deletes it, and redoes the host as it was saved without it. When
+ *  the step created its host rather than rewriting one, the create's
+ *  snapshot carries the shell-less html instead. */
 export function keepShell(entry: HistoryEntry, frameId: string, hostAfter: Patch) {
   if (entry.type !== 'transfer') return
   entry.entries = entry.entries.filter((e) => e.type !== 'delete' || e.frameId !== frameId)
   const update = entry.entries.find((e) => e.type === 'update')
   if (update?.type === 'update') update.after = { ...update.after, ...hostAfter }
+  else {
+    const created = entry.entries.find((e) => e.type === 'create')
+    if (created?.type === 'create') created.snapshot = { ...created.snapshot, ...hostAfter }
+  }
 }
 
 /** A page duplicated together with its frames: one undo step that removes

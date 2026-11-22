@@ -448,9 +448,15 @@ export function useElementMove(frame: Frame, layoutZoom: number) {
            travel turned back by the frame's rotation; the pointer likewise */
         const travel = rotateVector({ x: rect.x - bounds.x, y: rect.y - bounds.y }, -(frame.rotation ?? 0))
         const pointer = frameDesignPoint(point, frame)
+        /* a dragged layer lands on whole design px, as a design tool places
+           one: the pointer at a fractional zoom is never a place anyone
+           means. An axis the drag did not move (Shift holds it) keeps its
+           value, and align and distribute, which move layers through the
+           same edit, keep exact placement */
+        const onGrid = (from: number, by: number) => (by === 0 ? from : Math.round(from + by))
         layerPoint = {
-          x: layer.rect.x + travel.x,
-          y: layer.rect.y + travel.y,
+          x: onGrid(layer.rect.x, travel.x),
+          y: onGrid(layer.rect.y, travel.y),
           pointerX: pointer.x - contentOffset.x,
           pointerY: pointer.y - contentOffset.y,
         }

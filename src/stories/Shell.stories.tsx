@@ -3,6 +3,7 @@ import type { CanvasMeta, WorkspaceSummary } from '../../shared/types'
 import { AppRail, railLayout } from '@/components/AppRail'
 import { CanvasSearchModal } from '@/components/CanvasSearchModal'
 import { UpdateCardView } from '@/components/UpdateCard'
+import { StarCardView } from '@/components/StarCard'
 import { IosAppSheet, NativeAppCardView } from '@/components/NativeAppPromo'
 import {
   DashContent,
@@ -130,6 +131,16 @@ export const UpdateAvailable: Story = {
     <div className="flex gap-6 p-6">
       <UpdateCardView version="0.11.0" onRestart={() => {}} onLater={() => {}} />
       <UpdateCardView version="0.11.0" restarting onRestart={() => {}} onLater={() => {}} />
+    </div>
+  ),
+}
+
+/** Home's ask for a GitHub star, once someone has used Doop on a few days. */
+export const GithubStar: Story = {
+  name: 'GitHub star ask',
+  render: () => (
+    <div className="p-6">
+      <StarCardView onLater={() => {}} onDismiss={() => {}} />
     </div>
   ),
 }

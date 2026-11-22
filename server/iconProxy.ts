@@ -81,10 +81,13 @@ export async function serveIcon(req: Request, res: Response) {
   await sendCopy(res, icons.get(upstream), 'public, max-age=604800')
 }
 
-const HOTLINK = /https:\/\/api\.iconify\.design\/([a-z0-9-]+)\/([a-z0-9-]+\.svg)/g
+/* the slash form and Iconify's colon form (`mdi:home.svg`); a query stays as written */
+const HOTLINK = /https:\/\/api\.iconify\.design\/([a-z0-9-]+)[/:]([a-z0-9-]+\.svg)/g
 
-/** A frame's Iconify hotlinks pointed at Doop's copies, for a renderer: frames written
- *  before search_icons handed out Doop URLs keep their links, and render like new ones. */
+/** A frame's Iconify hotlinks pointed at Doop's copies. Every frame write applies it
+ *  (server/canvasFaces.ts), so viewers' browsers never burst api.iconify.design, which
+ *  answers a burst with 429 and leaves icons blank until a reload; renderers apply it
+ *  too, for frames written before. */
 export function withHostedIcons(html: string): string {
   return html.includes('api.iconify.design')
     ? html.replace(
@@ -92,4 +95,38 @@ export function withHostedIcons(html: string): string {
         (_link, prefix: string, file: string) => `${env.BETTER_AUTH_URL}/icons/iconify/${prefix}/${file}`,
       )
     : html
+}
+
+/* a Doop icon link as frame HTML spells it, query included (an attribute's may be `&amp;`-encoded) */
+const HOSTED_LINK = /\/icons\/iconify\/([a-z0-9-]+)\/([a-z0-9-]+\.svg)((?:\?[^\s"'<>()\\]*)?)/g
+/** Background fetches for every write on this server together: the route keeps the rest of
+ *  its fetch slots for viewers, and a write past the queue's length warms nothing more. */
+const WARM_AT_ONCE = 2
+const MAX_WARM_QUEUE = 512
+const warmQueue = new Set<string>()
+let warming = 0
+
+async function drainWarmQueue() {
+  warming++
+  try {
+    for (let url = warmQueue.values().next().value; url; url = warmQueue.values().next().value) {
+      warmQueue.delete(url)
+      await iconSvg(url).catch(() => null)
+    }
+  } finally {
+    warming--
+  }
+}
+
+/** Start fetching the icons a saved frame links, so they are in the bucket before anyone
+ *  opens it. Fire and forget: whatever is not warmed is fetched by the first viewer instead. */
+export function warmHostedIcons(html: string): void {
+  if (!html.includes('/icons/iconify/')) return
+  for (const [, prefix, file, query] of html.matchAll(HOSTED_LINK)) {
+    if (warmQueue.size >= MAX_WARM_QUEUE) break
+    const params = new URLSearchParams((query ?? '').slice(1).replace(/&amp;/gi, '&'))
+    const upstream = upstreamFor(prefix!, file!, Object.fromEntries(params))
+    if (upstream) warmQueue.add(upstream)
+  }
+  while (warming < WARM_AT_ONCE && warmQueue.size) void drainWarmQueue()
 }

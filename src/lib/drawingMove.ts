@@ -69,7 +69,8 @@ export function drawingDropFrame(point: Point, sourceId?: string): Frame | null 
   return hit && !hit.locked ? hit : null
 }
 
-const round = (n: number) => Math.round(n * 100) / 100
+/** a placed layer sits on whole pixels */
+const round = (n: number) => Math.round(n)
 
 export function placeDrawing(
   el: HTMLElement | SVGSVGElement,
@@ -82,8 +83,8 @@ export function placeDrawing(
   const style = el.style
   for (const [key, value] of Object.entries(geometry?.styles ?? {})) style.setProperty(key, value)
   style.position = 'absolute'
-  style.left = `${(frame ? rect.x - frame.x - origin.x : 0) - (geometry?.offsetX ?? 0)}px`
-  style.top = `${(frame ? rect.y - frame.y - origin.y : 0) - (geometry?.offsetY ?? 0)}px`
+  style.left = `${round((frame ? rect.x - frame.x - origin.x : 0) - (geometry?.offsetX ?? 0))}px`
+  style.top = `${round((frame ? rect.y - frame.y - origin.y : 0) - (geometry?.offsetY ?? 0))}px`
   const fillsBox =
     !geometry ||
     (geometry.width === rect.width &&
@@ -118,10 +119,13 @@ export function drawingPreview(sourceHtml: string, path: string, el: Element): s
 export function moveDrawing(
   pressed: Frame,
   selector: string | undefined,
-  rect: DrawingRect,
+  dropped: DrawingRect,
   targetId?: string,
   hit?: DrawingHit,
 ): Promise<string | undefined> {
+  /* where it was let go, on whole pixels: the pointer at a fractional zoom
+     is never a place anyone means; its size is its own and stays */
+  const rect = { ...dropped, x: Math.round(dropped.x), y: Math.round(dropped.y) }
   let landed: string | undefined
   const save = async () => {
     /* where the destination's body places absolute layers from, asked before
@@ -183,7 +187,7 @@ export function moveDrawing(
     }
     if (standalone && !target) {
       const position = hit
-        ? { x: rect.x - hit.rect.x, y: rect.y - hit.rect.y, width: source.width, height: source.height }
+        ? { x: round(rect.x - hit.rect.x), y: round(rect.y - hit.rect.y), width: source.width, height: source.height }
         : rect
       const saved = await conditional(source, api.updateFrame(source.id, position, source.updatedAt))
       updateLocal(saved)

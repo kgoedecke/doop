@@ -83,16 +83,18 @@ describe('the existing style of a canvas', () => {
     expect(brief).toContain('#e5533c (3 frames)')
     expect(brief).toContain('Inter (3 frames)')
     expect(brief).toContain('create_tokens')
-    expect(brief).toContain('no replace_matching')
+    expect(brief).toContain('Do not rewrite the existing frames')
+    expect(brief).not.toContain('replace_matching')
     expect(existingStyleBrief(style, { tokens: true })).not.toContain('create_tokens')
   })
 })
 
 describe('the guide on adding to an established canvas', () => {
-  it('turns established frames into tokens and keeps replace_matching for an asked-for clean-up', () => {
+  it('turns established frames into tokens and keeps rewriting the pages for an asked-for clean-up', () => {
     expect(DESIGN_BRIEF).toContain("get_canvas's existingStyle lists the colours")
     expect(DESIGN_BRIEF).toContain('Leave the existing frames as they are unless asked')
     expect(COMPONENTS).toContain('make the block a component from one existing copy')
-    expect(COMPONENTS).toContain('use it when the human asked for that\n  clean-up')
+    expect(COMPONENTS).toContain('do it\n  when the human asked for that clean-up')
+    expect(COMPONENTS).not.toContain('replace_matching')
   })
 })

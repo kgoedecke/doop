@@ -89,8 +89,11 @@
   them itself; the renderer (`loadFrameInto`) also points a frame's existing Iconify and Pexels
   hotlinks at Doop before loading it; `hostedIconSvg` and `hostedPhoto` read both in-process,
   since a private `BETTER_AUTH_URL` is refused by `fetchRemote`. Pexels' licence
-  allows rehosting; arbitrary hotlinked images are never copied. Tests: `iconProxy.test.ts`,
-  `photoProxy.test.ts`.
+  allows rehosting; arbitrary hotlinked images are never copied. Every frame write also points
+  Iconify hotlinks (slash or colon form) at Doop (`withHostedIcons` in `withCanvasFaces`, and on a
+  stream's healed partials) and starts fetching the copies two at a time (`warmHostedIcons`), since
+  viewers' browsers loading a canvas full of hotlinked icons drew a 429 from Iconify and left icons
+  blank until a reload. Tests: `iconProxy.test.ts`, `photoProxy.test.ts`, `iconFrameWrites.test.ts`.
 - Where frame CSS goes (`FRAME_STYLES` in `server/guide.ts`): agents are asked to style an element
   in its own `style` attribute, which is what the editor reads and writes, and to keep a `<style>`
   block for what an attribute cannot say (keyframes, font faces, `:root` custom properties, states,
@@ -344,8 +347,9 @@
   A frame stays self-contained: `withFontFaces` adds the `@font-face` rules for the library
   families its CSS names to one `<style data-doop-fonts>` block in its own HTML (only adds, never
   removes). `actions.createFrame` / `updateFrame` / every append chunk run it on every write
-  (`withCanvasFaces` in `server/canvasFaces.ts`; mid-stream once a complete `<head>` or `<body>`
-  tag has arrived, so the first section's screenshot already has its fonts and tokens),
+  (`withCanvasFaces` in `server/canvasFaces.ts`; mid-stream a fragment from its first chunk, a
+  document once a complete `<head>` or `<body>` tag has arrived (`streamTopSettled`), so the
+  first section's screenshot already has its fonts and tokens),
   and `FrameView`'s save path runs it too, so a family picked from the Design panel's "Custom
   fonts" group renders at once. Every renderer that reads frame HTML (screenshots, PDF
   export, iOS) gets the font that way. Agents see the library as `fonts` plus a note in
@@ -479,7 +483,8 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   `frameExport.test.ts`. Scale and format (`shared/exportScale.ts`, `src/lib/exportSettings.ts`,
   `ExportOptions.tsx`): the Inspector's Export group and the Export… dialog (frames, and elements
   from their menu) pick 0.5x / 1x / 2x / 3x / 4x or a typed multiplier (0.1-4, two decimals) and
-  PNG / JPG / SVG, remembered per browser under `doop:export-settings` (2x PNG by default) and
+  PNG / JPG / SVG (the frame Inspector adds PDF, the server's vector print of that frame; a layer
+  reads a PDF pick as PNG, `elementFormat`), remembered per browser under `doop:export-settings` (2x PNG by default) and
   named `Name@2x.png` as Figma does. Up to 2x a scale is honoured as before; above it,
   `fitExportScale` brings a huge frame down to 16,384 px a side and 64 MP, the same limit
   for the browser render, `/i/<id>.png?scale=` (any parsed scale, 1x when unreadable) and MCP
@@ -505,6 +510,11 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   runs a health probe outside the gate and is retried once if the probe kills the browser; a
   browser is recycled after 500 pages or an hour. DevTools commands time out at 60s, not 180s.
   Screenshots are capped at 50M device px (`server/renderLimits.ts`; MCP says when it cropped).
+  Every render waits for its fonts before capturing (`settleFonts` in `server/renderFonts.ts`,
+  for `/i/`, MCP screenshots, inspection and PDF export): `load` does not cover a face from a
+  linked stylesheet (a frame's Google Fonts link), which layout requests only after it, so the
+  page is laid out to start those loads and `document.fonts.ready` is awaited, at most 5s, before
+  the capture proceeds with whatever loaded. Tests: `screenshotFonts.test.ts`.
   `GET /healthz/renderer` reports the counters (`kills`, `lastOpenedAt`, `failedOpensInARow`,
   queue depth) for an uptime check. Context: the 2026-11-05 wedge, where one browser stopped
   making pages for two hours. Tests: `renderBrowser.test.ts`.
@@ -546,7 +556,7 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   queue. Inside an open transaction `transaction` / `atomic` is a savepoint; the frame, token and
   component actions are `atomic`, so one called outside any operation (a job, a timer) is still
   all-or-nothing. `checkpoint()` is a sub-commit, for partial progress that is meant to stay
-  (`replace_matching` per frame, a pulled component of an import, each canvas of
+  (a pulled component of an import, each canvas of
   `update_library_everywhere`) and before an await that depends on committed work (the element-id
   stamp's durable write). No isolation: an undo restores only what is still its own write (a
   frame's `updatedAt`, a definition's identity). Presence touches are never queued.
@@ -616,6 +626,13 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   fly-tos fit into the stage area the top bar and floating panels leave open: `CanvasPage` passes
   `Stage` the `insets` its chrome covers and `fitBox` (`src/lib/viewFit.ts`) centres there.
   Tests: `viewFit.test.ts`, `fitSelectionBrowser.test.ts`.
+- Following (`src/lib/follow.ts`, the loop in `Stage.tsx`, `FollowFrame.tsx`): every face in the
+  presence stack is a toggle. A person is followed by their camera (`cameraToFollow`). An agent is
+  followed to the frame it works on (`agentFollowFrame`, by `locatePresence`), fitted into the open
+  stage, onto its page first, and again whenever that frame changes, moves or grows. Agents leave
+  the roster whenever they go idle and come back as the same `agent:<name>` clientId, so an agent
+  follow outlives that (`followedAgent` keeps it named; the pill says it is idle) and ends only on a
+  camera move of our own, Esc, the pill's ✕ or another canvas. Tests: `follow.test.ts`.
 - View options (`src/lib/viewOptions.ts`, per browser under `doop:view-options`): the zoom pill's
   menu opens on a field for a typed level (`150`, `150%`; `parseZoomPercent`) and switches the
   pixel grid (⇧'), other people's cursors (⌘⌥\ / Ctrl+Alt+\) and the comment pins (⇧C), each read
@@ -674,6 +691,11 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   palette (`CommandPalette.tsx`, cmdk through `ui/command.tsx`; text that names no command goes to
   the agent's composer as a prompt), the main menu off the bar's Doop mark (`MainMenu.tsx`: Go to files, then File,
   Edit, View, Object, Text, Arrange, Help) and the ⌃⇧? sheet (`ShortcutsSheet.tsx`) all read it.
+  The layer right-click menu (`ElementContextMenu.tsx`) is mostly registry rows (`ActionMenuItem.tsx`),
+  ordered as Figma's and Paper's (select, clipboard with a Copy/Paste as submenu, structure, stacking,
+  flip, visibility); a right-click inside a multi-pick keeps it. A Layers row opens the same menu the canvas
+  does (a shape's row too), and Rename from a canvas menu opens that row's name field (`renameRequest`). Frames and standalone shapes get Move to
+  page (`MoveToPageMenu`). ⌘L copies a link and ⇧⌘C a PNG of the selection.
   `CanvasPage` lends the registry its modals and panels as the `ActionHost`. Chords (`chords.ts`)
   are `mod` (⌘ on a Mac, Ctrl elsewhere), ⌥ chords by `code`, `macOnly` / `notMac` per platform (⌘Y
   is outlines on a Mac, redo elsewhere), `global` for the two that act from fields (⌘K palette, ⌘/
@@ -845,6 +867,17 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   anywhere else on it moves the value by the share of the width travelled (never jumping to the
   pointer); a click still types, mouse and pen only. Tests: `inspectorScrub.test.tsx`,
   `valueSlide.test.tsx`.
+- Frame fill (`FrameFillSection` in `Inspector.tsx`, `rootFill` in `frameRuntime.ts`): the frame
+  Inspector has a Fill section, as a Figma frame does, and it is the element panel's own
+  (`FillSection` in `ElementPanel.tsx`: colour, opacity, token binding, image fill). It edits the
+  background of the root element that paints the frame, read live through `doop:root-fill`:
+  `<body>`, whose paint covers the whole frame while `<html>` has none, unless `<html>` is painted
+  and the body is not, or covers under half the frame (a centred column). A colour edit replaces a
+  gradient over it (`background-image: none`) and a token set through the `background` shorthand
+  (shown as bound). Reads take a ticket so only the newest answer lands; until the frame answers
+  the section says so. Writes are ordinary runtime style edits (`styleElement` / `styleGesture`),
+  saved and undone like any other. Not shown for a locked frame or a standalone shape. Tests:
+  `frameFillBrowser.test.ts`.
 - Frame rotation (`shared/frameRotation.ts`, `src/lib/frameRotate.ts`): a selected frame wears a
   zone just outside each corner (`data-frame-rotate-handle`, 18 screen px, clear of the corner
   grip) that shows Figma's curved double-arrow cursor, turned to curve around its corner and with
@@ -1054,7 +1087,9 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   canvas. The components pass runs first on every write, then `withLibraryFaces`, so an expanded
   `<doop-use>` naming a library family gets its face. Agents read and write the short form
   (`get_frame`, `edit_frame_html`); tools live once in `server/componentTools.ts` for MCP and the
-  resident agent. `src/lib/components.ts` and `ComponentsPanel.tsx` (the Layers panel's Components
+  resident agent. `get_component_preview` and the resident's `screenshot_component` show the default
+  instance, or compare selected prop values in one image (up to 12 combinations). Omitted props keep
+  their defaults. `src/lib/components.ts` and `ComponentsPanel.tsx` (the Layers panel's Components
   tab, beside Tokens) / `ComponentSection.tsx` are the editor's side. A component is renamed from its card's menu
   or a double-click on its name in that tab, or from its main's Layers row (`renameComponent`; instances are
   linked by id, so they follow). As in Figma, renaming an instance's row names that layer
@@ -1080,7 +1115,10 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   agent's own edit is not a whole write; another agent's is refused unless it replaces the design
   (`replace`: MCP and resident `set_frame_html`, the resident's rewrite commit). The scanner skips
   `<doop-use` text in scripts, styles, textareas, titles and comments and in names like
-  `<doop-user-chip>`. Tests: `componentDrops.test.ts`, the `<doop-use>` cases in `inlineData.test.ts`.
+  `<doop-user-chip>`. Tests: `componentDrops.test.ts`, the `<doop-use>` cases in `inlineData.test.ts`. A component's CSS is read with CSS escapes honoured (Tailwind's `\'` in
+  `[class*='size-']` is part of a class name, not a string); a sheet that still cannot be read to the
+  end (a string or block left open, text outside a rule) is reported as `css_not_read` with where it
+  went wrong, beside `css_not_kept`. Tests: `componentCssEscapes.test.ts`.
 - Component system first (`SYSTEM_FIRST`, `COMPOSE_CHECK` in `server/guide.ts`): the guide opens
   with a must-do list (tokens, then a component system set up the way a designer sets up a Figma
   file, then screens composed from it; themes are tokens, never a copied frame), the brief creates
@@ -1100,8 +1138,8 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
 - Reuse notes (`server/reuseNotes.ts`): a whole-frame write (MCP `create_frame`, `set_frame_html`, the
   `done` chunk of a stream; the resident's `create_frame`, `set_frame_html`, `commit_frame_rewrite`)
   gets `componentWriteNotes(frame, { review: true })`, which adds what the frame should have reused:
-  a block written out three or more times (`REUSE`, with the `create_component` + `replace_matching`
-  call), colours the canvas has as tokens (`TOKENS`, `#hex → var(--name)`, aliases resolved), a
+  a block written out three or more times (`REUSE`: make one a component with `create_component`,
+  then replace the other copies with `<doop-use>` through `edit_frame_html`), colours the canvas has as tokens (`TOKENS`, `#hex → var(--name)`, aliases resolved), a
   colour palette declared on `:root` or tokens redefined there, and on a canvas with no tokens a frame
   hardcoding four or more colours. Doop's own blocks (tokens, fonts, component CSS) are not counted;
   `edit_frame_html` stays quiet. `create_component` / `update_component` name rows a main repeats by
@@ -1114,7 +1152,7 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   and the resident kickoff an "Existing style" block: with no tokens, the colours and fonts the
   frames share (by how many frames name each). The brief (`existingStyleBrief`, replacing
   `NO_TOKENS_BRIEF` there) asks for tokens from those values before the first new frame, and says to leave the existing
-  frames alone (no `replace_matching`) unless asked, offering the clean-up at the end;
+  frames alone unless asked, offering the clean-up at the end;
   `DESIGN_BRIEF` and `COMPONENTS` say the same. Tests: `existingStyle.test.ts`.
 - Workspace component libraries (`.context/specs/workspace-component-library.md`,
   `server/componentLibrary.ts`): a workspace canvas publishes snapshots of its components

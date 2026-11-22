@@ -1056,7 +1056,17 @@ export const FrameView = memo(function FrameView({
       })
       setMenuProbe(null)
       setProbe(hit ?? null)
-      store.setSelectedElement(hit ? { frameId: frame.id, selector: hit.selector } : null)
+      /* a right-click inside a multi-pick keeps the pick, the clicked layer
+         its primary, so the menu's commands act on all of it */
+      const picked = store.selectedElement?.frameId === frame.id ? pickedSelectors(store) : []
+      /* a shape on the canvas is its frame: the right-click selects it, so a
+         stale frame selection is not what Move to page or Group act on */
+      if (hit && live && standaloneSelector(live) === hit.selector && !store.selectedIds.includes(frame.id)) {
+        store.select(frame.id)
+      }
+      if (hit && picked.length > 1 && picked.includes(hit.selector)) {
+        store.pickElements(frame.id, [...picked.filter((s) => s !== hit.selector), hit.selector])
+      } else store.setSelectedElement(hit ? { frameId: frame.id, selector: hit.selector } : null)
     })
     return () => {
       cancelled = true

@@ -137,9 +137,10 @@ export const canvas = {
   followAround: 'Follow {name} around the canvas',
   stopFollowing: 'Stop following {name}',
   stopFollowingEsc: 'Stop following (Esc)',
-  goWhereWorking: '{label} — click to go where it is working',
+  followAgent: '{label} — click to follow it as it works',
   online: '{online} online',
   following: 'Following',
+  followIdle: 'waiting for its next frame',
 
   /* rename yourself */
   displayNameTitle: 'Your display name',

@@ -27,4 +27,10 @@ export const shell: Catalog['shell'] = {
   appPromoIosBody: 'Acompanhe seus agentes enquanto desenham, revise frames e responda comentários em um app nativo.',
   appPromoIosGet: 'Baixar na App Store',
   appPromoIosLater: 'Continuar no navegador',
+  starTitle: 'Curtindo o Doop?',
+  starBody:
+    'O Doop é open source. Se ele ajudou você a criar hoje, uma estrela no GitHub ajuda outros designers e desenvolvedores a encontrá-lo.',
+  starAction: 'Dar estrela no GitHub',
+  starLater: 'Depois',
+  starDismiss: 'Não perguntar de novo',
 }

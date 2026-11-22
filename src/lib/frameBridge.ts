@@ -387,14 +387,38 @@ export async function styleElement(
   return infoOf(await requestFrame(frameId, 'doop:style', { selector, styles, uniformText }))
 }
 
-/** Replace image content through the same live edit/undo path as styles. */
+/** The frame's own fill, as Figma's frame Fill: the root element that paints
+ *  the frame's background (`body`, or `html` when only the root is painted),
+ *  its computed colour and the inline value the Fill field binds tokens on. */
+export interface FrameFill {
+  selector: 'body' | 'html'
+  backgroundColor: string
+  /** a single image fill, edited as an element's is */
+  image: ElementInfo['image']
+  /** a gradient or layered image painted over the colour */
+  overlay: boolean
+  inline: Record<string, string>
+  /** the element's inline style uses the `background` shorthand */
+  shorthand: boolean
+  locked: boolean
+}
+
+/** Read the frame's fill, or null when the frame is not mounted. */
+export async function readFrameFill(frameId: string): Promise<FrameFill | null> {
+  const reply = await requestFrame(frameId, 'doop:root-fill', {})
+  return reply && typeof reply.fill === 'object' ? (reply.fill as FrameFill | null) : null
+}
+
+/** Replace image content through the same live edit/undo path as styles;
+ *  resolves with whether the frame took it. */
 export async function replaceElementImage(
   frameId: string,
   selector: string,
   image: NonNullable<ElementInfo['image']>,
   url: string,
-): Promise<ElementInfo | null> {
-  return infoOf(await requestFrame(frameId, 'doop:replace-image', { selector, image, url }))
+): Promise<boolean> {
+  const reply = await requestFrame(frameId, 'doop:replace-image', { selector, image, url })
+  return reply?.ok === true
 }
 
 /** One element with interactions, as the frame runtime reports it. */

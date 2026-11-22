@@ -9,6 +9,7 @@ import { withHostedPhotos } from './photoProxy.ts'
 import { designPx, renderedHeight } from './renderLimits.ts'
 import { LayerNotFoundError } from './layerExport.ts'
 import { installNameShim } from './pageShim.ts'
+import { settleFonts } from './renderFonts.ts'
 import {
   createRenderer,
   remoteConnectFailure,
@@ -210,6 +211,9 @@ async function loadFrameInto(page: Page, frame: Frame): Promise<void> {
   } catch {
     /* Slow external resources: inspect whatever has rendered. */
   }
+  /* `load` does not cover a face from a linked stylesheet (Google Fonts):
+     without this a capture intermittently shows the fallback fonts */
+  await settleFonts(page.mainFrame())
   await new Promise((resolve) => setTimeout(resolve, 120))
 }
 
@@ -964,6 +968,8 @@ async function screenshotOn(page: Page, frame: Frame, scale: number, opts: Rende
      queries and bottom-fixed elements lay out as they do on the canvas; the
      pixel budget bounds only the captured image below */
   await page.setViewport(frameViewport(width, fullHeight, scale))
+  /* the new viewport can switch media queries onto faces not yet requested */
+  await settleFonts(page.mainFrame())
   const type = opts.type ?? 'png'
   const clip = opts.layer
     ? await layerClip(page, opts.layer, frame, scale)
