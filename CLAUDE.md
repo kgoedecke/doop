@@ -40,7 +40,8 @@ server/            - Express backend, WebSocket room, MCP server, better-auth
 server/db/         - drizzle-orm schema (schema.ts, auth-schema.ts) and migrations
 shared/            - types/utilities shared between server and client
 desktop/           - Tauri desktop app wrapper
-desktop/src-tauri/ - Rust side of the desktop app
+desktop/src-tauri/ - Rust side of the desktop app (system webview: Windows, Linux)
+desktop/src-tauri-chromium/ - the same Rust sources on Chromium (CEF): the macOS app
 scripts/           - repo maintenance scripts
 tests/             - vitest test suite
 ```
