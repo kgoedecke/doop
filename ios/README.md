@@ -39,6 +39,12 @@ HTML/CSS engine (Stylo + Taffy + Parley), compiled into the app as a static libr
   frame open (`editing`) gets a solid ring and its name. A chip moves above the title when both
   do not fit, and says less (name, then mark) on a frame narrower than its words. Like the web,
   a stream that began before the app joined shows as an open frame.
+  Across the top of the canvas a glass pill per agent says what it is doing, as the web's
+  `WorkingNow` does (`Core/WorkingAgents.swift`): its mark, name and `set_status` line, with the
+  web's twinkling 3×3 dot matrix. A prompt sent from the phone shows at once as "Starting…" (for
+  ten minutes, then a card nobody picked up is no longer shown). With a side rail (iPad, the
+  unfolded Duo) the first agent, and how many more, sit in the bar beside the canvas name. Tap
+  for Agent tasks. Debug builds take `-fakeWorking 1` (or `2` for a second agent) to show them.
 - **Blitz engine** (`Doop/Blitz/BlitzDocument.swift` over `BlitzKit/`): each frame's
   HTML is parsed once into a Blitz document. The canvas asks for a bitmap at the
   density the current zoom needs (up to 3 bitmap pixels per CSS pixel, 4096 px max

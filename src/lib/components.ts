@@ -132,15 +132,14 @@ function refuseLocked(frame: Frame, selector: string): boolean {
   return true
 }
 
-export async function makeComponent(frame: Frame, selector: string, name: string, replaceMatching = false) {
+export async function makeComponent(frame: Frame, selector: string, name: string) {
   if (refuseLocked(frame, selector)) return null
   const framesBefore = useStore.getState().canvas?.frames ?? []
   try {
-    const { component, converted, frames } = await api.createComponent(frame.canvasId, {
+    const { component, frames } = await api.createComponent(frame.canvasId, {
       name,
       frameId: frame.id,
       element: selector,
-      replaceMatching,
     })
     const items = frames.flatMap((after) => {
       const before = framesBefore.find((candidate) => candidate.id === after.id)
@@ -150,14 +149,7 @@ export async function makeComponent(frame: Frame, selector: string, name: string
         : []
     })
     if (items.length) recordUpdates(items)
-    const linked = converted.reduce((total, entry) => total + entry.instances, 0)
-    useStore
-      .getState()
-      .pushNotice(
-        linked
-          ? t('components.createdLinked', { name: component.name, count: linked })
-          : t('components.created', { name: component.name }),
-      )
+    useStore.getState().pushNotice(t('components.created', { name: component.name }))
     return component
   } catch (error) {
     notifyFailure(error, t('components.createFailed'))

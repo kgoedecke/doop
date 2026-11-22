@@ -66,7 +66,10 @@ describe('reuse notes on frame writes', () => {
     const reuse = notes.filter((note) => note.startsWith('REUSE:'))
     expect(reuse).toHaveLength(1)
     expect(reuse[0]).toContain('3 blocks in this frame share one structure')
-    expect(reuse[0]).toContain('replace_matching=true')
+    expect(reuse[0]).toContain('create_component with frame_id')
+    expect(reuse[0]).toContain('<doop-use component="')
+    expect(reuse[0]).toContain('edit_frame_html')
+    expect(reuse[0]).not.toContain('replace_matching')
   })
 
   it('leaves two copies alone, and says nothing on a small edit', () => {

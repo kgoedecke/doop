@@ -143,6 +143,22 @@ export function closeOtherTabs(id: string, currentPath: string) {
   if (currentPath !== `/c/${id}`) navigate(`/c/${id}`)
 }
 
+/** Move a tab to a new position in the strip — DesktopTabs' drag-and-drop
+ *  commits through this. The index clamps to the strip's bounds, and a tab
+ *  that isn't open or would not move is a no-op, so the persisted order
+ *  and the ⌘1…⌘9 slots simply follow. */
+export function moveTab(id: string, toIndex: number) {
+  const { tabs } = useTabs.getState()
+  const from = tabs.findIndex((t) => t.id === id)
+  if (from < 0) return
+  const to = Math.max(0, Math.min(toIndex, tabs.length - 1))
+  const tab = tabs[from]
+  if (!tab || to === from) return
+  const next = tabs.filter((t) => t.id !== id)
+  next.splice(to, 0, tab)
+  setTabs(next)
+}
+
 /** ⌘1 (Ctrl+1 elsewhere) goes Home and ⌘2…⌘9 to the open tabs in strip
  *  order, as Figma's desktop app binds them. By physical key, so a layout
  *  that types another character on the digit row still switches. */

@@ -246,9 +246,9 @@ needs a reusable piece the system lacks, add it, then use it.
 - Write a reusable piece as a component the first time, not after the third copy. Adding to a
   canvas whose pages already repeat a block: make the block a component from one existing copy
   (create_component with its frame_id and element) and use it in
-  what you add, rather than writing it out again. replace_matching=true turns every other copy
-  into an instance too; that rewrites the existing pages, so use it when the human asked for that
-  clean-up, and otherwise offer it when you finish.
+  what you add, rather than writing it out again. Turning the other copies into instances means
+  replacing each with <doop-use> in edit_frame_html; that rewrites the existing pages, so do it
+  when the human asked for that clean-up, and otherwise offer it when you finish.
 - Components nest, and every rule here applies inside a main too. A main's markup can hold
   <doop-use>, and a change to the inner component reaches every main that uses it and every
   instance of those. A NavItem written out by hand nine times inside a Sidebar is the same mistake
@@ -285,7 +285,8 @@ needs a reusable piece the system lacks, add it, then use it.
 - To change them all, call update_component with find + replace, and read the impact it reports.
   Approved frames keep their sign-off: following a component is not an edit. Use dry_run first on anything
   widely used. Never edit each instance by hand.
-- get_component_preview shows you every variant at once. Look at it after changing a component.
+- After changing a component, use get_component_preview to check the appearance you edited. Omit props
+  for the default, or pass e.g. {"tone": ["solid", "ghost"]} to compare two tones at the default size.
 - Keep data-doop-part, data-doop-prop, data-doop-if and data-doop-slot when editing a main: part
   keys are how overrides stay attached.
 - update_component returns before the instances have followed: they are rewritten in the

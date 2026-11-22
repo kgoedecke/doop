@@ -20,7 +20,17 @@
       } from '/src/components/ui/context-menu.tsx'
       import { useStore } from '/src/lib/store.ts'
       import { clearHistory, undo, redo } from '/src/lib/history.ts'
+      import { setActionHost } from '/src/lib/actions/registry.ts'
       import '/src/styles.css'
+
+      /* the menus' registry rows run only with a canvas page lending its host */
+      const noop = () => {}
+      setActionHost(
+        new Proxy(
+          { canvasId: 'c', guest: false, presenting: false, hideUiActive: false, agentsOpen: false },
+          { get: (target, key) => (key in target ? target[key] : noop) },
+        ),
+      )
 
       window.contextMenuHarness = {
         seed: (frames, zoom = 1) => {

@@ -26,4 +26,10 @@ export const shell = {
   appPromoIosBody: 'Follow your agents as they design, review frames and reply to comments, all in a native app.',
   appPromoIosGet: 'Get it on the App Store',
   appPromoIosLater: 'Continue in browser',
+  starTitle: 'Enjoying Doop?',
+  starBody:
+    'Doop is open source. If it helped you design today, a GitHub star helps other designers and developers find it.',
+  starAction: 'Star on GitHub',
+  starLater: 'Later',
+  starDismiss: 'Don’t ask again',
 } as const

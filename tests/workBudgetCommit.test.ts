@@ -453,9 +453,8 @@ const OPERATIONS: Record<string, Case> = {
         canvas,
       ),
   },
-  'create_component (the tool) with replace_matching': {
-    run: ({ canvas, page }) =>
-      tool('create_component', { name: 'Tag', frame_id: page.id, element: 'tagone', replace_matching: true }, canvas),
+  'create_component (the tool) from an element': {
+    run: ({ canvas, page }) => tool('create_component', { name: 'Tag', frame_id: page.id, element: 'tagone' }, canvas),
   },
   'update_component (the tool)': {
     run: ({ canvas }) =>
@@ -568,14 +567,6 @@ const OPERATIONS: Record<string, Case> = {
   'create_component from an element': {
     run: ({ canvas, page }) =>
       createComponentFromElement(canvas.id, { name: 'Tag', frameId: page.id, element: 'tagone' }, actor),
-  },
-  'create_component with replace_matching': {
-    run: ({ canvas, page }) =>
-      createComponentFromElement(
-        canvas.id,
-        { name: 'Tag', frameId: page.id, element: 'tagone', replaceMatching: true },
-        actor,
-      ),
   },
   'import_component with what it is built from': {
     run: ({ canvas, source }) => importComponent(canvas.id, source.id, 'Panel', actor),
@@ -820,45 +811,6 @@ describe('a refusal while a main is being updated', () => {
 })
 
 describe('work that is optional once a change has landed', () => {
-  it('keeps a finished replace_matching partial, and says it stopped', async () => {
-    ownClock()
-    let stopped = 0
-    for (let at = 1; at <= 40; at++) {
-      const { canvas, page } = setup()
-      await propagation.whenIdle()
-      const view = viewing(canvas)
-      told.delete(canvas.id)
-      slow.parses = 0
-      slow.offset = 0
-      slow.at = at
-      let result: ReturnType<typeof createComponentFromElement> | undefined
-      try {
-        result = runOperation('create', canvas.id, () =>
-          createComponentFromElement(
-            canvas.id,
-            { name: 'Tag', frameId: page.id, element: 'tagone', replaceMatching: true },
-            actor,
-          ),
-        )
-      } catch (error) {
-        expect(error).toBeInstanceOf(WorkBudgetError)
-      }
-      slow.at = 0
-      await propagation.whenIdle()
-      if (!result?.matching_stopped) continue
-      stopped += 1
-      /* the component is there, and what it reports as linked is linked */
-      expect(result.component.rev).toBeGreaterThan(0)
-      for (const entry of result.converted)
-        expect(framed(entry.frameId)).toContain(`data-doop-instance="${result.component.id}"`)
-      expect(result.converted.length).toBeLessThan(2)
-      /* and stored and shown as such: each finished part was committed */
-      expect(stored(canvas)).toEqual(storedFrom(canvas))
-      expect(replay(view, told.get(canvas.id) ?? [])).toEqual(viewing(canvas))
-    }
-    expect(stopped).toBeGreaterThan(0)
-  })
-
   it('applies an instance change even when reading the instances back does not fit', async () => {
     ownClock()
     let applied = 0

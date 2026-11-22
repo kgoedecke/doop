@@ -51,6 +51,7 @@ import { WorkingNow } from '../components/WorkingNow'
 import { MobilePanelTabs, SideRail } from '../components/SideRail'
 import { LayersPanel, LayersRailToggle } from '../components/LayersPanel'
 import { IosAppPrompt } from '../components/NativeAppPromo'
+import { noteActiveDay } from '../lib/githubStar'
 import { Onboarding } from '../components/Onboarding'
 import { AccessBanner } from '../components/AccessBanner'
 import { ShareModal } from '../components/ShareModal'
@@ -265,6 +266,10 @@ export function CanvasPage({
   const prototypeMode = useStore((s) => s.prototypeMode)
   const [panelWidths, setPanelWidths] = useState(readPanelWidths)
   const [viewportWidth, setViewportWidth] = useState(() => window.innerWidth)
+  /* a day spent editing a canvas counts toward Home's GitHub star ask (StarCard) */
+  useEffect(() => {
+    if (editorReady) noteActiveDay()
+  }, [editorReady])
   useEffect(() => {
     const updateWidth = () => setViewportWidth(window.innerWidth)
     window.addEventListener('resize', updateWidth)

@@ -865,8 +865,23 @@ async function renameMain(def: ComponentDef, frame: Frame, standalone: boolean, 
   if (saved && standalone) renameFrame(frame.id, saved, { record: false })
 }
 
-function useItemRename(name: string, allowed: boolean, onCommit: (value: string) => void) {
+function useItemRename(
+  name: string,
+  allowed: boolean,
+  onCommit: (value: string) => void,
+  target: { frameId: string; selector: string | null },
+) {
   const [renaming, setRenaming] = useState(false)
+  /* a Rename picked from a canvas menu lands here, so the canvas and the
+     panel rename the same way; the row may mount after the request */
+  const request = useStore((s) => s.renameRequest)
+  const requested = !!request && request.frameId === target.frameId && request.selector === target.selector
+  useEffect(() => {
+    if (!request || !requested) return
+    useStore.getState().clearRenameRequest(request.nonce)
+    // eslint-disable-next-line react/set-state-in-effect -- the request comes from the store, outside this row
+    if (allowed) setRenaming(true)
+  }, [request, requested, allowed])
   return {
     label:
       renaming && allowed ? <ItemNameInput name={name} onCommit={onCommit} onDone={() => setRenaming(false)} /> : name,
@@ -901,8 +916,11 @@ function FrameRow({
 }) {
   const { frame } = row
   const readOnly = useStore((s) => !canEditOpenCanvas(s))
-  const { label, startRename } = useItemRename(frame.name, !readOnly && !frame.locked, (value) =>
-    renameFrame(frame.id, value),
+  const { label, startRename } = useItemRename(
+    frame.name,
+    !readOnly && !frame.locked,
+    (value) => renameFrame(frame.id, value),
+    { frameId: frame.id, selector: null },
   )
   const stream = useStore((s) => s.streams[frame.id])
   const presences = useStore((s) => s.presences)
@@ -1033,8 +1051,8 @@ function NodeRow({
       else if (standalone) renameFrame(frame.id, value)
       else renameLayer(frame.id, node.selector, value)
     },
+    { frameId: frame.id, selector: node.selector },
   )
-  const pasteAt = useRef({ x: 0, y: 0 })
   return (
     <ContextMenu>
       <ContextMenuTrigger asChild disabled={readOnly}>
@@ -1096,10 +1114,15 @@ function NodeRow({
             if (!isLayerLocked(frame, node.selector)) startRename()
           }}
           onContextMenu={() => {
-            pasteAt.current = { x: window.innerWidth / 2, y: window.innerHeight / 2 }
-            /* a right-click on a shape in a multi-selection keeps the selection */
+            /* a right-click inside a multi-selection keeps the selection, so
+               the menu's commands act on all of it, with the clicked layer
+               its primary, as a right-click on the canvas does */
             const s = useStore.getState()
-            if (!(standalone && s.selectedIds.length > 1 && s.selectedIds.includes(frame.id))) onActivate()
+            const kept = standalone ? s.selectedIds.length > 1 && s.selectedIds.includes(frame.id) : selected
+            if (!kept) return onActivate()
+            if (standalone) return
+            const picked = pickedSelectors(s)
+            s.pickElements(frame.id, [...picked.filter((sel) => sel !== node.selector), node.selector])
           }}
           onPointerDown={onPointerDown}
           /* the row under the pointer is outlined on the canvas too, as a
@@ -1112,11 +1135,8 @@ function NodeRow({
           }}
         />
       </ContextMenuTrigger>
-      {standalone ? (
-        <FrameContextMenu frame={frame} at={pasteAt} onRename={startRename} />
-      ) : (
-        <ElementContextMenu frame={frame} selector={node.selector} onRename={startRename} />
-      )}
+      {/* the menu a right-click on the canvas opens, a shape's included */}
+      <ElementContextMenu frame={frame} selector={node.selector} onRename={startRename} />
     </ContextMenu>
   )
 }

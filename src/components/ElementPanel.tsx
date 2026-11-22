@@ -504,11 +504,15 @@ function parentLayout(info: ElementInfo): string {
 /** The token a property is bound to inline, if any. */
 /** The properties the Fill and Stroke sections write: SVG paint on a vector,
  *  the box's background and border elsewhere. */
-function paintProperties(info: ElementInfo) {
+function paintProperties(info: Pick<ElementInfo, 'vector'>) {
   return info.vector ? { fill: 'fill', stroke: 'stroke' } : { fill: 'background-color', stroke: 'border-color' }
 }
 
-function boundToken(info: ElementInfo, property: string, tokens: readonly DesignToken[]): DesignToken | undefined {
+function boundToken(
+  info: Pick<ElementInfo, 'inline'>,
+  property: string,
+  tokens: readonly DesignToken[],
+): DesignToken | undefined {
   const name = aliasOf(info.inline[property] ?? '')
   return name ? tokens.find((token) => token.name === name) : undefined
 }
@@ -724,27 +728,17 @@ function TokenMenu({
   )
 }
 
-function DesignTab({
-  frame,
-  selector,
-  info,
-  apply,
-  editGeometry,
-}: {
-  frame: Frame
-  selector: string
-  info: ElementInfo
-  apply: (styles: StylePatch) => void
-  editGeometry: (edit: GeometryEdit) => void
-}) {
-  const library = useCanvasFonts((state) => state.fonts)
+/** What the Fill and Stroke sections read: the layer's paint and the inline
+ *  values its token bindings sit on. */
+type PaintInfo = Pick<ElementInfo, 'backgroundColor' | 'inline' | 'vector'>
+
+/** A field bound to a token shows its name (`chip`); the menu beside it
+ *  binds one (`menu`). A vector's paint lives on its shapes, so its token
+ *  bindings do too. Swatches and values read as the frame's theme resolves them. */
+function useTokenFields(frame: Frame, info: PaintInfo, apply: (styles: StylePatch) => void) {
   const tokens = useStore((state) => state.canvas?.tokens ?? [])
-  const customFamilies = libraryFamilies(library)
-  /* a field bound to a token shows its name; the menu beside it binds one */
-  /* a vector's paint lives on its shapes, so its token bindings do too */
   const paintInfo = info.vector ? { ...info, inline: { ...info.inline, ...info.vector.inline } } : info
   const bound = (property: string) => boundToken(paintInfo, property, tokens)
-  /* the frame's theme, so swatches and values read as this frame resolves them */
   const theme = frameTheme(frame.html) ?? undefined
   const chip = (property: string, literal: string | null) =>
     fieldToken(bound(property), tokens, theme, () => apply({ [property]: literal }))
@@ -766,20 +760,25 @@ function DesignTab({
       onPick={(name) => apply({ [property]: `var(${name})`, ...extra })}
     />
   )
+  return { tokens, bound, chip, menu }
+}
 
-  /* a library family offers only the weights it was uploaded with; picking
-     one it lacks would just show the browser's faux bold */
-  const weights = familyWeights(library, fontName(info.fontFamily)) ?? WEIGHTS
-  /* runs that disagree show "Mixed", as Figma does for a text layer */
-  const mixed = info.textMixed ?? {}
+/** The Fill section: the paint's colour and opacity, token-bindable, and an
+ *  image fill when the layer has one. The frame Inspector shows the same
+ *  section for the frame's own fill. */
+export function FillSection({
+  frame,
+  selector,
+  info,
+  apply,
+}: {
+  frame: Frame
+  selector: string
+  info: PaintInfo & { image?: ElementInfo['image'] }
+  apply: (styles: StylePatch) => void
+}) {
   const t = useT()
-  const sizeModes = SIZE_MODES.map(({ value, label }) => ({ value, label: t(label) }))
-  const ratio = aspectRatio(info.aspectRatio, info.naturalAspectRatio)
-  const canLink = (info.width ?? 0) > 0 && (info.height ?? 0) > 0
-  const visible = info.visibility !== 'hidden'
-  /* A vector layer (a drawn or imported path, an inline icon) paints with
-     SVG's fill and stroke, as Figma's vectors do; any other layer with its
-     box's background and border. */
+  const { chip, menu } = useTokenFields(frame, info, apply)
   const paint = paintProperties(info)
   const fillColor = info.vector ? info.vector.fill : info.backgroundColor
   const fill = rgbToHex(fillColor, true)
@@ -796,10 +795,77 @@ function DesignTab({
     if (!color) return { fill: 'none' }
     return { fill: rgbToHex(color) ?? color, 'fill-opacity': String(Math.min(1, Math.max(0, alpha))) }
   }
-  const strokeColor = info.vector ? info.vector.stroke : info.borderColor
-  const borderColor = rgbToHex(strokeColor)
   /* the fill as the document has it: a translucent one keeps its alpha */
   const fillLiteral = fill && fillAlpha < 1 ? fillColor : fill
+  return (
+    <PropertySection title={t('inspector.sectionFill')}>
+      {info.image && (
+        <ImageFill key={`${frame.id}:${selector}`} frame={frame} selector={selector} image={info.image} apply={apply} />
+      )}
+      <div className="grid grid-cols-[minmax(0,1fr)_64px] gap-1.5">
+        <ColorField
+          label={t('inspector.fillColor')}
+          value={fillAlpha === 0 && fill === '#000000' ? null : fill}
+          token={chip(paint.fill, fillLiteral)}
+          trailing={menu(
+            paint.fill,
+            ['color'],
+            fillLiteral,
+            'inline',
+            /* a token carries its own alpha: a vector's earlier fill-opacity goes */
+            info.vector ? { 'fill-opacity': '1' } : {},
+          )}
+          onCommit={(v) => apply(fillPatch(v, fillAlpha === 0 && (!fill || fill === '#000000') ? 1 : fillAlpha))}
+        />
+        <NumberField
+          label={t('inspector.fillOpacity')}
+          prefix={<DropletIcon size="rail" />}
+          max={100}
+          slider={[0, 100]}
+          value={Math.round(fillAlpha * 100)}
+          unit="%"
+          onCommit={(v) =>
+            apply(info.vector && !fill ? { 'fill-opacity': String(v / 100) } : fillPatch(fill ?? fillColor, v / 100))
+          }
+        />
+      </div>
+    </PropertySection>
+  )
+}
+
+function DesignTab({
+  frame,
+  selector,
+  info,
+  apply,
+  editGeometry,
+}: {
+  frame: Frame
+  selector: string
+  info: ElementInfo
+  apply: (styles: StylePatch) => void
+  editGeometry: (edit: GeometryEdit) => void
+}) {
+  const library = useCanvasFonts((state) => state.fonts)
+  const customFamilies = libraryFamilies(library)
+  const { tokens, bound, chip, menu } = useTokenFields(frame, info, apply)
+
+  /* a library family offers only the weights it was uploaded with; picking
+     one it lacks would just show the browser's faux bold */
+  const weights = familyWeights(library, fontName(info.fontFamily)) ?? WEIGHTS
+  /* runs that disagree show "Mixed", as Figma does for a text layer */
+  const mixed = info.textMixed ?? {}
+  const t = useT()
+  const sizeModes = SIZE_MODES.map(({ value, label }) => ({ value, label: t(label) }))
+  const ratio = aspectRatio(info.aspectRatio, info.naturalAspectRatio)
+  const canLink = (info.width ?? 0) > 0 && (info.height ?? 0) > 0
+  const visible = info.visibility !== 'hidden'
+  /* A vector layer (a drawn or imported path, an inline icon) paints with
+     SVG's fill and stroke, as Figma's vectors do; any other layer with its
+     box's background and border. */
+  const paint = paintProperties(info)
+  const strokeColor = info.vector ? info.vector.stroke : info.borderColor
+  const borderColor = rgbToHex(strokeColor)
   const strokeOn: StylePatch = !info.vector && info.borderStyle === 'none' ? { 'border-style': 'solid' } : {}
   /* the stroke and text colours as the document has them: a translucent one keeps its alpha */
   const strokeLiteral = borderColor && colorAlpha(strokeColor) < 1 ? strokeColor : borderColor
@@ -1110,44 +1176,7 @@ function DesignTab({
           />
         </label>
       </PropertySection>
-      <PropertySection title={t('inspector.sectionFill')}>
-        {info.image && (
-          <ImageFill
-            key={`${frame.id}:${selector}`}
-            frame={frame}
-            selector={selector}
-            image={info.image}
-            apply={apply}
-          />
-        )}
-        <div className="grid grid-cols-[minmax(0,1fr)_64px] gap-1.5">
-          <ColorField
-            label={t('inspector.fillColor')}
-            value={fillAlpha === 0 && fill === '#000000' ? null : fill}
-            token={chip(paint.fill, fillLiteral)}
-            trailing={menu(
-              paint.fill,
-              ['color'],
-              fillLiteral,
-              'inline',
-              /* a token carries its own alpha: a vector's earlier fill-opacity goes */
-              info.vector ? { 'fill-opacity': '1' } : {},
-            )}
-            onCommit={(v) => apply(fillPatch(v, fillAlpha === 0 && (!fill || fill === '#000000') ? 1 : fillAlpha))}
-          />
-          <NumberField
-            label={t('inspector.fillOpacity')}
-            prefix={<DropletIcon size="rail" />}
-            max={100}
-            slider={[0, 100]}
-            value={Math.round(fillAlpha * 100)}
-            unit="%"
-            onCommit={(v) =>
-              apply(info.vector && !fill ? { 'fill-opacity': String(v / 100) } : fillPatch(fill ?? fillColor, v / 100))
-            }
-          />
-        </div>
-      </PropertySection>
+      <FillSection frame={frame} selector={selector} info={info} apply={apply} />
       <PropertySection title={t('inspector.sectionStroke')}>
         <div className="grid grid-cols-[minmax(0,1fr)_64px] gap-1.5">
           <ColorField
