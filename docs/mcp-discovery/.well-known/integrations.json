@@ -1,11 +1,16 @@
 {
   "version": 3,
-  "summary": "Doop is a multiplayer design canvas. MCP clients can read and edit canvases according to the connected account's permissions.",
+  "summary": "Doop is a multiplayer design canvas with an MCP server and a session-authenticated Canvas REST API.",
   "credentials": {
     "doop_mcp_oauth": {
       "type": "oauth2",
       "label": "OAuth 2.0",
       "setup": "Add https://doop.design/mcp to an OAuth-capable MCP client, then sign in to Doop and approve access in your browser. Doop supports dynamic client registration."
+    },
+    "doop_browser_session": {
+      "type": "custom",
+      "label": "Doop browser session",
+      "setup": "Sign in on doop.design and use a client that can make requests with the authenticated browser session cookie. For standalone agent clients, connect to the MCP endpoint."
     },
     "doop_agent_key": {
       "type": "bearer",
@@ -42,6 +47,30 @@
                 "mechanics": { "source": "http", "in": "header", "headerName": "Authorization", "scheme": "Bearer" }
               }
             ],
+            "basis": {
+              "via": "declared",
+              "source": "https://doop.design/.well-known/integrations.json"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "slug": "doop-canvas-rest-api",
+      "name": "Doop Canvas REST API",
+      "type": "http",
+      "url": "https://doop.design/api",
+      "spec": "https://doop.design/openapi.json",
+      "docs": "https://github.com/kgoedecke/doop#rest-api",
+      "basis": {
+        "via": "declared",
+        "source": "https://doop.design/.well-known/integrations.json"
+      },
+      "auth": {
+        "status": "required",
+        "entries": [
+          {
+            "use": [{ "id": "doop_browser_session", "mechanics": { "source": "spec", "scheme": "sessionCookie" } }],
             "basis": {
               "via": "declared",
               "source": "https://doop.design/.well-known/integrations.json"

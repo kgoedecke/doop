@@ -1,0 +1,12 @@
+{
+  "$schema": "https://schemas.agentskills.io/discovery/0.2.0/schema.json",
+  "skills": [
+    {
+      "name": "doop-design",
+      "type": "skill-md",
+      "description": "Create, inspect, and refine HTML designs on a shared Doop canvas.",
+      "url": "https://raw.githubusercontent.com/kgoedecke/doop/1881b5e82d295f154a2aa1e355e7a7f5372ce529/cursor-plugin/skills/doop-design/SKILL.md",
+      "digest": "sha256:44d8d1acd96fdf6c64fb31217a9a7e2ed785b5698ccac874771e7310df105402"
+    }
+  ]
+}

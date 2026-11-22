@@ -10,4 +10,6 @@ Connect an MCP client to https://doop.design/mcp over Streamable HTTP. Sign in a
 - [Connect an AI agent](https://github.com/kgoedecke/doop#connect-an-ai-agent): Client configuration and OAuth setup.
 - [Headless agents](https://github.com/kgoedecke/doop#headless-agents-agent-keys): Configure a bearer key.
 - [MCP tools](https://github.com/kgoedecke/doop#mcp-tools): Discover tools for reading and editing canvases and frames.
+- [Doop design skill](https://doop.design/.well-known/agent-skills/index.json): Find the skill for working on a shared canvas.
+- [Canvas REST API](https://doop.design/openapi.json): List and read canvases with a signed-in browser session.
 - [Self-hosting](https://github.com/kgoedecke/doop#deploy): Run Doop and connect a client to your own instance.

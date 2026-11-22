@@ -1,0 +1,74 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Doop Canvas REST API",
+    "version": "1.0.0",
+    "description": "Selected read-only canvas operations from Doop's session-authenticated REST API. Agents can use the separate MCP endpoint for OAuth and agent-key workflows."
+  },
+  "externalDocs": { "url": "https://github.com/kgoedecke/doop#rest-api" },
+  "servers": [{ "url": "https://doop.design/api" }],
+  "security": [{ "sessionCookie": [] }],
+  "paths": {
+    "/canvases": {
+      "get": {
+        "operationId": "listCanvases",
+        "summary": "List canvases available to the signed-in account",
+        "responses": {
+          "200": {
+            "description": "Canvas summaries",
+            "content": {
+              "application/json": {
+                "schema": { "type": "array", "items": { "$ref": "#/components/schemas/Canvas" } }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" }
+        }
+      }
+    },
+    "/canvases/{id}": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "description": "Canvas ID from the canvas URL or listCanvases",
+          "schema": { "type": "string" }
+        }
+      ],
+      "get": {
+        "operationId": "getCanvas",
+        "summary": "Read a canvas",
+        "responses": {
+          "200": {
+            "description": "Canvas details",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Canvas" } } }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "description": "The signed-in account cannot view this canvas" },
+          "404": { "description": "Canvas not found" }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "sessionCookie": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "__Secure-better-auth.session_token",
+        "description": "Doop's browser session cookie, set when you sign in on doop.design."
+      }
+    },
+    "schemas": {
+      "Canvas": {
+        "type": "object",
+        "required": ["id", "name"],
+        "properties": { "id": { "type": "string" }, "name": { "type": "string" } }
+      }
+    },
+    "responses": {
+      "Unauthorized": { "description": "A valid Doop browser session is required" }
+    }
+  }
+}

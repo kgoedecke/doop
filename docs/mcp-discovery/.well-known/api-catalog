@@ -1,0 +1,17 @@
+{
+  "linkset": [
+    {
+      "anchor": "https://doop.design/.well-known/api-catalog",
+      "item": [{ "href": "https://doop.design/api" }, { "href": "https://doop.design/mcp" }]
+    },
+    {
+      "anchor": "https://doop.design/api",
+      "service-desc": [{ "href": "https://doop.design/openapi.json", "type": "application/json" }],
+      "service-doc": [{ "href": "https://github.com/kgoedecke/doop#rest-api", "type": "text/html" }]
+    },
+    {
+      "anchor": "https://doop.design/mcp",
+      "service-doc": [{ "href": "https://github.com/kgoedecke/doop#connect-an-ai-agent", "type": "text/html" }]
+    }
+  ]
+}
