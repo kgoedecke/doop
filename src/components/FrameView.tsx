@@ -934,8 +934,16 @@ export const FrameView = memo(function FrameView({
   /* saves a document the runtime serialized after an edit (set below) */
   const saveEditedRef = useRef<(html: string, discrete: boolean) => void>(() => {})
   /* the frame's box, which a relayed wheel's point is mapped through */
-  const wheelFrameRef = useRef({ width: frame.width, height: frame.height, rotation: frame.rotation ?? 0 })
-  wheelFrameRef.current = { width: frame.width, height: frame.height, rotation: frame.rotation ?? 0 }
+  const wheelFrame = {
+    width: frame.width,
+    height: frame.height,
+    rotation: frame.rotation ?? 0,
+    /* a document taking the world's zoom k as pixel density measures the
+       wheel in its own px, k times smaller than the stage's */
+    density: FRAME_DOCUMENTS_TAKE_ZOOM_AS_DENSITY ? layoutZoom : 1,
+  }
+  const wheelFrameRef = useRef(wheelFrame)
+  wheelFrameRef.current = wheelFrame
   useEffect(() => {
     /* a key pressed while the focus sits in this frame's document: replay
        it on the iframe, where it bubbles to the canvas shortcuts as if the
@@ -970,12 +978,12 @@ export const FrameView = memo(function FrameView({
         /* the iframe's box shares the frame's centre whatever its bleed or
            turn: the point is taken from the centre, turned with the frame */
         const box = iframe.getBoundingClientRect()
-        const { width, height, rotation } = wheelFrameRef.current
+        const { width, height, rotation, density } = wheelFrameRef.current
         const zoom = useStore.getState().viewport.zoom
         const offset = rotateVector({ x: (x - width / 2) * zoom, y: (y - height / 2) * zoom }, rotation)
         iframe.dispatchEvent(
           new WheelEvent('wheel', {
-            deltaY,
+            deltaY: deltaY * density,
             ctrlKey: relay.ctrlKey === true,
             metaKey: relay.metaKey === true,
             clientX: box.left + box.width / 2 + offset.x,

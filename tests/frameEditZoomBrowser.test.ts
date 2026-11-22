@@ -27,11 +27,29 @@ describe.skipIf(!findBrowserPath())('zooming over a frame being edited', { timeo
       return { left: r.left, top: r.top, width: r.width }
     })
 
+  /** the frame's live document, once it is in text editing */
+  async function editingFrame() {
+    for (let i = 0; i < 100; i++) {
+      for (const f of page.frames()) {
+        if (f === page.mainFrame() || f.detached) continue
+        if (await f.$('style[data-v-edit]').catch(() => null)) return f
+      }
+      await new Promise((r) => setTimeout(r, 100))
+    }
+    throw new Error('the frame never entered text editing')
+  }
+
   /** select the frame by its title, then double-click its text into editing;
    *  returns the screen point clicked, inside the text near its start */
   async function editText(rotation = 0) {
     await page.click('[data-frame-title]')
-    const frame = page.frames().find((f) => f !== page.mainFrame())!
+    const at = await textPoint(rotation)
+    await page.mouse.click(at.x, at.y, { count: 2 })
+    await editingFrame()
+    return at
+  }
+
+  async function textPoint(rotation = 0) {
     /* a point in the text (design px 70, 62), turned with the frame about
        its centre; the zoom read off the turned box's width */
     const box = await page.$eval('[data-frame-surface]', (el) => {
@@ -46,8 +64,6 @@ describe.skipIf(!findBrowserPath())('zooming over a frame being edited', { timeo
       x: box.x + dx * Math.cos(turn) - dy * Math.sin(turn),
       y: box.y + dx * Math.sin(turn) + dy * Math.cos(turn),
     }
-    await page.mouse.click(at.x, at.y, { count: 2 })
-    await frame.waitForSelector('style[data-v-edit]')
     return at
   }
 
@@ -72,8 +88,24 @@ describe.skipIf(!findBrowserPath())('zooming over a frame being edited', { timeo
     expect(Math.abs(after.left + fx * after.width - at.x)).toBeLessThan(2)
     /* the page itself never zoomed, and the text is still being edited */
     expect(await page.evaluate(() => window.visualViewport?.scale ?? 1)).toBe(1)
-    const frame = page.frames().find((f) => f !== page.mainFrame())!
-    expect(await frame.$('style[data-v-edit]')).not.toBeNull()
+    expect(await editingFrame()).toBeTruthy()
+  })
+
+  it('zooms as strongly over the edited frame as over the shield above 100%', async () => {
+    /* two notches over the shield take the camera past 100%, where a frame's
+       document takes the world's zoom as pixel density */
+    const start = (await surface()).width
+    /* about the text, so it and the frame's title stay in view */
+    const shield = await textPoint()
+    await wheelWith('Control', shield, -40)
+    await wheelWith('Control', shield, -40)
+    expect((await surface()).width / start).toBeGreaterThan(1.9)
+    await new Promise((r) => setTimeout(r, 400))
+    const at = await editText()
+    const before = (await surface()).width
+    await wheelWith('Control', at, -20)
+    /* the stage's own mapping: exp(-deltaY / 100) */
+    expect((await surface()).width / before).toBeCloseTo(Math.exp(0.2), 2)
   })
 
   it('zooms about the pointer on a rotated frame', async () => {
