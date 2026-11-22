@@ -144,6 +144,55 @@ describe.skipIf(!findBrowserPath())('zooming over a frame being edited', { timeo
     expect(await frame.$('style[data-v-edit]')).not.toBeNull()
   })
 
+  /** load a frame of `body` markup (with the #copy text first) and start editing it */
+  async function editDesign(body: string, bodyStyle = 'margin:0') {
+    const html = `<body style="${bodyStyle}"><p id="copy" style="font:32px/1.4 Arial;margin:40px">Edit me</p>${body}</body>`
+    await showCanvasPage(page, [{ ...TEXT, html }])
+    return editText()
+  }
+
+  it('leaves a wheel a design script claims to the design', async () => {
+    /* on an element: a wheel handler on body, document or window is passive */
+    const html =
+      '<body style="margin:0"><div onwheel="event.preventDefault()">' +
+      '<p id="copy" style="font:32px/1.4 Arial;margin:40px">Edit me</p></div></body>'
+    await showCanvasPage(page, [{ ...TEXT, html }])
+    const at = await editText()
+    const before = await surface()
+    await plainWheel(at, 100)
+    expect(await surface()).toEqual(before)
+  })
+
+  it('pans when body hides the overflow the page would scroll', async () => {
+    const at = await editDesign('<div style="height:2000px"></div>', 'margin:0;overflow:hidden')
+    const before = await surface()
+    await plainWheel(at, 100)
+    expect(before.top - (await surface()).top).toBeCloseTo(100, 0)
+  })
+
+  it('reads a right-to-left scroller from its right edge', async () => {
+    const html =
+      '<body style="margin:0"><div id="box" dir="rtl" style="width:600px;height:400px;overflow:auto">' +
+      '<p id="copy" style="font:32px/1.4 Arial;margin:40px;width:2000px;text-align:left" dir="ltr">Edit me</p></div></body>'
+    await showCanvasPage(page, [{ ...TEXT, html }])
+    const at = await editText()
+    const frame = await editingFrame()
+    const before = await surface()
+    const wheelX = async (deltaX: number) => {
+      await page.mouse.move(at.x, at.y)
+      await page.mouse.wheel({ deltaX })
+      await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))))
+    }
+    /* at its start, the right edge: a wheel left scrolls the box */
+    await wheelX(-100)
+    await frame.waitForFunction(() => document.getElementById('box')!.scrollLeft < 0)
+    expect(await surface()).toEqual(before)
+    /* back at the right edge, a wheel right has nowhere to go: the canvas pans */
+    await frame.evaluate(() => (document.getElementById('box')!.scrollLeft = 0))
+    await wheelX(100)
+    expect(before.left - (await surface()).left).toBeCloseTo(100, 0)
+  })
+
   it('scrolls a box in the design that can take the wheel, and pans once it cannot', async () => {
     const html =
       '<body style="margin:0"><div id="box" style="height:300px;overflow:auto">' +

@@ -720,70 +720,105 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
      pointer's spot in design px. It is caught on the window in the capture
      phase, ahead of any design script, and only while editing: a playing
      prototype, or a runtime without the canvas's port (the prototype
-     player), leaves the browser its own. A plain wheel pans the canvas
-     the same way, unless the design has a box to scroll under it. */
-  var wheelGetters = {
-    deltaX: getter(WheelEvent.prototype, 'deltaX'),
-    deltaY: getter(WheelEvent.prototype, 'deltaY'),
-    deltaMode: getter(WheelEvent.prototype, 'deltaMode'),
-    clientX: getter(MouseEvent.prototype, 'clientX'),
-    clientY: getter(MouseEvent.prototype, 'clientY'),
-    ctrlKey: getter(MouseEvent.prototype, 'ctrlKey'),
-    metaKey: getter(MouseEvent.prototype, 'metaKey'),
-    shiftKey: getter(MouseEvent.prototype, 'shiftKey'),
-  }
+     player), leaves the browser its own.
+     A plain wheel pans the canvas the same way, but the design has it
+     first: it is heard on the window once the event has bubbled, and left
+     alone when a design script claimed it (a carousel) or a box under the
+     pointer can still scroll that way. */
+  var readDeltaX = getter(WheelEvent.prototype, 'deltaX')
+  var readDeltaY = getter(WheelEvent.prototype, 'deltaY')
+  var readDeltaMode = getter(WheelEvent.prototype, 'deltaMode')
+  var readClientX = getter(MouseEvent.prototype, 'clientX')
+  var readClientY = getter(MouseEvent.prototype, 'clientY')
+  var readCtrlKey = getter(MouseEvent.prototype, 'ctrlKey')
+  var readMetaKey = getter(MouseEvent.prototype, 'metaKey')
+  var readShiftKey = getter(MouseEvent.prototype, 'shiftKey')
+  var readDefaultPrevented = getter(Event.prototype, 'defaultPrevented')
+  var composedPath = Event.prototype.composedPath
   var preventDefault = Event.prototype.preventDefault
   var readComputedStyle = window.getComputedStyle
-  var readParentElement = getter(Node.prototype, 'parentElement')
-  /* can a box scroll further along one axis the way the wheel turns? The
-     root scrolls unless told not to, any other box only when it says so */
-  function axisScrolls(isRoot, overflow, delta, pos, size, client) {
-    if (!delta || size - client < 1) return false
-    if (isRoot ? overflow === 'hidden' || overflow === 'clip' : !/^(auto|scroll|overlay)$/.test(overflow)) return false
-    return delta < 0 ? pos > 0 : pos + client < size - 1
-  }
-  /* does the box under the pointer, or one around it, take this wheel? */
-  function wheelScrolls(node, dx, dy) {
-    var root = document.scrollingElement || document.documentElement
-    for (var el = node; el && apply(readNodeType, el, []) === 1; el = apply(readParentElement, el, [])) {
-      var cs = apply(readComputedStyle, window, [el])
-      var isRoot = el === root
-      if (axisScrolls(isRoot, cs.overflowY, dy, el.scrollTop, el.scrollHeight, el.clientHeight)) return true
-      if (axisScrolls(isRoot, cs.overflowX, dx, Math.abs(el.scrollLeft), el.scrollWidth, el.clientWidth)) return true
-    }
-    return false
+  function wheelListening(ev) {
+    if (!runtimePort || !editing || protoOn) return false
+    return readTrusted ? apply(readTrusted, ev, []) : ev.isTrusted
   }
   /* the canvas counts in px; a line or page wheel (Firefox's mouse) does not */
   function wheelPx(delta, mode, page) {
     return mode === 1 ? delta * 16 : mode === 2 ? delta * page : delta
   }
-  function relayWheel(ev) {
-    if (!runtimePort || !editing || protoOn) return
-    if (!(readTrusted ? apply(readTrusted, ev, []) : ev.isTrusted)) return
-    var w = {}
-    for (var f in wheelGetters) w[f] = apply(wheelGetters[f], ev, [])
-    /* a plain wheel first scrolls whatever in the design can take it (Shift
-       turns a vertical wheel sideways); only one with nowhere to go pans */
-    if (!w.ctrlKey && !w.metaKey) {
-      var sideways = w.shiftKey && !w.deltaX
-      var target = apply(readTarget, ev, [])
-      if (target && wheelScrolls(target, sideways ? w.deltaY : w.deltaX, sideways ? 0 : w.deltaY)) return
-    }
+  function sendWheel(ev, ctrlKey, metaKey) {
     apply(preventDefault, ev, [])
+    var mode = apply(readDeltaMode, ev, [])
     apply(portSend, runtimePort, [
       {
         event: 'wheel',
-        x: w.clientX - bleed,
-        y: w.clientY - bleed,
-        deltaX: wheelPx(w.deltaX, w.deltaMode, innerWidth),
-        deltaY: wheelPx(w.deltaY, w.deltaMode, innerHeight),
-        ctrlKey: w.ctrlKey,
-        metaKey: w.metaKey,
-        shiftKey: w.shiftKey,
+        x: apply(readClientX, ev, []) - bleed,
+        y: apply(readClientY, ev, []) - bleed,
+        deltaX: wheelPx(apply(readDeltaX, ev, []), mode, innerWidth),
+        deltaY: wheelPx(apply(readDeltaY, ev, []), mode, innerHeight),
+        ctrlKey: ctrlKey,
+        metaKey: metaKey,
+        shiftKey: apply(readShiftKey, ev, []),
       },
     ])
   }
-  window.addEventListener('wheel', relayWheel, { capture: true, passive: false })
+  window.addEventListener(
+    'wheel',
+    function (ev) {
+      if (!wheelListening(ev)) return
+      var ctrlKey = apply(readCtrlKey, ev, [])
+      var metaKey = apply(readMetaKey, ev, [])
+      if (ctrlKey || metaKey) sendWheel(ev, ctrlKey, metaKey)
+    },
+    { capture: true, passive: false },
+  )
+
+  /* how far a box can still scroll one way, in px. A right-to-left box
+     counts its scrollLeft from 0 at its right edge down to minus its range */
+  function scrollRoom(el, cs, dx, dy) {
+    if (dy) return dy < 0 ? el.scrollTop : el.scrollHeight - el.clientHeight - el.scrollTop
+    var range = el.scrollWidth - el.clientWidth
+    var left = cs.direction === 'rtl' ? range + el.scrollLeft : el.scrollLeft
+    return dx < 0 ? left : range - left
+  }
+  /* does a box on the event's path (shadow roots included) take the wheel?
+     The page scrolls unless told not to; any other box only when it says so.
+     An html left visible hands body's overflow to the page instead. */
+  function wheelScrolls(ev, dx, dy) {
+    var root = document.scrollingElement || document.documentElement
+    var body = document.body
+    var rootStyle = apply(readComputedStyle, window, [document.documentElement])
+    var bodyRules = rootStyle.overflowX === 'visible' && rootStyle.overflowY === 'visible' && body
+    var path = apply(composedPath, ev, [])
+    for (var i = 0; i < path.length; i++) {
+      var el = path[i]
+      if (!el || el === window || apply(readNodeType, el, []) !== 1) continue
+      if (bodyRules && el === body && el !== root) continue
+      var cs = apply(readComputedStyle, window, [el])
+      var isRoot = el === root
+      var rules = isRoot && bodyRules ? apply(readComputedStyle, window, [body]) : cs
+      var overflow = dy ? rules.overflowY : rules.overflowX
+      if (isRoot ? overflow === 'hidden' || overflow === 'clip' : !/^(auto|scroll|overlay)$/.test(overflow)) continue
+      if (scrollRoom(el, cs, dx, dy) >= 1) return true
+    }
+    return false
+  }
+  window.addEventListener(
+    'wheel',
+    function (ev) {
+      if (!wheelListening(ev) || apply(readDefaultPrevented, ev, [])) return
+      if (apply(readCtrlKey, ev, []) || apply(readMetaKey, ev, [])) return
+      var dx = apply(readDeltaX, ev, [])
+      var dy = apply(readDeltaY, ev, [])
+      /* Shift turns a vertical wheel sideways */
+      if (apply(readShiftKey, ev, []) && !dx) {
+        dx = dy
+        dy = 0
+      }
+      if ((dy && wheelScrolls(ev, 0, dy)) || (dx && wheelScrolls(ev, dx, 0))) return
+      sendWheel(ev, false, false)
+    },
+    { passive: false },
+  )
 
   /* Escape pressed with focus inside the frame: the parent never sees the
      key event itself, so relay it (present mode closes on it) */
