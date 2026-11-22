@@ -19,8 +19,6 @@ import { MenuButton } from './ui/menu-button'
 import { Pressable } from './ui/pressable'
 import { Textarea } from './ui/textarea'
 import { Input } from './ui/input'
-import { Button } from './ui/button'
-import { Modal, ModalActions, ModalLede, ModalTitle } from './ui/modal'
 import {
   DropdownMenu,
   DropdownMenuCaption,
@@ -44,7 +42,6 @@ import {
   PlusIcon,
   UploadIcon,
   WebIcon,
-  XIcon,
 } from './ui/icons'
 import { useT, type PlainMessageKey } from '../lib/i18n'
 
@@ -135,8 +132,6 @@ export function HomeHero({
   skillScope: AgentScope
 }) {
   const hidden = usePromptBoxHidden()
-  const [confirmHide, setConfirmHide] = useState(false)
-  const cancelRef = useRef<HTMLButtonElement>(null)
   const [text, setText] = useState('')
   const [drafts, setDrafts] = useState<DraftCount>(() =>
     readStoredDrafts(typeof localStorage === 'undefined' ? undefined : localStorage),
@@ -150,7 +145,7 @@ export function HomeHero({
 
   useLayoutEffect(() => {
     if (inputRef.current) autosize(inputRef.current)
-  }, [text])
+  }, [hidden, text])
 
   useEffect(() => {
     if (focusAt) inputRef.current?.focus()
@@ -199,41 +194,6 @@ export function HomeHero({
 
   return (
     <section className="relative overflow-hidden" data-slot="home-hero">
-      <IconButton
-        aria-label={t('home.hidePromptBox')}
-        className="absolute right-4 top-0 z-10 text-ink-faint md:right-8"
-        disabled={busy}
-        onClick={() => setConfirmHide(true)}
-      >
-        <XIcon className="size-4" />
-      </IconButton>
-      {confirmHide && (
-        <Modal
-          size="sm"
-          onClose={() => setConfirmHide(false)}
-          onOpenAutoFocus={(event) => {
-            event.preventDefault()
-            cancelRef.current?.focus()
-          }}
-        >
-          <ModalTitle>{t('home.hidePromptBoxTitle')}</ModalTitle>
-          <ModalLede>{t('home.hidePromptBoxLede')}</ModalLede>
-          <ModalActions>
-            <Button ref={cancelRef} onClick={() => setConfirmHide(false)}>
-              {t('common.cancel')}
-            </Button>
-            <Button
-              variant="primary"
-              onClick={() => {
-                setConfirmHide(false)
-                setPromptBoxHidden(true)
-              }}
-            >
-              {t('home.hidePromptBox')}
-            </Button>
-          </ModalActions>
-        </Modal>
-      )}
       {/* the wave: 2 copies of 28 bars, blurred, fading in from the top. It is
           sized to the section, not to pixels, so it ends faded inside the hero
           on a phone as it does on desktop instead of being cut at the edge */}
@@ -302,6 +262,14 @@ export function HomeHero({
       {/* the composer */}
       <div className="relative mx-auto mt-6 w-full max-w-[740px] px-4 md:mt-[34px] md:px-0">
         <div className="relative rounded-panel bg-surface px-[18px] pb-3 pt-5 shadow-float">
+          <IconButton
+            aria-label={t('home.hidePromptBox')}
+            className="absolute right-1.5 top-1.5 z-10"
+            disabled={busy}
+            onClick={() => setPromptBoxHidden(true)}
+          >
+            <MinusIcon className="size-4" />
+          </IconButton>
           {skillMenu.menu}
           <Textarea
             ref={inputRef}
@@ -313,7 +281,7 @@ export function HomeHero({
             aria-label={t('home.composerAria')}
             {...skillMenu.inputProps}
             onKeyDown={onKeyDown}
-            className="min-h-[52px] text-lead placeholder:text-ink-ghost md:text-lead"
+            className="min-h-[52px] pr-6 text-lead placeholder:text-ink-ghost md:text-lead"
           />
           <div className="mt-1 flex items-center gap-3 text-body text-ink-soft md:gap-5">
             <Pressable

@@ -4,7 +4,9 @@ import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { HomeHero } from '../src/components/HomeHero'
 import { GeneralSettings } from '../src/components/GeneralSettings'
-import { PROMPT_BOX_STORAGE_KEY, setPromptBoxHidden } from '../src/lib/homePreferences'
+import { Button } from '../src/components/ui/button'
+import { SparkIcon } from '../src/components/ui/icons'
+import { PROMPT_BOX_STORAGE_KEY, setPromptBoxHidden, usePromptBoxHidden } from '../src/lib/homePreferences'
 
 vi.mock('../src/components/ModelPicker', () => ({ ModelPicker: () => null }))
 
@@ -19,6 +21,19 @@ const actions = {
   onAutomations: vi.fn(),
   onIntegrations: vi.fn(),
   onCommunity: vi.fn(),
+}
+const composer = '[aria-label="Ask Doop what to design"]'
+const collapseButton = '[aria-label="Hide Prompt Box"]'
+const expandButton = '[aria-label="Show Prompt Box"]'
+
+function HeaderExpand() {
+  const hidden = usePromptBoxHidden()
+  if (!hidden) return null
+  return (
+    <Button variant="default" size="bar" aria-label="Show Prompt Box" onClick={() => setPromptBoxHidden(false)}>
+      <SparkIcon width={15} height={15} className="text-ink-soft" /> Show Prompt Box
+    </Button>
+  )
 }
 
 beforeEach(() => {
@@ -36,64 +51,74 @@ afterEach(async () => {
 
 async function render(busy = false) {
   await act(async () =>
-    root.render(<HomeHero busy={busy} actions={actions} focusAt={0} skillScope={{ personal: true }} />),
+    root.render(
+      <>
+        <HeaderExpand />
+        <HomeHero busy={busy} actions={actions} focusAt={0} skillScope={{ personal: true }} />
+      </>,
+    ),
   )
 }
 
-async function click(selector: string, scope: ParentNode = document) {
-  const button = scope.querySelector<HTMLButtonElement>(selector)
+async function click(selector: string) {
+  const button = container.querySelector<HTMLButtonElement>(selector)
   expect(button).not.toBeNull()
   await act(async () => button!.click())
 }
 
-it('requires confirmation and keeps the prompt visible when cancelled or dismissed', async () => {
+it('collapses the prompt box immediately and persists the choice', async () => {
   await render()
-  await click('[aria-label="Hide Prompt Box"]')
-  const dialog = document.querySelector('[role="dialog"]')!
-  expect(dialog.textContent).toContain('Hide Prompt Box?')
-  expect(dialog.textContent).toContain('Settings → General')
-  expect(document.activeElement?.textContent).toBe('Cancel')
-  await act(async () => (document.activeElement as HTMLButtonElement).click())
+  const input = container.querySelector(composer)
+  expect(input).not.toBeNull()
+  const button = container.querySelector(collapseButton)
+  expect(button?.parentElement).toBe(input?.parentElement)
+  expect(button?.getAttribute('title')).toBe('Hide Prompt Box')
+  await click(collapseButton)
   expect(document.querySelector('[role="dialog"]')).toBeNull()
-  expect(container.querySelector('textarea')).not.toBeNull()
-  expect(localStorage.getItem(PROMPT_BOX_STORAGE_KEY)).toBe('false')
+  expect(container.querySelector(composer)).toBeNull()
+  expect(localStorage.getItem(PROMPT_BOX_STORAGE_KEY)).toBe('true')
+})
 
-  await click('[aria-label="Hide Prompt Box"]')
-  await click('[aria-label="Close"]', document.querySelector('[role="dialog"]')!)
-  expect(container.querySelector('textarea')).not.toBeNull()
+it('restores the prompt box from the header in one click', async () => {
+  await render()
+  expect(container.querySelector(expandButton)).toBeNull()
+  await click(collapseButton)
+  expect(container.querySelector(expandButton)?.textContent?.trim()).toBe('Show Prompt Box')
+  await click(expandButton)
+  expect(container.querySelector(composer)).not.toBeNull()
+  expect(container.querySelector(expandButton)).toBeNull()
   expect(localStorage.getItem(PROMPT_BOX_STORAGE_KEY)).toBe('false')
 })
 
-it('persists hiding and lets settings restore the prompt box', async () => {
-  await render()
-  await click('[aria-label="Hide Prompt Box"]')
-  const confirm = Array.from(document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')).find(
-    (button) => button.textContent === 'Hide Prompt Box',
-  )!
-  await act(async () => confirm.click())
-  expect(container.querySelector('[data-slot="home-hero"]')).toBeNull()
-  expect(localStorage.getItem(PROMPT_BOX_STORAGE_KEY)).toBe('true')
-
+it('reads a stored true as collapsed after reload', async () => {
+  localStorage.setItem(PROMPT_BOX_STORAGE_KEY, 'true')
   // A fresh module reads the persisted choice, as a page reload would.
   vi.resetModules()
   const fresh = await import('../src/lib/homePreferences')
   function ReloadedHome() {
-    return fresh.usePromptBoxHidden() ? null : <p>Prompt box</p>
+    return fresh.usePromptBoxHidden() ? <p>Collapsed</p> : null
   }
   await act(async () => root.render(<ReloadedHome />))
-  expect(container.textContent).toBe('')
-
-  await act(async () => root.render(<GeneralSettings />))
-  expect(container.querySelector('[role="switch"]')?.getAttribute('aria-checked')).toBe('false')
-  await click('[role="switch"]', container)
-  expect(localStorage.getItem(PROMPT_BOX_STORAGE_KEY)).toBe('false')
-  await render()
-  expect(container.querySelector('textarea')).not.toBeNull()
+  expect(container.textContent).toBe('Collapsed')
 })
 
-it('cannot hide a prompt while it is being submitted', async () => {
+it('lets Settings restore the prompt box', async () => {
+  setPromptBoxHidden(true)
+  await act(async () => root.render(<GeneralSettings />))
+  const settingsSwitch = '[role="switch"]#show-prompt-box'
+  expect(container.querySelector(settingsSwitch)?.getAttribute('aria-checked')).toBe('false')
+  await click(settingsSwitch)
+  expect(container.querySelector(settingsSwitch)?.getAttribute('aria-checked')).toBe('true')
+  expect(localStorage.getItem(PROMPT_BOX_STORAGE_KEY)).toBe('false')
+  await render()
+  expect(container.querySelector(composer)).not.toBeNull()
+})
+
+it('cannot collapse the prompt box during submission', async () => {
   await render(true)
-  await click('[aria-label="Hide Prompt Box"]')
-  expect(document.querySelector('[role="dialog"]')).toBeNull()
-  expect(container.querySelector('textarea')).not.toBeNull()
+  expect(container.querySelector<HTMLButtonElement>(collapseButton)?.disabled).toBe(true)
+  await click(collapseButton)
+  expect(container.querySelector(composer)).not.toBeNull()
+  expect(container.querySelector(expandButton)).toBeNull()
+  expect(localStorage.getItem(PROMPT_BOX_STORAGE_KEY)).toBe('false')
 })

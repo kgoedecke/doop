@@ -5,9 +5,7 @@ export const home = {
   newCanvas: 'New canvas',
   newShort: 'New',
   hidePromptBox: 'Hide Prompt Box',
-  hidePromptBoxTitle: 'Hide Prompt Box?',
-  hidePromptBoxLede:
-    'This removes the prompt box from your home dashboard. You can turn it back on anytime in Settings → General.',
+  showPromptBox: 'Show Prompt Box',
 
   /* failures and toasts */
   createCanvasFailed: 'Couldn’t create the canvas',
