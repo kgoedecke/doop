@@ -765,8 +765,8 @@ function useTokenFields(frame: Frame, info: PaintInfo, apply: (styles: StylePatc
 }
 
 /* a colour and its number (fill opacity, stroke width): the number's column
-   fits "100 %" and "12.75 px" whole, the same in every such row */
-const COLOR_ROW = 'grid grid-cols-[minmax(0,1fr)_88px] gap-1.5'
+   fits "100 %" and a two-digit "12 px" whole, the same in every such row */
+const COLOR_ROW = 'grid grid-cols-[minmax(0,1fr)_72px] gap-1.5'
 
 /** The Fill section: the paint's colour and opacity, token-bindable, and an
  *  image fill when the layer has one. The frame Inspector shows the same
