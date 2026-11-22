@@ -713,6 +713,48 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
   document.addEventListener('keydown', relayKey)
   document.addEventListener('keyup', relayKey)
 
+  /* ⌘/Ctrl+wheel (a trackpad pinch, or a held modifier and a mouse wheel)
+     reaches this document only while it is being edited, when the canvas
+     lifts its shield off the frame. Left alone it zooms the whole page; it
+     is the canvas's zoom instead, so it travels over the port at the
+     pointer's spot in design px. It is caught on the window in the capture
+     phase, ahead of any design script, and only while editing: a playing
+     prototype, or a runtime without the canvas's port (the prototype
+     player), leaves the browser its own. A plain wheel stays here. */
+  var wheelGetters = {
+    deltaY: getter(WheelEvent.prototype, 'deltaY'),
+    deltaMode: getter(WheelEvent.prototype, 'deltaMode'),
+    clientX: getter(MouseEvent.prototype, 'clientX'),
+    clientY: getter(MouseEvent.prototype, 'clientY'),
+    ctrlKey: getter(MouseEvent.prototype, 'ctrlKey'),
+    metaKey: getter(MouseEvent.prototype, 'metaKey'),
+  }
+  var preventDefault = Event.prototype.preventDefault
+  function relayZoomWheel(ev) {
+    if (!runtimePort || !editing || protoOn) return
+    if (!(readTrusted ? apply(readTrusted, ev, []) : ev.isTrusted)) return
+    var ctrlKey = apply(wheelGetters.ctrlKey, ev, [])
+    var metaKey = apply(wheelGetters.metaKey, ev, [])
+    if (!ctrlKey && !metaKey) return
+    apply(preventDefault, ev, [])
+    var deltaY = apply(wheelGetters.deltaY, ev, [])
+    var deltaMode = apply(wheelGetters.deltaMode, ev, [])
+    /* the canvas counts in px; a line or page wheel (Firefox's mouse) does not */
+    if (deltaMode === 1) deltaY *= 16
+    else if (deltaMode === 2) deltaY *= innerHeight
+    apply(portSend, runtimePort, [
+      {
+        event: 'wheel',
+        x: apply(wheelGetters.clientX, ev, []) - bleed,
+        y: apply(wheelGetters.clientY, ev, []) - bleed,
+        deltaY: deltaY,
+        ctrlKey: ctrlKey,
+        metaKey: metaKey,
+      },
+    ])
+  }
+  window.addEventListener('wheel', relayZoomWheel, { capture: true, passive: false })
+
   /* Escape pressed with focus inside the frame: the parent never sees the
      key event itself, so relay it (present mode closes on it) */
   document.addEventListener('keydown', function (ev) {
