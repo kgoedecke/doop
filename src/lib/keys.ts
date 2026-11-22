@@ -1,8 +1,8 @@
 /** ⌘ on Mac, Ctrl elsewhere — for the shortcut hints in menus. */
 export const MOD_KEY = /mac/i.test(navigator.platform) ? '⌘' : 'Ctrl+'
 
-/** The ⌘ / Ctrl chords the canvas page acts on, as `[shift+]key` (key
- *  lowercased; a shifted digit by its `code`, as ⌘⇧7 types & on US keyboards). A frame document with the focus keeps them from its browser
+/** The ⌘ / Ctrl chords the canvas page acts on, as `[shift+]key` using
+ *  the Latin labels of the physical keys. A frame document with the focus keeps them from its browser
  *  defaults (Ctrl+D bookmarking, Ctrl+K the search bar, Ctrl+± page zoom)
  *  before relaying them, since the page's own preventDefault arrives too
  *  late to reach that document. ⌘[ / ⌘] would otherwise take the frame's
@@ -24,6 +24,7 @@ export const CANVAS_MOD_CHORDS = [
   '-',
   '+',
   'shift++',
+  'shift+=',
   '[',
   ']',
   'b',
@@ -41,8 +42,8 @@ export function isTypingTarget(target: EventTarget | null): target is HTMLElemen
 
 /** ⌘. (Ctrl+. elsewhere): Figma's "hide UI" — only the bare chord, so
  *  ⌘⇧. and ⌥-variants stay free for the browser and the OS. */
-export function isHideUiShortcut(e: Pick<KeyboardEvent, 'key' | 'metaKey' | 'ctrlKey' | 'altKey' | 'shiftKey'>) {
-  return e.key === '.' && (e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey
+export function isHideUiShortcut(e: Chord) {
+  return shortcutKey(e) === '.' && (e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey
 }
 
 /** An Enter that only confirms an IME composition (Chinese, Japanese,
@@ -97,23 +98,52 @@ export function pressedKey(e: { key?: string }): string {
   return (e.key ?? '').toLowerCase()
 }
 
-type Chord = Pick<KeyboardEvent, 'key' | 'code' | 'metaKey' | 'ctrlKey' | 'altKey' | 'shiftKey'>
+/** Physical key labels shared by the canvas and its iframe runtime. */
+export const SHORTCUT_KEYS_BY_CODE: Readonly<Record<string, string>> = {
+  ...Object.fromEntries(Array.from('ABCDEFGHIJKLMNOPQRSTUVWXYZ', (letter) => [`Key${letter}`, letter.toLowerCase()])),
+  ...Object.fromEntries(Array.from('0123456789', (digit) => [`Digit${digit}`, digit])),
+  Backquote: '`',
+  Minus: '-',
+  Equal: '=',
+  BracketLeft: '[',
+  BracketRight: ']',
+  Backslash: '\\',
+  Semicolon: ';',
+  Quote: "'",
+  Comma: ',',
+  Period: '.',
+  Slash: '/',
+  NumpadAdd: '+',
+  NumpadSubtract: '-',
+  NumpadEqual: '=',
+  Numpad0: '0',
+}
+
+/** Named keys and events without a physical code still use the event's key. */
+export function shortcutKey(e: { key?: string; code?: string }): string {
+  const key = pressedKey(e)
+  const code = e.code
+  if (!code || code === 'Unidentified') return key
+  if (Object.hasOwn(SHORTCUT_KEYS_BY_CODE, code)) return SHORTCUT_KEYS_BY_CODE[code] ?? ''
+  return key.length > 1 ? key : ''
+}
+
+type Chord = Pick<KeyboardEvent, 'key' | 'metaKey' | 'ctrlKey' | 'altKey' | 'shiftKey'> &
+  Partial<Pick<KeyboardEvent, 'code'>>
 
 /** ⌘A (Ctrl+A elsewhere): Figma's select all. */
 export function isSelectAllShortcut(e: Chord) {
-  return pressedKey(e) === 'a' && (e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey
+  return shortcutKey(e) === 'a' && (e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey
 }
 
 export type ReorderMove = 'forward' | 'backward' | 'front' | 'back'
 
 /** ⌘] / ⌘[ step the selection forward or backward, ⌘⌥] / ⌘⌥[ take it to
- *  the front or the back, as in Figma. Read by code as well as key: with ⌥
- *  held macOS types another character for the bracket keys. */
+ *  the front or the back, as in Figma. */
 export function reorderShortcut(e: Chord): ReorderMove | null {
   if (!(e.metaKey || e.ctrlKey) || e.shiftKey) return null
-  const right = e.key === ']' || e.code === 'BracketRight'
-  const left = e.key === '[' || e.code === 'BracketLeft'
-  if (!right && !left) return null
-  if (e.altKey) return right ? 'front' : 'back'
-  return right ? 'forward' : 'backward'
+  const key = shortcutKey(e)
+  if (key !== ']' && key !== '[') return null
+  if (e.altKey) return key === ']' ? 'front' : 'back'
+  return key === ']' ? 'forward' : 'backward'
 }

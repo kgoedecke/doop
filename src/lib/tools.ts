@@ -3,6 +3,7 @@
    place, so the Stage (background) and FrameView (frames) agree on it. */
 
 import type { PlainMessageKey } from './i18n'
+import { isTypingTarget, shortcutKey } from './keys'
 
 export type DrawingTool = 'rectangle' | 'circle' | 'path' | 'text' | 'frame'
 export type Tool = 'select' | 'hand' | 'zoom' | 'comment' | DrawingTool
@@ -76,4 +77,11 @@ export function resolvePointerAction({ tool, target, button, pointerType, spaceH
 export function toolForKey(key: string): Tool | null {
   const found = TOOLS.find((t) => t.key.toLowerCase() === key.toLowerCase())
   return found?.id ?? null
+}
+
+/** The Stage's tool shortcuts yield to text entry and modifier chords. */
+export function toolForShortcut(e: KeyboardEvent): Tool | null {
+  if (e.metaKey || e.ctrlKey || e.altKey || e.repeat || isTypingTarget(e.target)) return null
+  const key = shortcutKey(e)
+  return toolForKey(e.shiftKey && key ? `⇧${key}` : key)
 }

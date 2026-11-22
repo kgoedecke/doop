@@ -24,6 +24,7 @@ import { ShareModal } from '../components/ShareModal'
 import { CreateWorkspaceModal, MoveCanvasModal, UpgradeModal } from '../components/WorkspaceModals'
 import { posthog } from '../lib/posthog'
 import { closeTab, openCanvasTab, pruneTabs } from '../lib/desktop'
+import { shortcutKey } from '../lib/keys'
 import { AvatarStack } from '../components/ui/avatar'
 import { EmptyState } from '../components/ui/empty-state'
 import { Button } from '../components/ui/button'
@@ -128,7 +129,7 @@ export function Home() {
   /* ⌘/ hands the keyboard to the composer; ⌘K opens the rail's search */
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      if (e.key === '/' && (e.metaKey || e.ctrlKey)) {
+      if (shortcutKey(e) === '/' && (e.metaKey || e.ctrlKey)) {
         e.preventDefault()
         setComposerFocusAt(Date.now())
       }

@@ -12,6 +12,7 @@ import { AppRail, railLayout } from '../components/AppRail'
 import { FramePreview } from '../components/FramePreview'
 import { posthog } from '../lib/posthog'
 import { openCanvasTab } from '../lib/desktop'
+import { shortcutKey } from '../lib/keys'
 import { Button } from '../components/ui/button'
 import { Badge } from '../components/ui/badge'
 import { Kbd } from '../components/ui/kbd'
@@ -61,7 +62,7 @@ export function Community() {
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      if (e.key === 'k' && (e.metaKey || e.ctrlKey)) {
+      if (shortcutKey(e) === 'k' && (e.metaKey || e.ctrlKey)) {
         e.preventDefault()
         searchRef.current?.focus()
         searchRef.current?.select()

@@ -118,6 +118,8 @@ describe('key chords', () => {
   it('reads ⌘A and nothing shifted or alted', () => {
     expect(isSelectAllShortcut(chord({ key: 'a', metaKey: true }))).toBe(true)
     expect(isSelectAllShortcut(chord({ key: 'A', ctrlKey: true }))).toBe(true)
+    expect(isSelectAllShortcut(chord({ key: 'ф', code: 'KeyA', ctrlKey: true }))).toBe(true)
+    expect(isSelectAllShortcut(chord({ key: 'a', code: 'KeyQ', ctrlKey: true }))).toBe(false)
     expect(isSelectAllShortcut(chord({ key: 'a', metaKey: true, shiftKey: true }))).toBe(false)
     expect(isSelectAllShortcut(chord({ key: 'a' }))).toBe(false)
   })

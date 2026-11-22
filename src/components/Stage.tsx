@@ -32,7 +32,7 @@ import { MeasureOverlay } from './MeasureOverlay'
 import { SnapGuides } from './SnapGuides'
 import { GuideLines, Rulers } from './Rulers'
 import { useIsMobile } from '../hooks/use-mobile'
-import { isTypingTarget, MOD_KEY, pressedKey } from '../lib/keys'
+import { isTypingTarget, MOD_KEY, shortcutKey } from '../lib/keys'
 import { cn } from '../lib/utils'
 import { gesture } from '../lib/gesture'
 import { hasFrameClip, pasteFrameAtScreen } from '../lib/frameClipboard'
@@ -54,7 +54,7 @@ import {
   VectorIcon,
   ZoomInIcon,
 } from './ui/icons'
-import { TOOLS, isDrawingTool, resolvePointerAction, toolForKey, type Tool } from '../lib/tools'
+import { TOOLS, isDrawingTool, resolvePointerAction, toolForShortcut, type Tool } from '../lib/tools'
 import { useCanvasDrawing } from './CanvasDrawing'
 import { CommentThreadLayer, FrameLabelLayer } from './FrameLabelLayer'
 import { pixelGridLines } from './PixelGrid'
@@ -931,17 +931,16 @@ export function Stage({
       if (s.tool === 'zoom') s.setTool(held.previous)
     }
     function onKeyUp(e: KeyboardEvent) {
-      if (e.code === 'KeyZ' || pressedKey(e) === 'z') release()
+      if (shortcutKey(e) === 'z') release()
     }
     function onKey(e: KeyboardEvent) {
-      if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey || e.repeat) return
       if (e.key === 'Escape') {
+        if (e.metaKey || e.ctrlKey || e.altKey || e.repeat) return
         if (isTypingTarget(e.target) && !e.target.closest('[data-comment-ui], [data-drawing-input]')) return
         if (useStore.getState().tool !== 'select') useStore.getState().setTool('select')
         return
       }
-      if (isTypingTarget(e.target)) return
-      const next = toolForKey(pressedKey(e))
+      const next = toolForShortcut(e)
       if (!next) return
       e.preventDefault()
       const previous = useStore.getState().tool

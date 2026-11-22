@@ -26,7 +26,7 @@ import { forgetPendingConnect, isPendingConnect, parseDesktopConnectLink } from 
 import { safeRelativeTarget } from './safeTarget'
 import { NO_CANVAS, isViewCommand, runViewCommand, syncViewMenu } from './viewMenu'
 import { initAppMenu } from './appMenu'
-import { pressedKey } from './keys'
+import { shortcutKey } from './keys'
 import { type Chord, matchesChord } from './actions/chords'
 
 export type CanvasTab = { id: string; name: string }
@@ -355,9 +355,8 @@ export function initDesktopShell() {
   if (!isDesktopShell()) return
   /* Windows: the page's caption buttons take over from the native frame */
   initWindowFrame().catch(console.error)
-  /* Cmd+W: on macOS the shell's menu owns the shortcut (main.rs) and relays
-     it as an event — the page never sees the keystroke. Windows has no menu
-     bar, so Ctrl+W arrives as a plain keydown. Both close the active tab. */
+  /* The File menu (and its accelerator on older shells) relays Close Tab
+     as an event. The page matches the shortcut by physical key. */
   shellWindow.__TAURI__?.event?.listen?.('close-tab', closeActiveTab).catch(console.error)
   /* the macOS menu bar, built from the action registry (appMenu.ts); a shell
      older than that has only the View menu (view_menu.rs), which a reload
@@ -371,12 +370,16 @@ export function initDesktopShell() {
     })
     .catch(console.error)
   listenForDesktopLinks()
-  /* capture phase, so a field that stops its keys (the zoom input, a colour
-     field) cannot swallow the tab and Settings shortcuts; a frame relays them from inside
-     too, text editing included (frameRuntime.ts) */
+  /* Capture phase, so a field that stops its keys cannot swallow the tab
+     and Settings shortcuts. Frames relay them even while editing text. */
   document.addEventListener(
     'keydown',
     (e) => {
+      if (shortcutKey(e) === 'w' && (e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey) {
+        e.preventDefault()
+        closeActiveTab()
+        return
+      }
       const target = shellShortcutTarget(e, useTabs.getState().tabs)
       if (target === null) return
       e.preventDefault()
@@ -384,11 +387,6 @@ export function initDesktopShell() {
     },
     true,
   )
-  document.addEventListener('keydown', (e) => {
-    if (pressedKey(e) !== 'w' || !(e.metaKey || e.ctrlKey) || e.shiftKey || e.altKey) return
-    e.preventDefault()
-    closeActiveTab()
-  })
   document.addEventListener(
     'click',
     (e) => {

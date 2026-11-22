@@ -17,6 +17,12 @@ describe('⌘. hide UI', () => {
     expect(isHideUiShortcut({ key: ',', metaKey: true, ctrlKey: false, altKey: false, shiftKey: false })).toBe(false)
   })
 
+  it('matches Period and rejects a dot typed by Slash', () => {
+    const mods = { metaKey: true, ctrlKey: false, altKey: false, shiftKey: false }
+    expect(isHideUiShortcut({ ...mods, key: 'ю', code: 'Period' })).toBe(true)
+    expect(isHideUiShortcut({ ...mods, key: '.', code: 'Slash' })).toBe(false)
+  })
+
   it('toggles the flag without touching what the panels had open', () => {
     useStore.setState({ uiHidden: false, layersOpen: true, inspectorOpen: true, elementPanelOpen: false })
     useStore.getState().toggleUiHidden()

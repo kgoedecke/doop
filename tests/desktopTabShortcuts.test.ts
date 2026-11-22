@@ -53,19 +53,30 @@ it('hears the shortcuts from a field that stops its own keys', async () => {
   const { initDesktopShell, useTabs } = await import('../src/lib/desktop')
   const { navigate } = await import('../src/App')
   const listener = vi.spyOn(document, 'addEventListener')
+  const originalUrl = location.href
+  const field = document.createElement('input')
   try {
     initDesktopShell()
     useTabs.setState({ tabs })
-    const field = document.createElement('input')
     field.addEventListener('keydown', (e) => e.stopPropagation())
     document.body.append(field)
     const ctrl = !/mac/i.test(navigator.platform)
-    field.dispatchEvent(
-      new KeyboardEvent('keydown', { key: '2', code: 'Digit2', metaKey: !ctrl, ctrlKey: ctrl, bubbles: true }),
-    )
+    const press = (key: string, code: string) =>
+      field.dispatchEvent(
+        new KeyboardEvent('keydown', { key, code, metaKey: !ctrl, ctrlKey: ctrl, bubbles: true, cancelable: true }),
+      )
+    press('2', 'Digit2')
     expect(navigate).toHaveBeenCalledWith('/c/a')
-    field.remove()
+
+    history.replaceState(null, '', '/c/a')
+    expect(press('w', 'KeyZ')).toBe(true)
+    expect(useTabs.getState().tabs).toEqual(tabs)
+    expect(press('ц', 'KeyW')).toBe(false)
+    expect(useTabs.getState().tabs).toEqual([tabs[1]])
+    expect(navigate).toHaveBeenCalledWith('/c/b')
   } finally {
+    history.replaceState(null, '', originalUrl)
+    field.remove()
     for (const [name, handler, options] of listener.mock.calls) document.removeEventListener(name, handler, options)
     listener.mockRestore()
   }

@@ -90,10 +90,15 @@ describe('dispatchActionKey', () => {
   afterEach(() => setActionHost(null))
 
   it('opens the palette on ⌘K, even from a field', () => {
-    const e = keyEvent('k', { metaKey: true })
+    const e = keyEvent('л', { metaKey: true }, 'KeyK')
     expect(dispatchActionKey(e, true, true)).toBe(true)
     expect(host.openPalette).toHaveBeenCalled()
     expect(e.preventDefault).toHaveBeenCalled()
+  })
+
+  it('handles shifted Equal and the keypad Add key as zoom in', () => {
+    expect(dispatchActionKey(keyEvent('=', { metaKey: true, shiftKey: true }, 'Equal'), false, true)).toBe(true)
+    expect(dispatchActionKey(keyEvent('+', { metaKey: true }, 'NumpadAdd'), false, true)).toBe(true)
   })
 
   it('opens the shortcuts sheet on ⌃⇧?', () => {
@@ -118,7 +123,9 @@ describe('dispatchActionKey', () => {
 
   it('toggles the view on ⇧C and ⌘Y', () => {
     const before = useStore.getState().viewOptions.comments
-    dispatchActionKey(keyEvent('C', { shiftKey: true }), false, true)
+    const comment = keyEvent('С', { shiftKey: true }, 'KeyC')
+    expect(dispatchActionKey(comment, true, true)).toBe(false)
+    expect(dispatchActionKey(comment, false, true)).toBe(true)
     expect(useStore.getState().viewOptions.comments).toBe(!before)
     dispatchActionKey(keyEvent('y', { metaKey: true }), false, true)
     expect(useStore.getState().outlines).toBe(true)

@@ -1,13 +1,12 @@
 /* A keyboard chord, as the action registry binds it. `mod` is ⌘ on a Mac and
    Ctrl elsewhere; `ctrl` is the Control key itself, which only a Mac tells
-   apart from `mod`. Chords with ⌥ or ⇧ on a digit or punctuation key name the
-   physical key by `code`, since macOS types another character for ⌥ chords
-   and ⇧1 is '!' on most layouts. */
+   apart from `mod`. Printable keys use the physical key. A chord can name
+   that key explicitly when its label differs, as with ⇧1. */
 
-import { pressedKey } from '../keys'
+import { pressedKey, shortcutKey } from '../keys'
 
 export interface Chord {
-  /** `KeyboardEvent.key`, compared case-insensitively */
+  /** The Latin label of a physical key, or a named `KeyboardEvent.key`. */
   key?: string
   /** `KeyboardEvent.code`, the physical key */
   code?: string
@@ -39,7 +38,9 @@ export function matchesChord(e: KeyInput, chord: Chord, mac = IS_MAC): boolean {
   }
   if (e.altKey !== !!chord.alt || e.shiftKey !== !!chord.shift) return false
   if (chord.code) return e.code === chord.code
-  return !!chord.key && pressedKey(e) === chord.key.toLowerCase()
+  if (!chord.key) return false
+  const key = chord.key.length === 1 ? shortcutKey(e) : pressedKey(e)
+  return key === chord.key.toLowerCase()
 }
 
 const KEY_GLYPHS: Record<string, string> = {

@@ -21,7 +21,7 @@ import {
   type Step,
 } from '../../shared/automations'
 import { api, ApiError, type IntegrationsStatus } from '../lib/api'
-import { RUN_SHORTCUT_HINT, SAVE_SHORTCUT_HINT, isRunShortcut } from '../lib/keys'
+import { RUN_SHORTCUT_HINT, SAVE_SHORTCUT_HINT, isRunShortcut, shortcutKey } from '../lib/keys'
 import { navigate } from '../App'
 import { posthog } from '../lib/posthog'
 import { FrameThumb } from '../components/FramePreview'
@@ -389,7 +389,7 @@ export function AutomationEditor({ automationId }: { automationId: string }) {
      draft is saved before the run starts. */
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      if (e.key === 's' && (e.metaKey || e.ctrlKey)) {
+      if (shortcutKey(e) === 's' && (e.metaKey || e.ctrlKey)) {
         e.preventDefault()
         void saveRef.current()
         return
