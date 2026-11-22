@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ClientCanvas, CanvasMeta, WorkspaceSummary } from '../../shared/types'
 import { colorFor } from '../../shared/types'
+import { MAX_CANVAS_NAME } from '../../shared/pages'
 import { api, errorMessage, paywalledWorkspace } from '../lib/api'
 import { authClient } from '../lib/auth'
 import { useUserEvents } from '../hooks/use-user-events'
@@ -19,11 +20,12 @@ import { IosAppPrompt } from '../components/NativeAppPromo'
 import { StarCard } from '../components/StarCard'
 import { SourcePicker } from '../components/ImportSources'
 import { importSources } from '../components/importSourceList'
-import { Modal } from '../components/ui/modal'
+import { Modal, ModalActions, ModalTitle } from '../components/ui/modal'
+import { Input } from '../components/ui/input'
 import { ShareModal } from '../components/ShareModal'
 import { CreateWorkspaceModal, MoveCanvasModal, UpgradeModal } from '../components/WorkspaceModals'
 import { posthog } from '../lib/posthog'
-import { closeTab, openCanvasTab, pruneTabs } from '../lib/desktop'
+import { closeTab, openCanvasTab, pruneTabs, renameTab } from '../lib/desktop'
 import { AvatarStack } from '../components/ui/avatar'
 import { EmptyState } from '../components/ui/empty-state'
 import { Button } from '../components/ui/button'
@@ -47,6 +49,7 @@ import {
 import {
   BuildingIcon,
   CopyIcon,
+  EditIcon,
   GridIcon,
   ListIcon,
   MoreHorizontalIcon,
@@ -91,6 +94,7 @@ export function Home() {
   const [shareCanvas, setShareCanvas] = useState<ClientCanvas | null>(null)
   const [deleteCanvas, setDeleteCanvas] = useState<CanvasMeta | null>(null)
   const [moveCanvas, setMoveCanvas] = useState<CanvasMeta | null>(null)
+  const [renameCanvas, setRenameCanvas] = useState<CanvasMeta | null>(null)
   const [creatingWorkspace, setCreatingWorkspace] = useState(
     () => new URLSearchParams(location.search).get('workspace') === 'new',
   )
@@ -465,6 +469,7 @@ export function Home() {
                       duplicating={duplicatingId === c.id}
                       onShare={() => share(c)}
                       onDuplicate={() => duplicate(c)}
+                      onRename={() => setRenameCanvas(c)}
                       onMove={workspaces.length && canManage(c) ? () => setMoveCanvas(c) : undefined}
                       onDelete={canManage(c) ? () => setDeleteCanvas(c) : undefined}
                     />
@@ -518,6 +523,7 @@ export function Home() {
                         duplicating={duplicatingId === c.id}
                         onShare={() => share(c)}
                         onDuplicate={() => duplicate(c)}
+                        onRename={() => setRenameCanvas(c)}
                         onMove={workspaces.length && canManage(c) ? () => setMoveCanvas(c) : undefined}
                         onDelete={canManage(c) ? () => setDeleteCanvas(c) : undefined}
                       />
@@ -573,6 +579,18 @@ export function Home() {
           onClose={() => {
             setUpgrade(null)
             reload()
+          }}
+        />
+      )}
+      {renameCanvas && (
+        <RenameCanvasModal
+          key={renameCanvas.id}
+          canvas={renameCanvas}
+          onClose={() => setRenameCanvas(null)}
+          onRenamed={(id, name) => {
+            setRenameCanvas(null)
+            setCanvases((list) => list?.map((c) => (c.id === id ? { ...c, name } : c)) ?? list)
+            renameTab(id, name)
           }}
         />
       )}
@@ -696,6 +714,7 @@ function CanvasActions({
   duplicating,
   onShare,
   onDuplicate,
+  onRename,
   onMove,
   onDelete,
 }: {
@@ -704,6 +723,7 @@ function CanvasActions({
   duplicating: boolean
   onShare: () => void
   onDuplicate: () => void
+  onRename: () => void
   onMove?: () => void
   onDelete?: () => void
 }) {
@@ -732,6 +752,9 @@ function CanvasActions({
         <DropdownMenuItem disabled={duplicating} onSelect={onDuplicate}>
           <CopyIcon className="size-4" /> {duplicating ? t('home.duplicating') : t('home.duplicate')}
         </DropdownMenuItem>
+        <DropdownMenuItem onSelect={onRename}>
+          <EditIcon className="size-4" /> {t('home.rename')}
+        </DropdownMenuItem>
         {onMove && (
           <DropdownMenuItem onSelect={onMove}>
             <BuildingIcon className="size-4" /> {canvas.workspaceId ? t('home.move') : t('home.moveToWorkspace')}
@@ -747,5 +770,65 @@ function CanvasActions({
         )}
       </DropdownMenuContent>
     </DropdownMenu>
+  )
+}
+
+/** the canvas's name, changed from its tile: the same PATCH the editor's title uses */
+function RenameCanvasModal({
+  canvas,
+  onClose,
+  onRenamed,
+}: {
+  canvas: CanvasMeta
+  onClose: () => void
+  onRenamed: (id: string, name: string) => void
+}) {
+  const [name, setName] = useState(canvas.name)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const t = useT()
+  const clean = name.trim()
+
+  async function save() {
+    if (!clean || busy) return
+    if (clean === canvas.name) return onClose()
+    setBusy(true)
+    setError(null)
+    try {
+      await api.renameCanvas(canvas.id, clean)
+      posthog.capture('canvas_renamed', { source: 'home' })
+      onRenamed(canvas.id, clean)
+    } catch (caught) {
+      setError(errorMessage(caught, t('home.renameFailed')))
+      setBusy(false)
+    }
+  }
+
+  return (
+    /* held open while saving, so a late answer never lands on another canvas's modal */
+    <Modal size="sm" onClose={() => !busy && onClose()}>
+      <ModalTitle>{t('home.renameTitle')}</ModalTitle>
+      <Input
+        variant="well"
+        className="mt-5"
+        autoFocus
+        onFocus={(event) => event.target.select()}
+        value={name}
+        maxLength={MAX_CANVAS_NAME}
+        disabled={busy}
+        onChange={(event) => setName(event.target.value)}
+        onKeyDown={(event) => event.key === 'Enter' && !event.nativeEvent.isComposing && void save()}
+        aria-label={t('home.canvasNameAria')}
+      />
+      {error && <p className="mt-2 text-label text-accent-ink">{error}</p>}
+      <ModalActions>
+        <Button onClick={onClose} disabled={busy}>
+          {t('common.cancel')}
+        </Button>
+        <Button variant="primary" onClick={() => void save()} disabled={busy || !clean}>
+          {busy ? t('home.renaming') : t('common.save')}
+        </Button>
+      </ModalActions>
+    </Modal>
   )
 }

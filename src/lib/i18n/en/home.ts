@@ -78,6 +78,11 @@ export const home = {
   share: 'Share',
   duplicating: 'Duplicating…',
   duplicate: 'Duplicate',
+  rename: 'Rename…',
+  renameTitle: 'Rename canvas',
+  canvasNameAria: 'Canvas name',
+  renaming: 'Saving…',
+  renameFailed: 'Couldn’t rename the canvas',
   move: 'Move…',
   moveToWorkspace: 'Move to workspace…',
 
