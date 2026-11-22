@@ -751,6 +751,38 @@ export function Stage({
     }
   }, [])
 
+  /* Safari reports a trackpad pinch as gesture events, not ctrl+wheel */
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    let last = 1
+    type GestureEvent = Event & { scale: number; clientX: number; clientY: number }
+    function onStart(e: Event) {
+      e.preventDefault()
+      last = 1
+    }
+    function onChange(e: Event) {
+      e.preventDefault()
+      const g = e as GestureEvent
+      const rect = el!.getBoundingClientRect()
+      const vp = useStore.getState().viewport
+      const zoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, vp.zoom * (g.scale / last)))
+      const scale = zoom / vp.zoom
+      const px = g.clientX - rect.left
+      const py = g.clientY - rect.top
+      last = g.scale
+      useStore.getState().setViewport({ x: px - (px - vp.x) * scale, y: py - (py - vp.y) * scale, zoom })
+    }
+    el.addEventListener('gesturestart', onStart)
+    el.addEventListener('gesturechange', onChange)
+    el.addEventListener('gestureend', onStart)
+    return () => {
+      el.removeEventListener('gesturestart', onStart)
+      el.removeEventListener('gesturechange', onChange)
+      el.removeEventListener('gestureend', onStart)
+    }
+  }, [])
+
   /* touch: a two-finger pinch zooms around the fingers' midpoint and pans
      with it. iOS never maps a pinch onto ctrl+wheel the way desktop browsers
      do, so it needs its own listener — on touch events rather than pointers,

@@ -936,6 +936,7 @@ export const FrameView = memo(function FrameView({
         | Partial<KeyRelay>
         | { event: 'edited'; html?: unknown; discrete?: boolean }
         | { event: 'settled'; reqId?: unknown }
+        | { event: 'wheel'; x?: unknown; y?: unknown; deltaY?: unknown; ctrlKey?: unknown; metaKey?: unknown }
         | undefined
       /* Inspector edits arrive while the panel holds focus. Only keys need
          the iframe to be focused. */
@@ -945,6 +946,24 @@ export const FrameView = memo(function FrameView({
       }
       if (relay?.event === 'settled') {
         if (typeof relay.reqId === 'number') finishFrameSettle(iframe.contentWindow, relay.reqId)
+        return
+      }
+      if (relay?.event === 'wheel') {
+        const { x, y, deltaY } = relay as { x?: unknown; y?: unknown; deltaY?: unknown }
+        if (typeof x !== 'number' || typeof y !== 'number' || typeof deltaY !== 'number') return
+        const rect = documentRect(iframe) ?? iframe.getBoundingClientRect()
+        const zoom = useStore.getState().viewport.zoom
+        iframe.dispatchEvent(
+          new WheelEvent('wheel', {
+            deltaY,
+            ctrlKey: relay.ctrlKey === true,
+            metaKey: relay.metaKey === true,
+            clientX: rect.left + x * zoom,
+            clientY: rect.top + y * zoom,
+            bubbles: true,
+            cancelable: true,
+          }),
+        )
         return
       }
       if (document.activeElement !== iframe || !document.hasFocus()) return

@@ -713,6 +713,22 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
   document.addEventListener('keydown', relayKey)
   document.addEventListener('keyup', relayKey)
 
+  /* A trackpad pinch over this document arrives as ctrl+wheel in here, never
+     in the canvas: stop the page zooming and hand it to the parent, which
+     zooms the canvas around the same point. Plain scrolling stays here. */
+  document.addEventListener(
+    'wheel',
+    function (ev) {
+      if (!ev.ctrlKey && !ev.metaKey) return
+      ev.preventDefault()
+      if (!runtimePort) return
+      apply(portSend, runtimePort, [
+        { event: 'wheel', x: ev.clientX, y: ev.clientY, deltaY: ev.deltaY, ctrlKey: ev.ctrlKey, metaKey: ev.metaKey },
+      ])
+    },
+    { passive: false },
+  )
+
   /* Escape pressed with focus inside the frame: the parent never sees the
      key event itself, so relay it (present mode closes on it) */
   document.addEventListener('keydown', function (ev) {
