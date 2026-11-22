@@ -720,40 +720,70 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
      pointer's spot in design px. It is caught on the window in the capture
      phase, ahead of any design script, and only while editing: a playing
      prototype, or a runtime without the canvas's port (the prototype
-     player), leaves the browser its own. A plain wheel stays here. */
+     player), leaves the browser its own. A plain wheel pans the canvas
+     the same way, unless the design has a box to scroll under it. */
   var wheelGetters = {
+    deltaX: getter(WheelEvent.prototype, 'deltaX'),
     deltaY: getter(WheelEvent.prototype, 'deltaY'),
     deltaMode: getter(WheelEvent.prototype, 'deltaMode'),
     clientX: getter(MouseEvent.prototype, 'clientX'),
     clientY: getter(MouseEvent.prototype, 'clientY'),
     ctrlKey: getter(MouseEvent.prototype, 'ctrlKey'),
     metaKey: getter(MouseEvent.prototype, 'metaKey'),
+    shiftKey: getter(MouseEvent.prototype, 'shiftKey'),
   }
   var preventDefault = Event.prototype.preventDefault
-  function relayZoomWheel(ev) {
+  var readComputedStyle = window.getComputedStyle
+  var readParentElement = getter(Node.prototype, 'parentElement')
+  /* can a box scroll further along one axis the way the wheel turns? The
+     root scrolls unless told not to, any other box only when it says so */
+  function axisScrolls(isRoot, overflow, delta, pos, size, client) {
+    if (!delta || size - client < 1) return false
+    if (isRoot ? overflow === 'hidden' || overflow === 'clip' : !/^(auto|scroll|overlay)$/.test(overflow)) return false
+    return delta < 0 ? pos > 0 : pos + client < size - 1
+  }
+  /* does the box under the pointer, or one around it, take this wheel? */
+  function wheelScrolls(node, dx, dy) {
+    var root = document.scrollingElement || document.documentElement
+    for (var el = node; el && apply(readNodeType, el, []) === 1; el = apply(readParentElement, el, [])) {
+      var cs = apply(readComputedStyle, window, [el])
+      var isRoot = el === root
+      if (axisScrolls(isRoot, cs.overflowY, dy, el.scrollTop, el.scrollHeight, el.clientHeight)) return true
+      if (axisScrolls(isRoot, cs.overflowX, dx, Math.abs(el.scrollLeft), el.scrollWidth, el.clientWidth)) return true
+    }
+    return false
+  }
+  /* the canvas counts in px; a line or page wheel (Firefox's mouse) does not */
+  function wheelPx(delta, mode, page) {
+    return mode === 1 ? delta * 16 : mode === 2 ? delta * page : delta
+  }
+  function relayWheel(ev) {
     if (!runtimePort || !editing || protoOn) return
     if (!(readTrusted ? apply(readTrusted, ev, []) : ev.isTrusted)) return
-    var ctrlKey = apply(wheelGetters.ctrlKey, ev, [])
-    var metaKey = apply(wheelGetters.metaKey, ev, [])
-    if (!ctrlKey && !metaKey) return
+    var w = {}
+    for (var f in wheelGetters) w[f] = apply(wheelGetters[f], ev, [])
+    /* a plain wheel first scrolls whatever in the design can take it (Shift
+       turns a vertical wheel sideways); only one with nowhere to go pans */
+    if (!w.ctrlKey && !w.metaKey) {
+      var sideways = w.shiftKey && !w.deltaX
+      var target = apply(readTarget, ev, [])
+      if (target && wheelScrolls(target, sideways ? w.deltaY : w.deltaX, sideways ? 0 : w.deltaY)) return
+    }
     apply(preventDefault, ev, [])
-    var deltaY = apply(wheelGetters.deltaY, ev, [])
-    var deltaMode = apply(wheelGetters.deltaMode, ev, [])
-    /* the canvas counts in px; a line or page wheel (Firefox's mouse) does not */
-    if (deltaMode === 1) deltaY *= 16
-    else if (deltaMode === 2) deltaY *= innerHeight
     apply(portSend, runtimePort, [
       {
         event: 'wheel',
-        x: apply(wheelGetters.clientX, ev, []) - bleed,
-        y: apply(wheelGetters.clientY, ev, []) - bleed,
-        deltaY: deltaY,
-        ctrlKey: ctrlKey,
-        metaKey: metaKey,
+        x: w.clientX - bleed,
+        y: w.clientY - bleed,
+        deltaX: wheelPx(w.deltaX, w.deltaMode, innerWidth),
+        deltaY: wheelPx(w.deltaY, w.deltaMode, innerHeight),
+        ctrlKey: w.ctrlKey,
+        metaKey: w.metaKey,
+        shiftKey: w.shiftKey,
       },
     ])
   }
-  window.addEventListener('wheel', relayZoomWheel, { capture: true, passive: false })
+  window.addEventListener('wheel', relayWheel, { capture: true, passive: false })
 
   /* Escape pressed with focus inside the frame: the parent never sees the
      key event itself, so relay it (present mode closes on it) */

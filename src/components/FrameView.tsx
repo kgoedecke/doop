@@ -292,15 +292,17 @@ interface ProbeHit {
 /* what a surface click's probe is for; see `probeIntent` */
 type ProbeIntent = 'pick' | 'comment' | 'toggle'
 
-/* a ⌘/Ctrl+wheel the frame runtime relays from its document while it is
-   being edited: the canvas's zoom, at a point in design px */
+/* a wheel the frame runtime relays from its document while it is being
+   edited (the canvas's zoom or pan), at a point in design px */
 interface WheelRelay {
   event: 'wheel'
   x: number
   y: number
+  deltaX: number
   deltaY: number
   ctrlKey: boolean
   metaKey: boolean
+  shiftKey: boolean
 }
 
 /* a key the frame runtime relays from its own document, over its port */
@@ -970,8 +972,8 @@ export const FrameView = memo(function FrameView({
         if (typeof relay.reqId === 'number') finishFrameSettle(iframe.contentWindow, relay.reqId)
         return
       }
-      /* replayed on the iframe, the wheel bubbles to the stage, which zooms
-         about the pointer as it does over the shield */
+      /* replayed on the iframe, the wheel bubbles to the stage, which zooms or pans
+         as it does over the shield */
       if (relay?.event === 'wheel') {
         const { x, y, deltaY } = relay
         if (typeof x !== 'number' || typeof y !== 'number' || typeof deltaY !== 'number') return
@@ -983,9 +985,11 @@ export const FrameView = memo(function FrameView({
         const offset = rotateVector({ x: (x - width / 2) * zoom, y: (y - height / 2) * zoom }, rotation)
         iframe.dispatchEvent(
           new WheelEvent('wheel', {
+            deltaX: (typeof relay.deltaX === 'number' ? relay.deltaX : 0) * density,
             deltaY: deltaY * density,
             ctrlKey: relay.ctrlKey === true,
             metaKey: relay.metaKey === true,
+            shiftKey: relay.shiftKey === true,
             clientX: box.left + box.width / 2 + offset.x,
             clientY: box.top + box.height / 2 + offset.y,
             bubbles: true,
