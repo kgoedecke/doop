@@ -354,6 +354,20 @@ function inDocumentOrder(els: Element[]): Element[] {
   return outermost(els).sort((a, b) => (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1))
 }
 
+/** The selectors in document order, outermost only: a picked element
+ *  inside another picked one folds into it. Null when any selector does
+ *  not resolve. */
+export function outermostSelectors(html: string, selectors: string[]): string[] | null {
+  const doc = parse(html)
+  const selectorOf = new Map<Element, string>()
+  for (const sel of selectors) {
+    const el = find(doc, sel)
+    if (!el) return null
+    if (!selectorOf.has(el)) selectorOf.set(el, sel)
+  }
+  return inDocumentOrder([...selectorOf.keys()]).map((el) => selectorOf.get(el)!)
+}
+
 /** What became of the element `selector` names in `before` in `after`, a
  *  later save of the same frame: `kept` or `gone` when that can be shown,
  *  `unsure` when it cannot. Its markup missing proves nothing (an edit to its
@@ -658,6 +672,28 @@ function alreadyAt(el: Element, at: Element, where: DropPlace): boolean {
   return el === (first && HIDDEN_TAGS.has(first.tagName) ? visibleSibling(first, 1) : first)
 }
 
+/* a canvas group whose last layer left goes with it, as in a design tool */
+function dropEmptyCanvasGroup(left: Element | null, parent: Element) {
+  if (left && left !== parent && left.getAttribute('data-doop-drawing') === 'group' && !left.children.length)
+    left.remove()
+}
+
+// Keep size, rotation and scale, but let DOM order (or the box's own
+// placement) determine where it lands.
+function placeMoved(el: Element, flow: FlowPlacement) {
+  const style = (el as HTMLElement | SVGElement).style
+  placeInFlow(style, flow, el)
+  if (flow.transform !== undefined) style.setProperty('transform', flow.transform, 'important')
+  if (!el.getAttribute('style')) el.removeAttribute('style')
+}
+
+/* the saved markup is what everyone re-parses: a move the parser would
+   drop or hoist (into a void element, a <select>, a <table>) is no move */
+function keptByParse(html: string, els: Element[]): boolean {
+  const reparsed = parse(html)
+  return els.every((el) => find(reparsed, elementPath(el))?.outerHTML === el.outerHTML)
+}
+
 function move(doc: Document, el: Element, at: Element, where: DropPlace, flow?: FlowPlacement): MovedElement | null {
   if (el === at || el.contains(at)) return null
   if (alreadyAt(el, at, where) && !flow?.orderChanged && flow?.transform === undefined && !flow?.absolute) return null
@@ -668,22 +704,11 @@ function move(doc: Document, el: Element, at: Element, where: DropPlace, flow?: 
   if (where === 'inside') at.prepend(el)
   else if (where === 'before') at.before(el)
   else at.after(el)
-  /* a canvas group whose last layer left goes with it, as in a design tool */
-  if (left && left !== parent && left.getAttribute('data-doop-drawing') === 'group' && !left.children.length)
-    left.remove()
-  if (flow) {
-    // Keep size, rotation and scale, but let DOM order (or the box's own
-    // placement) determine where it lands.
-    const style = (el as HTMLElement | SVGElement).style
-    placeInFlow(style, flow, el)
-    if (flow.transform !== undefined) style.setProperty('transform', flow.transform, 'important')
-    if (!el.getAttribute('style')) el.removeAttribute('style')
-  }
+  dropEmptyCanvasGroup(left, parent)
+  if (flow) placeMoved(el, flow)
   const html = serialize(doc)
   const selector = elementPath(el)
-  /* the saved markup is what everyone re-parses: a move the parser would
-     drop or hoist (into a void element, a <select>, a <table>) is no move */
-  if (find(parse(html), selector)?.outerHTML !== el.outerHTML) return null
+  if (!keptByParse(html, [el])) return null
   return { html, selector }
 }
 
@@ -702,6 +727,59 @@ export function moveElement(
   const at = find(doc, target.selector)
   if (!el || !at) return null
   return move(doc, el, at, target.place, flow)
+}
+
+/** The frame's HTML with the elements moved together, as one run in
+ *  document order, next to or into the target — what a group drag in the
+ *  rail does. A member inside another member rides along with it. `flows`
+ *  carries each member's slot placement, keyed by its selector. Null when
+ *  a selector or the target no longer resolves, the target is a member or
+ *  sits inside one, the target cannot hold them, their destination is
+ *  locked or outside the body, or nothing would change. Returns their
+ *  selectors after the move, in the order given. */
+export function moveElements(
+  html: string,
+  selectors: string[],
+  target: DropTarget,
+  flows?: ReadonlyMap<string, FlowPlacement | undefined>,
+): { html: string; selectors: string[] } | null {
+  const doc = parse(html)
+  const els: Element[] = []
+  const selectorOf = new Map<Element, string>()
+  for (const sel of selectors) {
+    const el = find(doc, sel)
+    if (!el) return null
+    els.push(el)
+    if (!selectorOf.has(el)) selectorOf.set(el, sel)
+  }
+  const at = find(doc, target.selector)
+  if (!at || !els.length) return null
+  /* a picked element inside another picked one goes with it, not on its own */
+  const members = inDocumentOrder(els)
+  if (members.some((el) => el === at || el.contains(at))) return null
+  if (target.place === 'inside' && !holdsChildren(at.tagName)) return null
+  const parent = target.place === 'inside' ? at : at.parentElement
+  if (!parent || parent.closest(`[${LOCK_ATTR}]`) || !doc.body.contains(parent)) return null
+  const before = serialize(doc)
+  const left = members.map((el) => el.parentElement)
+  if (target.place === 'inside') at.prepend(...members)
+  else if (target.place === 'before') at.before(...members)
+  else {
+    let prev: Element = at
+    for (const el of members) {
+      prev.after(el)
+      prev = el
+    }
+  }
+  members.forEach((el, i) => dropEmptyCanvasGroup(left[i] ?? null, parent))
+  for (const el of members) {
+    const flow = flows?.get(selectorOf.get(el) ?? '')
+    if (flow) placeMoved(el, flow)
+  }
+  const next = serialize(doc)
+  if (next === before) return null
+  if (!keptByParse(next, members)) return null
+  return { html: next, selectors: els.map(elementPath) }
 }
 
 /** The frame's HTML with the element swapped past the layer above (-1) or

@@ -22,6 +22,7 @@ import {
   buildLayerTree,
   filterLayers,
   holdsChildren,
+  outermostSelectors,
   type DropPlace,
   type DropTarget,
   type LayerNode,
@@ -32,6 +33,7 @@ import {
   renameFrame,
   renameLayer,
   dropLayer,
+  dropLayers,
   setFrameHidden,
   setFramesLocked,
   setLayerHidden,
@@ -40,12 +42,14 @@ import {
   isStackLocked,
   isLayerLocked,
   restackFrame,
+  restackFrames,
   stackRoom,
   shiftFrame,
   shiftLayer,
   standaloneSelector,
   takesLayers,
   transferLayer,
+  transferLayers,
 } from '../lib/layerEdits'
 import { cn } from '@/lib/utils'
 import { AgentIcon } from './AgentIcon'
@@ -149,6 +153,14 @@ function isRoot(row: VisibleRow): boolean {
 type Drop = { key: string; place: DropPlace | 'root' }
 /* the key of the root drop shown under the last row */
 const ROOT_KEY = ''
+
+/* the rows a drag carries when the pressed row is one of several selected —
+   fixed at the press, since the selection can change mid-gesture.
+   `standalone`: every member is a canvas shape, which a frame can take in.
+   `doc`: the picked selectors in document order, for a run into a frame */
+type DragGroup =
+  | { kind: 'roots'; ids: string[]; keys: Set<string>; standalone: boolean }
+  | { kind: 'nodes'; selectors: string[]; doc: string[]; keys: Set<string>; nodes: LayerNode[] }
 
 /* a press has to travel this far before it is a drag rather than a click */
 const DRAG_THRESHOLD = 4
@@ -272,6 +284,8 @@ export function LayersPanel({
      bound to the window for the length of the press, so they read the rows
      through a ref rather than a stale closure */
   const [drag, setDrag] = useState<VisibleRow | null>(null)
+  /* the rows the drag shows as moving: the pressed row's, or a picked set's */
+  const [dragKeys, setDragKeys] = useState<ReadonlySet<string> | null>(null)
   const [drop, setDrop] = useState<Drop | null>(null)
   const rowsRef = useRef<VisibleRow[]>([])
   const didDrag = useRef(false)
@@ -358,18 +372,30 @@ export function LayersPanel({
   /* where a dragged frame, or a standalone element, would go among the
      top-level rows: above the row under the pointer, or below it (above
      the next one) from its lower half or anywhere inside an open frame.
-     A spot that leaves it where it is draws no line. */
-  function restackAt(dragged: VisibleRow, row: VisibleRow | undefined, fraction: number): Drop | null {
+     A spot that leaves it — or the group it drags — where it is draws no
+     line. */
+  function restackAt(
+    dragged: VisibleRow,
+    group: DragGroup | null,
+    row: VisibleRow | undefined,
+    fraction: number,
+  ): Drop | null {
     const roots = rowsRef.current.filter(isRoot)
-    const own = roots.find((r) => r.frame.id === dragged.frame.id)
+    const keys = group?.keys ?? new Set([dragged.key])
     const root = row && roots.find((r) => r.frame.id === row.frame.id)
     const drop: Drop = !root
       ? { key: ROOT_KEY, place: 'root' }
       : row === root && fraction < 0.5
         ? { key: root.key, place: 'root' }
         : rootDropAfter(root)
-    /* the line just above or just below its own row */
-    if (own && (drop.key === own.key || drop.key === rootDropAfter(own).key)) return null
+    /* the line just above or just below the dragged run: splicing it back
+       in there gives the order the rows already have */
+    const rest = roots.filter((r) => !keys.has(r.key))
+    const members = roots.filter((r) => keys.has(r.key))
+    const at = roots.findIndex((r) => r.key === drop.key)
+    const pos = at === -1 ? rest.length : rest.filter((r) => roots.indexOf(r) < at).length
+    const spliced = [...rest.slice(0, pos), ...members, ...rest.slice(pos)]
+    if (spliced.every((r, i) => r === roots[i])) return null
     return drop
   }
 
@@ -379,26 +405,54 @@ export function LayersPanel({
      (transferLayer refuses those, so the line must not promise them); a
      standalone whose shape was dragged out stays behind empty and takes a
      layer back. A frame row only changes places with the rows around it. */
-  function dropAt(dragged: VisibleRow, x: number, y: number): Drop | null {
+  function dropAt(dragged: VisibleRow, group: DragGroup | null, x: number, y: number): Drop | null {
     const under = document.elementFromPoint(x, y)
     const el = under?.closest<HTMLElement>('[data-row-key]')
     const row = el ? rowsRef.current.find((r) => r.key === el.dataset.rowKey) : undefined
     const inList = !!under?.closest('[data-slot="panel-body"]')
     const fraction = el ? (y - el.getBoundingClientRect().top) / el.getBoundingClientRect().height : 0
-    if (dragged.kind === 'frame') return row || inList ? restackAt(dragged, row, fraction) : null
-    /* the list's empty tail is the root: out of every frame, onto the canvas, at the back */
+    /* a group of top-level rows only restacks — unless it is all canvas
+       shapes, which a frame takes in as one shape goes */
+    if (dragged.kind === 'frame' || group?.kind === 'roots') {
+      if (group?.kind === 'roots' && group.standalone && row) {
+        const member = group.keys.has(row.key) || group.ids.includes(row.frame.id)
+        if (member || (row.kind === 'node' && !!row.standalone)) return restackAt(dragged, group, row, fraction)
+        /* the band edges mean "beside it, at the root"; the rest is "into it" */
+        if (row.kind === 'frame' && fraction < EDGE_BAND) return restackAt(dragged, group, row, 0)
+        if (row.kind === 'frame' && !row.open && fraction > 1 - EDGE_BAND) return restackAt(dragged, group, row, 1)
+        if (!takesLayers(row.frame, frameTree(row.frame).length > 0)) return null
+        return { key: row.key, place: dropOver(row, fraction) }
+      }
+      return row || inList ? restackAt(dragged, group, row, fraction) : null
+    }
+    /* the list's empty tail is the root: out of every frame, onto the canvas,
+       at the back — for a picked set that stays a single layer's gesture */
     if (!row || !el) {
-      if (!inList) return null
-      return dragged.standalone ? restackAt(dragged, undefined, 0) : { key: ROOT_KEY, place: 'root' }
+      if (!inList || group) return null
+      return dragged.standalone ? restackAt(dragged, null, undefined, 0) : { key: ROOT_KEY, place: 'root' }
     }
     if (row.key === dragged.key) return null
+    if (group) {
+      /* a picked set moves inside its own frame or into another that takes
+         layers — out of a frame onto the canvas stays a single layer's
+         gesture for now, so it draws no line */
+      if (row.kind === 'node' && !!row.standalone) return null
+      if (row.frame.id !== dragged.frame.id && !takesLayers(row.frame, frameTree(row.frame).length > 0)) return null
+      if (
+        row.kind === 'node' &&
+        row.frame.id === dragged.frame.id &&
+        (group.keys.has(row.key) || group.nodes.some((n) => holds(n, row.node.selector)))
+      )
+        return null
+      return { key: row.key, place: dropOver(row, fraction) }
+    }
     const standalone = row.kind === 'node' && !!row.standalone
     if (dragged.standalone) {
       /* a standalone element changes places with the top-level rows, or
          goes into a frame from the middle of its row or one of its layers */
-      if (standalone || row.frame.id === dragged.frame.id) return restackAt(dragged, row, fraction)
-      if (row.kind === 'frame' && fraction < EDGE_BAND) return restackAt(dragged, row, 0)
-      if (row.kind === 'frame' && !row.open && fraction > 1 - EDGE_BAND) return restackAt(dragged, row, 1)
+      if (standalone || row.frame.id === dragged.frame.id) return restackAt(dragged, null, row, fraction)
+      if (row.kind === 'frame' && fraction < EDGE_BAND) return restackAt(dragged, null, row, 0)
+      if (row.kind === 'frame' && !row.open && fraction > 1 - EDGE_BAND) return restackAt(dragged, null, row, 1)
     } else if ((row.kind === 'frame' || standalone) && fraction < EDGE_BAND)
       /* the band above a top-level row means "beside it, at the root"; the
          layer's own frame counts, since nothing else lies in front of the
@@ -421,6 +475,27 @@ export function LayersPanel({
     return index(roots.find((r) => r.key === target.key)) + 1
   }
 
+  /* the same slot for a group drop: stackSlot's lookup fails a line drawn
+     above one of the group's own rows, so the `rest` rows below the line
+     are counted instead — those are the frames the group lands in front of */
+  function groupSlot(target: Drop, rest: Frame[]): number {
+    const ids = new Set(rest.map((f) => f.id))
+    const roots = rowsRef.current.filter(isRoot)
+    /* the tail: behind the last listed row that stays (a filter can hide the back) */
+    if (target.key === ROOT_KEY) {
+      const last = roots.filter((r) => ids.has(r.frame.id)).at(-1)
+      return last
+        ? Math.max(
+            0,
+            rest.findIndex((f) => f.id === last.frame.id),
+          )
+        : 0
+    }
+    const at = roots.findIndex((r) => r.key === target.key)
+    if (at === -1) return rest.length
+    return roots.slice(at).filter((r) => ids.has(r.frame.id)).length
+  }
+
   /* a press on a layer row turns into a drag once it travels; the row is
      dropped where the pointer lets go, and the click that follows a drag is
      swallowed so the drop does not double as a select. The target is read
@@ -433,6 +508,41 @@ export function LayersPanel({
     if (e.button !== 0 || readOnly) return
     /* a locked frame or shape keeps its place in the stack */
     if (isRoot(row) && isStackLocked(row.frame)) return
+    /* a press on one row of a multi-selection drags them all, as Figma does
+       — fixed at the press, since the selection may change mid-gesture. A
+       picked set holding a locked layer takes no group move (reorderLayers
+       refuses the same way), and a row outside the selection drags alone */
+    const s = useStore.getState()
+    let group: DragGroup | null = null
+    if (isRoot(row) && s.selectedIds.includes(row.frame.id)) {
+      const members = rows.filter((r) => isRoot(r) && s.selectedIds.includes(r.frame.id))
+      if (members.length > 1)
+        group = {
+          kind: 'roots',
+          ids: members.map((r) => r.frame.id),
+          keys: new Set(members.map((r) => r.key)),
+          standalone: members.every((r) => standaloneSelector(r.frame) !== null),
+        }
+    } else if (row.kind === 'node' && s.selectedElement?.frameId === row.frame.id) {
+      const picked = pickedSelectors(s)
+      if (
+        picked.length > 1 &&
+        picked.includes(row.node.selector) &&
+        !picked.some((sel) => isLayerLocked(row.frame, sel))
+      )
+        group = {
+          kind: 'nodes',
+          selectors: picked,
+          doc: outermostSelectors(row.frame.html, picked) ?? picked,
+          keys: new Set(picked.map((sel) => rowKey(row.frame.id, sel))),
+          nodes: rows
+            .filter(
+              (r): r is NodeVisibleRow =>
+                r.kind === 'node' && r.frame.id === row.frame.id && picked.includes(r.node.selector),
+            )
+            .map((r) => r.node),
+        }
+    }
     const start = { x: e.clientX, y: e.clientY }
     const body = e.currentTarget.closest<HTMLElement>('[data-slot="panel-body"]')
     let active = false
@@ -441,6 +551,7 @@ export function LayersPanel({
       window.removeEventListener('pointerup', onUp)
       window.removeEventListener('pointercancel', onCancel)
       setDrag(null)
+      setDragKeys(null)
       setDrop(null)
     }
     const onMove = (ev: PointerEvent) => {
@@ -449,21 +560,63 @@ export function LayersPanel({
         active = true
         didDrag.current = true
         setDrag(row)
+        setDragKeys(group?.keys ?? new Set([row.key]))
       }
       if (body) {
         const rect = body.getBoundingClientRect()
         if (ev.clientY < rect.top + 24) body.scrollBy(0, -8)
         else if (ev.clientY > rect.bottom - 24) body.scrollBy(0, 8)
       }
-      setDrop(dropAt(row, ev.clientX, ev.clientY))
+      setDrop(dropAt(row, group, ev.clientX, ev.clientY))
     }
     const onUp = (ev: PointerEvent) => {
       const wasActive = active
       finish()
       if (!wasActive) return
-      const target = dropAt(row, ev.clientX, ev.clientY)
+      const target = dropAt(row, group, ev.clientX, ev.clientY)
       const over = target && rowsRef.current.find((r) => r.key === target.key)
       if (!target) return
+      if (group?.kind === 'roots') {
+        /* the selected top-level rows restack as one run, keeping order;
+           a set of canvas shapes can also move into a frame */
+        if (target.place === 'root') {
+          const stacked = currentPageCanvas()?.frames ?? []
+          const ids = new Set(group.ids)
+          const others = stacked.filter((f) => !ids.has(f.id))
+          restackFrames(stacked, group.ids, groupSlot(target, others))
+        } else if (group.standalone && over) {
+          /* back to front, so the front-most shape lands last in the
+             markup and keeps its place on top, as on the canvas */
+          const stacked = currentPageCanvas()?.frames ?? []
+          const sources = [...group.ids]
+            .reverse()
+            .map((id) => stacked.find((f) => f.id === id))
+            .filter((f): f is Frame => !!f && !isStackLocked(f))
+            .flatMap((f) => {
+              const shape = standaloneSelector(f)
+              return shape ? [{ pressed: f, selectors: [shape] }] : []
+            })
+          if (sources.length) transferLayers(sources, over.frame, targetOf(over, target.place))
+        }
+        return
+      }
+      if (group?.kind === 'nodes') {
+        /* the set moves inside its own frame or into another that takes
+           it; out of a frame onto the canvas a single layer goes for now —
+           and moving one of a visible group would surprise anyway, so the
+           drop does nothing */
+        if (target.place !== 'root' && over) {
+          if (over.frame.id === row.frame.id) {
+            const to = targetOf(over, target.place)
+            void Promise.all(group.selectors.map((sel) => layerPlacement(row.frame.id, sel, to))).then((flows) =>
+              dropLayers(row.frame, group.selectors, to, new Map(group.selectors.map((sel, i) => [sel, flows[i]]))),
+            )
+          } else {
+            transferLayers([{ pressed: row.frame, selectors: group.doc }], over.frame, targetOf(over, target.place))
+          }
+        }
+        return
+      }
       if (target.place === 'root') {
         /* a frame or a standalone element changes places; an element
            comes out of its frame onto the canvas, at that place */
@@ -673,7 +826,7 @@ export function LayersPanel({
                   row={row}
                   selected={selectedIds.includes(row.frame.id) && !selectedElement}
                   current={row.frame.id === selectedId}
-                  dragging={drag?.key === row.key}
+                  dragging={dragKeys?.has(row.key) ?? false}
                   drop={drop?.key === row.key ? drop.place : undefined}
                   onToggle={() => setOpen(row.key, !row.open)}
                   onActivate={(toggle) => activate(row, toggle)}
@@ -687,7 +840,7 @@ export function LayersPanel({
                     pickedRows.has(row.key) ||
                     (!!row.standalone && !selectedElement && selectedIds.includes(row.frame.id))
                   }
-                  dragging={drag?.key === row.key}
+                  dragging={dragKeys?.has(row.key) ?? false}
                   drop={drop?.key === row.key ? drop.place : undefined}
                   onToggle={() => setOpen(row.key, !row.open)}
                   onActivate={(toggle) => activate(row, toggle)}
