@@ -46,7 +46,7 @@ reqwest = { version = "0.13", default-features = false, features = ["json", "rus
 rustls = { version = "0.23", default-features = false, features = ["ring"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
-objc2-app-kit = { version = "0.3", features = ["NSApplication", "NSButton", "NSControl", "NSEvent", "NSResponder", "NSView", "NSWindow"] }
+objc2-app-kit = { version = "0.3", features = ["NSApplication", "NSButton", "NSControl", "NSEvent", "NSResponder", "NSScreen", "NSView", "NSWindow"] }
 # reading the WebKit app's cookies and localStorage on the first launch (src/webkit_migration.rs)
 objc2 = "0.6"
 block2 = "0.6"
