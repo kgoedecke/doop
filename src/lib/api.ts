@@ -735,14 +735,11 @@ export const api = {
     req<{ id: string; name: string; components: number; publishedAt: number; usedBy: number; behind?: number }[]>(
       `/api/workspaces/${workspaceId}/libraries`,
     ),
-  createComponent: (
-    canvasId: string,
-    body: { name: string; frameId: string; element: string; replaceMatching?: boolean; description?: string },
-  ) =>
-    req<{ component: ComponentDef; converted: { frameId: string; instances: number }[]; frames: Frame[] }>(
-      `/api/canvases/${canvasId}/components`,
-      { method: 'POST', body: JSON.stringify(body) },
-    ),
+  createComponent: (canvasId: string, body: { name: string; frameId: string; element: string; description?: string }) =>
+    req<{ component: ComponentDef; frames: Frame[] }>(`/api/canvases/${canvasId}/components`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
   updateComponent: (
     canvasId: string,
     componentId: string,

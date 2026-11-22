@@ -13,7 +13,7 @@ vi.mock('../server/db/persist.ts', () => ({
 }))
 
 import { buildMcpServer } from '../server/mcp.ts'
-import { execTool } from '../server/resident.ts'
+import { execTool, RESIDENT_TOOLS } from '../server/resident.ts'
 import * as screenshot from '../server/screenshot.ts'
 import { DEFAULT_ROLE_ID, roleName } from '../shared/agents.ts'
 import { store } from '../server/store.ts'
@@ -334,7 +334,7 @@ describe('an agent working with components', () => {
     expect(html).toContain('color: red')
   })
 
-  it('turns repeated markup into linked instances, differences becoming props', async () => {
+  it('makes the picked element the main and leaves the other copies as they are', async () => {
     const canvas = newCanvas()
     const card = (title: string, id = '') =>
       `<article class="card"${id ? ` data-doop-id="${id}"` : ''}><h3 class="title">${title}</h3><p class="body">Copy for ${title}</p></article>`
@@ -342,6 +342,7 @@ describe('an agent working with components', () => {
     const a = await framed(canvas.id, `${card('One', 'card-one')}${card('Two')}`, 'A')
     const b = await framed(canvas.id, card('Three'), 'B')
 
+    /* an agent holding an old tool schema may still send replace_matching: it does nothing */
     const made = await call('create_component', {
       canvas_id: canvas.id,
       name: 'Card',
@@ -350,25 +351,21 @@ describe('an agent working with components', () => {
       replace_matching: true,
     })
     expect(made.isError).toBe(false)
-    expect(made.data.converted.reduce((n: number, c: { instances: number }) => n + c.instances, 0)).toBe(2)
+    expect(made.data.converted).toBeUndefined()
+    expect(made.data.matching_stopped).toBeUndefined()
+    expect(store.getFrame(a)!.html.match(/data-doop-component=/g)).toHaveLength(1)
+    expect(store.getFrame(a)!.html).not.toContain('data-doop-instance')
+    expect(store.getFrame(b)!.html).not.toContain('data-doop-instance')
+  })
 
-    const first = store.getFrame(a)!.html
-    const second = store.getFrame(b)!.html
-    expect(first).toContain('Two')
-    expect(second).toContain('Three')
-    expect(second).toContain('data-doop-instance')
-    expect(second).toMatch(/data-doop-props="[^"]*Three/)
-    expect(second).not.toContain('data-doop-overrides')
-
-    await call('update_component', {
-      canvas_id: canvas.id,
-      component: 'Card',
-      find: 'class="card"',
-      replace: 'class="card v2"',
-    })
-    expect(store.getFrame(a)!.html.match(/card v2/g)!.length).toBeGreaterThanOrEqual(2)
-    expect(store.getFrame(b)!.html).toContain('card v2')
-    expect(store.getFrame(b)!.html).toContain('Three')
+  it('no longer offers replace_matching, to MCP clients or the resident agent', async () => {
+    const { tools } = await client.listTools()
+    const mcp = tools.find((tool) => tool.name === 'create_component')!
+    expect(Object.keys(mcp.inputSchema.properties ?? {})).not.toContain('replace_matching')
+    const resident = RESIDENT_TOOLS.find((tool) => tool.name === 'create_component')!
+    expect(Object.keys(resident.input_schema.properties ?? {})).not.toContain('replace_matching')
+    for (const description of [mcp.description, resident.description])
+      expect(description).not.toContain('replace_matching')
   })
 
   it('places instances and changes several in one write', async () => {

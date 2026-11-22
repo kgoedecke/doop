@@ -134,8 +134,8 @@ function summary(canvas: Canvas, def: ComponentDef) {
 
 /** The frames a component write touched: every instance's frame and the main's,
  *  so a resident run counts the work and re-checks what it had verified. */
-function outcomeFrames(context: ToolContext, def: ComponentDef, extra: string[] = []): Frame[] {
-  const ids = new Set([...usageOf(context.canvas, def.id).frames.map((f) => f.id), ...extra])
+function outcomeFrames(context: ToolContext, def: ComponentDef): Frame[] {
+  const ids = new Set(usageOf(context.canvas, def.id).frames.map((f) => f.id))
   if (def.mainFrameId) ids.add(def.mainFrameId)
   return context.canvas.frames.filter((frame) => ids.has(frame.id))
 }
@@ -218,17 +218,13 @@ export const COMPONENT_TOOLS: ComponentTool[] = [
     name: 'create_component',
     title: 'Create a component',
     description:
-      'Make a reusable component from new markup (html + css) or from an element already in a frame (frame_id + element). From markup, the main lands on the canvas\'s Components page and no instance is placed anywhere: to use it, write <doop-use component="…"> in a frame\'s HTML or call insert_instance. From an element (its data-doop-id from get_frame), that element stays where it is and becomes the main; pass replace_matching=true to turn every other element of the same shape on the canvas into a linked instance in one go, differing text and links becoming props. Unless the markup already says otherwise, leaf text, image sources and link targets become props, named after what each element is (title, label, image, link, text) or its class; the result lists them. Name your own with data-doop-prop="label" (text), data-doop-prop="src:photo" (an image; on an <img> a bare name binds its src too), data-doop-prop="href:link,--accent:accent" (attributes, custom properties), data-doop-if="tone=ghost" or "show-icon" (conditional elements), data-doop-slot="actions" (content each instance supplies, add data-doop-slot-suggest="Button"). An enum prop in props sets data-<name> on the root, so variants are plain CSS: .btn[data-tone="ghost"] { … }. Give it a description saying when to use it: it is how the next agent knows.',
+      'Make a reusable component from new markup (html + css) or from an element already in a frame (frame_id + element). From markup, the main lands on the canvas\'s Components page and no instance is placed anywhere: to use it, write <doop-use component="…"> in a frame\'s HTML or call insert_instance. From an element (its data-doop-id from get_frame), that element stays where it is and becomes the main; other copies of it stay plain markup until you replace each with <doop-use> in edit_frame_html (insert_instance only adds one, it replaces nothing). Unless the markup already says otherwise, leaf text, image sources and link targets become props, named after what each element is (title, label, image, link, text) or its class; the result lists them. Name your own with data-doop-prop="label" (text), data-doop-prop="src:photo" (an image; on an <img> a bare name binds its src too), data-doop-prop="href:link,--accent:accent" (attributes, custom properties), data-doop-if="tone=ghost" or "show-icon" (conditional elements), data-doop-slot="actions" (content each instance supplies, add data-doop-slot-suggest="Button"). An enum prop in props sets data-<name> on the root, so variants are plain CSS: .btn[data-tone="ghost"] { … }. Give it a description saying when to use it: it is how the next agent knows.',
     readOnly: false,
     shape: {
       name: z.string().describe('Short and unique, e.g. "Button", "Pricing Card"'),
       description: z.string().optional().describe('When to use this. Later agents choose by it'),
       frame_id: z.string().optional().describe('With element: make this existing element the main'),
       element: z.string().optional().describe("The element's data-doop-id from get_frame"),
-      replace_matching: z
-        .boolean()
-        .optional()
-        .describe('With frame_id: turn same-shaped elements across the canvas into instances'),
       html: z.string().optional().describe('New markup, one root element'),
       css: z.string().optional().describe('With html: the rules it needs, unscoped; they get scoped for you'),
       width: z.number().optional().describe('With html: the main frame width, default 480'),
@@ -273,14 +269,9 @@ export const COMPONENT_TOOLS: ComponentTool[] = [
       }
       if (typeof input.frame_id !== 'string' || typeof input.element !== 'string')
         throw new ComponentError('pass html, or frame_id with element')
-      const { component, converted, inferred, matching_stopped } = createComponentFromElement(
+      const { component, inferred } = createComponentFromElement(
         canvas.id,
-        {
-          ...shared,
-          frameId: input.frame_id,
-          element: input.element,
-          replaceMatching: input.replace_matching as boolean | undefined,
-        },
+        { ...shared, frameId: input.frame_id, element: input.element },
         actor,
       )
       return {
@@ -288,24 +279,13 @@ export const COMPONENT_TOOLS: ComponentTool[] = [
           ok: true,
           component: summary(canvas, component),
           main_frame_id: component.mainFrameId,
-          converted,
-          ...(matching_stopped ? { matching_stopped } : {}),
           ...inferredProps(inferred),
         },
         note: [
           `Use it with ${usageExample(component)}.${inferredNote(inferred)}`,
-          ...(matching_stopped
-            ? [
-                'replace_matching stopped part of the way (the work budget for one call): the frames in `converted` are linked, later frames were not looked at and their copies stay plain markup.',
-              ]
-            : []),
           ...(optional(() => componentReuseNotes(canvas, component, shared.autoProps)) ?? []),
         ].join('\n'),
-        frames: outcomeFrames(
-          { canvas } as ToolContext,
-          component,
-          converted.map((entry) => entry.frameId),
-        ),
+        frames: outcomeFrames({ canvas } as ToolContext, component),
       }
     },
   },

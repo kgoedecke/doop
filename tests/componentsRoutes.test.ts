@@ -31,18 +31,26 @@ describe('component routes', () => {
 
   afterAll(() => server?.stop())
 
-  it('creates from an element and links what matches', async () => {
-    const res = await owner.post(`/api/canvases/${canvasId}/components`, {
-      name: 'Tag',
-      frameId,
-      element: 'tagone',
-      replaceMatching: true,
-    })
+  it('creates from an element, and returns the frame it changed', async () => {
+    const res = await owner.post(`/api/canvases/${canvasId}/components`, { name: 'Tag', frameId, element: 'tagone' })
     expect(res.status).toBe(200)
-    const body = (await res.json()) as { component: { id: string; rev: number }; converted: { instances: number }[] }
+    const body = (await res.json()) as {
+      component: { id: string; rev: number; props: { name: string }[] }
+      frames: { id: string; html: string }[]
+    }
     componentId = body.component.id
     expect(body.component.rev).toBe(1)
-    expect(body.converted[0]!.instances).toBe(1)
+    expect(body).not.toHaveProperty('converted')
+    expect(body.frames.map((f) => f.id)).toEqual([frameId])
+    const made = body.frames[0]!.html
+    expect(made).toContain(`data-doop-component="${componentId}"`)
+    /* the other copy stays plain markup until it is written as an instance */
+    expect(made).not.toContain('data-doop-instance')
+    const prop = body.component.props[0]!.name
+    const linked = await owner.patch(`/api/frames/${frameId}`, {
+      html: made.replace('<span class="tag">Two</span>', `<doop-use component="Tag" ${prop}="Two"></doop-use>`),
+    })
+    expect(linked.status).toBe(200)
     const frame = (await (await owner.get(`/api/canvases/${canvasId}`)).json()) as {
       components: { id: string }[]
       frames: { id: string; html: string }[]
