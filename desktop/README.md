@@ -75,6 +75,11 @@ The feed and its packages are produced by `desktop-release.yml`:
 - `doop.design/desktop/latest.json` redirects there (the hosted deployment serves it),
   so the feed can move without shipping a new shell.
 
+The Windows installer requests a WebView2 update when the installed runtime is older than
+`bundle.windows.minimumWebview2Version`. WebView2 158 improves frame rendering when zoomed
+out on Windows. Keep the `nsis` object in `tauri.conf.json` because the pinned Tauri bundler
+only reads the minimum version for NSIS when that object is present.
+
 The key's public half is `plugins.updater.pubkey` in `tauri.conf.json`; the
 plugin refuses any package that does not verify against it. Losing the private
 key means no installed app can be updated again without a manual reinstall, so

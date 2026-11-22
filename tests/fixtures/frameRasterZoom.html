@@ -70,12 +70,13 @@
       }
       /** the path FrameView takes in this browser */
       window.shippedPath = FRAME_DOCUMENTS_TAKE_ZOOM_AS_DENSITY ? 'density' : 'counter'
-      /** settle the canvas at zoom k: the world takes it as its layout zoom,
-          and both iframes either take it as pixel density (Chromium) or undo
-          it (zoom 1/k, scale k: WebKit), the way Stage and FrameView do */
+      /** Match Stage's settled layout zoom and remaining camera scale. Both
+          iframes either take k as pixel density (Chromium) or undo it
+          (zoom 1/k, scale k: WebKit), the way FrameView does. */
       window.zoom = async (zoom, path = window.shippedPath) => {
         const k = layoutZoomFor(zoom, 16, path === 'density')
         world.style.zoom = String(k)
+        world.style.transform = `scale(${zoom / k})`
         for (const el of [frame, probe]) {
           el.style.zoom = path === 'density' ? '' : String(counterZoom(k))
           el.style.transform = path === 'density' ? '' : `scale(${k})`

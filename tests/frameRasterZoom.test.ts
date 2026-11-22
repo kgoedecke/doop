@@ -105,4 +105,17 @@ describe.skipIf(!findBrowserPath())('settled canvas zoom', () => {
     await page.evaluate((p) => window.zoom(1, p), path)
     expect(await page.evaluate(() => window.rect('.foot'))).toEqual(rest.foot)
   })
+
+  it.each(PATHS)('shrinks the frame on screen below 100%% while preserving its design viewport (%s)', async (path) => {
+    const viewport = await page.evaluate(() => window.viewport())
+    const footer = await page.evaluate(() => window.rect('.foot'))
+
+    for (const zoom of [0.75, 0.5, 0.33, 0.25]) {
+      const box = await page.evaluate(([value, mode]) => window.zoom(value, mode), [zoom, path] as const)
+      expect(box.width).toBeCloseTo(400 * zoom, 3)
+      expect(box.height).toBeCloseTo(300 * zoom, 3)
+      expect(await page.evaluate(() => window.viewport())).toEqual(viewport)
+      expect(await page.evaluate(() => window.rect('.foot'))).toEqual(footer)
+    }
+  })
 })

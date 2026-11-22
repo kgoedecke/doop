@@ -43,6 +43,10 @@
       "appimage"
     ],
     "category": "Productivity",
+    "windows": {
+      "minimumWebview2Version": "158.0.4370.33",
+      "nsis": {}
+    },
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
