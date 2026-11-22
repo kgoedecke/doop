@@ -292,6 +292,17 @@ interface ProbeHit {
 /* what a surface click's probe is for; see `probeIntent` */
 type ProbeIntent = 'pick' | 'comment' | 'toggle'
 
+/* a ⌘/Ctrl+wheel the frame runtime relays from its document while it is
+   being edited: the canvas's zoom, at a point in design px */
+interface WheelRelay {
+  event: 'wheel'
+  x: number
+  y: number
+  deltaY: number
+  ctrlKey: boolean
+  metaKey: boolean
+}
+
 /* a key the frame runtime relays from its own document, over its port */
 interface KeyRelay {
   event: 'keydown' | 'keyup'
@@ -936,6 +947,7 @@ export const FrameView = memo(function FrameView({
         | Partial<KeyRelay>
         | { event: 'edited'; html?: unknown; discrete?: boolean }
         | { event: 'settled'; reqId?: unknown }
+        | Partial<WheelRelay>
         | undefined
       /* Inspector edits arrive while the panel holds focus. Only keys need
          the iframe to be focused. */
@@ -945,6 +957,26 @@ export const FrameView = memo(function FrameView({
       }
       if (relay?.event === 'settled') {
         if (typeof relay.reqId === 'number') finishFrameSettle(iframe.contentWindow, relay.reqId)
+        return
+      }
+      /* replayed on the iframe, the wheel bubbles to the stage, which zooms
+         about the pointer as it does over the shield */
+      if (relay?.event === 'wheel') {
+        const { x, y, deltaY } = relay
+        if (typeof x !== 'number' || typeof y !== 'number' || typeof deltaY !== 'number') return
+        const rect = documentRect(iframe) ?? iframe.getBoundingClientRect()
+        const zoom = useStore.getState().viewport.zoom
+        iframe.dispatchEvent(
+          new WheelEvent('wheel', {
+            deltaY,
+            ctrlKey: relay.ctrlKey === true,
+            metaKey: relay.metaKey === true,
+            clientX: rect.left + x * zoom,
+            clientY: rect.top + y * zoom,
+            bubbles: true,
+            cancelable: true,
+          }),
+        )
         return
       }
       if (document.activeElement !== iframe || !document.hasFocus()) return
