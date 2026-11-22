@@ -1,4 +1,5 @@
 import type { AgentTask } from './types.ts'
+import { taskAgentKey } from './agentIdentity.ts'
 
 /** Wire format shared with AgentActivityState in the iOS app/widget. Under APNs' 4 KB limit. */
 export function agentActivityState(canvasName: string, tasks: AgentTask[]) {
@@ -45,7 +46,7 @@ function runOf(task: AgentTask, sorted: AgentTask[]): AgentTask[] {
   const run = [task]
   for (const earlier of sorted.slice(sorted.indexOf(task) + 1)) {
     const next = run[run.length - 1]!
-    if (earlier.agentName !== task.agentName || earlier.owner !== task.owner) continue
+    if (taskAgentKey(earlier) !== taskAgentKey(task) || earlier.owner !== task.owner) continue
     if (earlier.queuedBy || earlier.failedAt != null || earlier.endedAt == null) break
     if (Math.abs(next.startedAt - earlier.endedAt) > HANDOFF_MS) break
     run.push(earlier)

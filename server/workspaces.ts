@@ -10,6 +10,7 @@ import * as billing from './billing.ts'
 import { mailerConfigured, sendMail } from './mailer.ts'
 import { dropWorkspaceFonts } from './fonts.ts'
 import { dropWorkspaceAgents } from './customAgents.ts'
+import { dropWorkspaceSkills } from './skills.ts'
 import { notifyUsers } from './userEvents.ts'
 import { avatarUrl } from '../shared/avatar.ts'
 import { billedSeats, isBillingInterval, isWorkspaceActive, parseSeats } from '../shared/billing.ts'
@@ -285,6 +286,7 @@ export async function deleteWorkspace(id: string): Promise<void> {
   })
   await dropWorkspaceFonts(id)
   await dropWorkspaceAgents(id)
+  await dropWorkspaceSkills(id)
   /* each canvas now has its owner's personal team; open rooms hear it. Lazy:
      actions depends on this module through the font library */
   const { announceTeam } = await import('./actions.ts')

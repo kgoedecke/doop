@@ -15,6 +15,7 @@ import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } 
 import { MentionText, useAgentMention, useMentionPicker } from './MentionPicker'
 import { copyCommentLink } from '../lib/commentLink'
 import { RoleMark } from './RoleMark'
+import { useSkillMenu } from './SkillMenu'
 import { useT, type Translate } from '../lib/i18n'
 import { CommentThreadLayer } from './FrameLabelLayer'
 
@@ -253,6 +254,8 @@ export function CommentComposer({
   useEffect(() => taRef.current?.focus(), [])
   const mentions = useMentionPicker({ value: text, onChange: setText, fieldRef: taRef })
   const send = () => text.trim() && onSubmit(text, mentions.picked(text))
+  const canvasId = useStore((s) => s.canvas?.id)
+  const skillMenu = useSkillMenu({ from: canvasId ? { canvasId } : undefined, text, setText, inputRef: taRef })
   /* @mention a resident agent to route the comment to it; without one the
      comment is a note for the humans in the room. Asking one takes edit. */
   const roster = useRoster()
@@ -261,19 +264,25 @@ export function CommentComposer({
   return (
     <div className="w-[240px] rounded-[10px] border border-line bg-surface p-2 shadow-pop animate-[chip-in_0.18s_ease]">
       <div className="relative">
+        {skillMenu.menu}
         <Textarea
           ref={taRef}
           variant="bare"
           className="min-h-[58px] md:text-[13px]"
           value={text}
           placeholder={placeholder ?? t('stage.commentOnElement')}
+          {...skillMenu.inputProps}
+          {...mentions.fieldProps}
           onChange={(e) => {
-            setText(e.target.value)
+            skillMenu.inputProps.onChange(e)
             mentions.onCaret(e)
           }}
-          {...mentions.fieldProps}
+          onSelect={(e) => {
+            skillMenu.inputProps.onSelect(e)
+            mentions.onCaret(e)
+          }}
           onKeyDown={(e) => {
-            if (mentions.onKeyDown(e)) return
+            if (skillMenu.onKeyDown(e) || mentions.onKeyDown(e)) return
             /* keys that finish an IME composition belong to it */
             if (e.nativeEvent.isComposing || e.keyCode === 229) return
             if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) send()
@@ -475,22 +484,35 @@ function ThreadReply({
   const fieldRef = useRef<HTMLTextAreaElement>(null)
   const mentions = useMentionPicker({ value: reply, onChange, fieldRef })
   const mentioned = useAgentMention(reply, mentions.picked(reply))
+  const canvasId = useStore((s) => s.canvas?.id)
+  const skillMenu = useSkillMenu({
+    from: canvasId ? { canvasId } : undefined,
+    text: reply,
+    setText: onChange,
+    inputRef: fieldRef,
+  })
   return (
     <>
       <div className="relative mt-2">
+        {skillMenu.menu}
         <Textarea
           ref={fieldRef}
           variant="bare"
           className="min-h-[38px] md:text-[13px]"
           value={reply}
           placeholder={placeholder}
+          {...skillMenu.inputProps}
+          {...mentions.fieldProps}
           onChange={(e) => {
-            onChange(e.target.value)
+            skillMenu.inputProps.onChange(e)
             mentions.onCaret(e)
           }}
-          {...mentions.fieldProps}
+          onSelect={(e) => {
+            skillMenu.inputProps.onSelect(e)
+            mentions.onCaret(e)
+          }}
           onKeyDown={(e) => {
-            if (mentions.onKeyDown(e)) return
+            if (skillMenu.onKeyDown(e) || mentions.onKeyDown(e)) return
             if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && !e.nativeEvent.isComposing)
               onSend(mentions.picked(reply))
           }}

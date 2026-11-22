@@ -74,6 +74,9 @@ describe.skipIf(!findBrowserPath())('the Pages and Layers split', () => {
     await page.mouse.down()
     await page.mouse.move(x, y + dy, { steps: 8 })
     await page.mouse.up()
+    /* React renders a pointermove's update in a later task, not during the
+       event: let the last step land before anything measures it */
+    await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))))
   }
 
   /** Leave a large split on the current canvas, then open a different canvas. */

@@ -178,7 +178,7 @@ describe('work addressed to an agent the canvas no longer has', () => {
     })
     expect(actions.pendingWorkAgents(CANVAS)).toEqual([DEFAULT_ROLE_NAME])
     expect(actions.takeAgentCommentsFor(CANVAS, DEFAULT_ROLE_NAME).map((c) => c.id)).toEqual(['c1'])
-    expect(actions.takeFeedbackFor(CANVAS, DEFAULT_ROLE_NAME).map((f) => f.id)).toEqual(['f1'])
+    expect(actions.takeFeedbackFor(CANVAS, { name: DEFAULT_ROLE_NAME }).map((f) => f.id)).toEqual(['f1'])
   })
 
   it('marks which claims were a resident run’s, so a restart fails only those', () => {
@@ -192,7 +192,7 @@ describe('work addressed to an agent the canvas no longer has', () => {
       proposals: new Map(),
     })
     /* an outside MCP agent named like a custom agent: not the resident */
-    expect(actions.takeFeedbackFor(CANVAS, 'Claude')[0]).toMatchObject({
+    expect(actions.takeFeedbackFor(CANVAS, { name: 'Claude' })[0]).toMatchObject({
       claimedBy: 'Claude',
       claimedByResident: false,
     })

@@ -81,6 +81,7 @@ import {
   FrameIcon,
   LayersIcon,
   ComponentIcon,
+  InstanceIcon,
   BracesIcon,
   LockIcon,
   LockOpenIcon,
@@ -985,12 +986,10 @@ function NodeRow({
           caret={<Caret open={row.open} present={hasChildren} />}
           onCaret={hasChildren ? onToggle : undefined}
           icon={
-            node.component ? (
-              <ComponentIcon
-                width={14}
-                height={14}
-                className={node.component === 'main' ? 'text-brand' : 'text-brand opacity-70'}
-              />
+            node.component === 'main' ? (
+              <ComponentIcon width={14} height={14} className="text-brand" data-component-icon="main" />
+            ) : node.component === 'instance' ? (
+              <InstanceIcon width={14} height={14} className="text-brand" data-component-icon="instance" />
             ) : (
               <LayerKindIcon kind={node.kind} />
             )

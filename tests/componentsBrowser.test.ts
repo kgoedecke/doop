@@ -181,10 +181,13 @@ describe.skipIf(!findBrowserPath())('components in the editor', { timeout: 60_00
     await switchTab('Layers')
     const instance = await page.evaluateHandle((id) => {
       const rows = [...document.querySelectorAll<HTMLElement>(`[data-row-key^="${id}|"]`)]
-      return rows.find((row) => row.querySelector('.text-brand.opacity-70')) ?? null
+      return rows.find((row) => row.querySelector('[data-component-icon="instance"]')) ?? null
     }, frameId)
     await (instance.asElement() as unknown as { click(): Promise<void> }).click()
     await page.waitForSelector('[data-slot="component-section"]')
+    /* an instance wears its own glyph, never the main's */
+    expect(await page.$('[data-slot="component-section"] [data-component-icon="instance"]')).not.toBeNull()
+    expect(await page.$('[data-slot="component-section"] [data-component-icon="main"]')).toBeNull()
     if (SHOTS) await page.screenshot({ path: `${SHOTS}/instance.png` })
     const field = await page.waitForSelector('[data-slot="component-section"] input')
     await field!.click({ count: 3 })
@@ -248,7 +251,7 @@ describe.skipIf(!findBrowserPath())('components in the editor', { timeout: 60_00
     /* detach lives in the element's context menu, here from its Layers row */
     const instanceRow = await page.evaluateHandle((id) => {
       const rows = [...document.querySelectorAll<HTMLElement>(`[data-row-key^="${id}|"]`)]
-      return rows.find((row) => row.querySelector('.text-brand.opacity-70')) ?? null
+      return rows.find((row) => row.querySelector('[data-component-icon="instance"]')) ?? null
     }, frameId)
     await (instanceRow.asElement() as unknown as { click(o: { button: string }): Promise<void> }).click({
       button: 'right',
@@ -303,7 +306,7 @@ describe.skipIf(!findBrowserPath())('components in the editor', { timeout: 60_00
     await switchTab('Layers')
     const mainRow = await page.evaluate((id) => {
       const rows = [...document.querySelectorAll<HTMLElement>(`[data-row-key^="${id}|"]`)]
-      return rows.find((row) => row.querySelector('.text-brand:not(.opacity-70)'))?.dataset.rowKey ?? ''
+      return rows.find((row) => row.querySelector('[data-component-icon="main"]'))?.dataset.rowKey ?? ''
     }, frameId)
     await page.click(`[data-row-key="${mainRow}"] > span:nth-of-type(3)`, { count: 2 })
     const rowField = 'input[aria-label="Item name"]'
@@ -324,7 +327,7 @@ describe.skipIf(!findBrowserPath())('components in the editor', { timeout: 60_00
     const instanceRow = await page.waitForFunction(
       (frame) =>
         [...document.querySelectorAll<HTMLElement>(`[data-row-key^="${frame}|"]`)].find((row) =>
-          row.querySelector('.text-brand.opacity-70'),
+          row.querySelector('[data-component-icon="instance"]'),
         )?.dataset.rowKey,
       {},
       frameId,
@@ -399,7 +402,7 @@ describe.skipIf(!findBrowserPath())('components in the editor', { timeout: 60_00
       page.evaluate(
         (frame) =>
           [...document.querySelectorAll<HTMLElement>(`[data-row-key^="${frame}|"]`)]
-            .filter((row) => row.querySelector('.text-brand.opacity-70'))
+            .filter((row) => row.querySelector('[data-component-icon="instance"]'))
             .map((row) => row.textContent ?? ''),
         frameId,
       )
@@ -468,7 +471,7 @@ describe.skipIf(!findBrowserPath())('components in the editor', { timeout: 60_00
     const row = await page.waitForFunction(
       (id) =>
         [...document.querySelectorAll<HTMLElement>(`[data-row-key^="${id}"]`)].find((el) =>
-          el.querySelector('.text-brand:not(.opacity-70)'),
+          el.querySelector('[data-component-icon="main"]'),
         )?.dataset.rowKey,
       {},
       made.frameId,

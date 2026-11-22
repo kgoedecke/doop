@@ -341,6 +341,8 @@ export const tasks = pgTable(
     id: text('id').primaryKey(),
     canvasId: text('canvas_id').notNull(),
     agentName: text('agent_name').notNull(),
+    /** an outside agent's identity when its name is not enough (shared/agentIdentity.ts) */
+    agentKey: text('agent_key'),
     owner: text('owner'),
     color: text('color').notNull(),
     status: text('status').notNull(),
@@ -530,6 +532,24 @@ export const customAgents = pgTable(
     uniqueIndex('custom_agents_scope_handle_idx').on(t.scope, t.handle),
     uniqueIndex('custom_agents_scope_name_idx').on(t.scope, t.name),
   ],
+)
+
+/** Skills (shared/skills.ts): named instructions a workspace or a person
+ *  writes once and asks for with `/handle`. `scope` as in `custom_agents`;
+ *  a handle is unique within it. */
+export const skills = pgTable(
+  'skills',
+  {
+    id: text('id').primaryKey(),
+    scope: text('scope').notNull(),
+    handle: text('handle').notNull(),
+    description: text('description').notNull(),
+    body: text('body').notNull(),
+    createdBy: text('created_by').notNull(),
+    createdAt: bigint('created_at', { mode: 'number' }).notNull(),
+    updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
+  },
+  (t) => [uniqueIndex('skills_scope_handle_idx').on(t.scope, t.handle)],
 )
 
 /** A workspace's or a person's changes to one built-in agent

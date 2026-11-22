@@ -1,4 +1,4 @@
-import { useEffect, useId, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import { api, errorMessage } from '../lib/api'
 import { useT } from '../lib/i18n'
 import { posthog } from '../lib/posthog'
@@ -14,6 +14,7 @@ import {
   type CustomAgent,
 } from '../../shared/customAgents'
 import { RoleMark } from './RoleMark'
+import { useSkillMenu } from './SkillMenu'
 import { ConfirmDialog } from './ui/alert-dialog'
 import { Badge } from './ui/badge'
 import { Button } from './ui/button'
@@ -270,6 +271,14 @@ function AgentForm({
   const [color, setColor] = useState<string>(agent?.color ?? CUSTOM_AGENT_COLORS[2])
   const [blurb, setBlurb] = useState(agent?.blurb ?? '')
   const [brief, setBrief] = useState(agent?.brief ?? '')
+  const briefRef = useRef<HTMLTextAreaElement>(null)
+  /* no "New skill" row, since leaving for the skills card would lose this half-edited form */
+  const skillMenu = useSkillMenu({
+    from: { scope: workspaceId ? { workspaceId } : { personal: true } },
+    text: brief,
+    setText: setBrief,
+    inputRef: briefRef,
+  })
   const [reviewer, setReviewer] = useState(agent?.reviewer ?? false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
@@ -298,7 +307,14 @@ function AgentForm({
   }
 
   return (
-    <Modal onClose={onClose} size="lg">
+    <Modal
+      onClose={onClose}
+      size="lg"
+      /* the dialog hears Escape before the field does; while the skill menu is open it closes only the menu */
+      onEscapeKeyDown={(e) => {
+        if (skillMenu.menu && e.target === briefRef.current) e.preventDefault()
+      }}
+    >
       <ModalTitle>{agent ? t('agents.editTitle', { name: agent.name }) : t('agents.addTitle')}</ModalTitle>
       <ModalLede>{editing.kind === 'builtin' ? t('agents.builtInLede') : t('agents.formLede')}</ModalLede>
       <form
@@ -362,15 +378,20 @@ function AgentForm({
           htmlFor={`${ids}-brief`}
           hint={t('agents.briefHint', { used: brief.length, max: MAX_AGENT_BRIEF })}
         >
-          <Textarea
-            id={`${ids}-brief`}
-            variant="well"
-            className="min-h-[150px]"
-            value={brief}
-            maxLength={MAX_AGENT_BRIEF}
-            placeholder={t('agents.briefPlaceholder')}
-            onChange={(e) => setBrief(e.target.value)}
-          />
+          <div className="relative">
+            {skillMenu.menu}
+            <Textarea
+              ref={briefRef}
+              id={`${ids}-brief`}
+              variant="well"
+              className="min-h-[150px]"
+              value={brief}
+              maxLength={MAX_AGENT_BRIEF}
+              placeholder={t('agents.briefPlaceholder')}
+              {...skillMenu.inputProps}
+              onKeyDown={skillMenu.onKeyDown}
+            />
+          </div>
         </Field>
         <Field label={t('agents.color')} labelVariant="form">
           <div className="flex flex-wrap gap-2" role="radiogroup" aria-label={t('agents.color')}>

@@ -26,6 +26,7 @@ import { Toast } from '../components/ui/toast'
 import { ChevronRightIcon } from '../components/ui/icons'
 import { FontLibrary } from '../components/FontLibrary'
 import { CustomAgents } from '../components/CustomAgents'
+import { Skills } from '../components/Skills'
 import { WorkspaceLibraries } from '../components/WorkspaceLibraries'
 import { DashContent, DashHeader, DashLayout, DashMain, DashSubtitle, DashTitle } from '../components/ui/dash'
 import { timeAgo } from '../lib/time'
@@ -266,7 +267,10 @@ export function Workspace({ workspaceId }: { workspaceId: string }) {
           ) : pane === 'fonts' ? (
             <FontLibrary workspaceId={ws.id} />
           ) : pane === 'agents' ? (
-            <CustomAgents workspaceId={ws.id} />
+            <>
+              <CustomAgents workspaceId={ws.id} />
+              <Skills workspaceId={ws.id} />
+            </>
           ) : pane === 'libraries' ? (
             <WorkspaceLibraries workspaceId={ws.id} onToast={showToast} />
           ) : pane === 'billing' ? (

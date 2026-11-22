@@ -414,6 +414,20 @@
       "when": 1794783638191,
       "tag": "0059_workspace_seats_bought",
       "breakpoints": true
+    },
+    {
+      "idx": 60,
+      "version": "7",
+      "when": 1794975071415,
+      "tag": "0060_skills",
+      "breakpoints": true
+    },
+    {
+      "idx": 61,
+      "version": "7",
+      "when": 1795256823668,
+      "tag": "0061_agent_key",
+      "breakpoints": true
     }
   ]
 }

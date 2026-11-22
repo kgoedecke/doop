@@ -115,6 +115,40 @@ describe.skipIf(!findBrowserPath())('rasterizing a frame in the browser', () => 
     })
   })
 
+  /* #508: HTML the XML serializer copies verbatim but no XML parser reads */
+  const HTML_ONLY_SYNTAX = `<html lang="en"><head><style>
+      * { margin: 0 }
+      .block { position: absolute; left: 0; top: 0; width: 100px; height: 100px; background: rgb(255, 0, 0) }
+    </style></head><body>
+    <!-- Hero -- CTA -->
+    <!-- ends in a dash --->
+    <div class="block" data-keep="yes" xml:lang="en" @click="open = true" :class="{ on: open }" x-on:click="go()"
+      v-bind:title="t" #slot="x"></div>
+    <template><!-- inside -- a template --><span @click="x"></span></template>
+    </body></html>`
+
+  it('writes an SVG any XML parser reads when the frame holds HTML-only comments and attribute names', async () => {
+    const text = await page.evaluate(
+      (h) => (window as unknown as { svgText: (o: unknown) => Promise<string> }).svgText({ html: h }),
+      HTML_ONLY_SYNTAX,
+    )
+    const parsed = await page.evaluate((t) => {
+      const doc = new DOMParser().parseFromString(t, 'image/svg+xml')
+      const block = doc.querySelector('.block')
+      return {
+        error: doc.querySelector('parsererror')?.textContent ?? null,
+        kept: block ? Array.from(block.attributes, (a) => a.name).sort() : null,
+      }
+    }, text)
+    expect(parsed.error).toBeNull()
+    expect(parsed.kept).toEqual(['class', 'data-keep', 'xml:lang'])
+  })
+
+  it('paints such a frame in the browser rather than giving up on it', async () => {
+    const out = await render({ html: HTML_ONLY_SYNTAX })
+    expect(out.block).toEqual([255, 0, 0, 255])
+  })
+
   it('keeps only the clipped box, drawn from the whole document, for an element export', async () => {
     const out = await render({ scale: 2, clip: { x: 200, y: 0, width: 100, height: 100 } })
     expect([out.width, out.height]).toEqual([200, 200])

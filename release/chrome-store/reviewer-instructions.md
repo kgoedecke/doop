@@ -1,9 +1,9 @@
 # Reviewer test instructions
 
-Doop Cature captures page content locally without an extension login. Importing the result requires signing into Doop and opening a canvas with edit access.
+Doop Capture captures page content locally without an extension login. Importing the result requires signing into Doop and opening a canvas with edit access.
 
 1. Open a normal HTTPS webpage (not a Chrome internal page or the Chrome Web Store).
-2. Click the Doop Cature toolbar icon, then Select a section.
+2. Click the Doop Capture toolbar icon, then Select a section.
 3. Move the pointer over page elements; a blue outline indicates the section. Click a section.
 4. In the capture toolbar, click Copy to Doop. Wait for the Copied confirmation.
 5. Sign in at https://doop.design and open or create an editable canvas.

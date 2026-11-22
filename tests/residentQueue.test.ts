@@ -133,7 +133,7 @@ describe('a run claims only its payer', () => {
       feedback: [feedback('f-alice', 'alice', 1200), feedback('f-bob', 'bob', 1300)],
     })
     expect(actions.takeAgentCommentsFor(CANVAS, AGENT, 'alice').map((c) => c.id)).toEqual(['m-alice'])
-    expect(actions.takeFeedbackFor(CANVAS, AGENT, 'alice').map((f) => f.id)).toEqual(['f-alice'])
+    expect(actions.takeFeedbackFor(CANVAS, { name: AGENT }, 'alice').map((f) => f.id)).toEqual(['f-alice'])
     expect(actions.nextWorkPayer(CANVAS, AGENT)).toBe('bob')
   })
 

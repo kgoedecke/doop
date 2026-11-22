@@ -107,6 +107,90 @@ describe.skipIf(!findBrowserPath())('rich text editing', { timeout: 30_000 }, ()
     ).not.toContain(value)
   })
 
+  it('scrolls to the spot a ⌘-clicked #link names, and to the top for a bare #', async () => {
+    await send({
+      type: 'doop:html',
+      html: '<div style="height:2000px">Top</div><h2 id="pricing">Pricing</h2><div style="height:2000px"></div>',
+      reqId: 'render',
+    })
+    await frame.waitForSelector('#pricing')
+    await send({ type: 'doop:anchor', id: 'pricing' })
+    await frame.waitForFunction(() => Math.abs(document.querySelector('#pricing')!.getBoundingClientRect().top) < 2)
+    await send({ type: 'doop:anchor', id: '' })
+    await frame.waitForFunction(() => scrollY === 0)
+    // an element named top wins over the top of the document, as in a browser
+    await frame.evaluate(() => {
+      document.querySelector('#pricing')!.id = 'top'
+    })
+    await send({ type: 'doop:anchor', id: 'top' })
+    await frame.waitForFunction(() => Math.abs(document.querySelector('#top')!.getBoundingClientRect().top) < 2)
+  })
+
+  it('ends the edit on a click on nothing editable, telling the canvas so', async () => {
+    await render('<p id="text" style="margin:0">Hello</p><div style="height:300px"></div>')
+    await page.evaluate(() => {
+      ;(window as unknown as Fixture).messages = []
+    })
+    const box = (await (await frame.frameElement())!.boundingBox())!
+    await page.mouse.click(box.x + 20, box.y + 110)
+    await frame.waitForFunction(() => !document.querySelector('style[data-v-edit]'))
+    await page.waitForFunction(() => (window as unknown as Fixture).messages.some((m) => m.type === 'doop:edit-esc'))
+    expect(await frame.$('[contenteditable]')).toBeNull()
+  })
+
+  it('keeps the edit when a text drag lets go past the text', async () => {
+    await render('<p id="text" style="margin:0">Hello there</p><div style="height:300px"></div>')
+    await page.evaluate(() => {
+      ;(window as unknown as Fixture).messages = []
+    })
+    const box = (await (await frame.frameElement())!.boundingBox())!
+    await page.mouse.move(box.x + 12, box.y + 10)
+    await page.mouse.down()
+    await page.mouse.move(box.x + 30, box.y + 110, { steps: 5 })
+    await page.mouse.up()
+    // the click lands on the body, the drag's common ancestor: still editing
+    await new Promise((resolve) => setTimeout(resolve, 100))
+    expect(await frame.$('style[data-v-edit]')).not.toBeNull()
+    expect(
+      await page.evaluate(() => (window as unknown as Fixture).messages.some((m) => m.type === 'doop:edit-esc')),
+    ).toBe(false)
+  })
+
+  it("wears the canvas's cursor outside a text edit, and its own while editing", async () => {
+    const cursor = (selector: string) => frame.$eval(selector, (el) => getComputedStyle(el).cursor)
+    await send({
+      type: 'doop:html',
+      html: '<p id="text">Read <a id="link" href="https://example.com">the docs</a></p><button id="cta" style="cursor:pointer">Go</button>',
+      reqId: 'render',
+    })
+    await frame.waitForSelector('#link')
+    // no canvas cursor, as in the prototype player: the design's own cursors stand
+    expect([await cursor('#link'), await cursor('#cta')]).toEqual(['pointer', 'pointer'])
+
+    // on the canvas a link's hand must not show through the shield
+    await send({ type: 'doop:cursor', cursor: 'default' })
+    await frame.waitForFunction(() => getComputedStyle(document.querySelector('#link')!).cursor === 'default')
+    expect(await cursor('#cta')).toBe('default')
+
+    await send({ type: 'doop:edit', on: true, x: 20, y: 20 })
+    await frame.waitForSelector('#text[contenteditable]')
+    // a click on the link places the caret, so it shows the text cursor
+    expect([await cursor('#link'), await cursor('#cta')]).toEqual(['text', 'pointer'])
+
+    await send({ type: 'doop:edit', on: false })
+    await frame.waitForFunction(() => !document.querySelector('style[data-v-edit]'))
+    expect([await cursor('#link'), await cursor('#cta')]).toEqual(['default', 'default'])
+    expect(await savedHtml()).not.toContain('cursor:default')
+
+    // the chord held over a link: the canvas asks for the hand
+    await send({ type: 'doop:cursor', cursor: 'pointer' })
+    await frame.waitForFunction(() => getComputedStyle(document.querySelector('#cta')!).cursor === 'pointer')
+    // anything that could add a rule is refused, putting the design's cursors back
+    await send({ type: 'doop:cursor', cursor: 'default}body{display:none' })
+    await frame.waitForFunction(() => getComputedStyle(document.querySelector('#link')!).cursor === 'pointer')
+    expect(await frame.$eval('body', (el) => getComputedStyle(el).display)).toBe('block')
+  })
+
   it('creates separate bullets from multiline text and preserves them through reload and re-entry', async () => {
     await render('<p id="text" style="margin:0;font:24px Arial;white-space:pre-wrap">One\nTwo</p>')
     await format('insertUnorderedList')

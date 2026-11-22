@@ -37,6 +37,7 @@ import { componentReuseNotes, componentSystemNotes, frameReuseNotes } from './re
 import { store } from './store.ts'
 import { inlineDataRefusal, type Surface } from './inlineData.ts'
 import { optional, WorkBudgetError } from './workBudget.ts'
+import { WriteRefusedError } from './writeRefusal.ts'
 import { transaction } from './journal.ts'
 
 /**
@@ -382,7 +383,7 @@ export const COMPONENT_TOOLS: ComponentTool[] = [
           }
         } catch (error) {
           /* a refusal is this entry's; a spent work budget refuses the whole call (runComponentTool) */
-          if (!(error instanceof ComponentError)) throw error
+          if (!(error instanceof ComponentError || error instanceof WriteRefusedError)) throw error
           refused.push(name)
           return { index, ok: false as const, name, error: error.message }
         }
@@ -804,7 +805,8 @@ export async function runComponentTool(
        inside, so an async tool's ComponentError is caught like any other */
     return { ok: true, result: await transaction(() => tool.run(input, context)) }
   } catch (error) {
-    if (error instanceof ComponentError || error instanceof WorkBudgetError) return { ok: false, error: error.message }
+    if (error instanceof ComponentError || error instanceof WorkBudgetError || error instanceof WriteRefusedError)
+      return { ok: false, error: error.message }
     throw error
   }
 }

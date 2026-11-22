@@ -14,13 +14,21 @@ import {
   recordUndo,
   transaction,
 } from './journal.ts'
-import { dedupeIssues, prepareChunk, prepareFrameHtml, referencesComponent, rederiveFromMains } from './components.ts'
+import {
+  dedupeIssues,
+  prepareChunk,
+  prepareFrameHtml,
+  referencesComponent,
+  rederiveFromMains,
+  refuseUnclosedUses,
+} from './components.ts'
 import { COMPONENT_ATTR, isDeleted, isHollow, type ComponentDef, type ComponentIssue } from '../shared/components.ts'
 import { MAX_DECISION_CHARS } from '../shared/designDecisions.ts'
 import { MAX_PAGES, PageLimitError, store } from './store.ts'
 import * as persist from './db/persist.ts'
 import * as thumbs from './thumbs.ts'
 import { colorFor } from '../shared/types.ts'
+import { agentKeyOf, isAgentsTask } from '../shared/agentIdentity.ts'
 import type { AgentBrand } from '../shared/agentBrand.ts'
 import type { StackWrite } from '../shared/frameStack.ts'
 import {
@@ -42,6 +50,7 @@ import { decodeEscapedHtml, looksEscapedHtml, repairEscapedHtml } from './escape
 import { forgetLibrary } from './componentLibrary.ts'
 import { withCanvasFaces, withCanvasFacesMidStream } from './canvasFaces.ts'
 import { EMBEDDED_MIN_LENGTH } from './inlineData.ts'
+import { WriteRefusedError } from './writeRefusal.ts'
 import {
   MAX_TOKENS,
   MAX_TOKEN_DESCRIPTION,
@@ -92,10 +101,9 @@ import type {
 type Broadcast = (canvasId: string, msg: ServerMessage, excludeClientId?: string) => void
 type AgentTouch = (
   canvasId: string,
-  agentName: string,
+  agent: Pick<Actor, 'name' | 'owner' | 'brand' | 'agentKey'>,
   frameId?: string | null,
   status?: string | null,
-  identity?: Pick<Actor, 'owner' | 'brand'>,
 ) => void
 
 let send: Broadcast = () => {}
@@ -282,15 +290,25 @@ function logActivity(canvasId: string, actor: Actor, message: string, frameId?: 
 }
 
 export function resolveActor(
-  raw: { name?: string; kind?: string; clientId?: string; owner?: string; brand?: AgentBrand } | undefined,
+  raw:
+    | { name?: string; kind?: string; clientId?: string; owner?: string; brand?: AgentBrand; agentKey?: string }
+    | undefined,
 ): Actor {
   const kind = raw?.kind === 'agent' ? 'agent' : raw?.kind === 'user' ? 'user' : 'agent'
   const name = raw?.name?.trim() || (kind === 'agent' ? 'AI Agent' : 'Anonymous')
-  return { name, kind, color: colorFor(name), clientId: raw?.clientId, owner: raw?.owner, brand: raw?.brand }
+  return {
+    name,
+    kind,
+    color: colorFor(name),
+    clientId: raw?.clientId,
+    owner: raw?.owner,
+    brand: raw?.brand,
+    ...(kind === 'agent' && raw?.agentKey ? { agentKey: raw.agentKey } : {}),
+  }
 }
 
 function touch(canvasId: string, actor: Actor, frameId?: string | null) {
-  if (actor.kind === 'agent') agentTouch(canvasId, actor.name, frameId, undefined, actor)
+  if (actor.kind === 'agent') agentTouch(canvasId, actor, frameId)
 }
 
 /** Refresh an agent's presence without changing its frame or status. A model
@@ -299,11 +317,6 @@ function touch(canvasId: string, actor: Actor, frameId?: string | null) {
  *  for as long as they are actually alive. */
 export function heartbeatAgent(canvasId: string, actor: Actor) {
   touch(canvasId, actor)
-}
-
-/** Same agent identity = same name. (Owner-scoping deferred until MCP auth.) */
-function sameAgent(t: { agentName: string }, actor: Actor): boolean {
-  return t.agentName === actor.name
 }
 
 /* ------------------------------------------------------------------ */
@@ -349,8 +362,12 @@ export function pendingWorkAgents(canvasId: string): string[] {
   for (const card of [...(taskLog.get(canvasId) ?? [])].reverse()) {
     if (card.queuedBy && !card.agentName && !card.failedAt && !card.endedAt) add(stageAgent(card, roster))
   }
+  const now = Date.now()
   for (const f of [...(feedbackLog.get(canvasId) ?? [])].reverse()) {
-    if (!f.deliveredAt && !f.failedAt) add(addressee(f.targetAgent, roster) ?? DEFAULT_ROLE_NAME)
+    /* feedback still waiting for the outside agent whose work it is about is
+       no resident's yet: addTaskFeedback wakes them when the wait is over */
+    if (!f.deliveredAt && !f.failedAt && !awaitingOwner(f, now))
+      add(addressee(f.targetAgent, roster) ?? DEFAULT_ROLE_NAME)
   }
   for (const c of [...(commentLog.get(canvasId) ?? [])].reverse()) {
     if (c.forAgent && !c.claimedBy && !c.failedAt && !c.resolvedAt)
@@ -425,8 +442,9 @@ function oldestWork(canvasId: string, agentName: string, passOver: (work: NextWo
       consider(c.at, c.fromUserId, undefined)
     }
   }
+  const now = Date.now()
   for (const f of feedbackLog.get(canvasId) ?? []) {
-    if (!f.deliveredAt && !f.failedAt && feedbackFor(f, agentName, roster)) {
+    if (!f.deliveredAt && !f.failedAt && feedbackFor(f, { name: agentName }, roster, now)) {
       consider(f.at, f.fromUserId, feedbackRunner(f))
     }
   }
@@ -434,10 +452,12 @@ function oldestWork(canvasId: string, agentName: string, passOver: (work: NextWo
 }
 
 /** Whether this agent may take a reply: one addressed to it, or one left for
- *  whoever shows up (the work it answers was an outside agent's). */
-function feedbackFor(f: TaskFeedback, agentName: string, roster: Roster): boolean {
+ *  whoever shows up (the work it answers was an outside agent's), once that
+ *  agent has had first pick. */
+function feedbackFor(f: TaskFeedback, agent: Pick<Actor, 'name' | 'agentKey'>, roster: Roster, now: number): boolean {
   const target = addressee(f.targetAgent, roster)
-  return !target || target === agentName
+  if (target && target !== agent.name) return false
+  return f.agentKey === agentKeyOf(agent) || !awaitingOwner(f, now)
 }
 
 /** The requester behind the oldest work, for callers that bill but do not
@@ -468,12 +488,12 @@ export function taskCanvasId(taskId: string): string | undefined {
 /** Agent announces what it is working on right now (empty string clears it). */
 export function setAgentStatus(canvasId: string, actor: Actor, status: string) {
   const clean = status.trim()
-  agentTouch(canvasId, actor.name, undefined, clean || null, actor)
+  agentTouch(canvasId, actor, undefined, clean || null)
 
   const list = taskLog.get(canvasId) ?? []
   /* board cards stay open until explicitly completed — a status change
      narrates work ON a card, it doesn't end it */
-  const open = list.find((t) => sameAgent(t, actor) && !t.endedAt && !t.queuedBy)
+  const open = list.find((t) => isAgentsTask(t, actor) && !t.endedAt && !t.queuedBy)
   if (open?.status === clean) return // same status re-posted: nothing new
   const runStartedAt = open ? (open.runStartedAt ?? open.startedAt) : undefined
   if (open) {
@@ -485,6 +505,7 @@ export function setAgentStatus(canvasId: string, actor: Actor, status: string) {
     const task: AgentTask = {
       id: nanoid(8),
       agentName: actor.name,
+      ...(actor.agentKey ? { agentKey: actor.agentKey } : {}),
       owner: actor.owner,
       color: actor.color,
       status: clean,
@@ -538,6 +559,7 @@ export function addTaskFeedback(
       taskId,
       canvasId,
       agentName: task.agentName,
+      ...(task.agentKey ? { agentKey: task.agentKey } : {}),
       ...(target ? { targetAgent: target } : {}),
       from,
       ...(fromUserId ? { fromUserId } : {}),
@@ -549,8 +571,11 @@ export function addTaskFeedback(
     stored.saveFeedback(fb)
     broadcast(canvasId, { type: 'feedback', feedback: fb })
     /* resident Doop agent picks feedback up instantly (no-op without an API
-       key). Dynamic import: resident depends on this module. */
+       key). Dynamic import: resident depends on this module. Feedback on an
+       outside agent's work is that agent's for a minute: the residents hear
+       again when it is open to them. */
     kickResident(canvasId)
+    if (fb.agentKey) afterCommit(() => setTimeout(() => kickResident(canvasId), OWNER_FIRST_MS).unref())
     logActivity(
       canvasId,
       resolveActor({ name: from, kind: 'user' }),
@@ -561,26 +586,48 @@ export function addTaskFeedback(
   return undefined
 }
 
+/** How long feedback on an outside agent's task waits for that agent before
+ *  any agent may take it: the longest an agent's presence outlives its last
+ *  tool call (server/index.ts), so an agent still at work is asked first. */
+export const OWNER_FIRST_MS = 60_000
+
+/** Feedback on an outside agent's work that is still that agent's alone:
+ *  every other agent, a resident one too, waits out OWNER_FIRST_MS. */
+function awaitingOwner(f: TaskFeedback, now: number): boolean {
+  return !!f.agentKey && now - f.at < OWNER_FIRST_MS
+}
+
 /** The feedback takeFeedbackFor would claim, left unclaimed: what read-only
  *  tools mention without assigning anything. */
-export function openFeedbackFor(canvasId: string, agentName: string, payer?: string, runner?: string): TaskFeedback[] {
+export function openFeedbackFor(
+  canvasId: string,
+  agent: Pick<Actor, 'name' | 'agentKey'>,
+  payer?: string,
+  runner?: string,
+): TaskFeedback[] {
   const roster = canvasRoster(canvasId)
+  const now = Date.now()
   return (feedbackLog.get(canvasId) ?? []).filter(
     (f) =>
       !f.deliveredAt &&
       !f.failedAt &&
-      feedbackFor(f, agentName, roster) &&
+      feedbackFor(f, agent, roster, now) &&
       (payer === undefined || (f.fromUserId ?? '') === payer) &&
       (runner === undefined || runnerKey(feedbackRunner(f)) === runner),
   )
 }
 
-/** Open feedback this agent may take: everything addressed to it, plus
- *  untargeted feedback — that part stays a canvas-level queue where the first
- *  identified agent call wins. `runner` (a `runnerKey`) narrows the claim to
- *  one connection, since a run calls one model. */
-export function takeFeedbackFor(canvasId: string, agentName: string, payer?: string, runner?: string): TaskFeedback[] {
-  return claimFeedback(canvasId, agentName, false, payer, runner)
+/** Open feedback this outside agent may take: everything addressed to it,
+ *  plus untargeted feedback — that part stays a canvas-level queue where the
+ *  first identified agent call wins, after the agent whose work it is about
+ *  has had first pick (OWNER_FIRST_MS). */
+export function takeFeedbackFor(
+  canvasId: string,
+  agent: Pick<Actor, 'name' | 'agentKey'>,
+  payer?: string,
+  runner?: string,
+): TaskFeedback[] {
+  return claimFeedback(canvasId, agent, false, payer, runner)
 }
 
 /** takeFeedbackFor for a resident run: the claim is marked in-process, which
@@ -591,20 +638,22 @@ export function takeResidentFeedbackFor(
   payer?: string,
   runner?: string,
 ): TaskFeedback[] {
-  return claimFeedback(canvasId, agentName, true, payer, runner)
+  return claimFeedback(canvasId, { name: agentName }, true, payer, runner)
 }
 
+/** `runner` (a `runnerKey`) narrows the claim to one connection, since a run
+ *  calls one model. */
 function claimFeedback(
   canvasId: string,
-  agentName: string,
+  agent: Pick<Actor, 'name' | 'agentKey'>,
   resident: boolean,
   payer?: string,
   runner?: string,
 ): TaskFeedback[] {
-  const pending = openFeedbackFor(canvasId, agentName, payer, runner)
+  const pending = openFeedbackFor(canvasId, agent, payer, runner)
   for (const f of pending) {
     edit(f).deliveredAt = Date.now()
-    f.claimedBy = agentName
+    f.claimedBy = agent.name
     f.claimedByResident = resident
     stored.saveFeedback(f)
     broadcast(canvasId, { type: 'feedback', feedback: f }) // clients flip the entry to "picked up"
@@ -1310,7 +1359,7 @@ export function recordWorkReply(canvasId: string, work: { cardIds: string[]; fee
 
 /** True if the agent has an explicitly announced (non-auto) task open. */
 export function hasAnnouncedTask(canvasId: string, actor: Actor): boolean {
-  return (taskLog.get(canvasId) ?? []).some((t) => sameAgent(t, actor) && !t.endedAt && !t.auto)
+  return (taskLog.get(canvasId) ?? []).some((t) => isAgentsTask(t, actor) && !t.endedAt && !t.auto)
 }
 
 /** How many frames a task remembers — the Agents panel only ever jumps to the
@@ -1322,7 +1371,7 @@ const TASK_FRAMES_CAP = 20
  *  card and a set_status task can be open side by side — both are the work. */
 function trackTaskFrame(canvasId: string, actor: Actor, frameId: string) {
   for (const open of taskLog.get(canvasId) ?? []) {
-    if (!sameAgent(open, actor) || open.endedAt) continue
+    if (!isAgentsTask(open, actor) || open.endedAt) continue
     if (open.frameIds?.at(-1) === frameId) continue
     edit(open).frameIds = [...(open.frameIds ?? []).filter((id) => id !== frameId), frameId].slice(-TASK_FRAMES_CAP)
     stored.saveTask(canvasId, open)
@@ -1334,13 +1383,14 @@ function trackTaskFrame(canvasId: string, actor: Actor, frameId: string) {
    they are visibly doing, so the Tasks panel is never silently empty. */
 function autoTask(canvasId: string, actor: Actor, status: string, frameId: string) {
   const list = taskLog.get(canvasId) ?? []
-  if (list.some((t) => sameAgent(t, actor) && !t.endedAt)) {
+  if (list.some((t) => isAgentsTask(t, actor) && !t.endedAt)) {
     trackTaskFrame(canvasId, actor, frameId) // any open task wins — it just gains the frame
     return
   }
   const task: AgentTask = {
     id: nanoid(8),
     agentName: actor.name,
+    ...(actor.agentKey ? { agentKey: actor.agentKey } : {}),
     owner: actor.owner,
     color: actor.color,
     status,
@@ -1354,7 +1404,7 @@ function autoTask(canvasId: string, actor: Actor, status: string, frameId: strin
 }
 
 function endAutoTask(canvasId: string, actor: Actor) {
-  const open = (taskLog.get(canvasId) ?? []).find((t) => sameAgent(t, actor) && !t.endedAt && t.auto)
+  const open = (taskLog.get(canvasId) ?? []).find((t) => isAgentsTask(t, actor) && !t.endedAt && t.auto)
   if (open) {
     edit(open).endedAt = Date.now()
     stored.saveTask(canvasId, open)
@@ -1362,10 +1412,12 @@ function endAutoTask(canvasId: string, actor: Actor) {
   }
 }
 
-/** Close an agent's open tasks, e.g. when its presence expires. */
-export function endAgentTasks(canvasId: string, agentName: string) {
+/** Close an agent's open tasks, e.g. when its presence expires. Only that
+ *  agent's: another one sharing its name keeps working. */
+export function endAgentTasks(canvasId: string, agent: Pick<Actor, 'name' | 'agentKey'>) {
+  const agentName = agent.name
   for (const t of taskLog.get(canvasId) ?? []) {
-    if (t.agentName === agentName && !t.endedAt) {
+    if (isAgentsTask(t, agent) && !t.endedAt) {
       if (t.queuedBy && t.failedAt) continue
       edit(t)
       if (t.queuedBy) {
@@ -1726,7 +1778,7 @@ function noteHtmlChange(prior: PriorState, actor: Actor, tweak: boolean) {
   const joins =
     tweak &&
     open !== undefined &&
-    open.actor.name === actor.name &&
+    agentKeyOf(open.actor) === agentKeyOf(actor) &&
     open.actor.kind === actor.kind &&
     now - open.lastAt < BURST_IDLE_MS
   setKey(bursts, prior.id, { actor, lastAt: now })
@@ -2075,11 +2127,11 @@ function prepareWrite(
   html: string,
   priorHtml: string,
   by: string,
-  carried: ComponentIssue[] = [],
+  { carried = [], refuseUnclosed = false }: { carried?: ComponentIssue[]; refuseUnclosed?: boolean } = {},
 ) {
   const canvas = store.getCanvas(canvasId)
   if (!canvas) return { html, changed: [] as ComponentDef[] }
-  const prepared = prepareFrameHtml(canvas, frameId, html, by, priorHtml)
+  const prepared = prepareFrameHtml(canvas, frameId, html, by, priorHtml, { refuseUnclosed })
   const issues = dedupeIssues([...carried, ...prepared.issues])
   if (issues.length) setKey(componentIssues, frameId, issues)
   else dropKey(componentIssues, frameId)
@@ -2385,11 +2437,29 @@ function healFromMain(canvas: Canvas, frame: Frame, ids: ReadonlySet<string>) {
   if (next) broadcast(canvas.id, { type: 'frame:updated', frame: next, actor })
 }
 
-export const appendFrameHtml = atomic(function appendFrameHtml(
+export function appendFrameHtml(
   frameId: string,
   chunk: string,
   actor: Actor,
   opts: { start?: boolean; done?: boolean } = {},
+): Frame | undefined {
+  try {
+    return appendChunk(frameId, chunk, actor, opts)
+  } catch (error) {
+    /* a last chunk refused for a <doop-use> it leaves open: the stream stays open for it to come
+       again, and that counts as the agent at work, so the idle sweep does not settle the stream
+       meanwhile. Set past the chunk's undo, and not journaled, so the refusal's undo keeps it */
+    const stream = error instanceof WriteRefusedError ? streams.get(frameId) : undefined
+    if (stream) stream.lastActivity = Date.now()
+    throw error
+  }
+}
+
+const appendChunk = atomic(function appendChunk(
+  frameId: string,
+  chunk: string,
+  actor: Actor,
+  opts: { start?: boolean; done?: boolean },
 ): Frame | undefined {
   const before = store.getFrame(frameId)
   if (!before) return undefined
@@ -2408,6 +2478,9 @@ export const appendFrameHtml = atomic(function appendFrameHtml(
   const chunked = canvas
     ? prepareChunk(canvas, piece, opts.start ? '' : before.html, actor.name)
     : { html: piece, issues: [], adopted: [] }
+  /* a tag left open in an override is whole already: no later chunk closes it, and waiting for the
+     done chunk would leave this one saved, so the chunk is refused now */
+  if (actor.kind === 'agent') refuseUnclosedUses(chunked.issues.filter((issue) => issue.inOverride))
   const expanded = chunked.html
   const carried = [...(starting ? [] : (streamIssues.get(frameId) ?? [])), ...chunked.issues]
   /* the last chunk settles the whole document: a <doop-use> split across
@@ -2418,7 +2491,10 @@ export const appendFrameHtml = atomic(function appendFrameHtml(
      until then the block stays as written, under the names the frame uses. */
   const joined = opts.start ? expanded : before.html + expanded
   const prepared = opts.done
-    ? prepareWrite(before.canvasId, before.id, joined, before.html, actor.name, carried)
+    ? prepareWrite(before.canvasId, before.id, joined, before.html, actor.name, {
+        carried,
+        refuseUnclosed: actor.kind === 'agent',
+      })
     : {
         html: pendingRenames.has(frameId) ? joined : withCanvasFacesMidStream(before.canvasId, joined),
         changed: [] as ComponentDef[],
@@ -2546,7 +2622,9 @@ export const createFrame = atomic(function createFrame(
 ): Frame | undefined {
   if (input.html !== undefined) {
     /* no id yet: a main marker arriving in a new frame is a copy of that main */
-    const prepared = prepareWrite(canvasId, '', repairEscapedHtml(input.html), '', actor.name)
+    const prepared = prepareWrite(canvasId, '', repairEscapedHtml(input.html), '', actor.name, {
+      refuseUnclosed: actor.kind === 'agent',
+    })
     input = { ...input, html: prepared.html }
   }
   const frame = store.createFrame(canvasId, input, actor.name)
@@ -2568,6 +2646,20 @@ export const createFrame = atomic(function createFrame(
   return frame
 })
 
+/** Whether this design write is refused, rather than saved with a note, when it leaves a
+ *  `<doop-use>` open: an agent's whole write. A frame mid-stream holds its stream's waiting tags:
+ *  the streaming agent's own edit of it is not whole (its next chunks close them), another
+ *  agent's is refused outright unless it replaces the design (set_frame_html). */
+function refusesUnclosed(frameId: string, actor: Actor, replace: boolean): boolean {
+  if (actor.kind !== 'agent') return false
+  const stream = streams.get(frameId)
+  if (!stream || replace) return true
+  if (stream.actor.name === actor.name) return false
+  throw new WriteRefusedError(
+    `Refused, nothing was written: ${stream.actor.name} is streaming this frame. Wait for its stream to finish, or replace the whole design with set_frame_html.`,
+  )
+}
+
 /** `replace` marks a deliberate whole-document write (set_frame_html): it
  *  always opens a history burst, even when the new document keeps most of
  *  the old one's wrapper — only the reveal-or-morph choice stays similarity
@@ -2584,7 +2676,9 @@ export const updateFrame = atomic(function updateFrame(
   if (!before) return undefined
   let changedComponents: ComponentDef[] = []
   if (patch.html !== undefined) {
-    const prepared = prepareWrite(before.canvasId, frameId, repairEscapedHtml(patch.html), before.html, actor.name)
+    const prepared = prepareWrite(before.canvasId, frameId, repairEscapedHtml(patch.html), before.html, actor.name, {
+      refuseUnclosed: refusesUnclosed(frameId, actor, opts.replace === true),
+    })
     patch = { ...patch, html: prepared.html }
     changedComponents = prepared.changed
   }
@@ -2876,12 +2970,12 @@ export function patchGuideline(
    task log's announce tracking. */
 const guidelinesSeen = new Set<string>()
 
-export function markGuidelinesSeen(canvasId: string, agentName: string) {
-  guidelinesSeen.add(`${canvasId}:${agentName}`)
+export function markGuidelinesSeen(canvasId: string, agentKey: string) {
+  guidelinesSeen.add(`${canvasId}:${agentKey}`)
 }
 
-export function hasSeenGuidelines(canvasId: string, agentName: string): boolean {
-  return guidelinesSeen.has(`${canvasId}:${agentName}`)
+export function hasSeenGuidelines(canvasId: string, agentKey: string): boolean {
+  return guidelinesSeen.has(`${canvasId}:${agentKey}`)
 }
 
 /* ------------------------------------------------------------------ */

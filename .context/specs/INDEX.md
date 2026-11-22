@@ -6,6 +6,9 @@ lists every file in this folder.
 
 ## Active
 
+- [skills.md](skills.md) - Team skills: named markdown instructions a workspace or person writes
+  once, invoked by `/handle` in a request and added to the resident agent's system prompt for that
+  run; storage, `/api/skills`, the settings card. Issue #380.
 - [image-descriptions.md](image-descriptions.md) - Model-written descriptions of uploaded images,
   stored once per asset, billed to the uploader, eligible owner or server behind an
   Agents setting, and surfaced to MCP and resident agents as `images` per frame.

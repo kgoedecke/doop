@@ -48,7 +48,8 @@ export const agents: Catalog['agents'] = {
   brief: 'Instruções',
   briefPlaceholder:
     'Você é o revisor de SEO. Confira se cada página tem um h1 claro, cabeçalhos descritivos em ordem e um texto que diz do que a página trata…',
-  briefHint: '{used} / {max} caracteres. Diga o que ele cuida, o que verifica e o que deve deixar como está.',
+  briefHint:
+    '{used} / {max} caracteres. Diga o que ele cuida, o que verifica e o que deve deixar como está. Digite / para citar uma skill que ele aplica em toda execução.',
   color: 'Cor',
   reviewer: 'Revisão',
   reviewerHint:

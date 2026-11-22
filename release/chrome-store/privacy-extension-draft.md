@@ -1,6 +1,6 @@
-## Doop Cature Chrome extension
+## Doop Capture Chrome extension
 
-Doop Cature reads the rendered HTML, text, image references, and computed styles of the page or section you explicitly choose to capture. Processing occurs locally in your browser. The extension does not collect browsing history, read your clipboard, or send captured content to our servers automatically. Clicking Copy to Doop writes the capture to your clipboard, where it remains subject to your device's clipboard and clipboard-history settings.
+Doop Capture reads the rendered HTML, text, image references, and computed styles of the page or section you explicitly choose to capture. Processing occurs locally in your browser. The extension does not collect browsing history, read your clipboard, or send captured content to our servers automatically. Clicking Copy to Doop writes the capture to your clipboard, where it remains subject to your device's clipboard and clipboard-history settings.
 
 When you paste a capture into Doop, it becomes canvas content and is stored and shared under the content, retention, and collaboration provisions of this policy. Capture only content you intend to store and share. Captured pages may contain personal information even when form values are excluded.
 

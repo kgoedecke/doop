@@ -145,10 +145,15 @@ import { modelCatalogFor } from './modelCatalog.ts'
 import { mentionedRole } from '../shared/agents.ts'
 import { hydrateCustomAgents, rosterFor, teamOfCanvas } from './customAgents.ts'
 import { customAgentsRouter } from './customAgentRoutes.ts'
+import { hydrateSkills, skillsForCanvas } from './skills.ts'
+import type { AgentScope } from '../shared/customAgents.ts'
+import type { CanvasSkills } from '../shared/skills.ts'
+import { skillsRouter } from './skillRoutes.ts'
 import { activeAgentTasks } from '../shared/agentActivity.ts'
 import { colorFor } from '../shared/types.ts'
+import { agentKeyOf } from '../shared/agentIdentity.ts'
 import { isPeerViewport } from '../shared/viewport.ts'
-import { exportScaleSuffix, fitExportScale, parseExportScale } from '../shared/exportScale.ts'
+import { exportScaleSuffix, fitExportScale, fullFrameRenderScale, parseExportScale } from '../shared/exportScale.ts'
 import { emailShare } from './canvasShares.ts'
 import * as userEvents from './userEvents.ts'
 import type { Actor, Canvas, ClientMessage, Presence, ServerMessage } from '../shared/types.ts'
@@ -177,6 +182,7 @@ await backgrounds.initBackgrounds()
 initAuth()
 await syncAdmins() // ADMIN_EMAILS -> user.role, for accounts that already exist
 await hydrateCustomAgents() // before the logs: an interrupted claim is told apart by its agent's name
+await hydrateSkills()
 let data = await persist.hydrate()
 if (data.canvases.length === 0 && (await persist.importLegacyJson())) {
   data = await persist.hydrate()
@@ -344,39 +350,42 @@ function broadcast(canvasId: string, msg: ServerMessage, excludeClientId?: strin
 interface AgentPresence extends Presence {
   lastSeen: number
 }
-const agentPresences = new Map<string, Map<string, AgentPresence>>() // canvasId -> name -> presence
+const agentPresences = new Map<string, Map<string, AgentPresence>>() // canvasId -> agent identity -> presence
 
 function agentTouch(
   canvasId: string,
-  agentName: string,
+  agent: Pick<Actor, 'name' | 'owner' | 'brand' | 'agentKey'>,
   frameId?: string | null,
   status?: string | null,
-  identity?: Pick<Actor, 'owner' | 'brand'>,
 ) {
-  const owner = identity?.owner
-  let byName = agentPresences.get(canvasId)
-  if (!byName) agentPresences.set(canvasId, (byName = new Map()))
-  let p = byName.get(agentName)
+  const owner = agent.owner
+  /* one presence per agent identity (shared/agentIdentity.ts), not per name:
+     two agents both called "Claude" are two faces */
+  const key = agentKeyOf(agent)
+  let byKey = agentPresences.get(canvasId)
+  if (!byKey) agentPresences.set(canvasId, (byKey = new Map()))
+  let p = byKey.get(key)
   const isNew = !p
   if (!p) {
     p = {
-      clientId: `agent:${agentName}`,
-      name: agentName,
-      color: colorFor(agentName),
+      clientId: `agent:${key}`,
+      name: agent.name,
+      color: colorFor(agent.name),
       kind: 'agent',
       owner,
-      brand: identity?.brand,
+      brand: agent.brand,
+      ...(agent.agentKey ? { agentKey: agent.agentKey } : {}),
       lastSeen: Date.now(),
       activeFrameId: frameId ?? null,
     }
-    byName.set(agentName, p)
+    byKey.set(key, p)
   }
   p.lastSeen = Date.now()
   if (owner && !p.owner) p.owner = owner
   /* a presence first seen through a task update has no client to read; the
      next tool call brings one, and viewers get the presence again */
-  const learnedBrand = !isNew && !!identity?.brand && p.brand !== identity.brand
-  if (learnedBrand) p.brand = identity?.brand
+  const learnedBrand = !isNew && !!agent.brand && p.brand !== agent.brand
+  if (learnedBrand) p.brand = agent.brand
   if (frameId !== undefined) p.activeFrameId = frameId
   let statusChanged = false
   if (status !== undefined) {
@@ -400,14 +409,14 @@ function agentTouch(
 
 setInterval(() => {
   const now = Date.now()
-  for (const [canvasId, byName] of agentPresences) {
-    for (const [name, p] of byName) {
+  for (const [canvasId, byKey] of agentPresences) {
+    for (const [key, p] of byKey) {
       /* an agent with a posted status is likely thinking between tool calls —
          keep it (and its status) on screen longer before expiring */
       if (now - p.lastSeen > (p.status ? 60_000 : 20_000)) {
-        byName.delete(name)
+        byKey.delete(key)
         broadcast(canvasId, { type: 'presence:leave', clientId: p.clientId })
-        actions.endAgentTasks(canvasId, p.name) // an agent that went silent is no longer "working on" anything
+        actions.endAgentTasks(canvasId, p) // an agent that went silent is no longer "working on" anything
       }
     }
   }
@@ -555,7 +564,9 @@ app.get('/i/:id.:ext', async (req, res) => {
   if (layer === null) return res.status(400).json({ error: 'element must be a data-doop-id; selector a CSS selector' })
   /* any multiplier the export picker offers; a missing or unreadable one
      is 1x, as before there was a picker */
-  const scale = fitExportScale(frame, parseExportScale(req.query.scale) ?? 1)
+  const requested = fitExportScale(frame, parseExportScale(req.query.scale) ?? 1)
+  const preview = !layer && ext === 'jpg' && req.query.preview !== undefined
+  const scale = layer || preview ? requested : fullFrameRenderScale(frame, requested)
   let result: Awaited<ReturnType<typeof getImage>>
   try {
     result = await getImage(frame, {
@@ -563,7 +574,7 @@ app.get('/i/:id.:ext', async (req, res) => {
       scale,
       quality: Math.min(100, Math.max(1, Number(req.query.quality) || 90)),
       /* ?preview — the dashboard-card variant; see previews.ts */
-      preview: !layer && req.query.preview !== undefined,
+      preview,
       layer: layer ? layerSelector(layer) : undefined,
       ip: req.ip ?? 'unknown',
       /* the render limit targets anonymous hotlink abuse — a logged-in user
@@ -1118,6 +1129,7 @@ app.use('/api/notifications', notificationsRouter)
 app.use('/api/webhooks', webhooksRouter)
 app.use('/api/fonts', fontsRouter)
 app.use('/api/agents', customAgentsRouter)
+app.use('/api/skills', skillsRouter)
 
 /* the custom agents a canvas's team has: its workspace's, or its owner's (the
    automation editor asks for a step's canvas) */
@@ -1130,6 +1142,30 @@ app.get('/api/canvases/:id/agents', (req, res) => {
 app.get('/api/canvases/:id/fonts', (req, res) => {
   const canvas = requireCanvas(req, res, req.params.id, 'view')
   if (canvas) res.json(fontsForCanvas(canvas))
+})
+/* the skills a request on this canvas can name, for the /handle menu. Only
+   an editor can ask an agent for work (refuseAgentMention turns a commenter's
+   @mention away), so the route needs edit; it sends handles and descriptions,
+   never bodies.
+   `addIn` is the scope this viewer may add a skill to (a member's workspace,
+   an owner's own), else null. */
+app.get('/api/canvases/:id/skills', (req, res) => {
+  const canvas = requireCanvas(req, res, req.params.id, 'edit')
+  if (!canvas) return
+  const userId = req.user?.id
+  const addIn: AgentScope | null = !userId
+    ? null
+    : canvas.workspaceId
+      ? workspaces.isWorkspaceMember(canvas.workspaceId, userId)
+        ? { workspaceId: canvas.workspaceId }
+        : null
+      : canvas.ownerId === userId
+        ? { personal: true }
+        : null
+  res.json({
+    skills: skillsForCanvas(canvas).map(({ handle, description }) => ({ handle, description })),
+    addIn,
+  } satisfies CanvasSkills)
 })
 app.use('/api/admin', adminRouter)
 app.use('/api/community', communityRouter)
@@ -3224,7 +3260,8 @@ app.get('/api/frames/:id/screenshot.png', async (req, res) => {
   if (!frame) return
   try {
     const { renderFrame } = await import('./screenshot.ts')
-    const png = await renderFrame(frame, fitExportScale(frame, parseExportScale(req.query.scale) ?? 1))
+    const scale = fitExportScale(frame, parseExportScale(req.query.scale) ?? 1)
+    const png = await renderFrame(frame, fullFrameRenderScale(frame, scale))
     res.type('png').send(png)
   } catch (e) {
     sendRenderFailure(res, e)
@@ -3336,7 +3373,17 @@ app.use(undoRequest)
 app.use(workBudgetRefusal)
 
 const server = http.createServer(app)
-const wss = new WebSocketServer({ server, path: '/ws' })
+const wss = new WebSocketServer({
+  server,
+  path: '/ws',
+  perMessageDeflate: {
+    /* Compress canvas HTML and send small cursor and presence messages directly. */
+    threshold: 1024,
+    zlibDeflateOptions: { level: 3 },
+    serverNoContextTakeover: true,
+    clientNoContextTakeover: true,
+  },
+})
 
 /* A signed-out visitor on a link-shared canvas watches it as a guest
    (guestCanvasRole): view only, silent like a view-as session (no presence,

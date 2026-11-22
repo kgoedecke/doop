@@ -375,6 +375,9 @@ export interface Actor {
   owner?: string
   /** for agents: the product it reads as (shared/agentBrand.ts) */
   brand?: AgentBrand
+  /** for agents: who this agent is, when its name is not enough
+   *  (shared/agentIdentity.ts). Unset, the name is the identity. */
+  agentKey?: string
 }
 
 export interface Presence {
@@ -397,6 +400,8 @@ export interface Presence {
   owner?: string
   /** for agents: the product it reads as, from its MCP client (shared/agentBrand.ts) */
   brand?: AgentBrand
+  /** for agents: who this agent is (shared/agentIdentity.ts); unset, its name */
+  agentKey?: string
 }
 
 /** A unit of work an agent announced via set_status. A new status completes the previous task.
@@ -406,6 +411,9 @@ export interface AgentTask {
   id: string
   /** empty string while a queued card waits for an agent */
   agentName: string
+  /** the agent's identity when its name is not enough (shared/agentIdentity.ts):
+   *  two outside agents may share a name. Unset, the name is the identity. */
+  agentKey?: string
   /** whose token the agent connected with */
   owner?: string
   color: string
@@ -488,6 +496,10 @@ export interface TaskFeedback {
   canvasId: string
   /** whose work the feedback is about (the task's agent), not who must handle it */
   agentName: string
+  /** that agent's identity (shared/agentIdentity.ts), which gets first pick
+   *  for a minute (OWNER_FIRST_MS). Not stored: after a restart nobody is
+   *  still at work to wait for. */
+  agentKey?: string
   /** the resident agent this is routed to; unset = open to any agent */
   targetAgent?: string
   from: string

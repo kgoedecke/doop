@@ -105,10 +105,10 @@ describe('feedback and comments', () => {
     actions.takeQueuedCardsFor(canvasId, DOOP, 'alice')
     const fb = actions.addTaskFeedback(card.id, 'alice', 'more blue', 'alice')!
     expect(actions.nextWork(canvasId, DOOP)).toMatchObject({ payer: 'alice', runner: chatgpt })
-    expect(actions.takeFeedbackFor(canvasId, DOOP, 'alice', '').map((f) => f.id)).toEqual([])
-    expect(actions.takeFeedbackFor(canvasId, DOOP, 'alice', 'chatgpt|gpt-5.6-sol|high').map((f) => f.id)).toEqual([
-      fb.id,
-    ])
+    expect(actions.takeFeedbackFor(canvasId, { name: DOOP }, 'alice', '').map((f) => f.id)).toEqual([])
+    expect(
+      actions.takeFeedbackFor(canvasId, { name: DOOP }, 'alice', 'chatgpt|gpt-5.6-sol|high').map((f) => f.id),
+    ).toEqual([fb.id])
   })
   it('keeps feedback on its connection after the task leaves the history', () => {
     const card = actions.addQueuedCard(canvasId, 'one', 'alice', ['doop'], [], 'alice', undefined, chatgpt)!

@@ -21,6 +21,7 @@ import {
   type Step,
 } from '../../shared/automations'
 import { api, ApiError, type IntegrationsStatus } from '../lib/api'
+import { RUN_SHORTCUT_HINT, SAVE_SHORTCUT_HINT, isRunShortcut } from '../lib/keys'
 import { navigate } from '../App'
 import { posthog } from '../lib/posthog'
 import { FrameThumb } from '../components/FramePreview'
@@ -40,6 +41,7 @@ import {
   weekdayShort,
 } from '../components/AutomateShell'
 import { RoleMark } from '../components/RoleMark'
+import { useSkillMenu } from '../components/SkillMenu'
 import { Button } from '../components/ui/button'
 import { Input } from '../components/ui/input'
 import { Textarea } from '../components/ui/textarea'
@@ -277,18 +279,6 @@ export function AutomationEditor({ automationId }: { automationId: string }) {
     }
   }
 
-  /* ⌘S saves — the editor is a form people will expect it from */
-  useEffect(() => {
-    function onKey(e: KeyboardEvent) {
-      if (e.key === 's' && (e.metaKey || e.ctrlKey)) {
-        e.preventDefault()
-        void save()
-      }
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  })
-
   /* the name saves on its own, like a canvas rename — it is not part of the
      draft people expect to confirm with Save */
   async function rename(name: string) {
@@ -383,6 +373,35 @@ export function AutomationEditor({ automationId }: { automationId: string }) {
   const stepCanvases = approvalCanvasId === undefined ? canvases : canvases.filter((c) => c.id === approvalCanvasId)
   const incompleteRaw = draft ? incompleteReason(draft.steps, draft.trigger) : undefined
   const incomplete = incompleteRaw && incompleteText(t, incompleteRaw)
+  const canRun = Boolean(automation && automation.enabled && !incomplete && !runningNow && !saving)
+  const canRunRef = useRef(canRun)
+  const runNowRef = useRef(runNow)
+  const saveRef = useRef(save)
+
+  useEffect(() => {
+    canRunRef.current = canRun
+    runNowRef.current = runNow
+    saveRef.current = save
+  })
+
+  /* ⌘S saves, ⌘⌥↩ runs — the editor is a form people will expect them from.
+     Run works from the step fields too: the chord types nothing, and a dirty
+     draft is saved before the run starts. */
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 's' && (e.metaKey || e.ctrlKey)) {
+        e.preventDefault()
+        void saveRef.current()
+        return
+      }
+      if (isRunShortcut(e)) {
+        e.preventDefault()
+        if (!e.repeat && canRunRef.current) void runNowRef.current()
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
 
   return (
     <div className="fixed inset-x-0 bottom-0 top-[var(--app-inset,0px)] flex flex-col">
@@ -414,12 +433,18 @@ export function AutomationEditor({ automationId }: { automationId: string }) {
               className={barGhostBtn}
               disabled={runningNow || !!incomplete || !automation.enabled}
               onClick={runNow}
-              title={incomplete ? t('automations.reasonFirst', { reason: incomplete }) : t('automations.runNowTitle')}
+              title={`${incomplete ? t('automations.reasonFirst', { reason: incomplete }) : t('automations.runNowTitle')} · ${RUN_SHORTCUT_HINT}`}
             >
               <PlayIcon className="size-3.5" />
               {runningNow ? t('automations.runningEllipsis') : t('automations.runNow')}
             </Button>
-            <Button variant="primary" className={barPrimaryBtn} disabled={!dirty || saving} onClick={() => void save()}>
+            <Button
+              variant="primary"
+              className={barPrimaryBtn}
+              disabled={!dirty || saving}
+              onClick={() => void save()}
+              title={`${t('common.save')} · ${SAVE_SHORTCUT_HINT}`}
+            >
               {saving ? t('automations.saving') : t('common.save')}
             </Button>
           </div>
@@ -1008,6 +1033,14 @@ function AgentNode({
      step's canvas decides which custom agents there are */
   const roles = step.roles
   const roster = useCanvasRoster(step.canvasId || undefined)
+  /* the step's request names skills like the composer's: the step's canvas has them */
+  const promptRef = useRef<HTMLTextAreaElement>(null)
+  const skillMenu = useSkillMenu({
+    from: step.canvasId ? { canvasId: step.canvasId } : undefined,
+    text: step.prompt,
+    setText: (prompt) => onChange({ prompt }),
+    inputRef: promptRef,
+  })
   return (
     <div data-pan-node className={nodeCls}>
       <Port side="in" />
@@ -1029,13 +1062,18 @@ function AgentNode({
         </div>
         <RemoveStep onRemove={onRemove} />
       </div>
-      <Textarea
-        className="mt-2.5 min-h-[74px] w-full rounded-lg px-[11px] py-2.5 text-copy leading-[1.5] md:text-copy"
-        value={step.prompt}
-        maxLength={MAX_PROMPT}
-        placeholder={t('automations.agentPromptPlaceholder')}
-        onChange={(e) => onChange({ prompt: e.target.value })}
-      />
+      <div className="relative mt-2.5">
+        {skillMenu.menu}
+        <Textarea
+          ref={promptRef}
+          className="min-h-[74px] w-full rounded-lg px-[11px] py-2.5 text-copy leading-[1.5] md:text-copy"
+          value={step.prompt}
+          maxLength={MAX_PROMPT}
+          placeholder={t('automations.agentPromptPlaceholder')}
+          {...skillMenu.inputProps}
+          onKeyDown={skillMenu.onKeyDown}
+        />
+      </div>
       <div className="mt-2.5 flex flex-wrap gap-1">
         {roster.map((role) => {
           const on = roles[0] === role.id
@@ -1260,7 +1298,13 @@ function RunsPanel({
                     ? t('automations.noRunsScheduled')
                     : t('automations.noRunsFinish')}
                 {!savedIncompleteRaw && (
-                  <Button variant="ghost" size="sm" className="mt-2.5 block" onClick={onRunNow}>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="mt-2.5 block"
+                    onClick={onRunNow}
+                    title={`${t('automations.runNowTitle')} · ${RUN_SHORTCUT_HINT}`}
+                  >
                     {t('automations.runNow')}
                   </Button>
                 )}

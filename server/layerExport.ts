@@ -1,5 +1,5 @@
 import { DEFAULT_EXPORT_SCALE, exportPixelSize, fitExportScale, parseExportScale } from '../shared/exportScale.ts'
-import { elementIdSelector, isElementId } from '../shared/elementId.ts'
+import { elementIdSelector, isElementId, MAX_LAYER_SELECTOR_CHARS } from '../shared/elementId.ts'
 import type { Frame } from '../shared/types.ts'
 import { env } from './env.ts'
 import { hasElementId } from './elementIds.ts'
@@ -11,9 +11,6 @@ import { hasElementId } from './elementIds.ts'
  * Served as `/i/<frameId>.<ext>?element=<data-doop-id>` or `?selector=<css>`,
  * which re-renders when the frame changes, like a frame's image URL.
  */
-
-/** A selector is free text in a public URL: long enough for any real one. */
-export const MAX_LAYER_SELECTOR_CHARS = 500
 
 /** The layer an export names: its stamped id, or any CSS selector. */
 export type LayerRef = { elementId: string } | { selector: string }

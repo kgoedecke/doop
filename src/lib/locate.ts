@@ -1,4 +1,5 @@
 import type { Presence } from '../../shared/types'
+import { agentKeyOf, isAgentsTask } from '../../shared/agentIdentity'
 import type { useStore } from './store'
 
 type State = ReturnType<typeof useStore.getState>
@@ -23,9 +24,9 @@ export function locatePresence(
 
   const editing = exists(p.activeFrameId)
   if (editing) return { frameId: editing }
-  const streaming = exists(Object.entries(s.streams).find(([, actor]) => actor.name === p.name)?.[0])
+  const streaming = exists(Object.entries(s.streams).find(([, actor]) => agentKeyOf(actor) === agentKeyOf(p))?.[0])
   if (streaming) return { frameId: streaming }
-  const task = s.tasks.find((t) => t.agentName === p.name && t.frameIds?.length)
+  const task = s.tasks.find((t) => isAgentsTask(t, p) && t.frameIds?.length)
   for (let i = (task?.frameIds?.length ?? 0) - 1; i >= 0; i--) {
     const id = exists(task?.frameIds?.[i])
     if (id) return { frameId: id }

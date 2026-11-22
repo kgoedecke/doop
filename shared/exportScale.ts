@@ -41,6 +41,23 @@ export function fitExportScale(size: { width: number; height: number }, wanted: 
   return Math.max(DEFAULT_EXPORT_SCALE, fitted)
 }
 
+/** Chromium clips screenshots at this many device pixels. */
+export const MAX_RENDER_PIXELS = 50_000_000
+
+/** Fit an already-selected scale to a full server screenshot. Layers and
+ *  browser renders have their own output bounds. */
+export function fullFrameRenderScale(size: { width: number; height: number }, scale: number): number {
+  const width = Math.max(1, Math.round(size.width))
+  const height = Math.max(1, Math.round(size.height))
+  if (height <= MAX_RENDER_PIXELS / (width * scale * scale)) return scale
+  const limit = Math.sqrt(MAX_RENDER_PIXELS / width / height)
+  // Round down so the renderer can capture the final row, including at a
+  // floating-point boundary. Very large frames can need less than 0.01x.
+  const rounded = Math.floor(limit * 100) / 100
+  if (rounded > 0 && height <= MAX_RENDER_PIXELS / (width * rounded * rounded)) return rounded
+  return limit * (1 - Number.EPSILON)
+}
+
 /** `2x`, `1.5x`: how the picker, the toast and the hints name a scale. */
 export function formatExportScale(scale: number): string {
   return `${scale}x`

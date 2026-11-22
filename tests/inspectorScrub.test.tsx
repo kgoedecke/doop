@@ -226,3 +226,84 @@ it('scrubs rotation as one save, undoes to zero, and cancels without saving', as
   expect(stored().rotation).toBe(0)
   expect(update).not.toHaveBeenCalled()
 })
+
+it('shows the HTML editor with the frame in it, with nothing to open and nothing to hide it', () => {
+  const editor = container.querySelector<HTMLTextAreaElement>('textarea[aria-label="Edit the HTML"]')
+  expect(editor?.value).toBe('<h1>Checkout</h1>')
+  /* the old fold: "Code" was a toggle titled to open or hide the editor */
+  expect(container.querySelector('[title="Edit the HTML"], [title="Hide the HTML editor"]')).toBeNull()
+})
+
+it('pulls a stream of remote updates into the editor at a capped rate, ending on the last', async () => {
+  const editor = () => container.querySelector<HTMLTextAreaElement>('textarea[aria-label="Edit the HTML"]')!.value
+  const remote = (html: string) =>
+    act(() => useStore.getState().setCanvas({ ...useStore.getState().canvas!, frames: [{ ...stored(), html }] }))
+  remote('<h1>One</h1>')
+  remote('<h1>Two</h1>')
+  remote('<h1>Three</h1>')
+  expect(editor()).not.toBe('<h1>Three</h1>')
+  await act(() => new Promise((resolve) => setTimeout(resolve, 300)))
+  expect(editor()).toBe('<h1>Three</h1>')
+})
+
+it('pulls in an update that arrived while the editor had focus once focus leaves', async () => {
+  const editor = () => container.querySelector<HTMLTextAreaElement>('textarea[aria-label="Edit the HTML"]')!
+  const remote = (html: string) =>
+    act(() => useStore.getState().setCanvas({ ...useStore.getState().canvas!, frames: [{ ...stored(), html }] }))
+  remote('<h1>One</h1>')
+  /* the next update waits out the cap, and the editor takes focus meanwhile */
+  remote('<h1>Two</h1>')
+  act(() => editor().focus())
+  await act(() => new Promise((resolve) => setTimeout(resolve, 300)))
+  expect(editor().value).toBe('<h1>One</h1>')
+  act(() => editor().blur())
+  await act(() => new Promise((resolve) => setTimeout(resolve, 300)))
+  expect(editor().value).toBe('<h1>Two</h1>')
+})
+
+it('keeps an edit whose save failed when focus leaves and a remote update arrives', async () => {
+  vi.spyOn(api, 'updateFrame').mockRejectedValue(new Error('offline'))
+  const editor = () => container.querySelector<HTMLTextAreaElement>('textarea[aria-label="Edit the HTML"]')!
+  act(() => editor().focus())
+  act(() => {
+    const setValue = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!
+    setValue.call(editor(), '<h1>Typed</h1>')
+    editor().dispatchEvent(new Event('input', { bubbles: true }))
+  })
+  /* the save runs after 700ms and fails */
+  await act(() => new Promise((resolve) => setTimeout(resolve, 800)))
+  expect(api.updateFrame).toHaveBeenCalled()
+  act(() => editor().blur())
+  act(() =>
+    useStore
+      .getState()
+      .setCanvas({ ...useStore.getState().canvas!, frames: [{ ...stored(), html: '<h1>Remote</h1>' }] }),
+  )
+  await act(() => new Promise((resolve) => setTimeout(resolve, 300)))
+  expect(editor().value).toBe('<h1>Typed</h1>')
+})
+
+it('keeps a newer edit when an older save finishes after it was typed', async () => {
+  let finishOlder: (frame: Frame) => void = () => {}
+  const update = vi
+    .spyOn(api, 'updateFrame')
+    .mockImplementationOnce(() => new Promise<Frame>((resolve) => (finishOlder = resolve)))
+    .mockImplementation(() => new Promise<Frame>(() => {}))
+  const editor = () => container.querySelector<HTMLTextAreaElement>('textarea[aria-label="Edit the HTML"]')!
+  const type = (html: string) =>
+    act(() => {
+      const setValue = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!
+      setValue.call(editor(), html)
+      editor().dispatchEvent(new Event('input', { bubbles: true }))
+    })
+  act(() => editor().focus())
+  type('<h1>Older</h1>')
+  /* the older edit's save starts after 700ms and stays in flight */
+  await act(() => new Promise((resolve) => setTimeout(resolve, 750)))
+  expect(update).toHaveBeenCalledTimes(1)
+  type('<h1>Newer</h1>')
+  await act(async () => finishOlder({ ...stored(), html: '<h1>Older</h1>' }))
+  act(() => editor().blur())
+  await act(() => new Promise((resolve) => setTimeout(resolve, 300)))
+  expect(editor().value).toBe('<h1>Newer</h1>')
+})
