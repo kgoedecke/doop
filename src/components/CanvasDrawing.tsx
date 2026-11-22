@@ -1,5 +1,16 @@
-import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type RefObject } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type PointerEvent as ReactPointerEvent,
+  type RefObject,
+} from 'react'
+import type { Frame } from '../../shared/types'
 import { useStore } from '../lib/store'
+import { currentPageCanvas } from '../lib/pages'
+import { commentsVerdict, htmlVerdict, shapesInside } from '../lib/canvasGroups'
 import { isDrawingTool, resolvePointerAction, type DrawingTool } from '../lib/tools'
 import { gesture } from '../lib/gesture'
 import { visibleGuides } from '../lib/guides'
@@ -26,6 +37,11 @@ interface Draft {
   drawing: Drawing
   target: DrawingTarget
   typing?: boolean
+  /* a frame dragged out takes in the shapes it encloses; a click-placed one does not */
+  wrap?: boolean
+  /* the shape checks a frame drag asks on every move, cached by frame html
+     for the gesture so a move only redoes the cheap geometry */
+  verdicts?: Map<string, { html: string; verdict: ReturnType<typeof htmlVerdict> }>
 }
 
 /** Stage owns the pointer capture, including presses over a frame's shield.
@@ -59,7 +75,7 @@ export function useCanvasDrawing(stage: RefObject<HTMLDivElement>) {
       cancel()
       useStore.getState().setTool('select')
       if (drawing.tool === 'text' && !drawing.text?.trim()) return
-      void saveDrawing(drawing, current.target)
+      void saveDrawing(drawing, current.target, { wrap: current.wrap })
     },
     [cancel],
   )
@@ -230,7 +246,11 @@ export function useCanvasDrawing(stage: RefObject<HTMLDivElement>) {
     }
     cancel()
     const drawTool: DrawingTool = tool
-    setDraft({ target, drawing: drawingBounds(tool, start, start) })
+    setDraft({
+      target,
+      drawing: drawingBounds(tool, start, start),
+      verdicts: tool === 'frame' ? new Map() : undefined,
+    })
     const el = e.currentTarget
     const pointerId = e.pointerId
     el.setPointerCapture(pointerId)
@@ -240,6 +260,7 @@ export function useCanvasDrawing(stage: RefObject<HTMLDivElement>) {
       setDraft({
         target: target!,
         drawing: drawingBounds(drawTool, start, snappedWorld(ev), ev.shiftKey),
+        verdicts: draftRef.current?.verdicts,
       })
     }
     function up(ev: PointerEvent) {
@@ -251,7 +272,7 @@ export function useCanvasDrawing(stage: RefObject<HTMLDivElement>) {
       cleanup.current?.()
       cleanup.current = null
       if (drawing.width < 1 || drawing.height < 1) return cancel()
-      setDraft({ target: target!, drawing, typing: tool === 'text' })
+      setDraft({ target: target!, drawing, typing: tool === 'text', wrap: !clicked })
       if (tool !== 'text') finish()
     }
     function cancelled(ev: PointerEvent) {
@@ -270,13 +291,39 @@ export function useCanvasDrawing(stage: RefObject<HTMLDivElement>) {
     el.addEventListener('lostpointercapture', cancelled)
   }
 
+  /* while a frame is being dragged out, each shape it would take in gets a
+     brand outline so the user sees what goes inside */
+  const cues = useMemo(() => {
+    const d = draft?.drawing
+    if (!draft || !d || d.tool !== 'frame' || draft.wrap !== undefined) return null
+    const verdicts = draft.verdicts ?? new Map()
+    const probe = (frame: Frame) => {
+      /* the html reads are cached for the gesture; the comment check runs
+         fresh over them — a comment left mid-drag still keeps the shape out */
+      const cached = verdicts.get(frame.id)
+      const verdict = cached?.html === frame.html ? cached.verdict : htmlVerdict(frame)
+      if (cached?.html !== frame.html) verdicts.set(frame.id, { html: frame.html, verdict })
+      return commentsVerdict(frame, verdict)
+    }
+    return shapesInside(currentPageCanvas()?.frames ?? [], d, draft.target.pageId, probe).shapes
+  }, [draft])
   const preview = draft && (
-    <DrawingPreview
-      draft={draft}
-      hover={hover}
-      onText={(text, height) => setDraft({ ...draft, drawing: { ...draft.drawing, text, height } })}
-      onFinish={() => finish()}
-    />
+    <>
+      <DrawingPreview
+        draft={draft}
+        hover={hover}
+        onText={(text, height) => setDraft({ ...draft, drawing: { ...draft.drawing, text, height } })}
+        onFinish={() => finish()}
+      />
+      {cues?.map((f) => (
+        <div
+          key={f.id}
+          data-frame-cue
+          className="pointer-events-none absolute [box-shadow:0_0_0_calc(1px/var(--zoom,1))_var(--brand)]"
+          style={{ left: f.x, top: f.y, width: f.width, height: f.height }}
+        />
+      ))}
+    </>
   )
   const penZoom = useStore((s) => s.viewport.zoom)
   /* what the pen's badge says a press would do: close the path, land on an
@@ -414,6 +461,11 @@ function DrawingPreview({
       </svg>
     )
   }
+  return <DraftBox d={d} />
+}
+
+/* the draft's outline box: the ring and fill each tool previews with */
+function DraftBox({ d }: { d: Drawing }) {
   return (
     <div
       className="pointer-events-none absolute z-20 [box-shadow:0_0_0_calc(1px/var(--zoom,1))_var(--brand)]"
@@ -422,7 +474,9 @@ function DrawingPreview({
         top: d.y,
         width: d.width,
         height: d.height,
-        background: d.tool === 'frame' ? '#fff' : d.tool === 'text' ? 'transparent' : DRAWING_FILL,
+        /* a frame being drawn is only its outline, as in Figma: its white
+           lands with the frame on release, never covering what is behind */
+        background: d.tool === 'frame' || d.tool === 'text' ? 'transparent' : DRAWING_FILL,
         borderRadius: d.tool === 'circle' ? '50%' : 0,
       }}
     />
