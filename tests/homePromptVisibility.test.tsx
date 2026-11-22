@@ -23,7 +23,7 @@ const actions = {
   onCommunity: vi.fn(),
 }
 const composer = '[aria-label="Ask Doop what to design"]'
-const collapseButton = '[aria-label="Hide Prompt Box"]'
+const collapseButton = 'button[aria-label="Collapse prompt box"]'
 const expandButton = '[aria-label="Show Prompt Box"]'
 
 function HeaderExpand() {
@@ -71,8 +71,9 @@ it('collapses the prompt box immediately and persists the choice', async () => {
   const input = container.querySelector(composer)
   expect(input).not.toBeNull()
   const button = container.querySelector(collapseButton)
-  expect(button?.parentElement).toBe(input?.parentElement)
-  expect(button?.getAttribute('title')).toBe('Hide Prompt Box')
+  expect(button?.parentElement?.matches('[data-slot="home-hero"]')).toBe(true)
+  expect(input?.parentElement?.contains(button)).toBe(false)
+  expect(button?.getAttribute('title')).toBe('Collapse prompt box')
   await click(collapseButton)
   expect(document.querySelector('[role="dialog"]')).toBeNull()
   expect(container.querySelector(composer)).toBeNull()

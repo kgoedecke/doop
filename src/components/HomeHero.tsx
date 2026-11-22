@@ -194,6 +194,14 @@ export function HomeHero({
 
   return (
     <section className="relative overflow-hidden" data-slot="home-hero">
+      <IconButton
+        aria-label={t('home.collapsePromptBox')}
+        className="absolute right-4 top-0 z-10 md:right-[26px]"
+        disabled={busy}
+        onClick={() => setPromptBoxHidden(true)}
+      >
+        <MinusIcon className="size-4" strokeWidth={2} />
+      </IconButton>
       {/* the wave: 2 copies of 28 bars, blurred, fading in from the top. It is
           sized to the section, not to pixels, so it ends faded inside the hero
           on a phone as it does on desktop instead of being cut at the edge */}
@@ -262,14 +270,6 @@ export function HomeHero({
       {/* the composer */}
       <div className="relative mx-auto mt-6 w-full max-w-[740px] px-4 md:mt-[34px] md:px-0">
         <div className="relative rounded-panel bg-surface px-[18px] pb-3 pt-5 shadow-float">
-          <IconButton
-            aria-label={t('home.hidePromptBox')}
-            className="absolute right-1.5 top-1.5 z-10"
-            disabled={busy}
-            onClick={() => setPromptBoxHidden(true)}
-          >
-            <MinusIcon className="size-4" />
-          </IconButton>
           {skillMenu.menu}
           <Textarea
             ref={inputRef}
@@ -281,7 +281,7 @@ export function HomeHero({
             aria-label={t('home.composerAria')}
             {...skillMenu.inputProps}
             onKeyDown={onKeyDown}
-            className="min-h-[52px] pr-6 text-lead placeholder:text-ink-ghost md:text-lead"
+            className="min-h-[52px] text-lead placeholder:text-ink-ghost md:text-lead"
           />
           <div className="mt-1 flex items-center gap-3 text-body text-ink-soft md:gap-5">
             <Pressable

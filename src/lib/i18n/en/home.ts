@@ -80,6 +80,7 @@ export const home = {
   moveToWorkspace: 'Move to workspace…',
 
   /* hero */
+  collapsePromptBox: 'Collapse prompt box',
   greeting: 'Ask me what to design',
   chipLanding: 'Draft a landing page',
   chipLandingPrompt: 'Draft a landing page for ',

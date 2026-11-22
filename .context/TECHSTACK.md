@@ -1305,9 +1305,10 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   (the "on" chip wears the drifting colour beam from `src/styles.css`) and a composer. A prompt makes
   a canvas named after it (`src/lib/homePrompt.ts`), queues it as the first board card asking for N
   drafts, and opens the canvas; a card that cannot queue rides along as the canvas composer's draft.
-  The collapse button on the composer card hides the prompt area immediately. While collapsed, a
-  labeled "Show Prompt Box" button appears in the dash header to the left of Import and restores it
-  in one click. `src/lib/homePreferences.ts` stores the choice in localStorage under
+  The Home hero's top-right collapse button uses a visible minus aligned with the right edge of the
+  header actions and hides the prompt area immediately. While collapsed, a labeled "Show Prompt Box"
+  button appears in the dash header to the left of Import and restores it in one click.
+  `src/lib/homePreferences.ts` stores the choice in localStorage under
   `doop.home.prompt-box-hidden`. Settings → General → Show Prompt Box also restores the prompt area,
   and the preference updates other open tabs.
   Import makes a canvas and opens it with `?import=1`, which `CanvasPage` turns into the import

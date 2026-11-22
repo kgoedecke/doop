@@ -81,6 +81,7 @@ export const home: Catalog['home'] = {
   moveToWorkspace: 'Mover para um workspace…',
 
   /* hero */
+  collapsePromptBox: 'Recolher a caixa de prompt',
   greeting: 'Me diga o que desenhar',
   chipLanding: 'Criar uma landing page',
   chipLandingPrompt: 'Crie uma landing page para ',
