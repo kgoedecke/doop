@@ -83,7 +83,6 @@ export const canvas = {
   docs: 'Docs',
   contactSupport: 'Contact support',
   youAre: 'You are “{name}” — click to change your name',
-  changeDisplayName: 'Change your display name',
   agents: 'Agents · ⌘/ to ask the Doop Agent',
   agentsWorking: 'Agents · {working} working · ⌘/ to ask the Doop Agent',
   comments: 'Comments',

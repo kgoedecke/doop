@@ -1183,8 +1183,6 @@ export function CanvasPage({
                 } else if (elementPicked) s.openElementPanel()
                 else s.setInspectorOpen(true)
               }}
-              me={meFace}
-              onRenameSelf={() => setRenaming(true)}
               guest={guest}
             />
           )}

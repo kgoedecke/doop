@@ -19,7 +19,7 @@ import {
 } from './ui/icons'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from './ui/dropdown-menu'
 import { openSupportChat } from '../lib/posthog'
-import { PresenceFace } from './PeerAvatars'
+import { AccountMenu } from './DashShell'
 import { useT } from '../lib/i18n'
 
 const island = 'pointer-events-auto absolute z-[38]'
@@ -31,7 +31,7 @@ const dockedIsland = 'rounded-none bg-transparent shadow-none'
  *  button per tab of the Agents panel (agents, comments, activity, memory),
  *  each opening the panel on that tab, with a live dot while an agent works or
  *  a message waits. Open panels close from their own header. The bottom
- *  island holds Settings, Help (docs, support chat) and you. Docked, the two
+ *  island holds Settings, Help (docs, support chat) and your account menu. Docked, the two
  *  share one column at full height, the second at its foot. */
 export function SideRail({
   style,
@@ -41,8 +41,6 @@ export function SideRail({
   inspectorAvailable,
   inspectTarget = 'frame',
   onToggleInspector,
-  me,
-  onRenameSelf,
   docked = false,
   guest = false,
 }: {
@@ -59,8 +57,6 @@ export function SideRail({
   /** what the slot would open: the picked element, the selected frame, or the page's settings */
   inspectTarget?: 'element' | 'frame' | 'page'
   onToggleInspector: () => void
-  me: { name: string; image?: string; color: string }
-  onRenameSelf: () => void
 }) {
   const t = useT()
   const setPanelTab = useStore((s) => s.setPanelTab)
@@ -136,25 +132,9 @@ export function SideRail({
             )}
           </DropdownMenuContent>
         </DropdownMenu>
-        {!guest && (
-          <Tooltip label={t('canvas.youAre', { name: me.name })} side="left">
-            <button
-              type="button"
-              aria-label={t('canvas.changeDisplayName')}
-              className="rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink-faint"
-              onClick={onRenameSelf}
-            >
-              <PresenceFace
-                name={me.name}
-                image={me.image}
-                color={me.color}
-                kind="user"
-                size={26}
-                className="text-[10px] shadow-none"
-              />
-            </button>
-          </Tooltip>
-        )}
+        {/* the same account menu the dashboard rail opens, rather than
+            jumping straight into renaming */}
+        {!guest && <AccountMenu face side="left" align="end" />}
       </Toolbar>
     </>
   )
