@@ -371,6 +371,22 @@ export function CanvasPage({
   /* the open page rides in the URL (?page=), so a reload or a shared link lands on it */
   useEffect(() => followPageInUrl(canvasId), [canvasId])
 
+  /* Safari's own page zoom (double-tap, a pinch it claims) rescales every
+     layer on the page, frame iframes included, and on an iPhone that takes
+     the tab past its memory limit in a beat. The canvas zooms itself, so the
+     page never does while it is open. */
+  useEffect(() => {
+    const root = document.documentElement
+    root.classList.add('no-page-zoom')
+    const block = (e: Event) => e.preventDefault()
+    const events = ['gesturestart', 'gesturechange', 'gestureend'] as const
+    for (const type of events) document.addEventListener(type, block, { passive: false })
+    return () => {
+      root.classList.remove('no-page-zoom')
+      for (const type of events) document.removeEventListener(type, block)
+    }
+  }, [])
+
   useEffect(() => {
     connect(canvasId, guest)
     return () => {

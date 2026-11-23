@@ -229,6 +229,74 @@ export function HiddenFrameView({ frame, stack }: { frame: Frame; stack?: number
   )
 }
 
+export function DeferredFrameView({
+  frame,
+  stack,
+  onFocus,
+}: {
+  frame: Frame
+  stack?: number
+  onFocus: (frame: Frame) => void
+}) {
+  const selected = useStore((s) => s.selectedIds.includes(frame.id))
+  const standalone = isCanvasElement(frame.html)
+  return (
+    <div
+      data-deferred-frame=""
+      data-frame-id={frame.id}
+      className="absolute"
+      style={{
+        left: frame.x,
+        top: frame.y,
+        width: frame.width,
+        height: frame.height,
+        zIndex: stack,
+        transform: frame.rotation ? `rotate(${frame.rotation}deg)` : undefined,
+      }}
+      onClick={(e) => {
+        if (gesture.pinching) return
+        e.stopPropagation()
+        onFocus(frame)
+      }}
+    >
+      {!standalone && (
+        <div
+          className={cn(
+            'pointer-events-none absolute -top-[26px] left-0 flex origin-bottom-left items-center gap-1.5 whitespace-nowrap text-[12px] font-semibold text-ink-soft',
+            COUNTER_SCALE,
+          )}
+        >
+          <span>{frame.name}</span>
+        </div>
+      )}
+      <div
+        className={cn(
+          'absolute inset-0 flex items-center justify-center overflow-hidden',
+          standalone ? 'border border-dashed border-line/80 bg-transparent' : 'bg-white shadow-ring',
+          selected && 'outline-solid outline-brand',
+        )}
+        style={
+          selected
+            ? { outlineWidth: 'calc(2px / var(--zoom, 1))', outlineOffset: 'calc(-1px / var(--zoom, 1))' }
+            : undefined
+        }
+      >
+        {!standalone && (
+          <div
+            className="pointer-events-none flex flex-col items-center gap-1 px-3 py-2 text-center"
+            style={{ transform: 'scale(calc(1 / var(--zoom, 1)))' }}
+          >
+            <span className="max-w-[160px] truncate text-[12px] font-medium text-ink-soft">{frame.name}</span>
+            <span className="font-mono text-[11px] text-ink-faint">
+              {Math.round(frame.width)} × {Math.round(frame.height)}
+            </span>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
 /* Figma-style ⌥⇧-drag duplicate cursor: a doubled pointer, hotspot on the
    front arrow's tip. `copy` is the fallback where custom cursors fail. */
 const DUP_CURSOR_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24"><path d="M9 8v12.6l3.4-2.9 2 4.6 2.3-1-2-4.5 4.5-.4z" fill="#000" stroke="#fff" stroke-width="1.2"/><path d="M4 3v12.6l3.4-2.9 2 4.6 2.3-1-2-4.5 4.5-.4z" fill="#000" stroke="#fff" stroke-width="1.2"/></svg>`

@@ -371,6 +371,12 @@
   }
 }
 
+/* the canvas page: no pinch or double-tap page zoom anywhere on it (CanvasPage). Zero
+   specificity, so an element's own touch-action (the stage's touch-none) wins */
+:where(html.no-page-zoom, html.no-page-zoom *) {
+  touch-action: pan-x pan-y;
+}
+
 @layer base {
   * {
     @apply border-border outline-ring/50;

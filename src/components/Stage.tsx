@@ -7,7 +7,7 @@ import type { Frame } from '../../shared/types'
 import { usePageCanvas, currentPageCanvas } from '../lib/pages'
 import { sendWs } from '../lib/ws'
 import { throttle } from '../lib/throttle'
-import { FrameView, HiddenFrameView } from './FrameView'
+import { DeferredFrameView, FrameView, HiddenFrameView } from './FrameView'
 import { CanvasComments, type CanvasComposeAt } from './CanvasComments'
 import { placeComposer } from '../lib/composerPlacement'
 import { isCanvasComment, type CanvasComment } from '../../shared/comments'
@@ -59,6 +59,13 @@ import { useCanvasDrawing } from './CanvasDrawing'
 import { CommentThreadLayer, FrameLabelLayer } from './FrameLabelLayer'
 import { pixelGridLines } from './PixelGrid'
 import { layoutZoomFor } from '../lib/layoutZoom'
+import {
+  frameMountPolicy,
+  safeMaxLayoutZoom,
+  sameFrameIdSet,
+  selectMountedFrames,
+  type FrameMountPolicy,
+} from '../lib/frameBudget'
 import { useT, type PlainMessageKey } from '../lib/i18n'
 import { NO_INSETS, fitBox, fitColumnStart, type StageInsets } from '../lib/viewFit'
 import { spaceWouldScroll } from '../lib/spaceScroll'
@@ -260,7 +267,55 @@ export function Stage({
   const uiHidden = useStore((s) => s.uiHidden)
   /* ⇧R — phones have no room for rulers (nor a keyboard to ask for them) */
   const isMobile = useIsMobile()
+  const selectedIds = useStore((s) => s.selectedIds)
+  const streams = useStore((s) => s.streams)
   const showRulers = useStore((s) => s.rulers) && !uiHidden && !isMobile
+  const [stageSize, setStageSize] = useState({ width: 0, height: 0 })
+  const [cameraSample, setCameraSample] = useState<Viewport>(() => useStore.getState().viewport)
+
+  useEffect(() => {
+    const el = ref.current
+    if (!el || typeof ResizeObserver === 'undefined') return
+    const update = () => {
+      const width = el.clientWidth
+      const height = el.clientHeight
+      setStageSize((prev) => (prev.width === width && prev.height === height ? prev : { width, height }))
+    }
+    const ro = new ResizeObserver(update)
+    ro.observe(el)
+    update()
+    return () => ro.disconnect()
+  }, [])
+
+  const visibleFrames = useMemo(() => (canvas?.frames ?? []).filter((f) => !f.hidden), [canvas?.frames])
+  const priorityIds = useMemo(() => {
+    const ids = new Set<string>(selectedIds)
+    for (const id of Object.keys(streams)) ids.add(id)
+    return ids
+  }, [selectedIds, streams])
+  const mountPolicy = useMemo(() => frameMountPolicy({ isMobile }), [isMobile])
+  const mountedIds = useMemo(
+    () => selectMountedFrames(visibleFrames, cameraSample, stageSize, priorityIds, mountPolicy),
+    [visibleFrames, cameraSample, stageSize, priorityIds, mountPolicy],
+  )
+  const mountedFrames = useMemo(() => visibleFrames.filter((f) => mountedIds.has(f.id)), [visibleFrames, mountedIds])
+  const safeCap = useMemo(
+    () => safeMaxLayoutZoom(mountedFrames, { maxZoom: MAX_ZOOM, isMobile }),
+    [mountedFrames, isMobile],
+  )
+
+  const visibleFramesRef = useRef(visibleFrames)
+  const priorityIdsRef = useRef(priorityIds)
+  const mountPolicyRef = useRef<FrameMountPolicy>(mountPolicy)
+  const mountedIdsRef = useRef(mountedIds)
+  const safeCapRef = useRef(safeCap)
+  useLayoutEffect(() => {
+    visibleFramesRef.current = visibleFrames
+    priorityIdsRef.current = priorityIds
+    mountPolicyRef.current = mountPolicy
+    mountedIdsRef.current = mountedIds
+    safeCapRef.current = safeCap
+  })
   const tool = useStore((s) => s.tool)
   /* view links get Select and Hand, comment links add the Comment tool */
   const role = useStore(roleOf)
@@ -286,6 +341,10 @@ export function Stage({
      raster stays sharp and nothing needs a relayout; the ref serves the
      per-frame viewport writes */
   const [layoutZoom, setLayoutZoom] = useState(1)
+  const effectiveLayoutZoom = useMemo(
+    () => (layoutZoom > safeCap ? layoutZoomFor(safeCap, safeCap) : layoutZoom),
+    [layoutZoom, safeCap],
+  )
   const layoutZoomRef = useRef(1)
   const pageCameras = useRef(new Map<string, Viewport>())
   const cameraPage = useRef<string | null>(null)
@@ -343,6 +402,19 @@ export function Stage({
     }
     apply(useStore.getState().viewport)
     let settle = 0
+    /* which frames get a live iframe follows the camera, but only re-renders
+       the stack when that set actually changes (not on every pan step) */
+    const syncMounted = (vp: Viewport) => {
+      const next = selectMountedFrames(
+        visibleFramesRef.current,
+        vp,
+        stageSizeRef.current,
+        priorityIdsRef.current,
+        mountPolicyRef.current,
+      )
+      if (!sameFrameIdSet(next, mountedIdsRef.current)) setCameraSample(vp)
+    }
+    const syncMountedThrottled = throttle(syncMounted, 150)
     const unsub = useStore.subscribe((s, prev) => {
       const sameCanvas = s.canvas?.id === prev.canvas?.id
       if (!sameCanvas) pageCameras.current.clear()
@@ -364,10 +436,17 @@ export function Stage({
       if (s.viewOptions.pixelGrid !== prev.viewOptions.pixelGrid) apply(s.viewport)
       if (s.viewport === prev.viewport) return
       apply(s.viewport)
+      /* zooming out past the overview drops live frames at once: left mounted
+         for the throttle's wait, they make the zoomed-out world's layer huge */
+      if (s.viewport.zoom < prev.viewport.zoom && s.viewport.zoom < mountPolicyRef.current.overviewZoom)
+        syncMounted(s.viewport)
+      else syncMountedThrottled(s.viewport)
       if (ref.current) sendViewport(s.viewport, ref.current)
       window.clearTimeout(settle)
       settle = window.setTimeout(() => {
-        setLayoutZoom(layoutZoomFor(useStore.getState().viewport.zoom, MAX_ZOOM))
+        const vp = useStore.getState().viewport
+        syncMounted(vp)
+        setLayoutZoom(layoutZoomFor(vp.zoom, safeCapRef.current))
       }, 250)
     })
     return () => {
@@ -379,7 +458,7 @@ export function Stage({
   /* a new layout zoom lands in the same commit as the frames' counter-zoom
      (FrameView), so no paint sees one without the other */
   useLayoutEffect(() => {
-    layoutZoomRef.current = layoutZoom
+    layoutZoomRef.current = effectiveLayoutZoom
     const world = worldRef.current
     if (!world) return
     /* a new zoom recomputes every length inside the world: anything with a
@@ -387,11 +466,11 @@ export function Stage({
        from its old-zoom value while the world itself snaps, so it jumped
        off its spot and slid back. Transitions are off for this one change. */
     world.dataset.rezoom = ''
-    world.style.zoom = String(layoutZoom)
-    world.style.transform = worldTransform(useStore.getState().viewport, layoutZoom)
+    world.style.zoom = String(effectiveLayoutZoom)
+    world.style.transform = worldTransform(useStore.getState().viewport, effectiveLayoutZoom)
     void world.offsetWidth
     delete world.dataset.rezoom
-  }, [layoutZoom])
+  }, [effectiveLayoutZoom])
 
   /* following a peer: whenever their camera (or, lacking one, their cursor)
      moves, ease ours toward the same view. Following an agent: whenever the
@@ -593,6 +672,10 @@ export function Stage({
     [setViewport],
   )
 
+  /* a placeholder for a frame without a live iframe: a tap brings it into
+     view, where it mounts */
+  const focusDeferredFrame = useCallback((f: Frame) => focusFrame(f, null), [focusFrame])
+
   /* fit a set of frames (with their name labels above) into the open part
      of the view; an empty set resets to the origin at 100% */
   const fitFrames = useCallback(
@@ -760,6 +843,8 @@ export function Stage({
     const el = ref.current
     if (!el) return
     let prev: { dist: number; x: number; y: number } | null = null
+    let pending: { dist: number; x: number; y: number } | null = null
+    let raf = 0
 
     function pinchOf(touches: TouchList) {
       const rect = el!.getBoundingClientRect()
@@ -771,17 +856,11 @@ export function Stage({
         y: (a.clientY + b.clientY) / 2 - rect.top,
       }
     }
-    function onStart(e: TouchEvent) {
-      if (e.touches.length < 2) return
-      e.preventDefault()
-      prev = pinchOf(e.touches)
-      gesture.pinching = true
-    }
-    function onMove(e: TouchEvent) {
-      if (!prev || e.touches.length < 2) return
-      e.preventDefault()
-      const cur = pinchOf(e.touches)
-      if (!cur) return
+    function flushPinch() {
+      raf = 0
+      const cur = pending
+      pending = null
+      if (!prev || !cur) return
       const vp = useStore.getState().viewport
       const zoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, vp.zoom * (cur.dist / Math.max(1, prev.dist))))
       const scale = zoom / vp.zoom
@@ -793,15 +872,35 @@ export function Stage({
       })
       prev = cur
     }
+    function onStart(e: TouchEvent) {
+      if (e.touches.length < 2) return
+      e.preventDefault()
+      prev = pinchOf(e.touches)
+      pending = null
+      gesture.pinching = true
+    }
+    function onMove(e: TouchEvent) {
+      if (!prev || e.touches.length < 2) return
+      e.preventDefault()
+      const cur = pinchOf(e.touches)
+      if (!cur) return
+      pending = cur
+      if (!raf) raf = requestAnimationFrame(flushPinch)
+    }
     function onEnd(e: TouchEvent) {
       /* three fingers down and one lifts: the pair that remains may not be
          the pair being tracked, so measure it afresh instead of comparing
          it against the old pair's spread */
+      if (raf) {
+        cancelAnimationFrame(raf)
+        flushPinch()
+      }
       if (e.touches.length >= 2) {
         prev = pinchOf(e.touches)
         return
       }
       prev = null
+      pending = null
       gesture.pinching = false
     }
     el.addEventListener('touchstart', onStart, { passive: false })
@@ -813,6 +912,7 @@ export function Stage({
       el.removeEventListener('touchmove', onMove)
       el.removeEventListener('touchend', onEnd)
       el.removeEventListener('touchcancel', onEnd)
+      if (raf) cancelAnimationFrame(raf)
       gesture.pinching = false
     }
   }, [])
@@ -1028,6 +1128,20 @@ export function Stage({
     const unlockSelection = lockTextSelection()
     let last = { x: e.clientX, y: e.clientY }
     let moved = false
+    let panDx = 0
+    let panDy = 0
+    let raf = 0
+
+    function flushPan() {
+      raf = 0
+      if (!panDx && !panDy) return
+      const vp = useStore.getState().viewport
+      const dx = panDx
+      const dy = panDy
+      panDx = 0
+      panDy = 0
+      useStore.getState().setViewport({ ...vp, x: vp.x + dx, y: vp.y + dy })
+    }
 
     function onMove(ev: PointerEvent) {
       if (ev.pointerId !== e.pointerId) return
@@ -1038,8 +1152,9 @@ export function Stage({
       /* a pinch owns the viewport while it lasts; keep tracking the finger
          so the pan resumes from where it is, not from where the pinch began */
       if (gesture.pinching) return
-      const vp = useStore.getState().viewport
-      useStore.getState().setViewport({ ...vp, x: vp.x + dx, y: vp.y + dy })
+      panDx += dx
+      panDy += dy
+      if (!raf) raf = requestAnimationFrame(flushPan)
     }
     /* a cancelled pointer (touch or pen taken by the system) ends the pan
        too, but is not a click */
@@ -1047,6 +1162,10 @@ export function Stage({
       if (ev.pointerId === e.pointerId) end()
     }
     function end() {
+      if (raf) {
+        cancelAnimationFrame(raf)
+        flushPan()
+      }
       window.removeEventListener('pointermove', onMove)
       window.removeEventListener('pointerup', onUp)
       window.removeEventListener('pointercancel', onCancel)
@@ -1267,7 +1386,14 @@ export function Stage({
             >
               <CommentThreadLayer.Provider value={threadLayer}>
                 <FrameLabelLayer.Provider value={labelLayer}>
-                  <FrameStack frames={canvas?.frames ?? []} layoutZoom={layoutZoom} onFollowLink={followFrameLink} />
+                  <FrameStack
+                    frames={canvas?.frames ?? []}
+                    mountedIds={mountedIds}
+                    deferPlaceholders={!isMobile}
+                    layoutZoom={effectiveLayoutZoom}
+                    onFollowLink={followFrameLink}
+                    onFocusDeferred={focusDeferredFrame}
+                  />
                 </FrameLabelLayer.Provider>
                 <GhostFrames />
                 <FlowOverlay />
@@ -1478,12 +1604,21 @@ function byCreation(a: Frame, b: Frame) {
  *  marquee) stay above every frame. */
 function FrameStack({
   frames,
+  mountedIds,
+  deferPlaceholders,
   layoutZoom,
   onFollowLink,
+  onFocusDeferred,
 }: {
   frames: Frame[]
+  mountedIds: ReadonlySet<string>
+  /** a frame without a live iframe still shows as a light placeholder; on a
+   *  phone it shows as nothing, since anything painted inside the scaled world
+   *  grows the world's own GPU layer (mobile Safari backs it at full size) */
+  deferPlaceholders: boolean
   layoutZoom: number
   onFollowLink: (source: Frame, href: string) => void
+  onFocusDeferred: (frame: Frame) => void
 }) {
   const mounted = useMemo(() => [...frames].sort(byCreation), [frames])
   const rank = useMemo(() => new Map(frames.map((f, i) => [f.id, i + 1])), [frames])
@@ -1492,9 +1627,11 @@ function FrameStack({
       {mounted.map((f) =>
         f.hidden ? (
           <HiddenFrameView key={f.id} frame={f} stack={rank.get(f.id)} />
-        ) : (
+        ) : mountedIds.has(f.id) ? (
           <FrameView key={f.id} frame={f} stack={rank.get(f.id)} layoutZoom={layoutZoom} onFollowLink={onFollowLink} />
-        ),
+        ) : deferPlaceholders ? (
+          <DeferredFrameView key={f.id} frame={f} stack={rank.get(f.id)} onFocus={onFocusDeferred} />
+        ) : null,
       )}
     </div>
   )

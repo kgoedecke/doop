@@ -26,9 +26,14 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
   var vSheet = null
   try {
     vSheet = new CSSStyleSheet()
-    vSheet.replaceSync('html,body{overscroll-behavior-x:none}html:root,html:root>body{scrollbar-width:none!important}html:root::-webkit-scrollbar,html:root>body::-webkit-scrollbar{display:none!important}[data-v-path-hidden]{visibility:hidden!important}svg[data-doop-drawing="path"]{overflow:visible}')
+    vSheet.replaceSync('html,body{overscroll-behavior-x:none}:where(html,html *){touch-action:pan-x pan-y}html:root,html:root>body{scrollbar-width:none!important}html:root::-webkit-scrollbar,html:root>body::-webkit-scrollbar{display:none!important}[data-v-path-hidden]{visibility:hidden!important}svg[data-doop-drawing="path"]{overflow:visible}')
     document.adoptedStyleSheets = document.adoptedStyleSheets.concat(vSheet)
   } catch (e) {}
+  /* a pinch on a frame document must not zoom the editor's page either: Safari
+     scales every frame with it, past an iPhone tab's memory limit */
+  function blockPageZoom(e) { e.preventDefault() }
+  document.addEventListener('gesturestart', blockPageZoom, { passive: false })
+  document.addEventListener('gesturechange', blockPageZoom, { passive: false })
   /* ⌘Y outline mode: every box drawn as a hairline, fills and shadows off.
      Adopted like the sheet above, so no save or export ever carries it. */
   var vOutlineSheet = null
