@@ -40,8 +40,9 @@ Out of scope: workspace-scoped sharing, sharing built-in kinds (ChatGPT/OpenAI/A
    purposes, like a personal one: the run is on the company's model, not the server's paid key.
    **Image generation** bills it the same way: a person with a shared provider has a connection of their own, so the
    server's image keys (`OPENAI_API_KEY`, `GEMINI_API_KEY`), which cover only people who connected no model account,
-   no longer draw for them. A shared provider cannot draw images, so such a person draws only with an image-capable
-   account of their own (ChatGPT, OpenAI or Gemini key).
+   no longer draw for them. Such a person draws with an image-capable account of their own (ChatGPT, OpenAI or Gemini
+   key) or with the image models a provider lists, a shared one included
+   ([custom-provider-image-models.md](custom-provider-image-models.md)).
 8. **Security:**
    - The shared key and headers are sealed at rest like personal ones (`sealedText`). They are read sealed and opened
      per provider: one whose key or headers cannot be unsealed (its encryption key rotated out of
