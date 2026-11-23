@@ -57,6 +57,9 @@ fit, and stays live (each screen re-posts its frame's HTML when the store update
   (`sanitizeInteraction`) before acting, since a frame script could post anything. `scroll-to`
   runs inside the frame (from a press too); `url` opens a new tab with `noopener`. A live edit
   restarts the screen's `delay:` timers from the new HTML.
+- The screen is a browser viewport at the frame dimensions. The document and its nested
+  scrollers keep native wheel and keyboard input in the player; the editing canvas retains
+  wheel pan/zoom and its scrollbar-free artboards.
 - Navigation keeps a history stack (each visit a fresh document, at most 50). A move mounts the
   target beside the current screen, waits for it to render, then animates the two wrappers with
   the Web Animations API (`transitionFrames`). `back` plays the arriving transition in reverse.

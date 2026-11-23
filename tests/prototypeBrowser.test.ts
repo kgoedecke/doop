@@ -113,6 +113,34 @@ describe.skipIf(!findBrowserPath())('prototype player', { timeout: 30_000 }, () 
     return page.$eval('[data-proto-current]', (el) => el.textContent)
   }
 
+  it('scrolls long viewport documents and nested regions with real wheel input', async () => {
+    const canvas = {
+      ...CANVAS,
+      frames: [
+        frame(
+          'home',
+          '<div id="nested" style="height:100px;width:160px;overflow:auto;overscroll-behavior:contain"><p style="height:450px">Inner</p></div><p style="height:900px">Page</p>',
+        ),
+      ],
+    }
+    await page.evaluate((next) => (window as unknown as Fixture).seed(next), canvas)
+    await page.evaluate(() => (window as unknown as Fixture).play('home'))
+    const handle = await page.waitForSelector('iframe[data-doop-proto-frame="home"]')
+    const documentFrame = await handle!.contentFrame()
+    await documentFrame.waitForSelector('#nested')
+    const box = (await handle!.boundingBox())!
+    const scale = box.width / 400
+
+    await page.mouse.move(box.x + 40 * scale, box.y + 40 * scale)
+    await page.mouse.wheel({ deltaY: 60 })
+    await documentFrame.waitForFunction(() => (document.querySelector('#nested')?.scrollTop ?? 0) > 0)
+    expect(await documentFrame.evaluate(() => window.scrollY)).toBe(0)
+
+    await page.mouse.move(box.x + 40 * scale, box.y + 160 * scale)
+    await page.mouse.wheel({ deltaY: 140 })
+    await documentFrame.waitForFunction(() => window.scrollY > 0)
+  })
+
   /* a trigger is live once the player has switched the frame's runtime on,
      a moment after the HTML lands — retry the click until it takes. The
      click is dispatched in the frame: the player scales its iframes, which
