@@ -291,10 +291,10 @@ needs a reusable piece the system lacks, add it, then use it.
   it; edits inside an instance are captured as overrides on that element alone and survive every
   later change to the main. Do not detach to make a small change.
 - Doop parses the whole template of every instance before it picks the conditional elements, so a
-  main with a data-doop-if branch per choice carries every branch each time. For a long set of
-  icons do not write one conditional <img> or <svg> per icon: bind one image with
-  data-doop-prop="src:icon" and give each instance its URL as the icon prop. A long enum's names are
-  in the signature that get_canvas and list_components return.
+  main with a data-doop-if branch per choice carries every branch each time. For a large icon set,
+  use one <img> with data-doop-prop="src:icon". Doop infers icon as an image prop. Pass the image URL
+  directly as the icon value on each instance. Declaring icon as an enum would list every option
+  in the component signature returned by get_canvas and list_components.
 - To change them all, call update_component with find + replace, and read the impact it reports.
   Approved frames keep their sign-off: following a component is not an edit. Use dry_run first on anything
   widely used. Never edit each instance by hand.
