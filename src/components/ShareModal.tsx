@@ -59,11 +59,13 @@ const LINK_ACCESS_ORDER: readonly LinkAccess[] = ['none', 'view', 'comment', 'ed
    state; this component reports optimistic access changes back to it. */
 export function ShareModal({
   canvas,
+  communityFirst = false,
   onChange,
   onClose,
   onCopied,
 }: {
   canvas: ShareableCanvas
+  communityFirst?: boolean
   onChange: (patch: SharePatch) => void
   onClose: () => void
   onCopied: () => void
@@ -193,17 +195,29 @@ export function ShareModal({
     }
   }
 
+  const communityListing = isOwner && (
+    <CommunityListing
+      canvas={canvas}
+      autoFocus={communityFirst}
+      busy={busy}
+      setBusy={setBusy}
+      setError={setError}
+      onChange={onChange}
+    />
+  )
+
   return (
     <Modal size="sm" onClose={onClose}>
       <>
         <ModalTitle className="min-w-0">{t('panels.shareTitle', { name: canvas.name })}</ModalTitle>
+        {communityFirst && communityListing}
         {isOwner && (
           <>
             <div className="mt-4 flex flex-col items-stretch gap-2 sm:flex-row">
               <Input
                 variant="well"
                 className="flex-1"
-                autoFocus
+                autoFocus={!communityFirst}
                 placeholder={t('panels.shareInvitePlaceholder')}
                 value={email}
                 disabled={busy}
@@ -327,9 +341,7 @@ export function ShareModal({
             {t('panels.shareCopyLink')}
           </Button>
         </div>
-        {isOwner && (
-          <CommunityListing canvas={canvas} busy={busy} setBusy={setBusy} setError={setError} onChange={onChange} />
-        )}
+        {!communityFirst && communityListing}
         {upgrade && (
           <UpgradeModal
             workspaceId={upgrade}
@@ -347,18 +359,21 @@ export function ShareModal({
    with its own switch and its own blurb. */
 function CommunityListing({
   canvas,
+  autoFocus,
   busy,
   setBusy,
   setError,
   onChange,
 }: {
   canvas: ShareableCanvas
+  autoFocus: boolean
   busy: boolean
   setBusy: (busy: boolean) => void
   setError: (error: string | null) => void
   onChange: (patch: SharePatch) => void
 }) {
   const published = canvas.publishedAt !== undefined
+  const [confirming, setConfirming] = useState(false)
   const [description, setDescription] = useState(canvas.description ?? '')
   const [category, setCategory] = useState<CommunityCategory>(canvas.category ?? 'website')
   const dirty = published && (description.trim() !== (canvas.description ?? '') || category !== canvas.category)
@@ -372,6 +387,7 @@ function CommunityListing({
       if (next) {
         const listing = await api.publishCanvas(canvas.id, { description: description.trim(), category })
         if (!published) posthog.capture('canvas_published')
+        setConfirming(false)
         onChange(listing)
       } else {
         await api.unpublishCanvas(canvas.id)
@@ -395,11 +411,19 @@ function CommunityListing({
         className="flex cursor-pointer items-center gap-2 text-body font-medium text-ink"
         title={t('panels.shareGalleryTitle')}
       >
-        <Checkbox checked={published} disabled={busy} onChange={(event) => save(event.target.checked)} />
+        <Checkbox
+          autoFocus={autoFocus}
+          checked={published || confirming}
+          disabled={busy}
+          onChange={(event) => {
+            if (published) void save(false)
+            else setConfirming(event.target.checked)
+          }}
+        />
         {t('panels.shareGallery')}
       </label>
       <p className="mt-1 pl-[26px] text-label leading-snug text-ink-faint">{t('panels.shareGalleryBlurb')}</p>
-      {published && (
+      {(published || confirming) && (
         <div className="mt-3 flex flex-col gap-2.5 pl-[26px]">
           <Textarea
             rows={2}
@@ -422,11 +446,20 @@ function CommunityListing({
               </ToggleChipItem>
             ))}
           </ToggleChipGroup>
-          {dirty && (
+          {!published && confirming ? (
+            <div className="flex flex-wrap gap-2">
+              <Button size="sm" disabled={busy} onClick={() => void save(true)}>
+                {t('panels.shareConfirmPublish')}
+              </Button>
+              <Button size="sm" variant="ghost" disabled={busy} onClick={() => setConfirming(false)}>
+                {t('common.cancel')}
+              </Button>
+            </div>
+          ) : dirty ? (
             <Button size="sm" className="self-start" disabled={busy} onClick={() => save(true)}>
               {t('panels.shareUpdateListing')}
             </Button>
-          )}
+          ) : null}
         </div>
       )}
     </div>

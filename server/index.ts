@@ -102,7 +102,7 @@ import * as workspaces from './workspaces.ts'
 import { uploadCap } from './entitlements.ts'
 import { startStallWatchdog } from './stallWatchdog.ts'
 import { beginOperation, endOperation, withinOperation, WorkBudgetError } from './workBudget.ts'
-import { openTransaction, outsideOperation, transaction, type OpenTransaction } from './journal.ts'
+import { afterCommit, openTransaction, outsideOperation, transaction, type OpenTransaction } from './journal.ts'
 import * as billing from './billing.ts'
 import * as demo from './demo.ts'
 import { db, initDb } from './db/index.ts'
@@ -276,6 +276,7 @@ const GUEST_HIDDEN: ReadonlySet<ServerMessage['type']> = new Set([
   'guidelines',
   /* an agent's status line is its task's summary (setAgentStatus) */
   'status',
+  'canvas:listing',
 ] satisfies ServerMessage['type'][])
 
 /** A presence as a guest sees it: without the status line, which carries
@@ -1617,7 +1618,10 @@ app.put('/api/canvases/:id/publish', (req, res) => {
   const listing = parseListing(req.body)
   if (typeof listing === 'string') return res.status(400).json({ error: listing })
   const published = store.publishCanvas(c.id, listing)!
-  res.json({ publishedAt: published.publishedAt, description: published.description, category: published.category })
+  const { publishedAt, description, category } = published
+  const update = { publishedAt, description, category }
+  afterCommit(() => broadcast(c.id, { type: 'canvas:listing', listing: update }))
+  res.json(update)
 })
 
 app.delete('/api/canvases/:id/publish', (req, res) => {
@@ -1625,6 +1629,7 @@ app.delete('/api/canvases/:id/publish', (req, res) => {
   if (!c) return
   if (c.ownerId !== req.user!.id) return res.status(403).json({ error: 'only the owner can unpublish a canvas' })
   store.unpublishCanvas(c.id)
+  afterCommit(() => broadcast(c.id, { type: 'canvas:listing', listing: {} }))
   res.json({ ok: true })
 })
 

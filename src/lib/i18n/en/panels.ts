@@ -237,6 +237,13 @@ export const panels = {
   shareGalleryTitle: 'Anyone on doop can preview and copy a listed canvas. The canvas itself stays private.',
   shareGallery: 'Show in the community gallery',
   shareGalleryBlurb: 'People can preview it and copy it into their own account. Your canvas stays private.',
+  shareConfirmPublish: 'Publish canvas',
+  communityInvitationTitle: 'Share this design with the community?',
+  communityInvitationDetail:
+    'Gallery visitors can preview and copy this canvas without getting access to the original.',
+  communityInvitationReview: 'Review sharing',
+  communityInvitationLater: 'Not now',
+  communityInvitationOptOut: 'Don’t ask again',
   shareDescriptionPlaceholder: 'What is this design? One or two lines helps people find it.',
   shareShelf: 'Gallery shelf',
   shareUpdateListing: 'Update listing',

@@ -1,9 +1,10 @@
-import type { ClientMessage, ServerMessage } from '../../shared/types'
+import type { AgentTask, ClientMessage, ServerMessage } from '../../shared/types'
 import { isPeerViewport } from '../../shared/viewport'
 import { roleAllows } from '../../shared/canvasRole'
 import { getIdentity } from './identity'
 import { useStore } from './store'
 import { noteTheirSave } from './theirSaves'
+import { isNewTaskCompletion } from './communityInvitation'
 
 let socket: WebSocket | null = null
 let currentCanvasId: string | null = null
@@ -12,6 +13,14 @@ let joinedAsGuest = false
 let retryTimer: number | null = null
 /* the server build this page first connected under; survives reconnects */
 let loadedBuild: string | null = null
+const taskCompletions = new Set<(task: AgentTask) => void>()
+
+export function subscribeToTaskCompletions(listener: (task: AgentTask) => void) {
+  taskCompletions.add(listener)
+  return () => {
+    taskCompletions.delete(listener)
+  }
+}
 
 export function connect(canvasId: string, guest = false) {
   currentCanvasId = canvasId
@@ -148,9 +157,14 @@ function handle(msg: ServerMessage) {
     case 'status':
       s.setStatus(msg.clientId, msg.status)
       break
-    case 'task':
+    case 'task': {
+      const previous = s.tasks.find((task) => task.id === msg.task.id)
       s.upsertTask(msg.task)
+      if (isNewTaskCompletion(msg.task, previous)) {
+        for (const listener of taskCompletions) listener(msg.task)
+      }
       break
+    }
     case 'feedback':
       s.upsertFeedback(msg.feedback)
       break
@@ -192,6 +206,11 @@ function handle(msg: ServerMessage) {
     case 'canvas:renamed':
       s.renameCanvasLocal(msg.name)
       break
+    case 'canvas:listing': {
+      const { publishedAt, description, category } = msg.listing
+      if (s.canvas) s.setCanvas({ ...s.canvas, publishedAt, description, category })
+      break
+    }
     case 'component':
       s.setComponentLocal(msg.id, msg.component)
       break
