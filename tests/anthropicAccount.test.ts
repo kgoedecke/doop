@@ -27,7 +27,7 @@ it('stores a Claude key privately beside other connections and validates provide
   const connected = (await response.json()) as View
   /* connecting adds a row: nothing else is switched off or replaced */
   expect(connected.accounts.map((a) => a.kind)).toEqual(['openai-key', 'anthropic-key'])
-  expect(account(connected, 'anthropic-key')).toMatchObject({ enabled: true, model: 'claude-sonnet-5' })
+  expect(account(connected, 'anthropic-key')).toMatchObject({ enabled: true, model: 'claude-opus-5-5' })
   expect(await (await alice.get('/api/local-agent')).json()).toMatchObject({ enabled: true })
   expect(connected.default).toBe('claude-local')
   expect(JSON.stringify(connected)).not.toContain(key)

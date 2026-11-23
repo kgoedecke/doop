@@ -27,7 +27,7 @@ it('stores an OpenRouter key privately, validates its roster, and serves the per
   const response = await alice.post('/api/model-account/openrouter-key', { apiKey: key })
   expect(response.status).toBe(200)
   const view = (await response.json()) as View
-  expect(accountIn(view, 'openrouter-key')).toMatchObject({ enabled: true, model: 'moonshotai/kimi-k2.6' })
+  expect(accountIn(view, 'openrouter-key')).toMatchObject({ enabled: true, model: 'moonshotai/kimi-k3.1-pro' })
   expect(JSON.stringify(view)).not.toContain(key)
   /* connecting a server-side account leaves the local CLI on */
   expect(await (await alice.get('/api/local-agent')).json()).toMatchObject({ enabled: true })
@@ -53,7 +53,7 @@ it('stores a Gemini key beside the OpenRouter one, each with its own model', asy
   const response = await alice.post('/api/model-account/gemini-key', { apiKey: 'AIzaTestKeyLongEnoughToPass123456' })
   expect(response.status).toBe(200)
   const view = (await response.json()) as View
-  expect(accountIn(view, 'gemini-key')).toMatchObject({ enabled: true, model: 'gemini-3.7-flash' })
+  expect(accountIn(view, 'gemini-key')).toMatchObject({ enabled: true, model: 'gemini-4-hydrogen' })
   expect(accountIn(view, 'openrouter-key')).toMatchObject({ model: 'z-ai/glm-5.3' })
   expect(JSON.stringify(view)).not.toContain('AIzaTestKeyLongEnoughToPass123456')
   expect((await alice.patch('/api/model-account/gemini-key', { model: 'gemini-3.1-pro-preview' })).status).toBe(200)

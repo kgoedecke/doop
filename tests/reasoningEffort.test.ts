@@ -34,7 +34,7 @@ it('starts on the server default, takes a pick, and keeps it across a key rotati
 
   const picked = await alice.patch('/api/model-account/openai-key', { effort: 'high' })
   expect(picked.status).toBe(200)
-  expect(accountIn(await picked.json(), 'openai-key')).toMatchObject({ model: 'gpt-5.6-terra', effort: 'high' })
+  expect(accountIn(await picked.json(), 'openai-key')).toMatchObject({ model: 'gpt-6.2-sol', effort: 'high' })
 
   /* a model pick leaves the effort alone, and the other way round */
   expect((await alice.patch('/api/model-account/openai-key', { model: 'gpt-6-astra' })).status).toBe(200)

@@ -94,8 +94,8 @@ const OPENAI_PAGE = {
 const GEMINI_PAGE_ONE = {
   models: [
     {
-      name: 'models/gemini-3.7-flash',
-      displayName: 'Gemini 3.7 Flash',
+      name: 'models/gemini-3.8-flash',
+      displayName: 'Gemini 3.8 Flash',
       supportedGenerationMethods: ['generateContent', 'countTokens'],
       outputTokenLimit: 65536,
     },
@@ -262,7 +262,7 @@ it('Gemini: pages through the catalog and keeps the generateContent models with 
   await alice.post('/api/model-account/gemini-key', { apiKey: 'AIzaSyGeminiTestKey0123456789abcdefghij' })
   const catalog = await (await alice.get('/api/model-account/models?kind=gemini-key')).json()
   expect(catalog.live).toBe(true)
-  expect(ids(catalog)).toEqual(['gemini-3.7-flash', 'gemini-4-argon'])
+  expect(ids(catalog)).toEqual(['gemini-3.8-flash', 'gemini-4-argon'])
   expect(catalog.models[0]).toMatchObject({ recommended: true, vision: true })
   expect(catalog.models[1]).toMatchObject({ name: 'Gemini 4 Argon', vision: true })
   expect(seen.map((r) => r.path)).toEqual([
