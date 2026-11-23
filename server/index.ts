@@ -160,21 +160,22 @@ import type { Actor, Canvas, ClientMessage, Presence, ServerMessage } from '../s
 
 const PORT = env.PORT
 const HOST = env.HOST
+const CLIENT_DIST = path.join(process.cwd(), 'dist')
+const CLIENT_INDEX = path.join(CLIENT_DIST, 'index.html')
+
+const clientHtml = (() => {
+  try {
+    return readFileSync(CLIENT_INDEX)
+  } catch {
+    return null
+  }
+})()
 
 /* Identifies the client bundle this process serves. Hashing dist/index.html
    works because Vite writes hashed asset names into it — any frontend change
    changes the hash, while server-only deploys and plain restarts do not.
    Clients compare it across reconnects to know their loaded bundle is stale. */
-const BUILD_ID = (() => {
-  try {
-    return createHash('sha1')
-      .update(readFileSync(path.join(process.cwd(), 'dist', 'index.html')))
-      .digest('hex')
-      .slice(0, 12)
-  } catch {
-    return 'dev'
-  }
-})()
+const BUILD_ID = clientHtml ? createHash('sha1').update(clientHtml).digest('hex').slice(0, 12) : 'dev'
 
 /* boot: connect the DB, hydrate memory, import pre-DB store.json once */
 await initDb()
@@ -836,8 +837,7 @@ app.get('/api/oidc-config', (req, res) => {
   res.json({ ...providers, ...loginPolicy(providers.enabled) })
 })
 
-/* Public: the interface language for visitors who have not picked one. The
-   client asks before its first render, so sign-in already speaks it. */
+/* Public fallback for static HTML without an embedded language, e.g. in development. */
 app.get('/api/locale-config', (_req, res) => {
   const config: LocaleConfig = { defaultLocale: env.DEFAULT_LOCALE }
   res.json(config)
@@ -3354,12 +3354,22 @@ app.get('/sitemap.xml', (_req, res) => {
 
 /* production: serve the built client */
 if (env.isProduction) {
-  const dist = path.join(process.cwd(), 'dist')
-  app.use(express.static(dist))
+  const localizedIndex = clientHtml
+    ?.toString('utf8')
+    .replace('data-doop-default-locale=""', `data-doop-default-locale="${env.DEFAULT_LOCALE}"`)
+  const serveClient: express.RequestHandler = (_req, res) => {
+    if (localizedIndex === undefined) {
+      res.sendFile(CLIENT_INDEX)
+      return
+    }
+    res.set('Cache-Control', 'public, max-age=0').type('html').send(localizedIndex)
+  }
+  app.get('/index.html', serveClient)
+  app.use(express.static(CLIENT_DIST, { index: false }))
   /* a missing bundle or source map is a 404, not the app shell: HTML served
      as a .js or .map breaks module loads and source map resolution */
   app.get('/assets/*', (_req, res) => res.sendStatus(404))
-  app.get('*', (_req, res) => res.sendFile(path.join(dist, 'index.html')))
+  app.get('*', serveClient)
 }
 
 /* ------------------------------------------------- websocket */

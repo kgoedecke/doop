@@ -36,7 +36,7 @@ export function authErrorCode(error: AuthClientError): string {
  * or can fix, so it becomes `unreachable`, a plain try-again in the person's
  * language (`auth.unreachable`), instead.
  */
-export function authErrorMessage(error: AuthClientError, fallback: string, unreachable: string): string {
+export function authErrorMessage<T>(error: AuthClientError, fallback: T, unreachable: T): string | T {
   if (foreign(error)) return unreachable
   return typeof error.message === 'string' ? error.message : fallback
 }

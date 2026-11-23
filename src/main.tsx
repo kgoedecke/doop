@@ -10,18 +10,23 @@ import { initLocale } from './lib/i18n'
 import { installTranslateGuard } from './lib/translateGuard'
 import './styles.css'
 
+const fonts = document.getElementById('app-fonts')
+if (fonts instanceof HTMLLinkElement) {
+  // The print media lets the page start while the stylesheet downloads.
+  if (fonts.sheet) fonts.media = 'all'
+  else fonts.addEventListener('load', () => (fonts.media = 'all'), { once: true })
+}
+
 installTranslateGuard()
 initDesktopShell()
 initTheme()
+void initLocale()
 
-/* the language is settled first, so the first paint already speaks it */
-void initLocale().then(() =>
-  ReactDOM.createRoot(document.getElementById('root')!).render(
-    <React.StrictMode>
-      <TooltipProvider>
-        <App />
-        <UpdateCard />
-      </TooltipProvider>
-    </React.StrictMode>,
-  ),
+ReactDOM.createRoot(document.getElementById('root')!).render(
+  <React.StrictMode>
+    <TooltipProvider>
+      <App />
+      <UpdateCard />
+    </TooltipProvider>
+  </React.StrictMode>,
 )

@@ -6,9 +6,6 @@ export { LOCALES, LOCALE_NAMES, isLocale, type Locale } from '../../../shared/lo
 /* Per browser, not per account, like the theme: it is how this device reads. */
 export const LOCALE_STORAGE_KEY = 'doop-locale'
 
-/* A slow or unreachable server must not hold the first paint for long. */
-const CONFIG_TIMEOUT_MS = 1500
-
 /* The language picked in this browser, if any, and the one the server shows
    to everyone else (its DEFAULT_LOCALE). A pick wins over the server. */
 let picked: Locale | null | undefined
@@ -74,7 +71,7 @@ export function setLocale(locale: Locale): void {
 
 async function fetchServerDefault(): Promise<Locale | null> {
   try {
-    const res = await fetch('/api/locale-config', { signal: AbortSignal.timeout(CONFIG_TIMEOUT_MS) })
+    const res = await fetch('/api/locale-config')
     if (!res.ok) return null
     const config = (await res.json()) as Partial<LocaleConfig>
     return isLocale(config.defaultLocale) ? config.defaultLocale : null
@@ -83,18 +80,24 @@ async function fetchServerDefault(): Promise<Locale | null> {
   }
 }
 
-/** Settles the language before React mounts: the browser's own pick when it
- *  has one, otherwise the server's default (one short request), otherwise
- *  English. Then follows picks made in other tabs. */
+/** Use the saved choice or the default in the HTML for the first render.
+ *  Vite's static HTML has no default, so look it up in the background. */
 export async function initLocale(): Promise<void> {
   window.addEventListener('storage', (event) => {
     if (event.key !== null && event.key !== LOCALE_STORAGE_KEY) return
     picked = undefined
     notify()
   })
-  if (!getPicked()) serverDefault = (await fetchServerDefault()) ?? FALLBACK_LOCALE
-  snapshot = null
-  mark()
+  const htmlDefault = document.documentElement.dataset.doopDefaultLocale
+  const hasDefault = isLocale(htmlDefault)
+  if (hasDefault) serverDefault = htmlDefault
+  notify()
+
+  if (hasDefault || getPicked()) return
+  const fetchedDefault = await fetchServerDefault()
+  if (!fetchedDefault || fetchedDefault === serverDefault) return
+  serverDefault = fetchedDefault
+  notify()
 }
 
 /** The active language, whether this browser picked it (rather than taking

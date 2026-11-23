@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { authClient } from '../lib/auth'
-import { authErrorCode, authErrorMessage } from '../lib/authError'
+import { authErrorCode, authErrorMessage, type AuthClientError } from '../lib/authError'
 import { BrandMark } from '../components/ui/brand-mark'
 import { setName } from '../lib/identity'
 import { beginBrowserSignIn, supportsBrowserSignIn } from '../lib/desktop'
@@ -124,17 +124,21 @@ const SSO_ERROR_MESSAGES: Record<string, PlainMessageKey> = {
    contain underscores, so flipping them back restores it verbatim. */
 const SIGNUP_RESTRICTED_PREFIX = 'Sign_up_is_restricted'
 
-/** What to show for a provider failure: the server's own words when it sent
- *  any (`text`), else the message key for the code (`key`). */
-type SsoError = { text: string } | { key: PlainMessageKey }
+/** A message from the server or a key translated when the form renders. */
+type AuthError = string | { key: PlainMessageKey }
+type AuthNotice = PlainMessageKey | { email: string }
 
-function ssoErrorFromUrl(): SsoError | null {
+function authFailure(error: AuthClientError, fallback: PlainMessageKey): AuthError {
+  return authErrorMessage(error, { key: fallback }, { key: 'auth.unreachable' })
+}
+
+function ssoErrorFromUrl(): AuthError | null {
   const params = new URLSearchParams(location.search)
   const code = params.get('error')
   if (!code) return null
-  if (code.startsWith(SIGNUP_RESTRICTED_PREFIX)) return { text: code.replaceAll('_', ' ') }
+  if (code.startsWith(SIGNUP_RESTRICTED_PREFIX)) return code.replaceAll('_', ' ')
   const description = params.get('error_description')
-  if (description) return { text: description }
+  if (description) return description
   return { key: (Object.hasOwn(SSO_ERROR_MESSAGES, code) && SSO_ERROR_MESSAGES[code]) || 'auth.ssoFailed' }
 }
 
@@ -210,7 +214,7 @@ function shouldAutoRedirect(config: OidcClientConfig, cardWanted: boolean): bool
    the auth client re-check the session, App swaps in its pending screen for
    a moment, and this form remounts with fresh state — the notice would be
    gone before anyone read it. A page load (the sign-in landing) resets it. */
-let browserSignInNotice: string | null = null
+let browserSignInNotice: PlainMessageKey | null = null
 
 /** `initialMode` opens the form on sign-up or sign-in, for a guest on a
  *  shared canvas who pressed one of the two (src/components/AccessBanner.tsx). */
@@ -223,13 +227,9 @@ export function AuthPage({ initialMode }: { initialMode?: 'signin' | 'signup' } 
   const [name, setNameField] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
-  const [error, setError] = useState<string | null>(() => {
-    const sso = ssoErrorFromUrl()
-    if (!sso) return null
-    return 'key' in sso ? t(sso.key) : sso.text
-  })
+  const [error, setError] = useState<AuthError | null>(ssoErrorFromUrl)
   /* informational state (not an error): "check your email" and friends */
-  const [notice, setNotice] = useState<string | null>(browserSignInNotice)
+  const [notice, setNotice] = useState<AuthNotice | null>(browserSignInNotice)
   /* signin failed on an unverified email — offer a resend */
   const [unverified, setUnverified] = useState(false)
   /* set when the error's real fix is the other mode: signin with an unknown
@@ -273,7 +273,6 @@ export function AuthPage({ initialMode }: { initialMode?: 'signin' | 'signup' } 
     setError(null)
     setNotice(null)
     setBusy(true)
-    const startFailed = t('auth.startFailed')
     try {
       if (isDesktopShell() && supportsBrowserSignIn()) {
         /* Identity providers refuse embedded webviews, so the desktop shell
@@ -281,17 +280,17 @@ export function AuthPage({ initialMode }: { initialMode?: 'signin' | 'signup' } 
            back over a doop:// link (src/lib/desktopAuth.ts). The browser
            starts the provider round trip itself, from a doop page. */
         if (!(await beginBrowserSignIn(provider, ssoRedirects(provider)))) {
-          setError(startFailed)
+          setError({ key: 'auth.startFailed' })
           return
         }
-        browserSignInNotice = t('auth.browserSignInNotice')
+        browserSignInNotice = 'auth.browserSignInNotice'
         setNotice(browserSignInNotice)
         return
       }
       const res = await start({ ...ssoRedirects(provider), errorCallbackURL: '/auth' })
-      if (res.error) setError(authErrorMessage(res.error, startFailed, t('auth.unreachable')))
+      if (res.error) setError(authFailure(res.error, 'auth.startFailed'))
     } catch {
-      setError(t(NETWORK_ERROR))
+      setError({ key: NETWORK_ERROR })
     } finally {
       setBusy(false)
     }
@@ -311,9 +310,9 @@ export function AuthPage({ initialMode }: { initialMode?: 'signin' | 'signup' } 
       await authClient.sendVerificationEmail({ email, callbackURL: verifiedLanding() })
       setError(null)
       setUnverified(false)
-      setNotice(t('auth.verificationSent'))
+      setNotice('auth.verificationSent')
     } catch {
-      setError(t(NETWORK_ERROR))
+      setError({ key: NETWORK_ERROR })
     } finally {
       setBusy(false)
     }
@@ -330,18 +329,18 @@ export function AuthPage({ initialMode }: { initialMode?: 'signin' | 'signup' } 
       if (mode === 'forgot') {
         await authClient.requestPasswordReset({ email, redirectTo: '/auth/reset' })
         /* same response either way — this must not confirm account existence */
-        setNotice(t('auth.resetLinkSent'))
+        setNotice('auth.resetLinkSent')
         return
       }
       if (mode === 'reset') {
         const res = await authClient.resetPassword({ newPassword: password, token: resetToken ?? '' })
         if (res.error) {
           /* a platform error must not be reported as an expired link */
-          setError(authErrorMessage(res.error, t('auth.resetLinkInvalid'), t('auth.unreachable')))
+          setError(authFailure(res.error, 'auth.resetLinkInvalid'))
         } else {
           history.replaceState(null, '', '/auth')
           switchMode('signin')
-          setNotice(t('auth.passwordUpdated'))
+          setNotice('auth.passwordUpdated')
         }
         return
       }
@@ -360,27 +359,27 @@ export function AuthPage({ initialMode }: { initialMode?: 'signin' | 'signup' } 
            throw in here — see src/lib/authError.ts */
         const code = authErrorCode(res.error)
         if (mode === 'signin' && code === 'EMAIL_NOT_VERIFIED') {
-          setError(t('auth.emailNotVerified'))
+          setError({ key: 'auth.emailNotVerified' })
           setUnverified(true)
         } else if (mode === 'signin' && !(await accountExists(email))) {
-          setError(t('auth.noAccountFound'))
+          setError({ key: 'auth.noAccountFound' })
           if (oidc.emailPasswordSignup) setSuggestMode('signup')
           posthog.capture('login_no_account_found')
         } else if (mode === 'signup' && code.startsWith('USER_ALREADY_EXISTS')) {
-          setError(t('auth.accountExists'))
+          setError({ key: 'auth.accountExists' })
           setSuggestMode('signin')
         } else if (mode === 'signup' && code === 'SIGNUP_DISABLED') {
-          setError(t('auth.signupDisabled'))
+          setError({ key: 'auth.signupDisabled' })
           setSuggestMode('signin')
         } else {
-          setError(authErrorMessage(res.error, t('auth.somethingWentWrong'), t('auth.unreachable')))
+          setError(authFailure(res.error, 'auth.somethingWentWrong'))
         }
       } else if (res.data?.user) {
         /* signup with verification required: the account exists but there is
            no session yet — better-auth returns a null token in that case */
         if (mode === 'signup' && !res.data.token) {
           posthog.capture('account_signed_up', { method: 'email' })
-          setNotice(t('auth.verifyEmailSent', { email }))
+          setNotice({ email })
           return
         }
         if (mode === 'signup') posthog.capture('account_signed_up', { method: 'email' })
@@ -392,7 +391,7 @@ export function AuthPage({ initialMode }: { initialMode?: 'signin' | 'signup' } 
         if (!resumeOAuthFlow() && mode === 'signup') location.href = verifiedLanding()
       }
     } catch {
-      setError(t(NETWORK_ERROR))
+      setError({ key: NETWORK_ERROR })
     } finally {
       setBusy(false)
     }
@@ -550,10 +549,10 @@ export function AuthPage({ initialMode }: { initialMode?: 'signin' | 'signup' } 
             {t('auth.forgotPassword')}
           </Button>
         )}
-        {notice && <Callout>{notice}</Callout>}
+        {notice && <Callout>{typeof notice === 'string' ? t(notice) : t('auth.verifyEmailSent', notice)}</Callout>}
         {error && (
           <Callout tone="error">
-            {error}
+            {typeof error === 'string' ? error : t(error.key)}
             {suggestMode && (
               <Button
                 variant="link"

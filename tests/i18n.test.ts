@@ -26,6 +26,7 @@ beforeEach(async () => {
   store.clear()
   vi.stubGlobal('localStorage', storage)
   document.documentElement.lang = ''
+  delete document.documentElement.dataset.doopDefaultLocale
   vi.resetModules()
   i18n = await import('../src/lib/i18n')
 })
@@ -80,9 +81,11 @@ describe('translateIn', () => {
 })
 
 describe('locale', () => {
-  it("uses the server's default until this browser picks a language", async () => {
+  it("loads the server's default in the background for static HTML", async () => {
     serverSays({ defaultLocale: 'pt-BR' })
-    await i18n.initLocale()
+    const initialized = i18n.initLocale()
+    expect(document.documentElement.lang).toBe('en')
+    await initialized
     expect(i18n.getLocale()).toBe('pt-BR')
     expect(document.documentElement.lang).toBe('pt-BR')
     expect(i18n.t('shell.logOut')).toBe('Sair')
@@ -91,6 +94,21 @@ describe('locale', () => {
     expect(i18n.getLocale()).toBe('en')
     expect(store.get('doop-locale')).toBe('en')
     expect(document.documentElement.lang).toBe('en')
+  })
+
+  it.each([
+    { saved: null, expected: 'pt-BR' },
+    { saved: 'en', expected: 'en' },
+  ])('sets $expected immediately with a saved choice of $saved', async ({ saved, expected }) => {
+    if (saved) store.set('doop-locale', saved)
+    document.documentElement.dataset.doopDefaultLocale = 'pt-BR'
+    serverSays({ defaultLocale: 'en' })
+
+    const initialized = i18n.initLocale()
+    expect(document.documentElement.lang).toBe(expected)
+    expect(i18n.getLocale()).toBe(expected)
+    await initialized
+    expect(fetch).not.toHaveBeenCalled()
   })
 
   it('does not ask the server when the browser already picked', async () => {
