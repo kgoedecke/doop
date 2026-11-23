@@ -42,10 +42,12 @@ describe.skipIf(!findBrowserPath())('community invitation', () => {
   let page: Page
   let appUrl: URL
   let publishRequests: string[]
+  let beforePublishResponse: (() => Promise<void>) | undefined
 
   beforeEach(async () => {
     page = await pages.open()
     publishRequests = []
+    beforePublishResponse = undefined
     await page.setViewport({ width: 1280, height: 850 })
     await page.evaluateOnNewDocument(() => {
       if (window !== window.top) return
@@ -80,6 +82,7 @@ describe.skipIf(!findBrowserPath())('community invitation', () => {
       if (pathname === '/api/workspaces') body = { workspaces: [] }
       if (pathname === '/api/canvases/c/publish') {
         publishRequests.push(request.method())
+        await beforePublishResponse?.()
         body = { publishedAt: 41, category: 'website' }
       }
       await request.respond({ status: 200, contentType: 'application/json', body: JSON.stringify(body) })
@@ -115,6 +118,7 @@ describe.skipIf(!findBrowserPath())('community invitation', () => {
   async function complete(id: string) {
     await send({ type: 'task', task: { ...card, id } })
     await send({ type: 'task', task: { ...card, id, endedAt: 40 } })
+    await send({ type: 'canvas:design-generated', frameIds: [frame.id] })
   }
 
   const reviews = () => page.locator('::-p-aria(Review sharing)')
@@ -127,7 +131,7 @@ describe.skipIf(!findBrowserPath())('community invitation', () => {
     await init({}, [{ ...card, id: 'old', endedAt: 40 }])
     await send({ type: 'task', task: { ...card, id: 'failed' } })
     await send({ type: 'task', task: { ...card, id: 'failed', failedAt: 40 } })
-    const edit = { ...card, id: 'existing-frame-edit', startedAt: 35 }
+    const edit = { ...card, id: 'marked-done-manually' }
     await send({ type: 'task', task: edit })
     await send({ type: 'task', task: { ...edit, endedAt: 40 } })
     const collaborator = { ...card, id: 'collaborator-generation', queuedByUserId: 'collaborator' }
@@ -139,6 +143,7 @@ describe.skipIf(!findBrowserPath())('community invitation', () => {
     await reviews().wait()
     expect(await page.$eval(invitation, (el) => el.contains(document.activeElement))).toBe(false)
     await send({ type: 'task', task: { ...card, endedAt: 40 } })
+    await send({ type: 'canvas:design-generated', frameIds: [frame.id] })
     expect(
       await page.$$eval(
         'h2',
@@ -203,5 +208,22 @@ describe.skipIf(!findBrowserPath())('community invitation', () => {
     await complete('published-remotely')
     expect(await visibleInvitation()).toBe(false)
     expect(publishRequests).toEqual([])
+  }, 30_000)
+
+  it('keeps a newer listing event when an older unpublish response arrives later', async () => {
+    await init({ publishedAt: 12 })
+    await page.locator('::-p-aria(Share)').click()
+    await gallery().wait()
+    beforePublishResponse = () => send({ type: 'canvas:listing', listing: { publishedAt: 44 } })
+    await gallery().click()
+    await expect.poll(() => publishRequests).toEqual(['DELETE'])
+    await page.waitForFunction(() => {
+      const checkbox = document.querySelector<HTMLInputElement>('[data-slot="checkbox"]')
+      return checkbox?.checked && !checkbox.disabled
+    })
+    await page.keyboard.press('Escape')
+    await complete('after-listing-event')
+    expect(await visibleInvitation()).toBe(false)
+    expect(publishRequests).toEqual(['DELETE'])
   }, 30_000)
 })

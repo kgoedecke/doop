@@ -277,6 +277,7 @@ const GUEST_HIDDEN: ReadonlySet<ServerMessage['type']> = new Set([
   /* an agent's status line is its task's summary (setAgentStatus) */
   'status',
   'canvas:listing',
+  'canvas:design-generated',
 ] satisfies ServerMessage['type'][])
 
 /** A presence as a guest sees it: without the status line, which carries
@@ -1614,6 +1615,10 @@ app.put('/api/canvases/:id/publish', (req, res) => {
   const c = requireCanvas(req, res, req.params.id, 'edit')
   if (!c) return
   if (c.ownerId !== req.user!.id) return res.status(403).json({ error: 'only the owner can publish a canvas' })
+  const expectedPublishedAt: unknown = req.body?.expectedPublishedAt
+  if (expectedPublishedAt !== undefined && c.publishedAt !== expectedPublishedAt) {
+    return res.status(409).json({ error: 'the community listing changed; reopen Share to review it' })
+  }
   if (!publishableFrames(c).length) return res.status(400).json({ error: 'add a frame before publishing' })
   const listing = parseListing(req.body)
   if (typeof listing === 'string') return res.status(400).json({ error: listing })

@@ -546,7 +546,10 @@ export const api = {
   setLinkAccess: (id: string, linkAccess: LinkAccess) =>
     req('/api/canvases/' + id, { method: 'PATCH', body: JSON.stringify({ linkAccess }) }),
   /* community gallery: owner-only listing, open browsing and copying */
-  publishCanvas: (id: string, listing: { description: string; category: CommunityCategory }) =>
+  publishCanvas: (
+    id: string,
+    listing: { description: string; category: CommunityCategory; expectedPublishedAt?: number },
+  ) =>
     req<Pick<Canvas, 'publishedAt' | 'description' | 'category'>>(`/api/canvases/${id}/publish`, {
       method: 'PUT',
       body: JSON.stringify(listing),

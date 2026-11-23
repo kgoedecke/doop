@@ -1,9 +1,8 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import type { AgentTask, Canvas, Frame } from '../shared/types'
+import type { Canvas, Frame } from '../shared/types'
 import {
   canInviteToCommunity,
   claimCommunityInvitation,
-  isNewTaskCompletion,
   optOutOfCommunityInvitations,
 } from '../src/lib/communityInvitation'
 
@@ -21,35 +20,17 @@ const frame: Frame = {
   updatedBy: 'Doop',
 }
 const canvas: Canvas = { id: 'canvas', name: 'Design', ownerId: 'owner', createdAt: 1, updatedAt: 3, frames: [frame] }
-const started: AgentTask = {
-  id: 'task',
-  agentName: 'Doop',
-  color: '#000000',
-  status: 'Generate a frame',
-  startedAt: 2,
-  queuedBy: 'Owner',
-  queuedByUserId: 'owner',
-  frameIds: [frame.id],
-}
-const completed = { ...started, endedAt: 4 }
-
 describe('community invitation eligibility', () => {
-  it('requires a live transition into successful completion', () => {
-    expect(isNewTaskCompletion(completed, started)).toBe(true)
-    expect(isNewTaskCompletion(completed, completed)).toBe(false)
-    expect(isNewTaskCompletion(completed, undefined)).toBe(false)
-    expect(isNewTaskCompletion({ ...started, failedAt: 4 }, started)).toBe(false)
-    expect(isNewTaskCompletion({ ...completed, failedAt: 4 }, started)).toBe(false)
+  it('requires a generated non-demo frame that still exists on the canvas', () => {
+    expect(canInviteToCommunity(canvas, [frame.id], 'owner')).toBe(true)
+    expect(canInviteToCommunity({ ...canvas, frames: [{ ...frame, demo: true }] }, [frame.id], 'owner')).toBe(false)
+    expect(canInviteToCommunity(canvas, ['deleted-frame'], 'owner')).toBe(false)
+    expect(canInviteToCommunity(canvas, [], 'owner')).toBe(false)
   })
 
-  it('requires an unpublished canvas and a new non-demo frame from the owner’s request', () => {
-    expect(canInviteToCommunity(canvas, completed, 'owner')).toBe(true)
-    expect(canInviteToCommunity({ ...canvas, publishedAt: 4 }, completed, 'owner')).toBe(false)
-    expect(canInviteToCommunity({ ...canvas, frames: [{ ...frame, demo: true }] }, completed, 'owner')).toBe(false)
-    expect(canInviteToCommunity(canvas, { ...completed, startedAt: 4 }, 'owner')).toBe(false)
-    expect(canInviteToCommunity(canvas, { ...completed, frameIds: [] }, 'owner')).toBe(false)
-    expect(canInviteToCommunity(canvas, { ...completed, queuedByUserId: 'collaborator' }, 'owner')).toBe(false)
-    expect(canInviteToCommunity(canvas, completed, 'collaborator')).toBe(false)
+  it('requires the owner of an unpublished canvas', () => {
+    expect(canInviteToCommunity({ ...canvas, publishedAt: 4 }, [frame.id], 'owner')).toBe(false)
+    expect(canInviteToCommunity(canvas, [frame.id], 'collaborator')).toBe(false)
   })
 })
 

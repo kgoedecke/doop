@@ -644,6 +644,7 @@ export type ServerMessage =
   | { type: 'frame:streaming'; frameId: string; active: boolean; actor: Actor }
   | { type: 'canvas:renamed'; name: string; actor: Actor }
   | { type: 'canvas:listing'; listing: Pick<Canvas, 'publishedAt' | 'description' | 'category'> }
+  | { type: 'canvas:design-generated'; frameIds: string[] }
   | { type: 'canvas:pages'; pages: CanvasPageInfo[]; actor: Actor }
   /** a ruler guide was added or moved (guide set) or removed (null) */
   | { type: 'guide'; id: string; guide: CanvasGuide | null; actor: Actor }

@@ -1,10 +1,9 @@
-import type { AgentTask, ClientMessage, ServerMessage } from '../../shared/types'
+import type { ClientMessage, ServerMessage } from '../../shared/types'
 import { isPeerViewport } from '../../shared/viewport'
 import { roleAllows } from '../../shared/canvasRole'
 import { getIdentity } from './identity'
 import { useStore } from './store'
 import { noteTheirSave } from './theirSaves'
-import { isNewTaskCompletion } from './communityInvitation'
 
 let socket: WebSocket | null = null
 let currentCanvasId: string | null = null
@@ -13,12 +12,17 @@ let joinedAsGuest = false
 let retryTimer: number | null = null
 /* the server build this page first connected under; survives reconnects */
 let loadedBuild: string | null = null
-const taskCompletions = new Set<(task: AgentTask) => void>()
+const designGenerations = new Set<(frameIds: string[]) => void>()
+let listingRevision = 0
 
-export function subscribeToTaskCompletions(listener: (task: AgentTask) => void) {
-  taskCompletions.add(listener)
+export function canvasListingRevision() {
+  return listingRevision
+}
+
+export function subscribeToDesignGeneration(listener: (frameIds: string[]) => void) {
+  designGenerations.add(listener)
   return () => {
-    taskCompletions.delete(listener)
+    designGenerations.delete(listener)
   }
 }
 
@@ -111,6 +115,7 @@ function handle(msg: ServerMessage) {
   const me = getIdentity().clientId
   switch (msg.type) {
     case 'init':
+      listingRevision++
       /* a reconnect that lands on a different build means this page is
          running a stale bundle — offer a reload instead of forcing one,
          so in-progress work is never yanked away */
@@ -157,14 +162,9 @@ function handle(msg: ServerMessage) {
     case 'status':
       s.setStatus(msg.clientId, msg.status)
       break
-    case 'task': {
-      const previous = s.tasks.find((task) => task.id === msg.task.id)
+    case 'task':
       s.upsertTask(msg.task)
-      if (isNewTaskCompletion(msg.task, previous)) {
-        for (const listener of taskCompletions) listener(msg.task)
-      }
       break
-    }
     case 'feedback':
       s.upsertFeedback(msg.feedback)
       break
@@ -207,10 +207,14 @@ function handle(msg: ServerMessage) {
       s.renameCanvasLocal(msg.name)
       break
     case 'canvas:listing': {
+      listingRevision++
       const { publishedAt, description, category } = msg.listing
       if (s.canvas) s.setCanvas({ ...s.canvas, publishedAt, description, category })
       break
     }
+    case 'canvas:design-generated':
+      for (const listener of designGenerations) listener(msg.frameIds)
+      break
     case 'component':
       s.setComponentLocal(msg.id, msg.component)
       break

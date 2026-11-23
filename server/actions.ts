@@ -1668,17 +1668,33 @@ export function takeQueuedCardsFor(canvasId: string, agentName: string, payer?: 
   return pending
 }
 
+const generatedByCard = new WeakMap<AgentTask, string[]>()
+
 /** An agent finished its stage: hand the card to the next agent in the
  *  pipeline, or complete it if that was the last one. */
-export function advanceCard(canvasId: string, cardId: string, by: Actor): AgentTask | undefined {
+export function advanceCard(
+  canvasId: string,
+  cardId: string,
+  by: Actor,
+  generatedFrameIds: string[] = [],
+): AgentTask | undefined {
   const card = (taskLog.get(canvasId) ?? []).find((t) => t.id === cardId && t.queuedBy)
   /* a card stopped while its run went on stays stopped */
   if (!card || card.endedAt || card.failedAt) return card
   const pipeline = pipelineOf(card)
   const next = (card.stage ?? 0) + 1
-  if (next >= pipeline.length) return completeCard(canvasId, cardId)
+  const generated = [...new Set([...(generatedByCard.get(card) ?? []), ...generatedFrameIds])]
+  if (next >= pipeline.length) {
+    const completed = completeCard(canvasId, cardId)
+    const ownerId = store.getCanvas(canvasId)?.ownerId
+    if (completed && ownerId && completed.queuedByUserId === ownerId && !completed.kind && generated.length) {
+      broadcast(canvasId, { type: 'canvas:design-generated', frameIds: generated })
+    }
+    return completed
+  }
 
   edit(card).stage = next
+  if (generated.length) afterCommit(() => generatedByCard.set(card, generated))
   card.agentName = ''
   delete card.claimedAt
   delete card.failedAt
@@ -1694,6 +1710,7 @@ export function completeCard(canvasId: string, cardId: string): AgentTask | unde
   const card = (taskLog.get(canvasId) ?? []).find((t) => t.id === cardId && t.queuedBy)
   if (!card || card.endedAt) return card
   edit(card).endedAt = Date.now()
+  afterCommit(() => generatedByCard.delete(card))
   stored.saveTask(canvasId, card)
   broadcast(canvasId, { type: 'task', task: card })
   emitEvent(canvasId, { type: 'task.completed', task: card })

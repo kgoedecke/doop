@@ -1,4 +1,4 @@
-import type { AgentTask, Canvas } from '../../shared/types'
+import type { Canvas } from '../../shared/types'
 
 const COOLDOWN_MS = 7 * 24 * 60 * 60 * 1000
 const OPT_OUT = 'never'
@@ -7,22 +7,11 @@ function preferenceKey(ownerId: string) {
   return `doop:community-invitation:${ownerId}`
 }
 
-export function isNewTaskCompletion(task: AgentTask, previous: AgentTask | undefined) {
-  return (
-    previous?.id === task.id &&
-    previous.endedAt === undefined &&
-    task.endedAt !== undefined &&
-    task.failedAt === undefined
-  )
-}
-
-export function canInviteToCommunity(canvas: Canvas, task: AgentTask, ownerId: string) {
+export function canInviteToCommunity(canvas: Canvas, frameIds: string[], ownerId: string) {
   return (
     canvas.ownerId === ownerId &&
     canvas.publishedAt === undefined &&
-    task.queuedByUserId === ownerId &&
-    !task.kind &&
-    canvas.frames.some((frame) => !frame.demo && frame.createdAt >= task.startedAt && task.frameIds?.includes(frame.id))
+    canvas.frames.some((frame) => !frame.demo && frameIds.includes(frame.id))
   )
 }
 

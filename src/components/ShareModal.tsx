@@ -7,6 +7,7 @@ import { api, ApiError, paywalledWorkspace, type CanvasMember } from '../lib/api
 import { PERSONAL_WORKSPACE, UpgradeModal } from './WorkspaceModals'
 import { authClient } from '../lib/auth'
 import { posthog } from '../lib/posthog'
+import { canvasListingRevision } from '../lib/ws'
 import { Avatar } from './ui/avatar'
 import { Button } from './ui/button'
 import { Checkbox } from './ui/checkbox'
@@ -66,7 +67,7 @@ export function ShareModal({
 }: {
   canvas: ShareableCanvas
   communityFirst?: boolean
-  onChange: (patch: SharePatch) => void
+  onChange: (patch: SharePatch, listingRevision?: number) => void
   onClose: () => void
   onCopied: () => void
 }) {
@@ -197,6 +198,7 @@ export function ShareModal({
 
   const communityListing = isOwner && (
     <CommunityListing
+      key={JSON.stringify([canvas.publishedAt, canvas.description, canvas.category])}
       canvas={canvas}
       autoFocus={communityFirst}
       busy={busy}
@@ -370,7 +372,7 @@ function CommunityListing({
   busy: boolean
   setBusy: (busy: boolean) => void
   setError: (error: string | null) => void
-  onChange: (patch: SharePatch) => void
+  onChange: (patch: SharePatch, listingRevision?: number) => void
 }) {
   const published = canvas.publishedAt !== undefined
   const [confirming, setConfirming] = useState(false)
@@ -381,18 +383,24 @@ function CommunityListing({
 
   async function save(next: boolean) {
     if (busy) return
+    const revision = canvasListingRevision()
     setBusy(true)
     setError(null)
     try {
       if (next) {
-        const listing = await api.publishCanvas(canvas.id, { description: description.trim(), category })
+        const listing = await api.publishCanvas(canvas.id, {
+          description: description.trim(),
+          category,
+          expectedPublishedAt: canvas.publishedAt,
+        })
         if (!published) posthog.capture('canvas_published')
         setConfirming(false)
-        onChange(listing)
+        const { publishedAt, description: nextDescription, category: nextCategory } = listing
+        onChange({ publishedAt, description: nextDescription, category: nextCategory }, revision)
       } else {
         await api.unpublishCanvas(canvas.id)
         posthog.capture('canvas_unpublished')
-        onChange({ publishedAt: undefined, description: undefined, category: undefined })
+        onChange({ publishedAt: undefined, description: undefined, category: undefined }, revision)
       }
     } catch (caught) {
       setError(
@@ -413,11 +421,11 @@ function CommunityListing({
       >
         <Checkbox
           autoFocus={autoFocus}
-          checked={published || confirming}
+          checked={published}
           disabled={busy}
-          onChange={(event) => {
+          onChange={() => {
             if (published) void save(false)
-            else setConfirming(event.target.checked)
+            else setConfirming(!confirming)
           }}
         />
         {t('panels.shareGallery')}

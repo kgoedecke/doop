@@ -6,7 +6,7 @@ import {
 } from '../lib/communityInvitation'
 import { useT } from '../lib/i18n'
 import { useStore } from '../lib/store'
-import { subscribeToTaskCompletions } from '../lib/ws'
+import { subscribeToDesignGeneration } from '../lib/ws'
 import { Button } from './ui/button'
 
 export function CommunityInvitation({
@@ -26,9 +26,9 @@ export function CommunityInvitation({
 
   useEffect(() => {
     if (paused || offered) return
-    return subscribeToTaskCompletions((task) => {
+    return subscribeToDesignGeneration((frameIds) => {
       const { canvas } = useStore.getState()
-      if (document.hidden || canvas?.id !== canvasId || !canInviteToCommunity(canvas, task, ownerId)) return
+      if (document.hidden || canvas?.id !== canvasId || !canInviteToCommunity(canvas, frameIds, ownerId)) return
       if (claimCommunityInvitation(ownerId)) setOffered(true)
     })
   }, [canvasId, offered, ownerId, paused])

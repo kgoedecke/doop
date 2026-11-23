@@ -725,6 +725,7 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
     /* a review pass legitimately ends without touching a frame; an
        originating pass that changed nothing has not delivered its card */
     const requireMutation = cards.length > 0 && !role.reviewer
+    const existingFrameIds = new Set(canvas?.frames.map((frame) => frame.id))
     const messages: Anthropic.MessageParam[] = [{ role: 'user', content: kickoff }]
     const runState: RunState = {
       mutatedFrames: new Set(),
@@ -1122,7 +1123,11 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
       for (const f of claimed) actions.completeTaskFeedback(f.id)
       settleComments(canvasId, comments, actor, { ok: true, summary }, runState)
       /* a card moves to the next agent in its pipeline, or finishes here */
-      for (const c of cards) actions.advanceCard(canvasId, c.id, actor)
+      const generated =
+        cards.length === 1 && claimed.length === 0 && comments.length === 0 && !runState.automated
+          ? deliverableFrames.filter((id) => !existingFrameIds.has(id))
+          : []
+      for (const c of cards) actions.advanceCard(canvasId, c.id, actor, generated)
     } else {
       let reason: string
       if (staleAccount) {

@@ -7,7 +7,7 @@ import { enterSelection, exitSelection, selectSibling } from '../lib/selectionKe
 import { dispatchActionKey, setActionHost, type ActionHost } from '../lib/actions/registry'
 import { presentStartFrame } from '../lib/present'
 import { canHideUi, hideUiHinted } from '../lib/hideUi'
-import { connect, disconnect, sendWs } from '../lib/ws'
+import { canvasListingRevision, connect, disconnect, sendWs } from '../lib/ws'
 import {
   api,
   ApiError,
@@ -1364,9 +1364,11 @@ export function CanvasPage({
           key={canvas.id}
           canvas={canvas}
           communityFirst={showShare === 'community'}
-          onChange={(patch) => {
+          onChange={(patch, listingRevision) => {
             const current = useStore.getState().canvas
-            if (current?.id === canvasId) useStore.getState().setCanvas({ ...current, ...patch })
+            if (current?.id !== canvasId) return
+            if (listingRevision !== undefined && listingRevision !== canvasListingRevision()) return
+            useStore.getState().setCanvas({ ...current, ...patch })
           }}
           onClose={() => setShowShare(null)}
           onCopied={() => {
