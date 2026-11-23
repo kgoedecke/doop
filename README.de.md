@@ -236,7 +236,7 @@ verpasst, erhält eine E-Mail-Zusammenfassung (abstellbar unter Settings → Acc
 
 Doop zeigt dir einen Hinweis, wenn du ein Canvas über einen Ansichts- oder Kommentarlink öffnest.
 Über beide Links kannst du das Design ansehen. Über den Kommentarlink kannst du auch kommentieren.
-Zum Bearbeiten brauchst du eine entsprechende Freigabe.
+Für Änderungen am Design brauchst du Bearbeitungsrechte.
 
 Beim Import wählst du als Quelle **Website** (eine Seite oder eine ganze Website erkunden und Seiten
 auswählen), **Live app** (das
@@ -316,9 +316,9 @@ ungefragt frei, und Automationsläufe können nicht freigeben. Wähle in **Autom
 bereit für die Entwicklung sind. Ohne aktivierten Workflow hält die Freigabe nur die Abnahme fest.
 
 Das REST-Pendant ist `PUT /api/frames/:id/approval` mit
-`{ status: "ready_for_dev" | "draft", expectedUpdatedAt }`. Die Identität des angemeldeten Nutzers
-liefert die Zuordnung. Der Endpunkt wendet dieselben Canvas-Zugriffsregeln an wie das Bearbeiten und
-liefert `409`, wenn die geprüfte Revision veraltet ist.
+`{ status: "ready_for_dev" | "draft", expectedUpdatedAt }`. Doop speichert die Freigabe im Namen
+des angemeldeten Nutzers. Der Endpunkt verwendet dieselben Canvas-Zugriffsregeln wie beim
+Bearbeiten und liefert `409`, wenn die geprüfte Revision veraltet ist.
 
 ## Klickbare Prototypen
 
@@ -609,9 +609,9 @@ freigegeben hat, und haben genau dessen Zugriff.
 </p>
 
 Wenn SMTP konfiguriert ist (`SMTP_HOST` usw., siehe [.env.example](.env.example)), müssen neue
-Konten ihre E-Mail-Adresse bestätigen. "Passwort vergessen" verschickt echte Links zum Zurücksetzen.
-Ohne SMTP bleibt die Registrierung offen und jede E-Mail wird samt Links im Serverlog ausgegeben.
-Die Abläufe funktionieren damit auch in der Entwicklung.
+Konten ihre E-Mail-Adresse bestätigen. Bei "Passwort vergessen" schickt Doop den Link zum
+Zurücksetzen per E-Mail. Ohne SMTP bleibt die Registrierung offen. Doop schreibt die E-Mails samt
+Links ins Serverlog. So kannst du die Abläufe auch in der Entwicklung testen.
 
 Setze `SIGNUP_EMAIL_DOMAINS=jointhetroops.com`, um neue Konten auf eine E-Mail-Domain zu
 beschränken. Für mehrere Domains nutze eine kommagetrennte Liste. Der Abgleich ignoriert Groß- und
@@ -695,9 +695,9 @@ Optionale Anmeldung über einen externen OIDC-Anbieter (Zitadel, Okta, Authentik
 ergänzend zu E-Mail und Passwort. Sie ersetzt diese nicht. Setze `OIDC_ISSUER`, `OIDC_CLIENT_ID` und
 `OIDC_CLIENT_SECRET` gemeinsam, um SSO zu aktivieren. Bei unvollständiger Konfiguration startet die
 Instanz nicht. `OIDC_SCOPES` (Standard `openid email profile`) und `OIDC_PROVIDER_NAME` (Standard
-`SSO`, auf dem Anmeldebutton angezeigt, z. B. `Zitadel`) sind optional. Bei der Anmeldung über SSO
-wird ein bestehendes Konto mit E-Mail und Passwort verknüpft, wenn die E-Mail-Adressen
-übereinstimmen und der Anbieter die Adresse als verifiziert markiert. Das funktioniert auch auf
+`SSO`, auf dem Anmeldebutton angezeigt, z. B. `Zitadel`) sind optional. Doop verknüpft die
+SSO-Anmeldung mit einem vorhandenen Konto mit Passwort, wenn die E-Mail-Adressen übereinstimmen
+und der Anbieter die Adresse als verifiziert markiert. Das funktioniert auch auf
 einer Instanz ohne SMTP, auf der sich ein lokales Konto sonst nicht selbst verifizieren könnte. SSO
 allein vergibt niemals die Admin-Rolle, auch nicht für eine in `ADMIN_EMAILS` aufgeführte Adresse.
 Doop vertraut dem Identitätsanbieter nur bei der Bestätigung der E-Mail-Adresse. Doop vergibt die
