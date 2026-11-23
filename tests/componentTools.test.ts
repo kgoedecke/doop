@@ -18,6 +18,7 @@ import * as screenshot from '../server/screenshot.ts'
 import { DEFAULT_ROLE_ID, roleName } from '../shared/agents.ts'
 import { store } from '../server/store.ts'
 import * as propagation from '../server/propagation.ts'
+import * as actions from '../server/actions.ts'
 import { resolveActor, takeComponentIssues } from '../server/actions.ts'
 import { findComponent } from '../server/componentActions.ts'
 import { previewCombinations, previewDocument } from '../server/componentPreview.ts'
@@ -66,6 +67,23 @@ async function button(canvasId: string) {
     props: [{ name: 'tone', type: 'enum', options: ['solid', 'ghost'] }],
   })
   return data
+}
+
+function residentRunState() {
+  return {
+    mutatedFrames: new Set<string>(),
+    sourceFrames: new Set<string>(),
+    verificationFrames: new Set<string>(),
+    verifiedFrames: new Set<string>(),
+    seenVerified: new Set<string>(),
+    rewriteDrafts: new Map<string, string>(),
+    vision: false,
+    imagesGenerated: 0,
+    repliedThreads: new Set<string>(),
+    awaitingThreads: new Set<string>(),
+    tokenWrites: 0,
+    arrangeWrites: 0,
+  }
 }
 
 async function framed(canvasId: string, body: string, name = 'Screen') {
@@ -161,20 +179,7 @@ describe('an agent working with components', () => {
     const canvas = newCanvas()
     await button(canvas.id)
     const resident = resolveActor({ name: roleName(DEFAULT_ROLE_ID), kind: 'agent' })
-    const runState = {
-      mutatedFrames: new Set<string>(),
-      sourceFrames: new Set<string>(),
-      verificationFrames: new Set<string>(),
-      verifiedFrames: new Set<string>(),
-      seenVerified: new Set<string>(),
-      rewriteDrafts: new Map<string, string>(),
-      vision: false,
-      imagesGenerated: 0,
-      repliedThreads: new Set<string>(),
-      awaitingThreads: new Set<string>(),
-      tokenWrites: 0,
-      arrangeWrites: 0,
-    }
+    const runState = residentRunState()
     const shoot = (input: Record<string, unknown>) =>
       execTool(
         { type: 'tool_use', id: 't1', name: 'screenshot_component', input: { component: 'Button', ...input } },
@@ -407,6 +412,53 @@ describe('an agent working with components', () => {
     const html = store.getFrame(frameId)!.html
     expect(html).not.toContain('data-doop-instance')
     expect(html).toContain('Placed')
+  })
+
+  it('changes the props of several instances in one write, found by the ids each agent reads', async () => {
+    const canvas = newCanvas()
+    await button(canvas.id)
+    const frameId = await framed(
+      canvas.id,
+      '<doop-use component="Button" label="One"></doop-use><doop-use component="Button" label="Two"></doop-use>',
+    )
+    const ids = (await call('get_frame', { frame_id: frameId })).data.instances.map(
+      (instance: { instance_id: string }) => instance.instance_id,
+    )
+    expect(ids).toHaveLength(2)
+
+    /* the built-in agent reads the same ids off the <doop-use> lines of the compact read */
+    const resident = resolveActor({ name: roleName(DEFAULT_ROLE_ID), kind: 'agent' })
+    const read = await execTool(
+      { type: 'tool_use', id: 't1', name: 'get_frame_html', input: { frame_id: frameId } },
+      canvas.id,
+      resident,
+      residentRunState(),
+    )
+    for (const id of ids) expect(String(read.content)).toContain(`<doop-use component="Button" id="${id}"`)
+
+    const write = vi.spyOn(actions, 'updateFrame')
+    const changed = await call('update_instances', {
+      canvas_id: canvas.id,
+      frame_id: frameId,
+      instances: [
+        { instance_id: ids[0], props: { label: 'Alpha', tone: 'ghost' } },
+        { instance_id: ids[1], props: { label: 'Beta' } },
+        { instance_id: 'nosuch', props: { label: 'Gamma' } },
+      ],
+    })
+    expect(changed.isError).toBe(false)
+    expect(changed.data.not_found).toEqual(['nosuch'])
+    expect(write.mock.calls.filter(([id]) => id === frameId)).toHaveLength(1)
+
+    const props = (await call('get_frame', { frame_id: frameId })).data.instances.map(
+      (instance: { props: Record<string, string> }) => instance.props,
+    )
+    expect(props).toEqual([{ label: 'Alpha', tone: 'ghost' }, { label: 'Beta' }])
+    const html = store.getFrame(frameId)!.html
+    expect(html).toContain('Alpha')
+    expect(html).toContain('Beta')
+    expect(html.match(/<button [^>]*data-tone="ghost"/g)).toHaveLength(1)
+    expect(html.match(/<button [^>]*data-tone="solid"/g)).toHaveLength(1)
   })
 
   it('keeps what is built from a component working when it is renamed', async () => {

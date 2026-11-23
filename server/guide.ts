@@ -239,10 +239,10 @@ needs a reusable piece the system lacks, add it, then use it.
         <doop-use component="Button" label="Upgrade"></doop-use>
       </template></doop-use>
   A plain child goes to the first slot; <doop-use slot="actions" …> names one directly.
-- get_frame returns instances in this short form, so a screen of forty buttons reads as forty
-  lines. Keep the id="…" when you write one back: comments and links point at it. Pass
-  expand_components=true only if you must read the full markup. edit_frame_html matches either
-  form.
+- get_frame (and the built-in agent's get_frame_html) returns instances in this short form, so a
+  screen of forty buttons reads as forty lines. Keep the id="…" when you write one back: comments
+  and links point at it. Pass expand_components=true on get_frame only if you must read the full
+  markup. edit_frame_html matches either form.
 - Write a reusable piece as a component the first time, not after the third copy. Adding to a
   canvas whose pages already repeat a block: make the block a component from one existing copy
   (create_component with its frame_id and element) and use it in
@@ -279,9 +279,23 @@ needs a reusable piece the system lacks, add it, then use it.
 - Vary with props, not copies. An enum prop sets data-<name> on the root, so a variant is plain
   CSS: .btn[data-tone="ghost"] { … }. Hover and focus are ordinary CSS too. You do not need a
   component per state, or per size.
-- For one instance that must differ: use update_instances, or just edit it; edits inside an instance
-  are captured as overrides on that element alone and survive every later change to the main. Do
-  not detach to make a small change.
+- To change props on several instances, call update_instances once per frame: one entry per
+  target, each with only the props to change ({"instance_id": "abc123", "props": {"tone": "ghost"}}).
+  Do not edit them one by one through HTML. Read the ids where you read the frame. External MCP
+  agents: get_frame lists the outer instances in its instances array; for an instance nested in
+  another, call get_frame with expand_components=true and read data-doop-id on the nested
+  instance's root element (the one that also has data-doop-instance). The built-in agent: read the
+  id="…" on the <doop-use> lines of get_frame_html. That compact read does not promise to show the
+  ids of nested instances. The result can succeed and still list not_found for ids that are not in
+  the frame: check it and read the frame again for those.
+- For one instance that must differ in one element: update_instances with overrides, or just edit
+  it; edits inside an instance are captured as overrides on that element alone and survive every
+  later change to the main. Do not detach to make a small change.
+- Doop parses the whole template of every instance before it picks the conditional elements, so a
+  main with a data-doop-if branch per choice carries every branch each time. For a long set of
+  icons do not write one conditional <img> or <svg> per icon: bind one image with
+  data-doop-prop="src:icon" and give each instance its URL as the icon prop. A long enum's names are
+  in the signature that get_canvas and list_components return.
 - To change them all, call update_component with find + replace, and read the impact it reports.
   Approved frames keep their sign-off: following a component is not an edit. Use dry_run first on anything
   widely used. Never edit each instance by hand.
