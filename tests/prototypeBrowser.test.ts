@@ -465,13 +465,13 @@ describe.skipIf(!findBrowserPath())('prototype player', { timeout: 30_000 }, () 
     })
 
     /* only the top screen takes input: the screen an overlay covers stays put */
-    const COVERED: Canvas = {
+    const covered = (withDelay: boolean): Canvas => ({
       ...CANVAS,
       frames: [
         frame(
           'home',
           `<button id="help" data-doop-on="click" data-doop-action="overlay:menu">Help</button>
-           <div data-doop-on="delay:800" data-doop-action="navigate:detail"></div>
+           ${withDelay ? '<div data-doop-on="delay:800" data-doop-action="navigate:detail"></div>' : ''}
            <div data-doop-on="key:k" data-doop-action="navigate:detail"></div>`,
         ),
         frame('detail', `<button id="back" data-doop-on="click" data-doop-action="back">Back</button>`, 500),
@@ -489,7 +489,7 @@ describe.skipIf(!findBrowserPath())('prototype player', { timeout: 30_000 }, () 
           1500,
         ),
       ],
-    }
+    })
     const focusedScreen = () =>
       page.evaluate(() => (document.activeElement as HTMLElement | null)?.dataset.doopProtoFrame)
     /* a wait that, when it never comes true, says where the focus and the overlays are */
@@ -512,7 +512,7 @@ describe.skipIf(!findBrowserPath())('prototype player', { timeout: 30_000 }, () 
     }
 
     it('runs only the top screen’s delays and keys while an overlay is open', async () => {
-      await page.evaluate((canvas) => (window as unknown as Fixture).seed(canvas), COVERED)
+      await page.evaluate((canvas) => (window as unknown as Fixture).seed(canvas), covered(true))
       await page.evaluate(() => (window as unknown as Fixture).play('home'))
       const home = await screen('home')
       /* a real click focuses the screen that opens the overlay */
@@ -532,7 +532,7 @@ describe.skipIf(!findBrowserPath())('prototype player', { timeout: 30_000 }, () 
     })
 
     it('hands the focus back to the uncovered screen as nested overlays close', async () => {
-      await page.evaluate((canvas) => (window as unknown as Fixture).seed(canvas), COVERED)
+      await page.evaluate((canvas) => (window as unknown as Fixture).seed(canvas), covered(false))
       await page.evaluate(() => (window as unknown as Fixture).play('home'))
       const home = await screen('home')
       await home.$eval('#help', (el) => (el as HTMLElement).focus())
