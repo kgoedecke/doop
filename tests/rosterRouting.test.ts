@@ -57,6 +57,16 @@ it('marks a text-only roster pick as vision: false', async () => {
   expect(await pickModel('a')).toMatchObject({ vision: false, label: 'OpenRouter (z-ai/glm-5.3)' })
 })
 
+it('keeps vision on an OpenRouter pick saved before the roster moved on', async () => {
+  mocks.account.mockResolvedValue({
+    kind: 'openrouter-key',
+    userId: 'a',
+    apiKey: 'sk-or-a',
+    model: 'google/gemini-3.7-flash',
+  })
+  expect(await pickModel('a')).toMatchObject({ vision: true, label: 'OpenRouter (google/gemini-3.7-flash)' })
+})
+
 it('treats an off-menu OpenRouter override as text-only, the safe degraded default', async () => {
   mocks.account.mockResolvedValue({ kind: 'openrouter-key', userId: 'a', apiKey: 'sk-or-a', model: 'acme/mystery-1' })
   expect(await pickModel('a')).toMatchObject({ vision: false })
@@ -68,7 +78,7 @@ it('routes a Gemini account with its default model and vision intact', async () 
     .spyOn(globalThis, 'fetch')
     .mockResolvedValue(new Response(JSON.stringify({ choices: [{ message: { content: 'Done' } }] }), { status: 200 }))
   const model = await pickModel('bob')
-  expect(model).toMatchObject({ provider: 'gemini-key', vision: true, label: 'Gemini (gemini-3.7-flash)' })
+  expect(model).toMatchObject({ provider: 'gemini-key', vision: true, label: 'Gemini (gemini-4-hydrogen)' })
   expect(await model!.run(request)).toMatchObject({ stop_reason: 'end_turn' })
   expect(String(fetchSpy.mock.calls[0]![0])).toContain('generativelanguage.googleapis.com')
 })

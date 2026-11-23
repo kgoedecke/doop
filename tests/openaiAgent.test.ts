@@ -160,8 +160,9 @@ describe('model menu', () => {
     vi.resetModules()
   })
 
-  it('offers GPT-6 Astra above the GPT-5.6 tiers', () => {
+  it('offers GPT-6.2 Sol and GPT-6 Astra above the GPT-5.6 tiers', () => {
     expect(AGENT_MODELS.map((model) => model.id)).toEqual([
+      'gpt-6.2-sol',
       'gpt-6-astra',
       'gpt-5.6-sol',
       'gpt-5.6-terra',
@@ -171,11 +172,11 @@ describe('model menu', () => {
     expect(isKnownModel('gpt-6')).toBe(false)
   })
 
-  it('defaults to Terra when no override is set, whatever this shell exports', async () => {
+  it('defaults to GPT-6.2 Sol when no override is set, whatever this shell exports', async () => {
     vi.stubEnv('DOOP_AGENT_OPENAI_MODEL', '')
     vi.resetModules()
     const fresh = await import('../server/openaiAgent.ts')
-    expect(fresh.DEFAULT_OPENAI_MODEL).toBe('gpt-5.6-terra')
+    expect(fresh.DEFAULT_OPENAI_MODEL).toBe('gpt-6.2-sol')
   })
 
   it('tells a model the account cannot run apart from a dead credential', async () => {

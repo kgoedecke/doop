@@ -26,15 +26,21 @@ export interface ModelOption {
  */
 export const OPENROUTER_MODELS: ModelOption[] = [
   {
+    id: 'moonshotai/kimi-k3.1-pro',
+    name: 'Kimi K3.1 Pro',
+    blurb: 'Moonshot’s flagship — strong agentic design work. A good default.',
+    vision: true,
+  },
+  {
     id: 'moonshotai/kimi-k3',
     name: 'Kimi K3',
-    blurb: 'Moonshot’s flagship — strong agentic design work.',
+    blurb: 'The previous flagship, still dependable.',
     vision: true,
   },
   {
     id: 'moonshotai/kimi-k2.6',
     name: 'Kimi K2.6',
-    blurb: 'Open-weight all-rounder with solid tool use. A good default.',
+    blurb: 'Older open-weight all-rounder; Moonshot retires it end of 2026.',
     vision: true,
   },
   {
@@ -51,9 +57,15 @@ export const OPENROUTER_MODELS: ModelOption[] = [
   },
   { id: 'qwen/qwen3.7-plus', name: 'Qwen3.7 Plus', blurb: 'Multimodal workhorse — fast and dependable.', vision: true },
   {
+    id: 'google/gemini-3.8-flash',
+    name: 'Gemini 3.8 Flash',
+    blurb: 'Google’s coding and agent workhorse.',
+    vision: true,
+  },
+  {
     id: 'google/gemini-3.7-flash',
     name: 'Gemini 3.7 Flash',
-    blurb: 'Google’s coding and agent workhorse.',
+    blurb: 'The previous Flash; Google retired it for 3.8.',
     vision: true,
   },
   { id: 'z-ai/glm-5.3-flash', name: 'GLM-5.3 Flash', blurb: 'Zhipu’s fast tier, with vision.', vision: true },
@@ -79,10 +91,16 @@ export const OPENROUTER_MODELS: ModelOption[] = [
   { id: 'xiaomi/mimo-v2.6-pro', name: 'MiMo V2.6 Pro', blurb: 'Xiaomi’s multimodal pro tier.', vision: true },
 ]
 
-export const DEFAULT_OPENROUTER_MODEL = 'moonshotai/kimi-k2.6'
+export const DEFAULT_OPENROUTER_MODEL = 'moonshotai/kimi-k3.1-pro'
 
 /** Gemini direct (Google AI Studio API key). */
 export const GEMINI_MODELS: ModelOption[] = [
+  {
+    id: 'gemini-4-hydrogen',
+    name: 'Gemini 4 Hydrogen',
+    blurb: 'Google’s everyday Gemini 4 model. A good default for design work.',
+    vision: true,
+  },
   {
     id: 'gemini-3.1-pro-preview',
     name: 'Gemini 3.1 Pro',
@@ -90,14 +108,14 @@ export const GEMINI_MODELS: ModelOption[] = [
     vision: true,
   },
   {
-    id: 'gemini-3.7-flash',
-    name: 'Gemini 3.7 Flash',
-    blurb: 'The everyday workhorse. A good default for design work.',
+    id: 'gemini-3.8-flash',
+    name: 'Gemini 3.8 Flash',
+    blurb: 'The previous Flash, cheaper per token.',
     vision: true,
   },
 ]
 
-export const DEFAULT_GEMINI_MODEL = 'gemini-3.7-flash'
+export const DEFAULT_GEMINI_MODEL = 'gemini-4-hydrogen'
 
 /**
  * DeepSeek direct (a platform.deepseek.com key). A curated roster like
@@ -272,6 +290,24 @@ export const ANTHROPIC_MODELS: ModelOption[] = [
     vision: true,
   },
   {
+    id: 'claude-opus-5-5',
+    name: 'Opus 5.5',
+    blurb: 'Anthropic’s recommended start — complex layouts and demanding work.',
+    vision: true,
+  },
+  {
+    id: 'claude-sonnet-5-5',
+    name: 'Sonnet 5.5',
+    blurb: 'Faster and cheaper, for everyday design work.',
+    vision: true,
+  },
+  {
+    id: 'claude-haiku-5-5',
+    name: 'Haiku 5.5',
+    blurb: 'For quick edits and straightforward tasks.',
+    vision: true,
+  },
+  {
     id: 'claude-opus-5',
     name: 'Opus 5',
     blurb: 'For complex layouts and demanding design or coding work.',
@@ -286,7 +322,7 @@ export const ANTHROPIC_MODELS: ModelOption[] = [
   },
 ]
 
-export const DEFAULT_ANTHROPIC_MODEL = 'claude-sonnet-5'
+export const DEFAULT_ANTHROPIC_MODEL = 'claude-opus-5-5'
 
 /**
  * The small, vision-capable tier an image description runs on, per account
@@ -297,13 +333,13 @@ export const DEFAULT_ANTHROPIC_MODEL = 'claude-sonnet-5'
  * drop to low reasoning effort instead.
  */
 export const DESCRIBER_MODELS: Readonly<Record<string, string>> = {
-  'anthropic-key': 'claude-haiku-4-5-20251001',
-  'gemini-key': 'gemini-3.7-flash',
-  'openrouter-key': 'google/gemini-3.7-flash',
+  'anthropic-key': 'claude-haiku-5-5',
+  'gemini-key': 'gemini-3.8-flash',
+  'openrouter-key': 'google/gemini-3.8-flash',
 }
 
 /** The server tier's describer when DOOP_AGENT_PROVIDER is anthropic. */
-export const DESCRIBER_ANTHROPIC_MODEL = 'claude-haiku-4-5-20251001'
+export const DESCRIBER_ANTHROPIC_MODEL = 'claude-haiku-5-5'
 
 /**
  * How hard an OpenAI model thinks per turn, on a ChatGPT subscription or an

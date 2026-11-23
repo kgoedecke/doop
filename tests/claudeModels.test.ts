@@ -46,7 +46,7 @@ describe('Claude model preferences', () => {
     'claude-x'.padEnd(120, 'x'),
   ])('falls back to the default for %s', (saved) => {
     expect(isClaudeModel(saved)).toBe(false)
-    expect(normalizeClaudeModel(saved)).toBe('sonnet')
+    expect(normalizeClaudeModel(saved)).toBe('opus')
   })
 
   it('knows the CLI effort levels and nothing else', () => {
