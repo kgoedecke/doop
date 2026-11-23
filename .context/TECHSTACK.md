@@ -1281,6 +1281,9 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
 - React 18.3.1 + Vite 8 - SPA, entry at `index.html`.
 - Tailwind CSS 4.3.3 (`@tailwindcss/vite` 4.3.3) - styling; `tw-animate-css` 1.4.0 for animation
   utilities. Design tokens in `src/styles.css` (see `.context/DESIGN.md`).
+- `index.html` preloads the bundled Latin Inter while the app starts. The sign-in card appears with
+  Inter once it loads. If the file fails or takes longer than 1.5 seconds after app startup, the card
+  uses the system font for that page visit. `tests/authStartupBrowser.test.ts` exercises these cases.
 - Tauri 2.9.0 (`@tauri-apps/cli`, `desktop/src-tauri`) - desktop app wrapper around the web build.
 - Chromium shell (the macOS app): `desktop/src-tauri-chromium` builds the same sources (its
   `[[bin]]` and build script point into `desktop/src-tauri`) on Tauri 3.0.0-alpha.5 with

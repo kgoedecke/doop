@@ -30,7 +30,8 @@ White system (Doop UI v2, canvas guideline `doop-ui-system`): neutral greys, no 
 ## Typography
 
 - `--font-ui` / `--font-display`: `'Inter'` - UI and headings (`--font-sans` / `--font-heading`
-  aliases). `--font-mono`: `'Geist Mono', ui-monospace, monospace` - values only (ids, sizes,
+  aliases). Doop serves the Inter WOFF2 subsets from `src/assets/fonts/`. The initial HTML
+  preloads the Latin subset at weights 400–600. `--font-mono`: `'Geist Mono', ui-monospace, monospace` - values only (ids, sizes,
   numbers, key caps, code); the mono-uppercase caption voice is retired, captions and field labels
   are `text-caption` / `text-label` in sentence case. `--font-hero`: `'Hanken Grotesk'` Light - the
   home greeting, and nothing else (loaded in `index.html`). Every font stack lists `'Doop Keys'`

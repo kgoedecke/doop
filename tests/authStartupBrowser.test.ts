@@ -71,6 +71,61 @@ describe.skipIf(!findBrowserPath())('production sign-in startup', { timeout: 30_
     await page.waitForFunction(() => getComputedStyle(document.documentElement).getPropertyValue('--test-font-ready'))
   })
 
+  it.each(['loaded', 'failed', 'late'] as const)('shows the login when the local Inter font is %s', async (outcome) => {
+    const page = await pages.open()
+    const isInter = (request: HTTPRequest) =>
+      /\/assets\/inter-latin-[^/]+\.woff2$/.test(new URL(request.url()).pathname)
+    const isApp = (request: HTTPRequest) => /\/assets\/index-[^/]+\.js$/.test(new URL(request.url()).pathname)
+    await page.setRequestInterception(true)
+    page.on('request', async (request) => {
+      if (isInter(request) || isApp(request)) return
+      if (new URL(request.url()).hostname === 'fonts.googleapis.com') {
+        await request.respond({ status: 200, contentType: 'text/css', body: '' })
+      } else {
+        await request.continue()
+      }
+    })
+
+    const font = page.waitForRequest(isInter)
+    const app = page.waitForRequest(isApp)
+    const navigation = page.goto(`${server.base}/auth`, { waitUntil: 'domcontentloaded' })
+    const [fontRequest, appRequest] = await Promise.all([font, app])
+    // The browser found the font even though the app code is still held.
+    await appRequest.continue()
+    await navigation
+    const title = '[data-slot="auth-card"] h1'
+    await page.waitForSelector(title)
+    expect(await page.$eval(title, (heading) => getComputedStyle(heading).visibility)).toBe('hidden')
+
+    if (outcome === 'loaded') await fontRequest.continue()
+    if (outcome === 'failed') await fontRequest.abort()
+
+    await page.waitForSelector(title, { visible: true })
+    const fontFamily = () => page.$eval(title, (heading) => getComputedStyle(heading).fontFamily)
+    if (outcome === 'loaded') {
+      expect(await fontFamily()).toMatch(/^Inter,/)
+      expect(
+        await page.evaluate(() =>
+          [...document.fonts].some((font) => font.family === 'Inter' && font.status === 'loaded'),
+        ),
+      ).toBe(true)
+    } else {
+      expect(await fontFamily()).not.toContain('Inter')
+    }
+
+    const email = 'input[autocomplete="email"]'
+    await page.locator(email).fill('visitor@example.test')
+    expect(await page.$eval(email, (input) => input.value)).toBe('visitor@example.test')
+    if (outcome === 'late') {
+      await fontRequest.continue()
+      await page.evaluate(async () => {
+        await document.fonts.load('400 1em Inter')
+      })
+      expect(await fontFamily()).not.toContain('Inter')
+      expect(await page.$eval(email, (input) => input.value)).toBe('visitor@example.test')
+    }
+  })
+
   it.each([
     {
       flow: 'provider callback',

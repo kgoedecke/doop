@@ -1,6 +1,7 @@
 @import 'tailwindcss';
 @import 'tw-animate-css';
 @import 'shadcn/tailwind.css';
+@import './assets/fonts/inter.css';
 
 @custom-variant dark (&:where(.dark, .dark *));
 
@@ -434,6 +435,16 @@
     background-color: var(--surface);
     color: var(--ink);
   }
+}
+
+html[data-auth-font='loading'] [data-slot='auth-screen'] > * {
+  visibility: hidden;
+}
+
+html[data-auth-font='fallback'] [data-slot='auth-screen'] {
+  --font-ui: 'Doop Keys', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+  --font-display: var(--font-ui);
+  font-family: var(--font-ui);
 }
 
 .dark {

@@ -17,6 +17,20 @@ if (fonts instanceof HTMLLinkElement) {
   else fonts.addEventListener('load', () => (fonts.media = 'all'), { once: true })
 }
 
+const page = document.documentElement
+page.dataset.authFont = 'loading'
+const useFallbackFont = () => {
+  page.dataset.authFont = 'fallback'
+}
+// Keeping the fallback after a timeout prevents a late Inter download from swapping the login text.
+const fontTimeout = window.setTimeout(useFallbackFont, 1500)
+void document.fonts
+  .load('400 1em Inter')
+  .then(() => {
+    if (page.dataset.authFont === 'loading') delete page.dataset.authFont
+  }, useFallbackFont)
+  .finally(() => window.clearTimeout(fontTimeout))
+
 installTranslateGuard()
 initDesktopShell()
 initTheme()
