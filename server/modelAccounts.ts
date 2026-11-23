@@ -29,6 +29,16 @@ import {
   type CustomProviderKind,
 } from '../shared/customProvider.ts'
 import { effortFor, modelFor } from './openaiAgent.ts'
+import {
+  getSharedPref,
+  getSharedPrefs,
+  getSharedProvider,
+  isSharedKind,
+  listSharedProviders,
+  saveSharedPref,
+  type SharedProvider,
+  type SharedProviderPrefs,
+} from './sharedModelAccounts.ts'
 
 /**
  * "Bring your own model": a user connects their ChatGPT subscription (or an
@@ -118,6 +128,9 @@ export interface ModelAccount {
   custom?: CustomProviderConfig
   /** a custom provider's extra request headers */
   headers?: Record<string, string>
+  /** an admin's shared provider (sharedModelAccounts.ts): the person picks
+   *  its model and switches it on or off, nothing more */
+  shared?: true
 }
 
 /** A custom provider as Settings shows it: the description, which headers
@@ -139,6 +152,8 @@ export interface AccountStatus {
   effort?: string
   connectedAt: number
   custom?: CustomProviderStatus
+  /** set up by an admin for everyone: no edit, no disconnect */
+  shared?: true
 }
 
 export function isBuiltinAccountKind(value: unknown): value is BuiltinAccountKind {
@@ -220,26 +235,90 @@ function baseAccount(row: typeof modelAccounts.$inferSelect, kind: AccountKind):
   }
 }
 
-/** Every account this person connected, switched on or off, oldest first. */
-export async function getAccounts(userId: string): Promise<ModelAccount[]> {
-  const rows = await db
-    .select()
-    .from(modelAccounts)
-    .where(eq(modelAccounts.userId, userId))
-    .orderBy(asc(modelAccounts.connectedAt))
-  return rows.map(toAccount).filter((account): account is ModelAccount => account !== null)
+/** A shared provider as one person has it: the admin's definition with
+ *  their own model, effort and on/off. */
+function sharedAccount(userId: string, provider: SharedProvider, prefs: SharedProviderPrefs | undefined): ModelAccount {
+  return {
+    userId,
+    kind: provider.kind,
+    ...(provider.apiKey ? { apiKey: provider.apiKey } : {}),
+    ...(prefs?.model ? { model: prefs.model } : {}),
+    ...(prefs?.effort ? { effort: prefs.effort } : {}),
+    enabled: prefs?.enabled ?? true,
+    connectedAt: provider.createdAt,
+    custom: provider.custom,
+    ...(provider.headers ? { headers: provider.headers } : {}),
+    shared: true,
+  }
 }
 
-/** One provider's account, switched on or off, or null when not connected. */
+/** The shared providers an admin has switched on, as this person has them;
+ *  none while the operator has custom providers off. */
+async function sharedAccounts(userId: string): Promise<ModelAccount[]> {
+  if (!customProvidersEnabled()) return []
+  const [providers, prefs] = await Promise.all([listSharedProviders({ enabledOnly: true }), getSharedPrefs(userId)])
+  return providers.map((provider) => sharedAccount(userId, provider, prefs.get(provider.kind)))
+}
+
+/** Every account this person connected, switched on or off, oldest first,
+ *  then the shared providers an admin has on. */
+export async function getAccounts(userId: string): Promise<ModelAccount[]> {
+  const [rows, shared] = await Promise.all([
+    db.select().from(modelAccounts).where(eq(modelAccounts.userId, userId)).orderBy(asc(modelAccounts.connectedAt)),
+    sharedAccounts(userId),
+  ])
+  const own = rows.map(toAccount).filter((account): account is ModelAccount => account !== null)
+  return [...own, ...shared]
+}
+
+/** One provider's account, switched on or off, or null when not connected
+ *  (a shared provider: when an admin has it on). */
 export async function getAccount(userId: string, kind: AccountKind): Promise<ModelAccount | null> {
   const [row] = await db
     .select()
     .from(modelAccounts)
     .where(and(eq(modelAccounts.userId, userId), eq(modelAccounts.kind, kind)))
-  return row ? toAccount(row) : null
+  if (row) return toAccount(row)
+  if (!isCustomProviderKind(kind) || !customProvidersEnabled()) return null
+  const [provider, prefs] = await Promise.all([getSharedProvider(kind), getSharedPref(userId, kind)])
+  return provider?.enabled ? sharedAccount(userId, provider, prefs) : null
+}
+
+/** Refused for a shared provider: only an admin edits or removes one. */
+export class SharedAccountError extends Error {
+  constructor() {
+    super('that provider is shared by your admin')
+  }
+}
+
+/** What a person is told about a shared provider's endpoint: its origin.
+ *  The path, the headers and the key are the admin's business. */
+function sharedBaseUrl(baseUrl: string): string {
+  try {
+    return new URL(baseUrl).origin
+  } catch {
+    return ''
+  }
 }
 
 export function statusOf(account: ModelAccount): AccountStatus {
+  if (account.shared && account.custom) {
+    return {
+      kind: account.kind,
+      enabled: account.enabled,
+      model: accountModelFor(account),
+      connectedAt: account.connectedAt,
+      custom: {
+        name: account.custom.name,
+        apiType: account.custom.apiType,
+        baseUrl: sharedBaseUrl(account.custom.baseUrl),
+        models: account.custom.models,
+        headerNames: [],
+        hasKey: Boolean(account.apiKey),
+      },
+      shared: true,
+    }
+  }
   return {
     kind: account.kind,
     enabled: account.enabled,
@@ -410,9 +489,11 @@ export async function setAccountEnabled(userId: string, kind: AccountKind, enabl
  *  would undo each other; matching the kind keeps a pick validated for one
  *  provider off an account that switched to another meanwhile. */
 async function savePick(
-  account: Pick<ModelAccount, 'userId' | 'kind'>,
+  account: Pick<ModelAccount, 'userId' | 'kind' | 'shared'>,
   pick: { model: string } | { reasoningEffort: string } | { enabled: boolean },
 ): Promise<void> {
+  /* a shared provider's pick is this person's own row; the definition is the admin's */
+  if (account.shared && isCustomProviderKind(account.kind)) return saveSharedPref(account.userId, account.kind, pick)
   const written = await db
     .update(modelAccounts)
     .set({ ...pick, updatedAt: Date.now() })
@@ -462,6 +543,7 @@ async function save(account: Omit<ModelAccount, 'connectedAt' | 'enabled'>): Pro
 }
 
 export async function disconnect(userId: string, kind: AccountKind): Promise<void> {
+  if (await isSharedKind(kind)) throw new SharedAccountError()
   await db.delete(modelAccounts).where(and(eq(modelAccounts.userId, userId), eq(modelAccounts.kind, kind)))
 }
 
@@ -1085,6 +1167,7 @@ export async function updateCustomProvider(
   config: CustomProviderConfig,
   secrets: CustomProviderSecrets,
 ): Promise<void> {
+  if (await isSharedKind(kind)) throw new SharedAccountError()
   const written = await db
     .update(modelAccounts)
     .set({

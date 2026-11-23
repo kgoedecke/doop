@@ -78,6 +78,7 @@ export async function listRunners(userId: string): Promise<AgentRunners> {
     runners.push({
       provider: account.kind,
       name: nameOf(account),
+      ...(account.shared ? { shared: true as const } : {}),
       ...(account.email ? { email: account.email } : {}),
       model: accountModelFor(account),
       ...(effort ? { effort } : {}),
