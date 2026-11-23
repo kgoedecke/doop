@@ -7,7 +7,8 @@ import { canvasFrame, openCanvasPage, showCanvasPage } from './canvasPageFixture
 /* While a frame's text is being edited the canvas lifts its shield, so a
    ⌘/Ctrl+wheel (a trackpad pinch) over the frame lands in the frame's own
    document. It still zooms the canvas, about the pointer, as it does over
-   any other part of the board, rather than zooming the whole page. */
+   any other part of the board, rather than zooming the whole page, and a
+   plain wheel pans it unless the design has a box to scroll there. */
 describe.skipIf(!findBrowserPath())('zooming over a frame being edited', { timeout: 30_000 }, () => {
   const pages = pagePerTest()
   let page: Page
@@ -126,12 +127,109 @@ describe.skipIf(!findBrowserPath())('zooming over a frame being edited', { timeo
     expect(Math.abs(at.y + scale * (before.y - at.y) - after.y)).toBeLessThan(2)
   })
 
-  it('leaves a plain wheel to the frame being edited', async () => {
+  async function plainWheel(at: { x: number; y: number }, deltaY: number) {
+    await page.mouse.move(at.x, at.y)
+    await page.mouse.wheel({ deltaY })
+    await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))))
+  }
+
+  it('pans the canvas with a plain wheel, staying in the edit', async () => {
     const at = await editText()
     const before = await surface()
-    await page.mouse.move(at.x, at.y)
-    await page.mouse.wheel({ deltaY: 100 })
-    await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))))
+    await plainWheel(at, 100)
+    const after = await surface()
+    expect(after.width).toBe(before.width)
+    expect(before.top - after.top).toBeCloseTo(100, 0)
+    const frame = page.frames().find((f) => f !== page.mainFrame())!
+    expect(await frame.$('style[data-v-edit]')).not.toBeNull()
+  })
+
+  /** load a frame of `body` markup (with the #copy text first) and start editing it */
+  async function editDesign(body: string, bodyStyle = 'margin:0') {
+    const html = `<body style="${bodyStyle}"><p id="copy" style="font:32px/1.4 Arial;margin:40px">Edit me</p>${body}</body>`
+    await showCanvasPage(page, [{ ...TEXT, html }])
+    return editText()
+  }
+
+  it('leaves a wheel a design script claims to the design', async () => {
+    /* on an element: a wheel handler on body, document or window is passive */
+    const html =
+      '<body style="margin:0"><div onwheel="event.preventDefault()">' +
+      '<p id="copy" style="font:32px/1.4 Arial;margin:40px">Edit me</p></div></body>'
+    await showCanvasPage(page, [{ ...TEXT, html }])
+    const at = await editText()
+    const before = await surface()
+    await plainWheel(at, 100)
     expect(await surface()).toEqual(before)
+  })
+
+  it('pans when body hides the overflow the page would scroll', async () => {
+    const at = await editDesign('<div style="height:2000px"></div>', 'margin:0;overflow:hidden')
+    const before = await surface()
+    await plainWheel(at, 100)
+    expect(before.top - (await surface()).top).toBeCloseTo(100, 0)
+  })
+
+  it('reads a right-to-left scroller from its right edge', async () => {
+    const html =
+      '<body style="margin:0"><div id="box" dir="rtl" style="width:600px;height:400px;overflow:auto">' +
+      '<p id="copy" style="font:32px/1.4 Arial;margin:40px;width:2000px;text-align:left" dir="ltr">Edit me</p></div></body>'
+    await showCanvasPage(page, [{ ...TEXT, html }])
+    const at = await editText()
+    const frame = await editingFrame()
+    const before = await surface()
+    const wheelX = async (deltaX: number) => {
+      await page.mouse.move(at.x, at.y)
+      await page.mouse.wheel({ deltaX })
+      await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))))
+    }
+    /* at its start, the right edge: a wheel left scrolls the box */
+    await wheelX(-100)
+    await frame.waitForFunction(() => document.getElementById('box')!.scrollLeft < 0)
+    expect(await surface()).toEqual(before)
+    /* back at the right edge, a wheel right has nowhere to go: the canvas pans */
+    await frame.evaluate(() => (document.getElementById('box')!.scrollLeft = 0))
+    await wheelX(100)
+    expect(before.left - (await surface()).left).toBeCloseTo(100, 0)
+  })
+
+  it('scrolls a reversed box (a chat log) up from its bottom', async () => {
+    const html =
+      '<body style="margin:0"><div id="box" style="height:300px;overflow:auto;display:flex;flex-direction:column-reverse">' +
+      '<p id="copy" style="font:32px/1.4 Arial;margin:40px;flex:none">Edit me</p><div style="height:400px;flex:none"></div></div></body>'
+    await showCanvasPage(page, [{ ...TEXT, html }])
+    const frame = page.frames().find((f) => f !== page.mainFrame() && !f.detached)!
+    /* the text sits at the box's bottom, where it starts scrolled */
+    const text = await frame.$eval('#copy', (el) => {
+      const r = el.getBoundingClientRect()
+      return { x: r.left + 30, y: r.top + r.height / 2 }
+    })
+    await page.click('[data-frame-title]')
+    const box = await surface()
+    const zoom = box.width / 600
+    const at = { x: box.left + text.x * zoom, y: box.top + text.y * zoom }
+    await page.mouse.click(at.x, at.y, { count: 2 })
+    const editing = await editingFrame()
+    const before = await surface()
+    await plainWheel(at, -100)
+    await editing.waitForFunction(() => document.getElementById('box')!.scrollTop < 0)
+    expect(await surface()).toEqual(before)
+  })
+
+  it('scrolls a box in the design that can take the wheel, and pans once it cannot', async () => {
+    const html =
+      '<body style="margin:0"><div id="box" style="height:300px;overflow:auto">' +
+      '<p id="copy" style="font:32px/1.4 Arial;margin:40px">Edit me</p><div style="height:400px"></div></div></body>'
+    await showCanvasPage(page, [{ ...TEXT, html }])
+    const at = await editText()
+    const frame = page.frames().find((f) => f !== page.mainFrame())!
+    const before = await surface()
+    await plainWheel(at, 100)
+    await frame.waitForFunction(() => document.getElementById('box')!.scrollTop > 0)
+    expect(await surface()).toEqual(before)
+    /* scrolled up to its top already, the box has nowhere to go: the canvas pans */
+    await frame.evaluate(() => (document.getElementById('box')!.scrollTop = 0))
+    await plainWheel(at, -100)
+    expect((await surface()).top - before.top).toBeCloseTo(100, 0)
   })
 })

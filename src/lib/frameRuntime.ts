@@ -720,40 +720,111 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
      pointer's spot in design px. It is caught on the window in the capture
      phase, ahead of any design script, and only while editing: a playing
      prototype, or a runtime without the canvas's port (the prototype
-     player), leaves the browser its own. A plain wheel stays here. */
-  var wheelGetters = {
-    deltaY: getter(WheelEvent.prototype, 'deltaY'),
-    deltaMode: getter(WheelEvent.prototype, 'deltaMode'),
-    clientX: getter(MouseEvent.prototype, 'clientX'),
-    clientY: getter(MouseEvent.prototype, 'clientY'),
-    ctrlKey: getter(MouseEvent.prototype, 'ctrlKey'),
-    metaKey: getter(MouseEvent.prototype, 'metaKey'),
-  }
+     player), leaves the browser its own.
+     A plain wheel pans the canvas the same way, but the design has it
+     first: it is heard on the window once the event has bubbled, and left
+     alone when a design script claimed it (a carousel) or a box under the
+     pointer can still scroll that way. */
+  var readDeltaX = getter(WheelEvent.prototype, 'deltaX')
+  var readDeltaY = getter(WheelEvent.prototype, 'deltaY')
+  var readDeltaMode = getter(WheelEvent.prototype, 'deltaMode')
+  var readClientX = getter(MouseEvent.prototype, 'clientX')
+  var readClientY = getter(MouseEvent.prototype, 'clientY')
+  var readCtrlKey = getter(MouseEvent.prototype, 'ctrlKey')
+  var readMetaKey = getter(MouseEvent.prototype, 'metaKey')
+  var readShiftKey = getter(MouseEvent.prototype, 'shiftKey')
+  var readDefaultPrevented = getter(Event.prototype, 'defaultPrevented')
+  var composedPath = Event.prototype.composedPath
   var preventDefault = Event.prototype.preventDefault
-  function relayZoomWheel(ev) {
-    if (!runtimePort || !editing || protoOn) return
-    if (!(readTrusted ? apply(readTrusted, ev, []) : ev.isTrusted)) return
-    var ctrlKey = apply(wheelGetters.ctrlKey, ev, [])
-    var metaKey = apply(wheelGetters.metaKey, ev, [])
-    if (!ctrlKey && !metaKey) return
+  var readComputedStyle = window.getComputedStyle
+  function wheelListening(ev) {
+    if (!runtimePort || !editing || protoOn) return false
+    return readTrusted ? apply(readTrusted, ev, []) : ev.isTrusted
+  }
+  /* the canvas counts in px; a line or page wheel (Firefox's mouse) does not */
+  function wheelPx(delta, mode, page) {
+    return mode === 1 ? delta * 16 : mode === 2 ? delta * page : delta
+  }
+  function sendWheel(ev, ctrlKey, metaKey) {
     apply(preventDefault, ev, [])
-    var deltaY = apply(wheelGetters.deltaY, ev, [])
-    var deltaMode = apply(wheelGetters.deltaMode, ev, [])
-    /* the canvas counts in px; a line or page wheel (Firefox's mouse) does not */
-    if (deltaMode === 1) deltaY *= 16
-    else if (deltaMode === 2) deltaY *= innerHeight
+    var mode = apply(readDeltaMode, ev, [])
     apply(portSend, runtimePort, [
       {
         event: 'wheel',
-        x: apply(wheelGetters.clientX, ev, []) - bleed,
-        y: apply(wheelGetters.clientY, ev, []) - bleed,
-        deltaY: deltaY,
+        x: apply(readClientX, ev, []) - bleed,
+        y: apply(readClientY, ev, []) - bleed,
+        deltaX: wheelPx(apply(readDeltaX, ev, []), mode, innerWidth),
+        deltaY: wheelPx(apply(readDeltaY, ev, []), mode, innerHeight),
         ctrlKey: ctrlKey,
         metaKey: metaKey,
+        shiftKey: apply(readShiftKey, ev, []),
       },
     ])
   }
-  window.addEventListener('wheel', relayZoomWheel, { capture: true, passive: false })
+  window.addEventListener(
+    'wheel',
+    function (ev) {
+      if (!wheelListening(ev)) return
+      var ctrlKey = apply(readCtrlKey, ev, [])
+      var metaKey = apply(readMetaKey, ev, [])
+      if (ctrlKey || metaKey) sendWheel(ev, ctrlKey, metaKey)
+    },
+    { capture: true, passive: false },
+  )
+
+  /* how far a box can still scroll one way, in px. A box whose content
+     starts at its far end (right-to-left, or a reversed flex box such as a
+     chat log) counts its scroll offset from 0 there down to minus its range */
+  function scrollRoom(el, cs, dx, dy) {
+    var flex = cs.display === 'flex' || cs.display === 'inline-flex'
+    var vertical = !!dy
+    var range = vertical ? el.scrollHeight - el.clientHeight : el.scrollWidth - el.clientWidth
+    var reversed = vertical
+      ? flex && cs.flexDirection === 'column-reverse'
+      : (cs.direction === 'rtl') !== (flex && cs.flexDirection === 'row-reverse')
+    var offset = vertical ? el.scrollTop : el.scrollLeft
+    var before = reversed ? range + offset : offset
+    return (vertical ? dy : dx) < 0 ? before : range - before
+  }
+  /* does a box on the event's path (shadow roots included) take the wheel?
+     The page scrolls unless told not to; any other box only when it says so.
+     An html left visible hands body's overflow to the page instead. */
+  function wheelScrolls(ev, dx, dy) {
+    var root = document.scrollingElement || document.documentElement
+    var body = document.body
+    var rootStyle = apply(readComputedStyle, window, [document.documentElement])
+    var bodyRules = rootStyle.overflowX === 'visible' && rootStyle.overflowY === 'visible' && body
+    var path = apply(composedPath, ev, [])
+    for (var i = 0; i < path.length; i++) {
+      var el = path[i]
+      if (!el || el === window || apply(readNodeType, el, []) !== 1) continue
+      if (bodyRules && el === body && el !== root) continue
+      var cs = apply(readComputedStyle, window, [el])
+      var isRoot = el === root
+      var rules = isRoot && bodyRules ? apply(readComputedStyle, window, [body]) : cs
+      var overflow = dy ? rules.overflowY : rules.overflowX
+      if (isRoot ? overflow === 'hidden' || overflow === 'clip' : !/^(auto|scroll|overlay)$/.test(overflow)) continue
+      if (scrollRoom(el, cs, dx, dy) >= 1) return true
+    }
+    return false
+  }
+  window.addEventListener(
+    'wheel',
+    function (ev) {
+      if (!wheelListening(ev) || apply(readDefaultPrevented, ev, [])) return
+      if (apply(readCtrlKey, ev, []) || apply(readMetaKey, ev, [])) return
+      var dx = apply(readDeltaX, ev, [])
+      var dy = apply(readDeltaY, ev, [])
+      /* Shift turns a vertical wheel sideways */
+      if (apply(readShiftKey, ev, []) && !dx) {
+        dx = dy
+        dy = 0
+      }
+      if ((dy && wheelScrolls(ev, 0, dy)) || (dx && wheelScrolls(ev, dx, 0))) return
+      sendWheel(ev, false, false)
+    },
+    { passive: false },
+  )
 
   /* Escape pressed with focus inside the frame: the parent never sees the
      key event itself, so relay it (present mode closes on it) */
