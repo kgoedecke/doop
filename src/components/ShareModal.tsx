@@ -198,7 +198,6 @@ export function ShareModal({
 
   const communityListing = isOwner && (
     <CommunityListing
-      key={JSON.stringify([canvas.publishedAt, canvas.description, canvas.category])}
       canvas={canvas}
       autoFocus={communityFirst}
       busy={busy}
@@ -376,9 +375,13 @@ function CommunityListing({
 }) {
   const published = canvas.publishedAt !== undefined
   const [confirming, setConfirming] = useState(false)
-  const [description, setDescription] = useState(canvas.description ?? '')
-  const [category, setCategory] = useState<CommunityCategory>(canvas.category ?? 'website')
-  const dirty = published && (description.trim() !== (canvas.description ?? '') || category !== canvas.category)
+  const savedDescription = canvas.description ?? ''
+  const savedCategory = canvas.category ?? 'website'
+  const [draftDescription, setDraftDescription] = useState<string>()
+  const [draftCategory, setDraftCategory] = useState<CommunityCategory>()
+  const description = draftDescription ?? savedDescription
+  const category = draftCategory ?? savedCategory
+  const dirty = published && (description.trim() !== savedDescription || category !== savedCategory)
   const t = useT()
 
   async function save(next: boolean) {
@@ -395,11 +398,15 @@ function CommunityListing({
         })
         if (!published) posthog.capture('canvas_published')
         setConfirming(false)
+        setDraftDescription(undefined)
+        setDraftCategory(undefined)
         const { publishedAt, description: nextDescription, category: nextCategory } = listing
         onChange({ publishedAt, description: nextDescription, category: nextCategory }, revision)
       } else {
         await api.unpublishCanvas(canvas.id)
         posthog.capture('canvas_unpublished')
+        setDraftDescription(undefined)
+        setDraftCategory(undefined)
         onChange({ publishedAt: undefined, description: undefined, category: undefined }, revision)
       }
     } catch (caught) {
@@ -440,13 +447,18 @@ function CommunityListing({
             placeholder={t('panels.shareDescriptionPlaceholder')}
             value={description}
             disabled={busy}
-            onChange={(event) => setDescription(event.target.value)}
+            onChange={(event) => {
+              const value = event.target.value
+              setDraftDescription(value === savedDescription ? undefined : value)
+            }}
           />
           <ToggleChipGroup
             aria-label={t('panels.shareShelf')}
             className="gap-1.5"
             value={category}
-            onValueChange={(next) => setCategory(next as CommunityCategory)}
+            onValueChange={(next) => {
+              if (next) setDraftCategory(next === savedCategory ? undefined : (next as CommunityCategory))
+            }}
           >
             {COMMUNITY_CATEGORIES.map((value) => (
               <ToggleChipItem key={value} value={value} size="sm" disabled={busy}>
@@ -459,7 +471,16 @@ function CommunityListing({
               <Button size="sm" disabled={busy} onClick={() => void save(true)}>
                 {t('panels.shareConfirmPublish')}
               </Button>
-              <Button size="sm" variant="ghost" disabled={busy} onClick={() => setConfirming(false)}>
+              <Button
+                size="sm"
+                variant="ghost"
+                disabled={busy}
+                onClick={() => {
+                  setConfirming(false)
+                  setDraftDescription(undefined)
+                  setDraftCategory(undefined)
+                }}
+              >
                 {t('common.cancel')}
               </Button>
             </div>

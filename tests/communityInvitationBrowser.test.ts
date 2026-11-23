@@ -226,4 +226,27 @@ describe.skipIf(!findBrowserPath())('community invitation', () => {
     expect(await visibleInvitation()).toBe(false)
     expect(publishRequests).toEqual(['DELETE'])
   }, 30_000)
+
+  it('preserves a draft description and refreshes the untouched shelf after a remote edit', async () => {
+    await init({ publishedAt: 12, description: 'Original description', category: 'website' })
+    await page.locator('::-p-aria(Share)').click()
+    const description = '[data-slot="modal"] textarea'
+    await page.waitForFunction(
+      (selector) => document.querySelector<HTMLTextAreaElement>(selector)?.value === 'Original description',
+      {},
+      description,
+    )
+    await page.locator(description).fill('My unfinished description')
+    await send({
+      type: 'canvas:listing',
+      listing: { publishedAt: 12, description: 'Remote description', category: 'dashboard' },
+    })
+    await page.waitForFunction(() =>
+      [...document.querySelectorAll('[data-slot="toggle-chip"][data-state="on"]')].some(
+        (el) => el.textContent === 'Dashboards',
+      ),
+    )
+    expect(await page.$eval(description, (el) => (el as HTMLTextAreaElement).value)).toBe('My unfinished description')
+    expect(publishRequests).toEqual([])
+  }, 30_000)
 })
