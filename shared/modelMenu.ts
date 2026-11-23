@@ -62,6 +62,12 @@ export const OPENROUTER_MODELS: ModelOption[] = [
     blurb: 'Google’s coding and agent workhorse.',
     vision: true,
   },
+  {
+    id: 'google/gemini-3.7-flash',
+    name: 'Gemini 3.7 Flash',
+    blurb: 'The previous Flash; Google retired it for 3.8.',
+    vision: true,
+  },
   { id: 'z-ai/glm-5.3-flash', name: 'GLM-5.3 Flash', blurb: 'Zhipu’s fast tier, with vision.', vision: true },
   {
     id: 'z-ai/glm-5.3',
