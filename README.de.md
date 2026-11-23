@@ -821,7 +821,7 @@ Diese Kurzliste enthält die Variablen, die du beim Self-Hosting üblicherweise 
 | Abrechnung            | `STRIPE_SECRET_KEY`, `STRIPE_PRICE_TEAM_*`, `STRIPE_WEBHOOK_SECRET` ([Abrechnung](#workspaces-und-abrechnung-team-plan))                                             | Abrechnung ausgeschaltet, jeder Workspace aktiv                                               |
 | Ratenlimits           | `MCP_UPLOADS_PER_MIN`, `MCP_SEARCHES_PER_MIN`, `MCP_GENERATIONS_PER_MIN`, `MCP_IMPORTS_PER_MIN`, `SYNC_INGESTS_PER_MIN`, `PREVIEW_RENDERS_PER_MIN`, `SYNC_FREEZE_MS` | Standardwerte für den gehosteten Dienst; Anfragen über dem Limit erhalten `429`               |
 | Webhooks              | `WEBHOOK_ALLOW_PRIVATE_URLS` ([Webhooks](docs/webhooks.md))                                                                                                          | Webhook-URLs in privaten Netzwerken werden abgelehnt                                          |
-| Analyse               | `VITE_POSTHOG_KEY` (zur Build-Zeit: ein Docker-Build-`ARG`), `POSTHOG_KEY`, `POSTHOG_*_HOST`                                                                         | Keine Analyse; wenn gesetzt, meldet der Browser über den `/relay`-Proxy desselben Origins     |
+| Analyse               | `VITE_POSTHOG_KEY` (zur Build-Zeit: ein Docker-Build-`ARG`), `POSTHOG_KEY`, `POSTHOG_*_HOST`                                                                         | Ohne Konfiguration keine Analyse. Sonst sendet der Browser Analysedaten über `/relay`.        |
 | iOS-Push              | `DOOP_APNS_TEAM_ID`, `DOOP_APNS_KEY_ID`, `DOOP_APNS_PRIVATE_KEY`, `DOOP_APNS_BUNDLE_ID`                                                                              | Keine Live Activity Pushes; die App fragt den Status regelmäßig ab                            |
 | Gemini-Cloud-Pilot    | `DOOP_GEMINI_CLOUD_WORKERS` ([Pilotanleitung](docs/gemini-cloud-pilot.md))                                                                                           | Ausgeschaltet                                                                                 |
 
@@ -1043,10 +1043,10 @@ MCP-Prompts.
 | `list_linear_issues`     | Listet Tickets über die Linear-Verbindung des Nutzers auf (offen, zuletzt aktualisierte zuerst)                                                     |
 | `get_linear_issue`       | Liest ein Linear-Ticket und seine Beschreibung per UUID oder Identifier                                                                             |
 
-Tools, die etwas ändern, akzeptieren `agent_name`. Der Agent erscheint dann im Presence-Stack
-(pulsierender quadratischer Avatar), bekommt am bearbeiteten Frame einen Ring mit der Kennzeichnung "editing",
-und seine Aktionen landen im Aktivitätsfeed. Agenten verschwinden nach etwa 20 Sekunden ohne
-Aktivität aus der Anwesenheitsanzeige (nach etwa 60 Sekunden, solange sie einen gesetzten Status
+Tools, die etwas ändern, akzeptieren `agent_name`. Der Agent erscheint dann mit einem pulsierenden,
+quadratischen Avatar in der Anwesenheitsanzeige. Am bearbeiteten Frame erscheinen ein Ring und eine
+Kennzeichnung mit dem Text "editing". Doop protokolliert seine Aktionen im Aktivitätsfeed.
+Agenten verschwinden nach etwa 20 Sekunden ohne Aktivität aus der Anwesenheitsanzeige (nach etwa 60 Sekunden, solange sie einen gesetzten Status
 haben, denn ein Status heißt meist, dass der Agent zwischen Tool-Aufrufen nachdenkt).
 
 Das OAuth-Token bestimmt, welcher Person der Agent zugeordnet ist. Das Bearer-Token zeigt, wer die Verbindung
@@ -1078,17 +1078,17 @@ bestehen, wenn Agenten gehen, und wird an alle gesendet, die später dazukommen.
 ### Agenten steuern: Feedback zu Aufgaben
 
 In der App steuern Menschen Agenten mit [Kommentaren](#kommentare-importe-und-exporte): Sie erwähnen
-per `@mention` eine Rolle am betreffenden Element. Für Skripte und Integrationen hinterlässt
-`POST /api/tasks/:id/feedback` mit `{ text }` eine Notiz an einer Aufgabe (der angemeldete Nutzer
-ist der Autor; sie zählt als eine Aufgabe des Doop Agent und kann deshalb `403 resident_limit`
-zurückgeben).
+per `@mention` eine Rolle am betreffenden Element. Skripte und Integrationen können über
+`POST /api/tasks/:id/feedback` mit `{ text }` eine Notiz zu einer Aufgabe hinterlassen. Doop schreibt
+die Notiz dem angemeldeten Nutzer zu und rechnet sie als eine Aufgabe des Doop Agent an. Ist das
+Aufgabenkontingent des Nutzers ausgeschöpft, kann der Endpunkt `403 resident_limit` zurückgeben.
 
 Jede Notiz wird zu einer **offenen Anfrage auf dem Canvas**. Sie ist ein Arbeitsauftrag und keine
-Nachricht an den Agenten, der die Aufgabe bearbeitet hat. MCP arbeitet nach dem Pull-Prinzip,
-deshalb läuft die Zustellung über die Nudge-Schicht in den Tool-Ergebnissen: Der **nächste
-identifizierte Agent-Aufruf** auf dem Canvas, der Feedback-Zustellung unterstützt (mit einem
-`agent_name`, egal von wem), gibt einen `HUMAN FEEDBACK`-Block zurück. Der Block zitiert die Notiz,
-nennt, um wessen Arbeit es geht, und weist den Agenten an, sie zu bearbeiten, bevor er weitermacht.
+Nachricht an den Agenten, der die Aufgabe bearbeitet hat. Doop liefert die Anfrage beim nächsten Aufruf auf dem
+Canvas aus, der zwei Bedingungen erfüllt. Das Tool unterstützt die Zustellung von Feedback, und der
+Aufruf enthält einen `agent_name`. Welcher Agent das Tool aufruft, spielt keine Rolle. In der
+Antwort zitiert der `HUMAN FEEDBACK`-Block die Notiz, nennt die betroffene Arbeit und bittet den
+Agenten, die Anfrage zu bearbeiten, bevor er weitermacht.
 Das gilt auch, wenn dafür der Frame eines anderen Agenten geändert werden muss (eine Anfrage von
 Menschen hat Vorrang vor der Etikette, fremde Frames nicht anzufassen). Der Server teilt jede
 Notiz genau einmal zu.
@@ -1211,27 +1211,27 @@ stehen in [`shared/types.ts`](shared/types.ts).
 Die wichtigsten Einstiegspunkte (der Server hat insgesamt etwa 70 Module):
 
 ```
-server/            Node (tsx) — one process on :4400
-  index.ts         Express REST API + ws rooms + presence + static serving (prod)
-  store.ts         In-memory canvas/frame state (hot path), write-through to the DB
-  db/              Drizzle schema + PGlite/Postgres connection + migrations
-  actions.ts       Shared mutations: broadcast + activity log + agent presence + streaming reveal
-  mcp.ts           MCP server (@modelcontextprotocol/sdk), stateless streamable HTTP at /mcp
-  guide.ts         The agent guide (get_guide) and the shared prototype/design doctrine
-  resident.ts      The built-in Doop Agent; agentModel.ts picks the credential a run uses
-  auth.ts          better-auth: email/password, SSO, Google/Microsoft/Apple, MCP OAuth
-  automations.ts   Scheduled and approval-triggered workflows
-  extensions.ts    Registry for the Linear and Slack integrations (server/linear, server/slack)
-  seed.ts          Demo canvas on first run
-shared/            Types and logic shared by server and client (ws protocol, prototypes, pages)
-src/               React + Vite + zustand client on :4300
-  pages/           Route-level screens (Home, CanvasPage, Settings, Automations…)
-  components/      Canvas editor and app UI; components/ui/ holds every styled primitive
-  styles.css       Design tokens, the base reset, and keyframes. Nothing else.
-desktop/           Tauri desktop app (macOS, Windows)
-ios/               SwiftUI iPhone and iPad app
-claude-extension/  Claude Desktop extension (.mcpb); cursor-plugin/ and chatgpt-plugin/ beside it
-public/doop-sync.js  The design-sync snippet
+server/            Node (tsx), ein Prozess auf Port 4400
+  index.ts         Express-REST-API, WebSocket-Räume und Anwesenheitsanzeige. Liefert in Produktion statische Dateien aus
+  store.ts         Hält den Canvas- und Frame-Zustand für schnelle Zugriffe im Arbeitsspeicher und schreibt Änderungen direkt in die Datenbank
+  db/              Drizzle-Schema, PGlite-/PostgreSQL-Verbindung und Migrationen
+  actions.ts       Gemeinsame Änderungslogik für Live-Updates, Aktivitätsprotokoll, Agentenanzeige und schrittweisen Designaufbau
+  mcp.ts           MCP-Server (@modelcontextprotocol/sdk) mit zustandslosem Streamable HTTP unter /mcp
+  guide.ts         Agentenanleitung (get_guide) und gemeinsame Regeln für Prototypen und Designs
+  resident.ts      Eingebauter Doop Agent. agentModel.ts wählt die Zugangsdaten für jeden Lauf
+  auth.ts          better-auth für E-Mail und Passwort, SSO, Google, Microsoft und Apple sowie MCP OAuth
+  automations.ts   Workflows, die nach Zeitplan oder nach einer Freigabe starten
+  extensions.ts    Registrierung der Linear- und Slack-Integrationen (server/linear, server/slack)
+  seed.ts          Demo-Canvas beim ersten Start
+shared/            Gemeinsame Typen und Logik für Server und Client (WebSocket-Protokoll, Prototypen, Seiten)
+src/               Client mit React, Vite und zustand auf Port 4300
+  pages/           Ansichten für die einzelnen Routen (Home, CanvasPage, Settings, Automations…)
+  components/      Canvas-Editor und App-Oberfläche. components/ui/ enthält alle formatierten Grundkomponenten
+  styles.css       Enthält nur Design-Tokens, Basis-Reset und Keyframes
+desktop/           Tauri-Desktop-App für macOS und Windows
+ios/               SwiftUI-App für iPhone und iPad
+claude-extension/  Claude-Desktop-Erweiterung (.mcpb). cursor-plugin/ und chatgpt-plugin/ liegen daneben
+public/doop-sync.js  Skript für Design-Sync
 ```
 
 ### Styling
