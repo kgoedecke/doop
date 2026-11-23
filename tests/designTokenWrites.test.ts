@@ -25,7 +25,8 @@ vi.mock('../server/fonts.ts', () => ({ fontsForCanvas: () => [] }))
 
 const actions = await import('../server/actions.ts')
 const { store } = await import('../server/store.ts')
-const { createComponentFromHtml } = await import('../server/componentActions.ts')
+const { createComponentFromHtml, updateComponent } = await import('../server/componentActions.ts')
+const propagation = await import('../server/propagation.ts')
 const { previewDocument } = await import('../server/componentPreview.ts')
 
 /**
@@ -355,5 +356,94 @@ describe('design tokens on frame writes', () => {
     const canvasId = setup()
     const copy = (await store.duplicateCanvas(canvasId, 'kevin', 'kevin'))!
     expect(copy.tokens?.map((t) => t.name)).toEqual(['--color-ink', '--color-primary', '--spacing-4'])
+  })
+})
+
+describe('renames reach component definitions', () => {
+  const definition = (canvasId: string, id: string) => store.getCanvas(canvasId)!.components!.find((d) => d.id === id)!
+
+  /** A Chip whose markup and rules name `--color-ink` and the dark theme, used on a screen. */
+  function withChip() {
+    const canvasId = setup()
+    actions.setTokens(canvasId, [{ name: '--color-ink', themes: { dark: '#eee' } }], human)
+    const { component } = createComponentFromHtml(
+      canvasId,
+      {
+        name: 'Chip',
+        html: '<span class="chip" data-doop-theme="dark" style="padding:var(--spacing-4)">New</span>',
+        css: '.chip{color:var(--color-ink)} [data-doop-theme=dark] .chip{border-color:var(--color-ink)}',
+      },
+      human,
+    )
+    const screen = actions.createFrame(
+      canvasId,
+      { name: 'Screen', html: '<html><head></head><body><doop-use component="Chip"></doop-use></body></html>' },
+      human,
+    )!
+    return { canvasId, def: component, screen }
+  }
+
+  it('gives every definition naming a renamed token a revision with the new name', () => {
+    const { canvasId, def } = withChip()
+    sent.length = 0
+    actions.setTokens(
+      canvasId,
+      [
+        { name: '--spacing-4', newName: '--space-4' },
+        { name: '--color-ink', newName: '--ink' },
+      ],
+      human,
+    )
+    const after = definition(canvasId, def.id)
+    expect(after.template).toContain('padding:var(--space-4)')
+    expect(after.css).toContain('var(--ink)')
+    expect(after.rawCss).toContain('color:var(--ink)')
+    expect(`${after.template}${after.css}${after.rawCss}`).not.toMatch(/--spacing-4|--color-ink/)
+    expect(after.rev).toBe(def.rev + 2)
+    expect(after.history.at(-1)).toMatchObject({ rev: def.rev + 1 })
+    expect(sent.filter((m) => m.type === 'component')).toHaveLength(2)
+    /* the main names the new token as its definition does */
+    expect(store.getFrame(after.mainFrameId!)!.html).toContain('padding:var(--space-4)')
+  })
+
+  it('follows a theme rename into a definition’s markup and rules', () => {
+    const { canvasId, def } = withChip()
+    actions.setTokenThemes(canvasId, ['night'], human, [{ from: 'dark', to: 'night' }])
+    const after = definition(canvasId, def.id)
+    expect(after.template).toContain('data-doop-theme="night"')
+    expect(after.rawCss).toContain('[data-doop-theme="night"] .chip')
+    expect(`${after.template}${after.css}${after.rawCss}`).not.toContain('dark')
+  })
+
+  it('keeps instances following their component, with no override for the renamed markup', async () => {
+    const { canvasId, def, screen } = withChip()
+    actions.setTokens(canvasId, [{ name: '--spacing-4', newName: '--space-4' }], human)
+    actions.setTokenThemes(canvasId, ['night'], human, [{ from: 'dark', to: 'night' }])
+    const renamed = definition(canvasId, def.id)
+    let html = store.getFrame(screen.id)!.html
+    expect(html).toContain(`data-doop-rev="${renamed.renderRev ?? renamed.rev}"`)
+    expect(html).not.toContain('data-doop-overrides')
+    /* a later change to the component still reaches the instance */
+    updateComponent(canvasId, def.id, { css: '.chip{color:red}' }, human)
+    const main = store.getFrame(renamed.mainFrameId!)!
+    actions.updateFrame(main.id, { html: main.html.replace('>New<', '>Fresh<') }, human)
+    await propagation.whenIdle()
+    html = store.getFrame(screen.id)!.html
+    expect(html).toContain('>Fresh<')
+    expect(html).toContain('padding:var(--space-4)')
+    expect(html).not.toContain('data-doop-overrides')
+    /* and the definition kept the new names through the main's write */
+    expect(definition(canvasId, def.id).template).toContain('data-doop-theme="night"')
+  })
+
+  it('leaves a definition linked to a library, and one that names nothing renamed, alone', () => {
+    const { canvasId, def } = withChip()
+    const linked = { ...definition(canvasId, def.id), id: 'linked', mainFrameId: null }
+    linked.source = { canvasId: 'library', componentId: def.id, rev: 1, library: true }
+    store.saveComponent(canvasId, linked)
+    const { component: plain } = createComponentFromHtml(canvasId, { name: 'Plain', html: '<b>Plain</b>' }, human)
+    actions.setTokens(canvasId, [{ name: '--spacing-4', newName: '--space-4' }], human)
+    expect(definition(canvasId, 'linked').template).toContain('var(--spacing-4)')
+    expect(definition(canvasId, plain.id).rev).toBe(plain.rev)
   })
 })

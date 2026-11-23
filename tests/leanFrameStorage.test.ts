@@ -171,6 +171,16 @@ describe.each([
     expect(composedHtml(canvasId, html(page.id))).toContain('--text:#111')
   })
 
+  it('a token rename reaches the stylesheet a component composes into the frames using it', () => {
+    const { canvasId, page, button } = start()
+    actions.setTokens(canvasId, [{ name: '--brand', newName: '--accent' }], human)
+    expect(store.getComponents(canvasId).find((def) => def.id === button.id)!.css).toContain('var(--accent)')
+    const composed = composedHtml(canvasId, html(page.id))
+    expect(composed).toMatch(new RegExp(`<style ${CSS_ATTR}="[^"]+">[^<]*color: var\\(--accent\\)`))
+    expect(composed).toContain('--accent:blue')
+    expect(composed).not.toContain('--brand')
+  })
+
   it(
     lean
       ? 'a change to a component’s rules alone writes no frame using it'

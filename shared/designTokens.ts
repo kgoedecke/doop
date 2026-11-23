@@ -333,12 +333,13 @@ export function nextTokenName(tokens: readonly Pick<DesignToken, 'name'>[], type
   }
 }
 
-/** The HTML with every `data-doop-theme="from"` switched to `to`. */
+/** The HTML (or CSS) with every `data-doop-theme="from"` switched to `to`, an unquoted one in
+ *  an attribute selector (`[data-doop-theme=from]`) too. */
 export function renameThemeAttrs(html: string, from: string, to: string): string {
   const escaped = from.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
   return html
     .replace(new RegExp(`(${THEME_ATTR}\\s*=\\s*)(["'])${escaped}\\2`, 'g'), `$1$2${to}$2`)
-    .replace(new RegExp(`(${THEME_ATTR}\\s*=\\s*)${escaped}(?=[\\s/>])`, 'g'), `$1"${to}"`)
+    .replace(new RegExp(`(${THEME_ATTR}\\s*=\\s*)${escaped}(?=[\\s/>\\]])`, 'g'), `$1"${to}"`)
 }
 
 const ROOT_TAG_RE = /<(html|body)\b([^>]*)>/i

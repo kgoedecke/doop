@@ -331,6 +331,19 @@ describe('an agent working with components', () => {
     expect(html).toContain('color: red')
   })
 
+  it('takes the markup as template, the name get_component returns it by, and refuses it twice', async () => {
+    const canvas = newCanvas()
+    await button(canvas.id)
+    const read = await call('get_component', { canvas_id: canvas.id, component: 'Button' })
+    const template = String(read.data.template).replace('class="btn"', 'class="btn wide"')
+    const both = await call('update_component', { canvas_id: canvas.id, component: 'Button', html: template, template })
+    expect(both.isError).toBe(true)
+    expect(both.text).toContain('not both')
+    const updated = await call('update_component', { canvas_id: canvas.id, component: 'Button', template })
+    expect(updated.isError).toBe(false)
+    expect(store.getComponents(canvas.id)[0]!.template).toContain('btn wide')
+  })
+
   it('makes the picked element the main and leaves the other copies as they are', async () => {
     const canvas = newCanvas()
     const card = (title: string, id = '') =>

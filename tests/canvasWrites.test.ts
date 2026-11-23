@@ -723,6 +723,35 @@ describe('design tokens through the canvas write entry', () => {
     expect(store.getTokenThemes(canvasId)).toEqual(['dark'])
   })
 
+  it('a set-tokens rename revises the components naming the token, and an undone one leaves them', async () => {
+    await runCanvasWrite(canvasId, { type: 'create-tokens', tokens: [ink], actor: user })
+    const { component } = createComponentFromHtml(
+      canvasId,
+      { name: 'Chip', html: '<span class="chip">Chip</span>', css: '.chip { color: var(--color-ink) }' },
+      user,
+    )
+    const rename = () =>
+      runCanvasWrite(canvasId, {
+        type: 'set-tokens',
+        edits: [{ name: '--color-ink', newName: '--color-text' }],
+        actor: user,
+      })
+    const chip = () => store.getComponents(canvasId).find((def) => def.id === component.id)!
+    /* undone with the request that made it: the definition is as it was */
+    const request = openTransaction()
+    await request.run(rename)
+    request.rollback()
+    expect(names()).toEqual(['--color-ink'])
+    expect(chip().rev).toBe(component.rev)
+    expect(chip().css).toContain('var(--color-ink)')
+    sent = []
+    await rename()
+    expect(chip().rev).toBe(component.rev + 1)
+    expect(chip().css).toContain('var(--color-text)')
+    /* the room hears the revision, and the tokens */
+    expect(types()).toEqual(expect.arrayContaining(['component', 'tokens']))
+  })
+
   it('a rejected token command inside a request is undone, and tells nobody', async () => {
     const fails = refuseNextTokens()
     /* what the HTTP middleware and undoRequest do with a request (server/index.ts) */

@@ -19,6 +19,7 @@ import {
   prepareChunk,
   prepareFrameHtml,
   referencesComponent,
+  bumpRevision,
   rederiveFromMains,
   refuseUnclosedUses,
 } from './components.ts'
@@ -55,6 +56,14 @@ import { parseRunnerPick, runnerKey, type RunnerPick } from '../shared/agentRunn
 import { hasElementId, stampElementId } from './elementIds.ts'
 import { decodeEscapedHtml, looksEscapedHtml, repairEscapedHtml } from './escapedHtml.ts'
 import { forgetLibrary } from './componentLibrary.ts'
+import {
+  advanceInstanceMarks,
+  applyRename,
+  renameInComponents,
+  renameTokenRefs,
+  type MarkAdvance,
+  type TokenRename,
+} from './tokenRenames.ts'
 import { withCanvasFaces, withCanvasFacesMidStream, withCanvasStyles } from './canvasFaces.ts'
 import { resourcesOf, sameStored, storedHtml } from './frameCompose.ts'
 import { htmlLoaded } from './frameHtml.ts'
@@ -74,7 +83,6 @@ import {
   normalizeTokenName,
   normalizeTokenValue,
   referencedTokens,
-  renameThemeAttrs,
   resolveToken,
   tokensUsedBy,
   usesToken,
@@ -2203,7 +2211,8 @@ function finishStream(frameId: string, logDone: boolean) {
      replace cut it off) still gets the faces of the library fonts it uses;
      a finished one already has them, and this is then a no-op */
   let renamed = current.html
-  for (const rename of pendingRenames.get(frameId) ?? []) renamed = applyRename(renamed, rename)
+  for (const { rename, marks } of pendingRenames.get(frameId) ?? [])
+    renamed = advanceInstanceMarks(applyRename(renamed, rename), marks)
   dropKey(pendingRenames, frameId)
   const html = storedHtml(current.canvasId, withCanvasStyles(current.canvasId, renamed))
   /* compare the HTML, not the objects: updateFrame edits the frame in place */
@@ -3390,30 +3399,43 @@ export function tokenUsage(canvasId: string): Map<string, number> {
  *  canvas's tokens (and, on a rename, the references to the old name). An
  *  annotation write: nothing a reviewer signed off on moved, so sign-off
  *  stands and no version is filed. Returns how many frames changed. */
-type TokenRename = { kind: 'token' | 'theme'; from: string; to: string }
+/** Renames a frame with an open append stream still has to take, with the instance marks
+ *  they moved: applied when the stream closes, done chunk or idle. */
+const pendingRenames = new Map<string, { rename: TokenRename; marks: readonly MarkAdvance[] }[]>()
 
-/** Renames a frame with an open append stream still has to take: applied
- *  when the stream closes, done chunk or idle. */
-const pendingRenames = new Map<string, TokenRename[]>()
-
-function applyRename(html: string, rename: TokenRename): string {
-  return rename.kind === 'token'
-    ? renameTokenRefs(html, rename.from, rename.to)
-    : renameThemeAttrs(html, rename.from, rename.to)
+/** A rename followed into the canvas's own component definitions (server/tokenRenames.ts):
+ *  each revision saved and told to the room, as any revision is. The instance marks it moved. */
+function renameInCanvasComponents(canvasId: string, rename: TokenRename, actor: Actor): MarkAdvance[] {
+  return renameInComponents(
+    store.getComponents(canvasId),
+    rename,
+    (def) => bumpRevision(def, actor.name),
+    (def) => {
+      store.saveComponent(canvasId, def)
+      const saved = store.getComponents(canvasId).find((candidate) => candidate.id === def.id) ?? def
+      broadcastComponent(canvasId, saved, actor)
+      return saved
+    },
+  )
 }
 
-function restyleTokenFrames(canvasId: string, actor: Actor, rename?: TokenRename): number {
+function restyleTokenFrames(
+  canvasId: string,
+  actor: Actor,
+  rename?: TokenRename,
+  marks: readonly MarkAdvance[] = [],
+): number {
   const canvas = store.getCanvas(canvasId)
   if (!canvas) return 0
   let changed = 0
   for (const frame of [...canvas.frames]) {
     /* an open append stream gets its block, and any rename, with its done chunk */
     if (streams.has(frame.id)) {
-      if (rename) setKey(pendingRenames, frame.id, [...(pendingRenames.get(frame.id) ?? []), rename])
+      if (rename) setKey(pendingRenames, frame.id, [...(pendingRenames.get(frame.id) ?? []), { rename, marks }])
       continue
     }
     let html = frame.html
-    if (rename) html = applyRename(html, rename)
+    if (rename) html = advanceInstanceMarks(applyRename(html, rename), marks)
     html = storedHtml(canvasId, withCanvasStyles(canvasId, html))
     /* lean storage: a value is not in the frame, so only a rename, a theme attribute or
        a font face that comes or goes with the change is a reason to write it */
@@ -3431,11 +3453,6 @@ function restyleTokenFrames(canvasId: string, actor: Actor, rename?: TokenRename
     changed++
   }
   return changed
-}
-
-function renameTokenRefs(html: string, from: string, to: string): string {
-  const escaped = from.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-  return html.replace(new RegExp(`var\\(\\s*${escaped}(?=\\s*[,)])`, 'g'), `var(${to}`)
 }
 
 function tokenSummary(results: TokenResult[], verb: string): string {
@@ -3657,7 +3674,8 @@ export const setTokens = atomic(function setTokens(
   }
   if (touched) {
     let restyled = 0
-    for (const rename of renames) restyled += restyleTokenFrames(canvasId, actor, rename)
+    for (const rename of renames)
+      restyled += restyleTokenFrames(canvasId, actor, rename, renameInCanvasComponents(canvasId, rename, actor))
     restyled += restyleTokenFrames(canvasId, actor)
     broadcast(canvasId, {
       type: 'tokens',
@@ -3729,7 +3747,8 @@ export const setTokenThemes = atomic(function setTokenThemes(
   let restyled = 0
   for (const move of moves) {
     store.renameTokenTheme(canvasId, move.from, move.to, actor.name)
-    restyled += restyleTokenFrames(canvasId, actor, { kind: 'theme', ...move })
+    const rename: TokenRename = { kind: 'theme', ...move }
+    restyled += restyleTokenFrames(canvasId, actor, rename, renameInCanvasComponents(canvasId, rename, actor))
   }
   if (!same) store.setTokenThemes(canvasId, names, actor.name)
   restyled += restyleTokenFrames(canvasId, actor)

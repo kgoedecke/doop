@@ -388,7 +388,7 @@ export const COMPONENT_TOOLS: ComponentTool[] = [
     name: 'update_component',
     title: 'Update a component',
     description:
-      "Change a component's main; every instance on the canvas follows in the background within moments, keeping its props and overrides, so this is how a sweeping design change is one call rather than one edit per screen. Small changes to the markup: find + replace on the template (from get_component). CSS is not searched: to change a style, pass the whole stylesheet as css. Rewrites: html (or template, the name get_component reads it back under; never both), keeping data-doop-part attributes where you can so overrides stay attached. The result reports the impact: which frames hold instances and are queued to follow (propagation), and how many of them are approved (they keep their sign-off). get_component shows where a component is used before you change it. A changed main is one undo-able revision: restore_component_version goes back.",
+      "Change a component's main; every instance on the canvas follows in the background within moments, keeping its props and overrides, so this is how a sweeping design change is one call rather than one edit per screen. Small changes to the markup: find + replace on the template (from get_component). CSS is not searched: to change a style, pass the whole stylesheet as css. Rewrites: html (or template, the name get_component reads it back under; never both), keeping data-doop-part attributes where you can so overrides stay attached. The result reports the impact: which frames hold instances and are queued to follow (propagation), how many of them are approved (they keep their sign-off), which overrides no longer have an element to apply to. Pass dry_run=true to read that report first, which you should for a component with many instances. A changed main is one undo-able revision: restore_component_version goes back.",
     readOnly: false,
     destructive: true,
     shape: {
@@ -396,6 +396,7 @@ export const COMPONENT_TOOLS: ComponentTool[] = [
       find: z.string().optional().describe('Exact text in the template; must occur once'),
       replace: z.string().optional(),
       html: z.string().optional().describe('New template markup, one root element'),
+      template: z.string().optional().describe('The same as html, under the name get_component returns it by'),
       css: z
         .string()
         .optional()
@@ -407,12 +408,15 @@ export const COMPONENT_TOOLS: ComponentTool[] = [
       expected_rev: z.number().optional().describe('Refuse if the component has moved past this revision'),
     },
     async run(input, { canvas, actor, canRead }) {
+      if (input.html !== undefined && input.template !== undefined)
+        throw new ComponentError('pass the new markup once, as html or as template, not both')
+      const html = input.html ?? input.template
       const result = await runCanvasWrite(canvas.id, {
         type: 'update-component',
         component: String(input.component),
         input: {
           ...(input.find !== undefined ? { find: String(input.find), replace: String(input.replace ?? '') } : {}),
-          ...(input.html !== undefined ? { html: String(input.html) } : {}),
+          ...(html !== undefined ? { html: String(html) } : {}),
           ...(input.css !== undefined ? { css: String(input.css) } : {}),
           ...(input.name !== undefined ? { name: String(input.name) } : {}),
           ...(input.description !== undefined ? { description: String(input.description) } : {}),

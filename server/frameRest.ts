@@ -226,7 +226,7 @@ export function sameAtRest(a: string, b: string, defs: readonly ComponentDef[]):
 }
 
 /* the two attributes as `markRoot` writes them, side by side */
-const INSTANCE_MARK = new RegExp(`\\s${INSTANCE_ATTR}="([^"]+)" ${REV_ATTR}="(\\d+)"`, 'g')
+export const INSTANCE_MARK = new RegExp(`\\s${INSTANCE_ATTR}="([^"]+)" ${REV_ATTR}="(\\d+)"`, 'g')
 
 /** Does this document hold a written-out instance marked older than its component's markup? */
 function holdsInstancesBehind(html: string, defs: readonly ComponentDef[]): boolean {
