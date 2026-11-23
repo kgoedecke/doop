@@ -490,7 +490,7 @@ export const COMPONENT_TOOLS: ComponentTool[] = [
     name: 'update_instances',
     title: 'Change instances',
     description:
-      "Change instances in one frame in a single undo step: set props, override one element (keyed by part, from get_component), reset overrides back to the main, or detach. Use one call per frame with one entry per target, listing only the props to change. Instance ids: get_frame's instances list (outer instances; for a nested one, get_frame with expand_components=true and the data-doop-id on its root), or the id on the <doop-use> lines of get_frame_html. Ids missing from the frame come back as not_found while the rest still apply. An override is sparse: everything else keeps following the main. Detaching keeps the look and cuts the link, for that instance only (instances nested inside it stay linked).",
+      'Change instances in one frame in a single undo step: set props, override one element (keyed by part, from get_component), reset overrides back to the main, or detach. Use one call per frame for one or more targets, listing only the props to change. External MCP agents get outer ids from get_frame\'s instances list and nested ids from data-doop-id on instance roots using get_frame with expand_components=true. The built-in agent reads id on the <doop-use> tags in get_frame_html, or uses inspect_frame with selectors: ["[data-doop-instance] [data-doop-instance]"] for visible nested HTML instances. Ids missing from the frame come back as not_found while the rest still apply. An override is sparse: everything else keeps following the main. Detaching keeps the look and cuts the link, for that instance only (instances nested inside it stay linked).',
     readOnly: false,
     shape: {
       frame_id: FRAME_ID,
@@ -539,7 +539,7 @@ export const COMPONENT_TOOLS: ComponentTool[] = [
         ...(instances
           ? {}
           : {
-              note: 'The change was applied. Read the frame again (get_frame, or get_frame_html) to see the instances.',
+              note: 'The change was applied. External MCP agents can read it back with get_frame. The built-in agent can use get_frame_html or inspect_frame.',
             }),
         frames: [frame],
       }

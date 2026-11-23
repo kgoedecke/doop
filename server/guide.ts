@@ -279,15 +279,14 @@ needs a reusable piece the system lacks, add it, then use it.
 - Vary with props, not copies. An enum prop sets data-<name> on the root, so a variant is plain
   CSS: .btn[data-tone="ghost"] { … }. Hover and focus are ordinary CSS too. You do not need a
   component per state, or per size.
-- To change props on several instances, call update_instances once per frame: one entry per
-  target, each with only the props to change ({"instance_id": "abc123", "props": {"tone": "ghost"}}).
-  Do not edit them one by one through HTML. Read the ids where you read the frame. External MCP
-  agents: get_frame lists the outer instances in its instances array; for an instance nested in
-  another, call get_frame with expand_components=true and read data-doop-id on the nested
-  instance's root element (the one that also has data-doop-instance). The built-in agent: read the
-  id="…" on the <doop-use> lines of get_frame_html. That compact read does not promise to show the
-  ids of nested instances. The result can succeed and still list not_found for ids that are not in
-  the frame: check it and read the frame again for those.
+- Use update_instances to change props on one or more instances. Call it once per frame with one
+  entry per target and only the props to change ({"instance_id": "abc123", "props": {"tone": "ghost"}}).
+  External MCP agents get outer ids from get_frame's instances array. For a nested target, pass
+  expand_components=true and read data-doop-id on the root with data-doop-instance.
+  The built-in agent reads id="…" on <doop-use> tags from get_frame_html. For a visible nested HTML
+  instance, call inspect_frame with selectors: ["[data-doop-instance] [data-doop-instance]"] and
+  read data-doop-id from the matching element's selector. Narrow the selector if needed. Check not_found for
+  any missing ids before reporting the result.
 - For one instance that must differ in one element: update_instances with overrides, or just edit
   it; edits inside an instance are captured as overrides on that element alone and survive every
   later change to the main. Do not detach to make a small change.
