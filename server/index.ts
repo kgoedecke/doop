@@ -53,6 +53,7 @@ import { geminiCloudWorkerFor } from './geminiCloudRuns.ts'
 import http from 'node:http'
 import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
+import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import express from 'express'
 import { eq, inArray } from 'drizzle-orm'
@@ -163,19 +164,17 @@ const HOST = env.HOST
 const CLIENT_DIST = path.join(process.cwd(), 'dist')
 const CLIENT_INDEX = path.join(CLIENT_DIST, 'index.html')
 
-const clientHtml = (() => {
-  try {
-    return readFileSync(CLIENT_INDEX)
-  } catch {
-    return null
-  }
-})()
-
 /* Identifies the client bundle this process serves. Hashing dist/index.html
    works because Vite writes hashed asset names into it — any frontend change
    changes the hash, while server-only deploys and plain restarts do not.
    Clients compare it across reconnects to know their loaded bundle is stale. */
-const BUILD_ID = clientHtml ? createHash('sha1').update(clientHtml).digest('hex').slice(0, 12) : 'dev'
+const BUILD_ID = (() => {
+  try {
+    return createHash('sha1').update(readFileSync(CLIENT_INDEX)).digest('hex').slice(0, 12)
+  } catch {
+    return 'dev'
+  }
+})()
 
 /* boot: connect the DB, hydrate memory, import pre-DB store.json once */
 await initDb()
@@ -3354,14 +3353,18 @@ app.get('/sitemap.xml', (_req, res) => {
 
 /* production: serve the built client */
 if (env.isProduction) {
-  const localizedIndex = clientHtml
-    ?.toString('utf8')
-    .replace('data-doop-default-locale=""', `data-doop-default-locale="${env.DEFAULT_LOCALE}"`)
-  const serveClient: express.RequestHandler = (_req, res) => {
-    if (localizedIndex === undefined) {
+  const serveClient: express.RequestHandler = async (_req, res) => {
+    let index: string
+    try {
+      index = await readFile(CLIENT_INDEX, 'utf8')
+    } catch {
       res.sendFile(CLIENT_INDEX)
       return
     }
+    const localizedIndex = index.replace(
+      'data-doop-default-locale=""',
+      `data-doop-default-locale="${env.DEFAULT_LOCALE}"`,
+    )
     res.set('Cache-Control', 'public, max-age=0').type('html').send(localizedIndex)
   }
   app.get('/index.html', serveClient)

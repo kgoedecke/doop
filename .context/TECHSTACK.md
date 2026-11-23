@@ -1298,8 +1298,10 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   placeholders are type-checked, `{ one, other }` values pick a plural by `{count}`, and a key kept
   in a table is a `PlainMessageKey` translated at render. The active language is this browser's pick
   (`doop-locale` in `localStorage`, Settings -> General), else the server's `DEFAULT_LOCALE` in
-  the initial HTML. With static HTML and no saved choice, React starts in English and updates the
-  language when `GET /api/locale-config` returns. The list lives in `shared/locales.ts`.
+  the initial HTML. The server reads the current `dist/index.html` for each page request so a
+  completed build replacement takes effect without a restart. With static HTML and no saved
+  choice, React starts in English and updates the language when `GET /api/locale-config` returns.
+  The list lives in `shared/locales.ts`.
   `tests/i18n.test.ts` checks every catalog against English. Screens not yet converted still render
   English.
 - Home (`src/pages/Home.tsx`, `src/components/HomeHero.tsx`): a 12.5px rail (canvases, workspaces,
