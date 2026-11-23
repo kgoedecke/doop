@@ -29,6 +29,15 @@ describe('matchesChord', () => {
     expect(matchesChord(optionA, { code: 'KeyA', alt: true }, true)).toBe(true)
   })
 
+  it('takes letters and punctuation from the physical key for implicit chords', () => {
+    const copy = { key: 'c', mod: true }
+    expect(matchesChord(key('с', { metaKey: true }, 'KeyC'), copy, true)).toBe(true)
+    expect(matchesChord(key('c', { metaKey: true }, 'KeyC'), copy, true)).toBe(true)
+    expect(matchesChord(key('c', { metaKey: true }, 'KeyV'), copy, true)).toBe(false)
+    expect(matchesChord(key('.', { ctrlKey: true }, 'Slash'), { key: '/', mod: true }, false)).toBe(true)
+    expect(matchesChord(key('.', { ctrlKey: true }, 'Slash'), { key: '.', mod: true }, false)).toBe(false)
+  })
+
   it('passes over an event with no key, as autofill dispatches', () => {
     const autofill = { code: '', metaKey: true, ctrlKey: false, altKey: false, shiftKey: false } as KeyboardEvent
     expect(matchesChord(autofill, { key: 'k', mod: true }, true)).toBe(false)

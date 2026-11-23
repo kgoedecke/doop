@@ -497,7 +497,7 @@ export const FRAME_TEXT_RUNTIME = `
   document.addEventListener('selectionchange', postTextState)
   document.addEventListener('keydown', function (ev) {
     if (!editing || !activeEl || !(ev.metaKey || ev.ctrlKey) || ev.altKey) return
-    var key = (ev.key || '').toLowerCase()
+    var key = shortcutKey(ev)
     var command = !ev.shiftKey ? { b: 'bold', i: 'italic', u: 'underline' }[key]
       : ev.code === 'Digit7' ? 'insertOrderedList' : ev.code === 'Digit8' ? 'insertUnorderedList' : null
     if (!command) return

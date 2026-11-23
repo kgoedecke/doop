@@ -19,9 +19,9 @@
 //
 // Because tabs live in the page, the macOS menu is built here rather than
 // taken from Tauri's default: that one binds Cmd+W to "Close Window", which
-// on a single-window app closes the whole app. Ours binds Cmd+W to "Close
-// Tab" and hands the keystroke to the page as a `close-tab` event
-// (src/lib/desktop.ts closes the active canvas tab).
+// on a single-window app closes the whole app. Ours sends a `close-tab`
+// event when "Close Tab" is clicked. The page handles Cmd+W by physical
+// key (src/lib/desktop.ts).
 //
 // Sign-in with Google / Microsoft / SSO cannot happen in the webview —
 // identity providers refuse embedded browsers — so the page opens the
@@ -152,7 +152,7 @@ fn place_traffic_lights(ns_window_ptr: *mut std::ffi::c_void) {
     }
 }
 
-/// Menu item id for Cmd+W; the page listens for the event of the same name.
+/// Menu item id for Close Tab; the page listens for the event of the same name.
 #[cfg(target_os = "macos")]
 const CLOSE_TAB: &str = "close-tab";
 
@@ -215,10 +215,11 @@ fn app_submenu(app: &AppHandle) -> tauri::Result<Submenu<ShellRuntime>> {
     Submenu::with_items(app, pkg.name.clone(), true, &app_items)
 }
 
-/// File's Close Tab (Cmd+W), relayed to the page as `close-tab`.
+/// File's Close Tab, relayed to the page as `close-tab`. The webview handles
+/// Cmd+W so AppKit's character-based accelerator cannot preempt it.
 #[cfg(target_os = "macos")]
 fn close_tab_item(app: &AppHandle) -> tauri::Result<MenuItem<ShellRuntime>> {
-    MenuItem::with_id(app, CLOSE_TAB, "Close Tab", true, Some("Cmd+W"))
+    MenuItem::with_id(app, CLOSE_TAB, "Close Tab", true, None::<&str>)
 }
 
 /// The system's text editing commands: AppKit sends them to the focused

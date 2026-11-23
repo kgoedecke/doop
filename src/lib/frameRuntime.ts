@@ -2,7 +2,7 @@ import { FRAME_REPLAY_RUNTIME } from './frameReplayRuntime'
 import { FRAME_DROP_RUNTIME } from './frameDropRuntime'
 import { FRAME_PROTO_RUNTIME } from './frameProtoRuntime'
 import { FRAME_TEXT_RUNTIME } from './frameTextRuntime'
-import { CANVAS_MOD_CHORDS } from './keys'
+import { CANVAS_MOD_CHORDS, SHORTCUT_KEYS_BY_CODE } from './keys'
 
 /**
  * Bootstrap document loaded once per frame iframe. The parent posts HTML in
@@ -280,6 +280,14 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
   var editing = false
   var activeEl = null
   var editTimer = null
+  var physicalKeys = ${JSON.stringify(SHORTCUT_KEYS_BY_CODE)}
+  var hasOwn = Object.hasOwn
+  function shortcutKey(ev) {
+    var key = (ev.key || '').toLowerCase()
+    if (!ev.code || ev.code === 'Unidentified') return key
+    if (hasOwn(physicalKeys, ev.code)) return physicalKeys[ev.code]
+    return key.length > 1 ? key : ''
+  }
   ${FRAME_TEXT_RUNTIME}
 
   /* the edited element's outline is the parent's (its selection hairline,
@@ -631,7 +639,7 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
      and the event's own getters (so a patched prototype cannot turn the key
      the person pressed into another). */
   var runtimePort = null
-  var hasOwn = Object.hasOwn
+  var desktopShell = false
   var editorWindow = parent
   var readMessageSource = getter(MessageEvent.prototype, 'source')
   var readMessageData = getter(MessageEvent.prototype, 'data')
@@ -657,12 +665,12 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
     if (!(readTrusted ? apply(readTrusted, ev, []) : ev.isTrusted)) return
     var k = {}
     for (var f = 0; f < KEY_FIELDS.length; f++) k[KEY_FIELDS[f]] = apply(keyGetters[KEY_FIELDS[f]], ev, [])
-    /* ⌘1…⌘9 switch the desktop shell's tabs and ⌘, opens Settings
+    /* ⌘1…⌘9 switch tabs, ⌘W closes a desktop tab, and ⌘, opens Settings
        (desktop.ts), so they travel from text being edited and a field too:
        nothing in here types with them. The prototype player hands its
        screens no port, so a playing prototype keeps them (it is modal) */
-    var tabChord =
-      (k.metaKey || k.ctrlKey) && !k.altKey && !k.shiftKey && /^(Digit[1-9]|Comma)$/.test(String(k.code))
+    var tabChord = (k.metaKey || k.ctrlKey) && !k.altKey && !k.shiftKey &&
+      (/^(Digit[1-9]|Comma)$/.test(k.code) || (desktopShell && shortcutKey(k) === 'w'))
     /* the shell is about to leave this canvas: text typed in the last
        400ms goes first, down the key's own port so it arrives ahead of it */
     if (tabChord && editing && editTimer && apply(readType, ev, []) === 'keydown') {
@@ -680,22 +688,16 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
     }
     var type = apply(readType, ev, [])
     var mod = (k.metaKey || k.ctrlKey) && !k.altKey
-    var letter = String(k.key).toLowerCase()
+    var letter = shortcutKey(k)
     /* ⌘C / ⌘X stay this document's: the page cannot see text selected in
        here, and would take the chord for its own selection instead */
     if (mod && !k.shiftKey && (letter === 'c' || letter === 'x')) return
     /* ⌫ and Delete are never relayed: the page removes what is selected on them */
     if (k.key === 'Backspace' || k.key === 'Delete') return
-    var digit = k.shiftKey && /^Digit[0-9]$/.test(k.code) ? k.code.slice(5) : ''
     var chord = (k.shiftKey ? 'shift+' : '') + letter
-    var byCode = digit ? 'shift+' + digit : chord
     /* Space would scroll this document while the page pans on it */
     if (type === 'keydown' && k.key === ' ' && !mod) ev.preventDefault()
-    if (
-      type === 'keydown' &&
-      mod &&
-      (CANVAS_MOD_CHORDS.indexOf(chord) >= 0 || CANVAS_MOD_CHORDS.indexOf(byCode) >= 0)
-    )
+    if (type === 'keydown' && ((desktopShell && tabChord) || (mod && CANVAS_MOD_CHORDS.indexOf(chord) >= 0)))
       ev.preventDefault()
     apply(portSend, runtimePort, [
       {
@@ -2047,7 +2049,10 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
     var d = { ...data }
     /* the first port offered is the one for life: a later message carrying
        one could be answering a design script's forged ready signal */
-    if (d.type === 'doop:runtime-port' && !runtimePort && ev.ports && ev.ports[0]) runtimePort = ev.ports[0]
+    if (d.type === 'doop:runtime-port' && !runtimePort && ev.ports && ev.ports[0]) {
+      runtimePort = ev.ports[0]
+      desktopShell = d.desktopShell === true
+    }
     if (d.type === 'doop:inspect') {
       parent.postMessage({ type: 'doop:inspect-result', reqId: d.reqId, info: inspect(d.selector) }, '*')
     }

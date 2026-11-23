@@ -1,5 +1,6 @@
-import { describe, expect, it } from 'vitest'
-import { TOOLS, resolvePointerAction, toolForKey, type PointerContext } from '../src/lib/tools'
+// @vitest-environment happy-dom
+import { describe, expect, it, vi } from 'vitest'
+import { TOOLS, resolvePointerAction, toolForKey, toolForShortcut, type PointerContext } from '../src/lib/tools'
 
 /**
  * The bottom toolbar's tools decide what a pointer-down means. Select is the
@@ -93,5 +94,36 @@ describe('toolForKey', () => {
   it('maps the drawing shortcuts without conflicts', () => {
     expect(['f', 'R', 'o', 'P', 't'].map(toolForKey)).toEqual(['frame', 'rectangle', 'circle', 'path', 'text'])
     expect(new Set(TOOLS.map((t) => t.key)).size).toBe(TOOLS.length)
+  })
+})
+
+describe('toolForShortcut', () => {
+  const press = (key: string, code: string, extra: KeyboardEventInit = {}) =>
+    new KeyboardEvent('keydown', { key, code, ...extra })
+
+  it.each([
+    ['с', 'KeyC', 'comment'],
+    ['c', 'KeyC', 'comment'],
+    ['м', 'KeyV', 'select'],
+    ['р', 'KeyH', 'hand'],
+    ['я', 'KeyZ', 'zoom'],
+  ])('maps %s on %s to %s', (key, code, tool) => {
+    expect(toolForShortcut(press(key, code))).toBe(tool)
+  })
+
+  it('uses the physical key when the layout produces a different shortcut character', () => {
+    expect(toolForShortcut(press('c', 'KeyV'))).toBe('select')
+    expect(toolForShortcut(press('c', 'IntlBackslash'))).toBeNull()
+    expect(toolForShortcut(press('с', 'KeyC', { shiftKey: true }))).toBeNull()
+    expect(toolForShortcut(press('с', 'KeyC', { ctrlKey: true }))).toBeNull()
+  })
+
+  it.each(['input', 'textarea', 'select', 'div'])('leaves Cyrillic typing in a %s alone', (tag) => {
+    const field = document.createElement(tag)
+    if (tag === 'div') field.contentEditable = 'true'
+    const resolveTool = vi.fn(toolForShortcut)
+    field.addEventListener('keydown', resolveTool)
+    expect(field.dispatchEvent(press('с', 'KeyC', { cancelable: true }))).toBe(true)
+    expect(resolveTool).toHaveReturnedWith(null)
   })
 })

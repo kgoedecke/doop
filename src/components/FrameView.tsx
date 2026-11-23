@@ -35,6 +35,7 @@ import { throttle } from '../lib/throttle'
 import { getIdentity } from '../lib/identity'
 import { FRAME_BOOTSTRAP } from '../lib/frameRuntime'
 import { MOD_KEY } from '../lib/keys'
+import { isDesktopShell } from '../lib/shell'
 import { FRAME_DOCUMENTS_TAKE_ZOOM_AS_DENSITY, counterZoom } from '../lib/layoutZoom'
 import { dropEntry, recordCreate, recordUpdate, recordUpdates, trackSave, type HistoryEntry } from '../lib/history'
 import { snapFrame } from '../lib/snap'
@@ -1031,7 +1032,7 @@ export const FrameView = memo(function FrameView({
           const channel = new MessageChannel()
           channel.port1.onmessage = onRuntimeMessage
           runtimePort.current = channel.port1
-          win.postMessage({ type: 'doop:runtime-port' }, '*', [channel.port2])
+          win.postMessage({ type: 'doop:runtime-port', desktopShell: isDesktopShell() }, '*', [channel.port2])
         }
         setRuntimeReady(true)
       }

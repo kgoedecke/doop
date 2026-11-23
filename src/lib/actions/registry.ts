@@ -568,7 +568,7 @@ export const ACTIONS: readonly CanvasAction[] = [
     label: 'actions.zoomIn',
     menu: 'view',
     section: 2,
-    keys: [mod('='), mod('+', { shift: true }), mod('+')],
+    keys: [mod('='), mod('=', { shift: true }), mod('+', { shift: true }), mod('+')],
     run: () => runViewCommand('zoom-in'),
   },
   {

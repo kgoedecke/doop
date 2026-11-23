@@ -6,6 +6,7 @@ import { navigate } from '../lib/navigate'
 import { useRailDrawer } from '../lib/railDrawer'
 import { timeAgo } from '../lib/time'
 import { openCanvasTab } from '../lib/desktop'
+import { shortcutKey } from '../lib/keys'
 import { useT } from '../lib/i18n'
 import { cn } from '@/lib/utils'
 import { AgentTile } from './AgentIcon'
@@ -185,7 +186,7 @@ export function AppRail({
   useEffect(() => {
     if (!searchShortcut) return
     function onKey(e: KeyboardEvent) {
-      if (e.key === 'k' && (e.metaKey || e.ctrlKey)) {
+      if (shortcutKey(e) === 'k' && (e.metaKey || e.ctrlKey)) {
         e.preventDefault()
         setSearching(true)
       }
