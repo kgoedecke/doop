@@ -69,7 +69,7 @@ async function openMenu(id: string) {
   await act(async () => {
     row(id).dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2 }))
   })
-  return [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find((el) => el.textContent === 'Rename')!
+  return [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')]
 }
 
 describe('renaming in the Layers panel', () => {
@@ -119,19 +119,10 @@ describe('renaming in the Layers panel', () => {
     expect(row(id).textContent).toContain('New name')
   })
 
-  it.each(['f1', 'image'])('keeps focus in the editor after choosing Rename for %s', async (id) => {
-    const rename = await openMenu(id)
-    expect(rename).toBeDefined()
-    await act(async () => rename.click())
-    await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 10))
-    })
-    expect(document.querySelector('[role="menu"]')).toBeNull()
-    expect(input()).not.toBeNull()
-    expect(document.activeElement).toBe(input())
-    input().value = 'From menu'
-    await act(async () => input().blur())
-    expect(updateFrame).toHaveBeenCalledExactlyOnceWith(id, { name: 'From menu' })
+  it.each(['f1', 'image'])('offers no Rename in the menu of %s: a double-click renames', async (id) => {
+    const items = await openMenu(id)
+    expect(items.length).toBeGreaterThan(0)
+    expect(items.map((el) => el.textContent)).not.toContain('Rename')
   })
 
   it('cancels on Escape and ignores empty or unchanged names', () => {
@@ -168,7 +159,6 @@ describe('renaming in the Layers panel', () => {
     doubleClick('f1')
     doubleClick('image')
     expect(input()).toBeNull()
-    expect(await openMenu('f1')).toBeUndefined()
   })
 
   it('disables renaming locked frames and images', async () => {
@@ -181,7 +171,6 @@ describe('renaming in the Layers panel', () => {
     doubleClick('f1')
     doubleClick('image')
     expect(input()).toBeNull()
-    expect((await openMenu('f1')).getAttribute('aria-disabled')).toBe('true')
   })
 
   it('rolls back a failed save and removes its undo entry', async () => {
@@ -241,16 +230,12 @@ describe('renaming in the Layers panel', () => {
       await act(async () => redo())
       expect(row(key).textContent).toContain('Custom label')
 
-      const rename = await openMenu(key)
-      await act(async () => rename.click())
-      await act(async () => {
-        await new Promise((resolve) => setTimeout(resolve, 10))
-      })
+      doubleClick(key)
       expect(document.activeElement).toBe(input())
       expect(input().value).toBe('Custom label')
-      input().value = 'From nested menu'
+      input().value = 'Renamed again'
       await act(async () => input().blur())
-      expect(row(key).textContent).toContain('From nested menu')
+      expect(row(key).textContent).toContain('Renamed again')
     },
   )
 
@@ -313,7 +298,6 @@ describe('renaming in the Layers panel', () => {
     showLayers(nestedHtml.replace('id="box"', 'id="box" data-doop-locked="true"'))
     doubleClick('f1|#photo')
     expect(input()).toBeNull()
-    expect((await openMenu('f1|#photo')).getAttribute('aria-disabled')).toBe('true')
     expect(updateFrame).not.toHaveBeenCalled()
   })
 

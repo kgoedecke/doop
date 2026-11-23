@@ -101,9 +101,6 @@ interface State {
   /** the element under the pointer in the Layers panel — its frame outlines
    *  it on the canvas, the same as a hover over the frame itself */
   hoveredLayer: { frameId: string; selector: string } | null
-  /** a Rename picked from a canvas menu: the Layers panel row for this frame
-   *  (`selector` null) or layer opens its name field, as its own menu does */
-  renameRequest: { frameId: string; selector: string | null; nonce: number } | null
   /** a comment pin being dragged: its thread root and where the pointer
    *  holds it, in world px — CanvasComments draws the ghost there, above
    *  every frame, while the pin itself hides */
@@ -274,9 +271,6 @@ interface State {
   setSelectedElement(el: { frameId: string; selector: string } | null): void
   setHoveredLayer(el: { frameId: string; selector: string } | null): void
   /** ask the Layers panel to rename a frame or layer, opening the panel */
-  requestRename(frameId: string, selector: string | null): void
-  /** the row took the request with this nonce */
-  clearRenameRequest(nonce: number): void
   setCommentDrag(drag: { id: string; x: number; y: number } | null): void
   /** an element picked by the user — on the frame surface or in the Layers
    *  rail: selects it and opens its properties panel; picking nothing clears
@@ -363,7 +357,6 @@ export const useStore = create<State>((set, get) => ({
   selectedElement: null,
   selectedElements: [],
   hoveredLayer: null,
-  renameRequest: null,
   commentDrag: null,
   elementPanelOpen: false,
   layersOpen: readLayersOpen(),
@@ -776,15 +769,6 @@ export const useStore = create<State>((set, get) => ({
     set({ selectedElement: { frameId, selector: primary }, selectedElements: selectors, elementPanelOpen: true })
   },
   setElementPanelOpen: (elementPanelOpen) => set({ elementPanelOpen }),
-  requestRename: (frameId, selector) => {
-    get().setLayersOpen(true)
-    const nonce = (get().renameRequest?.nonce ?? 0) + 1
-    set({ renameRequest: { frameId, selector, nonce } })
-    /* a row that never shows (a collapsed ancestor, a closed sheet) must not
-       open its name field whenever it mounts later */
-    setTimeout(() => get().clearRenameRequest(nonce), 1500)
-  },
-  clearRenameRequest: (nonce) => set((s) => (s.renameRequest?.nonce === nonce ? { renameRequest: null } : s)),
   setLayersOpen: (layersOpen) => {
     try {
       localStorage.setItem(LAYERS_OPEN_KEY, layersOpen ? '1' : '0')
