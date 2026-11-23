@@ -84,13 +84,19 @@ function previewBridge(doopOrigin: string) {
     hovered = element
     paint()
   }, true)
-  for (const type of ['pointerdown', 'pointerup', 'pointercancel', 'mousedown', 'mouseup', 'dblclick', 'auxclick', 'contextmenu', 'dragstart']) {
+  for (const type of ['pointerdown', 'pointerup', 'pointercancel', 'mousedown', 'mouseup', 'dblclick', 'auxclick', 'dragstart']) {
     addEventListener(type, (event) => {
       if (!inspect || !event.isTrusted) return
       event.preventDefault()
       event.stopImmediatePropagation()
     }, true)
   }
+  addEventListener('contextmenu', (event) => {
+    if (!inspect || !event.isTrusted) return
+    event.preventDefault()
+    event.stopImmediatePropagation()
+    send({ type: 'doop-source:context-menu', x: event.clientX, y: event.clientY })
+  }, true)
   addEventListener('click', (event) => {
     if (!inspect || !event.isTrusted) return
     event.preventDefault()

@@ -60,6 +60,7 @@ export const sourceChange = z.object({
 export const sourcePreviewEvent = z.discriminatedUnion('type', [
   z.object({ type: z.literal('doop-source:ready') }),
   z.object({ type: z.literal('doop-source:select'), marker: sourceId.nullable() }),
+  z.object({ type: z.literal('doop-source:context-menu'), x: z.number().finite(), y: z.number().finite() }),
   z.object({
     type: z.literal('doop-source:wheel'),
     x: z.number().finite(),

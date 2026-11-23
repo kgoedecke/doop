@@ -880,10 +880,11 @@ Doop keeps the previous file in the project's local `.doop-source-recovery/` fol
 Keep that folder out of version control. You can delete recovery copies once you no longer need
 them. Visual writes require a local filesystem that supports hard links.
 
-Drag the board or a card's header to pan and use Ctrl/Command + wheel to zoom. Use **Play** to give
-the real app pointer and wheel input so its page and nested regions scroll without moving the
-board. Press Escape to return to selection. Stored HTML frames use **Present** to scroll long
-documents.
+Drag the board or a card's header to pan and use Ctrl/Command + wheel to zoom. Right-click a
+card and choose **Play** to interact with the app and scroll its page or nested regions without
+moving the board. To leave Play, press Escape or right-click the header and choose **Stop playing**.
+When the header is focused, Shift+F10 or the Menu key opens its menu. Stored HTML frames use
+**Present** to scroll long documents.
 
 ### Design sync: push an app's live screens onto a canvas
 

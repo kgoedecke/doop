@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } f
 import { createRoot } from 'react-dom/client'
 import { z, type ZodType } from 'zod'
 import { Button } from './components/ui/button'
+import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from './components/ui/context-menu'
 import { Input } from './components/ui/input'
 import { initTheme } from './lib/theme'
 import { cn } from './lib/utils'
@@ -27,6 +28,18 @@ type Wheel = { x: number; y: number; dx: number; dy: number; zoom: boolean }
 
 function syncPreviewMode(iframe: HTMLIFrameElement, origin: string, inspect: boolean, marker: string | null) {
   iframe.contentWindow?.postMessage({ type: 'doop-source:mode', inspect, marker }, origin)
+}
+
+function framePoint(iframe: HTMLIFrameElement, x: number, y: number) {
+  const rect = iframe.getBoundingClientRect()
+  return {
+    x: rect.left + (x * rect.width) / iframe.offsetWidth,
+    y: rect.top + (y * rect.height) / iframe.offsetHeight,
+  }
+}
+
+function openCardMenu(header: HTMLElement, x: number, y: number) {
+  header.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: x, clientY: y }))
 }
 
 async function projectRequest<T>(origin: string, path: string, schema: ZodType<T>, init?: RequestInit): Promise<T> {
@@ -166,6 +179,9 @@ function LocalCanvas() {
   const [revision, setRevision] = useState(0)
   const stage = useRef<HTMLElement>(null)
   const frames = useRef(new Map<string, HTMLIFrameElement>())
+  const headers = useRef(new Map<string, HTMLElement>())
+  const openMenu = useRef<string | null>(null)
+  const focusPlay = useRef<string | null>(null)
   const drag = useRef<{ pointer: number; x: number; y: number } | null>(null)
   const { origin } = connection
 
@@ -282,25 +298,32 @@ function LocalCanvas() {
       const data = parsed.data
       if (data.type === 'doop-source:ready') setMode(id, iframe)
       else if (data.type === 'doop-source:escape') {
+        if (playing !== id || openMenu.current) return
         setPlaying(null)
-        iframe.blur()
+        headers.current.get(id)?.focus({ preventScroll: true })
+      } else if (playing !== id && data.type === 'doop-source:context-menu') {
+        const header = headers.current.get(id)
+        const point = framePoint(iframe, data.x, data.y)
+        if (header) openCardMenu(header, point.x, point.y)
       } else if (playing !== id && data.type === 'doop-source:select') {
         setTarget(null)
         setTargetError('')
         setPicked(data.marker ? { card: id, marker: data.marker } : null)
       } else if (playing !== id && data.type === 'doop-source:wheel') {
-        const rect = iframe.getBoundingClientRect()
+        const point = framePoint(iframe, data.x, data.y)
         const stageRect = stage.current?.getBoundingClientRect()
         if (!stageRect) return
         moveCamera({
           ...data,
-          x: rect.left - stageRect.left + (data.x * rect.width) / iframe.offsetWidth,
-          y: rect.top - stageRect.top + (data.y * rect.height) / iframe.offsetHeight,
+          x: point.x - stageRect.left,
+          y: point.y - stageRect.top,
         })
       }
     }
     function key(event: KeyboardEvent) {
-      if (event.key === 'Escape' && !event.defaultPrevented) setPlaying(null)
+      if (event.key !== 'Escape' || event.defaultPrevented || openMenu.current || !playing) return
+      setPlaying(null)
+      headers.current.get(playing)?.focus({ preventScroll: true })
     }
     window.addEventListener('message', message)
     window.addEventListener('keydown', key)
@@ -343,25 +366,72 @@ function LocalCanvas() {
     const isPlaying = playing === card.id
     return (
       <article key={card.id} className="flex shrink-0 flex-col gap-2" style={{ width: card.width }}>
-        <header
-          data-source-pan=""
-          className="flex cursor-grab items-center justify-between rounded-card bg-surface px-3 py-2 shadow-ring"
+        <ContextMenu
+          onOpenChange={(open) => {
+            if (open) openMenu.current = card.id
+            else if (openMenu.current === card.id) openMenu.current = null
+          }}
         >
-          <div className="min-w-0">
-            <h2 className="truncate text-body font-semibold">{card.name}</h2>
-            <p className="text-caption text-ink-soft">
-              {card.width} × {card.height} · Local · Vite
-            </p>
-          </div>
-          <Button
-            variant={isPlaying ? 'brand' : 'ghost'}
-            size="sm"
-            aria-pressed={isPlaying}
-            onClick={() => setPlaying(isPlaying ? null : card.id)}
+          <ContextMenuTrigger asChild>
+            <header
+              ref={(header) => {
+                if (header) headers.current.set(card.id, header)
+                else headers.current.delete(card.id)
+              }}
+              data-source-pan=""
+              data-source-header={card.id}
+              tabIndex={0}
+              aria-label={`${card.name} card`}
+              aria-haspopup="menu"
+              title="Right-click for card actions"
+              className="flex cursor-grab items-center justify-between gap-3 rounded-card bg-surface px-3 py-2 shadow-ring focus-visible:outline-2 focus-visible:outline-brand"
+              onContextMenu={(event) => event.currentTarget.focus({ preventScroll: true })}
+              onKeyDown={(event) => {
+                if (event.key !== 'ContextMenu' && !(event.shiftKey && event.key === 'F10')) return
+                event.preventDefault()
+                const rect = event.currentTarget.getBoundingClientRect()
+                openCardMenu(event.currentTarget, rect.left + 12, rect.bottom)
+              }}
+            >
+              <div className="min-w-0">
+                <h2 className="truncate text-body font-semibold">{card.name}</h2>
+                <p className="text-caption text-ink-soft">
+                  {card.width} × {card.height} · Local · Vite
+                </p>
+              </div>
+              <span
+                data-source-mode={isPlaying ? 'play' : 'design'}
+                aria-live="polite"
+                className={cn(
+                  'shrink-0 rounded-full px-2 py-0.5 text-caption font-medium',
+                  isPlaying ? 'bg-brand/10 text-brand' : 'bg-sub text-ink-soft',
+                )}
+              >
+                {isPlaying ? 'Playing · Esc' : 'Design'}
+              </span>
+            </header>
+          </ContextMenuTrigger>
+          <ContextMenuContent
+            aria-label={`${card.name} card actions`}
+            onEscapeKeyDown={(event) => event.stopPropagation()}
+            onCloseAutoFocus={(event) => {
+              event.preventDefault()
+              if (focusPlay.current === card.id) {
+                focusPlay.current = null
+                frames.current.get(card.id)?.focus({ preventScroll: true })
+              } else headers.current.get(card.id)?.focus({ preventScroll: true })
+            }}
           >
-            {isPlaying ? 'Stop playing' : 'Play'}
-          </Button>
-        </header>
+            <ContextMenuItem
+              onSelect={() => {
+                focusPlay.current = isPlaying ? null : card.id
+                setPlaying(isPlaying ? null : card.id)
+              }}
+            >
+              {isPlaying ? 'Stop playing' : 'Play'}
+            </ContextMenuItem>
+          </ContextMenuContent>
+        </ContextMenu>
         <iframe
           ref={(iframe) => {
             if (iframe) frames.current.set(card.id, iframe)

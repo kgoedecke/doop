@@ -14,6 +14,10 @@ export default function Demo() {
   return <main>
     <h1 id="headline" data-doop-edit="headline" style={{ color: '#334455', margin: 0 }}
       onMouseDown={(event) => event.currentTarget.setAttribute('data-mouse-down', '')}
+      onContextMenu={(event) => {
+        event.preventDefault()
+        event.currentTarget.setAttribute('data-native-menu', '')
+      }}
       onPointerUp={(event) => event.currentTarget.setAttribute('data-pointer-up', '')}>First draft</h1>
     <div id="nested" style={{ height: 120, width: 260, overflow: 'auto', overscrollBehavior: 'contain' }}>
       <div style={{ height: 800 }}>Nested content</div>
@@ -142,14 +146,29 @@ describe.skipIf(!findBrowserPath())('local source canvas', () => {
       await expect.poll(camera).not.toBe(initialCamera)
       expect(await reloaded.evaluate(() => scrollY)).toBe(0)
       await page.locator('::-p-text(Reset view)').click()
-      await page.locator('article:first-child button').click()
-      await page.waitForSelector('article:first-child button[aria-pressed="true"]')
+      const header = '[data-source-header="large"]'
+      const menu = '[role="menu"]'
+      const item = '[role="menuitem"]'
+      expect(await page.$(header + ' button')).toBeNull()
+      await over(60, 15)
+      await page.mouse.down({ button: 'right' })
+      await page.mouse.up({ button: 'right' })
+      await page.waitForSelector(menu)
+      expect(await page.$eval(item, (el) => el.textContent)).toBe('Play')
+      expect(await reloaded.$eval('#headline', (el) => el.hasAttribute('data-native-menu'))).toBe(false)
+      await page.locator(item).click()
+      await page.waitForSelector(header + ' [data-source-mode="play"]')
+      await page.waitForFunction(() => document.activeElement?.getAttribute('data-source-card') === 'large')
 
       const playCamera = await camera()
       await over(60, 15)
       await page.mouse.down()
       await page.mouse.up()
       await reloaded.waitForSelector('#headline[data-mouse-down][data-pointer-up]')
+      await page.mouse.down({ button: 'right' })
+      await page.mouse.up({ button: 'right' })
+      await reloaded.waitForSelector('#headline[data-native-menu]')
+      expect(await page.$(menu)).toBeNull()
       await over(60, 70)
       await page.mouse.wheel({ deltaY: 70 })
       await reloaded.waitForFunction(() => (document.querySelector('#nested')?.scrollTop ?? 0) > 0)
@@ -158,6 +177,30 @@ describe.skipIf(!findBrowserPath())('local source canvas', () => {
       await page.mouse.wheel({ deltaY: 140 })
       await reloaded.waitForFunction(() => scrollY > 0)
       expect(await camera()).toBe(playCamera)
+      await page.focus(header)
+      await page.keyboard.down('Shift')
+      await page.keyboard.press('F10')
+      await page.keyboard.up('Shift')
+      await page.waitForFunction(() => document.activeElement?.textContent === 'Stop playing')
+      await page.keyboard.press('Escape')
+      await page.waitForSelector(menu, { hidden: true })
+      await page.waitForFunction(() => document.activeElement?.getAttribute('data-source-header') === 'large')
+      await page.waitForSelector(header + ' [data-source-mode="play"]')
+      await page.focus('iframe[data-source-card="large"]')
+      await page.keyboard.press('Escape')
+      await page.waitForSelector(header + ' [data-source-mode="design"]')
+      await page.waitForFunction(() => document.activeElement?.getAttribute('data-source-header') === 'large')
+      await page.keyboard.press('ContextMenu')
+      await page.waitForFunction(() => document.activeElement?.textContent === 'Play')
+      const menuScreenshot = process.env.DOOP_SOURCE_MENU_CAPTURE
+      if (menuScreenshot) await page.screenshot({ path: menuScreenshot })
+      await page.keyboard.press('Enter')
+      await page.waitForSelector(header + ' [data-source-mode="play"]')
+      await page.focus(header)
+      await page.keyboard.press('ContextMenu')
+      await page.waitForFunction(() => document.activeElement?.textContent === 'Stop playing')
+      await page.keyboard.press('Enter')
+      await page.waitForSelector(header + ' [data-source-mode="design"]')
     } finally {
       try {
         await page.close()
