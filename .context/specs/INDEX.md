@@ -6,6 +6,9 @@ lists every file in this folder.
 
 ## Active
 
+- [shared-model-providers.md](shared-model-providers.md) - Shared model providers: custom
+  providers an admin sets up once for every user (Admin → Shared models), per-user model pick and
+  on/off, sealed key never returned; `shared_model_accounts` + prefs, `/api/admin/shared-providers`.
 - [skills.md](skills.md) - Team skills: named markdown instructions a workspace or person writes
   once, invoked by `/handle` in a request and added to the resident agent's system prompt for that
   run; storage, `/api/skills`, the settings card. Issue #380.
