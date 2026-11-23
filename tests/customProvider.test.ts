@@ -3,10 +3,13 @@ import http from 'node:http'
 import type { AddressInfo } from 'node:net'
 import type Anthropic from '@anthropic-ai/sdk'
 import {
+  MAX_CUSTOM_IMAGE_MODELS,
+  customImageModelRef,
   headersFromText,
   isCustomProviderKind,
   normalizeBaseUrl,
   parseCustomHeaders,
+  parseCustomImageModelRef,
   parseCustomKey,
   parseCustomProviderConfig,
 } from '../shared/customProvider.ts'
@@ -116,6 +119,87 @@ describe('redactSecrets', () => {
     const secrets = { apiKey: 'sk-abcd1234', headers: { 'X-Tenant': 'abcd', 'X-Flag': '1' } }
     expect(redactSecrets('key sk-abcd1234 tenant abcd flag 1', secrets)).toBe('key *** tenant *** flag 1')
     expect(redactSecrets('nothing here', {})).toBe('nothing here')
+  })
+})
+
+describe('a provider’s image models', () => {
+  const base = {
+    name: 'Acme',
+    apiType: 'openai-chat',
+    baseUrl: 'https://llm.acme.example/v1',
+    models: [{ id: 'qwen3-coder', vision: true }],
+  }
+
+  it('keeps a description stored before image models existed valid, and adds nothing to it', () => {
+    const parsed = parseCustomProviderConfig(base)
+    expect(parsed.ok).toBe(true)
+    expect(parsed.ok && parsed.value).not.toHaveProperty('imageModels')
+    /* an empty list is stored as no list, the same shape */
+    const empty = parseCustomProviderConfig({ ...base, imageModels: [] })
+    expect(empty.ok && empty.value).not.toHaveProperty('imageModels')
+  })
+
+  it('normalises each one: a trimmed id, a name only when it says more, transparent only when true', () => {
+    const parsed = parseCustomProviderConfig({
+      ...base,
+      imageModels: [
+        { id: ' flux-dev ', name: ' FLUX.1 dev ', transparent: true },
+        { id: 'black-forest-labs/FLUX.1-schnell', name: 'black-forest-labs/FLUX.1-schnell', transparent: 'yes' },
+        { id: 'sdxl', name: '' },
+      ],
+    })
+    expect(parsed.ok && parsed.value.imageModels).toEqual([
+      { id: 'flux-dev', name: 'FLUX.1 dev', transparent: true },
+      { id: 'black-forest-labs/FLUX.1-schnell' },
+      { id: 'sdxl' },
+    ])
+    /* the chat models are untouched by them */
+    expect(parsed.ok && parsed.value.models).toEqual([{ id: 'qwen3-coder', vision: true }])
+  })
+
+  it('lets one id be a chat model and an image model at once', () => {
+    const parsed = parseCustomProviderConfig({ ...base, imageModels: [{ id: 'qwen3-coder' }] })
+    expect(parsed.ok && parsed.value.imageModels).toEqual([{ id: 'qwen3-coder' }])
+  })
+
+  it('drops them from an Anthropic-compatible provider, which has no Images API', () => {
+    const parsed = parseCustomProviderConfig({ ...base, apiType: 'anthropic', imageModels: [{ id: 'flux-dev' }] })
+    expect(parsed.ok).toBe(true)
+    expect(parsed.ok && parsed.value).not.toHaveProperty('imageModels')
+  })
+
+  it.each([
+    [{ imageModels: 'flux-dev' }, 'must be a list'],
+    [{ imageModels: [{ id: 'has space' }] }, 'Image model 1 needs an id without spaces'],
+    [{ imageModels: [{ id: '' }] }, 'Image model 1 needs an id'],
+    [{ imageModels: [{ id: 'x'.repeat(121) }] }, 'at most 120 characters'],
+    [{ imageModels: [null] }, 'Image model 1 is not valid'],
+    [{ imageModels: [{ id: 'flux' }, { id: 'flux' }] }, 'listed twice as an image model'],
+    [{ imageModels: [{ id: 'flux', name: 'n'.repeat(61) }] }, 'too long'],
+    [
+      { imageModels: Array.from({ length: MAX_CUSTOM_IMAGE_MODELS + 1 }, (_, i) => ({ id: `m${i}` })) },
+      `at most ${MAX_CUSTOM_IMAGE_MODELS} image models`,
+    ],
+  ])('refuses %j', (patch, message) => {
+    const parsed = parseCustomProviderConfig({ ...base, ...patch })
+    expect(parsed.ok).toBe(false)
+    expect(!parsed.ok && parsed.error).toContain(message)
+  })
+
+  it('takes exactly the cap', () => {
+    const imageModels = Array.from({ length: MAX_CUSTOM_IMAGE_MODELS }, (_, i) => ({ id: `m${i}` }))
+    const parsed = parseCustomProviderConfig({ ...base, imageModels })
+    expect(parsed.ok && parsed.value.imageModels).toHaveLength(MAX_CUSTOM_IMAGE_MODELS)
+  })
+
+  it('names one in the image-model preference by its provider and id, a slash in the id included', () => {
+    const kind = 'custom:0123456789abcdef01'
+    const ref = customImageModelRef(kind, 'black-forest-labs/FLUX.1-dev')
+    expect(ref).toBe('custom:0123456789abcdef01/black-forest-labs/FLUX.1-dev')
+    expect(parseCustomImageModelRef(ref)).toEqual({ kind, model: 'black-forest-labs/FLUX.1-dev' })
+    for (const value of ['gpt-image-2', 'custom:0123456789abcdef01', 'custom:short/flux', 'custom:../x/flux', 42]) {
+      expect(parseCustomImageModelRef(value)).toBeNull()
+    }
   })
 })
 

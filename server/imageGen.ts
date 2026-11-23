@@ -4,12 +4,20 @@ import sharp from 'sharp'
 import { getAccounts, withFreshToken } from './modelAccounts.ts'
 import type { ModelAccount } from './modelAccounts.ts'
 import { getImagePref } from './imagePrefs.ts'
+import { customProviderFetch, redactSecrets } from './customProviderFetch.ts'
 import { ACCOUNT_KIND_LABELS, IMAGE_MODELS } from '../shared/modelMenu.ts'
 import type { AccountKindName, ImageModelOption } from '../shared/modelMenu.ts'
+import {
+  customImageModelRef,
+  isCustomProviderKind,
+  parseCustomImageModelRef,
+  type CustomImageModel,
+} from '../shared/customProvider.ts'
 import {
   CHATGPT_URL,
   DEFAULT_OPENAI_MODEL,
   ModelAuthError,
+  ModelUnavailableError,
   modelFor,
   OPENAI_URL,
   ORIGINATOR,
@@ -38,6 +46,14 @@ import {
  *    connected Gemini key, else the server's GEMINI_API_KEY;
  *  - `ark` (Seedream, BytePlus ModelArk) — server-only via ARK_API_KEY; there
  *    is no ByteDance BYO account.
+ *
+ * Beside the registry, a custom provider (shared/customProvider.ts) can list
+ * image models of its own — a gateway in front of a self-hosted FLUX, say —
+ * which anyone with that provider connected and on can pick. They draw
+ * through the provider's OpenAI Images API (`POST {baseUrl}/images/generations`)
+ * on its key and headers, over customProviderFetch like its chat turns, and
+ * are billed as the person's own connection, an admin's shared provider
+ * included: no server key ever stands in for one.
  *
  * Whoever pays for the agent run pays for its images; nobody's subscription
  * ever draws for someone else, and an unavailable choice refuses with the fix
@@ -71,6 +87,8 @@ export interface ImageRequest {
   prompt: string
   aspect?: ImageAspect
   quality?: ImageQuality
+  /** a cut-out: honoured only by an image model that says it can draw one */
+  transparent?: boolean
 }
 
 export interface GeneratedImage {
@@ -81,8 +99,12 @@ export interface GeneratedImage {
   height: number
   /** a small preview the agent can look at without paying for the full image */
   preview: { data: string; mime: 'image/jpeg' }
-  /** who paid: "ChatGPT", "OpenAI", "Gemini", or "server" */
+  /** who paid: "ChatGPT", "OpenAI", "Gemini", "server", or a custom provider's name */
   billedTo: string
+  /** drawn on a custom provider: the person's own, or one an admin shares */
+  custom?: 'personal' | 'shared'
+  /** a transparent background was asked for and the image has one */
+  transparent: boolean
 }
 
 /** Something that can generate an image for a given payer, or the reason it cannot. */
@@ -92,6 +114,8 @@ export type Generator =
       label: string
       /** set on server-key generators: the env var to blame when auth fails */
       authHint?: string
+      /** a custom provider's image model: whose it is */
+      custom?: 'personal' | 'shared'
       run: (req: ImageRequest) => Promise<Buffer>
     }
   | { ok: false; reason: string }
@@ -353,6 +377,175 @@ function arkGenerator(apiKey: string, label: string, model: string): Generator {
 }
 
 /* ---------------------------------------------------------------- */
+/* a custom provider's image models: its OpenAI Images API          */
+/* ---------------------------------------------------------------- */
+
+/** A custom provider's image model, on the account that lists it. */
+interface CustomImageChoice {
+  /** what the image-model preference stores for it */
+  ref: string
+  account: ModelAccount
+  model: CustomImageModel
+}
+
+interface CustomImageResponse {
+  data?: { b64_json?: string; url?: string }[]
+  error?: { message?: string } | string
+}
+
+/* what the image is decoded as; anything else (an SVG, an HTML error page)
+   is refused before it reaches a frame */
+const CUSTOM_IMAGE_FORMATS = new Set(['png', 'jpeg', 'webp'])
+
+/* a shared provider is its admin's to fix, a personal one its person's */
+function customFix(account: ModelAccount): string {
+  return account.shared
+    ? 'Ask your admin to check it in Admin → Shared models.'
+    : 'Check the provider in Settings → Doop Agent.'
+}
+
+/** The endpoint's refusal, phrased as the fix the person can make. */
+async function customImageError(res: Response, account: ModelAccount, model: CustomImageModel): Promise<Error> {
+  const name = account.custom!.name
+  /* masked on the whole body, before responseError shortens it */
+  const error = await responseError(res, name, (text) => redactSecrets(text, account))
+  if (error instanceof ModelAuthError) {
+    return new Error(
+      account.shared
+        ? `${name} turned down the shared connection your admin set up (${res.status}). Ask your admin to check it in Admin → Shared models.`
+        : `${name} rejected the API key (${res.status}). Update it in Settings → Doop Agent.`,
+      { cause: error },
+    )
+  }
+  if (error instanceof ModelUnavailableError || res.status === 404) {
+    return new Error(
+      `${name} cannot draw with ${model.id} (${res.status}): the endpoint has no such image model, or no /images/generations. ${customFix(account)}`,
+      { cause: error },
+    )
+  }
+  return error
+}
+
+/* every request to the provider, its image links included, goes through
+   customProviderFetch; a transport failure names the provider */
+async function reachCustom(account: ModelAccount, url: string, init: RequestInit): Promise<Response> {
+  try {
+    return await customProviderFetch(url, init)
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error)
+    throw new Error(`${account.custom!.name} could not be reached: ${detail} ${customFix(account)}`, {
+      cause: error,
+    })
+  }
+}
+
+/** An image the endpoint answered with as a link: fetched like the request
+ *  was, its key and headers sent along only to the provider's own origin. */
+async function customImageLink(
+  account: ModelAccount,
+  raw: string,
+  credentials: Record<string, string>,
+): Promise<Buffer> {
+  const config = account.custom!
+  let url: URL
+  try {
+    url = new URL(raw, `${config.baseUrl}/`)
+  } catch {
+    throw new Error(`${config.name} returned an image link that is not a URL. ${customFix(account)}`)
+  }
+  const sameOrigin = url.origin === new URL(config.baseUrl).origin
+  const res = await reachCustom(account, url.href, {
+    headers: sameOrigin ? credentials : {},
+    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+  })
+  if (!res.ok) {
+    await res.body?.cancel()
+    throw new Error(`${config.name} returned an image link that answered ${res.status}. ${customFix(account)}`)
+  }
+  return Buffer.from(await res.arrayBuffer())
+}
+
+/* The request is imageApiGenerator's, OpenAI's Images API shape that
+   gateways (LiteLLM, vLLM, LocalAI) take: the model id, the prompt as
+   written, one image at a size from SIZES. */
+function customImageGenerator(choice: CustomImageChoice): Generator {
+  const { account } = choice
+  const config = account.custom!
+  const credentials: Record<string, string> = {
+    ...account.headers,
+    ...(account.apiKey ? { Authorization: `Bearer ${account.apiKey}` } : {}),
+  }
+  return {
+    ok: true,
+    label: config.name,
+    custom: account.shared ? 'shared' : 'personal',
+    run: async (req) => {
+      try {
+        return await drawCustom(choice, credentials, req)
+      } catch (error) {
+        throw redactedImageError(error, account)
+      }
+    },
+  }
+}
+
+/**
+ * A custom provider's failure with its key and header values masked: the
+ * endpoint's own words (a refusal body, a 429, an `error.message` beside a
+ * 200) reach the person and the logs, and for a shared provider the person
+ * must never see the admin's key. A fresh error, so no cause carries the
+ * original along; a cancel or timeout has no endpoint text and passes as is.
+ */
+function redactedImageError(error: unknown, account: ModelAccount): unknown {
+  if (!(error instanceof Error) || error.name === 'AbortError' || error.name === 'TimeoutError') return error
+  return new Error(redactSecrets(error.message, { apiKey: account.apiKey, headers: account.headers }))
+}
+
+async function drawCustom(
+  { account, model }: CustomImageChoice,
+  credentials: Record<string, string>,
+  req: ImageRequest,
+): Promise<Buffer> {
+  const config = account.custom!
+  const res = await reachCustom(account, `${config.baseUrl}/images/generations`, {
+    method: 'POST',
+    headers: { ...credentials, 'Content-Type': 'application/json', Accept: 'application/json' },
+    body: JSON.stringify({
+      model: model.id,
+      prompt: req.prompt,
+      n: 1,
+      size: SIZES[req.aspect ?? 'square'],
+      quality: req.quality ?? 'medium',
+      output_format: 'png',
+      ...(req.transparent && model.transparent ? { background: 'transparent' } : {}),
+    }),
+    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+  })
+  if (!res.ok) throw await customImageError(res, account, model)
+  const body = (await res.json().catch(() => null)) as CustomImageResponse | null
+  const image = body?.data?.[0]
+  let buf: Buffer
+  if (image?.b64_json) buf = Buffer.from(image.b64_json, 'base64')
+  else if (image?.url) buf = await customImageLink(account, image.url, credentials)
+  else {
+    const detail = typeof body?.error === 'string' ? body.error : body?.error?.message
+    throw new Error(
+      detail
+        ? `${config.name} did not generate an image: ${redactSecrets(detail, account).slice(0, 300)}`
+        : `${config.name} returned no image (neither data[0].b64_json nor data[0].url). ${customFix(account)}`,
+    )
+  }
+  const format = await sharp(buf)
+    .metadata()
+    .then((meta) => meta.format as string | undefined)
+    .catch(() => undefined)
+  if (!format || !CUSTOM_IMAGE_FORMATS.has(format)) {
+    throw new Error(`${config.name} returned something that is not a PNG, JPEG or WebP image. ${customFix(account)}`)
+  }
+  return buf
+}
+
+/* ---------------------------------------------------------------- */
 /* which model, on whose credentials                                */
 /* ---------------------------------------------------------------- */
 
@@ -379,9 +572,13 @@ const NO_ACCOUNTS: PayerAccounts = { all: [], on: [], own: false }
 const DRAW_INSTEAD =
   'Retrying fails the same way until the person connects one; meanwhile use search_images for photography or draw the visual as inline SVG/CSS.'
 
+/** The generate_image `transparent` argument, as both tool schemas describe it. */
+export const TRANSPARENT_NOTE =
+  'true asks for a transparent background (a cut-out to place over the design). Only some image models can draw one (a custom provider’s, where its owner says so); the others draw an opaque background, and the result says which you got.'
+
 /** What every generate_image description says up front: who can draw. */
 export const IMAGE_PROVIDER_NOTE =
-  'It needs an image provider: the person’s ChatGPT subscription, OpenAI API key or Gemini API key, connected and switched on in Settings → Doop Agent (a Claude, OpenRouter, DeepSeek or Kimi connection cannot draw images), or the server’s own image key for someone who has connected no model account. Without one it fails at once saying what to connect: do not retry, use search_images or draw the visual as inline SVG/CSS.'
+  'It needs an image provider: the person’s ChatGPT subscription, OpenAI API key or Gemini API key, or a custom provider that lists image models (an admin’s shared one included), connected and switched on in Settings → Doop Agent (a Claude, OpenRouter, DeepSeek or Kimi connection cannot draw images), or the server’s own image key for someone who has connected no model account. Without one it fails at once saying what to connect: do not retry, use search_images or draw the visual as inline SVG/CSS.'
 
 /* the accounts that can pay for some image model */
 const IMAGE_ACCOUNT_KINDS: readonly string[] = ['chatgpt', 'openai-key', 'gemini-key']
@@ -395,10 +592,17 @@ function listed(names: readonly string[]): string {
   return `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`
 }
 
+/* an account that could draw if it were on: an image kind, or a custom
+   provider that lists image models */
+function drawsImages(account: ModelAccount): boolean {
+  return IMAGE_ACCOUNT_KINDS.includes(account.kind) || Boolean(account.custom?.imageModels?.length)
+}
+
 /** Why no image model at all can run for this payer, and what the person can do about it. */
 function noImageProviderReason(accounts: PayerAccounts): string {
-  const connect = 'connect a ChatGPT subscription, an OpenAI API key or a Gemini API key in Settings → Doop Agent'
-  const switchedOff = accounts.all.filter((account) => !account.enabled && IMAGE_ACCOUNT_KINDS.includes(account.kind))
+  const connect =
+    'connect a ChatGPT subscription, an OpenAI API key or a Gemini API key in Settings → Doop Agent, or list image models on a custom provider'
+  const switchedOff = accounts.all.filter((account) => !account.enabled && drawsImages(account))
   if (switchedOff.length > 0) {
     return `image generation is not available: the person’s ${listed(switchedOff.map(accountName))} connection is switched off. Switch it on in Settings → Doop Agent, or ${connect}. ${DRAW_INSTEAD}`
   }
@@ -421,6 +625,34 @@ function geminiAccount(accounts: readonly ModelAccount[]): ModelAccount | undefi
   return accounts.find((account) => account.kind === 'gemini-key' && Boolean(account.apiKey))
 }
 
+/** The image models the person's switched-on custom providers list, in
+ *  getAccounts' order: their own first, then the shared ones. */
+function customImageChoices(accounts: PayerAccounts): CustomImageChoice[] {
+  return accounts.on.flatMap((account) => {
+    const { kind } = account
+    if (!isCustomProviderKind(kind) || !account.custom?.imageModels) return []
+    return account.custom.imageModels.map((model) => ({ ref: customImageModelRef(kind, model.id), account, model }))
+  })
+}
+
+/** Why the custom image model the person picked cannot run now. It never
+ *  runs on another model in its place: the fix is theirs to choose. */
+function missingCustomReason(ref: string, accounts: PayerAccounts): string {
+  const parsed = parseCustomImageModelRef(ref)
+  const model = parsed?.model ?? ref
+  const account = parsed ? accounts.all.find((entry) => entry.kind === parsed.kind) : undefined
+  const pickAnother = 'pick another image model in Settings → Doop Agent'
+  const meanwhile = 'Meanwhile draw the visual as inline SVG/CSS or use search_images.'
+  const name = account?.custom?.name
+  if (name && !account.enabled) {
+    return `${model} on ${name} is not available: the person’s ${name} connection is switched off. Switch it on in Settings → Doop Agent, or ${pickAnother}. ${meanwhile}`
+  }
+  if (name) {
+    return `${name} no longer lists ${model} as an image model${account.shared ? ' (its admin changed it)' : ''}: ${pickAnother}. ${meanwhile}`
+  }
+  return `the image model picked in Settings (${model}) was on a custom provider that is no longer connected: ${pickAnother}. ${meanwhile}`
+}
+
 function available(option: ImageModelOption, accounts: PayerAccounts): boolean {
   switch (option.provider) {
     case 'openai':
@@ -437,17 +669,40 @@ function available(option: ImageModelOption, accounts: PayerAccounts): boolean {
   }
 }
 
-/** The registry entries this payer could actually run, for the Settings UI. */
-export async function imageModelAvailability(
-  payerId?: string,
-): Promise<{ id: string; available: boolean; selected: boolean }[]> {
+/** One image model as the Settings picker lists it. */
+export interface ImageModelAvailability {
+  id: string
+  available: boolean
+  selected: boolean
+  /** a custom provider's image model; registry entries carry their own
+   *  names and blurbs in shared/modelMenu.ts */
+  custom?: { provider: string; name: string; shared?: true; transparent?: true }
+}
+
+/** The registry entries this payer could actually run, then the image
+ *  models their switched-on custom providers list, for the Settings UI. */
+export async function imageModelAvailability(payerId?: string): Promise<ImageModelAvailability[]> {
   const accounts = payerId ? await payerAccounts(payerId).catch(() => NO_ACCOUNTS) : NO_ACCOUNTS
   const chosen = await chosenImageModel(payerId, accounts)
-  return IMAGE_MODELS.map((option) => ({
-    id: option.id,
-    available: available(option, accounts),
-    selected: chosen?.id === option.id,
-  }))
+  const chosenId = chosen ? choiceId(chosen) : undefined
+  return [
+    ...IMAGE_MODELS.map((option) => ({
+      id: option.id,
+      available: available(option, accounts),
+      selected: chosenId === option.id,
+    })),
+    ...customImageChoices(accounts).map(({ ref, account, model }) => ({
+      id: ref,
+      available: true,
+      selected: chosenId === ref,
+      custom: {
+        provider: account.custom!.name,
+        name: model.name ?? model.id,
+        ...(account.shared ? { shared: true as const } : {}),
+        ...(model.transparent ? { transparent: true as const } : {}),
+      },
+    })),
+  ]
 }
 
 let warnedDefault = false
@@ -457,16 +712,29 @@ async function payerAccounts(payerId: string): Promise<PayerAccounts> {
   return { all, on: all.filter((account) => account.enabled), own: all.length > 0 }
 }
 
-/** The model a run will draw with: the user's pick, else the server default,
- *  else the first entry their credentials can run. */
-async function chosenImageModel(
-  payerId: string | undefined,
-  accounts: PayerAccounts,
-): Promise<ImageModelOption | null> {
+/** What a run draws with: a registry entry, a custom provider's image
+ *  model, or the custom one the person picked that is not there now. */
+type ImageChoice = { option: ImageModelOption } | { custom: CustomImageChoice } | { missing: string }
+
+/* the id the picker knows the choice by */
+function choiceId(choice: ImageChoice): string {
+  if ('option' in choice) return choice.option.id
+  return 'custom' in choice ? choice.custom.ref : choice.missing
+}
+
+/** The model a run will draw with: the user's pick, else (on their own
+ *  credentials) the server default, the first registry entry, the first image
+ *  model of a custom provider of theirs, and only then what a server key pays
+ *  for, the server default first. */
+async function chosenImageModel(payerId: string | undefined, accounts: PayerAccounts): Promise<ImageChoice | null> {
   const pref = payerId ? await getImagePref(payerId) : undefined
+  const customs = customImageChoices(accounts)
   if (pref) {
     const option = IMAGE_MODELS.find((entry) => entry.id === pref)
-    if (option) return option
+    if (option) return { option }
+    const custom = customs.find((entry) => entry.ref === pref)
+    if (custom) return { custom }
+    if (parseCustomImageModelRef(pref)) return { missing: pref }
   }
   const fallback = IMAGE_MODELS.find((entry) => entry.id === DEFAULT_IMAGE_MODEL)
   if (!fallback && !warnedDefault) {
@@ -475,8 +743,25 @@ async function chosenImageModel(
       `[image-gen] DOOP_IMAGE_MODEL="${DEFAULT_IMAGE_MODEL}" is not on the image-model registry — ignoring it`,
     )
   }
-  if (fallback && available(fallback, accounts)) return fallback
-  return IMAGE_MODELS.find((entry) => available(entry, accounts)) ?? fallback ?? null
+  /* the person's own credentials first, the server default leading: their
+     registry accounts, then their custom providers' image models (a shared
+     one is the company's endpoint, still theirs to draw on) */
+  if (fallback && ownCredentials(fallback, accounts)) return { option: fallback }
+  const own = IMAGE_MODELS.find((entry) => ownCredentials(entry, accounts))
+  if (own) return { option: own }
+  if (customs[0]) return { custom: customs[0] }
+  /* then what a server key pays for: anything for someone who connected
+     nothing, and Seedream on ARK_API_KEY for everyone */
+  if (fallback && available(fallback, accounts)) return { option: fallback }
+  const runnable = IMAGE_MODELS.find((entry) => available(entry, accounts))
+  if (runnable) return { option: runnable }
+  return fallback ? { option: fallback } : null
+}
+
+/* runs on the person's own account rather than a server key: for someone
+   with an account every registry entry but Seedream does, or none at all */
+function ownCredentials(option: ImageModelOption, accounts: PayerAccounts): boolean {
+  return accounts.own && option.provider !== 'ark' && available(option, accounts)
 }
 
 function providerGenerator(option: ImageModelOption, accounts: PayerAccounts): Generator {
@@ -533,7 +818,8 @@ function providerGenerator(option: ImageModelOption, accounts: PayerAccounts): G
  * default), on their own credentials first, else the matching server key.
  * An explicit pick that cannot run refuses with the fix — it never quietly
  * swaps in a different model or bills a key the user did not choose. When no
- * model at all can run, the refusal names what to connect instead.
+ * model at all can run, the refusal names what to connect instead. A custom
+ * provider's image model only ever runs on that provider.
  */
 export async function generatorFor(payerId?: string): Promise<Generator> {
   /* a lookup failure must not read as "no account": that would quietly move
@@ -546,12 +832,14 @@ export async function generatorFor(payerId?: string): Promise<Generator> {
     : NO_ACCOUNTS
   /* nothing at all can draw: say what the person can connect, not why the
      default model in particular cannot run (they never picked it) */
-  if (!IMAGE_MODELS.some((entry) => available(entry, accounts))) {
+  if (!IMAGE_MODELS.some((entry) => available(entry, accounts)) && !customImageChoices(accounts).length) {
     return { ok: false, reason: noImageProviderReason(accounts) }
   }
-  const option = await chosenImageModel(payerId, accounts)
-  if (!option) return { ok: false, reason: noImageProviderReason(accounts) }
-  return providerGenerator(option, accounts)
+  const choice = await chosenImageModel(payerId, accounts)
+  if (!choice) return { ok: false, reason: noImageProviderReason(accounts) }
+  if ('custom' in choice) return customImageGenerator(choice.custom)
+  if ('missing' in choice) return { ok: false, reason: missingCustomReason(choice.missing, accounts) }
+  return providerGenerator(choice.option, accounts)
 }
 
 /* ---------------------------------------------------------------- */
@@ -559,12 +847,21 @@ export async function generatorFor(payerId?: string): Promise<Generator> {
 /* ---------------------------------------------------------------- */
 
 /** Recompress the model's png (large) into what a frame should load, and
- *  cut a preview the agent can judge it by. */
-async function finish(png: Buffer, billedTo: string): Promise<GeneratedImage> {
+ *  cut a preview the agent can judge it by. A cut-out keeps its alpha in the
+ *  webp; its jpeg preview shows it on white. */
+async function finish(
+  png: Buffer,
+  payer: Pick<GeneratedImage, 'billedTo' | 'custom'>,
+  cutOut: boolean,
+): Promise<GeneratedImage> {
   const image = sharp(png)
   const meta = await image.metadata()
+  /* what was drawn, not what the model was said to do: a cut-out has an
+     alpha channel that is not opaque everywhere */
+  const transparent = cutOut && Boolean(meta.hasAlpha) && !(await sharp(png).stats()).isOpaque
   const preview = await sharp(png)
     .resize({ width: PREVIEW_PX, height: PREVIEW_PX, fit: 'inside' })
+    .flatten({ background: '#ffffff' })
     .jpeg({ quality: 70 })
     .toBuffer()
   return {
@@ -573,7 +870,8 @@ async function finish(png: Buffer, billedTo: string): Promise<GeneratedImage> {
     width: meta.width ?? 0,
     height: meta.height ?? 0,
     preview: { data: preview.toString('base64'), mime: 'image/jpeg' },
-    billedTo,
+    ...payer,
+    transparent,
   }
 }
 
@@ -588,7 +886,11 @@ export async function generateImage(payerId: string | undefined, req: ImageReque
   if (!generator.ok) throw new Error(generator.reason)
   try {
     const png = await generator.run({ ...req, prompt })
-    return finish(png, generator.label)
+    return finish(
+      png,
+      { billedTo: generator.label, ...(generator.custom ? { custom: generator.custom } : {}) },
+      Boolean(req.transparent),
+    )
   } catch (err) {
     if (err instanceof ModelAuthError && generator.authHint) {
       /* these are the SERVER's credentials — "reconnect your account" would
@@ -600,4 +902,4 @@ export async function generateImage(payerId: string | undefined, req: ImageReque
 }
 
 /* exported for tests */
-export const _internal = { requestBody, SIZES, ARK_SIZES, GEMINI_ASPECTS, chosenImageModel }
+export const _internal = { requestBody, SIZES, ARK_SIZES, GEMINI_ASPECTS, chosenImageModel, customImageChoices }

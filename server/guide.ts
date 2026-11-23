@@ -661,13 +661,15 @@ any public image URL. Source images in this order:
   generated image, generate one from a prompt. It returns a permanent URL on this origin
   plus a preview: look at the preview and judge it like any other asset before it goes
   in. It draws with the image model your human picked in Settings (GPT Image, Nano
-  Banana or Seedream), on their connected account (else the server's key), and costs
-  them quota or money, and takes 20–60 seconds, so write ONE
+  Banana, Seedream, or an image model their custom or shared provider lists), on their
+  connected account (else the server's key), and costs them quota or money, and takes
+  20–60 seconds, so write ONE
   considered prompt — subject, style, composition, palette hexes, lighting, what to
   leave out — and refine a near miss by saying what was wrong rather than rolling the
-  dice again. Match aspect to the slot (square, landscape, portrait). Images come back
-  opaque — no transparent cut-outs — so place them in a box, mask them with CSS, or
-  prompt for the surface color you will put them on. Photography that exists in the
+  dice again. Match aspect to the slot (square, landscape, portrait). Images usually come
+  back opaque: pass transparent for a cut-out, which only some image models can draw (the
+  result says whether you got one); otherwise place the image in a box, mask it with CSS,
+  or prompt for the surface color you will put it on. Photography that exists in the
   world is still search_images' job.
   - **Hero backgrounds are where it shines.** A generated scene can match the palette
     exactly and leave room where the copy and the product window sit, which no stock

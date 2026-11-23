@@ -59,7 +59,7 @@ import {
 } from '../server/modelAccounts.ts'
 import { readConnections } from '../server/agentDefaults.ts'
 import { listRunners } from '../server/agentRunners.ts'
-import { generatorFor } from '../server/imageGen.ts'
+import { generatorFor, imageModelAvailability } from '../server/imageGen.ts'
 
 const GATEWAY = 'custom:0123456789abcdef01'
 const OLD_GATEWAY = 'custom:fedcba98765432100f'
@@ -241,5 +241,19 @@ describe('image generation', () => {
     const shared = await generatorFor('alice')
     expect(shared.ok).toBe(false)
     expect(!shared.ok && shared.reason).toContain('Acme Gateway')
+  })
+
+  it('draws on a shared provider that lists image models, for everyone, and not once the operator turns custom providers off', async () => {
+    stubEnv('OPENAI_API_KEY', 'sk-server-paid')
+    mocks.providers = [{ ...gateway, custom: { ...gateway.custom, imageModels: [{ id: 'flux-schnell' }] } }]
+    for (const person of ['alice', 'bob']) {
+      const generator = await generatorFor(person)
+      expect(generator).toMatchObject({ ok: true, label: 'Acme Gateway', custom: 'shared' })
+      expect((await imageModelAvailability(person)).find((model) => model.custom)?.id).toBe(`${GATEWAY}/flux-schnell`)
+    }
+    stubEnv('DOOP_CUSTOM_PROVIDERS', 'false')
+    expect((await imageModelAvailability('alice')).some((model) => model.custom)).toBe(false)
+    /* with the feature off nobody has a shared provider: as before it existed */
+    expect(await generatorFor('alice')).toMatchObject({ ok: true, label: 'server' })
   })
 })

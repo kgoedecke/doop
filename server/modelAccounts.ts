@@ -4,7 +4,8 @@ import http from 'node:http'
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto'
 import { and, asc, eq, like, sql } from 'drizzle-orm'
 import { db } from './db/index.ts'
-import { modelAccounts } from './db/schema.ts'
+import { imagePrefs, modelAccounts } from './db/schema.ts'
+import { picksOnProvider } from './imagePrefs.ts'
 import {
   DEEPSEEK_MODELS,
   DEFAULT_ANTHROPIC_MODEL,
@@ -313,6 +314,7 @@ export function statusOf(account: ModelAccount): AccountStatus {
         apiType: account.custom.apiType,
         baseUrl: sharedBaseUrl(account.custom.baseUrl),
         models: account.custom.models,
+        ...(account.custom.imageModels ? { imageModels: account.custom.imageModels } : {}),
         headerNames: [],
         hasKey: Boolean(account.apiKey),
       },
@@ -544,7 +546,16 @@ async function save(account: Omit<ModelAccount, 'connectedAt' | 'enabled'>): Pro
 
 export async function disconnect(userId: string, kind: AccountKind): Promise<void> {
   if (await isSharedKind(kind)) throw new SharedAccountError()
-  await db.delete(modelAccounts).where(and(eq(modelAccounts.userId, userId), eq(modelAccounts.kind, kind)))
+  const account = and(eq(modelAccounts.userId, userId), eq(modelAccounts.kind, kind))
+  if (!isCustomProviderKind(kind)) {
+    await db.delete(modelAccounts).where(account)
+    return
+  }
+  /* a custom provider takes the image model picked on it along */
+  await db.transaction(async (tx) => {
+    await tx.delete(modelAccounts).where(account)
+    await tx.delete(imagePrefs).where(and(eq(imagePrefs.userId, userId), picksOnProvider(kind)))
+  })
 }
 
 /** What a ChatGPT token refresh changes on the account. */

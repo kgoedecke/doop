@@ -1516,6 +1516,7 @@ const TOOLS: Anthropic.Tool[] = [
           enum: [...imageGen.IMAGE_QUALITIES],
           description: 'low is fast and cheap; default medium',
         },
+        transparent: { type: 'boolean', description: imageGen.TRANSPARENT_NOTE },
       },
       required: ['prompt'],
     },
@@ -2360,7 +2361,7 @@ async function runResidentTool(
         return ok(blocks)
       }
       case 'generate_image': {
-        const raw = block.input as { prompt?: string; aspect?: string; quality?: string }
+        const raw = block.input as { prompt?: string; aspect?: string; quality?: string; transparent?: unknown }
         const prompt = String(raw.prompt || '').trim()
         if (!prompt) return fail('prompt must be a non-empty string')
         if (runState.imagesGenerated >= MAX_IMAGES_PER_RUN) {
@@ -2374,7 +2375,8 @@ async function runResidentTool(
         const quality = (imageGen.IMAGE_QUALITIES as readonly string[]).includes(String(raw.quality))
           ? (raw.quality as imageGen.ImageQuality)
           : undefined
-        const image = await imageGen.generateImage(runState.payerId, { prompt, aspect, quality })
+        const transparent = raw.transparent === true
+        const image = await imageGen.generateImage(runState.payerId, { prompt, aspect, quality, transparent })
         const asset = await assets.createAsset(image.buf, {
           canvasId,
           ...(runState.payerId ? { ownerId: runState.payerId } : {}),
@@ -2388,7 +2390,7 @@ async function runResidentTool(
           { type: 'image', source: { type: 'base64', media_type: image.preview.mime, data: image.preview.data } },
           {
             type: 'text',
-            text: `Generated ${image.width}×${image.height} (${asset.mime}, billed to ${image.billedTo}) — preview above, judge it before embedding.\nurl: ${url}\nusage: <img src="${url}" alt="" style="object-fit: cover">`,
+            text: `Generated ${image.width}×${image.height} (${asset.mime}, billed to ${image.billedTo}${transparent ? (image.transparent ? ', transparent background' : ', opaque: this image model cannot draw a transparent background') : ''}) — preview above, judge it before embedding.\nurl: ${url}\nusage: <img src="${url}" alt="" style="object-fit: cover">`,
           },
         ])
       }

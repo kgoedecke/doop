@@ -29,7 +29,7 @@ vi.mock('../server/db/index.ts', () => {
 })
 
 import { deleteSharedProvider, listSharedProviders } from '../server/sharedModelAccounts.ts'
-import { sharedModelAccountPrefs, sharedModelAccounts } from '../server/db/schema.ts'
+import { imagePrefs, sharedModelAccountPrefs, sharedModelAccounts } from '../server/db/schema.ts'
 
 const KIND = 'custom:0123456789abcdef01'
 const row = {
@@ -92,8 +92,8 @@ describe('listSharedProviders', () => {
 })
 
 describe('deleteSharedProvider', () => {
-  it('removes every person’s settings on it with it', async () => {
+  it('removes every person’s settings on it with it, their image-model picks on it included', async () => {
     expect(await deleteSharedProvider(KIND)).toBe(true)
-    expect(mocks.deleted).toEqual([sharedModelAccounts, sharedModelAccountPrefs])
+    expect(mocks.deleted).toEqual([sharedModelAccounts, sharedModelAccountPrefs, imagePrefs])
   })
 })

@@ -1,7 +1,8 @@
 import { randomBytes } from 'node:crypto'
 import { and, asc, eq, sql } from 'drizzle-orm'
 import { db } from './db/index.ts'
-import { sharedModelAccountPrefs, sharedModelAccounts } from './db/schema.ts'
+import { imagePrefs, sharedModelAccountPrefs, sharedModelAccounts } from './db/schema.ts'
+import { picksOnProvider } from './imagePrefs.ts'
 import { open } from './secretBox.ts'
 import { isReasoningEffort, type ReasoningEffort } from '../shared/modelMenu.ts'
 import {
@@ -298,7 +299,8 @@ export async function setSharedProviderEnabled(
   if (!written.length) throw new SharedProviderError('That shared provider no longer exists', 404)
 }
 
-/** Remove a shared provider, and every person's settings on it. */
+/** Remove a shared provider, and every person's settings on it, the image
+ *  model they picked on it included. */
 export async function deleteSharedProvider(kind: CustomProviderKind): Promise<boolean> {
   return db.transaction(async (tx) => {
     const deleted = await tx
@@ -306,6 +308,7 @@ export async function deleteSharedProvider(kind: CustomProviderKind): Promise<bo
       .where(eq(sharedModelAccounts.kind, kind))
       .returning({ kind: sharedModelAccounts.kind })
     await tx.delete(sharedModelAccountPrefs).where(eq(sharedModelAccountPrefs.kind, kind))
+    await tx.delete(imagePrefs).where(picksOnProvider(kind))
     return deleted.length > 0
   })
 }
