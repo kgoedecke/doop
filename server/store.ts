@@ -1320,9 +1320,9 @@ class Store {
     requireBoundary('store.renameToken')
     bumpStyle(canvasId, tokenDependency(name))
     bumpStyle(canvasId, tokenDependency(newName))
-    const before = { name: token.name, updatedAt: token.updatedAt, updatedBy: token.updatedBy }
-    recordUndo(() => Object.assign(token, before))
-    this.remember(c, ['updatedAt'])
+    /* the whole list, as setTokens keeps it: an undo of a later setTokens in the same
+       transaction puts back a copy of the list, which an undo of this token alone would miss */
+    this.remember(c, ['tokens', 'updatedAt'], true)
     afterCommit(() => persist.deleteToken(canvasId, name))
     token.name = newName
     token.updatedAt = Date.now()

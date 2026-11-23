@@ -27,6 +27,7 @@ vi.mock('../server/db/index.ts', async () => {
 
 const persist = await import('../server/db/persist.ts')
 const { bumpRevision } = await import('../server/components.ts')
+const { renameInComponents } = await import('../server/tokenRenames.ts')
 
 const def = (patch: Partial<ComponentDef> = {}): ComponentDef => ({
   id: 'cmp-1',
@@ -112,6 +113,31 @@ describe('component revisions', () => {
     const afterThird = await revisions(canvasId)
     expect(afterThird.map((row) => row.rev)).toEqual([1, 2])
     expect(afterThird[0]).toEqual(afterSecond[0])
+  })
+
+  it('files the state before a token rename as a revision, the new name in the definition', async () => {
+    const first = def({
+      template: '<button style="color:var(--ink)">Go</button>',
+      rawCss: '.btn { color: var(--ink) }',
+    })
+    await save(canvasId, first)
+    const held = [first]
+    /* the definitions a token store hands the rename, each save filed as the server files it */
+    renameInComponents(
+      held,
+      { kind: 'token', from: '--ink', to: '--text' },
+      (component) => bumpRevision(component, 'Grace'),
+      (component) => {
+        held.splice(0, 1, component)
+        persist.saveComponent(canvasId, component)
+        return component
+      },
+    )
+    await persist.pendingComponentWrites()
+    expect((await revisions(canvasId)).map((row) => [row.rev, row.template])).toEqual([[1, first.template]])
+    const [stored] = await loaded(canvasId)
+    expect(stored).toMatchObject({ rev: 2, rawCss: '.btn { color: var(--text) }' })
+    expect(stored!.template).toContain('var(--text)')
   })
 
   it('writes nothing to the revisions when a save changes none', async () => {

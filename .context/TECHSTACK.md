@@ -449,7 +449,12 @@ server/index.ts` in prod. `erasableSyntaxOnly` and `verbatimModuleSyntax` in tsc
   `<style data-doop-tokens>` block of the values a document names; it is composed in where a frame
   is rendered, not stored in it (Lean frame storage, below), so a value change writes no frame. A
   rename (`var(--old)` in frames' source) or a theme rename still rewrites the frames naming it, as
-  an annotation (sign-off stands, no version). Stored in `design_tokens` + `canvases.token_themes` (migration 0050); REST under
+  an annotation (sign-off stands, no version). It reaches the canvas's own component definitions
+  first (`renameInComponents` in `server/tokenRenames.ts`): every active one whose
+  template, stylesheet or head names the old name gets a revision with the new one (a linked
+  library definition is left to its library), and instances marked with the revision it moved
+  past are marked with the new one as their frames are rewritten, so the renamed markup is never
+  filed as an override. Stored in `design_tokens` + `canvases.token_themes` (migration 0050); REST under
   `/api/canvases/:id/tokens`, `/token-themes` and `/styleguide.md` (tokens + guidelines as one
   markdown); MCP `get_tokens` (json / css / tailwind / markdown), `create_tokens`, `set_tokens`,
   `set_token_themes`, mirrored on the resident agent; the Layers panel's Tokens tab
