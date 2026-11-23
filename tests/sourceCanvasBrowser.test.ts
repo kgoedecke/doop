@@ -12,7 +12,9 @@ import { fixtureUrl, pagePerTest } from './browser.ts'
 const content = `import React from 'react'
 export default function Demo() {
   return <main>
-    <h1 id="headline" data-doop-edit="headline" style={{ color: '#334455', margin: 0 }}>First draft</h1>
+    <h1 id="headline" data-doop-edit="headline" style={{ color: '#334455', margin: 0 }}
+      onMouseDown={(event) => event.currentTarget.setAttribute('data-mouse-down', '')}
+      onPointerUp={(event) => event.currentTarget.setAttribute('data-pointer-up', '')}>First draft</h1>
     <div id="nested" style={{ height: 120, width: 260, overflow: 'auto', overscrollBehavior: 'contain' }}>
       <div style={{ height: 800 }}>Nested content</div>
     </div>
@@ -94,6 +96,8 @@ describe.skipIf(!findBrowserPath())('local source canvas', () => {
       await page.mouse.up()
       const inspector = 'aside[aria-label="Source inspector"]'
       await page.locator(inspector + ' label:first-child input').fill('Saved by Doop')
+      expect(await large.$eval('#headline', (el) => el.hasAttribute('data-mouse-down'))).toBe(false)
+      expect(await large.$eval('#headline', (el) => el.hasAttribute('data-pointer-up'))).toBe(false)
       await page.locator(inspector + ' label:nth-child(2) input').fill('#cc4422')
       const [write] = await Promise.all([
         page.waitForResponse(
@@ -142,6 +146,10 @@ describe.skipIf(!findBrowserPath())('local source canvas', () => {
       await page.waitForSelector('article:first-child button[aria-pressed="true"]')
 
       const playCamera = await camera()
+      await over(60, 15)
+      await page.mouse.down()
+      await page.mouse.up()
+      await reloaded.waitForSelector('#headline[data-mouse-down][data-pointer-up]')
       await over(60, 70)
       await page.mouse.wheel({ deltaY: 70 })
       await reloaded.waitForFunction(() => (document.querySelector('#nested')?.scrollTop ?? 0) > 0)

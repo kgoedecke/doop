@@ -1,5 +1,4 @@
-import { randomUUID } from 'node:crypto'
-import { chmod, readFile, realpath, rename, stat, unlink, writeFile } from 'node:fs/promises'
+import { readFile, realpath } from 'node:fs/promises'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import path from 'node:path'
 import type { Plugin, ViteDevServer } from 'vite'
@@ -12,6 +11,7 @@ import {
   type SourceCard,
 } from '../shared/sourceCanvas.ts'
 import { editSourceTarget, sourceTarget } from './sourceJsx.ts'
+import { replaceLocalSource, SOURCE_RECOVERY_DIR } from './sourceDisk.ts'
 
 type Entry = SourceCard & { entry: string; source: string }
 type SourceCanvasOptions = { doopOrigin: string; name: string; cards: Entry[] }
@@ -78,15 +78,19 @@ function previewBridge(doopOrigin: string) {
   })
   addEventListener('pointermove', (event) => {
     if (!inspect) return
+    event.stopImmediatePropagation()
     const element = mark(event.target)
     if (hovered === element) return
     hovered = element
     paint()
-  })
-  addEventListener('pointerdown', (event) => {
-    if (!inspect || !event.isTrusted || event.button !== 0) return
-    event.stopImmediatePropagation()
   }, true)
+  for (const type of ['pointerdown', 'pointerup', 'pointercancel', 'mousedown', 'mouseup', 'dblclick', 'auxclick', 'contextmenu', 'dragstart']) {
+    addEventListener(type, (event) => {
+      if (!inspect || !event.isTrusted) return
+      event.preventDefault()
+      event.stopImmediatePropagation()
+    }, true)
+  }
   addEventListener('click', (event) => {
     if (!inspect || !event.isTrusted) return
     event.preventDefault()
@@ -131,7 +135,7 @@ export function doopSourceCanvas(options: SourceCanvasOptions): Plugin {
     if (relative === '..' || relative.startsWith('..' + path.sep) || path.isAbsolute(relative)) return null
     const source = await readFile(file, 'utf8')
     const target = sourceTarget(file, source, marker)
-    return target ? { item, file, source, target } : null
+    return target ? { item, root, file, source, target } : null
   }
 
   const handle = async (server: ViteDevServer, req: IncomingMessage, res: ServerResponse) => {
@@ -190,21 +194,19 @@ export function doopSourceCanvas(options: SourceCanvasOptions): Plugin {
       if (!change) return json(res, 400, { error: 'Invalid source edit' })
       const hit = await readTarget(server, change.card, change.marker)
       if (!hit) return json(res, 404, { error: 'The selected source element no longer exists' })
-      const conflict = () => json(res, 409, { error: 'File changed on disk. Reselect the element and try again.' })
+      const conflict = () =>
+        json(res, 409, {
+          error: 'File changed on disk. Reselect the element. If needed, check .doop-source-recovery for a copy.',
+        })
       if (hit.target.revision !== change.revision || busy.has(hit.file)) return conflict()
       const updated = editSourceTarget(hit.source, hit.target, change.fields)
       if (updated === null) return json(res, 422, { error: 'This field is not a supported JSX literal' })
       if (updated === hit.source) return json(res, 200, { saved: true })
       busy.add(hit.file)
-      const temp = path.join(path.dirname(hit.file), '.doop-' + randomUUID())
       try {
-        await writeFile(temp, updated, { flag: 'wx', mode: 0o600 })
-        await chmod(temp, (await stat(hit.file)).mode & 0o777)
-        if ((await readFile(hit.file, 'utf8')) !== hit.source) return conflict()
-        await rename(temp, hit.file)
+        if (!(await replaceLocalSource(hit.root, hit.file, hit.source, updated))) return conflict()
       } finally {
         busy.delete(hit.file)
-        await unlink(temp).catch(() => {})
       }
       return json(res, 200, { saved: true })
     }
@@ -214,6 +216,10 @@ export function doopSourceCanvas(options: SourceCanvasOptions): Plugin {
   return {
     name: 'doop-source-canvas',
     apply: 'serve',
+    config(config) {
+      const deny = config.server?.fs?.deny ?? ['.env', '.env.*', '*.{crt,pem}', '**/.git/**']
+      return { server: { fs: { deny: [...deny, `**/${SOURCE_RECOVERY_DIR}/**`] } } }
+    },
     resolveId(id) {
       if (id.startsWith(virtual) && entries.has(id.slice(virtual.length))) return '\0' + id
     },

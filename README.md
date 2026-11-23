@@ -876,6 +876,10 @@ aren't visual write targets. If a file changed since it was selected, reselect t
 version before you save. **Copy prompt with source reference** prepares a request for the coding
 agent running in your project; it doesn't send the request to Doop's HTML agent.
 
+Doop keeps the previous file in the project's local `.doop-source-recovery/` folder when it saves.
+Keep that folder out of version control. You can delete recovery copies once you no longer need
+them. Visual writes require a local filesystem that supports hard links.
+
 Drag the board or a card's header to pan and use Ctrl/Command + wheel to zoom. Use **Play** to give
 the real app pointer and wheel input so its page and nested regions scroll without moving the
 board. Press Escape to return to selection. Stored HTML frames use **Present** to scroll long
