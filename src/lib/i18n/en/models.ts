@@ -163,6 +163,9 @@ export const models = {
   imageSeedreamProBlurb: 'ByteDance’s top image model — rich, painterly quality.',
   imageSeedreamLiteBlurb: 'Faster, cheaper Seedream tier.',
   imageModelTitle: 'Image model',
+  imageCustomBlurb: '{model}, drawn on your custom provider.',
+  imageCustomSharedBlurb: '{model}, drawn on the provider your admin shares.',
+  imageCustomTransparent: 'Draws transparent backgrounds.',
 
   /* custom providers (CustomProviderForm, ModelAccount) */
   customRowTitle: 'Custom provider',
@@ -202,6 +205,18 @@ export const models = {
   customAddModel: 'Add model',
   customModelsHint:
     'Each model appears under this provider in the model picker. Turn on Sees images only for models that accept image input: the agent reviews its designs from screenshots.',
+  customImageModels: 'Image models',
+  customImageModelsHint:
+    'Optional. The agents’ generate_image can draw with these: Doop adds /images/generations to the base URL (the OpenAI Images API) and sends this provider’s key and headers. Turn on Transparent only for models that honour a transparent background.',
+  customImageModelId: 'Image model {n} id',
+  customImageModelIdPlaceholder: 'my-image-model',
+  customImageModelName: 'Image model {n} name',
+  customImageModelNamePlaceholder: 'Name (optional)',
+  customImageTransparent: 'Transparent',
+  customImageTransparentFor: 'Image model {n} draws transparent backgrounds',
+  customRemoveImageModel: 'Remove image model {n}',
+  customAddImageModel: 'Add image model',
+  customAddListedImage: 'Add an image model the endpoint lists',
   customAdvanced: 'Advanced',
   customHeaders: 'Extra headers',
   customHeadersHint: 'One per line, as Name: value. Stored encrypted.',

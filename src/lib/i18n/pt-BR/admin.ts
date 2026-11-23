@@ -109,6 +109,7 @@ export const admin: Catalog['admin'] = {
   sharedDeleteDescription:
     'Ele some para todos na hora, junto com o modelo que cada pessoa escolheu nele. Para tirá-lo por enquanto, desligue-o.',
   sharedModelCount: { one: '{count} modelo', other: '{count} modelos' },
+  sharedImageModelCount: { one: '{count} modelo de imagem', other: '{count} modelos de imagem' },
   sharedKeySet: 'chave definida',
   sharedNoKey: 'sem chave',
 }

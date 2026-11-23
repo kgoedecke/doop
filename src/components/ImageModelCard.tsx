@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { api } from '../lib/api'
 import type { ImageModelStatus } from '../lib/api'
 import { IMAGE_MODELS, type ImageModelOption, type ImageProvider } from '../../shared/modelMenu'
+import { parseCustomImageModelRef } from '../../shared/customProvider'
 import { posthog } from '../lib/posthog'
 import { useStore } from '../lib/store'
 import { useT, type PlainMessageKey } from '../lib/i18n'
@@ -63,12 +64,76 @@ function imageModelRows(): ImageModelOption[][] {
   return rows
 }
 
+/** A custom provider's image models as rows, one per provider, in the order
+ *  the server lists them (the person's own providers, then shared ones). */
+function customImageRows(models: ImageModelStatus[]): ImageModelStatus[][] {
+  const rows = new Map<string, ImageModelStatus[]>()
+  for (const model of models) {
+    const kind = model.custom ? parseCustomImageModelRef(model.id)?.kind : undefined
+    if (!kind) continue
+    rows.set(kind, [...(rows.get(kind) ?? []), model])
+  }
+  return [...rows.values()]
+}
+
+/** One pickable row: a tile, a name and a line, a model dropdown when the
+ *  row holds several, and a check on the chosen one. */
+function ImageModelRow({
+  tile,
+  name,
+  line,
+  models,
+  model,
+  available,
+  chosen,
+  busy,
+  onPick,
+}: {
+  tile: ReactNode
+  name: string
+  line: string
+  models: { id: string; name: string; blurb: string }[]
+  model: string
+  available: boolean
+  chosen: boolean
+  busy: boolean
+  onPick: (id: string) => void
+}) {
+  return (
+    <div className="flex w-full items-center gap-[14px] border-b border-line-soft px-4 py-3 last:border-b-0 max-md:flex-wrap max-md:gap-y-2">
+      <Pressable
+        role="radio"
+        aria-checked={chosen}
+        disabled={busy || !available}
+        onClick={() => onPick(model)}
+        className="flex min-w-0 flex-1 items-center gap-[14px] text-left disabled:cursor-default"
+      >
+        <span aria-hidden className={cn('flex-none', !available && 'opacity-55')}>
+          {tile}
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className={cn('block truncate text-copy font-medium', !available && 'text-ink-soft')}>{name}</span>
+          <span className="block truncate text-label text-ink-faint">{line}</span>
+        </span>
+      </Pressable>
+      {models.length > 1 && (
+        <div className="w-[260px] flex-none max-md:order-last max-md:w-full">
+          <ModelSelect name={name} models={models} model={model} onModel={onPick} disabled={busy || !available} />
+        </div>
+      )}
+      {chosen && <CheckIcon size={16} strokeWidth={2.2} className="flex-none text-brand" aria-hidden />}
+    </div>
+  )
+}
+
 /**
  * Which image model the agents' generate_image tool draws with, as a list in
  * the connections' style: pick a row, the chosen one wears a check. The
  * registry is shared with the server; the server says which entries this
  * user's credentials can actually run, and unavailable ones stay visible but
- * inert, their line saying what to connect.
+ * inert, their line saying what to connect. After the registry come the
+ * image models the person's switched-on custom providers list (an admin's
+ * shared ones included), one row per provider.
  */
 export function ImageModelCard() {
   const t = useT()
@@ -98,7 +163,11 @@ export function ImageModelCard() {
     try {
       const { models: next } = await api.setImageModel(id)
       setModels(next)
-      posthog.capture('image_model_changed', { model: id })
+      /* a custom provider's model id is its person's or admin's, not an analytics value */
+      const custom = models.find((m) => m.id === id)?.custom
+      posthog.capture('image_model_changed', {
+        model: custom ? (custom.shared ? 'custom-shared' : 'custom-personal') : id,
+      })
     } catch (e) {
       const body = (e as { body?: { error?: string } })?.body
       setError(body?.error || (e instanceof Error ? e.message : t('models.failedRetry')))
@@ -121,42 +190,44 @@ export function ImageModelCard() {
           const familyKey = option.family ? FAMILY_NAMES[option.family] : undefined
           const name = familyKey ? t(familyKey) : (option.family ?? option.name)
           return (
-            <div
+            <ImageModelRow
               key={option.family ?? option.id}
-              className="flex w-full items-center gap-[14px] border-b border-line-soft px-4 py-3 last:border-b-0 max-md:flex-wrap max-md:gap-y-2"
-            >
-              <Pressable
-                role="radio"
-                aria-checked={chosen}
-                disabled={busy || !available}
-                onClick={() => void pick(option.id)}
-                className="flex min-w-0 flex-1 items-center gap-[14px] text-left disabled:cursor-default"
-              >
-                <span aria-hidden className={cn('flex-none', !available && 'opacity-55')}>
-                  {TILES[option.provider]}
-                </span>
-                <span className="min-w-0 flex-1">
-                  <span className={cn('block truncate text-copy font-medium', !available && 'text-ink-soft')}>
-                    {name}
-                  </span>
-                  <span className="block truncate text-label text-ink-faint">
-                    {available ? blurbOf(option) : t(UNAVAILABLE_HINTS[option.provider])}
-                  </span>
-                </span>
-              </Pressable>
-              {variants.length > 1 && (
-                <div className="w-[260px] flex-none max-md:order-last max-md:w-full">
-                  <ModelSelect
-                    name={name}
-                    models={variants.map((v) => ({ id: v.id, name: v.name, blurb: blurbOf(v) }))}
-                    model={option.id}
-                    onModel={(id) => void pick(id)}
-                    disabled={busy || !available}
-                  />
-                </div>
-              )}
-              {chosen && <CheckIcon size={16} strokeWidth={2.2} className="flex-none text-brand" aria-hidden />}
-            </div>
+              tile={TILES[option.provider]}
+              name={name}
+              line={available ? blurbOf(option) : t(UNAVAILABLE_HINTS[option.provider])}
+              models={variants.map((v) => ({ id: v.id, name: v.name, blurb: blurbOf(v) }))}
+              model={option.id}
+              available={available}
+              chosen={chosen}
+              busy={busy}
+              onPick={(id) => void pick(id)}
+            />
+          )
+        })}
+        {customImageRows(models).map((variants) => {
+          const option = variants.find((v) => v.selected) ?? variants[0]!
+          const custom = option.custom!
+          const line = custom.shared
+            ? t('models.imageCustomSharedBlurb', { model: custom.name })
+            : t('models.imageCustomBlurb', { model: custom.name })
+          return (
+            <ImageModelRow
+              /* the provider, not the picked model: a pick keeps the row (and its focus) */
+              key={parseCustomImageModelRef(option.id)?.kind ?? option.id}
+              tile={<AppIcon brand="headless" />}
+              name={custom.shared ? t('models.sharedRunnerName', { name: custom.provider }) : custom.provider}
+              line={custom.transparent ? `${line} ${t('models.imageCustomTransparent')}` : line}
+              models={variants.map((v) => ({
+                id: v.id,
+                name: v.custom!.name,
+                blurb: v.custom!.transparent ? t('models.imageCustomTransparent') : '',
+              }))}
+              model={option.id}
+              available={option.available}
+              chosen={option.available && option.selected}
+              busy={busy}
+              onPick={(id) => void pick(id)}
+            />
           )
         })}
       </div>

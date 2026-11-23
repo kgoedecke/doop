@@ -193,6 +193,12 @@ function ProviderRow({
         <span>·</span>
         <span>{t('admin.sharedModelCount', { count: custom.models.length })}</span>
         <span>·</span>
+        {custom.imageModels?.length ? (
+          <>
+            <span>{t('admin.sharedImageModelCount', { count: custom.imageModels.length })}</span>
+            <span>·</span>
+          </>
+        ) : null}
         <span>{custom.hasKey ? t('admin.sharedKeySet') : t('admin.sharedNoKey')}</span>
       </span>
     </CardRow>

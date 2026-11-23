@@ -108,6 +108,7 @@ export const admin = {
   sharedDeleteDescription:
     'It disappears for everyone at once, with each person’s model pick on it. To take it away for now, switch it off instead.',
   sharedModelCount: { one: '{count} model', other: '{count} models' },
+  sharedImageModelCount: { one: '{count} image model', other: '{count} image models' },
   sharedKeySet: 'key set',
   sharedNoKey: 'no key',
 } as const

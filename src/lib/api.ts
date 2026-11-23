@@ -370,11 +370,15 @@ export interface ModelAccounts {
   customProviders?: boolean
 }
 
-/** One image-model registry entry's availability for this user. */
+/** One image model's availability for this user: a registry entry, or an
+ *  image model one of their switched-on custom providers lists. */
 export interface ImageModelStatus {
   id: string
   available: boolean
   selected: boolean
+  /** a custom provider's image model (`custom:<id>/<model id>`), which the
+   *  shared registry knows nothing about */
+  custom?: { provider: string; name: string; shared?: true; transparent?: true }
 }
 
 export interface WebsiteImportResult {
