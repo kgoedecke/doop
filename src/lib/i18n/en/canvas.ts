@@ -256,4 +256,5 @@ export const canvas = {
   errStartInstall: 'could not start the GitHub install',
   errConnectRepo: 'could not connect the repository',
   errAnalysis: 'repository analysis failed',
+  localSource: 'Local source',
 } as const

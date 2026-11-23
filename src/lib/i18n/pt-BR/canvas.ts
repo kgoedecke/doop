@@ -247,4 +247,5 @@ export const canvas: Catalog['canvas'] = {
   errStartInstall: 'não foi possível iniciar a instalação do GitHub',
   errConnectRepo: 'não foi possível conectar o repositório',
   errAnalysis: 'a análise do repositório falhou',
+  localSource: 'Código local',
 }
