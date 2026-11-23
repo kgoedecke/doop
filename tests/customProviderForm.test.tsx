@@ -2,13 +2,28 @@
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-const mocks = vi.hoisted(() => ({ add: vi.fn(), update: vi.fn(), discover: vi.fn(), test: vi.fn() }))
+const mocks = vi.hoisted(() => ({
+  add: vi.fn(),
+  update: vi.fn(),
+  discover: vi.fn(),
+  test: vi.fn(),
+  addShared: vi.fn(),
+  updateShared: vi.fn(),
+  discoverShared: vi.fn(),
+  testShared: vi.fn(),
+}))
 vi.mock('../src/lib/api', () => ({
   api: {
     addCustomProvider: mocks.add,
     updateCustomProvider: mocks.update,
     discoverCustomModels: mocks.discover,
     testCustomProvider: mocks.test,
+  },
+  adminApi: {
+    addSharedProvider: mocks.addShared,
+    updateSharedProvider: mocks.updateShared,
+    discoverSharedModels: mocks.discoverShared,
+    testSharedProvider: mocks.testShared,
   },
 }))
 import { CustomProviderForm } from '../src/components/CustomProviderForm'
@@ -125,4 +140,31 @@ it('edits without resending the stored key or headers, and lists the endpoint’
   expect(mocks.discover).toHaveBeenLastCalledWith(expect.objectContaining({ apiKey: '', headers: {} }))
   await click('Save')
   expect(mocks.update).toHaveBeenLastCalledWith(provider.kind, expect.objectContaining({ apiKey: '', headers: {} }))
+})
+
+it('in admin mode saves and probes a shared provider through the admin routes', async () => {
+  const shared = { providers: [], customProviders: true }
+  mocks.addShared.mockResolvedValue(shared)
+  mocks.discoverShared.mockResolvedValue({ models: ['qwen3-coder'] })
+  mocks.testShared.mockResolvedValue({ ok: true, model: 'qwen3-coder' })
+  const onSaved = vi.fn()
+  act(() => root.render(<CustomProviderForm admin onSaved={onSaved} onClose={() => {}} />))
+  expect(document.body.textContent).toContain('Shared provider')
+  act(() => {
+    type(field('input[placeholder="My provider"]'), 'Acme Gateway')
+    type(field('input[placeholder="https://api.example.com/v1"]'), 'https://llm.example.com/v1')
+    type(field('input[placeholder="my-model-id"]'), 'qwen3-coder')
+    type(field('input[type="password"]'), 'sk-gateway')
+  })
+  await click('Fetch models')
+  expect(mocks.discoverShared).toHaveBeenCalledWith(expect.objectContaining({ apiKey: 'sk-gateway' }))
+  await click('Test')
+  expect(mocks.testShared).toHaveBeenCalledWith(expect.objectContaining({ model: 'qwen3-coder' }))
+  await click('Add provider')
+  expect(mocks.addShared).toHaveBeenCalledWith(expect.objectContaining({ name: 'Acme Gateway', apiKey: 'sk-gateway' }))
+  expect(onSaved).toHaveBeenCalledWith(shared)
+  /* nothing went through a person's own routes */
+  expect(mocks.add).not.toHaveBeenCalled()
+  expect(mocks.discover).not.toHaveBeenCalled()
+  expect(mocks.test).not.toHaveBeenCalled()
 })

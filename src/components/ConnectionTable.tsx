@@ -87,6 +87,7 @@ export function ConnectionRow({
   onMakeDefault,
   onDisconnect,
   menuItems = [],
+  badge,
   panel,
   error,
 }: {
@@ -101,9 +102,12 @@ export function ConnectionRow({
   model: ReactNode
   onToggle: (on: boolean) => void
   onMakeDefault?: () => void
-  onDisconnect: () => void
+  /** unset for a connection the person cannot remove (an admin's shared one) */
+  onDisconnect?: () => void
   /** the provider's own actions, between Make default and Disconnect */
   menuItems?: { label: string; onSelect: () => void }[]
+  /** one more badge after the name: where the connection comes from */
+  badge?: ReactNode
   /** what opens under the row: a key to replace, a task under way */
   panel?: ReactNode
   /** why the last change to this connection failed, shown under it */
@@ -122,6 +126,7 @@ export function ConnectionRow({
           sub={sub}
           badges={
             <>
+              {badge}
               {isDefault && <Badge tone="brand">{t('models.isDefault')}</Badge>}
               {off && <Badge>{t('models.off')}</Badge>}
             </>
@@ -154,10 +159,17 @@ export function ConnectionRow({
                 {item.label}
               </DropdownMenuItem>
             ))}
-            <DropdownMenuSeparator />
-            <DropdownMenuItem className="text-accent-ink data-[highlighted]:text-accent-ink" onSelect={onDisconnect}>
-              {t('models.disconnect')}
-            </DropdownMenuItem>
+            {onDisconnect && (
+              <>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  className="text-accent-ink data-[highlighted]:text-accent-ink"
+                  onSelect={onDisconnect}
+                >
+                  {t('models.disconnect')}
+                </DropdownMenuItem>
+              </>
+            )}
           </DropdownMenuContent>
         </DropdownMenu>
       </div>

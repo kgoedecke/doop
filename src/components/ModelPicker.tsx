@@ -138,9 +138,14 @@ export function ModelPicker({ disabled = false }: { disabled?: boolean }) {
           <>
             {runners.runners.map((runner) => (
               <Fragment key={runner.provider}>
-                {/* one connection needs no name; several are told apart by theirs */}
+                {/* one connection needs no name; several are told apart by theirs,
+                    and an admin's shared one by saying so (it may share a name) */}
                 <DropdownMenuCaption>
-                  {runners.runners.length > 1 ? runner.name : t('models.model')}
+                  {runners.runners.length > 1
+                    ? runner.shared
+                      ? t('models.sharedRunnerName', { name: runner.name })
+                      : runner.name
+                    : t('models.model')}
                 </DropdownMenuCaption>
                 <DropdownMenuRadioGroup
                   value={resolved?.runner.provider === runner.provider ? (resolved.pick.model ?? '') : ''}

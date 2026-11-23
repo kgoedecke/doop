@@ -220,4 +220,10 @@ export const models: Catalog['models'] = {
   customTestPassed: '{model} respondeu com uma chamada de ferramenta. Pronto para usar.',
   customSave: 'Salvar',
   customAdd: 'Adicionar provedor',
+  /* provedores compartilhados: configurados por um admin para todos (Admin → Modelos compartilhados) */
+  customSharedTitle: 'Provedor compartilhado',
+  customSharedLede:
+    'Todos nesta instância recebem este provedor ao lado das próprias conexões, e podem escolher o modelo ou desligá-lo só para si. A chave fica criptografada no servidor e nunca é mostrada de novo, nem aqui.',
+  sharedBadge: 'Compartilhado pelo seu admin',
+  sharedRunnerName: '{name} (compartilhado)',
 }

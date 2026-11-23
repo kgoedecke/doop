@@ -217,4 +217,10 @@ export const models = {
   customTestPassed: '{model} answered with a tool call. Ready to use.',
   customSave: 'Save',
   customAdd: 'Add provider',
+  /* shared providers: set up by an admin for everyone (Admin → Shared models) */
+  customSharedTitle: 'Shared provider',
+  customSharedLede:
+    'Everyone on this instance gets this provider beside their own connections, and can pick its model or switch it off for themselves. The key is stored encrypted on the server and never shown again, here included.',
+  sharedBadge: 'Shared by your admin',
+  sharedRunnerName: '{name} (shared)',
 } as const
