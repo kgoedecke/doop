@@ -7,7 +7,7 @@ import { enterSelection, exitSelection, selectSibling } from '../lib/selectionKe
 import { dispatchActionKey, setActionHost, type ActionHost } from '../lib/actions/registry'
 import { presentStartFrame } from '../lib/present'
 import { canHideUi, hideUiHinted } from '../lib/hideUi'
-import { connect, disconnect, sendWs } from '../lib/ws'
+import { canvasListingRevision, connect, disconnect, sendWs } from '../lib/ws'
 import {
   api,
   ApiError,
@@ -55,6 +55,7 @@ import { noteActiveDay } from '../lib/githubStar'
 import { Onboarding } from '../components/Onboarding'
 import { AccessBanner } from '../components/AccessBanner'
 import { ShareModal } from '../components/ShareModal'
+import { CommunityInvitation } from '../components/CommunityInvitation'
 import { ExportModal } from '../components/ExportModal'
 import { AppIcon } from '../components/ui/brand-mark'
 import { pageFrames } from '../../shared/pages'
@@ -296,7 +297,7 @@ export function CanvasPage({
     url.searchParams.delete('connect')
     history.replaceState(history.state, '', `${url.pathname}${url.search}${url.hash}`)
   }, [])
-  const [showShare, setShowShare] = useState(false)
+  const [showShare, setShowShare] = useState<'share' | 'community' | null>(null)
   /* the frame the player was launched on, while presenting */
   const [presenting, setPresenting] = useState<string | null>(null)
   /* ⌘. acts only over the canvas view, outside PresentMode */
@@ -956,7 +957,7 @@ export function CanvasPage({
           )}
           <BarPill>
             {!guest && (
-              <Button variant="bare" className={barPillBtn} onClick={() => setShowShare(true)}>
+              <Button variant="bare" className={barPillBtn} onClick={() => setShowShare('share')}>
                 <ShareUpIcon className="size-3.5" />
                 {t('canvas.share')}
               </Button>
@@ -1050,6 +1051,18 @@ export function CanvasPage({
           style={rulerInset || docked ? { top: 'var(--chrome-top)', left: rulerInset } : undefined}
         >
           <div className="pointer-events-none absolute top-3.5 right-[var(--chrome-right)] z-30 flex flex-col items-end gap-2 transition-[right] duration-150 [&>*]:pointer-events-auto max-md:top-[56px] max-md:right-2 max-md:left-2">
+            {editorReady &&
+              session?.user.id &&
+              canvas?.ownerId === session.user.id &&
+              canvas.publishedAt === undefined && (
+                <CommunityInvitation
+                  key={session.user.id}
+                  canvasId={canvasId}
+                  ownerId={session.user.id}
+                  paused={uiHidden || !!presenting || !!showShare || showConnect || showImport || limitWall}
+                  onReview={() => setShowShare('community')}
+                />
+              )}
             {pendingProposal && mutedProposal !== pendingProposal.id && !(showActivity && panelTab === 'memory') && (
               <div className="flex items-center rounded-[10px] bg-surface shadow-ring">
                 <Button
@@ -1232,7 +1245,7 @@ export function CanvasPage({
                     className="h-11 justify-start gap-2.5 border-line bg-surface px-4"
                     onClick={() => {
                       setShowMobileActions(false)
-                      setShowShare(true)
+                      setShowShare('share')
                     }}
                   >
                     <ShareIcon /> {t('canvas.shareCanvas')}
@@ -1350,13 +1363,16 @@ export function CanvasPage({
         <ShareModal
           key={canvas.id}
           canvas={canvas}
-          onChange={(patch) => {
+          communityFirst={showShare === 'community'}
+          onChange={(patch, listingRevision) => {
             const current = useStore.getState().canvas
-            if (current?.id === canvasId) useStore.getState().setCanvas({ ...current, ...patch })
+            if (current?.id !== canvasId) return
+            if (listingRevision !== undefined && listingRevision !== canvasListingRevision()) return
+            useStore.getState().setCanvas({ ...current, ...patch })
           }}
-          onClose={() => setShowShare(false)}
+          onClose={() => setShowShare(null)}
           onCopied={() => {
-            setShowShare(false)
+            setShowShare(null)
             showToast(t('canvas.linkCopied'))
           }}
         />

@@ -33,7 +33,8 @@ it('lists a published canvas for others to copy without opening the source', asy
     body: JSON.stringify({ description: 'A bold hero.', category: 'website' }),
   })
   expect(published.status).toBe(200)
-  expect(await published.json()).toMatchObject({ description: 'A bold hero.', category: 'website' })
+  const publishedListing = await published.json()
+  expect(publishedListing).toMatchObject({ description: 'A bold hero.', category: 'website' })
 
   const listing = await (await visitor.get('/api/community')).json()
   expect(listing).toMatchObject([
@@ -79,6 +80,11 @@ it('lists a published canvas for others to copy without opening the source', asy
   expect(stranger.status).toBe(403)
 
   expect((await author.delete(`/api/canvases/${canvas.id}/publish`)).status).toBe(200)
+  const staleEdit = await author.req(`/api/canvases/${canvas.id}/publish`, {
+    method: 'PUT',
+    body: JSON.stringify({ category: 'app', expectedPublishedAt: publishedListing.publishedAt }),
+  })
+  expect(staleEdit.status).toBe(409)
   expect(await (await visitor.get('/api/community')).json()).toEqual([])
   expect((await visitor.post(`/api/community/${canvas.id}/copy`)).status).toBe(404)
 }, 60_000)

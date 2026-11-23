@@ -12,6 +12,19 @@ let joinedAsGuest = false
 let retryTimer: number | null = null
 /* the server build this page first connected under; survives reconnects */
 let loadedBuild: string | null = null
+const designGenerations = new Set<(frameIds: string[]) => void>()
+let listingRevision = 0
+
+export function canvasListingRevision() {
+  return listingRevision
+}
+
+export function subscribeToDesignGeneration(listener: (frameIds: string[]) => void) {
+  designGenerations.add(listener)
+  return () => {
+    designGenerations.delete(listener)
+  }
+}
 
 export function connect(canvasId: string, guest = false) {
   currentCanvasId = canvasId
@@ -102,6 +115,7 @@ function handle(msg: ServerMessage) {
   const me = getIdentity().clientId
   switch (msg.type) {
     case 'init':
+      listingRevision++
       /* a reconnect that lands on a different build means this page is
          running a stale bundle — offer a reload instead of forcing one,
          so in-progress work is never yanked away */
@@ -191,6 +205,15 @@ function handle(msg: ServerMessage) {
       break
     case 'canvas:renamed':
       s.renameCanvasLocal(msg.name)
+      break
+    case 'canvas:listing': {
+      listingRevision++
+      const { publishedAt, description, category } = msg.listing
+      if (s.canvas) s.setCanvas({ ...s.canvas, publishedAt, description, category })
+      break
+    }
+    case 'canvas:design-generated':
+      for (const listener of designGenerations) listener(msg.frameIds)
       break
     case 'component':
       s.setComponentLocal(msg.id, msg.component)

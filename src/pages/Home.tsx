@@ -539,7 +539,9 @@ export function Home() {
         <ShareModal
           key={shareCanvas.id}
           canvas={shareCanvas}
-          onChange={(patch) => setShareCanvas((current) => (current ? { ...current, ...patch } : null))}
+          onChange={(patch) =>
+            setShareCanvas((current) => (current?.id === shareCanvas.id ? { ...current, ...patch } : current))
+          }
           onClose={() => setShareCanvas(null)}
           onCopied={() => {
             setShareCanvas(null)
