@@ -1,5 +1,5 @@
 <p align="center">
-  <img src=".github/assets/banner.png" alt="Doop, die Open-Source-Alternative zu Paper.design: ein Live-Canvas, auf dem Claude Code einen Preisbereich streamt, während sich die Cursor von ChatGPT und Claude Code über die Frames bewegen" width="100%">
+  <img src=".github/assets/banner.png" alt="Doop, die Open-Source-Alternative zu Paper.design: ein Live-Canvas, auf dem Claude Code live eine Preisübersicht erstellt, während sich die Cursor von ChatGPT und Claude Code über die Frames bewegen" width="100%">
 </p>
 
 <p align="center">
@@ -27,7 +27,7 @@ Canvas. Der eingebaute Doop Agent nutzt Modelle von **GPT, Claude, Gemini, DeepS
 Qwen** ([alle Agenten und Modelle](#funktioniert-mit-jedem-agenten)).
 
 <p align="center">
-  <img src=".github/assets/canvas.png" alt="Ein Doop-Canvas mit drei Frames für eine Reise-App (Startseiten-Hero, mobiler Reiseplan und Buchungskarte) und den Live-Cursorn zweier Mitwirkender" width="100%">
+  <img src=".github/assets/canvas.png" alt="Ein Doop-Canvas mit drei Frames für eine Reise-App (Titelbereich der Startseite, mobiler Reiseplan und Buchungskarte) und den Live-Cursorn zweier Mitwirkender" width="100%">
 </p>
 
 - **Mit Agenten designen statt Prompts eingeben und neu laden.** Verbinde Claude Code oder einen
@@ -112,11 +112,13 @@ der Server selbst läuft auf Node.
 `bun run dev` und `bun run build` packen auch die Claude-Desktop-Erweiterung mit einem Node-Skript,
 deshalb muss Node ebenfalls in deinem `PATH` liegen.
 
-Alles funktioniert ohne Konfiguration: Daten werden in einem eingebetteten Postgres (PGlite) unter
-`data/pg` gespeichert. Optionale Integrationen (SMTP, Stockfotos, Objektspeicher, Analytics) sind
-aus, bis ihre Variable in [.env.example](.env.example) gesetzt ist
-([die wichtigen Variablen](#umgebungsvariablen)). Alles andere läuft ohne sie. Der eingebaute
-[Doop Agent](#der-doop-agent) läuft, sobald ein Nutzer in Settings ein Modellkonto verbindet (oder
+Doop läuft ohne Konfiguration und speichert Daten in einem eingebetteten Postgres (PGlite) unter
+`data/pg`. E-Mail-Versand, Stockfotos, Objektspeicher und Analytics lassen sich separat einrichten.
+Ohne Objektspeicher speichert Doop Uploads lokal. Welche Variablen du für die einzelnen Integrationen
+setzen musst, steht in [.env.example](.env.example)
+([die wichtigen Variablen](#umgebungsvariablen)).
+
+Der eingebaute [Doop Agent](#der-doop-agent) läuft, sobald ein Nutzer in Settings ein Modellkonto verbindet (oder
 über den `ANTHROPIC_API_KEY` des Servers, wenn du `RESIDENT_TASK_LIMIT` erhöhst). Agenten, die du
 selbst über MCP verbindest, brauchen keinen Key.
 
@@ -143,14 +145,15 @@ Auch deine Workspaces und verbundenen Agenten findest du dort.
 
 ## Der Canvas-Editor
 
-Die Tools liegen in der unteren Werkzeugleiste, und jedes hat eine eigene Taste. Auf dem Canvas
-gezeichnete Formen werden eigenständige Elemente. Formen innerhalb eines Frames werden positionierte
-HTML-/SVG-Ebenen des Frames, die Agenten wie jedes andere Markup lesen und bearbeiten.
+Die Werkzeuge liegen in der unteren Leiste. Du kannst jedes mit einer einzelnen Taste aktivieren.
+Auf dem Canvas gezeichnete Formen werden eigenständige Elemente. Formen innerhalb eines Frames
+werden positionierte HTML-/SVG-Ebenen des Frames, die Agenten wie jedes andere Markup lesen und
+bearbeiten.
 
 | Tool        | Taste | Funktion                                                                                                          |
 | ----------- | ----- | ----------------------------------------------------------------------------------------------------------------- |
-| Select      | V     | Klicken zum Auswählen, Hintergrund für einen Auswahlrahmen ziehen, ⇧/⌘-Klick ergänzt die Auswahl                  |
-| Hand        | H     | Verschieben (Leertaste oder mittlere Maustaste verschiebt bei jedem Tool)                                         |
+| Select      | V     | Klick wählt aus. Auf freier Fläche ziehen, um einen Auswahlrahmen aufzuziehen. ⇧/⌘-Klick erweitert die Auswahl.   |
+| Hand        | H     | Ansicht verschieben (bei jedem Werkzeug mit gedrückter Leertaste oder mittlerer Maustaste)                        |
 | Frame       | F     | Einen leeren Frame zeichnen                                                                                       |
 | Rectangle   | R     | Ein Rechteck zeichnen                                                                                             |
 | Circle      | O     | Einen Kreis oder eine Ellipse zeichnen                                                                            |
@@ -166,7 +169,7 @@ HTML-/SVG-Ebenen des Frames, die Agenten wie jedes andere Markup lesen und bearb
 - **Elemente innerhalb eines Frames.** Klicke ein Element an, um es auszuwählen. Ziehe an einem
   Eckgriff oder Rand, um die Größe zu ändern (⇧ hält das Seitenverhältnis, ein `W × H`-Badge zeigt
   die Größe), oder ziehe das Element selbst, um es innerhalb eines Frames oder in einen anderen zu
-  verschieben. Im Tab **Design** bearbeitest du Füllung, Kontur, Text (Schrift, Größe, Stärke,
+  verschieben. Im Tab **Design** bearbeitest du Füllung, Kontur, Text (Schrift, Größe, Schriftstärke,
   Ausrichtung), Deckkraft, Eckenradius, Drehung, Position, Flex-Layout (Richtung, Abstand,
   Innenabstand, Umbruch, Ausrichtung) und Bildfüllungen. **HTML** zeigt den Quelltext, **Prototype**
   verbindet Interaktionen. Die schwebende Werkzeugleiste bietet Comment, **Ask AI** (füllt eine
@@ -178,7 +181,7 @@ HTML-/SVG-Ebenen des Frames, die Agenten wie jedes andere Markup lesen und bearb
   leeren Eintrag beendet sie. Ist eine Textebene auf dem Canvas ausgewählt, ändern ⌘/Ctrl+B, I, U
   und ⌘/Ctrl+⇧+X die gesamte Ebene und ⌘/Ctrl+⇧+7 oder 8 machen sie wie in Figma zu einer Liste. Esc
   beendet die Bearbeitung; die Formatierung wird mit dem Frame gespeichert und lässt sich rückgängig
-  machen und wiederholen. Sind Wörter ausgewählt, ändern Schrift, Größe, Stärke und Farbe im
+  machen und wiederholen. Sind Wörter ausgewählt, ändern Schrift, Größe, Schriftstärke und Farbe im
   Design-Panel nur diesen Textabschnitt. Bei Auswahl der ganzen Ebene erscheint **Mixed**, wo sich
   die Abschnitte unterscheiden. Ein dort gesetzter Wert gilt für alle Abschnitte, wie in Figma.
 - **Pfade bearbeiten.** Doppelklicke einen Pfad, um seine Anker und Bézier-Griffe zu ziehen, Punkte
@@ -211,7 +214,7 @@ HTML-/SVG-Ebenen des Frames, die Agenten wie jedes andere Markup lesen und bearb
 | ⌫                  | Das ausgewählte Element oder sonst die ausgewählten Frames löschen |
 | ⌘⇧H / ⌘⇧L          | Auswahl ausblenden / sperren                                       |
 | ⌥↑ / ⌥↓            | Eine Ebene nach oben oder unten verschieben (Layers-Panel)         |
-| ⇧1 / ⇧2            | Alles / die Auswahl einpassen                                      |
+| ⇧1 / ⇧2            | Ansicht auf alles bzw. auf die Auswahl zoomen                      |
 | ⌘0 / ⌘+ / ⌘−       | Auf 100 % zoomen, vergrößern, verkleinern                          |
 | ⇧R                 | Lineale ein- oder ausblenden                                       |
 | ⌘.                 | Gesamte Oberfläche ein- oder ausblenden                            |
@@ -226,21 +229,24 @@ Karte übernommen hat, als Nächstes gestaltet.
 ## Kommentare, Importe und Exporte
 
 Kommentiere jedes Element oder eine beliebige Stelle auf dem Canvas. Der Tab **Comments** listet die
-Kommentarverläufe der Seite (offen oder gelöst) samt Antworten auf. Erwähne eine Agentenrolle mit
+Kommentarverläufe der Seite (offen oder erledigt) samt Antworten auf. Erwähne eine Agentenrolle mit
 `@mention` in einem Kommentar oder einer Antwort (zum Beispiel `@doop`), um eine Designkarte in die
 Warteschlange zu stellen. Die Antwort des Agenten erscheint im Verlauf. Wer einen Kommentar
-verpasst, erhält eine E-Mail-Zusammenfassung (abstellbar unter Settings → Account). Canvases, die
-über einen Link nur zum Anzeigen oder Kommentieren geöffnet werden, zeigen ein Badge und sind
-schreibgeschützt.
+verpasst, erhält eine E-Mail-Zusammenfassung (abstellbar unter Settings → Account).
+
+Doop zeigt dir einen Hinweis, wenn du ein Canvas über einen Ansichts- oder Kommentarlink öffnest.
+Über beide Links kannst du das Design ansehen. Über den Kommentarlink kannst du auch kommentieren.
+Zum Bearbeiten brauchst du eine entsprechende Freigabe.
 
 Beim Import wählst du als Quelle **Website** (eine Seite oder eine ganze Website erkunden und Seiten
 auswählen), **Live app** (das
 [Sync-Snippet](#design-sync-live-screens-einer-app-auf-ein-canvas-übertragen)) oder **GitHub repo**
-(über die GitHub App oder ein fein abgestuftes Token: Doop prüft die Screens und Komponenten des
-Repos und stellt Karten für den Doop Agent in die Warteschlange, damit er sie skizziert und das
-Designsystem in einen Styleguide überträgt). Klicke mit rechts auf einen Frame und wähle
-**Export…**, um PNG, JPG oder ein Vektor-PDF herunterzuladen (für den Frame oder alle ausgewählten
-Frames als ein PDF). **Export** in der oberen Leiste fasst beliebige Frames der Seite in einem PDF
+(über die GitHub App oder ein GitHub-Token mit gezielt vergebenen Berechtigungen). Doop prüft die
+Screens und Komponenten des Repos und stellt Karten für den Doop Agent in die Warteschlange, damit
+er sie skizziert und das Designsystem in einen Styleguide überträgt.
+
+Klicke mit rechts auf einen Frame und wähle **Export…**, um PNG, JPG oder ein Vektor-PDF
+herunterzuladen (für den Frame oder alle ausgewählten Frames als ein PDF). **Export** in der oberen Leiste fasst beliebige Frames der Seite in einem PDF
 zusammen. Eine Fortschrittsanzeige zeigt, wie weit das Rendern ist; die Desktop-App öffnet ihren
 nativen Speicherdialog. Jeder Frame hat auch ein öffentliches Live-Bild unter
 `/i/<frameId>.png?scale=2` (oder `.jpg`), das bei Designänderungen neu gerendert wird, praktisch als
@@ -325,7 +331,7 @@ optional mit einem Übergang: dissolve, slide oder push. Verbinder auf dem Canva
 Element führt, und eine **Start**-Flagge markiert den Frame, mit dem der Ablauf jeder Seite beginnt.
 
 <p align="center">
-  <img src=".github/assets/prototype-canvas.jpg" alt="Prototyp einer Reise-App im Prototype mode: vier iPhone-Screens mit Liquid-Glass-Panels über Fotos, blaue Verbinder von einer Trending-Karte zum Zielscreen, von Book stay zum Buchungsblatt als Overlay und von Confirm and pay zur Bestätigung, dazu eine Start-Flagge auf dem ersten Screen" width="100%">
+  <img src=".github/assets/prototype-canvas.jpg" alt="Prototyp einer Reise-App im Prototype mode: vier iPhone-Screens mit Liquid-Glass-Panels über Fotos, blaue Verbindungslinien von einer Karte unter Trending zur Zielansicht, von Book stay zum Buchungsdialog als Overlay und von Confirm and pay zur Bestätigung, dazu eine Start-Flagge auf dem ersten Screen" width="100%">
 </p>
 
 Drücke **Play**, um den Prototyp im Vollbild zu starten, oder teile `/c/<canvas-id>/proto`. Für den
@@ -334,7 +340,7 @@ Ablauf durch. Frames bleiben beim Abspielen live, eine Änderung auf dem Canvas 
 dem Screen, den du gerade ansiehst.
 
 <p align="center">
-  <img src=".github/assets/prototype-player.jpg" alt="Der Prototyp-Player in Smartphone-Größe, drei Schritte des Ablaufs: Tippen auf die Karte Lago di Braies unter Explore, Book stay öffnet das Buchungsblatt als Overlay, und Confirm and pay blendet zur Bestätigung über" width="100%">
+  <img src=".github/assets/prototype-player.jpg" alt="Der Prototyp-Player in Smartphone-Größe, drei Schritte des Ablaufs: Tippen auf die Karte Lago di Braies unter Explore, Book stay öffnet den Buchungsdialog als Overlay, und Confirm and pay blendet zur Bestätigung über" width="100%">
 </p>
 
 Interaktionen sind einfache Attribute am Element im Frame-HTML. Sie werden deshalb zusammen mit dem
@@ -377,7 +383,7 @@ aus dem Dialog ein. Du brauchst weder einen Dateidownload noch ein Terminal noch
 
 Die aktualisierte Doop-Desktop-App bietet **Add to Claude** auch für lokale und selbst gehostete
 Server an. Sie öffnet direkt den Extension-Installer von Claude Desktop, in dem deine Server-URL
-bereits eingetragen ist. Bestätige die Installation in Claude und genehmige die Doop-Anmeldung. Der
+bereits eingetragen ist. Bestätige in Claude die Installation und anschließend die Anmeldung bei Doop. Der
 Online-Connector braucht einen öffentlich erreichbaren HTTPS-Server, Verbindungen zu localhost
 laufen über die Desktop-App. Die manuelle Installation der Extension bleibt als Ausweichlösung
 möglich. Details zu Build und Installation: [`claude-extension/`](claude-extension/README.md).
@@ -393,12 +399,12 @@ claude mcp add --transport http doop http://localhost:4300/mcp
 Das startet den Standard-MCP-OAuth-Ablauf. Ein Browserfenster öffnet sich, du bestätigst, und ab
 dann handelt der Agent **in deinem Namen**. Nenne ihm die ID deines Canvas, bitte ihn, etwas zu
 designen, und sieh live zu. Der Screenshot zeigt den echten Ablauf: Claude Code hat sich mit
-`set_status` gemeldet, einen Frame angelegt und streamt gerade die Pricing-Sektion hinein. Zu sehen
-sind der Presence-Avatar, die Zuordnung "for Kai Moreno", der Frame-Chip, der Working-Strip und die
-Aufgabe im Agents-Panel.
+`set_status` gemeldet, einen Frame angelegt und erstellt darin live eine Preisübersicht. Zu sehen
+sind der Avatar des Agenten, die Zuordnung "for Kai Moreno", die Markierung am Frame, die
+Statusleiste und die Aufgabe im Agents-Panel.
 
 <p align="center">
-  <img src=".github/assets/claude-code.png" alt="Claude Code, per MCP OAuth verbunden, streamt ein Pricing-Section-Design in einen Frame, während die Menschen auf dem Canvas zusehen" width="100%">
+  <img src=".github/assets/claude-code.png" alt="Claude Code, per MCP OAuth verbunden, erstellt live eine Preisübersicht in einem Frame. Die anderen auf dem Canvas können dabei zusehen" width="100%">
 </p>
 
 ## Einem Agenten beim Designen zusehen
@@ -451,9 +457,9 @@ Der Distiller bleibt in beiden Fällen auf `ANTHROPIC_API_KEY` und schaltet sich
 
 Sind die Gratis-Aufgaben (`RESIDENT_TASK_LIMIT`) aufgebraucht, verlieren Nutzer den Agenten nicht.
 Sie verbinden ein Modellkonto, und der Doop Agent läuft darauf weiter. **Ein verbundenes Konto
-übernimmt sofort**, ab der nächsten Aufgabe. Die Gratis-Stufe ist ein Test, der Leute hierherbringt,
-und kein Guthaben, das man erst aufbrauchen muss. Ab dem Moment der Verbindung entstehen dem Server
-keine Kosten mehr. Die Verbindung gilt für das ganze Konto und liegt deshalb unter **/settings**
+übernimmt sofort**, ab der nächsten Aufgabe. Du kannst den Agenten mit den Gratis-Aufgaben ausprobieren und
+jederzeit ein eigenes Konto verbinden. Ab dem Moment der Verbindung zahlt der Server nicht mehr
+für deine Aufgaben. Die Verbindung gilt für das ganze Konto und liegt deshalb unter **/settings**
 (Home → Settings). Die Sperre der Gratis-Stufe verweist dorthin, statt das Formular selbst noch
 einmal anzubieten, und "Connect an AI agent" auf einem Canvas bleibt allein für MCP-Clients
 zuständig. Nutzer können acht Arten von Konten verbinden. Der Gemini-Cloud-Pilot und Claude Plan
@@ -521,11 +527,11 @@ dieser Variablen eine 5.4-ID festschreibt, kann den Abo-Pfad danach nicht mehr n
 OpenAI registriert für eine gehostete App keine Redirect-URI. Deshalb läuft die Verbindung zu
 ChatGPT in einer von drei Varianten, und Doop wählt die aufwandsärmste verfügbare:
 
-| Wo Doop läuft                                                | Ablauf                                        | Was der Nutzer tut                                                   |
-| ------------------------------------------------------------ | --------------------------------------------- | -------------------------------------------------------------------- |
-| Gleicher Rechner wie der Browser (Entwicklung, Self-Hosting) | Loopback-Abfang: Doop belegt `127.0.0.1:1455` | Im OpenAI-Tab bestätigen. Nichts zu kopieren, keine Einrichtung      |
-| Gehostet (doop.design)                                       | Device Code (`/api/accounts/deviceauth/*`)    | Einen kurzen Code auf `auth.openai.com/codex/device` eingeben        |
-| Device Codes nicht erlaubt                                   | Browser-Redirect + Einfügen                   | Die Adresse der toten `localhost:1455`-Seite zurück in Doop einfügen |
+| Wo Doop läuft                                                | Ablauf                                          | Was der Nutzer tut                                                                      |
+| ------------------------------------------------------------ | ----------------------------------------------- | --------------------------------------------------------------------------------------- |
+| Gleicher Rechner wie der Browser (Entwicklung, Self-Hosting) | Lokale Rückleitung an Doop auf `127.0.0.1:1455` | Im OpenAI-Tab bestätigen. Nichts zu kopieren, keine Einrichtung                         |
+| Gehostet (doop.design)                                       | Device Code (`/api/accounts/deviceauth/*`)      | Einen kurzen Code auf `auth.openai.com/codex/device` eingeben                           |
+| Device Codes nicht erlaubt                                   | Browser-Redirect + Einfügen                     | Die vollständige Adresse der nicht erreichbaren `localhost:1455`-Seite in Doop einfügen |
 
 Der Device-Flow braucht eine eingeschaltete **device code authorization** unter ChatGPT → Settings →
 Security (Workspace-Mitglieder brauchen dafür einen Admin, der die Einstellung erlaubt). Deshalb
@@ -576,11 +582,11 @@ MCP.
 | `DOOP_DISTILL_MODEL`            | `claude-haiku-4-5-20251001` | Modell für den Guideline-Distiller                                                                        |
 
 `RESIDENT_TASK_LIMIT` ist der Zähler der Gratis-Stufe. Standardmäßig steht er auf `0`: Der Doop
-Agent läuft erst, sobald der Nutzer ein Modellkonto verbindet (eine der oben genannten Arten). Ein
-verbundenes Konto wird nie gezählt. Einen eigenen MCP-Agenten zu verbinden hebt den Zähler nicht
-auf: Er läuft auf deinem Modell, wenn _er_ designt, aber Aufgaben des Doop Agent werden weiterhin
-über Zugangsdaten abgerechnet. Setze das Limit auf mehr als 0, um so viele Gratis-Aufgaben auf dem
-Key des Servers zu gewähren. Alles, was Arbeit für den Doop Agent auslöst, zählt mit, auch Feedback
+Agent läuft erst, sobald der Nutzer ein Modellkonto verbindet (eine der oben genannten Arten). Aufgaben auf
+einem verbundenen Modellkonto zählen nicht zum Gratislimit. Ein eigener MCP-Agent nutzt dein
+Modell. Für Aufgaben des eingebauten Doop Agent gilt weiter das Kontingent des Kontos, das er
+für die jeweilige Aufgabe nutzt. Setze das Limit auf mehr als 0, um so viele Gratis-Aufgaben auf
+dem Key des Servers zu gewähren. Alles, was Arbeit für den Doop Agent auslöst, zählt mit, auch Feedback
 und Wiederholungen. Es gibt keinen Wert "unlimited": Wenn du mit eigenem Key selbst hostest, setze
 es auf eine große Zahl, da du Anthropic ohnehin direkt bezahlst.
 
@@ -594,8 +600,8 @@ Personen können sie öffnen (Share → Einladung per E-Mail an bestehende Doop-
 legt der Eigentümer auch fest, was Personen mit dem Link dürfen: keinen Zugriff (standardmäßig nur
 mit Einladung), **view**, **comment** oder **edit**. Im selben Dialog kann der Eigentümer das Canvas
 einem Workspace zuordnen oder in der **Community**-Galerie (`/community`) veröffentlichen. Dort
-können angemeldete Personen veröffentlichte Canvases ansehen und in ihre eigenen kopieren. Auf Home
-stehen deine eigenen Canvases und die mit dir geteilten sowie ältere Canvases ohne Eigentümer, die
+können angemeldete Personen veröffentlichte Canvases ansehen und eigene Kopien davon erstellen.
+Auf Home stehen deine eigenen Canvases und die mit dir geteilten sowie ältere Canvases ohne Eigentümer, die
 du dort übernehmen kannst. Über MCP verbundene Agenten handeln im Namen des Kontos, das sie
 freigegeben hat, und haben genau dessen Zugriff.
 
@@ -639,11 +645,11 @@ erstellen.
 Workspaces sind der kostenpflichtige Teil von Doop in einem gehosteten Deployment. Die Pläne stehen
 in `shared/billing.ts`:
 
-| Plan       | Preis                                        | Inhalt                                                                            |
-| ---------- | -------------------------------------------- | --------------------------------------------------------------------------------- |
-| Personal   | kostenlos                                    | Eigene Canvases, Einladungen pro Canvas, Agenten, Community, Importe.             |
-| Team       | $20 / Platz / Monat oder $192 / Platz / Jahr | Gemeinsame Workspaces mit Rollen; die Plätze richten sich nach der Personenliste. |
-| Enterprise | Kontaktiere uns                              | SSO, dedizierter Support, individuelle Konditionen.                               |
+| Plan       | Preis                                                  | Inhalt                                                                                      |
+| ---------- | ------------------------------------------------------ | ------------------------------------------------------------------------------------------- |
+| Personal   | kostenlos                                              | Eigene Canvases, Einladungen pro Canvas, Agenten, Community, Importe.                       |
+| Team       | $20 pro Person und Monat oder $192 pro Person und Jahr | Gemeinsame Workspaces mit Rollen. Die Abrechnung richtet sich nach der Zahl der Mitglieder. |
+| Enterprise | Kontaktiere uns                                        | SSO, dedizierter Support, individuelle Konditionen.                                         |
 
 **Self-Hosting: Die Abrechnung ist standardmäßig ausgeschaltet.** Ohne `STRIPE_SECRET_KEY` ist jeder
 Workspace aktiv und nichts gesperrt. Ist der Key gesetzt, braucht ein Workspace ein aktives
@@ -658,8 +664,9 @@ Um die Abrechnung einzuschalten, erstelle das Produkt und die Preise mit
 `node scripts/stripe-setup.mjs`. Der Befehl gibt `STRIPE_PRICE_TEAM_MONTHLY` /
 `STRIPE_PRICE_TEAM_YEARLY` aus. Richte einen Stripe-Webhook auf `<origin>/stripe/webhook` für
 `checkout.session.completed` und `customer.subscription.{created,updated,deleted}` ein und setze
-`STRIPE_WEBHOOK_SECRET`. Checkout, Karten, Rechnungen und Kündigungen laufen über die von Stripe
-gehosteten Seiten. Der Server synchronisiert nur den Abonnementstatus des Workspaces. Das geschieht
+`STRIPE_WEBHOOK_SECRET`. Stripe stellt die Seiten für den Kaufabschluss, die Verwaltung von
+Zahlungskarten, Rechnungen und Kündigungen bereit. Der Server synchronisiert nur den
+Abonnementstatus des Workspaces. Das geschieht
 über den Webhook und direkt, wenn der Browser vom Checkout zurückkehrt. So funktioniert die lokale
 Entwicklung ohne Tunnel.
 
@@ -959,8 +966,8 @@ den Ergebnissen):
    einmal pro Sitzung geladen und lässt sich nach einer Kontextkomprimierung neu laden. Quelle:
    `server/guide.ts`.
 3. **Hinweise in den Ergebnissen.** Die Ergebnisse von `create_frame` / `set_frame_html` / dem
-   letzten `append_frame_html` sagen dem Agenten, dass er sein Design noch nicht _gesehen_ hat und
-   vor dem Weitermachen `get_frame_screenshot` aufrufen soll. Andere Ergebnisse erinnern einen
+   letzten `append_frame_html` sagen dem Agenten, dass er sein Design noch nicht visuell geprüft hat
+   und vor dem Weitermachen `get_frame_screenshot` aufrufen soll. Andere Ergebnisse erinnern einen
    Agenten daran, Styleguides des Canvas zu lesen, die er noch nicht geöffnet hat, sich mit
    `set_status` zu melden, und weisen auf HTML hin, das escaped angekommen ist. Offenes menschliches
    Feedback wird ebenfalls mitgeliefert.
@@ -995,7 +1002,7 @@ MCP-Prompts.
 | `get_frame`              | Liest einen Frame samt HTML                                                                                                                         |
 | `append_frame_html`      | **Streamt** ein Design in Blöcken (zuerst `start=true`, zuletzt `done=true`). Zuschauer sehen es entstehen                                          |
 | `set_frame_html`         | Ersetzt das Design eines Frames in einem Schritt und rendert es live für alle                                                                       |
-| `edit_frame_html`        | Gezieltes exaktes Suchen und Ersetzen im HTML eines Frames. Der Frame geht an Ort und Stelle in die gerenderte Darstellung über                     |
+| `edit_frame_html`        | Sucht und ersetzt exakten Text im HTML eines Frames. Die Ansicht aktualisiert sich ohne Neuladen.                                                   |
 | `update_frame`           | Benennt einen Frame um, verschiebt ihn oder ändert seine Größe                                                                                      |
 | `delete_frame`           | Entfernt einen Frame                                                                                                                                |
 | `list_frame_versions`    | Frühere Stände eines Frames, neueste zuerst, mit Autor und Zeit                                                                                     |
@@ -1006,10 +1013,10 @@ MCP-Prompts.
 | `get_prototype`          | Flow-Start jeder Seite und jede Interaktion (Trigger, Aktion, Ziel). Links auf fehlende Frames werden markiert                                      |
 | `set_prototype_start`    | Legt den Frame fest, mit dem der klickbare Prototyp einer Seite beginnt                                                                             |
 | **Collaboration**        |                                                                                                                                                     |
-| `get_feedback`           | Holt offene Feedback-Anfragen von Menschen und beansprucht sie. Für Agenten, die das Canvas regelmäßig abfragen sollen                              |
-| `get_comments`           | Liest Element- und Canvas-Kommentare mit ihren Antworten, optional gefiltert nach Frame oder Status (gelöst oder offen), ohne etwas zu beanspruchen |
+| `get_feedback`           | Holt offene Feedback-Anfragen ab und weist sie dem aufrufenden Agenten zu. Für Agenten, die das Canvas regelmäßig abfragen sollen                   |
+| `get_comments`           | Liest Element- und Canvas-Kommentare samt den Antworten. Filtert optional nach Frame oder Status (offen oder erledigt) und weist keine Anfragen zu. |
 | `reply_to_comment`       | Antwortet in einem Element-Kommentar-Thread. Eine `@mention` einer Rolle des Doop Agent zählt wie ein Kommentar im Browser                          |
-| `resolve_comment`        | Markiert einen Element-Kommentar-Thread als gelöst. Beim Lösen eines `@mention`-Threads wird der Austausch im Memory des Canvas festgehalten        |
+| `resolve_comment`        | Schließt einen Kommentarverlauf am Element. Bei `@mention`-Verläufen hält Doop den Austausch im Memory des Canvas fest.                             |
 | `report_issue`           | Meldet einen Tool-Fehler oder eine fehlende Fähigkeit an die Instanz-Admins                                                                         |
 | `share_feedback`         | Teilt Vorschläge und Feedback mit den Instanz-Admins                                                                                                |
 | **Design memory**        |                                                                                                                                                     |
@@ -1043,7 +1050,7 @@ Wem ein Agent gehört, ergibt sich aus dem OAuth-Token. Das Bearer-Token zeigt, 
 freigegeben hat, und diese Person erscheint bei Aufgaben und in der Anwesenheitsanzeige als
 Eigentümer des Agenten.
 
-### Live-Kommentar zu Aufgaben
+### Live-Status für Aufgaben
 
 Agenten werden (über die Server-Anweisungen und den Guide) angewiesen, `set_status` mit einer
 einzeiligen Zusammenfassung im Präsens aufzurufen, sobald sie eine Aufgabe beginnen und wann immer
@@ -1054,9 +1061,9 @@ Top-Bar sie an), im Tooltip des Presence-Avatars und als Eintrag im Aktivitätsf
 immer, was jeder Agent gerade tut, auch wenn er still nachdenkt. Ein leerer String löscht den
 Status. Er läuft außerdem ab, sobald der Agent aus der Anwesenheitsanzeige fällt.
 
-Jeder Status wird außerdem zu einer **Aufgabe**. Ein neuer Status schließt die vorherige ab, und
-Löschen (oder Schweigen) beendet die offene Aufgabe. Agenten, die `set_status` nie aufrufen, tauchen
-trotzdem auf: Der Server leitet eine Aufgabe aus dem ab, was sie sichtbar tun (_"Gestaltet 'Hero'"_,
+Jeder Status wird außerdem zu einer **Aufgabe**. Ein neuer Status schließt die vorherige Aufgabe ab.
+Die offene Aufgabe endet auch, wenn der Agent den Status löscht oder inaktiv wird. Agenten,
+die `set_status` nie aufrufen, tauchen trotzdem auf: Der Server leitet eine Aufgabe aus dem ab, was sie sichtbar tun (_"Gestaltet 'Hero'"_,
 im Panel kursiv), schließt sie, wenn der Stream endet, und weist die Agenten in Tool-Ergebnissen
 darauf hin, ihre Arbeit anzukündigen. So funktioniert das Panel auch bei Sessions, die sich
 verbunden haben, bevor es das Tool gab, oder die den Guide übersprungen haben. Der Tab **Agents** im
@@ -1081,14 +1088,14 @@ identifizierte Agent-Aufruf** auf dem Canvas, der Feedback-Zustellung unterstüt
 `agent_name`, egal von wem), gibt einen `HUMAN FEEDBACK`-Block zurück. Der Block zitiert die Notiz,
 nennt, um wessen Arbeit es geht, und weist den Agenten an, sie zu bearbeiten, bevor er weitermacht.
 Das gilt auch, wenn dafür der Frame eines anderen Agenten geändert werden muss (eine Anfrage von
-Menschen hat Vorrang vor der Etikette, fremde Frames nicht anzufassen). Jede Notiz wird genau einmal
-beansprucht.
+Menschen hat Vorrang vor der Etikette, fremde Frames nicht anzufassen). Der Server teilt jede
+Notiz genau einmal zu.
 
 Agenten warten nicht auf Antworten, denn Sessions enden, wenn ihre Arbeit endet. Offene Anfragen
 warten auf den nächsten Agenten: den ursprünglichen Agenten in einer späteren Session, einen anderen
 Agenten, der schon auf dem Canvas ist, oder einen neuen, den du startest (_"Schau auf Canvas ⟨id⟩
 nach"_). Soll sich ein Agent dauerhaft darum kümmern, verweist du ihn auf `get_feedback`. Das Tool
-holt Anfragen ab und beansprucht sie, ohne zu blockieren. Es ist für eine Schleife gedacht, etwa
+holt offene Anfragen sofort ab und weist sie dem Agenten zu. Es ist für eine Schleife gedacht, etwa
 "prüfe alle paar Minuten das Canvas und bearbeite, was Menschen angefragt haben".
 
 ### Element-Kommentare über MCP
@@ -1099,11 +1106,11 @@ Zeitstempel, CSS-Selektor, HTML-Snippet sowie Metadaten zu Beanspruchung, Fehlsc
 falls vorhanden. Antworten tragen eine `parentId`, die auf den Ausgangskommentar zeigt.
 
 Mit `frame_id` liest du nur Kommentare zu einem Frame dieses Canvas, mit `include_resolved: false`
-schließt du gelöste Einträge aus. Gelöste Einträge sind standardmäßig enthalten, damit der
-Gesprächskontext erhalten bleibt. Ein leeres Ergebnis ist `[]`. Das Tool erzwingt dieselben
+schließt du als erledigt markierte Kommentare aus. Standardmäßig gibt das Tool sie mit zurück,
+damit der Gesprächskontext erhalten bleibt. Ein leeres Ergebnis ist `[]`. Das Tool erzwingt dieselben
 Zugriffsrechte auf das Canvas wie andere MCP-Lesezugriffe, und das optionale `agent_name` meldet den
-Agenten in der Anwesenheitsanzeige an. Es beansprucht weder Aufgaben-Feedback noch Kommentare und
-markiert nichts als gelöst.
+Agenten in der Anwesenheitsanzeige an. Der Aufruf liest die Kommentare. Er weist weder
+Aufgaben-Feedback noch Kommentare zu und markiert keine Kommentare als erledigt.
 
 `reply_to_comment({ canvas_id, comment_id, text, agent_name })` fügt einem Thread eine Antwort hinzu
 und übernimmt den Element-Anker des Ausgangskommentars.
