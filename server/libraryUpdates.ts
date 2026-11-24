@@ -4,7 +4,6 @@ import { runCanvasWrite } from './canvasWrites.ts'
 import {
   ComponentError,
   libraryConsumers,
-  previewConsumerUpdate,
   requireLibraryPlan,
   requireLibraryPublisher,
   type LibrarySkippedConsumer,
@@ -48,7 +47,6 @@ export async function updateLibraryConsumers(
       'this canvas has not published a library, so no canvas follows it — publish_library comes first',
     )
   const report: LibraryUpdateReport = {
-    dry_run: options.dryRun === true,
     library: { canvas_id: library.id, canvas_name: library.name },
     canvases: [],
     skipped: [],
@@ -78,11 +76,6 @@ export async function updateLibraryConsumers(
       if (!canvas) continue
       const release = store.hold(canvas.id)
       try {
-        if (report.dry_run) {
-          const preview = previewConsumerUpdate(canvas, library.id)
-          if (preview) report.canvases.push(preview)
-          continue
-        }
         const { update, refusal } = await runCanvasWrite(canvas.id, {
           type: 'pull-library',
           library: library.id,
@@ -131,7 +124,7 @@ export async function updateLibraryConsumers(
       break
     }
   }
-  if (!report.dry_run && report.canvases.length) {
+  if (report.canvases.length) {
     const count = report.canvases.length
     actions.logComponent(
       library.id,

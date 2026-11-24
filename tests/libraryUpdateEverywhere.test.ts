@@ -24,7 +24,6 @@ interface LibraryBody {
   behind?: { id: string; name: string; components: string[] }[]
 }
 interface Report {
-  dry_run: boolean
   canvases: {
     canvas_id: string
     canvas_name: string
@@ -138,34 +137,12 @@ describe('update everywhere', () => {
     expect((await update(guest)).status).toBe(403)
   })
 
-  it('a dry run reports every canvas and changes none', async () => {
-    const res = await update(owner, { dryRun: true })
-    expect(res.status, await res.clone().text()).toBe(200)
-    const report = await json<Report>(res)
-    expect(report.dry_run).toBe(true)
-    expect(report.skipped).toEqual([])
-    expect(report.canvases.map((entry) => entry.canvas_name).sort()).toEqual(['Docs', 'Landing', 'Pricing'])
-    for (const entry of report.canvases) {
-      expect(entry.updated).toEqual(['Button'])
-      expect(entry.frames_changed).toBe(1)
-      expect(entry.approvals_withdrawn).toBe(0)
-    }
-    for (const consumer of consumers) {
-      const frame = (await canvasOf(consumer.id)).frames[0]!
-      expect(frame.html).toContain('Start')
-      expect(frame.html).not.toContain('Begin')
-      expect((await libraryOf(consumer.id)).updates).toHaveLength(1)
-    }
-    expect((await canvasOf(consumers[0]!.id)).frames[0]!.approval?.status).toBe('ready_for_dev')
-  })
-
   it('updates every canvas, loading the ones whose frame HTML is not in memory', async () => {
     await expect.poll(loadedCanvases, { timeout: 10_000, interval: 250 }).toBe(0)
 
     const res = await update(owner)
     expect(res.status, await res.clone().text()).toBe(200)
     const report = await json<Report>(res)
-    expect(report.dry_run).toBe(false)
     expect(report.skipped).toEqual([])
     expect(report.canvases.map((entry) => entry.canvas_name).sort()).toEqual(['Docs', 'Landing', 'Pricing'])
     for (const entry of report.canvases) {

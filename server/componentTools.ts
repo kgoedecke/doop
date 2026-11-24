@@ -388,7 +388,7 @@ export const COMPONENT_TOOLS: ComponentTool[] = [
     name: 'update_component',
     title: 'Update a component',
     description:
-      "Change a component's main; every instance on the canvas follows in the background within moments, keeping its props and overrides, so this is how a sweeping design change is one call rather than one edit per screen. Small changes to the markup: find + replace on the template (from get_component). CSS is not searched: to change a style, pass the whole stylesheet as css. Rewrites: html, keeping data-doop-part attributes where you can so overrides stay attached. The result reports the impact: which frames hold instances and are queued to follow (propagation), how many of them are approved (they keep their sign-off), which overrides no longer have an element to apply to. Pass dry_run=true to read that report first, which you should for a component with many instances. A changed main is one undo-able revision: restore_component_version goes back.",
+      "Change a component's main; every instance on the canvas follows in the background within moments, keeping its props and overrides, so this is how a sweeping design change is one call rather than one edit per screen. Small changes to the markup: find + replace on the template (from get_component). CSS is not searched: to change a style, pass the whole stylesheet as css. Rewrites: html (or template, the name get_component reads it back under; never both), keeping data-doop-part attributes where you can so overrides stay attached. The result reports the impact: which frames hold instances and are queued to follow (propagation), and how many of them are approved (they keep their sign-off). get_component shows where a component is used before you change it. A changed main is one undo-able revision: restore_component_version goes back.",
     readOnly: false,
     destructive: true,
     shape: {
@@ -405,7 +405,6 @@ export const COMPONENT_TOOLS: ComponentTool[] = [
       props: z.array(propSchema).optional().describe('Full replacement of the prop metadata'),
       code: codeSchema.optional(),
       expected_rev: z.number().optional().describe('Refuse if the component has moved past this revision'),
-      dry_run: z.boolean().optional().describe('Report the impact and change nothing'),
     },
     async run(input, { canvas, actor, canRead }) {
       const result = await runCanvasWrite(canvas.id, {
@@ -420,7 +419,6 @@ export const COMPONENT_TOOLS: ComponentTool[] = [
           ...(input.props !== undefined ? { props: input.props as never } : {}),
           ...(input.code !== undefined ? { code: input.code as never } : {}),
           ...(input.expected_rev !== undefined ? { expectedRev: Number(input.expected_rev) } : {}),
-          dryRun: input.dry_run === true,
         },
         actor,
         view: true,
@@ -439,21 +437,13 @@ export const COMPONENT_TOOLS: ComponentTool[] = [
           rev: result.component.rev,
           ...(shared.length ? { library_used_by: shared } : {}),
         },
-        ...(result.dry_run
-          ? shared.length
-            ? {
-                note: 'The impact counts this canvas only. It is a workspace library: the canvases in library_used_by get this change once it is published (publish_library) and each pulls it (sync_component).',
-              }
-            : {}
-          : {
-              note: [
-                ...propagationNote(result),
-                isLibrary(canvas.id) ? `${IMPACT_NOTE} ${LIBRARY_NOTE}` : IMPACT_NOTE,
-                ...(optional(() => componentReuseNotes(canvas, result.component)) ?? []),
-              ].join('\n'),
-              frames: view.frames,
-              changed: [changeOf(result.component, view.frames)],
-            }),
+        note: [
+          ...propagationNote(result),
+          isLibrary(canvas.id) ? `${IMPACT_NOTE} ${LIBRARY_NOTE}` : IMPACT_NOTE,
+          ...(optional(() => componentReuseNotes(canvas, result.component)) ?? []),
+        ].join('\n'),
+        frames: view.frames,
+        changed: [changeOf(result.component, view.frames)],
       }
     },
   },
@@ -718,14 +708,13 @@ export const COMPONENT_TOOLS: ComponentTool[] = [
     name: 'publish_library',
     title: 'Publish components to the workspace library',
     description:
-      "Share this canvas's components with every canvas in its workspace. Publishing snapshots them: other canvases use the published state, never work in progress, and a canvas already using one sees library_update_available and pulls it when it chooses, so publishing changes no other canvas by itself. The result's used_by lists the canvases using this library and which components each still has to pull (sync_component there, or update_library_everywhere when the human asks for the change on every canvas). Without components, everything this canvas owns is published; with them, only those (each with what it is built from). dry_run=true lists what would be published or removed. unpublish=true stops sharing instead (the named components, or all); canvases using them keep their definition and every instance. Publish when the human asks for it in any words (make this available to the team, share it with our other canvases), not on your own initiative: it is how a team's design system reaches their other canvases. Needs a canvas in a workspace on the Team plan, and a workspace can keep publishing to its owner and admins; when it is refused for either reason, tell the human rather than working around it.",
+      "Share this canvas's components with every canvas in its workspace. Publishing snapshots them: other canvases use the published state, never work in progress, and a canvas already using one sees library_update_available and pulls it when it chooses, so publishing changes no other canvas by itself. The result's used_by lists the canvases using this library and which components each still has to pull (sync_component there, or update_library_everywhere when the human asks for the change on every canvas). Without components, everything this canvas owns is published; with them, only those (each with what it is built from). unpublish=true stops sharing instead (the named components, or all); canvases using them keep their definition and every instance. Publish when the human asks for it in any words (make this available to the team, share it with our other canvases), not on your own initiative: it is how a team's design system reaches their other canvases. Needs a canvas in a workspace on the Team plan, and a workspace can keep publishing to its owner and admins; when it is refused for either reason, tell the human rather than working around it.",
     readOnly: false,
     shape: {
       components: z.array(z.string()).optional().describe('Component names or ids; omit for all'),
-      dry_run: z.boolean().optional().describe('Report what would change and publish nothing'),
       unpublish: z.boolean().optional().describe('Stop sharing instead of publishing'),
     },
-    run({ components, dry_run, unpublish }, { canvas, actor, canRead, userId }) {
+    run({ components, unpublish }, { canvas, actor, canRead, userId }) {
       const refs = Array.isArray(components) && components.length ? components.map(String) : undefined
       /* other canvases by name: only the ones this account can open */
       const usedBy = () => libraryConsumers(canvas).filter((consumer) => canRead(consumer.canvas_id))
@@ -733,22 +722,19 @@ export const COMPONENT_TOOLS: ComponentTool[] = [
         const result = unpublishFromLibrary(canvas.id, refs, actor, userId)
         return { data: { ok: true, unpublished: result.unpublished, is_library: result.library.library } }
       }
-      const result = publishToLibrary(canvas.id, refs, actor, userId, dry_run === true)
+      const result = publishToLibrary(canvas.id, refs, actor, userId)
       const unpublished = result.library.changes.filter((entry) => entry.change !== 'unchanged')
       return {
         data: {
           ok: true,
-          dry_run: result.dry_run,
           published: result.published,
           removed: result.removed,
           /* whether this canvas shares anything with its workspace right now */
           is_library: result.library.library,
-          ...(result.dry_run ? {} : { still_unpublished: unpublished.map((entry) => entry.name) }),
+          still_unpublished: unpublished.map((entry) => entry.name),
           used_by: usedBy(),
         },
-        note: result.dry_run
-          ? 'Dry run: nothing was published. `published` and `removed` are what a real call would do.'
-          : 'Published. Canvases in used_by with update_waiting keep the previous version until sync_component is called on each. Only when the human asks for the change everywhere: update_library_everywhere.',
+        note: 'Published. Canvases in used_by with update_waiting keep the previous version until sync_component is called on each. Only when the human asks for the change everywhere: update_library_everywhere.',
       }
     },
   },
@@ -756,15 +742,12 @@ export const COMPONENT_TOOLS: ComponentTool[] = [
     name: 'update_library_everywhere',
     title: 'Update every canvas using this library',
     description:
-      "Pull this library canvas's latest publication into every canvas of the workspace that uses it, in one call: what sync_component does on one canvas, done on all of them. Use it ONLY when the human asks for the change everywhere / across all canvases, never as a follow-up to publish_library on your own initiative: it changes other people's canvases (approved frames keep their sign-off). Run it with dry_run=true first and tell the human what it would touch. It applies what is published, so publish_library comes first (its used_by shows which canvases are waiting). The result reports per canvas which components were updated, how many frames changed (approvals_withdrawn is always 0: approved frames keep their sign-off); skipped lists canvases this account may not edit, or where the pull was refused, and each of those still needs sync_component by someone who can. Relay the report to the human.",
+      "Pull this library canvas's latest publication into every canvas of the workspace that uses it, in one call: what sync_component does on one canvas, done on all of them. Use it ONLY when the human asks for the change everywhere / across all canvases, never as a follow-up to publish_library on your own initiative: it changes other people's canvases (approved frames keep their sign-off). Ask the human before running it. It applies what is published, so publish_library comes first (its used_by shows which canvases are waiting). The result reports per canvas which components were updated, how many frames changed (approvals_withdrawn is always 0: approved frames keep their sign-off); skipped lists canvases this account may not edit, or where the pull was refused, and each of those still needs sync_component by someone who can. Relay the report to the human.",
     readOnly: false,
     destructive: true,
-    shape: {
-      dry_run: z.boolean().optional().describe('Report what would change on each canvas and change nothing'),
-    },
-    async run({ dry_run }, { canvas, actor, canEdit, canRead, userId }) {
+    shape: {},
+    async run(_input, { canvas, actor, canEdit, canRead, userId }) {
       const report = await updateLibraryConsumers(canvas.id, actor, {
-        dryRun: dry_run === true,
         canEdit,
         canRead,
         publisherId: userId,
@@ -775,9 +758,7 @@ export const COMPONENT_TOOLS: ComponentTool[] = [
         note:
           count + report.skipped.length === 0
             ? 'Every canvas using this library already has its latest publication. Changes made here since then reach nobody until publish_library.'
-            : report.dry_run
-              ? 'Dry run: nothing was changed. frames_changed counts the frames holding an instance of what would update; approved frames keep their sign-off. Tell the human before running it for real.'
-              : `Updated ${count} canvas${count === 1 ? '' : 'es'}; frames_changed counts the frames on each that now show the update (they follow their components: no frame was edited). Tell the human which canvases changed${report.skipped.length ? ', and which were skipped and why' : ''}.`,
+            : `Updated ${count} canvas${count === 1 ? '' : 'es'}; frames_changed counts the frames on each that now show the update (they follow their components: no frame was edited). Tell the human which canvases changed${report.skipped.length ? ', and which were skipped and why' : ''}.`,
       }
     },
   },
@@ -843,12 +824,11 @@ export async function runComponentTool(
  *  the resident agent report it on the person the agent works for. */
 export function libraryFeatureEvent(name: string, input: Record<string, unknown>, data: unknown): string | undefined {
   const result = (data ?? {}) as { updated?: boolean; component?: { library?: unknown }; components?: string[] }
-  if (name === 'publish_library')
-    return input.dry_run === true || input.unpublish === true ? undefined : 'library_published'
+  if (name === 'publish_library') return input.unpublish === true ? undefined : 'library_published'
   if (name === 'sync_component')
     return result.updated && result.component?.library ? 'library_update_pulled' : undefined
   if (name === 'import_component') return result.component?.library ? 'library_component_used' : undefined
-  if (name === 'update_library_everywhere') return input.dry_run === true ? undefined : 'library_updated_everywhere'
+  if (name === 'update_library_everywhere') return 'library_updated_everywhere'
   return undefined
 }
 

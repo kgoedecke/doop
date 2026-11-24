@@ -333,17 +333,6 @@ describe('what a component update reports', () => {
     await propagation.whenIdle()
     const before = htmlOf(canvas)
 
-    const dry = updateComponent(
-      canvas.id,
-      'Button',
-      { find: 'class="btn"', replace: 'class="btn big"', dryRun: true },
-      actor,
-    )
-    expect(dry.propagation).toBeUndefined()
-    expect(dry.impact.frames).toHaveLength(5)
-    expect(htmlOf(canvas)).toEqual(before)
-    expect(propagation.pendingFrames(canvas.id)).toBe(0)
-
     const applied = updateComponent(canvas.id, 'Button', { find: 'class="btn"', replace: 'class="btn big"' }, actor)
     expect(applied.propagation).toEqual({ status: 'queued', frames: 5 })
     expect(framed(buttonMain.id)).toContain('btn big')

@@ -62,7 +62,6 @@ it('updates every canvas on an older version from a library row, after a confirm
   const library = { id: 'lib1', name: 'Design system', components: 12, publishedAt: Date.now() - 60_000, usedBy: 3 }
   mocks.list.mockResolvedValueOnce([{ ...library, behind: 2 }]).mockResolvedValue([{ ...library, behind: 0 }])
   mocks.update.mockResolvedValue({
-    dry_run: false,
     canvases: [
       { canvas_id: 'k1', canvas_name: 'Landing', updated: ['Button'], frames_changed: 1, approvals_withdrawn: 0 },
       { canvas_id: 'k2', canvas_name: 'Pricing', updated: ['Button'], frames_changed: 3, approvals_withdrawn: 0 },

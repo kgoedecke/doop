@@ -106,9 +106,8 @@ export interface CanvasLibrary {
   behind?: { id: string; name: string; components: string[] }[]
 }
 
-/** What "Update everywhere" did, or in a dry run would do, canvas by canvas. */
+/** What "Update everywhere" did, canvas by canvas. */
 export interface LibraryUpdateReport {
-  dry_run: boolean
   canvases: {
     canvas_id: string
     canvas_name: string
@@ -128,12 +127,10 @@ export interface LibraryUpdateReport {
 
 export interface ComponentImpact {
   component: WireComponentDef
-  dry_run: boolean
   impact: {
     instances: number
     frames: { id: string; name: string; instances: number; approved: boolean }[]
     approvals_affected: number
-    overrides_orphaned: { frame_id: string; instance_id: string; parts: string[] }[]
   }
 }
 
@@ -759,11 +756,8 @@ export const api = {
       `/api/canvases/${canvasId}/components/${componentId}/preview?library=${encodeURIComponent(libraryCanvasId)}`,
     ),
   /** pull the library's latest publication into every canvas of the workspace using it */
-  updateLibraryEverywhere: (canvasId: string, dryRun = false) =>
-    req<LibraryUpdateReport>(`/api/canvases/${canvasId}/library/update-consumers`, {
-      method: 'POST',
-      body: JSON.stringify(dryRun ? { dryRun } : {}),
-    }),
+  updateLibraryEverywhere: (canvasId: string) =>
+    req<LibraryUpdateReport>(`/api/canvases/${canvasId}/library/update-consumers`, { method: 'POST' }),
   workspaceLibraries: (workspaceId: string) =>
     req<{ id: string; name: string; components: number; publishedAt: number; usedBy: number; behind?: number }[]>(
       `/api/workspaces/${workspaceId}/libraries`,
@@ -781,7 +775,6 @@ export const api = {
       description?: string
       props?: ComponentProp[]
       code?: ComponentCode | null
-      dryRun?: boolean
     },
   ) =>
     req<ComponentImpact>(`/api/canvases/${canvasId}/components/${componentId}`, {

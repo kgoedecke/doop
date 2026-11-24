@@ -15,7 +15,7 @@ through tools, and read them back in a short form.
 | Markup or CSS dropped without a word                | A binding on `<doop-use>` and CSS rules not kept are named in the result       |
 | Inferred props named `text`, `text-2`               | Named by what the element is, and listed in `create_component`'s result        |
 | Edits break the link, or get thrown away            | Any edit becomes the narrowest override that holds it; no detach needed        |
-| Sweeping edits have unknown blast radius            | `update_component` reports impact, with `dry_run`                              |
+| Sweeping edits have unknown blast radius            | `get_component` shows usage; `update_component` reports impact                 |
 | Variant explosion                                   | An enum prop is `data-<name>` on the root, and variants are CSS                |
 | Canvases that grew without components               | One copy made a component in place, the rest replaced with `<doop-use>`        |
 | Components disconnected from code                   | Optional `code` mapping; compact form reads like JSX                           |
@@ -292,10 +292,9 @@ Tests: `workBudget.test.ts`, `workBudgetHttp.test.ts`.
 its frames: a string scan for instance markers, never a parse, kept per frame until that frame is written
 (its `updatedAt` moves) or rendered again (its `rendered` moves). `catalog(canvas)` (the list in `get_canvas`, `list_components` and the
 resident prompt) takes every component's count from that one pass instead of splitting every frame once per
-component. `update_component`'s impact report reads the same index, and looks for orphaned overrides only
-in frames that can hold one (an overrides marker, or a slot / nested component at a part the new template
-drops), within a quarter of the operation's parse budget; frames it had to leave out are counted in
-`overrides_unchecked_frames`. Tests: `componentUsage.test.ts`.
+component. `update_component`'s impact (instances, frames, approvals affected) reads the same index and
+parses no frame; there is no dry run and no orphaned-override report, since an update is undone with
+`restore_component_version`. Tests: `componentUsage.test.ts`.
 
 ## Agent surface
 

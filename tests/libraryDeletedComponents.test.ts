@@ -137,10 +137,6 @@ describe('deleted components and the workspace library', () => {
         replace: 'class="card v2"',
       })
       expect(edited.status, await edited.clone().text()).toBe(200)
-      const dry = await json<{ removed: unknown[] }>(
-        await owner.post(`/api/canvases/${libraryId}/library/publish`, { dryRun: true }),
-      )
-      expect(dry.removed).toEqual([])
       const res = await owner.post(`/api/canvases/${libraryId}/library/publish`, {})
       expect((await json<{ removed: unknown[] }>(res)).removed).toEqual([])
 
@@ -223,10 +219,6 @@ describe('deleted components and the workspace library', () => {
 
     it('keeps it frozen when the library updates every canvas', async () => {
       const consumer = consumers[1]!
-      const dry = await json<{ canvases: { canvas_id: string; updated: string[] }[] }>(
-        await owner.post(`/api/canvases/${libraryId}/library/update-consumers`, { dryRun: true }),
-      )
-      expect(dry.canvases).toMatchObject([{ canvas_id: consumer.id, updated: ['Panel'] }])
       const res = await owner.post(`/api/canvases/${libraryId}/library/update-consumers`, {})
       expect(res.status, await res.clone().text()).toBe(200)
       const report = await json<{ canvases: { canvas_id: string; updated: string[] }[] }>(res)

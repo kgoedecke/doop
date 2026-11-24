@@ -264,7 +264,7 @@ export type CreateComponentsCommand = {
 }
 
 /** A component changed (componentActions.updateComponent): its template by find and replace
- *  or whole, its styles, name, description, props or code; `dryRun` reports the impact only. */
+ *  or whole, its styles, name, description, props or code. */
 export type UpdateComponentCommand = {
   type: 'update-component'
   component: string

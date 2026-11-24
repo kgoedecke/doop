@@ -4,7 +4,6 @@ import {
   BIND_ATTR,
   COMPONENT_ATTR,
   INSTANCE_ATTR,
-  OVERRIDES_ATTR,
   MAX_COMPONENTS,
   MAX_COMPONENT_DESCRIPTION,
   MAX_COMPONENT_NAME,
@@ -91,7 +90,7 @@ import {
 import { env } from './env.ts'
 import { resolveElement } from './elementIds.ts'
 import * as propagation from './propagation.ts'
-import { optional, parse, parseFragment, usage as workUsage, WorkBudgetError } from './workBudget.ts'
+import { optional, parse, parseFragment, WorkBudgetError } from './workBudget.ts'
 import { afterCommit, atomic, checkpoint, transaction } from './journal.ts'
 import { htmlLoaded } from './frameHtml.ts'
 import * as persist from './db/persist.ts'
@@ -735,23 +734,17 @@ export interface UpdateInput {
   find?: string
   replace?: string
   expectedRev?: number
-  dryRun?: boolean
 }
 
 export interface UpdateResult {
   component: ComponentDef
-  dry_run: boolean
-  /** what changing this does: read before a sweeping edit, or after to see what moved */
+  /** what the change reaches: the instances that follow it, the frames they are in */
   impact: {
     instances: number
     frames: { id: string; name: string; instances: number; approved: boolean }[]
     approvals_affected: number
-    overrides_orphaned: { frame_id: string; instance_id: string; parts: string[] }[]
-    /** frames with overridden instances that were not examined, because reading them all
-     *  would have used up the operation's work budget: overrides_orphaned may be missing some */
-    overrides_unchecked_frames?: number
   }
-  /** How the change reaches the instances in `impact.frames` (absent in a dry run):
+  /** How the change reaches the instances in `impact.frames`:
    *  `queued` renders the frames in memory again in the background, a frame per tick (a
    *  frame stores a reference to the component, so it is written only where what it stores
    *  changed too; one not in memory is rendered from the component when it is read);
@@ -766,42 +759,6 @@ function propagationOf(canvasId: string, before: ComponentDef, impact: UpdateRes
   if (actions.propagationPending(canvasId, before.id)) return { status: 'queued' as const, frames }
   const moved = after.rev !== before.rev && env.DOOP_DEFER_COMPONENT_PROPAGATION
   return moved ? { status: 'deferred' as const, frames } : { status: 'none' as const, frames: 0 }
-}
-
-/** The share of an operation's parse budget the impact report may use: the write it
- *  precedes needs the rest. */
-const IMPACT_BUDGET_SHARE = 0.25
-
-/** Instances whose overrides name a part the new template no longer has. Only frames that
- *  can hold one are parsed: frames using the component (from the usage index, no scan) whose
- *  instances either carry an overrides marker or fill a slot / nest a component at a part the
- *  new template drops. A plain restyle of a component with no overridden instance parses nothing. */
-function orphanedOverrides(canvas: Canvas, def: ComponentDef, template: string, frames: ComponentUsage['frames']) {
-  const keys = new Set(partsOf(template).keys())
-  /* content read from the DOM rather than the marker (readInstance): held by every instance */
-  const structuralGone = [...partsOf(def.template).entries()].some(
-    ([key, info]) => (info.isSlot || info.isUse) && !keys.has(key),
-  )
-  const ctx = contextFor(canvas.id)
-  const orphaned: UpdateResult['impact']['overrides_orphaned'] = []
-  const limit = env.DOOP_WORK_BUDGET_PARSE_MB * 1024 * 1024 * IMPACT_BUDGET_SHARE
-  const spentBefore = workUsage().parsedBytes
-  let unchecked = 0
-  for (const used of frames) {
-    const frame = store.getFrame(used.id)
-    if (!frame || (!structuralGone && !frame.html.includes(OVERRIDES_ATTR))) continue
-    if (limit && workUsage().parsedBytes - spentBefore + frame.html.length > limit) {
-      unchecked += 1
-      continue
-    }
-    for (const found of findMarked(frame.html, INSTANCE_ATTR)) {
-      if (attrOf(found.el, INSTANCE_ATTR) !== def.id) continue
-      const state = readInstance(found.el, def, ctx)
-      const parts = Object.keys(state?.overrides.parts ?? {}).filter((key) => !keys.has(key))
-      if (state && parts.length) orphaned.push({ frame_id: frame.id, instance_id: state.instanceId, parts })
-    }
-  }
-  return { orphaned, unchecked }
 }
 
 /** A rewrite of the main: old element keys carried over wherever tag and place line up,
@@ -837,7 +794,7 @@ export const updateComponent = atomic(function updateComponent(
   const canvas = store.getCanvas(canvasId)
   if (!canvas) fail('canvas not found')
   const def = requireComponent(canvasId, ref)
-  if (def.source?.library && !input.dryRun)
+  if (def.source?.library)
     fail(
       `“${def.name}” comes from the workspace library on canvas ${def.source.canvasId}: change it there and publish, then sync_component here. For one instance that must differ, use update_instances.`,
     )
@@ -846,21 +803,15 @@ export const updateComponent = atomic(function updateComponent(
       `component “${def.name}” is at revision ${def.rev}, not ${input.expectedRev} — someone changed it; read it again`,
     )
   const html = nextHtml(def, input)
-  /* the template as it would stand (a find + replace applied), a dry run's included */
+  /* the template as it would stand (a find + replace applied) */
   if (html !== undefined && actor.kind === 'agent') refuseUnclosedTemplate(html)
   const nextRoot = html !== undefined ? alignedRoot(html, def) : undefined
   const usage = usageOf(canvas, def.id)
-  const overrides = nextRoot
-    ? orphanedOverrides(canvas, def, stampedTemplate(nextRoot), usage.frames)
-    : { orphaned: [], unchecked: 0 }
   const impact: UpdateResult['impact'] = {
     instances: usage.instances,
     frames: usage.frames,
     approvals_affected: usage.frames.filter((frame) => frame.approved).length,
-    overrides_orphaned: overrides.orphaned,
-    ...(overrides.unchecked ? { overrides_unchecked_frames: overrides.unchecked } : {}),
   }
-  if (input.dryRun) return { component: def, dry_run: true, impact }
 
   const nextProps = input.props !== undefined ? validProps(input.props) : undefined
   const propsChanged = nextProps !== undefined && JSON.stringify(nextProps) !== JSON.stringify(def.props)
@@ -898,17 +849,10 @@ export const updateComponent = atomic(function updateComponent(
   actions.logComponent(canvasId, actor, `updated component “${meta.name}”`)
   return {
     component: requireComponent(canvasId, def.id),
-    dry_run: false,
     impact,
     propagation: propagationOf(canvasId, def, impact),
   }
 })
-
-function stampedTemplate(root: Element): string {
-  const clone = kidsOf(rootFragment(serializeOuter(root)))[0]!
-  stampParts(clone)
-  return serializeOuter(clone)
-}
 
 /** Put new markup in the main's place, or give the component a new main if it lost it. */
 const leadingTagOf = (markup: string) => /<([a-z][\w-]*)/i.exec(markup)?.[1]?.toLowerCase() ?? 'element'
@@ -1914,13 +1858,12 @@ export function waitingLibraryUpdates(canvas: Canvas): ComponentDef[] {
 /** Publish this canvas's components to its workspace: all of them, or the ones named
  *  (each with what it is built from). Other canvases see an update and pull it when they choose.
  *  `publisherId` is the account acting (the agent's person, for an agent), checked against the
- *  workspace's publish setting; a dry run is checked too, so an agent hears the refusal first. */
+ *  workspace's publish setting. */
 export const publishToLibrary = atomic(function publishToLibrary(
   canvasId: string,
   refs: readonly string[] | undefined,
   actor: Actor,
   publisherId: string | undefined,
-  dryRun: boolean = false,
 ) {
   const canvas = store.getCanvas(canvasId)
   if (!canvas) fail('canvas not found')
@@ -1935,8 +1878,8 @@ export const publishToLibrary = atomic(function publishToLibrary(
   })
   if (!ids && !(canvas.components ?? []).some(publishable) && !isLibrary(canvasId))
     fail('this canvas has no components of its own to publish — make one with create_component first')
-  const result = writeLibrary(canvas, ids, actor.name, dryRun)
-  if (!dryRun && (result.published.length || result.removed.length)) {
+  const result = writeLibrary(canvas, ids, actor.name)
+  if (result.published.length || result.removed.length) {
     const count = result.published.length
     actions.logComponent(
       canvasId,
@@ -1947,7 +1890,7 @@ export const publishToLibrary = atomic(function publishToLibrary(
     )
     actions.broadcastLibrary(canvas, actor)
   }
-  return { dry_run: dryRun, ...result, library: libraryStatus(canvas) }
+  return { ...result, library: libraryStatus(canvas) }
 })
 
 /** Stop offering this canvas's components to the workspace. Nothing changes on canvases using them. */
@@ -1978,8 +1921,6 @@ export const unpublishFromLibrary = atomic(function unpublishFromLibrary(
 /* ---- update everywhere: the one way a publication is pushed ---- */
 
 export interface LibraryUpdateOptions {
-  /** report what would change and change nothing */
-  dryRun?: boolean
   /** may the acting account change that canvas? one it may not is skipped and reported */
   canEdit: (canvasId: string) => boolean
   /** may it open that canvas? one it may not is reported without its id and name */
@@ -1995,8 +1936,7 @@ export interface LibraryConsumerUpdate {
   /** the linked components brought up to the publication */
   updated: string[]
   /** frames that show the update: rendered again from their components, and written only
-   *  where what they store changed too; in a dry run, the frames holding an instance of
-   *  what would update */
+   *  where what they store changed too */
   frames_changed: number
   /** always 0: a frame following its components keeps its sign-off (2026-11-12). Kept so
    *  readers of the report do not break */
@@ -2013,46 +1953,9 @@ export interface LibrarySkippedConsumer {
 }
 
 export interface LibraryUpdateReport {
-  dry_run: boolean
   library: { canvas_id: string; canvas_name: string }
   canvases: LibraryConsumerUpdate[]
   skipped: LibrarySkippedConsumer[]
-}
-
-/** The links on a canvas that pulling this library's publication would move: the ones
- *  behind it and, as pullFromLibrary walks them, whatever they are built from that is behind too. */
-function staleLinks(canvas: Canvas, libraryCanvasId: string): ComponentDef[] {
-  const stale = new Map<string, ComponentDef>()
-  for (const def of waitingLibraryUpdates(canvas)) {
-    const origin = def.source?.canvasId === libraryCanvasId ? originOf(canvas, def) : undefined
-    if (!origin) continue
-    for (const snapshot of snapshotClosure(origin)) {
-      const local = (canvas.components ?? []).find((candidate) => candidate.id === snapshot.id)
-      if (
-        local &&
-        !isDeleted(local) &&
-        local.source?.library &&
-        local.source.canvasId === snapshot.canvasId &&
-        local.source.rev < snapshot.rev
-      )
-        stale.set(local.id, local)
-    }
-  }
-  return [...stale.values()]
-}
-
-export function previewConsumerUpdate(canvas: Canvas, libraryCanvasId: string): LibraryConsumerUpdate | undefined {
-  const stale = staleLinks(canvas, libraryCanvasId)
-  if (!stale.length) return undefined
-  const frames = new Map<string, boolean>()
-  for (const def of stale) for (const frame of usageOf(canvas, def.id).frames) frames.set(frame.id, false)
-  return {
-    canvas_id: canvas.id,
-    canvas_name: canvas.name,
-    updated: stale.map((def) => def.name),
-    frames_changed: frames.size,
-    approvals_withdrawn: [...frames.values()].filter(Boolean).length,
-  }
 }
 
 /** Pull the library's publication into one loaded canvas. A refusal part of the way

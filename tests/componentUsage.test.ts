@@ -33,7 +33,7 @@ import { store } from '../server/store.ts'
 import * as actions from '../server/actions.ts'
 import * as propagation from '../server/propagation.ts'
 import { blankComponent } from '../server/components.ts'
-import { catalog, componentDetail, updateComponent, usageOf } from '../server/componentActions.ts'
+import { catalog, componentDetail, usageOf } from '../server/componentActions.ts'
 import { usageScans } from '../server/componentUsage.ts'
 import { COMPONENT_ATTR, INSTANCE_ATTR } from '../shared/components.ts'
 import type { Actor, Canvas } from '../shared/types.ts'
@@ -173,37 +173,5 @@ describe('component usage', () => {
     /* the instances follow later, in the propagation queue: the call itself reads none of their frames */
     for (const html of before) expect(parsed.documents).not.toContain(html)
     await client.close()
-  })
-})
-
-describe('a dry run of update_component', () => {
-  it('parses no frame when no instance could lose an override', () => {
-    const { canvas, button } = fixture()
-    parsed.documents.length = 0
-    const dry = updateComponent(
-      canvas.id,
-      'Button',
-      { find: 'class="btn"', replace: 'class="btn big"', dryRun: true },
-      actor,
-    )
-    expect(dry.impact.instances).toBe(oldUsageOf(canvas, button.def.id).instances)
-    expect(dry.impact.overrides_orphaned).toEqual([])
-    expect(parsed.documents).toEqual([])
-  })
-
-  it('parses only the frames whose instances carry overrides, and finds the ones a rewrite orphans', () => {
-    const { canvas, frames } = fixture()
-    const overridden = frames[0]!
-    actions.updateFrame(
-      overridden.id,
-      { html: framed(overridden.id).replace('<span', '<span style="color: red"') },
-      actor,
-    )
-    expect(framed(overridden.id)).toContain('data-doop-overrides')
-    parsed.documents.length = 0
-    const dry = updateComponent(canvas.id, 'Button', { html: '<button class="btn">Buy</button>', dryRun: true }, actor)
-    expect(dry.impact.overrides_orphaned).toHaveLength(1)
-    expect(dry.impact.overrides_orphaned[0]!.frame_id).toBe(overridden.id)
-    expect(parsed.documents).toEqual([framed(overridden.id)])
   })
 })

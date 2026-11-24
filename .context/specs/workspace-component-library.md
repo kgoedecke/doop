@@ -100,9 +100,6 @@ never a side effect of publishing, and it applies what is published, not work in
   the rest go on.
 - The report: `canvases` (`canvas_id`, `canvas_name`, `updated` component names, `frames_changed`,
   `approvals_withdrawn`) and `skipped` (`reason` `no_edit_access` or `failed`, `message`).
-  `dry_run` returns the same shape and changes nothing: there `frames_changed` counts the frames
-  holding an instance of what would update and `approvals_withdrawn` the approved ones among them.
-  A dry run loads the canvases too, since counting reads their frames.
 
 ## Entitlement
 
@@ -145,15 +142,14 @@ restricts), `libraryPublish` on `WorkspaceSummary`, changed by an admin through
   `list_components` adds `workspace_libraries` and marks linked components with `library`,
   `import_component` and `sync_component` understand library links (`sync_component` without a
   component pulls every update waiting on the canvas), and `publish_library` publishes
-  (`components`, `dry_run`) or withdraws (`unpublish`); its result's `used_by` lists the canvases
+  (`components`) or withdraws (`unpublish`); its result's `used_by` lists the canvases
   using the library and what each still has to pull, limited to canvases the account can open.
-  `update_library_everywhere` (`dry_run`) is the update-everywhere action: its description tells an
-  agent to use it only when the human asks for the change on every canvas, and to run the dry run
-  first. It is the one async component tool, so `runComponentTool` returns a promise and
+  `update_library_everywhere` is the update-everywhere action: its description tells an agent to use
+  it only when the human asks for the change on every canvas, and to ask the human before running it. It is the one async component tool, so `runComponentTool` returns a promise and
   `ToolContext` carries `canEdit` beside `canRead`. Guide text is in `COMPONENTS`.
 - **REST**: `GET /api/canvases/:id/library` (status, changes, waiting updates),
   `POST /api/canvases/:id/library/publish`, `DELETE /api/canvases/:id/library`,
-  `POST /api/canvases/:id/library/update-consumers` (`{ dryRun? }`, edit role on the library
+  `POST /api/canvases/:id/library/update-consumers` (edit role on the library
   canvas; answers with the report),
   `GET /api/canvases/:id/component-libraries` (libraries first, flagged `library`),
   `GET …/components/:componentId/preview?library=<canvas>` (a snapshot's preview),

@@ -263,12 +263,7 @@ export interface PublishResult {
 /** Publish the chosen components (all publishable ones when none are named),
  *  each with what it is built from. A published component the canvas no longer
  *  has stops being offered. Entitlement is the caller's check. */
-export function publishLibrary(
-  canvas: Canvas,
-  ids: readonly string[] | undefined,
-  by: string,
-  dryRun = false,
-): PublishResult {
+export function publishLibrary(canvas: Canvas, ids: readonly string[] | undefined, by: string): PublishResult {
   const all = publication(canvas)
   /* the chosen ones and what they are built from, deleted dependencies included */
   const chosen = withDependencies(canvas, ids ?? all.map((def) => def.id)).filter((def) => all.includes(def))
@@ -282,7 +277,6 @@ export function publishLibrary(
     }),
     removed: changes.filter((entry) => entry.change === 'removed'),
   }
-  if (dryRun) return result
   const at = Date.now()
   const next = before.filter((entry) => !result.removed.some((gone) => gone.id === entry.id))
   for (const def of chosen) {
