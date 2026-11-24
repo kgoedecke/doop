@@ -160,9 +160,16 @@ function hasRangeIn(el: Element): boolean {
   return !!s && !s.isCollapsed && el.contains(s.anchorNode) && el.contains(s.focusNode)
 }
 
+/** how many edited documents this runtime has sent: the editor names the one
+ *  a document it sends back was built from (see doop:html in commands.ts) */
+export let editsSent = 0
+
 /** the document goes to the editor's save path; discrete marks one undo step */
 export function postEdited(discrete?: boolean): void {
-  if (runtimePort) sendToEditor({ event: 'edited', html: serialize(), discrete: discrete === true })
+  if (runtimePort) {
+    editsSent++
+    sendToEditor({ event: 'edited', html: serialize(), discrete: discrete === true, edit: editsSent })
+  }
   /* typing can move/grow the element — keep the parent's toolbar anchored */
   if (editing && activeEl) postActive()
 }

@@ -13,7 +13,7 @@ import {
 } from './channel'
 import { styleTarget } from './dom'
 import { layerPlacement, moveTarget, placementOrigin } from './drop'
-import { activate, activeEl, candidate, deactivate, editing, selectAllIn, setEdit } from './edit'
+import { activate, activeEl, candidate, deactivate, editing, editsSent, selectAllIn, setEdit } from './edit'
 import { designRect, elementGeometry, ownRotation, renderedBox, sizable } from './geometry'
 import {
   contextHit,
@@ -35,7 +35,7 @@ import { pathInfo, setMovingDrawing, setPathEditing } from './paths'
 import { protoHtmlChanged } from './proto'
 import { exportSnapshot } from './serialize'
 import { setCanvasCursor, setOutlines } from './sheets'
-import { applyStyle, beginStyleEdit, endStyleEdit, flushStyleSave } from './styles'
+import { applyStyle, beginStyleEdit, endStyleEdit, flushStyleSave, styleSavePending } from './styles'
 import { firstTextRun, formatLayers, formatText, runDecoration } from './text'
 import type { Rect, StylePatch } from './types'
 
@@ -66,6 +66,8 @@ interface Command {
   phase?: unknown
   followers?: unknown
   html?: unknown
+  /** doop:html: the edit a document built from one of ours was made from */
+  basis?: unknown
   command?: unknown
   id?: unknown
   cursor?: unknown
@@ -278,7 +280,16 @@ function handle(d: Command, ev: MessageEvent): void {
           : false
     answer('doop:style-gesture-result', d.reqId, { info: changed ? inspect(d.selector) : null })
   }
-  if (d.type === 'doop:html' && typeof d.html === 'string' && !editing) {
+  /* A document built from one of our own edits (a hosted font's link added
+     to it on save) left before any edit made since: one whose save is still
+     waiting, or one already sent. Rendering it would put those edits back as
+     they were, and the waiting save would then send the older document. It
+     is dropped; the newer edit's save comes back the same way, built from
+     that one. */
+  const outdated = typeof d.basis === 'number' && (d.basis !== editsSent || styleSavePending())
+  if (d.type === 'doop:html' && typeof d.html === 'string' && !editing && outdated) {
+    if (d.reqId) parent.postMessage({ type: 'doop:html-result', reqId: d.reqId, outdated: true }, '*')
+  } else if (d.type === 'doop:html' && typeof d.html === 'string' && !editing) {
     render(d.html)
     notifyFrameUpdated()
     protoHtmlChanged()

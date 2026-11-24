@@ -344,13 +344,13 @@ describe.skipIf(!findBrowserPath())('element design controls', () => {
     await page.waitForSelector('[aria-label="Image fill"]')
     await page.click('[aria-label="Image fill"]')
     const before = saved.html
-    await number('Image URL', 'javascript:alert(1)')
+    await pasteUrl('javascript:alert(1)')
     await page.waitForSelector('[role="alert"]')
     expect(saved.html).toBe(before)
-    await number('Image URL', 'data:image/png;base64,aGVsbG8=')
+    await pasteUrl('data:image/png;base64,aGVsbG8=')
     await page.waitForFunction(() => document.querySelector('[role="alert"]')?.textContent?.includes('Couldn’t load'))
     expect(saved.html).toBe(before)
-    await number('Image URL', replacementUrl)
+    await pasteUrl(replacementUrl)
     await expect.poll(() => saved.html).toContain(replacementUrl)
     await page.waitForFunction(() => !document.querySelector('[aria-busy]'))
     await page.select('[aria-label="Image sizing"]', 'contain')
@@ -547,7 +547,7 @@ describe.skipIf(!findBrowserPath())('element design controls', () => {
         {},
         replacementUrl,
       )
-      await number('Image URL', originalUrl)
+      await pasteUrl(originalUrl)
       await expect.poll(() => saved.html).not.toContain(replacementUrl)
       await frame.waitForFunction(
         (url) => document.querySelector<HTMLImageElement>('#photo')?.currentSrc === url,
@@ -648,6 +648,15 @@ describe.skipIf(!findBrowserPath())('element design controls', () => {
     await page.keyboard.press('Enter')
   }
 
+  /* A URL goes in the way a person enters one: pasted over the field's text
+     in one input event. Typed key by key, a data URL is nearly two hundred
+     round trips to a busy renderer, seconds of a test's budget on CI. */
+  async function pasteUrl(url: string) {
+    await page.click('input[aria-label="Image URL"]', { count: 3 })
+    await page.keyboard.sendCharacter(url)
+    await page.keyboard.press('Enter')
+  }
+
   it('edits flex direction, alignment, spacing and padding without overwriting the other axes; saves and undoes', async () => {
     const frame = await seedPanel(
       `<!doctype html><html><head><style>
@@ -666,7 +675,10 @@ describe.skipIf(!findBrowserPath())('element design controls', () => {
       () => getComputedStyle(document.querySelector('#flex')!).justifyContent === 'space-between',
     )
     await page.click('[aria-label="Align children bottom right"]')
-    await frame.waitForFunction(() => getComputedStyle(document.querySelector('#flex')!).alignItems === 'flex-end')
+    /* Chrome 158 computes flex-end as flow-end */
+    await frame.waitForFunction(() =>
+      /^fl(ex|ow)-end$/.test(getComputedStyle(document.querySelector('#flex')!).alignItems),
+    )
     expect(await frame.$eval('#flex', (el) => getComputedStyle(el).justifyContent)).toBe('space-between')
     await number('Gap', 14)
     expect(await frame.$eval('#flex', (el) => getComputedStyle(el).rowGap)).toBe('7px')
@@ -1141,6 +1153,10 @@ describe.skipIf(!findBrowserPath())('element design controls', () => {
     await page.keyboard.press('Escape')
     await page.mouse.up()
     await frame.waitForFunction(() => (document.querySelector('#scrub') as HTMLElement).style.width === '120px')
+    /* the frame is put back before the panel hears so: until the cancel's
+       reply lands, the field holds the drag's last value (the min-width's
+       24), and a drag starts from what the field holds */
+    await page.waitForFunction(() => document.querySelector<HTMLInputElement>('[aria-label="Width"]')?.value === '120')
     await startScrub('Width')
     await page.mouse.move(x + 24, y, { steps: 6 })
     await frame.waitForFunction(() => (document.querySelector('#scrub') as HTMLElement).style.width === '144px')

@@ -1,4 +1,13 @@
-import { createContext, useContext, useRef, useState, type MouseEvent, type ReactNode } from 'react'
+import {
+  createContext,
+  useContext,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type MouseEvent,
+  type ReactNode,
+  type RefObject,
+} from 'react'
 
 import { cn } from '@/lib/utils'
 import { useT } from '@/lib/i18n'
@@ -9,7 +18,11 @@ import { ChevronDownIcon, UnlinkIcon } from './icons'
 /* The dense property controls of an inspector rail: a 26px row with a label
    column and one or more 26px fields, each carrying a faint unit at its
    right edge. Every field keeps a draft while it is being typed into and
-   commits on blur or Enter; a new value from outside replaces the draft. */
+   commits on blur or Enter; a new value from outside replaces the draft,
+   unless keys have been typed into it since: the panel re-reads the layer
+   once an edit is saved, a few hundred ms later, just when the next field
+   is being typed into, and replacing the draft then lost the keys already
+   typed. */
 
 const fieldCls =
   'group relative flex h-[26px] min-h-[26px] min-w-0 flex-1 shrink-0 items-center gap-1 rounded-[7px] bg-sub px-2 font-mono text-[11px] text-ink focus-within:bg-surface focus-within:shadow-elevation-1-focus'
@@ -18,6 +31,29 @@ const scrubUnitCls =
   'self-stretch content-center -mr-2 pr-2 pl-1 cursor-ew-resize touch-none select-none hover:text-ink'
 /* a field's icon is its scrub handle, widened to the field's edge so it is easy to catch */
 const scrubIconCls = 'self-stretch -ml-2 w-[22px] pl-2 cursor-ew-resize touch-none select-none hover:text-ink'
+
+/** A field's whole text, selected (a triple-click, a tab into it) to be
+ *  typed over, stays selected when a new value replaces it: setting an
+ *  input's value drops the selection, and the keys typed next would land
+ *  after the new value instead of replacing it. The returned `onSelect`
+ *  tracks the selection; `onChange` forgets it, so a typed key is never
+ *  selected and typed over by the next. */
+function useWholeSelection(input: RefObject<HTMLInputElement | null>, text: string) {
+  const whole = useRef(false)
+  useLayoutEffect(() => {
+    const el = input.current
+    if (el && whole.current && el.ownerDocument.activeElement === el) el.select()
+  }, [input, text])
+  return {
+    onSelect: (event: { currentTarget: HTMLInputElement }) => {
+      const el = event.currentTarget
+      whole.current = el.value !== '' && el.selectionStart === 0 && el.selectionEnd === el.value.length
+    },
+    onChange: () => {
+      whole.current = false
+    },
+  }
+}
 
 /** The panel owns CSS snapshots and persistence; fields only own the gesture. */
 export const PropertyScrubContext = createContext<{
@@ -135,6 +171,9 @@ export function NumberField({
   const input = useRef<HTMLInputElement>(null)
   const shown = value === null ? '' : String(value)
   const [draft, setDraft] = useState(shown)
+  /* keys typed since the field last committed or took up a value */
+  const [typed, setTyped] = useState(false)
+  const selection = useWholeSelection(input, draft)
   const [seen, setSeen] = useState({ value: shown, scrubbing: false })
   const scrubLifecycle = useContext(PropertyScrubContext)
   const scrub = useValueScrub({
@@ -144,6 +183,7 @@ export function NumberField({
     min,
     max,
     onChange: (v) => {
+      setTyped(false)
       setDraft(v)
       onCommit(Number(v))
     },
@@ -155,6 +195,7 @@ export function NumberField({
     enabled: !disabled && !token && draft.trim() !== '',
     onChange: (v) => {
       const next = Math.min(max, Math.max(min, v))
+      setTyped(false)
       setDraft(String(next))
       onCommit(next)
     },
@@ -168,12 +209,13 @@ export function NumberField({
   // release, even when CSS constrained or rounded it back to the old value.
   if (seen.value !== shown || seen.scrubbing !== dragging) {
     setSeen({ value: shown, scrubbing: dragging })
-    if (!dragging) setDraft(shown)
+    if (!dragging && !typed) setDraft(shown)
   }
   function commit() {
+    setTyped(false)
     if (dragging) return
     const n = Number(draft)
-    if (draft.trim() !== '' && Number.isFinite(n) && n !== value) {
+    if (typed && draft.trim() !== '' && Number.isFinite(n) && n !== value) {
       const next = Math.min(max, Math.max(min, n))
       setDraft(String(next))
       onCommit(next)
@@ -249,7 +291,12 @@ export function NumberField({
             )}
             value={draft}
             inputMode="decimal"
-            onChange={(e) => setDraft(e.target.value)}
+            onSelect={selection.onSelect}
+            onChange={(e) => {
+              selection.onChange()
+              setTyped(true)
+              setDraft(e.target.value)
+            }}
             onBlur={commit}
             onKeyDown={(e) => {
               if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
@@ -257,6 +304,7 @@ export function NumberField({
                 e.preventDefault()
                 const n = Number(draft) || 0
                 const next = Math.min(max, Math.max(min, n + (e.key === 'ArrowUp' ? 1 : -1) * (e.shiftKey ? 10 : 1)))
+                setTyped(false)
                 setDraft(String(next))
                 onCommit(next)
               }
@@ -302,7 +350,10 @@ export function TextField({
   disabled?: boolean
 }) {
   const t = useT()
+  const input = useRef<HTMLInputElement>(null)
   const [draft, setDraft] = useState(value)
+  const [typed, setTyped] = useState(false)
+  const selection = useWholeSelection(input, draft)
   const [seen, setSeen] = useState({ value, scrubbing: false })
   const scrubLifecycle = useContext(PropertyScrubContext)
   const scrub = useValueScrub({
@@ -311,24 +362,37 @@ export function TextField({
     enabled: scrubbable && !disabled,
     min,
     onChange: (v) => {
+      setTyped(false)
       setDraft(v)
       onCommit(v)
     },
   })
   if (seen.value !== value || seen.scrubbing !== scrub.scrubbing) {
     setSeen({ value, scrubbing: scrub.scrubbing })
-    if (!scrub.scrubbing) setDraft(value)
+    if (!scrub.scrubbing && !typed) setDraft(value)
+  }
+  function commit() {
+    setTyped(false)
+    if (scrub.scrubbing) return
+    if (typed && draft !== value) onCommit(draft)
+    else setDraft(value)
   }
   return (
     <label className={cn(fieldCls, className)}>
       <input
+        ref={input}
         aria-label={label}
         className="w-full min-w-0 bg-transparent font-[inherit] text-[length:inherit] text-ink outline-none placeholder:text-ink-faint disabled:opacity-50"
         value={draft}
         disabled={disabled}
         placeholder={placeholder}
-        onChange={(e) => setDraft(e.target.value)}
-        onBlur={() => !scrub.scrubbing && draft !== value && onCommit(draft)}
+        onSelect={selection.onSelect}
+        onChange={(e) => {
+          selection.onChange()
+          setTyped(true)
+          setDraft(e.target.value)
+        }}
+        onBlur={commit}
         onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
       />
       {u && (
@@ -458,13 +522,21 @@ export function ColorField({
 }) {
   const t = useT()
   const shown = value ?? ''
+  const input = useRef<HTMLInputElement>(null)
   const [draft, setDraft] = useState(shown)
+  const [typed, setTyped] = useState(false)
+  const selection = useWholeSelection(input, draft)
   const [seen, setSeen] = useState(shown)
   if (seen !== shown) {
     setSeen(shown)
-    setDraft(shown)
+    if (!typed) setDraft(shown)
   }
   function commit() {
+    setTyped(false)
+    if (!typed) {
+      setDraft(shown)
+      return
+    }
     const v = draft.trim().toLowerCase()
     if (v === '') {
       if (value !== null) onCommit(null)
@@ -496,6 +568,7 @@ export function ColorField({
         <TokenChip token={token} />
       ) : (
         <input
+          ref={input}
           aria-label={label}
           className={cn(
             'w-full min-w-0 bg-transparent font-mono text-[11px] uppercase text-ink outline-none placeholder:normal-case placeholder:text-ink-faint',
@@ -503,7 +576,12 @@ export function ColorField({
           )}
           value={draft}
           placeholder={placeholder ?? t('inspector.colorNone')}
-          onChange={(e) => setDraft(e.target.value)}
+          onSelect={selection.onSelect}
+          onChange={(e) => {
+            selection.onChange()
+            setTyped(true)
+            setDraft(e.target.value)
+          }}
           onBlur={commit}
           onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
         />

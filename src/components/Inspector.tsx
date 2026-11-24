@@ -280,9 +280,11 @@ export function Inspector({
           <FrameApprovalControl key={frame.id} frame={frame} hasUnsavedChanges={saveState === 'dirty'} />
         </InspectorGroup>
         <PropertyScrubContext.Provider value={boxScrub}>
+          {/* keyed by frame: a value typed for one frame is never committed to the next */}
           <InspectorGroup title={t('inspector.sectionPosition')}>
             <div className="grid grid-cols-2 gap-1.5">
               <NumberField
+                key={frame.id}
                 label={t('inspector.xPosition')}
                 prefix="X"
                 unit="px"
@@ -292,6 +294,7 @@ export function Inspector({
                 onCommit={(x) => editBox({ x })}
               />
               <NumberField
+                key={frame.id}
                 label={t('inspector.yPosition')}
                 prefix="Y"
                 unit="px"
@@ -305,6 +308,7 @@ export function Inspector({
           <InspectorGroup title={t('inspector.sectionLayout')}>
             <div className="grid grid-cols-2 gap-1.5">
               <NumberField
+                key={frame.id}
                 label={t('inspector.width')}
                 prefix="W"
                 unit="px"
@@ -314,6 +318,7 @@ export function Inspector({
                 onCommit={(width) => editBox({ width })}
               />
               <NumberField
+                key={frame.id}
                 label={t('inspector.height')}
                 prefix="H"
                 unit="px"
@@ -323,6 +328,7 @@ export function Inspector({
                 onCommit={(height) => editBox({ height })}
               />
               <NumberField
+                key={frame.id}
                 label={t('inspector.rotation')}
                 prefix={<RotationIcon size="rail" />}
                 unit="°"

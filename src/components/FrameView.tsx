@@ -939,7 +939,11 @@ export const FrameView = memo(function FrameView({
   /* Private to the bootstrap runtime, established before the first design renders. */
   const runtimePort = useRef<MessagePort | null>(null)
   /* saves a document the runtime serialized after an edit (set below) */
-  const saveEditedRef = useRef<(html: string, discrete: boolean) => void>(() => {})
+  const saveEditedRef = useRef<(html: string, discrete: boolean, edit: number | null) => void>(() => {})
+  /* the saved source of the runtime's last edit when the save changed it (a
+     hosted font's link added), and which edit it was built from: sent back
+     in, the runtime takes it only if it has made no edit since */
+  const savedEdit = useRef<{ html: string; edit: number } | null>(null)
   /* the frame's box, which a relayed wheel's point is mapped through */
   const wheelFrame = {
     width: frame.width,
@@ -963,14 +967,15 @@ export const FrameView = memo(function FrameView({
       if (!iframe?.contentWindow) return
       const relay = ev.data as
         | Partial<KeyRelay>
-        | { event: 'edited'; html?: unknown; discrete?: boolean }
+        | { event: 'edited'; html?: unknown; discrete?: boolean; edit?: unknown }
         | { event: 'settled'; reqId?: unknown }
         | Partial<WheelRelay>
         | undefined
       /* Inspector edits arrive while the panel holds focus. Only keys need
          the iframe to be focused. */
       if (relay?.event === 'edited') {
-        if (typeof relay.html === 'string') saveEditedRef.current(relay.html, relay.discrete === true)
+        if (typeof relay.html === 'string')
+          saveEditedRef.current(relay.html, relay.discrete === true, typeof relay.edit === 'number' ? relay.edit : null)
         return
       }
       if (relay?.event === 'settled') {
@@ -1029,6 +1034,9 @@ export const FrameView = memo(function FrameView({
            one was sent, and send it once the first render has settled (the
            effect below sends it too on the first boot; the second is a no-op) */
         sentCursor.current = null
+        /* and counts its edits from zero again: a save built from the last
+           document's edit is no longer behind anything here */
+        savedEdit.current = null
         window.requestAnimationFrame(() => syncCursorRef.current())
         /* once per document: the ready signal arrives before the design's
            HTML, so only the runtime can be listening for the port */
@@ -1067,13 +1075,16 @@ export const FrameView = memo(function FrameView({
     if (!runtimeReady || editing || suspendPost || html !== frame.html) return
     /* the runtime made this document itself (an edit), and the canvas's styles in it are current */
     if (html === localHtml.current && shared === shownShared.current) return
+    const basis = savedEdit.current?.html === html ? savedEdit.current.edit : undefined
+    savedEdit.current = null
     localHtml.current = null
     shownShared.current = shared
     const request = ++htmlRequest.current
     noteFrameDocument(frame.id, null)
     let cancelled = false
-    void requestFrame(frame.id, 'doop:html', { html: composed }).then((reply) => {
-      if (!reply || request !== htmlRequest.current) return
+    void requestFrame(frame.id, 'doop:html', { html: composed, basis }).then((reply) => {
+      /* outdated: the runtime has edited since; that edit's save comes back instead */
+      if (!reply || reply.outdated || request !== htmlRequest.current) return
       /* the runtime shows it whether or not this effect is still current */
       noteFrameDocument(frame.id, html)
       if (!cancelled) setRuntimeDocument({ html, request })
@@ -1765,7 +1776,7 @@ export const FrameView = memo(function FrameView({
 
   /* serialized edits stream out of the iframe; save through the human path */
   useEffect(() => {
-    function saveEdited(serialized: string, discrete: boolean) {
+    function saveEdited(serialized: string, discrete: boolean, edit: number | null) {
       /* the runtime's document carries what was composed into it (component stylesheets,
          token values): the store, the undo history and the server get its source */
       const edited = frameSource(serialized)
@@ -1782,6 +1793,7 @@ export const FrameView = memo(function FrameView({
       /* the font scan reads the composed document, so a family named through a font
          token or a component's rules is seen; only the faces stay in the source */
       const html = frameSource(withWebFontLinks(withFontFaces(composeFrame(edited), library), library))
+      savedEdit.current = html !== edited && edit !== null ? { html, edit } : null
       const before = useStore.getState().canvas?.frames.find((f) => f.id === frame.id)?.html
       useStore.getState().patchFrameLocal(frame.id, { html })
       trackSave(api.updateFrame(frame.id, { html }).catch(console.error))

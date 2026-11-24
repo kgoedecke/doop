@@ -22,6 +22,12 @@ function dimensionValue(el: Element, axis: 'width' | 'height', cs: CSSStyleDecla
   return (el as HTMLElement).style.getPropertyValue(axis) || cs[axis]
 }
 
+/* Chrome 158 computes flex-start and flex-end as flow-start and flow-end; the
+   panel, and the CSS it writes, keep the names every engine reads */
+function flexAlignment(value: string): string {
+  return value.replace(/flow-(start|end)/, 'flex-$1')
+}
+
 export function inspect(selector: unknown): ElementInfo | null {
   const el = styleTarget(selector)
   if (!el || el === document.documentElement) return null
@@ -99,8 +105,8 @@ export function inspect(selector: unknown): ElementInfo | null {
     display: cs.display,
     flexDirection: cs.flexDirection,
     flexWrap: cs.flexWrap,
-    justifyContent: cs.justifyContent,
-    alignItems: cs.alignItems,
+    justifyContent: flexAlignment(cs.justifyContent),
+    alignItems: flexAlignment(cs.alignItems),
     writingMode: cs.writingMode,
     width: px(cs.width),
     height: px(cs.height),
