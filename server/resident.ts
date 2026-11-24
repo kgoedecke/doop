@@ -22,7 +22,13 @@ import {
   tokensTailwind,
   type TokenResult,
 } from '../shared/designTokens.ts'
-import { ModelAuthError, ModelConfigurationError, ModelUnavailableError, pickModel } from './agentModel.ts'
+import {
+  type AgentTurnRequest,
+  ModelAuthError,
+  ModelConfigurationError,
+  ModelUnavailableError,
+  pickModel,
+} from './agentModel.ts'
 import { RESIDENT_TASK_LIMIT } from './allowance.ts'
 import * as actions from './actions.ts'
 import { captureFeature, captureTokenResults } from './featureEvents.ts'
@@ -106,6 +112,7 @@ import { runRepoCards } from './githubRecon.ts'
 import { retryModelTurn } from './modelTurnRetry.ts'
 import { recordAgentFeedback } from './agentFeedback.ts'
 import { AGENT_IDEA_CATEGORIES, AGENT_ISSUE_CATEGORIES, type AgentFeedbackCategory } from '../shared/agentFeedback.ts'
+import { crashReason, failureDetail } from './runFailure.ts'
 
 /**
  * The resident design team: a server-side Claude tool loop, run once per
@@ -126,15 +133,24 @@ import { AGENT_IDEA_CATEGORIES, AGENT_ISSUE_CATEGORIES, type AgentFeedbackCatego
  * did — the work waits for the next agent to connect over MCP.
  */
 
-/* A backstop against a run that loops, not a budget: each turn's output is
-   already capped, and a model that calls one tool per turn (ChatGPT's) spends
-   a dozen turns reading the canvas and searching before it writes anything.
-   At 24, ordinary runs finished at 20-23 and verified work was failed. */
-const MAX_TURNS = 60
+/* A run on the person's own connection has no turn limit: a cap of 60 stopped
+   runs that had written up to 34 frames mid-work. What stops one that never
+   ends is time, the same 30 minutes the desktop relay gives a run
+   (localAgentRuns.ts). */
+const RUN_TIME_LIMIT_MS = 30 * 60_000
+/* A run on Doop's own key keeps a turn backstop, so no runaway is billed to
+   us: a model that calls one tool per turn (ChatGPT's) spends a dozen turns
+   reading the canvas and searching before it writes anything. At 24, ordinary
+   runs finished at 20-23 and verified work was failed. */
+const SERVER_MAX_TURNS = 60
 /* a redesign card delivers an audit doc plus TWO draft frames in one run */
-const MAX_REDESIGN_TURNS = 80
-/* the agent's closing words when the cap stopped a run whose work was done */
-const CAPPED_SUMMARY = 'Done. The step limit came before my write-up, so look at the canvas for what changed.'
+const SERVER_MAX_REDESIGN_TURNS = 80
+/* A harness job still names a turn count: desktop shells before this release
+   pass it to Claude Code (clamped to 80), and the Gemini cloud worker's schema
+   takes at most 200. Current desktop shells pass Claude Code no turn limit. */
+const HARNESS_MAX_TURNS = 200
+/* the agent's closing words when the limit stopped a run whose work was done */
+const CAPPED_SUMMARY = 'Done. The run ended before my write-up, so look at the canvas for what changed.'
 /* a sweep hands a card down its pipeline in place; the cap is a backstop
    against a card that somehow keeps requeueing itself */
 const MAX_SWEEP_RUNS = 24
@@ -767,6 +783,13 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
     let crashed = false
     let staleAccount = false
     let accountError: string | undefined
+    /* what the connection said when the run crashed: the desktop CLI's result
+       or the provider's error, shown on the card instead of a bare "snag" */
+    let crashDetail: string | undefined
+    const connectionErrors = new WeakSet<object>()
+    /* a harness failure the relay itself worded (the desktop went away, the
+       cloud worker is down): already a sentence for the card */
+    let doopReason: string | undefined
     let unavailableModel = false
     let finished = false
     let mutationNudgeSent = false
@@ -864,7 +887,21 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
               text: 'Note: your model cannot view images. screenshot_frame returns a text confirmation, not pixels, and image search results describe rather than show. Verify layout by re-reading get_frame_html and checking inspect_frame instead.',
             },
           ]
-      const maxTurns = REDESIGN_RE.test(workText) ? MAX_REDESIGN_TURNS : MAX_TURNS
+      /* no turn limit on the person's own connection; a server-tier run is
+         paid by Doop and keeps the turn backstop. Both stop at the time limit. */
+      const maxTurns = model.userId
+        ? Infinity
+        : REDESIGN_RE.test(workText)
+          ? SERVER_MAX_REDESIGN_TURNS
+          : SERVER_MAX_TURNS
+      const deadline = Date.now() + RUN_TIME_LIMIT_MS
+      /* the model call's own failures, the only errors a card may quote as the
+         connection's words; anything else in the run is ours */
+      const runModel = (request: AgentTurnRequest) =>
+        model.run(request).catch((err: unknown) => {
+          if (err && typeof err === 'object') connectionErrors.add(err)
+          throw err
+        })
       if (model.runHarness) {
         const result = await model.runHarness({
           canvasId,
@@ -882,7 +919,7 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
           // Image generation uses a separate paid model account; the local CLI
           // connection must never imply that the user's subscription covers it.
           tools: TOOLS.filter((tool) => tool.name !== 'generate_image'),
-          maxTurns,
+          maxTurns: HARNESS_MAX_TURNS,
           isCanceled: canceled,
           signal: abort.signal,
           execute: async (block) => {
@@ -905,11 +942,15 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
         })
         if (canceled()) return 'ran'
         finished = result.success
-        crashed = !result.success
+        /* a run stopped at its turn limit is judged by its work below
+           (cappedDone), as the API loop's is, never called a crash */
+        crashed = !result.success && !result.limitReached
+        if (crashed && result.fromDoop) doopReason = result.text
+        else if (crashed) crashDetail = result.text
         messages.push({ role: 'assistant', content: [{ type: 'text', text: result.text }] })
-        if (!result.success) actions.agentSummary(canvasId, actor, result.text)
+        if (crashed) actions.agentSummary(canvasId, actor, result.text)
       } else
-        for (let turn = 0; turn < maxTurns; turn++) {
+        for (let turn = 0; turn < maxTurns && Date.now() < deadline; turn++) {
           if (canceled()) return 'ran'
           /* the status showing when the connection dropped, so a recovered
              run picks its narration back up instead of staying "reconnecting" */
@@ -917,7 +958,7 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
           runState.seenVerified = new Set(runState.verifiedFrames)
           const res = await retryModelTurn(
             () =>
-              model.run({
+              runModel({
                 maxTokens: 16000,
                 system: [
                   { text: systemFor(role, roster), cache: true },
@@ -1063,6 +1104,9 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
          fix is a different tier in Settings, and a retry on the same one
          would only fail the same way */
       unavailableModel = err instanceof ModelUnavailableError && !!model.userId
+      /* only the person's own connection: a server-tier error is about our
+         account (its billing, its limits), not one they can act on */
+      if (model.userId && err instanceof Error && connectionErrors.has(err)) crashDetail = err.message
       console.error('[resident] run errored', err)
       actions.setAgentStatus(
         canvasId,
@@ -1096,7 +1140,7 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
       !(runState.vision && verificationFrameIds(runState).some((id) => !runState.seenVerified.has(id)))
     if (cappedDone) finished = true
     const exhausted = capped && !cappedDone
-    if (exhausted) actions.setAgentStatus(canvasId, actor, 'Hit its step limit — waiting for a retry')
+    if (exhausted) actions.setAgentStatus(canvasId, actor, 'Hit its limit — waiting for a retry')
     const noMutation = finished && requireMutation && !deliveredWork(runState) && !blockedWebsiteAccess
     const unverifiedMutation =
       finished &&
@@ -1154,9 +1198,13 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
       } else if (refused) {
         reason = `${role.name} could not take this request. Retry when you are ready.`
       } else if (crashed) {
-        reason = `${role.name} hit a snag before finishing. Retry when you are ready.`
+        reason = doopReason ?? crashReason(role.name, model.label, crashDetail)
+        if (crashDetail)
+          console.log(
+            `[resident] crash detail canvas=${canvasId} provider=${model.provider} ${failureDetail(crashDetail)}`,
+          )
       } else if (exhausted) {
-        reason = `${role.name} hit its step limit before the work was done. Anything it made is still on the canvas; retry to have it continue.`
+        reason = `${role.name} hit its limit before the work was done. Anything it made is still on the canvas; retry to have it continue.`
       } else if (noMutation) {
         reason = `${role.name} finished without changing a frame or a token. Retry when you are ready.`
       } else {

@@ -78,4 +78,10 @@ export interface LocalAgentJob {
 export interface LocalAgentResult {
   success: boolean
   text: string
+  /** the run stopped at its turn limit (Claude Code's `error_max_turns`),
+   *  not on an error: its work is judged like any run the cap stopped */
+  limitReached?: boolean
+  /** Doop's relay worded this failure itself (the desktop went away, a
+   *  worker was down), so it is shown as it is, not quoted as the model's */
+  fromDoop?: boolean
 }

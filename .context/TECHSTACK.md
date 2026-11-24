@@ -187,6 +187,19 @@
   bound; Refresh asks again) and its `PATH` is given to every CLI process, since a GUI app's
   `/usr/bin:/bin` PATH lacks the `node` an npm install needs. Shells advertise this with
   `__DOOP_CLAUDE_CHOOSE__`.
+  A run's outcome is read from Claude Code's closing `result` event (`run_result` in `claude.rs`):
+  `is_error` decides success (an API error still says `subtype: "success"`), the text is `result`,
+  else `errors`, and `error_max_turns` is sent as `limitReached`. The resident (`server/resident.ts`)
+  sets no turn limit on the person's own connection (the shell passes Claude Code no `--max-turns`;
+  older shells clamp the job's `HARNESS_MAX_TURNS` to 80), only `RUN_TIME_LIMIT_MS`, the 30 minutes
+  the relay also gives a run (`expiry` in `server/localAgentRuns.ts` reports it as `limitReached`);
+  runs on Doop's key keep 60 / 80 turns. A run stopped at a limit is judged by its work as a capped
+  API run is, and the resident puts any other failure's own
+  words on the card (`crashReason` in `server/runFailure.ts`): the CLI's text, or an error the model
+  call itself threw on the person's own connection, never one of ours or a server-tier one. A
+  failure the relay words itself (`fromDoop`: the desktop went away, a worker is down) is shown as it
+  is. A shell from before `limitReached` is read by its fallback text (`shellResult`).
+  Tests: `runFailure.test.ts`, `result_event_reads_is_error_and_errors` in `claude.rs`.
 - Model menus (`server/modelCatalog.ts`, `GET /api/model-account/models`): the connected
   account's picker asks the provider's catalog with the user's own key when it opens (the
   composer's `ModelPicker`) or mounts (Settings, `useAgentModels`), merging the curated entries of

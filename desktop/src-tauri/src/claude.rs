@@ -765,7 +765,7 @@ fn run_cli(app: &AppHandle, job: &Value, cancel: Arc<AtomicBool>) -> Result<Valu
     if prompt.len() + system.len() > 1_000_000 {
         return Err("Task is too large".into());
     }
-    let turns = job["maxTurns"].as_u64().unwrap_or(60).clamp(1, 80);
+    // No turn limit: the 30-minute timeout below, and the server's, end a run that never does.
     let dir = directory(app)?.join(id);
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     let config = dir.join("mcp.json");
@@ -808,8 +808,6 @@ fn run_cli(app: &AppHandle, job: &Value, cancel: Arc<AtomicBool>) -> Result<Valu
                 "--permission-mode",
                 "dontAsk",
                 "--disable-slash-commands",
-                "--max-turns",
-                &turns.to_string(),
                 "--settings",
                 "{\"disableAllHooks\":true}",
             ])
@@ -838,9 +836,7 @@ fn run_cli(app: &AppHandle, job: &Value, cancel: Arc<AtomicBool>) -> Result<Valu
                 return;
             };
             if event["type"] == "result" {
-                final_result = Some(
-                    json!({"success":event["is_error"] == false && event["subtype"] == "success", "text":event["result"].as_str().unwrap_or("Claude did not complete the task. Check your login and usage limits, then retry.")}),
-                );
+                final_result = Some(run_result(&event));
             }
             // Send only human-readable progress; MCP headers and tool payloads stay out of UI events.
             let text = event.pointer("/event/delta/text").and_then(Value::as_str);
@@ -856,6 +852,10 @@ fn run_cli(app: &AppHandle, job: &Value, cancel: Arc<AtomicBool>) -> Result<Valu
             "Claude exited without a result. Check your CLI login and version, then retry.",
         )?;
         if !ok {
+            // A result that said success is then only the closing summary, not why it failed.
+            if result["success"] == true {
+                result["text"] = json!("Claude Code exited with an error after its last step. Check what changed on the canvas, then retry.");
+            }
             result["success"] = json!(false);
         }
         Ok(result)
@@ -866,10 +866,47 @@ fn run_cli(app: &AppHandle, job: &Value, cancel: Arc<AtomicBool>) -> Result<Valu
     result
 }
 
+/// The job's result from Claude Code's closing `result` event. An API error
+/// still says `subtype: "success"`, so `is_error` decides; an `error_*` run
+/// has no `result` text and gives its reason in `errors` instead.
+fn run_result(event: &Value) -> Value {
+    let errors = event["errors"]
+        .as_array()
+        .map(|errors| errors.iter().filter_map(Value::as_str).collect::<Vec<_>>().join(" "))
+        .filter(|text| !text.is_empty());
+    let text = event["result"]
+        .as_str()
+        .filter(|text| !text.trim().is_empty())
+        .map(str::to_owned)
+        .or(errors)
+        .unwrap_or_else(|| "Claude did not complete the task. Check your login and usage limits, then retry.".to_owned());
+    json!({
+        "success": event["is_error"] == false && event["subtype"] == "success",
+        "text": text,
+        "limitReached": event["subtype"] == "error_max_turns",
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     #[cfg(unix)]
+    #[test]
+    fn result_event_reads_is_error_and_errors() {
+        let api_error = json!({"type":"result","subtype":"success","is_error":true,"result":"Claude AI usage limit reached"});
+        assert_eq!(
+            run_result(&api_error),
+            json!({"success":false,"text":"Claude AI usage limit reached","limitReached":false})
+        );
+        let capped = json!({"type":"result","subtype":"error_max_turns","is_error":true,"errors":["Reached maximum number of turns (200)"]});
+        assert_eq!(
+            run_result(&capped),
+            json!({"success":false,"text":"Reached maximum number of turns (200)","limitReached":true})
+        );
+        let done = json!({"type":"result","subtype":"success","is_error":false,"result":"Done."});
+        assert_eq!(run_result(&done), json!({"success":true,"text":"Done.","limitReached":false}));
+    }
+
     #[test]
     fn installer_does_not_execute_a_failed_download() {
         use std::os::unix::fs::PermissionsExt;

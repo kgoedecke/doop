@@ -23,7 +23,7 @@ import {
 } from '../lib/prototypePlayer'
 import { prototypePath } from '../lib/prototype'
 import { canvasPages, framePageId } from '../../shared/pages'
-import { isCanvasElementHtml } from '../../shared/canvasPreview'
+import { isCanvasElement as isCanvasElementHtml } from '../lib/drawing'
 import { readingOrder } from '../../shared/frameOrder'
 import { IconButton } from './ui/icon-button'
 import { cn } from '@/lib/utils'

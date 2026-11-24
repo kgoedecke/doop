@@ -94,6 +94,7 @@ export class GeminiCloudRuns {
             response.status === 409
               ? 'Gemini cloud worker is busy. Retry the task.'
               : 'Gemini cloud worker is unavailable. Ask the operator to check its connection.',
+          fromDoop: true,
         }
       }
       return geminiCloudResultSchema.parse(await response.json())
@@ -101,6 +102,7 @@ export class GeminiCloudRuns {
       return {
         success: false,
         text: 'Gemini cloud run failed or timed out. Check the worker before retrying; earlier canvas edits may already have completed.',
+        fromDoop: true,
       }
     } finally {
       run.active = false

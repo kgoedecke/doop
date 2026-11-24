@@ -70,7 +70,9 @@ localAgentRouter.post('/poll', (req, res, next) => {
 })
 
 localAgentRouter.post('/finish/:id', (req, res, next) => {
-  const parsed = deviceSchema.extend({ success: z.boolean(), text: z.string().max(100_000) }).safeParse(req.body)
+  const parsed = deviceSchema
+    .extend({ success: z.boolean(), text: z.string().max(100_000), limitReached: z.boolean().optional() })
+    .safeParse(req.body)
   if (!parsed.success) {
     res.status(400).json({ error: 'Invalid result' })
     return
