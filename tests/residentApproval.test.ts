@@ -49,7 +49,7 @@ describe('the resident agent sets approval', () => {
       call({ frame_id: frameId, status: 'ready_for_dev' }),
       canvasId,
       actor(),
-      run({ requesterId: 'kevin' }),
+      newRunState({ requesterId: 'kevin' }),
     )
     expect(ready.is_error).toBeUndefined()
     expect(store.getFrame(frameId)!.approval).toMatchObject({
@@ -62,21 +62,25 @@ describe('the resident agent sets approval', () => {
       call({ frame_id: frameId, status: 'draft' }),
       canvasId,
       actor(),
-      run({ requesterId: 'kevin' }),
+      newRunState({ requesterId: 'kevin' }),
     )
     expect(draft.is_error).toBeUndefined()
     expect(store.getFrame(frameId)!.approval).toBeNull()
   })
 
   it('counts an approval as the delivered work of a card that asked only for it', async () => {
-    const state = run({ requesterId: 'kevin' })
+    const state = newRunState({ requesterId: 'kevin' })
     expect(deliveredWork(state)).toBe(false)
     await execTool(call({ frame_id: frameId, status: 'ready_for_dev' }), canvasId, actor(), state)
     expect(deliveredWork(state)).toBe(true)
   })
 
   it('refuses without a person who can edit the canvas, and inside automation runs', async () => {
-    for (const state of [run(), run({ requesterId: 'stranger' }), run({ requesterId: 'kevin', automated: true })]) {
+    for (const state of [
+      newRunState(),
+      newRunState({ requesterId: 'stranger' }),
+      newRunState({ requesterId: 'kevin', automated: true }),
+    ]) {
       const result = await execTool(call({ frame_id: frameId, status: 'ready_for_dev' }), canvasId, actor(), state)
       expect(result.is_error).toBe(true)
     }

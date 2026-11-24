@@ -55,7 +55,7 @@ const { updateLibraryConsumers } = await import('../server/libraryUpdates.ts')
 const { openTransaction } = await import('../server/journal.ts')
 const { runOperation, WorkBudgetError } = await import('../server/workBudget.ts')
 const { withArgsCanvases } = await import('../server/toolLoads.ts')
-const { execTool } = await import('../server/resident.ts')
+const { execTool, newRunState } = await import('../server/resident.ts')
 const { DEFAULT_ROLE_ID, roleName } = await import('../shared/agents.ts')
 
 /* The workspace library through the canvas write entry (server/canvasWrites.ts): taking a
@@ -107,22 +107,6 @@ afterEach(() => {
 const componentsOn = (canvasId: string) => (store.getCanvas(canvasId)!.components ?? []).map((def) => def.name)
 const tokensOn = (canvasId: string) => store.getTokens(canvasId).map((token) => token.name)
 const chipOn = (canvasId: string) => store.getComponents(canvasId).find((def) => def.name === 'Chip')
-const residentState = () => ({
-  mutatedFrames: new Set<string>(),
-  sourceFrames: new Set<string>(),
-  verificationFrames: new Set<string>(),
-  verifiedFrames: new Set<string>(),
-  seenVerified: new Set<string>(),
-  componentChecks: new Map(),
-  componentWrites: 0,
-  rewriteDrafts: new Map<string, string>(),
-  vision: false,
-  imagesGenerated: 0,
-  repliedThreads: new Set<string>(),
-  awaitingThreads: new Set<string>(),
-  tokenWrites: 0,
-  arrangeWrites: 0,
-})
 
 let edition = 0
 /** The library moves its Chip on and publishes again: every canvas using it has an update
@@ -299,7 +283,7 @@ describe('the workspace library through the canvas write entry', () => {
       },
       consumerId,
       actions.resolveActor({ name: roleName(DEFAULT_ROLE_ID), kind: 'agent' }),
-      residentState(),
+      newRunState(),
     )
     refused.mockRestore()
     expect(result.is_error).toBe(true)

@@ -43,7 +43,7 @@ const { openTransaction, transaction } = await import('../server/journal.ts')
 const { runOperation, usage, WorkBudgetError } = await import('../server/workBudget.ts')
 const { withArgsCanvases } = await import('../server/toolLoads.ts')
 const propagation = await import('../server/propagation.ts')
-const { execTool } = await import('../server/resident.ts')
+const { execTool, newRunState } = await import('../server/resident.ts')
 const { DEFAULT_ROLE_ID, roleName } = await import('../shared/agents.ts')
 
 /* The canvas write entry (server/canvasWrites.ts) and its local host: the server's own
@@ -331,22 +331,7 @@ describe('a rejected canvas write inside each kind of operation', () => {
       { type: 'tool_use', id: 't1', name: 'set_frame_html', input: { frame_id: frame.id, html: doc('<p>after</p>') } },
       canvasId,
       actions.resolveActor({ name: roleName(DEFAULT_ROLE_ID), kind: 'agent' }),
-      {
-        mutatedFrames: new Set<string>(),
-        sourceFrames: new Set<string>(),
-        verificationFrames: new Set<string>(),
-        verifiedFrames: new Set<string>(),
-        seenVerified: new Set<string>(),
-        componentChecks: new Map(),
-        componentWrites: 0,
-        rewriteDrafts: new Map<string, string>(),
-        vision: false,
-        imagesGenerated: 0,
-        repliedThreads: new Set<string>(),
-        awaitingThreads: new Set<string>(),
-        tokenWrites: 0,
-        arrangeWrites: 0,
-      },
+      newRunState(),
     )
     fails.mockRestore()
     expect(result.is_error).toBe(true)
@@ -773,22 +758,6 @@ describe('design tokens through the canvas write entry', () => {
     expect(sent).toEqual([])
   })
 
-  const runState = () => ({
-    mutatedFrames: new Set<string>(),
-    sourceFrames: new Set<string>(),
-    verificationFrames: new Set<string>(),
-    verifiedFrames: new Set<string>(),
-    seenVerified: new Set<string>(),
-    componentChecks: new Map(),
-    componentWrites: 0,
-    rewriteDrafts: new Map<string, string>(),
-    vision: false,
-    imagesGenerated: 0,
-    repliedThreads: new Set<string>(),
-    awaitingThreads: new Set<string>(),
-    tokenWrites: 0,
-    arrangeWrites: 0,
-  })
   const resident = () => actions.resolveActor({ name: roleName(DEFAULT_ROLE_ID), kind: 'agent' })
 
   it('a rejected token command inside a resident tool call answers an error, is undone, and tells nobody', async () => {
@@ -804,7 +773,7 @@ describe('design tokens through the canvas write entry', () => {
       },
       canvasId,
       resident(),
-      runState(),
+      newRunState(),
     )
     expect(fails).toHaveBeenCalled()
     fails.mockRestore()
@@ -820,7 +789,7 @@ describe('design tokens through the canvas write entry', () => {
       { type: 'tool_use', id: 't1', name: 'set_token_themes', input: { themes: 'dark' } },
       canvasId,
       resident(),
-      runState(),
+      newRunState(),
     )
     expect(refused).toMatchObject({ is_error: true, content: 'themes must be an array of names' })
     /* storage failing is not a refusal of the list: the tool call fails, and is undone */
@@ -831,7 +800,7 @@ describe('design tokens through the canvas write entry', () => {
       { type: 'tool_use', id: 't2', name: 'set_token_themes', input: { themes: ['dark'] } },
       canvasId,
       resident(),
-      runState(),
+      newRunState(),
     )
     fails.mockRestore()
     expect(failed.is_error).toBe(true)
@@ -844,22 +813,6 @@ describe('design tokens through the canvas write entry', () => {
 describe('component definitions through the canvas write entry', () => {
   const chip = { name: 'Chip', html: '<span class="chip">Chip</span>', css: '.chip { color: red }' }
   const componentNames = () => (store.getCanvas(canvasId)!.components ?? []).map((def) => def.name)
-  const residentState = () => ({
-    mutatedFrames: new Set<string>(),
-    sourceFrames: new Set<string>(),
-    verificationFrames: new Set<string>(),
-    verifiedFrames: new Set<string>(),
-    seenVerified: new Set<string>(),
-    componentChecks: new Map(),
-    componentWrites: 0,
-    rewriteDrafts: new Map<string, string>(),
-    vision: false,
-    imagesGenerated: 0,
-    repliedThreads: new Set<string>(),
-    awaitingThreads: new Set<string>(),
-    tokenWrites: 0,
-    arrangeWrites: 0,
-  })
   /** The store refuses the `nth` component save from now on, as storage might. */
   const refuseComponentSave = (nth: number) => {
     let saves = 0
@@ -1002,7 +955,7 @@ describe('component definitions through the canvas write entry', () => {
       },
       canvasId,
       actions.resolveActor({ name: roleName(DEFAULT_ROLE_ID), kind: 'agent' }),
-      residentState(),
+      newRunState(),
     )
     expect(fails.mock.calls.length).toBeGreaterThan(savesPerComponent)
     fails.mockRestore()
@@ -1026,22 +979,6 @@ describe('instances through the canvas write entry', () => {
     sent = []
     return { component: made.component, page }
   }
-  const residentState = () => ({
-    mutatedFrames: new Set<string>(),
-    sourceFrames: new Set<string>(),
-    verificationFrames: new Set<string>(),
-    verifiedFrames: new Set<string>(),
-    seenVerified: new Set<string>(),
-    componentChecks: new Map(),
-    componentWrites: 0,
-    rewriteDrafts: new Map<string, string>(),
-    vision: false,
-    imagesGenerated: 0,
-    repliedThreads: new Set<string>(),
-    awaitingThreads: new Set<string>(),
-    tokenWrites: 0,
-    arrangeWrites: 0,
-  })
 
   it('places and changes instances, answering what the write left', async () => {
     const { page } = await setup()
@@ -1137,7 +1074,7 @@ describe('instances through the canvas write entry', () => {
       },
       canvasId,
       actions.resolveActor({ name: roleName(DEFAULT_ROLE_ID), kind: 'agent' }),
-      residentState(),
+      newRunState(),
     )
     fails.mockRestore()
     expect(result.is_error).toBe(true)

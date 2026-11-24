@@ -47,22 +47,7 @@ const REMINDER = 'You have not visually verified'
 const actor = () => actions.resolveActor({ name: roleName(DEFAULT_ROLE_ID), kind: 'agent' })
 const page = (body: string) => `<!doctype html><html><head></head><body>${body}</body></html>`
 
-const runState = (vision = true): RunState => ({
-  mutatedFrames: new Set(),
-  sourceFrames: new Set(),
-  verificationFrames: new Set(),
-  verifiedFrames: new Set(),
-  seenVerified: new Set(),
-  componentChecks: new Map(),
-  componentWrites: 0,
-  rewriteDrafts: new Map(),
-  vision,
-  imagesGenerated: 0,
-  repliedThreads: new Set(),
-  awaitingThreads: new Set(),
-  tokenWrites: 0,
-  arrangeWrites: 0,
-})
+const runState = (vision = true) => resident.newRunState({ vision })
 
 let calls = 0
 const call = (name: string, input: Record<string, unknown>): Anthropic.ToolUseBlockParam => ({

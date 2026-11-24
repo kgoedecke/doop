@@ -14,7 +14,7 @@ vi.mock('../server/db/persist.ts', () => ({
 }))
 
 import { buildMcpServer } from '../server/mcp.ts'
-import { execTool, RESIDENT_TOOLS } from '../server/resident.ts'
+import { execTool, newRunState, RESIDENT_TOOLS } from '../server/resident.ts'
 import * as screenshot from '../server/screenshot.ts'
 import { DEFAULT_ROLE_ID, roleName } from '../shared/agents.ts'
 import { store } from '../server/store.ts'
@@ -163,22 +163,7 @@ describe('an agent working with components', () => {
     const canvas = newCanvas()
     await button(canvas.id)
     const resident = resolveActor({ name: roleName(DEFAULT_ROLE_ID), kind: 'agent' })
-    const runState = {
-      mutatedFrames: new Set<string>(),
-      sourceFrames: new Set<string>(),
-      verificationFrames: new Set<string>(),
-      verifiedFrames: new Set<string>(),
-      seenVerified: new Set<string>(),
-      componentChecks: new Map(),
-      componentWrites: 0,
-      rewriteDrafts: new Map<string, string>(),
-      vision: false,
-      imagesGenerated: 0,
-      repliedThreads: new Set<string>(),
-      awaitingThreads: new Set<string>(),
-      tokenWrites: 0,
-      arrangeWrites: 0,
-    }
+    const runState = newRunState()
     const shoot = (input: Record<string, unknown>) =>
       execTool(
         { type: 'tool_use', id: 't1', name: 'screenshot_component', input: { component: 'Button', ...input } },
