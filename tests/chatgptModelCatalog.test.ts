@@ -27,14 +27,18 @@ const account: ModelAccount = {
 const CATALOG = {
   models: [
     { slug: 'gpt-5.6-terra', display_name: 'GPT-5.6 Terra', visibility: 'list', input_modalities: ['text', 'image'] },
+    /* the backend's own spelling of an id: shown as the curated entries are */
     {
       slug: 'gpt-6.1-sol',
-      display_name: 'GPT-6.1 Sol',
-      description: 'Newest flagship',
+      display_name: 'GPT-6.1-Sol',
+      description: 'Near-Astra reasoning',
       visibility: 'list',
       input_modalities: ['text', 'image'],
     },
     { slug: 'gpt-6-astra', display_name: 'GPT-6 Astra', visibility: 'list', input_modalities: ['text', 'image'] },
+    { slug: 'gpt-6.1-terra', display_name: 'GPT-6.1 Terra', visibility: 'list', input_modalities: ['text', 'image'] },
+    { slug: 'gpt-6.2-astra', display_name: 'GPT-6.2 Astra', visibility: 'list', input_modalities: ['text', 'image'] },
+    { slug: 'gpt-6.2-sol', display_name: 'GPT-6.2 Sol', visibility: 'list', input_modalities: ['text', 'image'] },
     /* hidden from the CLI's picker: out */
     { slug: 'gpt-6-luna', display_name: 'GPT-6 Luna', visibility: 'hidden', input_modalities: ['text', 'image'] },
     /* no screenshots: out */
@@ -57,15 +61,21 @@ describe('ChatGPT model catalog', () => {
     const catalog = await modelCatalogFor(account, CURATED)
     expect(catalog.live).toBe(true)
     expect(catalog.models.map((m) => m.id)).toEqual([
-      /* curated tiers the backend confirmed, in curated order; Sol and Luna are not on this plan */
+      /* newest generation first; within one the curated tiers the backend
+         confirmed, in curated order (Luna is not on this plan), then the
+         rest in the backend's order */
+      'gpt-6.2-astra',
+      'gpt-6.2-sol',
+      'gpt-6.1-terra',
+      'gpt-6.1-sol',
       'gpt-6-astra',
       'gpt-5.6-terra',
-      /* then the rest in the backend's order */
-      'gpt-6.1-sol',
     ])
-    expect(catalog.models[0]).toMatchObject({ name: 'GPT-6 Astra', recommended: true })
-    expect(catalog.models[2]).toMatchObject({ name: 'GPT-6.1 Sol', blurb: 'Newest flagship', vision: true })
-    expect(seen.url).toBe('https://chatgpt.com/backend-api/codex/models?client_version=0.163.0')
+    expect(catalog.models[0]).toMatchObject({ name: 'GPT-6.2 Astra', recommended: true })
+    expect(catalog.models[1]).toMatchObject({ name: 'GPT-6.2 Sol', recommended: true })
+    expect(catalog.models[3]).toMatchObject({ name: 'GPT-6.1 Sol', blurb: 'Near-Astra reasoning', vision: true })
+    expect(catalog.models[3]).not.toHaveProperty('recommended')
+    expect(seen.url).toBe('https://chatgpt.com/backend-api/codex/models?client_version=0.171.0')
     expect(seen.headers).toMatchObject({
       Authorization: 'Bearer tok-live',
       originator: 'codex_cli_rs',

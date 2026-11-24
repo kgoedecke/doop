@@ -2,7 +2,13 @@ import Anthropic from '@anthropic-ai/sdk'
 import { z } from 'zod'
 import { env } from './env.ts'
 import type { BuiltinAccountKind, ModelAccount } from './modelAccounts.ts'
-import { ACCOUNT_KIND_LABELS, type ModelOption } from '../shared/modelMenu.ts'
+import {
+  ACCOUNT_KIND_LABELS,
+  openaiDisplayName,
+  openaiGeneration,
+  openaiModelName,
+  type ModelOption,
+} from '../shared/modelMenu.ts'
 
 /**
  * The models a connected account can run right now, asked of the provider
@@ -96,7 +102,7 @@ async function openaiModels(apiKey: string, signal: AbortSignal): Promise<ModelO
   return page.data
     .filter((model) => OPENAI_API_MODEL.test(model.id) && !NOT_AN_AGENT_MODEL.test(model.id))
     .sort((a, b) => b.created - a.created || a.id.localeCompare(b.id))
-    .map((model) => ({ id: model.id, name: model.id.replace(/^gpt-/, 'GPT-'), blurb: '', vision: true }))
+    .map((model) => ({ id: model.id, name: openaiModelName(model.id), blurb: '', vision: true }))
 }
 
 const geminiPage = z.object({
@@ -181,7 +187,7 @@ async function chatgptModels(account: ModelAccount, signal: AbortSignal): Promis
     )
     .map((model) => ({
       id: model.slug,
-      name: model.display_name || model.slug,
+      name: openaiDisplayName(model.slug, model.display_name),
       blurb: model.description ?? '',
       vision: true,
     }))
@@ -203,17 +209,38 @@ const LOADERS: Partial<Record<BuiltinAccountKind, Loader>> = {
   'gemini-key': keyed(geminiModels),
 }
 
+/* How new a model's generation is, for the providers whose ids say it. */
+type Generation = (id: string) => readonly number[]
+
+const GENERATIONS: Partial<Record<BuiltinAccountKind, Generation>> = {
+  chatgpt: openaiGeneration,
+  'openai-key': openaiGeneration,
+}
+
+/** Descending, element by element: [6, 2] before [6, 1] before [6, 0]. */
+function newerFirst(a: readonly number[], b: readonly number[]): number {
+  for (let i = 0; i < Math.max(a.length, b.length); i++) {
+    const order = (b[i] ?? 0) - (a[i] ?? 0)
+    if (order) return order
+  }
+  return 0
+}
+
 /** Curated entries the provider confirms come first, in curated order, with
  *  their blurbs; the rest of the catalog follows. A curated id the provider
  *  does not list is dropped — offering a tier the account cannot run is the
- *  bug this exists to fix. */
-function merge(curated: ModelOption[], live: ModelOption[]): ModelOption[] {
+ *  bug this exists to fix. Where the ids name a generation, the newest
+ *  generation leads (curated first within one), so a release the curated
+ *  menu has not caught up with never sits under an older one. */
+export function mergeCatalog(curated: ModelOption[], live: ModelOption[], generation?: Generation): ModelOption[] {
   const liveById = new Map(live.map((model) => [model.id, model]))
   const recommended = curated.flatMap((option) => {
     if (!liveById.delete(option.id)) return []
     return [{ ...option, recommended: true }]
   })
-  return [...recommended, ...liveById.values()]
+  const merged = [...recommended, ...liveById.values()]
+  /* the sort is stable, so each generation keeps the order above */
+  return generation ? merged.sort((a, b) => newerFirst(generation(a.id), generation(b.id))) : merged
 }
 
 /** The menu for this account: the provider's list merged over the curated
@@ -228,7 +255,7 @@ export async function modelCatalogFor(account: ModelAccount, curated: ModelOptio
   const label = ACCOUNT_KIND_LABELS[kind]
   if (!load) return { models: curated, live: false }
   try {
-    const models = merge(curated, await load(account, AbortSignal.timeout(8_000)))
+    const models = mergeCatalog(curated, await load(account, AbortSignal.timeout(8_000)), GENERATIONS[kind])
     /* a catalog with nothing the agent can run (a plan with no eligible
        tier, a response shape that lost its modalities) must not empty the
        picker: the curated menu stays, and the caption says why */

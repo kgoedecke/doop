@@ -1130,7 +1130,7 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
          reconnect, whatever error class its transport leaks */
       accountError = err instanceof ModelConfigurationError && model.userId ? err.message : undefined
       staleAccount = err instanceof ModelAuthError && !!model.userId
-      /* likewise a model the account cannot run yet (Astra mid-rollout): the
+      /* likewise a model the account cannot run yet (Astra not on the plan): the
          fix is a different tier in Settings, and a retry on the same one
          would only fail the same way */
       unavailableModel = err instanceof ModelUnavailableError && !!model.userId

@@ -78,6 +78,8 @@ const OPENAI_PAGE = {
     { id: 'gpt-5.6-terra', object: 'model', created: 1_780_000_000, owned_by: 'system' },
     { id: 'gpt-6.1-sol', object: 'model', created: 1_790_000_000, owned_by: 'system' },
     { id: 'gpt-6-astra', object: 'model', created: 1_785_000_000, owned_by: 'system' },
+    { id: 'gpt-6.1-terra', object: 'model', created: 1_792_000_000, owned_by: 'system' },
+    { id: 'gpt-6.2-sol', object: 'model', created: 1_795_000_000, owned_by: 'system' },
     { id: 'o4-mini', object: 'model', created: 1_745_000_000, owned_by: 'system' },
     /* not chat models the agent could drive: out */
     { id: 'gpt-image-2', object: 'model', created: 1_786_000_000, owned_by: 'system' },
@@ -241,13 +243,25 @@ it('tells the user to reconnect when the provider rejects the key', async () => 
   mode = 'catalog'
 })
 
-it('OpenAI: lists the GPT and o-series chat families, newest first after the curated tiers', async () => {
+it('OpenAI: lists the GPT and o-series chat families, newest generation first, curated first within one', async () => {
   seen.length = 0
   await alice.post('/api/model-account/openai-key', { apiKey: 'sk-openai-test' })
   const catalog = await (await alice.get('/api/model-account/models?kind=openai-key')).json()
   expect(catalog.live).toBe(true)
-  expect(ids(catalog)).toEqual(['gpt-6-astra', 'gpt-5.6-terra', 'gpt-6.1-sol', 'o4-mini'])
-  expect(catalog.models[2]).toMatchObject({ name: 'GPT-6.1-sol', vision: true })
+  expect(ids(catalog)).toEqual([
+    'gpt-6.2-sol',
+    'gpt-6.1-terra',
+    'gpt-6.1-sol',
+    'gpt-6-astra',
+    'gpt-5.6-terra',
+    'o4-mini',
+  ])
+  expect(catalog.models[0]).toMatchObject({ name: 'GPT-6.2 Sol', recommended: true })
+  expect(catalog.models[1]).toMatchObject({ name: 'GPT-6.1 Terra', recommended: true })
+  /* a discovered id is spelled the way the curated ones are */
+  expect(catalog.models[2]).toMatchObject({ name: 'GPT-6.1 Sol', vision: true })
+  expect(catalog.models[2]).not.toHaveProperty('recommended')
+  expect(catalog.models[5]).toMatchObject({ name: 'o4 Mini' })
   expect(seen.map((r) => r.auth)).toEqual(['Bearer sk-openai-test'])
   expect((await alice.patch('/api/model-account/openai-key', { model: 'gpt-6.1-sol' })).status).toBe(200)
   expect(accountIn(await (await alice.get('/api/model-account')).json(), 'openai-key')).toMatchObject({
