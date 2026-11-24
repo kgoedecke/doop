@@ -185,12 +185,15 @@ export async function editElementGeometry(
 interface PendingAsk {
   win: Window
   replyType: string
+  timeout: number
   resolve: (reply: Record<string, unknown>) => void
 }
 
 const REPLY_TIMEOUT_MS = 2000
 
 const windows = new Map<string, Window>()
+const frameIds = new WeakMap<MessageEventSource, string>()
+const windowListeners = new WeakMap<MessageEventSource, Set<(event: MessageEvent) => void>>()
 /* ⌘Y outline mode, which a frame mounted later picks up when it registers */
 let outlines = false
 const changeListeners = new Map<string, Set<() => void>>()
@@ -203,16 +206,18 @@ function listen() {
   if (listening) return
   listening = true
   window.addEventListener('message', (ev: MessageEvent) => {
+    const { source } = ev
+    if (!source) return
+    windowListeners.get(source)?.forEach((listener) => listener(ev))
     const data = ev.data as { type?: string; reqId?: number } | null
     if (data?.type === 'doop:frame-updated' || data?.type === 'doop:text-selection') {
       const listeners = data.type === 'doop:frame-updated' ? changeListeners : selectionListeners
-      for (const [frameId, win] of windows) {
-        if (ev.source === win) listeners.get(frameId)?.forEach((cb) => cb())
-      }
+      const frameId = frameIds.get(source)
+      if (frameId !== undefined) listeners.get(frameId)?.forEach((cb) => cb())
       return
     }
     if (typeof data?.type !== 'string' || typeof data.reqId !== 'number') return
-    if (data.type !== 'doop:settle-result') finishRequest(ev.source, data.type, data.reqId, data)
+    if (data.type !== 'doop:settle-result') finishRequest(source, data.type, data.reqId, data)
   })
 }
 
@@ -220,6 +225,7 @@ function finishRequest(source: MessageEventSource | null, type: string, reqId: n
   const ask = pending.get(reqId)
   if (!ask || ask.replyType !== type || source !== ask.win) return
   pending.delete(reqId)
+  window.clearTimeout(ask.timeout)
   ask.resolve(data)
 }
 
@@ -228,8 +234,22 @@ export function finishFrameSettle(win: Window, reqId: number) {
   finishRequest(win, 'doop:settle-result', reqId, { type: 'doop:settle-result', reqId })
 }
 
+/** Listen to one iframe, including its bootstrap before it can answer requests. */
+export function onFrameMessage(win: Window, listener: (event: MessageEvent) => void): () => void {
+  listen()
+  const listeners = windowListeners.get(win) ?? new Set()
+  listeners.add(listener)
+  windowListeners.set(win, listeners)
+  return () => {
+    if (listeners.delete(listener) && !listeners.size) windowListeners.delete(win)
+  }
+}
+
 export function registerFrameWindow(frameId: string, win: Window) {
+  const previous = windows.get(frameId)
+  if (previous) frameIds.delete(previous)
   windows.set(frameId, win)
+  frameIds.set(win, frameId)
   if (outlines) win.postMessage({ type: 'doop:outlines', on: true }, '*')
   changeListeners.get(frameId)?.forEach((cb) => cb())
 }
@@ -237,6 +257,7 @@ export function registerFrameWindow(frameId: string, win: Window) {
 export function unregisterFrameWindow(frameId: string, win: Window) {
   if (windows.get(frameId) !== win) return
   windows.delete(frameId)
+  frameIds.delete(win)
   shownDocuments.delete(frameId)
 }
 
@@ -244,6 +265,28 @@ export function unregisterFrameWindow(frameId: string, win: Window) {
    newer document is still on its way there. */
 const shownDocuments = new Map<string, string>()
 const documentListeners = new Map<string, Set<() => void>>()
+const frameLoadRequests = new Set<(frameId: string) => boolean>()
+
+/** Register the active page's loader for commands that need a live document. */
+export function onFrameLoadRequest(load: (frameId: string) => boolean): () => void {
+  frameLoadRequests.add(load)
+  return () => {
+    frameLoadRequests.delete(load)
+  }
+}
+
+/** An explicit command can start its frame ahead of the background queue. */
+export function prepareFrameDocument(frameId: string): 'ready' | 'unavailable' | Promise<boolean> {
+  if (shownDocuments.has(frameId)) return 'ready'
+  let loading = windows.has(frameId)
+  for (const load of frameLoadRequests) {
+    if (load(frameId)) {
+      loading = true
+      break
+    }
+  }
+  return loading ? waitForDocument(frameId, () => shownDocuments.has(frameId), 5_000) : 'unavailable'
+}
 
 /** Record what the frame's runtime shows: the acknowledged HTML, or null
  *  once a newer document has been posted and not yet acknowledged. */
@@ -258,7 +301,11 @@ export function noteFrameDocument(frameId: string, html: string | null) {
  *  throttled render, and a hit test on the older document would name its
  *  elements, not the ones `html` has in those places. */
 export function frameShows(frameId: string, html: string): Promise<boolean> {
-  if (shownDocuments.get(frameId) === html) return Promise.resolve(true)
+  return waitForDocument(frameId, () => shownDocuments.get(frameId) === html, REPLY_TIMEOUT_MS)
+}
+
+function waitForDocument(frameId: string, isReady: () => boolean, timeoutMs: number): Promise<boolean> {
+  if (isReady()) return Promise.resolve(true)
   return new Promise((resolve) => {
     const set = documentListeners.get(frameId) ?? new Set()
     documentListeners.set(frameId, set)
@@ -269,9 +316,9 @@ export function frameShows(frameId: string, html: string): Promise<boolean> {
       resolve(shown)
     }
     const check = () => {
-      if (shownDocuments.get(frameId) === html) done(true)
+      if (isReady()) done(true)
     }
-    const timer = window.setTimeout(() => done(false), REPLY_TIMEOUT_MS)
+    const timer = window.setTimeout(() => done(false), timeoutMs)
     set.add(check)
   })
 }
@@ -313,12 +360,12 @@ export function requestFrame(
   nextReq += 1
   const reqId = nextReq
   return new Promise((resolve) => {
-    pending.set(reqId, { win, replyType: `${type}-result`, resolve })
-    win.postMessage({ ...payload, type, reqId }, '*')
     /* a frame that unloads mid-request would leave the promise hanging */
-    window.setTimeout(() => {
+    const timeout = window.setTimeout(() => {
       if (pending.delete(reqId)) resolve(null)
     }, timeoutMs)
+    pending.set(reqId, { win, replyType: `${type}-result`, timeout, resolve })
+    win.postMessage({ ...payload, type, reqId }, '*')
   })
 }
 
@@ -333,12 +380,13 @@ export interface FrameSnapshot {
   html: string | null
 }
 
-/** The frame's document as the runtime shows it, or null when the frame
- *  is not mounted. A mounted frame that does not answer in time counts as
- *  one that could not be read, never as unmounted: its saved HTML would
- *  render without what the runtime shows. */
+/** Capture the live document, including frames still waiting to start. Return
+ *  null when no live document is available, and a failed snapshot when the
+ *  runtime times out. */
 export async function snapshotFrame(frameId: string): Promise<FrameSnapshot | null> {
-  if (!windows.has(frameId)) return null
+  const readiness = await prepareFrameDocument(frameId)
+  if (readiness === 'unavailable') return null
+  if (!readiness) return { html: null }
   const reply = await requestFrame(frameId, 'doop:snapshot', {}, SNAPSHOT_TIMEOUT_MS)
   return { html: typeof reply?.html === 'string' ? reply.html : null }
 }

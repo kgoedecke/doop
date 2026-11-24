@@ -267,6 +267,7 @@ export const panels = {
   copyPngFailed: 'Couldn’t copy the PNG',
   copyPngTimedOut: 'The PNG copy timed out — try again',
   copyPngDone: 'PNG copied',
+  frameStillLoading: 'This frame is still loading. Try again in a moment.',
   exportElementMissing: 'Couldn’t find the element to export — is its frame on screen?',
 
   frameExportTitle: 'Export “{name}”',

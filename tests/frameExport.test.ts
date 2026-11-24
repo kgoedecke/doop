@@ -21,7 +21,10 @@ vi.mock('../src/lib/frameRaster', async (importOriginal) => ({
   frameSvg: vi.fn(async () => new Blob(['<svg/>'], { type: 'image/svg+xml' })),
 }))
 /* an element is measured by the live document; an unmounted frame answers null */
-vi.mock('../src/lib/frameBridge', () => ({ inspectElement: vi.fn(async () => null) }))
+vi.mock('../src/lib/frameBridge', () => ({
+  inspectElement: vi.fn(async () => null),
+  prepareFrameDocument: vi.fn(() => 'ready'),
+}))
 
 const frame: Frame = {
   id: 'export-frame',

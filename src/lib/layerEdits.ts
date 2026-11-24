@@ -6,7 +6,14 @@ import { restackMany, roomAt, stackOf, type StackWrite } from '../../shared/fram
 import { canEditOpenCanvas, pickedSelectors, useStore } from './store'
 import { t } from './i18n'
 import { api, ApiError, errorMessage } from './api'
-import { formatElementText, inspectElement, nudgeElements, requestFrame } from './frameBridge'
+import {
+  formatElementText,
+  frameShows,
+  inspectElement,
+  nudgeElements,
+  prepareFrameDocument,
+  requestFrame,
+} from './frameBridge'
 import { isCanvasElement } from './drawing'
 import { copyFrames, duplicateFrames } from './frameClipboard'
 import { writeCanvasClipboard } from './canvasClipboard'
@@ -26,6 +33,7 @@ import {
   recordUpdates,
   saveStack,
   saveLayerName,
+  trackPendingFrameEdit,
   trackSave,
 } from './history'
 import {
@@ -300,8 +308,24 @@ export function nudgeSelection(dx: number, dy: number): boolean {
   if (!picked) return false
   const frame = s.canvas?.frames.find((f) => f.id === picked.frameId)
   if (!frame || isCanvasElement(frame.html)) return false
-  if (frame.locked) return true
-  void nudgeElements(frame.id, pickedSelectors(s), dx, dy)
+  if (frame.locked || frame.hidden) return true
+  const selectors = pickedSelectors(s)
+  const readiness = prepareFrameDocument(frame.id)
+  if (readiness === 'ready') {
+    void nudgeElements(frame.id, selectors, dx, dy)
+  } else if (readiness !== 'unavailable') {
+    const epoch = historyEpoch()
+    trackPendingFrameEdit(
+      readiness.then((ready) => {
+        const now = useStore.getState()
+        if (!canEditOpenCanvas(now) || historyEpoch() !== epoch || now.activePageId !== s.activePageId) return
+        const current = now.canvas?.frames.find((f) => f.id === frame.id)
+        if (current?.html !== frame.html || current.locked || current.hidden) return
+        if (ready) return nudgeElements(frame.id, selectors, dx, dy)
+        now.pushNotice(t('panels.frameStillLoading'))
+      }),
+    )
+  }
   return true
 }
 
@@ -460,22 +484,36 @@ export function formatSelectionText(command: TextFormatCommand): boolean {
   if (!picked) return false
   const frame = s.canvas?.frames.find((f) => f.id === picked.frameId)
   if (!frame) return false
-  if (frame.locked) return true
+  if (frame.locked || frame.hidden) return true
   const selectors = pickedSelectors(s)
-  formatElementText(picked.frameId, selectors, command)
-    .then((after) => {
-      /* the frame focused its layer for the command; the canvas's shortcuts listen on this window */
-      const active = document.activeElement
-      if (active instanceof HTMLIFrameElement) active.blur()
-      const primary = after?.[selectors.indexOf(picked.selector)]
-      const now = useStore.getState()
-      const unchanged =
-        now.selectedElement?.frameId === picked.frameId && pickedSelectors(now).join() === selectors.join()
-      if (!after || !primary || after.join() === selectors.join() || !unchanged) return
-      /* the whole picked set follows its layers' new selectors, the primary staying primary */
-      useStore.setState({ selectedElement: { frameId: picked.frameId, selector: primary }, selectedElements: after })
-    })
-    .catch(console.error)
+  const epoch = historyEpoch()
+  const readiness = prepareFrameDocument(frame.id)
+  if (readiness === 'unavailable') return true
+  const format = async () => {
+    const ready = await readiness
+    const shown = ready && (await frameShows(frame.id, frame.html))
+    const state = useStore.getState()
+    if (!canEditOpenCanvas(state) || historyEpoch() !== epoch || state.activePageId !== s.activePageId) return
+    const current = state.canvas?.frames.find((f) => f.id === frame.id)
+    if (current?.html !== frame.html || current.locked || current.hidden) return
+    if (!shown) {
+      state.pushNotice(t('panels.frameStillLoading'))
+      return
+    }
+    const after = await formatElementText(frame.id, selectors, command)
+    if (!after) return
+    /* the frame focused its layer for the command; the canvas's shortcuts listen on this window */
+    const active = document.activeElement
+    if (active instanceof HTMLIFrameElement) active.blur()
+    const primary = after[selectors.indexOf(picked.selector)]
+    const now = useStore.getState()
+    const unchanged =
+      now.selectedElement?.frameId === picked.frameId && pickedSelectors(now).join() === selectors.join()
+    if (!primary || after.join() === selectors.join() || !unchanged) return
+    /* the whole picked set follows its layers' new selectors, the primary staying primary */
+    useStore.setState({ selectedElement: { frameId: picked.frameId, selector: primary }, selectedElements: after })
+  }
+  trackPendingFrameEdit(format().catch(console.error))
   return true
 }
 

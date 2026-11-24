@@ -33,6 +33,8 @@ declare global {
       /** several Layers rows picked, the last the primary */
       pickMany: (frameId: string, selectors: string[]) => void
       formatText: (command: TextFormatCommand) => boolean
+      nudge: (dx: number, dy: number) => boolean
+      exportSvg: (id: string, element?: { selector: string; name: string }) => Promise<void>
       /** an SVG file read the way a paste reads it, with the browser's computed styles */
       importSvg: (markup: string, name: string) => ImportedSvg | null
     }

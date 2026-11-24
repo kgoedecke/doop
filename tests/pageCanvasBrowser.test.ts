@@ -580,7 +580,10 @@ describe.skipIf(!findBrowserPath())('pages in the URL', { timeout: 30_000 }, () 
   const open = (search = '', canvas = board) => openCanvasPage(page, frames, search, canvas)
   const activePage = () =>
     page.$eval('[data-page-id]:has(button[aria-current="page"])', (row) => row.getAttribute('data-page-id'))
-  const mounted = () => page.evaluate(() => (window as unknown as { mountedFrames: () => string[] }).mountedFrames())
+  async function mounted() {
+    await page.waitForSelector('iframe[data-doop-frame]')
+    return page.evaluate(() => (window as unknown as { mountedFrames: () => string[] }).mountedFrames())
+  }
   const search = () => page.evaluate(() => location.search)
   async function switchTo(pageId: string) {
     await page.locator(`[data-page-id="${pageId}"] button`).click()
