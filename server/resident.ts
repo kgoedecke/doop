@@ -369,8 +369,11 @@ interface RunState extends CheckState {
   automated?: boolean
 }
 
-/** A run's state before its first tool call; tests start one the same way. */
-export function newRunState(start: Partial<RunState> = {}): RunState {
+/** A run's state before its first turn: nothing written, checked or answered yet. A
+ *  field added to RunState gets its starting value here, which every run and test takes.
+ *  The model is taken to be blind unless `vision` says otherwise, so a state built
+ *  without one (a test) takes no screenshots. Exported for tests. */
+export function newRunState(overrides: Partial<RunState> = {}): RunState {
   return {
     mutatedFrames: new Set(),
     sourceFrames: new Set(),
@@ -386,7 +389,7 @@ export function newRunState(start: Partial<RunState> = {}): RunState {
     awaitingThreads: new Set(),
     tokenWrites: 0,
     arrangeWrites: 0,
-    ...start,
+    ...overrides,
   }
 }
 

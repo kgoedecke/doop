@@ -340,7 +340,7 @@ const runState = () => newRunState()
  *  back as an error result. */
 async function resident(name: string, input: Record<string, unknown>, canvas: Canvas) {
   const block: Anthropic.ToolUseBlockParam = { type: 'tool_use', id: 't1', name, input }
-  const result = await execTool(block, canvas.id, agent, runState() as never)
+  const result = await execTool(block, canvas.id, agent, newRunState())
   if (result.is_error) throw new Error(`refused: ${JSON.stringify(result.content)}`)
   return result
 }

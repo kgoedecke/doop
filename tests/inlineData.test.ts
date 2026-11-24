@@ -717,7 +717,7 @@ describe('the resident agent', () => {
 
   it('is refused on create, set, edit and rewrite chunks', async () => {
     const canvasId = store.createCanvas('resident', 'owner').id
-    const state = run()
+    const state = newRunState()
     const created = await execTool(
       call('create_frame', { name: 'Hero', width: 400, height: 300, html: doc(faceCss) }),
       canvasId,

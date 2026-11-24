@@ -38,7 +38,7 @@ const canvas = () => store.getCanvas(canvasId)!
 const pages = () => canvasPages(canvas()).map(({ id, name }) => ({ id, name }))
 
 async function addPage(name: string) {
-  const result = await execTool(call('create_canvas_page', { name }), canvasId, actor(), run())
+  const result = await execTool(call('create_canvas_page', { name }), canvasId, actor(), newRunState())
   expect(result.is_error).toBeUndefined()
   return (JSON.parse(String(result.content)) as { page: { id: string } }).page.id
 }
@@ -55,7 +55,7 @@ beforeEach(() => {
 describe('the resident agent reorganizes pages', () => {
   it('adds a page and moves a frame onto it in one update_frame call, keeping its position', async () => {
     const pageId = await addPage('Mobile')
-    const runState = run()
+    const runState = newRunState()
     const result = await execTool(call('update_frame', { frame_id: frameId, pageId }), canvasId, actor(), runState)
     expect(result.is_error).toBeUndefined()
     const frame = store.getFrame(frameId)!
@@ -66,14 +66,19 @@ describe('the resident agent reorganizes pages', () => {
   })
 
   it('refuses a page that is not on the canvas and names the real ones', async () => {
-    const result = await execTool(call('update_frame', { frame_id: frameId, pageId: 'nope' }), canvasId, actor(), run())
+    const result = await execTool(
+      call('update_frame', { frame_id: frameId, pageId: 'nope' }),
+      canvasId,
+      actor(),
+      newRunState(),
+    )
     expect(result.is_error).toBe(true)
     expect(String(result.content)).toContain('no page nope')
     expect(String(result.content)).toContain(pages()[0]!.id)
   })
 
   it('counts a resize as a design change to verify', async () => {
-    const runState = run()
+    const runState = newRunState()
     await execTool(call('update_frame', { frame_id: frameId, width: 1280 }), canvasId, actor(), runState)
     expect(store.getFrame(frameId)!.width).toBe(1280)
     expect(runState.mutatedFrames.has(frameId)).toBe(true)
@@ -87,7 +92,7 @@ describe('the resident agent reorganizes pages', () => {
       call('set_canvas_pages', { expectedPages: before, pages: next }),
       canvasId,
       actor(),
-      run(),
+      newRunState(),
     )
     expect(result.is_error).toBeUndefined()
     expect(pages()).toEqual(next)
@@ -100,7 +105,7 @@ describe('the resident agent reorganizes pages', () => {
       call('set_canvas_pages', { expectedPages: stale, pages: stale }),
       canvasId,
       actor(),
-      run(),
+      newRunState(),
     )
     expect(result.is_error).toBe(true)
     expect(String(result.content)).toContain('Mobile')
@@ -108,25 +113,25 @@ describe('the resident agent reorganizes pages', () => {
   })
 
   it('renames the canvas, and counts it as delivered only when the name changed', async () => {
-    const runState = run()
+    const runState = newRunState()
     const result = await execTool(call('update_canvas', { name: ' Launch ' }), canvasId, actor(), runState)
     expect(result.is_error).toBeUndefined()
     expect(canvas().name).toBe('Launch')
     expect(deliveredWork(runState)).toBe(true)
 
-    const again = run()
+    const again = newRunState()
     await execTool(call('update_canvas', { name: 'Launch' }), canvasId, actor(), again)
     expect(deliveredWork(again)).toBe(false)
 
     for (const name of ['  ', 'x'.repeat(MAX_CANVAS_NAME + 1)]) {
-      const refused = await execTool(call('update_canvas', { name }), canvasId, actor(), run())
+      const refused = await execTool(call('update_canvas', { name }), canvasId, actor(), newRunState())
       expect(refused.is_error).toBe(true)
     }
     expect(canvas().name).toBe('Launch')
   })
 
   it('does not count a frame save that changed nothing as delivered work', async () => {
-    const runState = run()
+    const runState = newRunState()
     const frame = store.getFrame(frameId)!
     const result = await execTool(
       call('update_frame', { frame_id: frameId, name: frame.name, x: frame.x, y: frame.y, width: frame.width }),
@@ -140,7 +145,7 @@ describe('the resident agent reorganizes pages', () => {
   })
 
   it('does not count a page list saved unchanged as delivered work', async () => {
-    const runState = run()
+    const runState = newRunState()
     const result = await execTool(
       call('set_canvas_pages', { expectedPages: pages(), pages: pages() }),
       canvasId,
@@ -159,7 +164,7 @@ describe('the resident agent reorganizes pages', () => {
       call('set_canvas_pages', { expectedPages: before, pages: before.filter((p) => p.id === pageId) }),
       canvasId,
       actor(),
-      run(),
+      newRunState(),
     )
     expect(result.is_error).toBe(true)
     expect(String(result.content)).toContain('Home')
