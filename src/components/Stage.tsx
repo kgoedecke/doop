@@ -1328,11 +1328,12 @@ export function Stage({
           </div>
         )}
         {/* the tool rail: a vertical island beside the Layers panel on desktop
-            (the page sets --rail-left and --chrome-top), a centred strip at
-            the bottom on phones */}
+            (the page sets --rail-left and --chrome-top), a centred 36px strip
+            8px off the bottom on phones and tablets: the zoom pill, the
+            working-now line and the access banner stack from its 44px top */}
         <div
           className={cn(
-            'absolute bottom-[calc(8px+env(safe-area-inset-bottom))] left-1/2 z-[35] -translate-x-1/2 sm:bottom-4',
+            'absolute bottom-[calc(8px+env(safe-area-inset-bottom))] left-1/2 z-[35] -translate-x-1/2',
             'md:top-[calc(var(--chrome-top,0px)+10px)] md:bottom-auto md:left-[var(--rail-left,14px)] md:translate-x-0 md:transition-[left] md:duration-150',
             docked && 'md:top-[var(--chrome-top,0px)] md:bottom-0',
             (uiHidden || hideTools) && 'hidden',

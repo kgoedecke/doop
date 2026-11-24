@@ -126,7 +126,6 @@ import {
 import { SelectionBar, SelectionBarAction } from '../components/ui/selection-bar'
 import { Input } from '../components/ui/input'
 import { Field } from '../components/ui/field'
-import { PeerAvatars, PresenceFace } from '../components/PeerAvatars'
 import { Checkbox, CheckboxCard } from '../components/ui/checkbox'
 import { Toast, ToastAction, ToastSpinner } from '../components/ui/toast'
 import { Tooltip } from '../components/ui/tooltip'
@@ -315,6 +314,15 @@ export function CanvasPage({
     () => presentStartFrame(canvas, selectedId, activePageId),
     [selectedId, canvas, activePageId],
   )
+  /* one label for the bar's Play button and the phone sheet's Present row */
+  const presentLabel = selectedId
+    ? t('canvas.presentFromFrame')
+    : playFrom
+      ? t('canvas.presentPrototype')
+      : t('canvas.addFrameToPresent')
+  const present = () => {
+    if (playFrom) setPresenting(playFrom)
+  }
   /* returning from a GitHub App install: the setup redirect appends a signed
      pass — pull it off the URL and open the import modal on the repo picker */
   const [ghInstallPass, setGhInstallPass] = useState<string | null>(() => {
@@ -936,21 +944,18 @@ export function CanvasPage({
             )}
           </BarPill>
         </div>
-        <div className={cn('absolute left-1/2 -translate-x-1/2 max-[1180px]:hidden', docked ? 'top-1' : 'top-3.5')}>
+        {/* the presence pill takes the bar's true centre from 1180px; below
+            that the actions need it, so the pill sits in the room between the
+            title and them, its status line truncating. A phone has no room. */}
+        <div
+          className={cn(
+            'flex min-w-0 flex-1 justify-center max-sm:hidden min-[1180px]:absolute min-[1180px]:left-1/2 min-[1180px]:flex-none min-[1180px]:-translate-x-1/2',
+            docked ? 'min-[1180px]:top-1' : 'min-[1180px]:top-3.5',
+          )}
+        >
           <LivePresence me={meFace} others={others} onRenameSelf={() => setRenaming(true)} />
         </div>
         <div className="ml-auto flex flex-none items-center gap-2 max-md:hidden">
-          {/* the presence pill needs the bar's centre; narrower desktops keep
-              the plain avatar stack (and its follow buttons) over here */}
-          <div
-            className="mr-1 flex items-center min-[1181px]:hidden"
-            title={others.map((p) => p.name).join(', ') || t('canvas.justYou')}
-          >
-            <PresenceFace name={meFace.name} image={meFace.image} color={meFace.color} kind="user" />
-            <span className="-ml-[7px] flex items-center">
-              <PeerAvatars others={others} />
-            </span>
-          </div>
           {!guest && (
             <BarPill>
               {!readOnly && (
@@ -980,16 +985,7 @@ export function CanvasPage({
                 {t('canvas.share')}
               </Button>
             )}
-            <Tooltip
-              label={
-                selectedId
-                  ? `${t('canvas.presentFromFrame')} · ${PRESENT_SHORTCUT_HINT}`
-                  : playFrom
-                    ? `${t('canvas.presentPrototype')} · ${PRESENT_SHORTCUT_HINT}`
-                    : t('canvas.addFrameToPresent')
-              }
-              side="bottom"
-            >
+            <Tooltip label={playFrom ? `${presentLabel} · ${PRESENT_SHORTCUT_HINT}` : presentLabel} side="bottom">
               <span className="inline-flex">
                 <Button
                   variant="bare"
@@ -997,7 +993,7 @@ export function CanvasPage({
                   className={barPillIconBtn}
                   aria-label={t('canvas.presentPrototypeLabel')}
                   disabled={!playFrom}
-                  onClick={() => setPresenting(playFrom)}
+                  onClick={present}
                 >
                   <PlayIcon className="size-3.5" />
                 </Button>
@@ -1019,15 +1015,6 @@ export function CanvasPage({
           )}
         </div>
         <div className="ml-auto hidden shrink-0 items-center gap-1.5 max-md:flex">
-          <div
-            className="mr-1 flex items-center max-sm:hidden"
-            title={others.map((p) => p.name).join(', ') || t('canvas.justYou')}
-          >
-            <PresenceFace name={meFace.name} image={meFace.image} color={meFace.color} kind="user" />
-            <span className="-ml-[7px] flex items-center">
-              <PeerAvatars others={others} />
-            </span>
-          </div>
           {!readOnly && (
             <Button
               variant="primary"
@@ -1226,11 +1213,11 @@ export function CanvasPage({
           <Sheet open={showMobileActions} onOpenChange={setShowMobileActions}>
             <SheetContent
               side="bottom"
-              className="gap-0 rounded-t-2xl border-line bg-surface p-0 pb-[env(safe-area-inset-bottom)] shadow-pop"
+              className="gap-0 overflow-hidden rounded-t-panel border-line bg-surface p-0 pb-[env(safe-area-inset-bottom)] shadow-pop"
             >
               <div className="border-b border-line-soft px-5 py-4 pr-14">
-                <SheetTitle className="font-display text-lg font-extrabold">{t('canvas.canvasActions')}</SheetTitle>
-                <SheetDescription className="mt-1 text-xs text-ink-soft">
+                <SheetTitle className="text-heading font-semibold">{t('canvas.canvasActions')}</SheetTitle>
+                <SheetDescription className="mt-1 text-copy text-ink-soft">
                   {t('canvas.canvasActionsDescription')}
                 </SheetDescription>
               </div>
@@ -1284,6 +1271,18 @@ export function CanvasPage({
                 >
                   <PrototypeModeIcon /> {prototypeMode ? t('canvas.leavePrototypeMode') : t('canvas.prototypeMode')}
                 </Button>
+                {/* the bar's Play button, from the selected frame or the start */}
+                <Button
+                  variant="ghost"
+                  className="h-11 justify-start gap-2.5 border-line bg-surface px-4"
+                  disabled={!playFrom}
+                  onClick={() => {
+                    setShowMobileActions(false)
+                    present()
+                  }}
+                >
+                  <PlayIcon /> {presentLabel}
+                </Button>
                 {!guest && (
                   <Button
                     variant="ghost"
@@ -1304,7 +1303,7 @@ export function CanvasPage({
                  tooltip would pop on the sheet's auto-focus; the finger is
                  the focus on a phone anyway */
               onOpenAutoFocus={(e) => e.preventDefault()}
-              className="max-h-[calc(100svh-56px)] gap-0 rounded-t-2xl border-line bg-surface p-0 shadow-pop data-[side=bottom]:h-[min(78svh,680px)]"
+              className="max-h-[calc(100svh-56px)] gap-0 overflow-hidden rounded-t-panel border-line bg-surface p-0 shadow-pop data-[side=bottom]:h-[min(78svh,680px)]"
             >
               <SheetTitle className="sr-only">{t('canvas.layers')}</SheetTitle>
               <LayersPanel onAddFrame={addFrame} surface="inline" onClose={() => setShowMobileLayers(false)} />
@@ -1315,14 +1314,19 @@ export function CanvasPage({
               as they were when ⌘. restores the chrome */}
           <Sheet
             open={!readOnly && !!selectedFrame && inspectorOpen && !deferPanel && !uiHidden}
+            /* closing the sheet keeps the frame selected: tapping its name
+               brings the properties back, as it first opened them */
             onOpenChange={(open) => {
-              if (!open) select(null)
+              if (!open) useStore.getState().setInspectorOpen(false)
             }}
           >
             <SheetContent
               side="bottom"
               showCloseButton={false}
-              className="max-h-[calc(100svh-56px)] gap-0 rounded-t-2xl border-line bg-surface p-0 shadow-pop data-[side=bottom]:h-[min(78svh,680px)]"
+              /* no focus ring on the first tab or field as the sheet rises,
+                 as in the Layers sheet: the finger is the focus on a phone */
+              onOpenAutoFocus={(e) => e.preventDefault()}
+              className="max-h-[calc(100svh-56px)] gap-0 overflow-hidden rounded-t-panel border-line bg-surface p-0 shadow-pop data-[side=bottom]:h-[min(78svh,680px)]"
             >
               <SheetTitle className="sr-only">{t('canvas.frameInspector')}</SheetTitle>
               {selectedFrame && <Inspector frame={selectedFrame} surface="inline" />}
@@ -1332,7 +1336,10 @@ export function CanvasPage({
             <SheetContent
               side="bottom"
               showCloseButton={false}
-              className="max-h-[calc(100svh-56px)] gap-0 rounded-t-2xl border-line bg-surface p-0 shadow-pop data-[side=bottom]:h-[min(78svh,680px)]"
+              /* no focus ring on the first tab or field as the sheet rises,
+                 as in the Layers sheet: the finger is the focus on a phone */
+              onOpenAutoFocus={(e) => e.preventDefault()}
+              className="max-h-[calc(100svh-56px)] gap-0 overflow-hidden rounded-t-panel border-line bg-surface p-0 shadow-pop data-[side=bottom]:h-[min(78svh,680px)]"
             >
               <SheetTitle className="sr-only">{t('canvas.canvasActivity')}</SheetTitle>
               <ActivityPanel canvasId={canvasId} onClose={() => setShowActivity(false)} surface="inline" />

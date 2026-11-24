@@ -7,7 +7,7 @@ import { IconButton } from './ui/icon-button'
 import { EyeIcon, XIcon } from './ui/icons'
 
 const bannerClass =
-  'pointer-events-auto absolute bottom-3.5 left-1/2 z-30 flex max-w-[calc(100%-32px)] -translate-x-1/2 items-center gap-3 rounded-panel bg-surface py-1.5 pr-1.5 pl-3.5 text-body text-ink shadow-pop max-md:bottom-[calc(112px+env(safe-area-inset-bottom))] max-md:w-max'
+  'pointer-events-auto absolute bottom-3.5 left-1/2 z-30 flex max-w-[calc(100%-32px)] -translate-x-1/2 items-center gap-3 rounded-panel bg-surface py-1.5 pr-1.5 pl-3.5 text-body text-ink shadow-pop max-md:bottom-[calc(98px+env(safe-area-inset-bottom))] max-md:w-max'
 
 /** The note at the foot of a canvas someone can only look at, as Figma
  *  shows it: a signed-out guest is asked to sign up, a signed-in viewer or

@@ -4,8 +4,9 @@ import { cn } from '@/lib/utils'
 import { Tooltip } from './tooltip'
 
 /* The floating island of quiet controls over the canvas — the tool rail, the
-   zoom pill. Its buttons grow to a 40px touch target on phones — small
-   enough to read as a toolbar, big enough to hit. */
+   zoom pill. In the phone and tablet layout (below md, the canvas's
+   useIsMobile) its buttons grow to 32px with a 2px inset, so every island is
+   36px, the height of the bar's pills beside it. */
 function Toolbar({
   orientation = 'horizontal',
   className,
@@ -20,7 +21,7 @@ function Toolbar({
       role="toolbar"
       aria-orientation={orientation}
       className={cn(
-        'relative flex items-center gap-0.5 rounded-[12px] bg-surface p-[5px] shadow-float',
+        'relative flex items-center gap-0.5 rounded-[12px] bg-surface p-0.5 shadow-float md:p-[5px]',
         orientation === 'vertical' && 'w-10 flex-col',
         className,
       )}
@@ -41,7 +42,7 @@ const ToolbarButton = React.forwardRef<HTMLButtonElement, React.ComponentProps<'
       type="button"
       data-slot="toolbar-button"
       className={cn(
-        'grid min-h-10 min-w-10 place-items-center rounded-[7px] border-0 bg-transparent px-1.5 text-[12px] text-ink-soft transition-[color,background-color,scale] duration-150 ease-out-quint hover:bg-paper-deep hover:text-ink active:scale-95 motion-reduce:transition-none sm:size-7 sm:min-h-0 sm:min-w-0 sm:px-0 [&_svg]:size-3.5',
+        'grid min-h-8 min-w-8 place-items-center rounded-[7px] border-0 bg-transparent px-1 text-[12px] text-ink-soft transition-[color,background-color,scale] duration-150 ease-out-quint hover:bg-paper-deep hover:text-ink active:scale-95 motion-reduce:transition-none md:size-7 md:min-h-0 md:min-w-0 md:px-0 [&_svg]:size-3.5',
         className,
       )}
       {...props}

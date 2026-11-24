@@ -14,7 +14,7 @@ const ROTATE_MS = 4000
  * Agents that are working wear the silver glaze in place; the 3×3 matrix and
  * a status line ("Claude streaming Canvas editor") follow. With two or more
  * active agents only the status line rotates. With nobody working it reads
- * "N online".
+ * "N online". Squeezed, the status line truncates and the faces stay.
  */
 export function LivePresence({
   me,
@@ -40,11 +40,11 @@ export function LivePresence({
 
   return (
     <BarPill
-      className="gap-0 pr-3 pl-2"
+      className="max-w-full gap-0 pr-3 pl-2"
       title={others.map((p) => p.name).join(', ') || t('canvas.justYou')}
       aria-live="polite"
     >
-      <span className="flex h-6 items-center">
+      <span className="flex h-6 shrink-0 items-center">
         <button
           type="button"
           className="relative z-[1] rounded-full transition-transform hover:z-10 hover:-translate-y-px focus-visible:z-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink-faint"
@@ -61,7 +61,7 @@ export function LivePresence({
       </span>
       {speaking ? (
         <>
-          <DotMatrix className="ml-3" />
+          <DotMatrix className="ml-3 shrink-0" />
           <span
             key={speaking.clientId + tick}
             className="ml-2 max-w-[340px] min-w-0 animate-[status-in_0.35s_ease] truncate leading-4 motion-reduce:animate-none"
