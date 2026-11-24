@@ -340,7 +340,8 @@ describe('app REST when configured', () => {
     /* the pass names the canvas and a nonce; the grants stay in the server */
     const pass = back.searchParams.get('ghInstall')!
     expect(pass.split('.').slice(0, 2)).toEqual(['gh-pass', canvasId])
-    expect(pass).not.toContain('555')
+    /* no part of it is the installation id (the timestamp in it may contain the digits) */
+    expect(pass.split('.')).not.toContain('555')
 
     /* the picker and the bind see what GitHub shows the user, not the
        installation's wider list (org/secret) */
