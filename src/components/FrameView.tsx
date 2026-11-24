@@ -24,6 +24,7 @@ import { currentPageCanvas } from '../lib/pages'
 import {
   finishFrameSettle,
   noteFrameDocument,
+  showFrameDocument,
   onFrameMessage,
   registerFrameWindow,
   requestFrame,
@@ -1065,12 +1066,9 @@ export const FrameView = memo(function FrameView({
     if (!runtimeReady || editing || suspendPost || html !== frame.html || html === localHtml.current) return
     localHtml.current = null
     const request = ++htmlRequest.current
-    noteFrameDocument(frame.id, null)
     let cancelled = false
-    void requestFrame(frame.id, 'doop:html', { html }).then((reply) => {
-      if (!reply || request !== htmlRequest.current) return
-      /* the runtime shows it whether or not this effect is still current */
-      noteFrameDocument(frame.id, html)
+    showFrameDocument(frame.id, html, () => {
+      if (request !== htmlRequest.current) return
       if (!cancelled) {
         setRuntimeDocument({ html, request })
         onDocumentReady?.(frame.id)

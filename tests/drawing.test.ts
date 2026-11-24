@@ -2,6 +2,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Canvas, Frame } from '../shared/types'
 
+vi.mock('../src/lib/frameBridge', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../src/lib/frameBridge')>()),
+  bodyPlacementOrigin: vi.fn(),
+}))
+const { bodyPlacementOrigin } = await import('../src/lib/frameBridge')
+
 vi.mock('../src/lib/posthog', () => ({ posthog: { capture: vi.fn() } }))
 vi.mock('../src/lib/api', () => ({
   api: { createFrame: vi.fn(), updateFrame: vi.fn(), deleteFrame: vi.fn(), getCanvas: vi.fn() },
@@ -45,6 +51,7 @@ const target = { canvasId: 'c', pageId: 'first' }
 
 beforeEach(() => {
   vi.resetAllMocks()
+  vi.mocked(bodyPlacementOrigin).mockResolvedValue({ x: 0, y: 0, scale: { x: 1, y: 1 } })
   clearHistory()
   useStore.getState().setCanvas({
     id: 'c',
@@ -212,6 +219,24 @@ describe('saving and targeting drawings', () => {
     expect(current().querySelector('h1')?.textContent).toBe('Collaborator edit')
   })
 
+  it('does not save an in-frame drawing when the live body offset cannot be read', async () => {
+    vi.mocked(bodyPlacementOrigin).mockResolvedValueOnce(null)
+    await saveDrawing(box, { ...target, frameId: 'f' })
+    expect(bodyPlacementOrigin).toHaveBeenCalledWith('f', frame.html)
+    expect(api.updateFrame).not.toHaveBeenCalled()
+    expect(useStore.getState().notice?.text).toContain('Couldn’t read the frame layout')
+  })
+
+  it('uses the actual body offset rather than the frame corner', async () => {
+    vi.mocked(bodyPlacementOrigin).mockResolvedValueOnce({ x: 12, y: 15, scale: { x: 1, y: 1 } })
+    await saveDrawing(box, { ...target, frameId: 'f' })
+    const written = vi.mocked(api.updateFrame).mock.calls[0]?.[1]?.html
+    expect(written).toBeDefined()
+    const inserted = doc(written!).querySelector<HTMLElement>('[data-doop-drawing]')
+    expect(inserted?.style.left).toBe('8px')
+    expect(inserted?.style.top).toBe('15px')
+  })
+
   it('reports drawings that cannot be inserted into a locked/deleted frame', async () => {
     useStore.getState().patchFrameLocal('f', { locked: true })
     await saveDrawing(box, { ...target, frameId: 'f' })
@@ -259,9 +284,11 @@ describe('saving and targeting drawings', () => {
     for (const call of vi.mocked(api.createFrame).mock.calls) {
       expect(call).toEqual(['c', expect.objectContaining({ pageId: 'first' })])
     }
-    expect(api.updateFrame).toHaveBeenCalledWith('f', {
-      html: expect.stringContaining('data-doop-drawing="rectangle"'),
-    })
+    expect(api.updateFrame).toHaveBeenCalledWith(
+      'f',
+      { html: expect.stringContaining('data-doop-drawing="rectangle"') },
+      frame.updatedAt,
+    )
     expect(useStore.getState().canvas?.frames).toHaveLength(3)
     expect(useStore.getState()).toMatchObject({ activePageId: 'second', selectedId: null, selectedElement: null })
     await undo()

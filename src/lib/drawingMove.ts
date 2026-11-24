@@ -128,10 +128,6 @@ export function moveDrawing(
   const rect = { ...dropped, x: Math.round(dropped.x), y: Math.round(dropped.y) }
   let landed: string | undefined
   const save = async () => {
-    /* where the destination's body places absolute layers from, asked before
-       anything is read, so no edit lands in between */
-    const asked = targetId && targetId !== pressed.id ? bodyPlacementOrigin(targetId) : undefined
-    const destinationOrigin = asked instanceof Promise ? await asked : asked
     const s = useStore.getState()
     const canvas = s.canvas?.id === pressed.canvasId ? s.canvas : await api.getCanvas(pressed.canvasId)
     const source = canvas.frames.find((f) => f.id === pressed.id)
@@ -215,7 +211,8 @@ export function moveDrawing(
         style.left = `${left}px`
         style.top = `${top}px`
       } else {
-        const at = await Promise.resolve(bodyPlacementOrigin(source.id))
+        const at = await bodyPlacementOrigin(source.id, source.html)
+        if (!at) throw new Error('Couldn’t read the frame layout. Try moving the drawing again.')
         style.left = `${round(rect.x - source.x - at.x - (hit?.geometry.offsetX ?? 0))}px`
         style.top = `${round(rect.y - source.y - at.y - (hit?.geometry.offsetY ?? 0))}px`
       }
@@ -233,6 +230,9 @@ export function moveDrawing(
     original.remove()
     const sourceHtml = serialize(sourceDoc)
     el.setAttribute(SCOPE_ATTR, scope)
+    const destinationOrigin = target ? await bodyPlacementOrigin(target.id, target.html) : undefined
+    if (destinationOrigin === null)
+      throw new Error('Couldn’t read the destination layout. Try moving the drawing again.')
     placeDrawing(el, rect, target, hit?.geometry, destinationOrigin)
     const destinationDoc = target ? parse(target.html) : parse(drawingDocument({ tool: 'frame', ...rect }))
     if (!target) {

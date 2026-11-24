@@ -2,6 +2,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Canvas, Frame } from '../shared/types'
 
+vi.mock('../src/lib/frameBridge', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../src/lib/frameBridge')>()),
+  bodyPlacementOrigin: vi.fn(),
+}))
+const { bodyPlacementOrigin } = await import('../src/lib/frameBridge')
+
 vi.mock('../src/lib/posthog', () => ({ posthog: { capture: vi.fn() } }))
 vi.mock('../src/lib/api', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../src/lib/api')>()),
@@ -52,6 +58,7 @@ function checkVersion(id: string, expectedUpdatedAt?: number) {
 
 beforeEach(() => {
   vi.resetAllMocks()
+  vi.mocked(bodyPlacementOrigin).mockResolvedValue({ x: 0, y: 0, scale: { x: 1, y: 1 } })
   clearHistory()
   db = new Map([base, shape].map((f) => [f.id, { ...f }]))
   useStore.getState().setCanvas({
@@ -85,6 +92,15 @@ beforeEach(() => {
 })
 
 describe('moving drawings between frames and canvas', () => {
+  it('does not alter either frame when the destination offset cannot be read', async () => {
+    vi.mocked(bodyPlacementOrigin).mockResolvedValueOnce(null)
+    expect(await moveDrawing(shape, undefined, rect, base.id)).toBeUndefined()
+    expect(bodyPlacementOrigin).toHaveBeenCalledWith(base.id, base.html)
+    expect(api.updateFrame).not.toHaveBeenCalled()
+    expect(api.deleteFrame).not.toHaveBeenCalled()
+    expect(useStore.getState().notice?.text).toContain('Couldn’t read the destination layout')
+  })
+
   it('converts a standalone circle to a frame layer at the drop coordinates, as one undo step', async () => {
     await moveDrawing(shape, undefined, rect, base.id)
     expect(frames()).toHaveLength(1)
@@ -285,8 +301,7 @@ describe('moving drawings between frames and canvas', () => {
     })
     const creating = saveDrawing({ tool: 'rectangle', ...rect }, { canvasId: 'c', pageId: 'first', frameId: base.id })
     const moving = moveDrawing(shape, undefined, rect, base.id)
-    await Promise.resolve()
-    expect(api.updateFrame).toHaveBeenCalledTimes(1)
+    await vi.waitFor(() => expect(api.updateFrame).toHaveBeenCalledTimes(1))
     release()
     await Promise.all([creating, moving])
     expect(parse(frames()[0]!.html).querySelectorAll('[data-doop-drawing]')).toHaveLength(2)

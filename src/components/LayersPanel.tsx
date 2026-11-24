@@ -658,8 +658,19 @@ export function LayersPanel({
         if (target.place !== 'root' && over) {
           if (over.frame.id === row.frame.id) {
             const to = targetOf(over, target.place)
-            void Promise.all(group.selectors.map((sel) => layerPlacement(row.frame.id, sel, to))).then((flows) =>
-              dropLayers(row.frame, group.selectors, to, new Map(group.selectors.map((sel, i) => [sel, flows[i]]))),
+            void Promise.all(group.selectors.map((sel) => layerPlacement(row.frame.id, sel, to, row.frame.html))).then(
+              (flows) => {
+                if (flows.some((flow) => flow === null)) {
+                  useStore.getState().pushNotice('Couldn’t read the frame layout. Try dragging the layers again.')
+                  return
+                }
+                dropLayers(
+                  row.frame,
+                  group.selectors,
+                  to,
+                  new Map(group.selectors.map((sel, i) => [sel, flows[i] ?? undefined])),
+                )
+              },
             )
           } else {
             transferLayers([{ pressed: row.frame, selectors: group.doc }], over.frame, targetOf(over, target.place))
@@ -687,9 +698,13 @@ export function LayersPanel({
         /* into a flex box it flows, out onto a hand-placed box it goes
            absolute where it shows, as a canvas drag would place it */
         const to = targetOf(over, target.place)
-        void layerPlacement(row.frame.id, row.node.selector, to).then((flow) =>
-          dropLayer(row.frame, row.node.selector, to, flow),
-        )
+        void layerPlacement(row.frame.id, row.node.selector, to, row.frame.html).then((flow) => {
+          if (flow === null) {
+            useStore.getState().pushNotice('Couldn’t read the frame layout. Try dragging the layer again.')
+            return
+          }
+          dropLayer(row.frame, row.node.selector, to, flow)
+        })
       } else transferLayer(row.frame, row.node.selector, over.frame, targetOf(over, target.place))
     }
     const onCancel = () => finish()

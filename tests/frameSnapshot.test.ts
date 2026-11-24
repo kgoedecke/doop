@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { afterEach, expect, it, vi } from 'vitest'
-import { registerFrameWindow, snapshotFrame, unregisterFrameWindow } from '../src/lib/frameBridge'
+import { noteFrameDocument, registerFrameWindow, snapshotFrame, unregisterFrameWindow } from '../src/lib/frameBridge'
 
 /* the export's snapshot of a frame: an unmounted frame has none (its saved
    HTML stands in), a mounted one answers, and a mounted one that cannot
@@ -17,6 +17,7 @@ it('has no snapshot of an unmounted frame', async () => {
 
 it('carries the live document a mounted frame answers with', async () => {
   registerFrameWindow('mounted', window)
+  noteFrameDocument('mounted', '<html/>')
   const posted = vi.spyOn(window, 'postMessage').mockImplementation((data: unknown) => {
     const { reqId } = data as { reqId: number }
     window.dispatchEvent(
@@ -29,6 +30,7 @@ it('carries the live document a mounted frame answers with', async () => {
 
 it('reports a mounted frame that could not read itself', async () => {
   registerFrameWindow('mounted', window)
+  noteFrameDocument('mounted', '<html/>')
   vi.spyOn(window, 'postMessage').mockImplementation((data: unknown) => {
     const { reqId } = data as { reqId: number }
     window.dispatchEvent(
@@ -41,6 +43,7 @@ it('reports a mounted frame that could not read itself', async () => {
 it('treats a mounted frame that never answers as unreadable, not unmounted', async () => {
   vi.useFakeTimers()
   registerFrameWindow('mounted', window)
+  noteFrameDocument('mounted', '<html/>')
   vi.spyOn(window, 'postMessage').mockImplementation(() => {})
   const snapshot = snapshotFrame('mounted')
   await vi.advanceTimersByTimeAsync(15_000)
