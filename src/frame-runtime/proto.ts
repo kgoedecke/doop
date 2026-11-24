@@ -29,6 +29,8 @@ export let protoOn = false
 let protoHints = true
 let protoTimers: number[] = []
 let protoHoverEl: Element | null = null
+/** the pending clear of the hotspot flash; a new flash takes its place */
+let protoFlashTimer: number | null = null
 /** the hotspot flash's sheet, adopted the first time it is needed */
 export let protoSheet: CSSStyleSheet | null = null
 /* a press this screen reported and whose release it still owes the player */
@@ -83,9 +85,11 @@ function protoEnsureSheet(): void {
   if (protoSheet) return
   try {
     protoSheet = new CSSStyleSheet()
+    /* the colour comes from the animation alone: an !important outline-color
+       outranks every animation, which would leave a hard ring that never fades */
     protoSheet.replaceSync(
       '@keyframes doop-proto-flash{0%{outline-color:rgba(1,119,211,.9)}100%{outline-color:rgba(1,119,211,0)}}' +
-        '[data-v-proto-flash]{outline:2px solid rgba(1,119,211,.9)!important;outline-offset:1px!important;' +
+        '[data-v-proto-flash]{outline-style:solid!important;outline-width:2px!important;outline-offset:1px!important;' +
         'animation:doop-proto-flash .9s ease-out forwards!important}',
     )
     document.adoptedStyleSheets = document.adoptedStyleSheets.concat(protoSheet)
@@ -102,7 +106,10 @@ function protoFlash(): void {
     void el.offsetWidth // restart the animation
     el.setAttribute('data-v-proto-flash', '')
   }
-  setTimeout(() => {
+  /* a flash restarted mid-run keeps its full run: the earlier clear would cut it short */
+  clearTimeout(protoFlashTimer)
+  protoFlashTimer = setTimeout(() => {
+    protoFlashTimer = null
     for (const lit of document.querySelectorAll('[data-v-proto-flash]')) lit.removeAttribute('data-v-proto-flash')
   }, 950)
 }
