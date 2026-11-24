@@ -63,6 +63,11 @@ function scheduleStyleSave(): void {
   }, 250)
 }
 
+/** whether a style save is still waiting to go */
+export function styleSavePending(): boolean {
+  return styleTimer !== null
+}
+
 /** a style save still waiting goes now: before an undo, or another action */
 export function flushStyleSave(): void {
   if (!styleTimer) return
