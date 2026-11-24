@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import UIKit.UIGestureRecognizerSubclass
 
 /// The native canvas: every frame is rendered by the Blitz engine into a
 /// bitmap on its own Core Animation layer. No WebKit is involved, so a board
@@ -21,6 +22,8 @@ final class CanvasView: UIView, UIGestureRecognizerDelegate {
     private let selectionOutline = CAShapeLayer()
     private let elementOutline = CAShapeLayer()
     private let snapGuideLayer = CAShapeLayer()
+    /// A hairline on every design-px boundary once zoomed in close, as on the web.
+    private let pixelGrid = CAShapeLayer()
     private var snapGuides: [SnapGuide] = []
     private var frames: [String: FrameLayer] = [:]
     private var labels: [String: CATextLayer] = [:]
@@ -35,6 +38,12 @@ final class CanvasView: UIView, UIGestureRecognizerDelegate {
     private var pinchAnchor = CGPoint.zero
     /// Fingers in the pinch at the last update; the centroid jumps when one lifts.
     private var pinchTouches = 0
+    /// Double-tap-and-drag: the world point held still, the zoom at touch-down,
+    /// where the finger landed, and whether it has moved far enough to be a zoom.
+    private var oneFingerZoom: (anchor: CGPoint, zoom: CGFloat, start: CGPoint)?
+    /// A camera move animating to its target (double tap, two-finger tap, fit).
+    private var cameraAnimation: CameraAnimation?
+    private var cameraLink: CADisplayLink?
     private var relayout: DispatchWorkItem?
     private var pendingWakes = Set<Int>()
     private var animationLink: CADisplayLink?
@@ -50,7 +59,13 @@ final class CanvasView: UIView, UIGestureRecognizerDelegate {
     #endif
 
     private static let minZoom: CGFloat = 0.03
-    static let maxZoom: CGFloat = 4
+    /// 1600%, the web canvas's deepest zoom (`MAX_ZOOM`).
+    static let maxZoom: CGFloat = 16
+    /// The pixel grid fades in from 300% and is fully shown from 500% (`pixelGridOpacity` on the web).
+    private static let pixelGridFrom: CGFloat = 3
+    private static let pixelGridFull: CGFloat = 5
+    /// Points a double-tap-and-drag travels to double (or halve) the zoom.
+    private static let oneFingerZoomPoints: CGFloat = 200
 
     init(model: CanvasModel) {
         self.model = model
@@ -62,6 +77,11 @@ final class CanvasView: UIView, UIGestureRecognizerDelegate {
         isMultipleTouchEnabled = true
         world.anchorPoint = .zero
         layer.addSublayer(world)
+        pixelGrid.fillColor = nil
+        pixelGrid.strokeColor = UIColor(white: 0.5, alpha: 0.16).cgColor
+        pixelGrid.lineWidth = 1 / UIScreen.main.scale
+        pixelGrid.isHidden = true
+        layer.addSublayer(pixelGrid)
         layer.addSublayer(chrome)
         for outline in [selectionOutline, elementOutline] {
             outline.fillColor = nil
@@ -81,10 +101,15 @@ final class CanvasView: UIView, UIGestureRecognizerDelegate {
         pan.maximumNumberOfTouches = 1
         let pinch = UIPinchGestureRecognizer(target: self, action: #selector(pinched))
         let tap = UITapGestureRecognizer(target: self, action: #selector(tapped))
-        let doubleTap = UITapGestureRecognizer(target: self, action: #selector(doubleTapped))
-        doubleTap.numberOfTapsRequired = 2
-        tap.require(toFail: doubleTap)
-        for gesture in [pan, pinch, tap, doubleTap] {
+        // As in Maps: a second tap that lifts zooms in, one that drags zooms
+        // with one finger (down zooms in).
+        let doubleTapDrag = DoubleTapDragGesture(target: self, action: #selector(doubleTapDragged))
+        tap.require(toFail: doubleTapDrag)
+        pan.require(toFail: doubleTapDrag)
+        // Two fingers tapping zooms out, as in Maps.
+        let twoFingerTap = UITapGestureRecognizer(target: self, action: #selector(twoFingerTapped))
+        twoFingerTap.numberOfTouchesRequired = 2
+        for gesture in [pan, pinch, tap, doubleTapDrag, twoFingerTap] {
             gesture.delegate = self
             addGestureRecognizer(gesture)
         }
@@ -129,6 +154,16 @@ final class CanvasView: UIView, UIGestureRecognizerDelegate {
 
     func gestureRecognizer(_ a: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith b: UIGestureRecognizer) -> Bool {
         a is UIPinchGestureRecognizer || b is UIPinchGestureRecognizer
+    }
+
+    override func gestureRecognizerShouldBegin(_ gesture: UIGestureRecognizer) -> Bool {
+        // The finger of a double-tap-and-drag zooms; it never also pans.
+        if gesture is UIPanGestureRecognizer, oneFingerZoom != nil { return false }
+        // A finger landing stops a camera animation where it is, as in Maps.
+        if gesture is UIPanGestureRecognizer || gesture is UIPinchGestureRecognizer || gesture is DoubleTapDragGesture {
+            stopCameraAnimation()
+        }
+        return super.gestureRecognizerShouldBegin(gesture)
     }
 
     // MARK: - Model sync
@@ -301,8 +336,38 @@ final class CanvasView: UIView, UIGestureRecognizerDelegate {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         world.transform = CATransform3DConcat(CATransform3DMakeScale(zoom, zoom, 1), CATransform3DMakeTranslation(offset.x, offset.y, 0))
+        drawPixelGrid()
         drawChrome()
         CATransaction.commit()
+    }
+
+    /// One hairline per design px across the view, faded in with the zoom the way
+    /// the web canvas does it, each line resting on a device pixel so it stays crisp.
+    private func drawPixelGrid() {
+        let opacity = max(0, min(1, (zoom - Self.pixelGridFrom) / (Self.pixelGridFull - Self.pixelGridFrom)))
+        pixelGrid.isHidden = opacity == 0
+        guard opacity > 0 else { pixelGrid.path = nil; return }
+        pixelGrid.frame = bounds
+        pixelGrid.opacity = Float(opacity)
+        let s = UIScreen.main.scale
+        func line(_ v: CGFloat) -> CGFloat { ((v * s).rounded(.down) + 0.5) / s }
+        let path = CGMutablePath()
+        let world = toWorldRect(bounds)
+        var x = world.minX.rounded(.down)
+        while x <= world.maxX {
+            let sx = line(x * zoom + offset.x)
+            path.move(to: CGPoint(x: sx, y: 0))
+            path.addLine(to: CGPoint(x: sx, y: bounds.height))
+            x += 1
+        }
+        var y = world.minY.rounded(.down)
+        while y <= world.maxY {
+            let sy = line(y * zoom + offset.y)
+            path.move(to: CGPoint(x: 0, y: sy))
+            path.addLine(to: CGPoint(x: bounds.width, y: sy))
+            y += 1
+        }
+        pixelGrid.path = path
     }
 
     /// Current camera: world → screen is `point * zoom + offset`.
@@ -545,31 +610,113 @@ final class CanvasView: UIView, UIGestureRecognizerDelegate {
         drawChrome()
     }
 
-    @objc private func doubleTapped(_ gesture: UITapGestureRecognizer) {
+    @objc private func doubleTapDragged(_ gesture: DoubleTapDragGesture) {
         let point = gesture.location(in: self)
-        let anchor = toWorld(point)
-        let hit = frame(at: point) ?? label(at: point).flatMap { frames[$0] }
+        switch gesture.state {
+        case .began:
+            window?.endEditing(true)
+            gestureActive = true
+            #if DEBUG
+            monitor.begin("one-finger zoom")
+            #endif
+            let start = gesture.start
+            oneFingerZoom = (toWorld(start), zoom, start)
+        case .changed:
+            guard let held = oneFingerZoom else { return }
+            // Exponential, so equal travel is an equal ratio whatever the zoom.
+            let dy = point.y - held.start.y
+            zoom = max(Self.minZoom, min(Self.maxZoom, held.zoom * pow(2, dy / Self.oneFingerZoomPoints)))
+            // The world point under the second tap stays where the finger landed.
+            offset = CGPoint(x: held.start.x - held.anchor.x * zoom, y: held.start.y - held.anchor.y * zoom)
+            applyTransform()
+        case .ended where gesture.wasTap:
+            doubleTapped(at: gesture.start)
+        case .ended, .cancelled, .failed:
+            guard oneFingerZoom != nil else { return }
+            oneFingerZoom = nil
+            gestureActive = false
+            #if DEBUG
+            monitor.end()
+            #endif
+            scheduleRelayout()
+        default: break
+        }
+    }
+
+    @objc private func twoFingerTapped(_ gesture: UITapGestureRecognizer) {
+        zoomCamera(by: 0.5, at: gesture.location(in: self))
+    }
+
+    /// As in Maps: a double tap zooms in 2x about the finger. On a frame's title
+    /// it fits that frame instead, a way back to the whole design.
+    private func doubleTapped(at point: CGPoint) {
         window?.endEditing(true)
-        if let frame = hit {
+        if let id = label(at: point), let frame = frames[id] {
             let padded = frame.rect.insetBy(dx: -frame.rect.width * 0.05, dy: -frame.rect.height * 0.05)
             let viewport = unobscuredViewport
             let fitZoom = max(Self.minZoom, min(Self.maxZoom, min(viewport.width / padded.width, viewport.height / padded.height)))
-            let detailZoom = min(Self.maxZoom, max(1, fitZoom * 2))
-            // Fitting an already-fitted frame made double-tap look broken.
-            // Zoom into the touched detail, then fit the frame on the next tap.
-            if zoom >= fitZoom * 0.95, zoom < detailZoom * 0.95 {
-                zoom = detailZoom
-                offset = CGPoint(x: point.x - anchor.x * zoom, y: point.y - anchor.y * zoom)
-            } else {
-                zoom = fitZoom
-                offset = CGPoint(x: viewport.midX - padded.midX * zoom,
-                                 y: viewport.midY - padded.midY * zoom)
-            }
-            model.select(frame.id)
-        } else {
-            fit(model.pageFrames)
+            model.select(id)
+            animateCamera(zoom: fitZoom,
+                          offset: CGPoint(x: viewport.midX - padded.midX * fitZoom, y: viewport.midY - padded.midY * fitZoom),
+                          pivot: CGPoint(x: viewport.midX, y: viewport.midY))
+            return
         }
+        zoomCamera(by: 2, at: point)
+    }
+
+    /// Zoom by `factor` keeping the world point under `point` still, animated.
+    private func zoomCamera(by factor: CGFloat, at point: CGPoint) {
+        let base: (zoom: CGFloat, offset: CGPoint) = cameraAnimation?.to ?? (zoom, offset)
+        let anchor = CGPoint(x: (point.x - base.offset.x) / base.zoom, y: (point.y - base.offset.y) / base.zoom)
+        let target = max(Self.minZoom, min(Self.maxZoom, base.zoom * factor))
+        guard abs(target - base.zoom) > 0.0001 else { return }
+        animateCamera(zoom: target, offset: CGPoint(x: point.x - anchor.x * target, y: point.y - anchor.y * target), pivot: point)
+    }
+
+    // MARK: - Camera animation
+
+    private struct CameraAnimation {
+        let from: (zoom: CGFloat, offset: CGPoint)
+        let to: (zoom: CGFloat, offset: CGPoint)
+        /// The screen point whose world point moves in a straight line (the finger, or the viewport's centre).
+        let pivot: CGPoint
+        let start: CFTimeInterval
+        static let duration: CFTimeInterval = 0.3
+    }
+
+    /// Glide to a camera: zoom moves geometrically and the world point under `pivot`
+    /// linearly, so a zoom about the finger keeps that point under it all the way.
+    private func animateCamera(zoom newZoom: CGFloat, offset newOffset: CGPoint, pivot: CGPoint) {
+        stopCameraAnimation()
+        cameraAnimation = CameraAnimation(from: (zoom, offset), to: (newZoom, newOffset), pivot: pivot, start: CACurrentMediaTime())
+        gestureActive = true
+        let link = CADisplayLink(target: self, selector: #selector(cameraTick))
+        link.preferredFrameRateRange = CAFrameRateRange(minimum: 60, maximum: 120, preferred: 120)
+        link.add(to: .main, forMode: .common)
+        cameraLink = link
+    }
+
+    @objc private func cameraTick(_ link: CADisplayLink) {
+        guard let animation = cameraAnimation else { stopCameraAnimation(); return }
+        let t = min(1, (CACurrentMediaTime() - animation.start) / CameraAnimation.duration)
+        let eased = 1 - pow(1 - t, 3)
+        let p = animation.pivot
+        let w0 = CGPoint(x: (p.x - animation.from.offset.x) / animation.from.zoom, y: (p.y - animation.from.offset.y) / animation.from.zoom)
+        let w1 = CGPoint(x: (p.x - animation.to.offset.x) / animation.to.zoom, y: (p.y - animation.to.offset.y) / animation.to.zoom)
+        zoom = animation.from.zoom * pow(animation.to.zoom / animation.from.zoom, eased)
+        let w = CGPoint(x: w0.x + (w1.x - w0.x) * eased, y: w0.y + (w1.y - w0.y) * eased)
+        offset = CGPoint(x: p.x - w.x * zoom, y: p.y - w.y * zoom)
         applyTransform()
+        if t >= 1 { stopCameraAnimation() }
+    }
+
+    /// Stop where the camera is now, and render it at its new density.
+    private func stopCameraAnimation() {
+        guard cameraLink != nil else { return }
+        cameraLink?.invalidate()
+        cameraLink = nil
+        cameraAnimation = nil
+        gestureActive = false
         scheduleRelayout()
     }
 
@@ -1197,5 +1344,97 @@ extension UIColor {
         if value.hasPrefix("#") { value.removeFirst() }
         guard value.count == 6, let rgb = UInt32(value, radix: 16) else { return nil }
         self.init(red: CGFloat((rgb >> 16) & 0xff) / 255, green: CGFloat((rgb >> 8) & 0xff) / 255, blue: CGFloat(rgb & 0xff) / 255, alpha: 1)
+    }
+}
+
+/// Maps' double tap: two quick taps in one place. A second tap that lifts ends
+/// the gesture as a tap (`wasTap`); one that drags makes it a continuous gesture
+/// whose `start` is where the second finger landed. Any other touch fails it at
+/// once, so pans and single taps are never held up longer than a double tap's wait.
+final class DoubleTapDragGesture: UIGestureRecognizer {
+    private enum Phase { case idle, firstDown, waiting, secondDown }
+    private var phase = Phase.idle
+    private var firstAt = CGPoint.zero
+    private var downTime: TimeInterval = 0
+    private var timer: DispatchWorkItem?
+    private(set) var start = CGPoint.zero
+    private(set) var wasTap = false
+    private static let maxGap: TimeInterval = 0.3
+    private static let maxPress: TimeInterval = 0.35
+    private static let slop: CGFloat = 10
+    private static let maxDistance: CGFloat = 44
+
+    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
+        guard touches.count == 1, (event.touches(for: self)?.count ?? 1) == 1, let touch = touches.first else {
+            fail(); return
+        }
+        let point = touch.location(in: view)
+        switch phase {
+        case .idle:
+            phase = .firstDown
+            firstAt = point
+            downTime = touch.timestamp
+        case .waiting where hypot(point.x - firstAt.x, point.y - firstAt.y) <= Self.maxDistance:
+            timer?.cancel()
+            phase = .secondDown
+            start = point
+            downTime = touch.timestamp
+        default:
+            fail()
+        }
+    }
+
+    override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent) {
+        guard let touch = touches.first else { return }
+        let point = touch.location(in: view)
+        switch phase {
+        case .firstDown:
+            if hypot(point.x - firstAt.x, point.y - firstAt.y) > Self.slop { fail() }
+        case .secondDown:
+            if state == .possible, hypot(point.x - start.x, point.y - start.y) > Self.slop {
+                state = .began
+            } else if state == .began || state == .changed {
+                state = .changed
+            }
+        default: break
+        }
+    }
+
+    override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent) {
+        guard let touch = touches.first else { return }
+        switch phase {
+        case .firstDown:
+            guard touch.timestamp - downTime <= Self.maxPress else { fail(); return }
+            phase = .waiting
+            let work = DispatchWorkItem { [weak self] in self?.fail() }
+            timer = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + Self.maxGap, execute: work)
+        case .secondDown:
+            if state == .possible {
+                wasTap = touch.timestamp - downTime <= Self.maxPress
+                state = wasTap ? .ended : .failed
+            } else {
+                state = .ended
+            }
+        default:
+            fail()
+        }
+    }
+
+    override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent) {
+        state = state == .possible ? .failed : .cancelled
+    }
+
+    private func fail() {
+        timer?.cancel()
+        if state == .possible { state = .failed }
+    }
+
+    override func reset() {
+        super.reset()
+        timer?.cancel()
+        timer = nil
+        phase = .idle
+        wasTap = false
     }
 }

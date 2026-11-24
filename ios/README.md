@@ -33,10 +33,15 @@ HTML/CSS engine (Stylo + Taffy + Parley), compiled into the app as a static libr
   Agents, Canvas with `canvas_id`, Settings). No session replay, feature flags or PostHog
   push hooks (the app owns its APNs token). `PrivacyInfo.xcprivacy` declares it.
 - **Native canvas** (`Doop/Blitz/BlitzCanvasView.swift`): a UIKit view with one
-  Core Animation layer per frame. Pan, pinch zoom, tap to select and dismiss the
-  keyboard, double tap a frame or its title to fit it, then toggle between a closer
-  view at the tapped point and fitting the frame. Double tap empty canvas to fit
-  the board; drag a frame by its title. Dragged frames snap to other frames' edges
+  Core Animation layer per frame. Zoom works as in Maps: pinch; double tap to zoom
+  in 2x about the finger; two-finger tap to zoom out 2x; double tap and keep the
+  finger down, then drag down to zoom in or up to zoom out (200 pt per doubling,
+  `DoubleTapDragGesture`). Taps zoom with a 0.3 s glide that a finger landing
+  stops. Double tap a frame's title to fit that frame; the fit control fits the
+  board. Pan, tap to select and dismiss the keyboard, drag a frame by its title.
+  Zoom runs from 3% to 1600%, the web's range; from 300% a hairline pixel grid
+  fades in over the canvas (fully shown at 500%, the web's `pixelGridOpacity`),
+  each line on a device pixel. Dragged frames snap to other frames' edges
   and centers within eight screen points, with alignment guides matching the web.
   Labels, selection outlines and collaborator
   cursors are native layers, so a board with many frames costs one small bitmap per
@@ -65,7 +70,7 @@ HTML/CSS engine (Stylo + Taffy + Parley), compiled into the app as a static libr
 - **Deep zoom tiles**: a base bitmap is capped at 3 bitmap pixels per CSS pixel and
   about two screens of pixels. When the screen density exceeds what the base bitmap
   holds, the part of the frame on screen (plus a 30% margin) is painted as a tile at
-  screen density (up to 12 bitmap pixels per CSS pixel at 400% on a 3x screen) and
+  screen density (up to 48 bitmap pixels per CSS pixel at 1600% on a 3x screen) and
   composited over the base, so text stays sharp at any zoom at roughly one screen of
   pixels per paint. Tiles refresh when a gesture settles and when the frame's HTML
   changes; a tiled frame holds its animations still.
