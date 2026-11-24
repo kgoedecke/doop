@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { AppIcon } from '@/components/ui/brand-mark'
 import { ChoiceList, ChoiceRow } from '@/components/ui/choice-list'
-import { BuildingIcon } from '@/components/ui/icons'
+import { BuildingIcon, XIcon } from '@/components/ui/icons'
 import { PersonRow } from '@/components/ui/list'
 import { SelectionBar, SelectionBarAction } from '@/components/ui/selection-bar'
 import { Step, Steps } from '@/components/ui/steps'
@@ -142,6 +142,29 @@ export const Choices: Story = {
         disabled
         trailing={<span className="text-caption">Soon</span>}
       />
+    </ChoiceList>
+  ),
+}
+
+/** Rows with a control of their own (the GitHub step's connected repos):
+ *  `action` sits beside the row's button, never inside it. */
+export const ChoicesWithAction: Story = {
+  name: 'ChoiceList with row actions',
+  render: () => (
+    <ChoiceList className="max-w-[560px]">
+      {['kgoedecke/doop', 'kgoedecke/doop-marketing'].map((repo) => (
+        <ChoiceRow
+          key={repo}
+          icon={<AppIcon brand="github" />}
+          title={repo}
+          description="Pick screens to import"
+          action={
+            <Button variant="bare" size="icon-sm" aria-label="Disconnect">
+              <XIcon size={14} />
+            </Button>
+          }
+        />
+      ))}
     </ChoiceList>
   ),
 }

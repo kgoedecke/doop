@@ -372,7 +372,8 @@ export function pendingWorkAgents(canvasId: string): string[] {
   const roster = canvasRoster(canvasId)
   /* oldest first so a queue is worked in the order humans filled it */
   for (const card of [...(taskLog.get(canvasId) ?? [])].reverse()) {
-    if (card.queuedBy && !card.agentName && !card.failedAt && !card.endedAt) add(stageAgent(card, roster))
+    if (card.queuedBy && !card.agentName && !card.failedAt && !card.endedAt && !isOutsideCard(card))
+      add(stageAgent(card, roster))
   }
   const now = Date.now()
   for (const f of [...(feedbackLog.get(canvasId) ?? [])].reverse()) {
@@ -439,7 +440,14 @@ function oldestWork(canvasId: string, agentName: string, passOver: (work: NextWo
   }
   const roster = canvasRoster(canvasId)
   for (const card of taskLog.get(canvasId) ?? []) {
-    if (card.queuedBy && !card.agentName && !card.failedAt && !card.endedAt && stageAgent(card, roster) === agentName) {
+    if (
+      card.queuedBy &&
+      !card.agentName &&
+      !card.failedAt &&
+      !card.endedAt &&
+      !isOutsideCard(card) &&
+      stageAgent(card, roster) === agentName
+    ) {
       consider(card.startedAt, card.queuedByUserId, card.runner)
     }
   }
@@ -497,7 +505,15 @@ export function taskCanvasId(taskId: string): string | undefined {
   return undefined
 }
 
+/** Say what an agent is doing next to its face, without logging a task: for
+ *  work whose board cards already are the tasks (a repo import), so a failed
+ *  card never leaves a narration behind that reads as finished work. */
+export function narrateAgent(canvasId: string, actor: Actor, status: string) {
+  agentTouch(canvasId, actor, undefined, status.trim() || null)
+}
+
 /** Agent announces what it is working on right now (empty string clears it). */
+
 export function setAgentStatus(canvasId: string, actor: Actor, status: string) {
   const clean = status.trim()
   agentTouch(canvasId, actor, undefined, clean || null)
@@ -1642,6 +1658,8 @@ export interface RepoImportInput {
   repo: string
   screens: RepoScreenRef[]
   designSystem: boolean
+  /** queue for the requester's own MCP agent, not the Doop Agent */
+  outside?: boolean
 }
 
 /** What an import would queue, after removing screens already waiting or in
@@ -1655,7 +1673,12 @@ export function planRepoCards(
   const list = taskLog.get(canvasId) ?? []
   const open = list.filter((t) => t.queuedBy && !t.endedAt && t.payload?.connectionId === input.connectionId)
   const importId = nanoid(8)
-  const base = { connectionId: input.connectionId, repo: input.repo, importId }
+  const base: RepoCardPayload = {
+    connectionId: input.connectionId,
+    repo: input.repo,
+    importId,
+    ...(input.outside ? { outside: true as const } : {}),
+  }
   const wanted: { kind: RepoCardKind; title: string; payload: RepoCardPayload }[] = []
   if (input.designSystem && !open.some((t) => t.kind === 'design-system'))
     wanted.push({ kind: 'design-system', title: `Design system of ${input.repo}`, payload: base })
@@ -1706,10 +1729,102 @@ export function addRepoCards(canvasId: string, input: RepoImportInput, from: str
     ]
       .filter(Boolean)
       .join(' and ')
-    logActivity(canvasId, actor, `queued ${what} from ${input.repo} for ${roleName(DEFAULT_ROLE_ID)}`)
-    kickResident(canvasId)
+    logActivity(
+      canvasId,
+      actor,
+      `queued ${what} from ${input.repo} for ${input.outside ? 'their own agent' : roleName(DEFAULT_ROLE_ID)}`,
+    )
+    if (!input.outside) kickResident(canvasId)
   }
   return cards
+}
+
+/** A repo card queued for the requester's own MCP agent: no resident claims it. */
+export function isOutsideCard(card: AgentTask): boolean {
+  return !!card.payload?.outside
+}
+
+/** The outside repo cards `userId` queued on a canvas that still wait for an
+ *  agent, oldest first: they are that person's, for their own agent alone. */
+export function waitingOutsideCards(canvasId: string, userId: string | undefined): AgentTask[] {
+  if (!userId) return []
+  return (taskLog.get(canvasId) ?? [])
+    .filter(
+      (t) => t.queuedBy && isOutsideCard(t) && t.queuedByUserId === userId && !t.agentName && !t.failedAt && !t.endedAt,
+    )
+    .reverse()
+}
+
+/** The outside repo card `cardId`, when `agent` (connected by `userId`)
+ *  holds it open. */
+export function outsideCardOf(
+  canvasId: string,
+  cardId: string,
+  agent: Actor,
+  userId: string | undefined,
+): AgentTask | undefined {
+  const card = (taskLog.get(canvasId) ?? []).find((t) => t.id === cardId && t.queuedBy && isOutsideCard(t))
+  if (!card || card.endedAt || card.failedAt || !userId || card.queuedByUserId !== userId) return undefined
+  return card.agentName && isAgentsTask(card, agent) ? card : undefined
+}
+
+/**
+ * An MCP agent connected by `userId` takes the outside repo cards that person
+ * queued: the ones it already holds and has not finished, then up to `limit`
+ * more from the queue, design systems first (each one grounds the screens of
+ * its repo). Oldest first otherwise.
+ */
+export function takeOutsideRepoCards(
+  canvasId: string,
+  agent: Actor,
+  userId: string | undefined,
+  limit: number,
+): AgentTask[] {
+  if (!userId) return []
+  const list = taskLog.get(canvasId) ?? []
+  const held = list
+    .filter(
+      (t) =>
+        t.queuedBy &&
+        isOutsideCard(t) &&
+        t.queuedByUserId === userId &&
+        !t.endedAt &&
+        !t.failedAt &&
+        t.agentName &&
+        isAgentsTask(t, agent),
+    )
+    .reverse()
+  const waiting = waitingOutsideCards(canvasId, userId).sort(
+    (a, b) => Number(b.kind === 'design-system') - Number(a.kind === 'design-system') || a.startedAt - b.startedAt,
+  )
+  const claimed = waiting.slice(0, Math.max(0, limit - held.length))
+  for (const c of claimed) {
+    edit(c).agentName = agent.name
+    if (agent.agentKey) c.agentKey = agent.agentKey
+    else delete c.agentKey
+    c.color = colorFor(agent.name)
+    c.claimedAt = Date.now()
+    stored.saveTask(canvasId, c)
+    broadcast(canvasId, { type: 'task', task: c })
+  }
+  if (claimed.length)
+    logActivity(canvasId, agent, `took ${claimed.length} repo import card${claimed.length === 1 ? '' : 's'}`)
+  return [...held, ...claimed]
+}
+
+/** `userId` connected a Doop Agent plan and imported again: the cards they
+ *  queued that still wait for their own agent go to the Doop Agent instead.
+ *  Cards an agent already holds, and other people's, stay. Returns how many moved. */
+export function handRepoCardsToDoop(canvasId: string, connectionId: string, userId: string): number {
+  const moved = waitingOutsideCards(canvasId, userId).filter((c) => c.payload?.connectionId === connectionId)
+  for (const c of moved) {
+    const { outside: _outside, ...payload } = c.payload!
+    edit(c).payload = payload
+    stored.saveTask(canvasId, c)
+    broadcast(canvasId, { type: 'task', task: c })
+  }
+  if (moved.length) kickResident(canvasId)
+  return moved.length
 }
 
 /** Cards waiting on THIS agent's stage, claimed by it. A card at another
@@ -1724,6 +1839,7 @@ export function takeQueuedCardsFor(canvasId: string, agentName: string, payer?: 
       !t.agentName &&
       !t.failedAt &&
       !t.endedAt &&
+      !isOutsideCard(t) &&
       stageAgent(t, roster) === agentName &&
       (payer === undefined || (t.queuedByUserId ?? '') === payer) &&
       (runner === undefined || runnerKey(t.runner) === runner),
@@ -1801,6 +1917,7 @@ export function retryCard(canvasId: string, cardId: string, by: string): AgentTa
   if (!card || card.endedAt) return card
   if (!card.failedAt) return card
   edit(card).agentName = ''
+  delete card.agentKey
   delete card.claimedAt
   delete card.failedAt
   delete card.failureReason

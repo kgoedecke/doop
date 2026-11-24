@@ -1,10 +1,10 @@
 import { env } from './env.ts'
 import { readConnections, usableAccount, type Connections } from './agentDefaults.ts'
 import { geminiCloudWorkerFor } from './geminiCloudRuns.ts'
-import { eq, sql } from 'drizzle-orm'
+import { desc, eq, sql } from 'drizzle-orm'
 import { db } from './db/index.ts'
 import { residentUsage } from './db/schema.ts'
-import { oauthAccessToken } from './db/auth-schema.ts'
+import { oauthAccessToken, oauthApplication } from './db/auth-schema.ts'
 import type { AccountKind } from './modelAccounts.ts'
 
 /**
@@ -55,6 +55,20 @@ async function hasOwnAgent(userId: string): Promise<boolean> {
     .where(eq(oauthAccessToken.userId, userId))
     .limit(1)
   return !!row
+}
+
+/** The client of the agent this person connected most recently ("Claude
+ *  Code (doop)", "Cursor"…), from its OAuth application, for opening that
+ *  agent with a prompt. Undefined when none ever connected. */
+export async function latestAgentClient(userId: string): Promise<string | undefined> {
+  const [row] = await db
+    .select({ name: oauthApplication.name })
+    .from(oauthAccessToken)
+    .innerJoin(oauthApplication, eq(oauthApplication.clientId, oauthAccessToken.clientId))
+    .where(eq(oauthAccessToken.userId, userId))
+    .orderBy(desc(oauthAccessToken.createdAt))
+    .limit(1)
+  return row?.name
 }
 
 async function usedCount(userId: string): Promise<number> {

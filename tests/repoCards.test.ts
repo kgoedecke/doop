@@ -154,3 +154,79 @@ describe('planRepoCards', () => {
     ])
   })
 })
+
+describe('cards for the requester’s own MCP agent', () => {
+  const claude = { name: 'Claude', kind: 'agent' as const, color: '#000', agentKey: 'key-claude' }
+  const codex = { name: 'Codex', kind: 'agent' as const, color: '#000', agentKey: 'key-codex' }
+  const queueOutside = () =>
+    actions.addRepoCards(
+      canvasId,
+      { connectionId: 'conn-1', repo: 'acme/app', screens: [button, pricing], designSystem: true, outside: true },
+      'kevin',
+      'user-1',
+    )
+
+  it('are never the Doop Agent’s work', () => {
+    const cards = queueOutside()
+    expect(cards.every((c) => c.payload?.outside === true)).toBe(true)
+    expect(actions.pendingWorkAgents(canvasId)).toEqual([])
+    expect(actions.nextWorkPayer(canvasId, AGENT)).toBeUndefined()
+    expect(actions.takeQueuedCardsFor(canvasId, AGENT, 'user-1')).toEqual([])
+    expect(actions.waitingOutsideCards(canvasId, 'user-1')).toHaveLength(3)
+  })
+
+  it('are taken design system first, up to the limit, and held by the agent that took them', () => {
+    queueOutside()
+    const first = actions.takeOutsideRepoCards(canvasId, claude, 'user-1', 2)
+    expect(first.map((c) => c.kind)).toEqual(['design-system', 'sketch'])
+    expect(first.every((c) => c.agentName === 'Claude' && c.agentKey === 'key-claude')).toBe(true)
+    /* asking again returns what it holds, plus the rest up to the limit */
+    expect(actions.takeOutsideRepoCards(canvasId, claude, 'user-1', 3).map((c) => c.status)).toEqual([
+      'Design system of acme/app',
+      'Button',
+      'Pricing',
+    ])
+    expect(actions.outsideCardOf(canvasId, first[0]!.id, claude, 'user-1')?.id).toBe(first[0]!.id)
+    /* another agent of the same person neither holds nor takes them */
+    expect(actions.outsideCardOf(canvasId, first[0]!.id, codex, 'user-1')).toBeUndefined()
+    expect(actions.takeOutsideRepoCards(canvasId, codex, 'user-1', 4)).toEqual([])
+  })
+
+  it('go to the Doop Agent once a plan is connected, except the ones an agent holds', () => {
+    queueOutside()
+    const [held] = actions.takeOutsideRepoCards(canvasId, claude, 'user-1', 1)
+    expect(actions.handRepoCardsToDoop(canvasId, 'conn-1', 'user-1')).toBe(2)
+    expect(actions.waitingOutsideCards(canvasId, 'user-1')).toEqual([])
+    expect(actions.pendingWorkAgents(canvasId)).toEqual([AGENT])
+    expect(
+      actions
+        .takeQueuedCardsFor(canvasId, AGENT, 'user-1')
+        .map((c) => c.status)
+        .sort(),
+    ).toEqual(['Button', 'Pricing'])
+    expect(actions.outsideCardOf(canvasId, held!.id, claude, 'user-1')?.id).toBe(held!.id)
+  })
+
+  it('belong to the person who queued them: another person’s agent or import never takes them', () => {
+    const [card] = queueOutside()
+    expect(actions.waitingOutsideCards(canvasId, 'user-2')).toEqual([])
+    expect(actions.takeOutsideRepoCards(canvasId, claude, 'user-2', 4)).toEqual([])
+    expect(actions.handRepoCardsToDoop(canvasId, 'conn-1', 'user-2')).toBe(0)
+    expect(actions.waitingOutsideCards(canvasId, 'user-1')).toHaveLength(3)
+    /* held by user-1's agent, still not user-2's to read or deliver */
+    actions.takeOutsideRepoCards(canvasId, claude, 'user-1', 4)
+    expect(actions.outsideCardOf(canvasId, card!.id, claude, 'user-2')).toBeUndefined()
+  })
+
+  it('count as on the board, so importing the same screens again queues nothing', () => {
+    queueOutside()
+    expect(
+      actions.planRepoCards(canvasId, {
+        connectionId: 'conn-1',
+        repo: 'acme/app',
+        screens: [button, pricing],
+        designSystem: true,
+      }),
+    ).toEqual([])
+  })
+})

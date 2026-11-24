@@ -687,8 +687,12 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
   })
   const editing = customForm && customForm !== 'new' ? accountOf(customForm) : undefined
 
-  /* the Plan is connected when this desktop may run it; a browser never can */
-  const planConnected = desktop && !!localState.native?.connected && !!localState.native.enabled
+  /* the Plan is connected when this desktop may run it */
+  /* in a browser the Plan is connected once it is on: work started here runs
+     on the person's desktop whenever it is online */
+  const planConnected = desktop
+    ? !!localState.native?.connected && !!localState.native.enabled
+    : !!localState.preference?.enabled
   /* the Plan's own row tells the pane when it switched on or became default */
   const planRowProps = {
     isDefault: view.default === 'claude-local',

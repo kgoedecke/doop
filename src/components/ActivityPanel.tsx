@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import type { AgentTask } from '../../shared/types'
 import { canEditOpenCanvas, useStore } from '../lib/store'
 import { api } from '../lib/api'
+import { authClient } from '../lib/auth'
 import { timeAgo } from '../lib/time'
 import { cn } from '@/lib/utils'
 import { AgentIcon } from './AgentIcon'
@@ -278,8 +279,10 @@ const RECENT_SHOWN = 3
 function RecentTasks() {
   const tasks = useStore((s) => s.tasks)
   const [all, setAll] = useState(false)
-  /* unclaimed board cards have no agent yet, so they are not activity */
-  const claimed = useMemo(() => tasks.filter((t) => t.agentName), [tasks])
+  /* unclaimed board cards have no agent yet, so they are not activity, except
+     repo import cards, which can wait a long while (for the person's own
+     agent, or for their desktop to come online) and must show that they do */
+  const claimed = useMemo(() => tasks.filter((t) => t.agentName || isWaitingRepoCard(t)), [tasks])
   const working = useMemo(() => claimed.filter((t) => !t.endedAt && !t.failedAt), [claimed])
   const finished = useMemo(() => claimed.filter((t) => t.endedAt || t.failedAt), [claimed])
   const t = useT()
@@ -350,6 +353,16 @@ function RecentTaskRow({ task }: { task: AgentTask }) {
   }
   const t = useT()
   const running = !task.endedAt && !task.failedAt
+  const waiting = isWaitingRepoCard(task)
+  const userId = authClient.useSession().data?.user.id
+  /* a waiting card has no agent yet: name who it waits for, whose it is */
+  const agentLabel =
+    task.agentName ||
+    (!task.payload?.outside
+      ? t('panels.activityDoopAgent')
+      : task.queuedByUserId === userId
+        ? t('panels.activityYourAgent')
+        : t('panels.activityAgentOf', { name: task.queuedBy ?? '' }))
   const failed = !!task.failedAt
   const reason = task.failureReason ?? t('panels.activityTaskUnfinished')
   /* a job's status already is its reason; a card's status is its brief */
@@ -374,9 +387,10 @@ function RecentTaskRow({ task }: { task: AgentTask }) {
     >
       <span className="flex min-w-0 items-center gap-1.5 whitespace-nowrap">
         <span className="grid size-4 flex-none place-items-center">
-          <AgentIcon name={task.agentName} size={14} />
+          <AgentIcon name={agentLabel} size={14} />
         </span>
-        <b className="truncate font-medium text-ink">{task.agentName}</b>
+        <b className="truncate font-medium text-ink">{agentLabel}</b>
+        {waiting && <em className="flex-none not-italic text-ink-faint">{t('panels.activityWaiting')}</em>}
         {task.owner && (
           <em className="truncate not-italic text-ink-faint">{t('panels.activityFor', { name: task.owner })}</em>
         )}
@@ -433,9 +447,16 @@ function RecentTaskRow({ task }: { task: AgentTask }) {
   )
 }
 
+/** A repo import card nobody has taken yet. */
+function isWaitingRepoCard(task: AgentTask): boolean {
+  return !!task.queuedBy && !!task.kind && !task.agentName && !task.endedAt && !task.failedAt
+}
+
 /** Where a task stands, as one 12px glyph: the working matrix, a done check,
- *  or the failure mark. */
+ *  the failure mark, or an empty ring while nobody has taken it. */
+
 function TaskMark({ task }: { task: AgentTask }) {
+  if (isWaitingRepoCard(task)) return <span className="size-3 flex-none rounded-full border border-ink-faint" />
   if (task.failedAt)
     return (
       <span className="flex size-3 flex-none flex-col items-center justify-center gap-[1px] rounded-full bg-accent-ink">

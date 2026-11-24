@@ -100,6 +100,84 @@ function DesktopOnlyClaudeRow({ active }: { active: boolean }) {
   )
 }
 
+/** Whether the person's desktop is checking in now, as the server sees it
+ *  (its last poll under 30 s ago), asked again while the row is on screen. */
+function useDesktopOnline(): boolean | null {
+  const [online, setOnline] = useState<boolean | null>(null)
+  useEffect(() => {
+    let live = true
+    const ask = () =>
+      api.agentRunners().then(
+        (runners) => {
+          if (live) setOnline(runners.runners.find((r) => r.provider === 'claude-local')?.online ?? false)
+        },
+        () => {},
+      )
+    void ask()
+    const timer = window.setInterval(ask, 15_000)
+    return () => {
+      live = false
+      window.clearInterval(timer)
+    }
+  }, [])
+  return online
+}
+
+/** The Plan as a browser sees it once it is on: connected, carried out by the
+ *  person's desktop, which may be online or not. Only the desktop can change
+ *  which Claude Code runs it, so the model is named here, not picked. */
+function BrowserPlanRow({ isDefault = false, onMakeDefault, onChange }: PlanRowProps) {
+  const t = useT()
+  const modelName = useModelName()
+  const { data: session } = authClient.useSession()
+  const userId = session?.user.id
+  const { preference } = useLocalAgent()
+  const online = useDesktopOnline()
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const turnOff = async () => {
+    if (!userId || !preference) return
+    setBusy(true)
+    setError('')
+    try {
+      await selectLocalAgent(userId, { ...preference, enabled: false })
+      onChange?.()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+  const model = CLAUDE_MODELS.find((m) => m.id === normalizeClaudeModel(preference?.model))
+  return (
+    <ConnectionRow
+      mark={<AppIcon brand="claude-code" />}
+      name={t('models.claudePlan')}
+      sub={
+        online === null
+          ? t('models.planRunsOnDesktop')
+          : online
+            ? t('models.planDesktopOnline')
+            : t('models.planDesktopOffline')
+      }
+      state="on"
+      isDefault={isDefault}
+      busy={busy}
+      model={
+        <span className="block truncate text-body text-ink-soft" title={t('models.planModelOnDesktop')}>
+          {model ? modelName(model) : preference?.model}
+        </span>
+      }
+      onToggle={(on) => {
+        if (!on) void turnOff()
+      }}
+      onMakeDefault={onMakeDefault}
+      onDisconnect={() => void turnOff()}
+      error={error || undefined}
+    />
+  )
+}
+
 export function LocalClaudeRow({ isDefault = false, onMakeDefault, onChange }: PlanRowProps = {}) {
   const t = useT()
   const modelName = useModelName()
@@ -172,7 +250,12 @@ export function LocalClaudeRow({ isDefault = false, onMakeDefault, onChange }: P
   /* the Claude Code settings (which CLI, a pinned model), from the row's menu */
   const [settingsOpen, setSettingsOpen] = useState(false)
 
-  if (!isDesktopShell()) return <DesktopOnlyClaudeRow active={active} />
+  if (!isDesktopShell())
+    return active ? (
+      <BrowserPlanRow isDefault={isDefault} onMakeDefault={onMakeDefault} onChange={onChange} />
+    ) : (
+      <DesktopOnlyClaudeRow active={false} />
+    )
 
   const models = [
     ...CLAUDE_MODELS.map((model) => ({ id: model.id, name: modelName(model), blurb: t(MODEL_BLURBS[model.id]) })),

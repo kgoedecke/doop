@@ -144,8 +144,10 @@ import type { AgentScope } from '../shared/customAgents.ts'
 import type { CanvasSkills } from '../shared/skills.ts'
 import { skillsRouter } from './skillRoutes.ts'
 import { activeAgentTasks } from '../shared/agentActivity.ts'
-import { colorFor } from '../shared/types.ts'
+import { colorFor, type GithubImportRunner } from '../shared/types.ts'
 import { agentKeyOf } from '../shared/agentIdentity.ts'
+import { readConnections } from './agentDefaults.ts'
+import { localAgentRuns } from './localAgentRuns.ts'
 import {
   CanvasMismatchError,
   FRAME_CHANGED,
@@ -230,7 +232,7 @@ seed()
    human explicitly retries them. */
 {
   const pending = [...data.tasks.entries()]
-    .filter(([, list]) => list.some((t) => t.queuedBy && !t.agentName && !t.endedAt))
+    .filter(([, list]) => list.some((t) => t.queuedBy && !t.agentName && !t.endedAt && !actions.isOutsideCard(t)))
     .map(([canvasId]) => canvasId)
   pending.forEach((canvasId, i) => {
     setTimeout(
@@ -2194,7 +2196,7 @@ app.post('/api/canvases/:id/github', async (req, res) => {
       branch: typeof req.body?.branch === 'string' ? req.body.branch : undefined,
       createdBy: req.user!.id,
     })
-    res.json({ ...github.connectionInfo(conn), frames: 0 })
+    res.json({ ...github.connectionInfo(conn), frames: github.importedFrameCount(c, conn.id) })
   } catch (e) {
     res.status(400).json({ error: e instanceof Error ? e.message : 'could not connect the repository' })
   }
@@ -2324,6 +2326,16 @@ app.post('/api/canvases/:id/github/:connId/analyze', async (req, res) => {
   }
 })
 
+/** Who carries out a repo import's cards, as the import answers it: the Doop
+ *  Agent on a model account, the Claude Plan on the person's desktop (online
+ *  or not), or the person's own MCP agent, with the client to open it in. */
+async function importRunner(userId: string, outside: boolean): Promise<GithubImportRunner> {
+  if (outside) return { kind: 'agent', client: await allowance.latestAgentClient(userId) }
+  const { default: provider } = await readConnections(userId)
+  if (provider === 'claude-local') return { kind: 'plan', online: localAgentRuns.online(userId) }
+  return { kind: 'doop' }
+}
+
 /* one import at a time per repo connection — see the route */
 const connectionLocks = new Map<string, Promise<unknown>>()
 async function withConnectionLock<T>(connectionId: string, fn: () => Promise<T>): Promise<T> {
@@ -2368,18 +2380,44 @@ app.post('/api/canvases/:id/github/:connId/import', async (req, res) => {
        overlapping imports of the same screens cannot both pass the plan and
        both pay while only one queues */
     const outcome = await withConnectionLock(conn.id, async () => {
-      /* nothing new to queue (all rejected, or already on the board) costs nothing */
-      if (!actions.planRepoCards(c.id, input).length) return { cards: [] as string[] }
+      const planned = actions.planRepoCards(c.id, input).length
+      const waiting = actions
+        .waitingOutsideCards(c.id, req.user!.id)
+        .some((card) => card.payload?.connectionId === conn.id)
+      /* nothing new to queue (all rejected, or already on the board) and none
+         waiting to hand over costs nothing */
+      if (!planned && !waiting) return { cards: [] as string[] }
       /* the import is the Doop Agent's work, card by card — same gate as a card
          typed on the board: a free task, or the requester's own model account */
       const gate = await allowance.consumeResidentTask(req.user!.id)
-      if (!gate.ok) return { limit: gate }
-      const cards = actions.addRepoCards(c.id, input, req.user!.name, req.user!.id)
-      return { cards: cards.map((card) => card.id) }
+      if (gate.ok) {
+        /* a plan connected since an import queued for their own agent: the
+           cards still waiting go to the Doop Agent now */
+        const handedOver = actions.handRepoCardsToDoop(c.id, conn.id, req.user!.id)
+        if (!planned) await allowance.refundResidentTask(gate, req.user!.id)
+        const cards = planned ? actions.addRepoCards(c.id, input, req.user!.name, req.user!.id) : []
+        return { cards: cards.map((card) => card.id), handedOver }
+      }
+      /* no Doop Agent plan, but an agent of their own over MCP (Claude Code,
+         Codex…): the cards wait for it, the server reads the repo for it */
+      if (gate.connected) {
+        const cards = planned
+          ? actions.addRepoCards(c.id, { ...input, outside: true }, req.user!.name, req.user!.id)
+          : []
+        return { cards: cards.map((card) => card.id), outside: true }
+      }
+      return { limit: gate }
     })
     if (outcome.limit)
-      return res.status(403).json({ error: 'resident_limit', used: outcome.limit.used, limit: outcome.limit.limit })
-    res.json({ cards: outcome.cards, rejected })
+      return res
+        .status(403)
+        .json({ error: 'resident_limit', used: outcome.limit.used, limit: outcome.limit.limit, reason: 'repo-import' })
+    res.json({
+      cards: outcome.cards,
+      rejected,
+      runner: await importRunner(req.user!.id, !!outcome.outside),
+      ...(outcome.handedOver ? { handedOver: outcome.handedOver } : {}),
+    })
   } catch (e) {
     res.status(400).json({ error: e instanceof Error ? e.message : 'import failed' })
   }
@@ -4183,7 +4221,11 @@ wss.on('connection', (ws, upgradeReq) => {
       if (role !== 'edit') return
       demo.maybePlay(msg.canvasId) // first visit to a fresh signup canvas: the demo agent performs
       /* Start never-attempted cards. Failed/interrupted cards are excluded. */
-      if (actions.getTasks(msg.canvasId).some((t) => t.queuedBy && !t.agentName && !t.endedAt)) {
+      if (
+        actions
+          .getTasks(msg.canvasId)
+          .some((t) => t.queuedBy && !t.agentName && !t.endedAt && !actions.isOutsideCard(t))
+      ) {
         import('./resident.ts').then((r) => r.onFeedback(msg.canvasId)).catch(() => {})
       }
       return
