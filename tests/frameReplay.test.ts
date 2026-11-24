@@ -14,6 +14,7 @@ declare global {
     snapshot: () => void
     renderReplay: (events: ReplayEvent[]) => void
     addFrame: (attribute?: string) => void
+    heldTimers: Map<number, () => void>
   }
 }
 
@@ -210,15 +211,39 @@ describe.skipIf(!findBrowserPath())('sandboxed frame replay', () => {
       await page.evaluate(() => new Promise((resolve) => setTimeout(resolve, 1100)))
       expect(attempts).toBe(3)
 
+      // A new generation gets a fresh budget, so its first failure schedules a
+      // 250ms retry. Hold the frame's timers: a slow runner must not let that
+      // retry fire before stopReplay gets its chance to cancel it.
+      const child = page.frames().find((f) => f !== page.mainFrame())!
+      await child.evaluate(() => {
+        /* only the retry's first backoff (250ms) is held; every other timer
+           of the frame runs as usual. Held ids sit far above the browser's
+           own, so clearing a real timer never touches a held one. */
+        const held = new Map<number, () => void>()
+        const realSet = window.setTimeout.bind(window)
+        const realClear = window.clearTimeout.bind(window)
+        let next = 1_000_000_000
+        window.setTimeout = ((callback: () => void, delay?: number, ...rest: unknown[]) => {
+          if (delay !== 250) return realSet(callback, delay, ...rest)
+          held.set(++next, callback)
+          return next
+        }) as typeof setTimeout
+        window.clearTimeout = ((id?: number) => {
+          if (id !== undefined && held.has(id)) held.delete(id)
+          else realClear(id)
+        }) as typeof clearTimeout
+        window.heldTimers = held
+      })
       await page.evaluate(() => {
         window.stopReplay()
         window.startReplay()
       })
       await vi.waitFor(() => expect(attempts).toBe(4))
-      const child = page.frames().find((f) => f !== page.mainFrame())!
-      await child.waitForFunction(() => !document.querySelector('script[data-doop-replay]'))
+      await child.waitForFunction(
+        () => !document.querySelector('script[data-doop-replay]') && window.heldTimers.size === 1,
+      )
       await page.evaluate(() => window.stopReplay())
-      await page.evaluate(() => new Promise((resolve) => setTimeout(resolve, 600)))
+      await child.waitForFunction(() => window.heldTimers.size === 0)
       expect(attempts).toBe(4)
       expect(await page.evaluate(() => window.messages.filter((m) => m.type === 'rrweb'))).toEqual([])
     } finally {

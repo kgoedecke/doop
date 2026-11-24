@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, expectTypeOf, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, expectTypeOf, it, vi } from 'vitest'
 import type { FrameRunner } from '../server/propagation.ts'
 import type { Actor, Frame, ServerMessage } from '../shared/types'
 
@@ -60,8 +60,12 @@ let canvasId: string
 
 beforeEach(() => {
   sent = []
+  /* a test hears only the canvases it makes. An earlier test's canvas can still be talking:
+     an agent's frame plays back as a reveal for seconds after it is made (actions.ts ticks
+     every 80 ms), so on a slow run a tick lands inside a later test's window */
+  const earlier = new Set(store.allCanvases().map((canvas) => canvas.id))
   actions.wire(
-    (_canvasId, message) => void sent.push(message),
+    (room, message) => void (earlier.has(room) || sent.push(message)),
     () => {},
   )
   canvasId = store.createCanvas('writes', 'ada').id
@@ -1136,6 +1140,9 @@ describe('instances through the canvas write entry', () => {
 })
 
 describe('the background queue through the canvas write entry', () => {
+  /* a turn's refusal is a spy on the store: a test that fails or times out before it restores
+     its spies must not refuse the next test's writes too */
+  afterEach(() => vi.restoreAllMocks())
   /** A component and `count` pages each holding one instance of it, the queue drained. */
   async function chips(count: number) {
     await runCanvasWrite(canvasId, {
