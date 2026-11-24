@@ -85,8 +85,22 @@ describe('local Claude run ownership', () => {
     const later = Date.now() + 46_000
     expect(runs.poll('alice', 'second', later)).toBeNull()
     await runs.expire(later)
-    expect((await result).success).toBe(false)
+    expect(await result).toEqual({ success: false, text: 'Desktop disconnected. Retry the task.', fromDoop: true })
     expect(runs.authorized(job.id, job.token)).toBeUndefined()
+  })
+
+  it('ends a run still going after 30 minutes as one that reached its limit', async () => {
+    const runs = new LocalAgentRuns()
+    const result = runs.start('alice', { model: 'default' }, harness())
+    const later = Date.now() + 30 * 60_000 + 1
+    runs.poll('alice', 'desktop', later)
+    await runs.expire(later)
+    expect(await result).toEqual({
+      success: false,
+      text: 'The run reached its 30-minute limit.',
+      fromDoop: true,
+      limitReached: true,
+    })
   })
 })
 
@@ -117,7 +131,7 @@ it('stops a canceled canvas run without stopping another run on the same account
   await expect(runs.execute(job.id, job.token, 'create_frame', {})).rejects.toThrow()
   expect(execute).not.toHaveBeenCalled()
   await runs.expire()
-  expect(await first).toEqual({ success: false, text: 'Task stopped.' })
+  expect(await first).toEqual({ success: false, text: 'Task stopped.', fromDoop: true })
   const next = runs.poll('alice', 'desktop')!
   expect(next.id).not.toBe(job.id)
   await runs.finish(next.id, 'alice', 'desktop', { success: true, text: 'Done' })

@@ -75,9 +75,13 @@ export class LocalAgentRuns {
         },
       }
       this.runs.set(id, run)
-      request.signal?.addEventListener('abort', () => void this.close(run, { success: false, text: 'Task stopped.' }), {
-        once: true,
-      })
+      request.signal?.addEventListener(
+        'abort',
+        () => void this.close(run, { success: false, text: 'Task stopped.', fromDoop: true }),
+        {
+          once: true,
+        },
+      )
     })
   }
 
@@ -119,7 +123,7 @@ export class LocalAgentRuns {
     await Promise.all(
       [...this.runs.values()]
         .filter((r) => r.userId === userId && !r.closing)
-        .map((r) => this.close(r, { success: false, text: 'Local Claude run stopped.' })),
+        .map((r) => this.close(r, { success: false, text: 'Local Claude run stopped.', fromDoop: true })),
     )
   }
 
@@ -133,27 +137,40 @@ export class LocalAgentRuns {
               (r.deviceId ? now - r.lastSeen > 45_000 : !this.online(r.userId, now)) ||
               now - r.startedAt > 30 * 60_000),
         )
-        .map((r) =>
-          this.close(r, {
-            success: false,
-            text: r.request.isCanceled?.()
-              ? 'Task stopped.'
-              : 'Desktop disconnected or local run timed out. Retry the task.',
-          }),
-        ),
+        .map((r) => this.close(r, expiry(r, r.deviceId ? now - r.lastSeen > 45_000 : !this.online(r.userId, now)))),
     )
     for (const [userId, device] of this.devices) if (now - device.at > 60_000) this.devices.delete(userId)
   }
 }
 
+/** Why an expired run ended. A run past its 30 minutes reached its limit and
+ *  is judged by its work, like any run a limit stopped. */
+function expiry(run: Run, away: boolean): LocalAgentResult {
+  if (run.request.isCanceled?.()) return { success: false, text: 'Task stopped.', fromDoop: true }
+  if (away) return { success: false, text: 'Desktop disconnected. Retry the task.', fromDoop: true }
+  return { success: false, text: 'The run reached its 30-minute limit.', fromDoop: true, limitReached: true }
+}
+
+/** What older desktop shells send when Claude Code's result has no text: they
+ *  read only `result`, which an `error_*` run leaves out. */
+const NO_RESULT_TEXT = 'Claude did not complete the task. Check your login and usage limits, then retry.'
+
 /** A desktop shell from before the model aliases refuses them with a bare
- *  "Invalid model"; say what the person can do about it. */
-function shellResult(result: LocalAgentResult): LocalAgentResult {
-  if (result.success || !/^invalid model$/i.test(result.text.trim())) return result
-  return {
-    success: false,
-    text: 'The Doop desktop app on this device is too old for that model. Update it, or pick a pinned model id in Settings.',
-  }
+ *  "Invalid model"; say what the person can do about it. A shell from before
+ *  `limitReached` reports a run stopped at its turn limit only as the text it
+ *  falls back to, which the other `error_*` endings (rare) share; it is taken
+ *  as the turn limit, so delivered work is judged rather than called a crash. */
+export function shellResult(result: LocalAgentResult): LocalAgentResult {
+  if (result.success) return result
+  if (/^invalid model$/i.test(result.text.trim()))
+    return {
+      success: false,
+      text: 'The Doop desktop app on this device is too old for that model. Update it, or pick a pinned model id in Settings.',
+      fromDoop: true,
+    }
+  if (result.limitReached === undefined && result.text.trim() === NO_RESULT_TEXT)
+    return { ...result, limitReached: true }
+  return result
 }
 
 export const localAgentRuns = new LocalAgentRuns()
