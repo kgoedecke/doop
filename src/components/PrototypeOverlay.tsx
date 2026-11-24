@@ -350,7 +350,7 @@ function ConnectHandle({ frame, selector, frames }: { frame: Frame; selector: st
         </svg>
       )}
       <div
-        className="absolute z-[8] cursor-crosshair rounded-full border-2 border-white bg-brand shadow-pop"
+        className="absolute z-[8] cursor-crosshair rounded-full border-2 border-white bg-brand"
         style={{ left: hx - size / 2, top: hy - size / 2, width: size, height: size, borderWidth: 2 / zoom }}
         title={t('panels.protoHandle')}
         aria-label={t('panels.protoHandle')}

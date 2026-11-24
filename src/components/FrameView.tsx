@@ -2137,12 +2137,12 @@ export const FrameView = memo(function FrameView({
               elementMove.moving ? 'cursor-move' : 'cursor-default',
               /* no edge at rest, as in Figma: the artwork meets the canvas
                  directly. A hovered frame wears a soft one-screen-pixel brand ring
-                 (the selected one has its own), a dragged one lifts */
+                 (the selected one has its own); a dragged one wears nothing more
+                 than its selection ring, as in Figma */
               !isCanvasElement(frame.html) &&
-                (dragging
-                  ? 'shadow-pop'
-                  : !selected &&
-                    'hover:shadow-[0_0_0_calc(1px/var(--zoom,1))_color-mix(in_srgb,var(--brand)_55%,transparent)]'),
+                !dragging &&
+                !selected &&
+                'hover:shadow-[0_0_0_calc(1px/var(--zoom,1))_color-mix(in_srgb,var(--brand)_55%,transparent)]',
               editing && 'cursor-text',
               !stream &&
                 remoteEditor &&
