@@ -26,6 +26,11 @@ export default defineConfig({
     exclude: ['**/node_modules/**', '**/.claude/**'],
     setupFiles: ['tests/setup.ts'],
     globalSetup: ['tests/globalSetup.ts'],
+    /* an expect.poll in a browser test reads the page through several round
+       trips (a frame's iframe, then its document); on a loaded runner one read
+       alone has outlasted vitest's 1s default, and the poll failed without
+       ever seeing an answer. 15s, the bound of every other page wait. */
+    expect: { poll: { timeout: 15_000 } },
     projects: [
       { test: { name: 'parallel', exclude: clipboardTests } },
       // Browser contexts share the system clipboard, so these files must run one at a time.

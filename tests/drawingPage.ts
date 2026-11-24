@@ -36,9 +36,21 @@ declare global {
       /** an SVG file read the way a paste reads it, with the browser's computed styles */
       importSvg: (markup: string, name: string) => ImportedSvg | null
     }
-    delayedLayerProbe: MessageEvent | null
-    heldMoveHits: MessageEvent[] | null
+    /** the frames' replies of one type the app does not see yet (see holdReplies) */
+    heldReplies: HeldReplies | null
+    /** hands the held replies on to the app, in order, and lets later ones through */
+    releaseReplies: () => void
   }
+}
+
+interface HeldReplies {
+  /** the reply held back, e.g. `doop:move-hit-result` */
+  type: string
+  events: MessageEvent[]
+  /** released: replies of the type go straight on */
+  open: boolean
+  /** how many of them the app has been handed */
+  delivered: number
 }
 
 /** the running test's page */
@@ -56,16 +68,29 @@ async function openPage(pages: TestPages): Promise<Page> {
   const page = await pages.open()
   page.setDefaultTimeout(10_000)
   page.on('pageerror', (err) => errors.push(String(err)))
-  /* holds the frames' hit-test answers while a test sets heldMoveHits; it
-     must listen before the app does, since a window's own listeners run in
-     the order they were added */
+  /* holds the frames' answers of one type while a test sets heldReplies,
+     as a busy frame answers late. It must listen before the app does: a
+     window runs its own listeners in the order they were added, capturing
+     or not, so one a test adds later only sees what the app already took */
   await page.evaluateOnNewDocument(() => {
-    window.heldMoveHits = null
+    window.heldReplies = null
     window.addEventListener('message', (event) => {
-      if (event.data?.type !== 'doop:move-hit-result' || !window.heldMoveHits) return
-      window.heldMoveHits.push(event)
+      const held = window.heldReplies
+      if (!held || event.data?.type !== held.type) return
+      if (held.open) {
+        held.delivered++
+        return
+      }
+      held.events.push(event)
       event.stopImmediatePropagation()
     })
+    window.releaseReplies = () => {
+      const held = window.heldReplies
+      if (!held) return
+      held.open = true
+      for (const event of held.events.splice(0))
+        window.dispatchEvent(new MessageEvent('message', { data: event.data, source: event.source }))
+    }
   })
   await page.setRequestInterception(true)
   page.on('request', async (req) => {
@@ -142,6 +167,14 @@ export async function drag(from: [number, number], to: [number, number]) {
   await page.mouse.move(...to, { steps: 5 })
   await page.mouse.up()
 }
+/** From now on the app gets no `type` reply from a frame until
+ *  `window.releaseReplies()` hands them over. */
+export async function holdReplies(type: `doop:${string}-result`) {
+  await page.evaluate((type) => {
+    window.heldReplies = { type, events: [], open: false, delivered: 0 }
+  }, type)
+}
+
 export async function waitForFrames(count: number) {
   await page.waitForFunction((n) => window.drawingHarness.state().frames.length === n, {}, count)
   return page.evaluate(() => window.drawingHarness.state().frames)
