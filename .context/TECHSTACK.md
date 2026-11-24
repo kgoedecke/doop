@@ -1538,9 +1538,16 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   policy cases in `authFormBrowser.test.ts`.
 
 - MCP OAuth (better-auth `mcp()` plugin): 1h access tokens, 30-day refresh tokens
-  (`MCP_REFRESH_TOKEN_TTL_S` in `server/mcpTokens.ts`; the plugin neither rotates nor revokes
-  them). A daily prune deletes expired token rows but keeps the newest per user and client,
-  since `allowance.ts` reads any row as proof an agent once connected.
+  (`MCP_REFRESH_TOKEN_TTL_S` in `server/mcpTokens.ts`; a refresh issues a new refresh token in a
+  new row and never revokes the old one, which stays valid until it expires). A daily prune
+  deletes expired token rows but keeps the newest per user and client, since `allowance.ts` reads
+  any row as proof an agent once connected. Consent (`server/mcpConsent.ts`, a plugin of before
+  hooks ahead of `mcp()`): the plugin's authorize shows `/oauth/consent` only on `prompt=consent`
+  and registration is open, so `/mcp/authorize` is marked `prompt=consent` unless this person
+  already approved this client for every requested scope (`oauth_consent` rows, written when they
+  press Connect), and always when signed out; `/mcp/token` refuses a code still awaiting approval
+  (the pending request is stored under the consent page's own code), and `/oauth2/consent`
+  approves only for the person who made the request. Tests: `mcpConsent.test.ts`.
 
 ## 6. Build and Dependency Management
 

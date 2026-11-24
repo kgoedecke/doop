@@ -5,8 +5,10 @@ import { db } from './db/index.ts'
  *  new refresh token with a fresh lifetime, so only a client unused for the
  *  whole window has to sign in again. better-auth's MCP plugin defaults to
  *  seven days, which logged out anyone who skipped a week. Kept at 30 rather
- *  than longer because the plugin neither rotates nor revokes refresh tokens:
- *  a leaked one stays valid until it expires. */
+ *  than longer because the plugin never revokes a refresh token: a refresh
+ *  writes a new token row and leaves the old one in place, so the old refresh
+ *  token still works too, and a leaked one stays valid until it expires,
+ *  whether or not the agent has refreshed since. */
 export const MCP_REFRESH_TOKEN_TTL_S = 30 * 24 * 60 * 60
 
 const PRUNE_EVERY_MS = 24 * 60 * 60 * 1000
