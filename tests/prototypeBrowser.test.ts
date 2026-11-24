@@ -182,6 +182,40 @@ describe.skipIf(!findBrowserPath())('prototype player', { timeout: 30_000 }, () 
     expect(await home.$('#go[data-v-proto-flash]')).not.toBeNull()
   })
 
+  it('keeps a restarted hotspot flash for its whole run', async () => {
+    await page.evaluate((canvas) => (window as unknown as Fixture).seed(canvas), CANVAS)
+    await page.evaluate(() => (window as unknown as Fixture).play('home'))
+    const home = await screen('home')
+    /* a miss flashes once the runtime is in prototype mode; let that flash end */
+    for (let attempt = 0; attempt < 20; attempt++) {
+      await home.$eval('#blank', (el) => (el as HTMLElement).click())
+      if (await home.$('[data-v-proto-flash]')) break
+      await sleep(50)
+    }
+    await home.waitForFunction(() => !document.querySelector('[data-v-proto-flash]'), { timeout: 3000 })
+    /* timed inside the frame, so no round trip stretches the gaps: the first
+       miss's clear must not cut the second miss's flash short */
+    const run = await home.evaluate(async () => {
+      const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+      const go = document.getElementById('go')!
+      const alpha = () => Number(/rgba?\(([^)]+)\)/.exec(getComputedStyle(go).outlineColor)?.[1]?.split(',')[3] ?? 1)
+      const blank = document.getElementById('blank')!
+      blank.click()
+      await wait(500)
+      blank.click()
+      await wait(100)
+      const early = alpha()
+      await wait(500)
+      const late = alpha()
+      await wait(200)
+      return { early, late, lit: go.hasAttribute('data-v-proto-flash') }
+    })
+    expect(run.lit).toBe(true)
+    /* and the ring fades over the run rather than holding until it is cleared */
+    expect(run.late).toBeLessThan(run.early)
+    await home.waitForFunction(() => !document.querySelector('[data-v-proto-flash]'), { timeout: 3000 })
+  })
+
   it('sits below the app inset and rescales from its scaling menu', async () => {
     await page.evaluate(() => document.documentElement.style.setProperty('--app-inset', '40px'))
     /* the scaling pick is kept in storage, which the file's pages share */
