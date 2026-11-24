@@ -41,17 +41,17 @@ it('drops a Claude API account to Haiku', () => {
   expect(accountDescriber(account('anthropic-key', { model: 'claude-opus-5' }))).toMatchObject({
     provider: 'anthropic-key',
     userId: 'alice',
-    label: 'Claude API (claude-haiku-4-5-20251001)',
+    label: 'Claude API (claude-haiku-5-5)',
   })
 })
 
 it('drops Gemini and OpenRouter accounts to the flash tier, with vision', () => {
   expect(accountDescriber(account('gemini-key', { model: 'gemini-3.1-pro-preview' }))).toMatchObject({
-    label: 'Gemini (gemini-3.7-flash)',
+    label: 'Gemini (gemini-3.8-flash)',
     vision: true,
   })
   expect(accountDescriber(account('openrouter-key', { model: 'deepseek/deepseek-v4-pro' }))).toMatchObject({
-    label: 'OpenRouter (google/gemini-3.7-flash)',
+    label: 'OpenRouter (google/gemini-3.8-flash)',
     vision: true,
   })
 })
@@ -67,5 +67,5 @@ it('is null for the server tier without a key, and Haiku on the Anthropic key', 
   vi.stubEnv('ANTHROPIC_API_KEY', '')
   expect(serverDescriber()).toBeNull()
   vi.stubEnv('ANTHROPIC_API_KEY', 'sk-ant-test')
-  expect(serverDescriber()).toMatchObject({ provider: 'anthropic', label: 'Doop (claude-haiku-4-5-20251001)' })
+  expect(serverDescriber()).toMatchObject({ provider: 'anthropic', label: 'Doop (claude-haiku-5-5)' })
 })

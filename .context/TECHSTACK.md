@@ -9,7 +9,8 @@
   (`tsx watch`) and prod (`NODE_ENV=production tsx server/index.ts`).
 - Bun 1.3.10 - pinned via `packageManager` in `package.json`; used as the package manager and
   script runner, not as the server runtime.
-- Rust (stable) - `desktop/src-tauri`, the Tauri desktop shell.
+- Rust (stable) - `desktop/src-tauri`, the Tauri desktop shell, and `desktop/src-tauri-chromium`,
+  the same sources built on Chromium (CEF) for the macOS app.
 
 ## 2. Core Frameworks and Libraries
 
@@ -613,7 +614,7 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   since the iframe box snaps to whole pixels and only a whole k keeps every design size exact.
   Elsewhere (`FRAME_DOCUMENTS_TAKE_ZOOM_AS_DENSITY` false) each `FrameView` iframe undoes k (`zoom: 1/k`, `scale(k)`); `src/lib/layoutZoom.ts` snaps k to a
   float32 whose inverse multiplies back to exactly 1, since engines multiply zoom in float32.
-  WebKit (the desktop app) rasterizes a composited layer at its CSS size, so a transform-only
+  WebKit (Safari, the Linux desktop app) rasterizes a composited layer at its CSS size, so a transform-only
   scale went soft past 100%. Both engines tile what is on screen, so backing memory follows the
   viewport, not k. From 300% a 1px pixel grid fades in over the frames (full at 500%): the
   Stage draws it over the bare paper, under the world, and each frame draws its own over its
@@ -694,7 +695,8 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   The layer right-click menu (`ElementContextMenu.tsx`) is mostly registry rows (`ActionMenuItem.tsx`),
   ordered as Figma's and Paper's (select, clipboard with a Copy/Paste as submenu, structure, stacking,
   flip, visibility); a right-click inside a multi-pick keeps it. A Layers row opens the same menu the canvas
-  does (a shape's row too), and Rename from a canvas menu opens that row's name field (`renameRequest`). Frames and standalone shapes get Move to
+  does (a shape's row too). No menu renames: a Layers row is renamed by a double-click. With several canvas shapes
+  selected, a shape's Copy and Cut take them all, as ⌘C and ⌘X do (`cutFrames`). Frames and standalone shapes get Move to
   page (`MoveToPageMenu`). ⌘L copies a link and ⇧⌘C a PNG of the selection.
   `CanvasPage` lends the registry its modals and panels as the `ActionHost`. Chords (`chords.ts`)
   are `mod` (⌘ on a Mac, Ctrl elsewhere), ⌥ chords by `code`, `macOnly` / `notMac` per platform (⌘Y

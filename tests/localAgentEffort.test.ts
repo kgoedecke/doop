@@ -17,6 +17,10 @@ afterAll(() => server?.stop())
 const put = (body: unknown) => alice.req('/api/local-agent', { method: 'PUT', body: JSON.stringify(body) })
 const get = async () => (await alice.get('/api/local-agent')).json()
 
+it('starts a user who never chose on Opus at medium effort, switched off', async () => {
+  expect(await get()).toMatchObject({ enabled: false, model: 'opus', effort: 'medium' })
+})
+
 it('keeps the alias, a pinned id and the effort across a switch away and back', async () => {
   expect((await put({ enabled: true, model: 'fable', effort: 'high' })).status).toBe(200)
   expect(await get()).toMatchObject({ enabled: true, model: 'fable', effort: 'high' })

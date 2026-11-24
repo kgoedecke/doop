@@ -38,7 +38,7 @@ Driven by `.github/workflows/desktop-release.yml`; every desktop job shares the 
 in `.github/actions/setup-desktop`:
 
 - Push a tag matching `desktop-v*` -> `dmg-macos` builds a universal (Apple Silicon + Intel) DMG
-  with `bunx tauri build --target universal-apple-darwin --bundles app,dmg`, `nsis-windows` builds
+  of the Chromium shell with `desktop/scripts/macos-universal.sh` (below), `nsis-windows` builds
   `doop_<version>_x64-setup.exe` with `bunx tauri build --bundles nsis`, `linux` builds the
   x64 AppImage, .deb and .rpm on `ubuntu-22.04` (the oldest runner, for a low glibc floor) with
   `bunx tauri build --bundles deb,rpm,appimage`, and a final `release` job (`needs` all three)
@@ -106,7 +106,8 @@ in `.github/actions/setup-desktop`:
 - Desktop app version is tracked separately from the root `package.json` and bumped by
   release-please (see above); after the release PR merges, tag as `desktop-vX.Y.Z`.
 - The macOS app is the Chromium (CEF) build in `desktop/src-tauri-chromium`; Windows and Linux
-  stay on the WebKit build. It ships as `doop` / `design.doop.desktop` with the executable
+  stay on the system-webview build in `desktop/src-tauri` (Tauri 2: WebView2, itself Chromium, on
+  Windows; WebKitGTK on Linux), which these notes call the WebKit build after its old macOS engine. It ships as `doop` / `design.doop.desktop` with the executable
   `doop-desktop`, exactly as the WebKit app did, so the updater swaps the bundle in place and
   relaunches it by its old path. The Tauri 3 CLI bundles CEF for one architecture at a time
   (its universal target ships one architecture's framework), so `dmg-macos` runs

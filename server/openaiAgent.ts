@@ -29,18 +29,18 @@ import { ModelStreamInterruptedError } from './modelTurnRetry.ts'
 export const CHATGPT_URL = env.CHATGPT_RESPONSES_URL
 export const OPENAI_URL = env.OPENAI_RESPONSES_URL
 /**
- * The OpenAI tiers a ChatGPT sign-in and an API key can both reach: GPT-6
- * Astra (the September 2026 flagship — on Codex it needs a Plus plan or
- * better, and OpenAI is still rolling it out account by account) on top of
- * the three GPT-5.6 tiers. Users pick one in Settings — they are paying for
- * it, and the tiers trade real money against real quality — so this list is
- * the menu, not a detail. Ordered best-first; the default stays on Terra:
+ * The OpenAI tiers a ChatGPT sign-in and an API key can both reach: GPT-6.2
+ * Sol (OpenAI's recommended everyday model, and the default), GPT-6 Astra
+ * (on Codex it needs a Plus plan or better) and the three GPT-5.6 tiers.
+ * Users pick one in Settings — they are paying for it, and the tiers trade
+ * real money against real quality — so this list is the menu, not a detail.
  * Astra bills several times Sol per token, which is a choice to opt into.
  */
 export const AGENT_MODELS = [
+  { id: 'gpt-6.2-sol', name: 'GPT-6.2 Sol', blurb: 'The everyday workhorse. A good default for design work' },
   { id: 'gpt-6-astra', name: 'GPT-6 Astra', blurb: 'Newest flagship — the sharpest reasoning, at the highest price' },
   { id: 'gpt-5.6-sol', name: 'GPT-5.6 Sol', blurb: 'Flagship — the most detail and polish, and the priciest' },
-  { id: 'gpt-5.6-terra', name: 'GPT-5.6 Terra', blurb: 'The everyday workhorse. A good default for design work' },
+  { id: 'gpt-5.6-terra', name: 'GPT-5.6 Terra', blurb: 'The previous workhorse, cheaper per token' },
   { id: 'gpt-5.6-luna', name: 'GPT-5.6 Luna', blurb: 'Fastest and cheapest — fine for small, mechanical edits' },
 ] as const
 

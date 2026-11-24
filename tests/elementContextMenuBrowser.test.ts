@@ -32,6 +32,8 @@ describe.skipIf(!findBrowserPath())('frame and element context menus', () => {
   let page: Page
   let saved: Frame
   let deletedFrames = 0
+  /* every frame a DELETE named, for menus that remove more than frame f */
+  let deletedIds: string[] = []
   let stamped: string[] = []
   const errors: string[] = []
 
@@ -104,6 +106,7 @@ describe.skipIf(!findBrowserPath())('frame and element context menus', () => {
 
   beforeEach(async () => {
     deletedFrames = 0
+    deletedIds = []
     stamped = []
     page = await pages.open()
     // Install before the iframe bootstrap registers its listener, and in the capture
@@ -135,6 +138,7 @@ describe.skipIf(!findBrowserPath())('frame and element context menus', () => {
     await page.setRequestInterception(true)
     page.on('request', async (request) => {
       const pathname = new URL(request.url()).pathname
+      if (request.method() === 'DELETE' && pathname.startsWith('/api/frames/')) deletedIds.push(pathname.slice(12))
       if (pathname === '/api/frames/f') {
         if (request.method() === 'PATCH') saved = { ...saved, ...JSON.parse(request.postData()!) }
         if (request.method() === 'DELETE') deletedFrames++
@@ -147,6 +151,8 @@ describe.skipIf(!findBrowserPath())('frame and element context menus', () => {
           contentType: 'application/json',
           body: JSON.stringify({ elementId: 'text00' }),
         })
+      } else if (request.method() === 'DELETE' && pathname.startsWith('/api/frames/')) {
+        await request.respond({ status: 200, contentType: 'application/json', body: '{}' })
       } else await request.continue()
     })
     await page.goto(fixtureUrl('elementContextMenu.html'))
@@ -197,12 +203,11 @@ describe.skipIf(!findBrowserPath())('frame and element context menus', () => {
     )
     await expect.poll(() => saved.name).toBe('Double-click name')
 
-    await page.click(row, { button: 'right' })
-    await choose('Rename')
+    await page.click(`${row} > span:nth-of-type(3)`, { count: 2 })
     await page.waitForFunction((selector) => document.activeElement === document.querySelector(selector), {}, editor)
-    await page.keyboard.type('Menu name')
+    await page.keyboard.type('Second name')
     await page.keyboard.press('Tab')
-    await expect.poll(() => saved.name).toBe('Menu name')
+    await expect.poll(() => saved.name).toBe('Second name')
     await page.evaluate(() => window.contextMenuHarness.undo())
     await page.waitForFunction(
       (row) => document.querySelector(row)?.textContent?.includes('Double-click name'),
@@ -233,8 +238,7 @@ describe.skipIf(!findBrowserPath())('frame and element context menus', () => {
       expect(await doc.$eval('#text', (el) => el.textContent)).toBe('Second element')
       expect(await doc.$eval('#photo', (el) => el.getAttribute('alt'))).toBe('Original alt')
 
-      await page.click(row, { button: 'right' })
-      await choose('Rename')
+      await page.click(`${row} > span:nth-of-type(3)`, { count: 2 })
       await page.waitForFunction((selector) => document.activeElement === document.querySelector(selector), {}, editor)
       await page.keyboard.type('Saved label')
       await page.keyboard.press('Enter')
@@ -260,7 +264,6 @@ describe.skipIf(!findBrowserPath())('frame and element context menus', () => {
       'Paste',
       'Paste to replace',
       'Duplicate',
-      'Rename',
       'Group selection',
       'Ungroup selection',
       'Add flex layout',
@@ -290,21 +293,15 @@ describe.skipIf(!findBrowserPath())('frame and element context menus', () => {
     expect(await page.evaluate(() => navigator.clipboard.readText())).toContain('id="text"')
   })
 
-  it('renames from the canvas menu through the layer row, as the Layers menu does', async () => {
-    const editor = 'input[aria-label="Item name"]'
+  it('offers no Rename on the canvas: a layer or frame is renamed from its Layers row', async () => {
+    const labels = () => page.$$eval('[role="menuitem"]', (items) => items.map((el) => el.firstChild?.textContent))
     await rightClick('#text')
-    await choose('Rename')
-    await page.waitForFunction((selector) => document.activeElement === document.querySelector(selector), {}, editor)
-    await page.keyboard.type('From canvas')
-    await page.keyboard.press('Enter')
-    await expect.poll(() => saved.html).toContain('data-doop-name="From canvas"')
-
+    expect(await labels()).not.toContain('Rename')
+    await page.keyboard.press('Escape')
+    await page.waitForSelector('[role="menu"]', { hidden: true })
     await page.click('[data-frame-title]', { button: 'right' })
-    await choose('Rename')
-    await page.waitForFunction((selector) => document.activeElement === document.querySelector(selector), {}, editor)
-    await page.keyboard.type('Canvas frame')
-    await page.keyboard.press('Enter')
-    await expect.poll(() => saved.name).toBe('Canvas frame')
+    await page.waitForSelector('[role="menuitem"]')
+    expect(await labels()).not.toContain('Rename')
   })
 
   it('shares hide, unlock, and link actions with the layer panel', async () => {
@@ -410,6 +407,40 @@ describe.skipIf(!findBrowserPath())('frame and element context menus', () => {
     })
     await chooseIn('Copy/Paste as', 'Copy HTML')
     expect(await page.evaluate(() => navigator.clipboard.readText())).toContain('id="text"')
+  })
+
+  it("copies and cuts every selected canvas shape from one shape's Layers row", async () => {
+    const shape = (id: string, x: number, locked = false): Frame => ({
+      ...saved,
+      id,
+      name: `Shape ${id}`,
+      x,
+      width: 40,
+      height: 40,
+      html: `<body data-doop-canvas-element="true"><div id="${id}-box" data-doop-drawing="rect"${locked ? ' data-doop-locked="true"' : ''} style="width:40px;height:40px;background:red"></div></body>`,
+    })
+    await page.evaluate(
+      (frames) => {
+        window.contextMenuHarness.seed(frames)
+        window.contextMenuHarness.selectMany(['f', 'g', 'h'])
+      },
+      /* h is locked on its own layer (⌘⇧L): copied with the rest, never cut */
+      [shape('f', 60), shape('g', 200), shape('h', 340, true)],
+    )
+    const row = '[data-row-key="f|#f-box"]'
+    const clip = () =>
+      page.evaluate(() => JSON.parse(localStorage.getItem('doop:frame-clipboard') ?? '{"frames":[]}').frames.length)
+
+    await page.click(row, { button: 'right' })
+    await choose('Copy')
+    await expect.poll(clip).toBe(3)
+
+    await page.evaluate(() => localStorage.removeItem('doop:frame-clipboard'))
+    await page.evaluate(() => window.contextMenuHarness.selectMany(['f', 'g', 'h']))
+    await page.click(row, { button: 'right' })
+    await choose('Cut')
+    await expect.poll(clip).toBe(3)
+    await expect.poll(() => [...deletedIds].sort()).toEqual(['f', 'g'])
   })
 
   it('keeps group actions on titles but restricts a surface action to its element', async () => {
