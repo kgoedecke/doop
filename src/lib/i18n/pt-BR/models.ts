@@ -115,6 +115,8 @@ export const models: Catalog['models'] = {
   claudeEffortMaxBlurb: 'Todo o raciocínio que ele consegue, com os turnos mais lentos',
   pinnedBlurb: 'Fixado neste id exato de modelo; os aliases acompanham os novos lançamentos sozinhos.',
   installToConnect: 'Instale o Claude Code para conectar.',
+  chooseOrInstallToConnect:
+    'O Doop não encontrou o Claude Code. Se ele estiver instalado, indique onde com Escolher…; se não, instale-o para conectar.',
   signInToConnect: 'Entre no Claude Code para conectar.',
   installing: 'Instalando…',
   installClaude: 'Instalar Claude Code',

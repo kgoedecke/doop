@@ -6,6 +6,8 @@ const mocks = vi.hoisted(() => ({
   refresh: vi.fn(),
   select: vi.fn(),
   disconnect: vi.fn(),
+  /* whether the shell offers Choose… for a Claude Code it did not find */
+  canChoose: false,
   /* what the row reads: the server preference and the desktop's own status */
   state: {
     preference: { enabled: false, model: 'claude-opus-5' },
@@ -19,7 +21,7 @@ vi.mock('../src/lib/localAgent', () => ({
   useLocalAgent: () => mocks.state,
   hasLocalClaude: () => true,
   canInstallClaude: () => true,
-  canChooseClaude: () => false,
+  canChooseClaude: () => mocks.canChoose,
   refreshLocalAgent: mocks.refresh,
   selectLocalAgent: mocks.select,
   disconnectLocalAgent: mocks.disconnect,
@@ -32,6 +34,7 @@ let container: HTMLDivElement
 const button = (label: string) => Array.from(container.querySelectorAll('button')).find((b) => b.textContent === label)
 beforeEach(async () => {
   vi.resetAllMocks()
+  mocks.canChoose = false
   mocks.state = {
     preference: { enabled: false, model: 'claude-opus-5' },
     native: { installed: true, connected: true, enabled: false },
@@ -68,6 +71,16 @@ it.each([
   expect(button('Refresh')).toBeDefined()
   await act(async () => button('Refresh')!.click())
   expect(button('Refresh')).toBeUndefined()
+})
+
+it('points at Choose… before installing when the shell can pick a Claude Code it did not find', async () => {
+  mocks.canChoose = true
+  mocks.refresh.mockResolvedValueOnce({ native: { installed: false, connected: false } })
+  await act(async () => button('Connect')!.click())
+  expect(mocks.select).not.toHaveBeenCalled()
+  expect(container.textContent).toContain(
+    'Doop did not find Claude Code. If it is installed, point Doop at it with Choose…; if not, install it to connect.',
+  )
 })
 
 describe('a connected Plan', () => {

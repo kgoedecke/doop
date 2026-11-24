@@ -113,6 +113,8 @@ export const models = {
   claudeEffortMaxBlurb: 'All the thinking it can do, and the slowest turns',
   pinnedBlurb: 'Pinned to this exact model id; the aliases follow new releases on their own.',
   installToConnect: 'Install Claude Code to connect.',
+  chooseOrInstallToConnect:
+    'Doop did not find Claude Code. If it is installed, point Doop at it with Choose…; if not, install it to connect.',
   signInToConnect: 'Sign in to Claude Code to connect.',
   installing: 'Installing…',
   installClaude: 'Install Claude Code',

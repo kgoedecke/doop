@@ -44,7 +44,8 @@ pub fn shutdown(state: &ClaudeState) {
 /// Every place a Claude Code install lands: the native installer's
 /// `~/.local/bin`, the npm-local install `claude migrate-installer` leaves in
 /// `~/.claude/local`, the login shell's PATH and the app's own (a GUI app's
-/// PATH is short), and the Homebrew/npm global locations. Users accumulate
+/// PATH is short), the Homebrew/npm global locations, and on Windows the
+/// installs WinGet and npm leave behind a `claude.cmd`. Users accumulate
 /// more than one over time, and an old npm global (1.x) neither knows
 /// `auth status` nor shares a login with the install they use, so when the
 /// shell names none worth running the NEWEST one found is the one to run.
@@ -61,9 +62,17 @@ fn candidates(shell_path: Option<&OsStr>) -> Vec<PathBuf> {
         candidates.push(home.join(".local/bin").join(name));
         candidates.push(home.join(".claude/local").join(name));
     }
-    for path in [shell_path.map(OsStr::to_os_string), std::env::var_os("PATH")].into_iter().flatten() {
-        candidates.extend(std::env::split_paths(&path).map(|dir| dir.join(name)));
-    }
+    let path_dirs: Vec<PathBuf> = [
+        shell_path.map(OsStr::to_os_string),
+        std::env::var_os("PATH"),
+    ]
+    .into_iter()
+    .flatten()
+    .flat_map(|path| std::env::split_paths(&path).collect::<Vec<_>>())
+    .collect();
+    candidates.extend(path_dirs.iter().map(|dir| dir.join(name)));
+    #[cfg(windows)]
+    candidates.extend(windows_installs(&path_dirs, |name| std::env::var_os(name)));
     candidates.extend([
         PathBuf::from("/opt/homebrew/bin/claude"),
         PathBuf::from("/usr/local/bin/claude"),
@@ -74,6 +83,129 @@ fn candidates(shell_path: Option<&OsStr>) -> Vec<PathBuf> {
         .filter(|p| p.is_file())
         .filter(|p| seen.insert(std::fs::canonicalize(p).unwrap_or_else(|_| p.clone())))
         .collect()
+}
+
+/// Windows package managers put no `claude.exe` on PATH. WinGet, when it
+/// cannot make a symlink, links a `claude.cmd` shim that runs the exe in its
+/// package folder; npm's global `claude.cmd` runs the exe its package ships in
+/// `bin` (recent releases; older ones ship a `cli.js` for node instead, which
+/// is left to `claude update` or Choose…). The shims are read, never run, and
+/// the exe behind one is what runs: a `.cmd` would go through cmd.exe, which
+/// parses every argument again. Their usual homes are looked in too, for an
+/// app started before the install changed PATH.
+#[cfg(windows)]
+fn windows_installs(path_dirs: &[PathBuf], var: impl Fn(&str) -> Option<OsString>) -> Vec<PathBuf> {
+    let mut found = Vec::new();
+    for dir in path_dirs {
+        found.extend(
+            read_shim(&dir.join("claude.cmd")).and_then(|text| winget_shim_target(&text, &var)),
+        );
+        found.push(npm_package_exe(dir));
+    }
+    let var_dir = |name: &str| var(name).map(PathBuf::from);
+    let winget = [
+        var_dir("LOCALAPPDATA").map(|dir| dir.join(r"Microsoft\WinGet\Packages")),
+        var_dir("ProgramFiles").map(|dir| dir.join(r"WinGet\Packages")),
+    ];
+    for packages in winget.into_iter().flatten() {
+        found.extend(winget_packages(&packages));
+    }
+    found.extend(var_dir("APPDATA").map(|dir| npm_package_exe(&dir.join("npm"))));
+    found
+}
+
+/// A shim's text, if it is a small file: a WinGet shim is two short lines,
+/// and a longer file is never one, nor read past where that is clear.
+#[cfg(windows)]
+fn read_shim(path: &Path) -> Option<String> {
+    use std::io::Read;
+    const MAX_SHIM_BYTES: u64 = 4096;
+    let mut text = String::new();
+    std::fs::File::open(path)
+        .ok()?
+        .take(MAX_SHIM_BYTES + 1)
+        .read_to_string(&mut text)
+        .ok()?;
+    (text.len() as u64 <= MAX_SHIM_BYTES).then_some(text)
+}
+
+/// The `claude.exe` a WinGet shim runs. The shim is `@echo off`, then the
+/// quoted exe followed by `%*`, its path written with `%LOCALAPPDATA%` and the
+/// like; only that exact shape is read, those variables expanded from the
+/// environment, and only an absolute path to a `claude.exe` is taken.
+#[cfg(windows)]
+fn winget_shim_target(text: &str, var: impl Fn(&str) -> Option<OsString>) -> Option<PathBuf> {
+    let mut lines = text.lines().map(str::trim).filter(|line| !line.is_empty());
+    if !lines.next()?.eq_ignore_ascii_case("@echo off") {
+        return None;
+    }
+    let command = lines.next()?;
+    if lines.next().is_some() {
+        return None;
+    }
+    let quoted = command
+        .strip_suffix("%*")?
+        .trim_end()
+        .strip_prefix('"')?
+        .strip_suffix('"')?;
+    if quoted.contains('"') {
+        return None;
+    }
+    let path = PathBuf::from(expand_variables(quoted, var)?);
+    let is_claude = path
+        .file_name()
+        .and_then(OsStr::to_str)
+        .is_some_and(|name| name.eq_ignore_ascii_case("claude.exe"));
+    (path.is_absolute() && is_claude).then_some(path)
+}
+
+/// `%NAME%` replaced with the variable's value, as cmd.exe would; None for a
+/// variable that is not set or a `%` that does not open one.
+#[cfg(windows)]
+fn expand_variables(text: &str, var: impl Fn(&str) -> Option<OsString>) -> Option<OsString> {
+    let mut expanded = OsString::new();
+    let mut rest = text;
+    while let Some((before, after)) = rest.split_once('%') {
+        let (name, tail) = after.split_once('%')?;
+        let is_name = !name.is_empty()
+            && name
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || "_()".contains(c));
+        if !is_name {
+            return None;
+        }
+        expanded.push(before);
+        expanded.push(var(name)?);
+        rest = tail;
+    }
+    expanded.push(rest);
+    Some(expanded)
+}
+
+/// The exe npm's global install of Claude Code runs, beside its shim.
+#[cfg(windows)]
+fn npm_package_exe(prefix: &Path) -> PathBuf {
+    prefix.join(r"node_modules\@anthropic-ai\claude-code\bin\claude.exe")
+}
+
+/// Each WinGet install of Claude Code: a `<package id>_<source>` folder.
+#[cfg(windows)]
+fn winget_packages(dir: &Path) -> Vec<PathBuf> {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    let mut found: Vec<PathBuf> = entries
+        .flatten()
+        .filter(|entry| {
+            entry.file_name().to_str().is_some_and(|name| {
+                name.to_ascii_lowercase()
+                    .starts_with("anthropic.claudecode_")
+            })
+        })
+        .map(|entry| entry.path().join("claude.exe"))
+        .collect();
+    found.sort();
+    found
 }
 
 type Version = (u64, u64, u64);
@@ -357,7 +489,7 @@ fn resolved(app: &AppHandle, fresh: bool) -> Result<Claude, String> {
     let (path, version, source) = pick(shell, || {
         candidates(env_path.as_deref()).into_iter().map(probe).collect()
     })
-    .ok_or("Claude CLI not found. Install Claude Code, then refresh.")?;
+    .ok_or("Claude Code not found. If it is installed, pick it with Choose… in Settings; otherwise install it, then refresh.")?;
     Ok(Claude { path, version, source, env_path, chosen_missing })
 }
 
@@ -446,7 +578,7 @@ fn read_cli_line(reader: &mut impl BufRead) -> Result<Option<String>, String> {
             break;
         }
         let newline = buffer.iter().position(|b| *b == b'\n');
-        let count = newline.map_or(buffer.len(), |index| index);
+        let count = newline.unwrap_or(buffer.len());
         if line.len() + count > MAX_CLI_LINE_BYTES {
             return Err("Claude output exceeded the 2 MB line limit. The run was stopped; retry with a smaller tool result.".into());
         }
@@ -907,6 +1039,7 @@ mod tests {
         assert_eq!(run_result(&done), json!({"success":true,"text":"Done.","limitReached":false}));
     }
 
+    #[cfg(unix)]
     #[test]
     fn installer_does_not_execute_a_failed_download() {
         use std::os::unix::fs::PermissionsExt;
@@ -1029,6 +1162,131 @@ mod tests {
             ShellView::default()
         );
         assert_eq!(parse_shell_probe("zsh: command not found: compinit", Some(home)), ShellView::default());
+    }
+
+    #[cfg(windows)]
+    fn test_vars(name: &str) -> Option<OsString> {
+        match name {
+            "LOCALAPPDATA" => Some(r"C:\Users\Me\AppData\Local".into()),
+            "ProgramFiles(x86)" => Some(r"C:\Program Files (x86)".into()),
+            _ => None,
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn reads_the_exe_a_winget_shim_runs() {
+        let package = r"\Microsoft\WinGet\Packages\Anthropic.ClaudeCode_Microsoft.Winget.Source_8wekyb3d8bbwe\claude.exe";
+        let exe = PathBuf::from(format!(r"C:\Users\Me\AppData\Local{package}"));
+        // as WinGet writes it, CRLF and all
+        let shim = format!("@echo off\r\n\"%LOCALAPPDATA%{package}\" %*\r\n");
+        assert_eq!(winget_shim_target(&shim, test_vars), Some(exe.clone()));
+        assert_eq!(
+            winget_shim_target(
+                &format!("@ECHO OFF\n\n  \"%LOCALAPPDATA%{package}\"   %*\n"),
+                test_vars
+            ),
+            Some(exe)
+        );
+        assert_eq!(
+            winget_shim_target(
+                "@echo off\r\n\"%ProgramFiles(x86)%\\WinGet\\Packages\\A\\claude.exe\" %*\r\n",
+                test_vars
+            ),
+            Some(PathBuf::from(
+                r"C:\Program Files (x86)\WinGet\Packages\A\claude.exe"
+            ))
+        );
+        // anything but that exact shape is not read: it could do anything
+        let not_read = [
+            format!("\"%LOCALAPPDATA%{package}\" %*"),
+            format!("@echo off\r\n\"%LOCALAPPDATA%{package}\" %*\r\ncalc.exe\r\n"),
+            format!("@echo off\r\n\"%LOCALAPPDATA%{package}\" %* & calc.exe\r\n"),
+            format!("@echo off\r\n\"%LOCALAPPDATA%{package}\"\r\n"),
+            format!("@echo off\r\n%LOCALAPPDATA%{package} %*\r\n"),
+            format!("@echo off\r\n\"%LOCALAPPDATA%{package}\" \"x\" %*\r\n"),
+            // a variable that is not set, or a % that opens none
+            format!("@echo off\r\n\"%USERPROFILE%{package}\" %*\r\n"),
+            format!("@echo off\r\n\"%LOCALAPPDATA{package}\" %*\r\n"),
+            format!("@echo off\r\n\"%LOCAL APPDATA%{package}\" %*\r\n"),
+            // only an absolute path to a claude.exe
+            "@echo off\r\n\"C:\\Windows\\System32\\calc.exe\" %*\r\n".into(),
+            "@echo off\r\n\"claude.exe\" %*\r\n".into(),
+            "@echo off\r\n\"C:\\Tools\\claude.cmd\" %*\r\n".into(),
+            String::new(),
+        ];
+        for shim in not_read {
+            assert_eq!(winget_shim_target(&shim, test_vars), None, "{shim:?}");
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn finds_winget_and_npm_installs_behind_their_shims() {
+        let root =
+            std::env::temp_dir().join(format!("doop-windows-installs-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let file = |path: &Path, text: &str| {
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, text).unwrap();
+        };
+        let local = root.join("Local");
+        let roaming = root.join("Roaming");
+        let links = local.join(r"Microsoft\WinGet\Links");
+        let packages = local.join(r"Microsoft\WinGet\Packages");
+        let winget =
+            packages.join(r"Anthropic.ClaudeCode_Microsoft.Winget.Source_8wekyb3d8bbwe\claude.exe");
+        file(&winget, "");
+        file(
+            &packages.join(r"Someone.Else_Microsoft.Winget.Source_8wekyb3d8bbwe\claude.exe"),
+            "",
+        );
+        file(
+            &links.join("claude.cmd"),
+            "@echo off\r\n\"%LOCALAPPDATA%\\Microsoft\\WinGet\\Packages\\Anthropic.ClaudeCode_Microsoft.Winget.Source_8wekyb3d8bbwe\\claude.exe\" %*\r\n",
+        );
+        let npm = roaming.join(r"npm\node_modules\@anthropic-ai\claude-code\bin\claude.exe");
+        file(&npm, "");
+        file(
+            &roaming.join(r"npm\claude.cmd"),
+            "@ECHO off\r\nGOTO start\r\n",
+        );
+        // an npm prefix of its own on PATH (nvm-windows, a custom prefix)
+        let nvm = root.join("nvm4w");
+        let nvm_npm = nvm.join(r"node_modules\@anthropic-ai\claude-code\bin\claude.exe");
+        file(&nvm_npm, "");
+        // a claude.cmd of another shape is never followed
+        let other = root.join("other");
+        file(
+            &other.join("claude.cmd"),
+            "@echo off\r\n\"C:\\Windows\\System32\\calc.exe\" %*\r\n",
+        );
+        // nor is one too long to be a WinGet shim, whatever its first lines say
+        let padded = root.join("padded");
+        file(&roaming.join(r"padded\claude.exe"), "");
+        file(
+            &padded.join("claude.cmd"),
+            &format!(
+                "@echo off\r\n\"%APPDATA%\\padded\\claude.exe\" %*\r\n{}",
+                "\r\n".repeat(2048)
+            ),
+        );
+        let vars = |name: &str| match name {
+            "LOCALAPPDATA" => Some(local.clone().into_os_string()),
+            "APPDATA" => Some(roaming.clone().into_os_string()),
+            "ProgramFiles" => Some(root.join("Program Files").into_os_string()),
+            _ => None,
+        };
+        let found: Vec<PathBuf> = windows_installs(&[links, nvm, other, padded], vars)
+            .into_iter()
+            .filter(|path| path.is_file())
+            .collect();
+        assert_eq!(found, vec![winget.clone(), nvm_npm, winget, npm]);
+        // nothing installed, nothing set: nothing found, and nothing fails
+        assert!(windows_installs(&[root.join("missing")], |_| None)
+            .iter()
+            .all(|path| !path.is_file()));
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
