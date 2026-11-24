@@ -226,7 +226,8 @@ export function LocalClaudeRow({ isDefault = false, onMakeDefault, onChange }: P
       const enabled = next.enabled ?? (connected ? active : true)
       if (enabled && (!active || !connected)) {
         const { native: current } = await refreshLocalAgent(userId)
-        if (!current?.installed) throw new Error(t('models.installToConnect'))
+        if (!current?.installed)
+          throw new Error(t(canChooseClaude() ? 'models.chooseOrInstallToConnect' : 'models.installToConnect'))
         if (!current.connected) throw new Error(t('models.signInToConnect'))
       }
       const effort = 'effort' in next ? next.effort : selectedEffort
