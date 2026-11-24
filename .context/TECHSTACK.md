@@ -1443,7 +1443,9 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   (Play, and the full-page `/c/<id>/proto`) runs them with Web Animations transitions, under the
   desktop tab strip (`--app-inset`), its controls in a bar above the screens (never over the design), scaled by the viewer's pick (actual size, responsive, fit width,
   fit, fill; `screenLayout`, remembered under `doop:proto-scaling`); the
-  Prototype tab and `PrototypeOverlay.tsx` edit and draw them; MCP has `get_prototype` and
+  Prototype tab and `PrototypeOverlay.tsx` edit and draw them (every link while no frame is
+  selected; with one selected, or an element picked in it, only the links into and out of it, as
+  Figma does); MCP has `get_prototype` and
   `set_prototype_start`. `tests/prototypeBrowser.test.ts` drives the player in Chromium.
 
 ## 5. Security and Secrets
