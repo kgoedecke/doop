@@ -24,7 +24,11 @@ class Room {
   readonly messages: RoomMessage[] = []
   closedWith: number | null = null
   readonly clientId = `t-${Math.random()}`
-  private constructor(private ws: WebSocket) {
+  private ws: WebSocket
+
+  private constructor(ws: WebSocket) {
+    this.ws = ws
+
     ws.on('message', (raw) => this.messages.push(JSON.parse(String(raw)) as RoomMessage))
     ws.on('close', (code) => (this.closedWith = code))
     ws.on('error', () => {}) // the close code carries the verdict

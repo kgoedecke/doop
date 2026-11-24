@@ -1088,7 +1088,7 @@ The realtime protocol is plain JSON over `/ws`, one room per canvas; its message
 The main entry points (the server has about 70 modules in all):
 
 ```
-server/            Node (tsx) — one process on :4400
+server/            Node 26 (runs the TypeScript directly) — one process on :4400
   index.ts         Express REST API + ws rooms + presence + static serving (prod)
   store.ts         In-memory canvas/frame state (hot path), write-through to the DB
   db/              Drizzle schema + PGlite/Postgres connection + migrations

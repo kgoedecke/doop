@@ -11,12 +11,16 @@ import { buildTemplate } from './harness.ts'
    shared Chromium and the built fixtures' server the browser tests drive. */
 let dir: string
 let rig: BrowserRig | null = null
+let compileCache: string
 
 export async function setup(project: TestProject): Promise<void> {
   dir = mkdtempSync(path.join(tmpdir(), 'doop-test-template-'))
-  const [, started] = await Promise.all([buildTemplate(dir), startBrowserRig()])
+  /* one compile cache for the run: the first server parses the source, the rest load its code */
+  compileCache = mkdtempSync(path.join(tmpdir(), 'doop-test-compile-cache-'))
+  const [, started] = await Promise.all([buildTemplate(dir, compileCache), startBrowserRig()])
   rig = started
   project.provide('templateDir', dir)
+  project.provide('compileCache', compileCache)
   project.provide(
     'browserRig',
     rig && { wsEndpoint: rig.wsEndpoint, fixtureOrigin: rig.fixtureOrigin, builtDir: rig.builtDir },
@@ -25,5 +29,6 @@ export async function setup(project: TestProject): Promise<void> {
 
 export async function teardown(): Promise<void> {
   rmSync(dir, { recursive: true, force: true })
+  rmSync(compileCache, { recursive: true, force: true })
   await rig?.close()
 }

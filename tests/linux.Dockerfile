@@ -1,7 +1,8 @@
 # The suite as CI runs it: Linux, two CPUs, a headless Chromium. Built and run
 # by scripts/test-linux.sh, for a browser test that fails on CI and passes on
 # a Mac. The context is the repository, so the image carries the working tree.
-FROM node:22-bookworm
+# the Node CI and production run (.node-version), on the Debian of the production image
+FROM node:26.13.1-trixie
 
 # Chrome for Testing has no Linux arm64 build, so an Apple Silicon Mac gets
 # Debian's Chromium here; an x64 host gets the Chrome CI pins (.chrome-version).

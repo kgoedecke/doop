@@ -4,6 +4,10 @@
     "module": "ESNext",
     "moduleResolution": "bundler",
     "allowImportingTsExtensions": true,
+    /* Node runs the server source by stripping its types: only syntax that strips away, and
+       type-only imports spelled as such */
+    "erasableSyntaxOnly": true,
+    "verbatimModuleSyntax": true,
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "types": ["vite/client", "node"],
     "jsx": "react-jsx",

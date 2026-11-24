@@ -14,7 +14,7 @@
  * skipped). Without a tags file and without ANTHROPIC_API_KEY, rows are
  * created disabled with blank tags for someone to fill in later.
  *
- * Usage: bun x tsx --env-file-if-exists=.env scripts/import-backgrounds.ts <folder> [--limit N] [--tags tags.json]
+ * Usage: node --env-file-if-exists=.env scripts/import-backgrounds.ts <folder> [--limit N] [--tags tags.json]
  */
 
 import { createHash } from 'node:crypto'

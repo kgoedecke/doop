@@ -48,7 +48,11 @@ class Journal {
   state: State = 'open'
   yielded = false
 
-  constructor(readonly outside?: string) {}
+  readonly outside?: string
+
+  constructor(outside?: string) {
+    this.outside = outside
+  }
 
   mark(): number {
     return this.committed + this.entries.length

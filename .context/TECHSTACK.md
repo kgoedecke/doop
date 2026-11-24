@@ -5,8 +5,11 @@
 - TypeScript 5.9 (strict mode) - primary language across `server/`, `src/`, and `shared/`.
   `bun run typecheck` uses `tsgo` (`@typescript/native-preview`, the TypeScript 7 Go compiler) for
   speed; the JS `typescript` package serves editors and the ESLint parser.
-- Node.js - runtime; `tsx` 4.23.9 runs server TypeScript directly with no build step, both in dev
-  (`tsx watch`) and prod (`NODE_ENV=production tsx server/index.ts`).
+- Node.js 26 LTS - runtime, pinned in `.node-version` (and `engines`, the Dockerfiles, CI and the
+  self-hosted runner image). Node runs the server's TypeScript itself by stripping types, with no
+  build step or loader: `node --watch server/index.ts` in dev, `NODE_ENV=production node
+server/index.ts` in prod. `erasableSyntaxOnly` and `verbatimModuleSyntax` in tsconfig keep the
+  source strippable (no parameter properties or enums; `import type` for types).
 - Bun 1.3.10 - pinned via `packageManager` in `package.json`; used as the package manager and
   script runner, not as the server runtime.
 - Rust (stable) - `desktop/src-tauri`, the Tauri desktop shell, and `desktop/src-tauri-chromium`,

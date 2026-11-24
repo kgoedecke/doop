@@ -2,11 +2,11 @@ import { env } from '../env.ts'
 import { z } from 'zod'
 
 export class LinearError extends Error {
-  constructor(
-    message: string,
-    readonly status = 502,
-  ) {
+  readonly status: number
+
+  constructor(message: string, status = 502) {
     super(message)
+    this.status = status
   }
 }
 

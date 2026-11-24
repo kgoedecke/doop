@@ -105,11 +105,13 @@ export function contextOfDefs(defs: () => readonly ComponentDef[]): EngineContex
  *  being rendered is missing or renders nothing, so the reference that led here is kept
  *  whole (as its placeholder, or as the markup it already was) rather than rendered short. */
 export class UnrenderableUse extends Error {
-  constructor(
-    readonly ref: string,
-    readonly why: string,
-  ) {
+  readonly ref: string
+  readonly why: string
+
+  constructor(ref: string, why: string) {
     super(`component “${ref}” cannot be rendered: ${why}`)
+    this.ref = ref
+    this.why = why
     this.name = 'UnrenderableUse'
   }
 }

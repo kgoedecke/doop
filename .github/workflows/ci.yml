@@ -34,16 +34,14 @@ jobs:
     runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - uses: actions/checkout@v4
-      - uses: oven-sh/setup-bun@v2
-      - run: bun install --frozen-lockfile
+      - uses: ./.github/actions/setup
       - run: bun run typecheck
 
   lint:
     runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - uses: actions/checkout@v4
-      - uses: oven-sh/setup-bun@v2
-      - run: bun install --frozen-lockfile
+      - uses: ./.github/actions/setup
       - run: bun run lint
       - run: bun run format:check
       - run: bun run doc-lint
@@ -52,8 +50,7 @@ jobs:
     runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - uses: actions/checkout@v4
-      - uses: oven-sh/setup-bun@v2
-      - run: bun install --frozen-lockfile
+      - uses: ./.github/actions/setup
       # The Docker build stage uses Bun even for commands named `node`.
       - run: bun run --bun build
 
@@ -67,8 +64,7 @@ jobs:
         shard: [1, 2, 3, 4]
     steps:
       - uses: actions/checkout@v4
-      - uses: oven-sh/setup-bun@v2
-      - run: bun install --frozen-lockfile
+      - uses: ./.github/actions/setup
       # The browser tests drive the Chrome named in .chrome-version, not the one
       # the runner image happens to ship: an image update must not be able to
       # change what the suite runs on without a commit here.

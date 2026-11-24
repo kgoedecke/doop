@@ -411,8 +411,12 @@ export const FRAME_CHANGED = 'The frame changed while you were editing. Please t
 
 /** A command carried `ifUpdatedAt` and the frame has moved past it: nothing was written. */
 export class FrameVersionConflict extends Error {
-  constructor(readonly frame: Frame) {
+  readonly frame: Frame
+
+  constructor(frame: Frame) {
     super(FRAME_CHANGED)
+    this.frame = frame
+
     this.name = 'FrameVersionConflict'
   }
 }

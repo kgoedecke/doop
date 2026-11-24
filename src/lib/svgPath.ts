@@ -129,7 +129,11 @@ function transformFunction(name: string, args: number[]): Matrix | null {
 
 class Scanner {
   private index = 0
-  constructor(private readonly text: string) {}
+  private readonly text: string
+
+  constructor(text: string) {
+    this.text = text
+  }
 
   skipSeparators() {
     while (this.index < this.text.length && /[\s,]/.test(this.text[this.index]!)) this.index++

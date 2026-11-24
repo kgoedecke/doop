@@ -128,7 +128,11 @@ it("copies the browser's own render", async () => {
   vi.stubGlobal(
     'ClipboardItem',
     class {
-      constructor(private readonly items: Record<string, Promise<Blob>>) {}
+      private readonly items: Record<string, Promise<Blob>>
+
+      constructor(items: Record<string, Promise<Blob>>) {
+        this.items = items
+      }
       getType(type: string) {
         return this.items[type]
       }
@@ -231,7 +235,11 @@ function stubClipboard() {
   vi.stubGlobal(
     'ClipboardItem',
     class {
-      constructor(readonly items: Record<string, Promise<Blob>>) {}
+      readonly items: Record<string, Promise<Blob>>
+
+      constructor(items: Record<string, Promise<Blob>>) {
+        this.items = items
+      }
     },
   )
   const write = vi.fn(async (items: { items: Record<string, Promise<Blob>> }[]) => {
@@ -364,7 +372,11 @@ it('copies one element as a PNG, measured after the clipboard write has started'
   vi.stubGlobal(
     'ClipboardItem',
     class {
-      constructor(private readonly items: Record<string, Promise<Blob>>) {}
+      private readonly items: Record<string, Promise<Blob>>
+
+      constructor(items: Record<string, Promise<Blob>>) {
+        this.items = items
+      }
       getType(type: string) {
         return this.items[type]
       }

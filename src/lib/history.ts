@@ -682,13 +682,15 @@ function selectionIds(e: Entry, direction: 'undo' | 'redo'): string[] {
    stack it came from for another try, `applied` (what did land before the
    failure) on the opposite stack so it stays reversible. */
 class PrerequisiteFailed extends Error {
-  constructor(
-    readonly remaining: Entry,
-    readonly applied: Entry | null,
-    cause: unknown,
-    readonly canvasId?: string,
-  ) {
+  readonly remaining: Entry
+  readonly applied: Entry | null
+  readonly canvasId?: string
+
+  constructor(remaining: Entry, applied: Entry | null, cause: unknown, canvasId?: string) {
     super(cause instanceof Error ? cause.message : 'Could not apply the page change', { cause })
+    this.remaining = remaining
+    this.applied = applied
+    this.canvasId = canvasId
   }
 }
 

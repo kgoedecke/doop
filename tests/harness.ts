@@ -24,6 +24,8 @@ declare module 'vitest' {
      *  tests/globalSetup.ts; fresh servers copy it instead of replaying the
      *  journal on an empty PGlite (~1s per boot) */
     templateDir: string
+    /** NODE_COMPILE_CACHE shared by every server of the run (tests/globalSetup.ts) */
+    compileCache: string
   }
 }
 
@@ -58,10 +60,28 @@ export function freePort(): Promise<number> {
  * dataDir) to reboot the same database on the same port.
  */
 export function startServer(env: Record<string, string> = {}, reuseDir?: string): Promise<Server> {
-  return boot(env, reuseDir, inject('templateDir'))
+  return boot(env, reuseDir, inject('templateDir'), inject('compileCache'))
 }
 
-async function boot(env: Record<string, string>, reuseDir: string | undefined, templateDir?: string): Promise<Server> {
+/** How a server process starts: Node itself running the source, as in production, with the
+ *  run's compile cache sparing every boot after the first the reparse. Never the tsx CLI: it ran
+ *  the server as its child and SIGKILLed it unless it acknowledged a relayed SIGTERM within
+ *  30 ms, so a server busy on a loaded runner died mid-flush of its debounced writes */
+export function serverCommand(compileCache?: string): { command: string; args: string[]; env: Record<string, string> } {
+  return {
+    command: process.execPath,
+    args: [path.join(ROOT, 'server', 'index.ts')],
+    env: compileCache ? { NODE_COMPILE_CACHE: compileCache } : {},
+  }
+}
+
+async function boot(
+  env: Record<string, string>,
+  reuseDir: string | undefined,
+  templateDir?: string,
+  compileCache?: string,
+): Promise<Server> {
+  const start = serverCommand(compileCache)
   const dataDir = reuseDir ?? mkdtempSync(path.join(tmpdir(), 'doop-test-'))
   /* a reboot on the same port: the previous process must be gone first, or
      /healthz answers from a server that is still flushing on its way out */
@@ -80,32 +100,29 @@ async function boot(env: Record<string, string>, reuseDir: string | undefined, t
     const port = fixed ? Number(fixed) : await freePort()
     const host = env.HOST?.includes(':') ? `[${env.HOST}]` : 'localhost'
     const base = `http://${host}:${port}`
-    const proc: ChildProcess = spawn(
-      path.join(ROOT, 'node_modules', '.bin', 'tsx'),
-      [path.join(ROOT, 'server', 'index.ts')],
-      {
-        cwd: dataDir, // PGlite persists to <cwd>/data — isolated per run
-        env: {
-          ...process.env,
-          PORT: String(port),
-          NODE_ENV: undefined as unknown as string,
-          BETTER_AUTH_URL: base,
-          /* always the embedded PGlite in dataDir, never a DATABASE_URL
+    const proc: ChildProcess = spawn(start.command, start.args, {
+      cwd: dataDir, // PGlite persists to <cwd>/data — isolated per run
+      env: {
+        ...process.env,
+        ...start.env,
+        PORT: String(port),
+        NODE_ENV: undefined as unknown as string,
+        BETTER_AUTH_URL: base,
+        /* always the embedded PGlite in dataDir, never a DATABASE_URL
              exported in the developer's shell */
-          DATABASE_URL: '',
-          /* never the live PostHog project: a key in a developer's shell or
+        DATABASE_URL: '',
+        /* never the live PostHog project: a key in a developer's shell or
              .env would turn every test signup into an account_created event,
              and the lifecycle-email workflows act on those */
           POSTHOG_KEY: '',
           VITE_POSTHOG_KEY: '',
           /* a store write outside any write boundary is an error here (server/journal.ts),
              so a path that escapes the all-or-nothing guarantee fails the test that takes it */
-          DOOP_WRITE_BOUNDARY: 'throw',
-          ...env,
-        },
-        stdio: ['ignore', 'pipe', 'ignore'],
+        DOOP_WRITE_BOUNDARY: 'throw',
+        ...env,
       },
-    )
+      stdio: ['ignore', 'pipe', 'ignore'],
+    })
     const stopped = new Promise<void>((resolve) => proc.once('exit', () => resolve()))
     exits.set(dataDir, stopped)
     const startupUrl = await waitForBind(proc, port)
@@ -163,8 +180,8 @@ function waitForBind(proc: ChildProcess, port: number): Promise<string | undefin
 
 /** Build the per-run template: boot once on an empty directory so the server
  *  applies the migration journal, and keep the resulting data directory. */
-export async function buildTemplate(dir: string): Promise<void> {
-  const server = await boot({}, undefined)
+export async function buildTemplate(dir: string, compileCache?: string): Promise<void> {
+  const server = await boot({}, undefined, undefined, compileCache)
   server.stop({ keepData: true })
   await server.stopped
   cpSync(server.dataDir, dir, { recursive: true })
@@ -175,7 +192,11 @@ export async function buildTemplate(dir: string): Promise<void> {
 export class Client {
   cookies = new Map<string, string>()
 
-  constructor(private server: Server) {}
+  private server: Server
+
+  constructor(server: Server) {
+    this.server = server
+  }
 
   header() {
     return [...this.cookies.entries()].map(([k, v]) => `${k}=${v}`).join('; ')

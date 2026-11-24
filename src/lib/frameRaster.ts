@@ -158,7 +158,11 @@ const MEDIA_RULE = 4
  *  aspect ratio, the person's colour scheme) is judged as the canvas does. */
 class FrameViewport {
   private frame: HTMLIFrameElement | null = null
-  constructor(private readonly size: { width: number; height: number }) {}
+  private readonly size: { width: number; height: number }
+
+  constructor(size: { width: number; height: number }) {
+    this.size = size
+  }
 
   /** before url()s are inlined, so no data: URL is ever rewritten */
   units(css: string): string {
@@ -414,11 +418,14 @@ function isInlineUrl(ref: string): boolean {
  *  export, and the server's renderer can still load it. */
 class ResourceCache {
   private readonly pending = new Map<string, Promise<Blob>>()
-  constructor(
-    readonly signal: AbortSignal,
-    /** settles each imported stylesheet as `inlineDocument` does the page's */
-    private readonly viewport: FrameViewport | null = null,
-  ) {}
+  readonly signal: AbortSignal
+  /** settles each imported stylesheet as `inlineDocument` does the page's */
+  private readonly viewport: FrameViewport | null
+
+  constructor(signal: AbortSignal, viewport: FrameViewport | null = null) {
+    this.signal = signal
+    this.viewport = viewport
+  }
 
   private blob(url: string): Promise<Blob> {
     let pending = this.pending.get(url)

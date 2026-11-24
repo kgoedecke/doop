@@ -115,12 +115,12 @@ export class ComponentError extends Error {}
 /** A library action on a canvas that may not have one: personal, or in a
  *  workspace whose plan lapsed. Routes turn it into the upgrade prompt. */
 export class LibraryPlanError extends ComponentError {
-  constructor(
-    message: string,
-    /** the workspace that needs a plan; undefined when the canvas is in none */
-    readonly workspaceId?: string,
-  ) {
+  /** the workspace that needs a plan; undefined when the canvas is in none */
+  readonly workspaceId?: string
+
+  constructor(message: string, workspaceId?: string) {
     super(message)
+    this.workspaceId = workspaceId
   }
 }
 

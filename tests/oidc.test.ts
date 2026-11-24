@@ -2,8 +2,8 @@ import { spawn } from 'node:child_process'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { Client, startServer, type Server } from './harness.ts'
+import { afterAll, beforeAll, describe, expect, inject, it } from 'vitest'
+import { Client, serverCommand, startServer, type Server } from './harness.ts'
 
 /**
  * The /api/oidc-config surface and the guarantee that configuring SSO
@@ -12,8 +12,6 @@ import { Client, startServer, type Server } from './harness.ts'
  * fake, unreachable OIDC_ISSUER is fine here - only the config-gating
  * behavior is under test, not a real IdP round trip.
  */
-
-const ROOT = process.cwd()
 
 /* the one hardcoded port left: this process refuses to boot and never binds it */
 const PORT_BOOT_REFUSAL = 4972
@@ -83,10 +81,12 @@ describe('boot-time refusal on partial OIDC config', () => {
      this spawns directly and asserts the process exits on its own. */
   it('exits rather than boot when only some of the three required vars are set', async () => {
     const dataDir = mkdtempSync(path.join(tmpdir(), 'doop-test-'))
-    const proc = spawn(path.join(ROOT, 'node_modules', '.bin', 'tsx'), [path.join(ROOT, 'server', 'index.ts')], {
+    const start = serverCommand(inject('compileCache'))
+    const proc = spawn(start.command, start.args, {
       cwd: dataDir,
       env: {
         ...process.env,
+        ...start.env,
         PORT: String(PORT_BOOT_REFUSAL),
         NODE_ENV: undefined as unknown as string,
         OIDC_ISSUER: 'https://idp.invalid',

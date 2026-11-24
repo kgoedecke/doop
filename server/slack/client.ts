@@ -7,12 +7,13 @@ import { z } from 'zod'
  * which can echo request or credential details.
  */
 export class SlackError extends Error {
-  constructor(
-    message: string,
-    readonly status = 502,
-    readonly code?: string,
-  ) {
+  readonly status: number
+  readonly code?: string
+
+  constructor(message: string, status = 502, code?: string) {
     super(message)
+    this.status = status
+    this.code = code
   }
 }
 
