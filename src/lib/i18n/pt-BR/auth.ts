@@ -101,4 +101,15 @@ export const auth: Catalog['auth'] = {
   viewingAsAfter: '— somente leitura, expira em 15 minutos.',
   stopViewing: 'Parar de visualizar',
   leaving: 'Saindo…',
+
+  editorConnectTitle: 'Conectar o {editor} ao Doop',
+  editorConnectBody:
+    'A extensão do Doop no {editor} vai abrir seus canvases e deixar os agentes de lá desenharem neles, como {email}. Você pode desconectá-la quando quiser em Configurações → Conectar IA.',
+  editorConnectAllow: 'Conectar o {editor}',
+  editorConnectSentTitle: 'De volta ao seu editor.',
+  editorConnectSentBody: 'O {editor} conclui o acesso. Você pode fechar esta aba depois.',
+  editorConnectOpen: 'Abrir o {editor}',
+  editorConnectFailed: 'Não foi possível conectar o editor. Volte a ele e tente de novo.',
+  editorConnectBadLink:
+    'Este link está incompleto ou não veio de uma extensão do Doop. Comece de novo pelo seu editor.',
 }

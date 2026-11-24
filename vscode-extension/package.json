@@ -1,0 +1,265 @@
+{
+  "name": "doop",
+  "displayName": "Doop",
+  "description": "Your Doop canvases inside your editor: design live with your coding agents next to the code.",
+  "version": "0.1.0",
+  "publisher": "doop",
+  "license": "AGPL-3.0-only",
+  "homepage": "https://doop.design",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/kgoedecke/doop"
+  },
+  "icon": "media/icon.png",
+  "galleryBanner": {
+    "color": "#111110",
+    "theme": "dark"
+  },
+  "categories": [
+    "Visualization",
+    "AI",
+    "Other"
+  ],
+  "keywords": [
+    "doop",
+    "design",
+    "canvas",
+    "mcp",
+    "agents",
+    "figma",
+    "multiplayer"
+  ],
+  "engines": {
+    "vscode": "^1.101.0"
+  },
+  "main": "./out/extension.js",
+  "activationEvents": [
+    "onStartupFinished",
+    "onUri",
+    "onWebviewPanel:doop.canvas"
+  ],
+  "scripts": {
+    "build": "node ../scripts/build-vscode-extension.mjs",
+    "package": "node ../scripts/build-vscode-extension.mjs --vsix"
+  },
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "doop",
+          "title": "Doop",
+          "icon": "media/doop.svg"
+        }
+      ]
+    },
+    "views": {
+      "doop": [
+        {
+          "id": "doop.canvases",
+          "name": "Canvases",
+          "icon": "media/doop.svg"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "doop.canvases",
+        "when": "!doop.signedIn",
+        "contents": "Design on your Doop canvases right here, next to your code, while your coding agents work on them live.\n[Sign in to Doop](command:doop.signIn)\nOr [use an agent key](command:doop.useAgentKey) from Settings \u2192 Connect AI.\nWorking on a self-hosted server? Set it in [settings](command:workbench.action.openSettings?%5B%22doop.serverUrl%22%5D)."
+      },
+      {
+        "view": "doop.canvases",
+        "when": "doop.signedIn && doop.empty",
+        "contents": "No canvases yet.\n[New canvas](command:doop.newCanvas)"
+      }
+    ],
+    "commands": [
+      {
+        "command": "doop.signIn",
+        "title": "Sign In",
+        "category": "Doop",
+        "icon": "$(account)"
+      },
+      {
+        "command": "doop.useAgentKey",
+        "title": "Sign In with an Agent Key",
+        "category": "Doop"
+      },
+      {
+        "command": "doop.signOut",
+        "title": "Sign Out",
+        "category": "Doop"
+      },
+      {
+        "command": "doop.refresh",
+        "title": "Refresh",
+        "category": "Doop",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "doop.newCanvas",
+        "title": "New Canvas",
+        "category": "Doop",
+        "icon": "$(add)"
+      },
+      {
+        "command": "doop.openCanvas",
+        "title": "Open Canvas\u2026",
+        "category": "Doop",
+        "icon": "$(search)"
+      },
+      {
+        "command": "doop.openCanvasUrl",
+        "title": "Open Canvas from Link\u2026",
+        "category": "Doop"
+      },
+      {
+        "command": "doop.openInBrowser",
+        "title": "Open in Browser",
+        "category": "Doop",
+        "icon": "$(link-external)"
+      },
+      {
+        "command": "doop.copyLink",
+        "title": "Copy Link",
+        "category": "Doop"
+      },
+      {
+        "command": "doop.copyAgentPrompt",
+        "title": "Copy Prompt for Your Agent",
+        "category": "Doop",
+        "icon": "$(copilot)"
+      },
+      {
+        "command": "doop.reloadCanvas",
+        "title": "Reload Canvas",
+        "category": "Doop",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "doop.connectAgents",
+        "title": "Connect Coding Agents\u2026",
+        "category": "Doop",
+        "icon": "$(plug)"
+      },
+      {
+        "command": "doop.openDoop",
+        "title": "Open Doop in Browser",
+        "category": "Doop"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "doop.newCanvas",
+          "when": "view == doop.canvases && doop.signedIn",
+          "group": "navigation@1"
+        },
+        {
+          "command": "doop.openCanvas",
+          "when": "view == doop.canvases && doop.signedIn",
+          "group": "navigation@2"
+        },
+        {
+          "command": "doop.refresh",
+          "when": "view == doop.canvases && doop.signedIn",
+          "group": "navigation@3"
+        },
+        {
+          "command": "doop.connectAgents",
+          "when": "view == doop.canvases && doop.signedIn",
+          "group": "1_agents"
+        },
+        {
+          "command": "doop.openCanvasUrl",
+          "when": "view == doop.canvases && doop.signedIn",
+          "group": "2_open"
+        },
+        {
+          "command": "doop.openDoop",
+          "when": "view == doop.canvases",
+          "group": "2_open"
+        },
+        {
+          "command": "doop.signOut",
+          "when": "view == doop.canvases && doop.signedIn",
+          "group": "9_account"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "doop.copyAgentPrompt",
+          "when": "view == doop.canvases && viewItem == canvas",
+          "group": "inline"
+        },
+        {
+          "command": "doop.openInBrowser",
+          "when": "view == doop.canvases && viewItem == canvas",
+          "group": "1_open"
+        },
+        {
+          "command": "doop.copyLink",
+          "when": "view == doop.canvases && viewItem == canvas",
+          "group": "2_copy@1"
+        },
+        {
+          "command": "doop.copyAgentPrompt",
+          "when": "view == doop.canvases && viewItem == canvas",
+          "group": "2_copy@2"
+        }
+      ],
+      "editor/title": [
+        {
+          "command": "doop.copyAgentPrompt",
+          "when": "activeWebviewPanelId == doop.canvas",
+          "group": "navigation@1"
+        },
+        {
+          "command": "doop.reloadCanvas",
+          "when": "activeWebviewPanelId == doop.canvas",
+          "group": "navigation@2"
+        },
+        {
+          "command": "doop.openInBrowser",
+          "when": "activeWebviewPanelId == doop.canvas",
+          "group": "navigation@3"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "doop.reloadCanvas",
+          "when": "activeWebviewPanelId == doop.canvas"
+        },
+        {
+          "command": "doop.copyLink",
+          "when": "activeWebviewPanelId == doop.canvas"
+        },
+        {
+          "command": "doop.signOut",
+          "when": "doop.signedIn"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Doop",
+      "properties": {
+        "doop.serverUrl": {
+          "type": "string",
+          "default": "https://doop.design",
+          "markdownDescription": "The Doop server your canvases live on. Change it for a self-hosted Doop; you sign in again afterwards."
+        },
+        "doop.registerMcpServer": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Offer Doop's MCP server to this editor's own agent mode (GitHub Copilot and other agents that read VS Code's MCP servers), signed in as you."
+        }
+      }
+    },
+    "mcpServerDefinitionProviders": [
+      {
+        "id": "doop.mcp",
+        "label": "Doop"
+      }
+    ]
+  }
+}

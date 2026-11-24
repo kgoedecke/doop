@@ -1,5 +1,7 @@
 dist/
 public/claude-extension/
+vscode-extension/out/
+vscode-extension/dist/
 node_modules/
 package-lock.json
 bun.lock

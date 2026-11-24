@@ -106,4 +106,15 @@ export const auth = {
   viewingAsAfter: '— read only, expires after 15 minutes.',
   stopViewing: 'Stop viewing',
   leaving: 'Leaving…',
+
+  /* connecting a code editor (src/pages/EditorConnect.tsx) */
+  editorConnectTitle: 'Connect {editor} to Doop',
+  editorConnectBody:
+    'The Doop extension in {editor} will open your canvases and let the agents there design on them, as {email}. You can disconnect it any time in Settings → Connect AI.',
+  editorConnectAllow: 'Connect {editor}',
+  editorConnectSentTitle: 'Back to your editor.',
+  editorConnectSentBody: '{editor} finishes signing in. You can close this tab afterwards.',
+  editorConnectOpen: 'Open {editor}',
+  editorConnectFailed: 'Could not connect the editor. Go back to it and try again.',
+  editorConnectBadLink: 'This link is incomplete or not from a Doop editor extension. Start again from your editor.',
 } as const

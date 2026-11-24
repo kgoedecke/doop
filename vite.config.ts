@@ -69,6 +69,11 @@ export default defineConfig({
       '/a/': { target: api },
       '/u/': { target: api },
       '/ingest': { target: api },
+      /* the editor extension's server routes; /editor/connect is the app's page */
+      '/editor/exchange': { target: api },
+      '/editor/embed': { target: api },
+      '/editor/whoami': { target: api },
+      '/editor/sign-out': { target: api },
       '/relay': { target: api },
       '/blog': { target: api },
       '/robots.txt': { target: api },
