@@ -235,35 +235,32 @@ describe.skipIf(!findBrowserPath())('fit_to_content in a browser', () => {
     expect(set.content[1]!.text).toContain('now 512px tall')
   }, 60_000)
 
-  it('sends the write before measuring, and never jumps a playback ahead', async () => {
-    const html = doc(block(333) + `<p>${'A design long enough to play back over a few ticks. '.repeat(200)}</p>`)
-    const result = await callTool('create_frame', {
+  it('delivers the write before the browser wait and keeps metadata broadcasts at the current playback position', async () => {
+    const measuring = holdNextMeasure()
+    const pending = callTool('create_frame', {
       canvas_id: canvasId,
       name: 'Played',
-      html,
+      html: doc(block(333)),
       fit_to_content: 'height',
     })
+    await measuring.reached
+    try {
+      const created = sent.find((message) => message.type === 'frame:created')?.frame
+      expect(created).toBeDefined()
+      const frame = store.getFrame(created!.id)!
+      const before = sent.length
+      actions.updateFrame(frame.id, { height: frame.height }, agent())
+      actions.setFrameApproval(frame.id, true, { id: OWNER, name: 'Fit Owner' })
+      actions.restackFrames(canvasId, [{ id: frame.id, z: 99 }], agent())
+      const updates = sent.slice(before).filter((message) => message.type === 'frame:updated')
+      expect(updates).toHaveLength(3)
+      for (const update of updates) expect(update.frame!.html.length).toBeLessThan(frame.html.length)
+    } finally {
+      measuring.release()
+    }
+    const result = await pending
     expect(result.isError).toBeFalsy()
-    const { frame } = JSON.parse(result.content[0]!.text!) as { frame: { height: number } }
-    const created = sent.findIndex((message) => message.type === 'frame:created')
-    const resized = sent.findIndex(
-      (message) => message.type === 'frame:updated' && message.frame?.height === frame.height,
-    )
-    expect(created).toBeGreaterThanOrEqual(0)
-    expect(resized).toBeGreaterThan(created)
-    /* the playback is still running: the resize carries what viewers have been shown, not the whole design */
-    const stored = store.getFrame(sent[resized]!.frame!.id)!.html
-    expect(sent[resized]!.frame!.html.length).toBeLessThan(stored.length)
-    /* a sign-off mid-playback does not jump it ahead either */
-    const before = sent.length
-    actions.setFrameApproval(sent[resized]!.frame!.id, true, { id: OWNER, name: 'Fit Owner' })
-    const approved = sent.slice(before).find((message) => message.type === 'frame:updated')
-    expect(approved?.frame?.html.length).toBeLessThan(stored.length)
-    /* nor does a restack */
-    const restacking = sent.length
-    actions.restackFrames(canvasId, [{ id: sent[resized]!.frame!.id, z: 99 }], agent())
-    const restacked = sent.slice(restacking).find((message) => message.type === 'frame:updated')
-    expect(restacked?.frame?.html.length).toBeLessThan(stored.length)
+    expect(result.content[1]!.text).toContain('now 333px tall')
   }, 60_000)
 
   it('sends a frame mid-stream healed when only its details change', async () => {
