@@ -19,7 +19,7 @@ export function WorkingNow({ style, className }: { style?: CSSProperties; classN
   return (
     <div
       className={cn(
-        'pointer-events-none absolute top-3.5 z-30 flex max-w-[min(420px,50vw)] flex-col items-start gap-1.5 transition-[left] duration-150 max-md:top-auto max-md:right-2 max-md:bottom-[calc(66px+env(safe-area-inset-bottom))] max-md:left-2! max-md:max-w-none',
+        'pointer-events-none absolute top-3.5 z-30 flex max-w-[min(420px,50vw)] flex-col items-start gap-1.5 transition-[left] duration-150 max-md:top-auto max-md:right-2 max-md:bottom-[calc(52px+env(safe-area-inset-bottom))] max-md:left-2! max-md:max-w-none',
         className,
       )}
       style={style}

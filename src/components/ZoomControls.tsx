@@ -64,28 +64,27 @@ export function ZoomControls({
   }
   /* phones have no room for shortcut hints, and no keyboard to use them */
   const hint = (keys: string) => !isMobile && <MenuHint>{keys}</MenuHint>
-  const stepBtn = 'min-h-0'
 
   return (
     <Toolbar
       className={cn(
-        'absolute bottom-[calc(64px+env(safe-area-inset-bottom))] z-[35] h-9 gap-0.5 px-1 py-0 transition-[right] duration-150 ease-[ease] md:bottom-3.5',
+        'absolute bottom-[calc(50px+env(safe-area-inset-bottom))] z-[35] h-9 gap-0.5 px-0.5 py-0 md:px-1 md:py-0 transition-[right] duration-150 ease-[ease] md:bottom-3.5',
         /* on phones the tool strip runs along the bottom, with its drawing hint above it */
-        drawing && 'max-md:bottom-[calc(124px+env(safe-area-inset-bottom))]',
+        drawing && 'max-md:bottom-[calc(110px+env(safe-area-inset-bottom))]',
         /* beside the account island and whatever panels are open — the page
            sets --chrome-right as they come and go */
         isMobile ? 'left-1/2 -translate-x-1/2' : 'right-[var(--chrome-right,12px)]',
         hidden && 'hidden',
       )}
     >
-      <ToolbarButton aria-label={t('canvas.zoomOut')} className={stepBtn} onClick={onZoomOut}>
+      <ToolbarButton aria-label={t('canvas.zoomOut')} onClick={onZoomOut}>
         <MinusIcon />
       </ToolbarButton>
       <DropdownMenu open={open} onOpenChange={onOpenChange}>
         <DropdownMenuTrigger asChild>
           <ToolbarButton
             aria-label={t('canvas.zoomLevel')}
-            className={cn(stepBtn, 'w-auto min-w-[48px] px-1.5 font-mono text-[12px] text-ink sm:w-auto sm:px-1.5')}
+            className="w-auto min-w-[48px] px-1.5 font-mono text-[12px] text-ink md:w-auto md:px-1.5"
           >
             <span ref={labelRef}>100%</span>
           </ToolbarButton>
@@ -157,7 +156,7 @@ export function ZoomControls({
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
-      <ToolbarButton aria-label={t('canvas.zoomIn')} className={stepBtn} onClick={onZoomIn}>
+      <ToolbarButton aria-label={t('canvas.zoomIn')} onClick={onZoomIn}>
         <PlusIcon />
       </ToolbarButton>
     </Toolbar>
