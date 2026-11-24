@@ -160,7 +160,8 @@ only run in the player):
 - Use real frame ids from the canvas, never invented ones. Size overlay frames to the modal itself, not the page.
 - set_prototype_start picks the frame the flow starts on; get_prototype lists every interaction
   and flags targets that do not exist — call it after wiring and fix what it flags. The player
-  lives at /c/<canvasId>/proto (append ?frame=<id> to open on a specific screen).`
+  lives at /c/<canvasId>/proto (append ?frame=<id> to open on a specific screen, and
+  &scaling=actual|responsive|fit-width|fit|fill to set how screens are scaled).`
 
 /** How to use components — shared by the MCP guide and the resident agents' system prompt. */
 /** Where a frame's CSS goes. People edit a frame element by element, and the

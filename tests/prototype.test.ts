@@ -18,7 +18,7 @@ import {
   screenLayout,
   transitionFrames,
 } from '../src/lib/prototypePlayer'
-import { elementInteractions, withElementInteractions } from '../src/lib/prototype'
+import { elementInteractions, prototypePath, withElementInteractions } from '../src/lib/prototype'
 
 const click = (action: string, extra: Partial<Interaction> = {}): Interaction => ({
   ...parseInteractions({ on: 'click', action })[0]!,
@@ -268,6 +268,15 @@ describe('player helpers', () => {
     expect(screenLayout(frame, viewport, 'fit')).toEqual({ width: 400, height: 300, scale: 1 })
     expect(screenLayout(frame, viewport, 'fill')).toEqual({ width: 400, height: 300, scale: 2 })
     expect(screenLayout({ width: 0, height: 300 }, viewport, 'fill').scale).toBe(1)
+  })
+})
+
+describe('prototypePath', () => {
+  it('writes the frame and the scaling a shared link should open with', () => {
+    expect(prototypePath('c1')).toBe('/c/c1/proto')
+    expect(prototypePath('c1', 'f 1')).toBe('/c/c1/proto?frame=f+1')
+    expect(prototypePath('c1', 'f1', 'fit-width')).toBe('/c/c1/proto?frame=f1&scaling=fit-width')
+    expect(prototypePath('c1', undefined, 'actual')).toBe('/c/c1/proto?scaling=actual')
   })
 })
 

@@ -6,6 +6,7 @@ import { saveFrameHtml, isLayerLocked } from './layerEdits'
 import { useStore } from './store'
 import { posthog } from './posthog'
 import { trackSave } from './history'
+import type { ProtoScaling } from './prototypePlayer'
 
 /* ---- reading and writing an element's interactions in frame HTML ---- */
 
@@ -82,7 +83,12 @@ export function setFlowStart(canvasId: string, pageId: string, frameId: string |
   )
 }
 
-/** The full-page player for a canvas, optionally opening on one frame. */
-export function prototypePath(canvasId: string, frameId?: string): string {
-  return `/c/${canvasId}/proto${frameId ? `?frame=${encodeURIComponent(frameId)}` : ''}`
+/** The full-page player for a canvas, optionally opening on one frame and
+ *  with one scaling (`?scaling=`, so a shared link opens the way it was set). */
+export function prototypePath(canvasId: string, frameId?: string, scaling?: ProtoScaling): string {
+  const query = new URLSearchParams()
+  if (frameId) query.set('frame', frameId)
+  if (scaling) query.set('scaling', scaling)
+  const search = query.toString()
+  return `/c/${canvasId}/proto${search ? `?${search}` : ''}`
 }
