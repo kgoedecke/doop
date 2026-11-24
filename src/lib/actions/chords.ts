@@ -23,7 +23,7 @@ export interface Chord {
   global?: boolean
 }
 
-type KeyInput = Pick<KeyboardEvent, 'key' | 'code' | 'metaKey' | 'ctrlKey' | 'altKey' | 'shiftKey'>
+export type KeyInput = Pick<KeyboardEvent, 'key' | 'code' | 'metaKey' | 'ctrlKey' | 'altKey' | 'shiftKey'>
 
 export const IS_MAC = typeof navigator !== 'undefined' && /mac/i.test(navigator.platform)
 

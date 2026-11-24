@@ -2,9 +2,9 @@ import { CAPTURE_PREFIX, pasteWebCapture } from '../lib/webCapture'
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { canEditOpenCanvas, pickedSelectors, roleOf, useStore } from '../lib/store'
 import { followPageInUrl } from '../lib/pageUrl'
-import { MOD_KEY, PRESENT_SHORTCUT_HINT, isControlTarget, isTypingTarget, pressedKey } from '../lib/keys'
+import { MOD_KEY, PRESENT_SHORTCUT_HINT, isControlTarget, isMenuTarget, isTypingTarget, pressedKey } from '../lib/keys'
 import { enterSelection, exitSelection, selectSibling } from '../lib/selectionKeys'
-import { dispatchActionKey, setActionHost, type ActionHost } from '../lib/actions/registry'
+import { dispatchActionKey, isCanvasChord, setActionHost, type ActionHost } from '../lib/actions/registry'
 import { presentStartFrame } from '../lib/present'
 import { canHideUi, hideUiHinted } from '../lib/hideUi'
 import { connect, disconnect, sendWs } from '../lib/ws'
@@ -419,6 +419,13 @@ export function CanvasPage({
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       const typing = isTypingTarget(e.target)
+      /* an open menu has the keyboard, as in Figma: a letter is its
+         typeahead and no shortcut runs. The canvas's own chords are still
+         kept from the browser, and Backspace, "back" to some engines (below) */
+      if (isMenuTarget(e.target)) {
+        if (e.key === 'Backspace' || isCanvasChord(e)) e.preventDefault()
+        return
+      }
       if (dispatchActionKey(e, typing)) return
       if (typing) return
       /* a held ⌘X cuts once: the auto-repeat would cut the frame left
@@ -475,7 +482,8 @@ export function CanvasPage({
        false when there is nothing of the canvas's to take (text selected on
        the page, a field focused, nothing selected) */
     function writeSelection(e: ClipboardEvent, onWritten?: () => void): boolean {
-      if (isTypingTarget(e.target) || window.getSelection()?.toString() || !e.clipboardData) return false
+      if (isTypingTarget(e.target) || isMenuTarget(e.target) || window.getSelection()?.toString() || !e.clipboardData)
+        return false
       const state = useStore.getState()
       const picked = state.selectedElement
       const frame = state.canvas?.frames.find((f) => f.id === picked?.frameId)
@@ -501,7 +509,7 @@ export function CanvasPage({
       if (writeSelection(e, remove)) e.preventDefault()
     }
     function onPaste(e: ClipboardEvent) {
-      if (isTypingTarget(e.target)) return
+      if (isTypingTarget(e.target) || isMenuTarget(e.target)) return
       /* every paste lands a frame or a layer */
       if (!canEditOpenCanvas(useStore.getState())) return
       const captureText = e.clipboardData?.getData('text/plain') ?? ''
