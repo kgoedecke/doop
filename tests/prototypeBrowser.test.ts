@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import type { Frame as PuppeteerFrame, Page } from 'puppeteer-core'
 import { findBrowserPath } from '../server/screenshot'
 import { fixtureUrl, pagePerTest } from './browser'
-import type { Canvas, Frame } from '../shared/types'
+import type { Canvas, ElementComment, Frame } from '../shared/types'
 
 type Message = { type?: string; interaction?: { action?: string; target?: string } }
 /* what tests/fixtures/prototype.html puts on window */
@@ -11,6 +11,7 @@ type Fixture = {
   fixtureReady: boolean
   playerClosed: boolean
   seed: (canvas: Canvas) => void
+  seedComments: (comments: ElementComment[]) => void
   play: (frameId: string) => void
   playSynced: (frameId: string) => void
   editFrame: (id: string, html: string) => void
@@ -542,6 +543,166 @@ describe.skipIf(!findBrowserPath())('prototype player', { timeout: 30_000 }, () 
         ),
       )
       await page.waitForFunction(() => document.querySelector('[data-proto-current]')?.textContent === 'DETAIL')
+    })
+  })
+
+  describe('frame menu and comments', () => {
+    const current = () => page.$eval('[data-proto-current]', (el) => el.textContent)
+
+    it('jumps to any frame from the menu, and Back returns', async () => {
+      await page.evaluate((canvas) => {
+        const w = window as unknown as Fixture
+        w.seed(canvas)
+        w.play('home')
+      }, CANVAS)
+      await screen('home')
+      await page.click('[data-proto-frame-menu]')
+      await page.waitForSelector('[data-proto-jump="detail"]')
+      const listed = await page.$$eval('[data-proto-jump]', (items) => items.map((i) => i.textContent))
+      expect(listed).toEqual(['HOME', 'DETAIL', 'MENU'])
+      await page.click('[data-proto-jump="detail"]')
+      await page.waitForFunction(() => document.querySelector('[data-proto-current]')?.textContent === 'DETAIL')
+      await screen('detail')
+      await page.click('[aria-label="Back"]')
+      await page.waitForFunction(() => document.querySelector('[data-proto-current]')?.textContent === 'HOME')
+      expect(await current()).toBe('HOME')
+    })
+
+    it('pins a comment to the element clicked in comment mode, without playing it', async () => {
+      await page.evaluate((canvas) => {
+        const w = window as unknown as Fixture & { posted: { url: string; body: Record<string, unknown> }[] }
+        w.posted = []
+        const real = window.fetch.bind(window)
+        window.fetch = (input, init) => {
+          const url = String(input)
+          if (url.includes('/comments') && init?.method === 'POST') {
+            w.posted.push({ url, body: JSON.parse(String(init.body)) as Record<string, unknown> })
+            return Promise.resolve(new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } }))
+          }
+          return real(input, init)
+        }
+        w.seed(canvas)
+        w.play('home')
+      }, CANVAS)
+      const home = await screen('home')
+      await page.click('[data-proto-comments]')
+      await page.waitForSelector('[data-proto-comment-surface]')
+      const box = (await (await page.$('iframe[data-doop-proto-frame="home"]'))!.boundingBox())!
+      const help = (await home.$eval('#help', (el) => {
+        const r = el.getBoundingClientRect()
+        return { x: r.x + r.width / 2, y: r.y + r.height / 2 }
+      })) as { x: number; y: number }
+      /* the screen is drawn scaled: design px to the page's */
+      const scale = box.width / 400
+      await page.mouse.click(box.x + help.x * scale, box.y + help.y * scale)
+      await page.waitForSelector('[data-proto-composer] textarea')
+      /* "c" types into the comment; it does not leave comment mode */
+      await page.type('[data-proto-composer] textarea', 'Nice copy')
+      await page.keyboard.down('Control')
+      await page.keyboard.press('Enter')
+      await page.keyboard.up('Control')
+      await page.waitForFunction(() => (window as unknown as { posted: unknown[] }).posted.length === 1)
+      const [posted] = await page.evaluate(
+        () => (window as unknown as { posted: { url: string; body: Record<string, unknown> }[] }).posted,
+      )
+      expect(posted!.url).toContain('/api/frames/home/comments')
+      expect(posted!.body.text).toBe('Nice copy')
+      expect(String(posted!.body.snippet)).toContain('Help')
+      expect(await page.$('[data-proto-composer]')).toBeNull()
+      /* the click commented: the Help overlay never opened */
+      expect(await page.$('[data-proto-overlay]')).toBeNull()
+      expect(await page.$('[data-proto-comment-surface]')).not.toBeNull()
+      /* Esc leaves comment mode before it closes the player */
+      await page.keyboard.press('Escape')
+      await page.waitForFunction(() => !document.querySelector('[data-proto-comment-surface]'))
+      expect(await page.evaluate(() => (window as unknown as Fixture).playerClosed)).toBe(false)
+    })
+
+    it("leaves C to a screen's own key:c interaction, and switches comment mode otherwise", async () => {
+      const keyed: Canvas = {
+        ...CANVAS,
+        frames: [
+          frame(
+            'home',
+            `<button id="go">Go</button><div data-doop-on="key:c" data-doop-action="navigate:detail"></div>`,
+          ),
+          ...CANVAS.frames.slice(1),
+        ],
+      }
+      await page.evaluate((canvas) => {
+        const w = window as unknown as Fixture
+        w.seed(canvas)
+        w.play('home')
+      }, keyed)
+      await screen('home')
+      await page.keyboard.press('c')
+      await page.waitForFunction(() => document.querySelector('[data-proto-current]')?.textContent === 'DETAIL')
+      expect(await page.$('[data-proto-comment-surface]')).toBeNull()
+      /* DETAIL has no key:c: C is comment mode */
+      await screen('detail')
+      await page.keyboard.press('c')
+      await page.waitForSelector('[data-proto-comment-surface]')
+    })
+
+    it('scrolls a long screen under the comment cover', async () => {
+      await page.evaluate((canvas) => {
+        const w = window as unknown as Fixture
+        w.seed(canvas)
+        w.play('home')
+      }, FLOW)
+      const home = await screen('home')
+      await page.click('[data-proto-comments]')
+      const surface = (await (await page.waitForSelector('[data-proto-comment-surface]'))!.boundingBox())!
+      await page.mouse.move(surface.x + 50, surface.y + 50)
+      await page.mouse.wheel({ deltaY: 400 })
+      await home.waitForFunction(() => window.scrollY > 0)
+    })
+
+    it('picking the screen under an open overlay closes the overlay', async () => {
+      await page.evaluate((canvas) => {
+        const w = window as unknown as Fixture
+        w.seed(canvas)
+        w.play('home')
+      }, CANVAS)
+      const home = await screen('home')
+      await clickUntil(home, '#help', async () => !!(await page.$('[data-proto-overlay]')))
+      await page.click('[data-proto-frame-menu]')
+      await page.waitForSelector('[data-proto-jump="home"]')
+      await page.click('[data-proto-jump="home"]')
+      await page.waitForFunction(() => !document.querySelector('[data-proto-overlay]'))
+      /* nothing was pushed: Back has nowhere to go */
+      expect(await page.$eval('[aria-label="Back"]', (b) => (b as HTMLButtonElement).disabled)).toBe(true)
+    })
+
+    it("shows the screen's threads as pins in comment mode", async () => {
+      const comment: ElementComment = {
+        id: 'k1',
+        canvasId: 'c',
+        frameId: 'home',
+        snippet: '',
+        x: 200,
+        y: 150,
+        from: 'Ana',
+        text: 'Too tight',
+        at: 1,
+      }
+      await page.evaluate(
+        (canvas, c) => {
+          const w = window as unknown as Fixture
+          w.seed(canvas)
+          w.seedComments([c])
+          w.play('home')
+        },
+        CANVAS,
+        comment,
+      )
+      await screen('home')
+      expect(await page.$('[title^="Ana: Too tight"]')).toBeNull()
+      await page.click('[data-proto-comments]')
+      const pin = await page.waitForSelector('[title^="Ana: Too tight"]')
+      await pin!.click()
+      await page.waitForFunction(() => document.body.textContent?.includes('Too tight'))
+      expect(await page.$('[data-comment-popover]')).not.toBeNull()
     })
   })
 })
