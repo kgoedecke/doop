@@ -88,6 +88,9 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
 /* The first load transforms the app through a cold Vite dev server, which can
    take longer than the default test timeout on CI. */
+/* the player's control bar above the screens, in px */
+const BAR = 40
+
 describe.skipIf(!findBrowserPath())('prototype player', { timeout: 30_000 }, () => {
   const pages = pagePerTest()
   let page: Page
@@ -151,7 +154,8 @@ describe.skipIf(!findBrowserPath())('prototype player', { timeout: 30_000 }, () 
 
     /* the scrim closes an overlay too */
     await clickUntil(back, '#help', async () => !!(await page.$('[data-proto-overlay="menu"]')))
-    await page.mouse.click(20, 20)
+    /* on the scrim, below the bar */
+    await page.mouse.click(20, BAR + 20)
     await page.waitForFunction(() => !document.querySelector('[data-proto-overlay]'))
   })
 
@@ -183,8 +187,17 @@ describe.skipIf(!findBrowserPath())('prototype player', { timeout: 30_000 }, () 
       await screen('home')
       expect(await page.$eval('[data-prototype-player]', (el) => el.getBoundingClientRect().top)).toBe(40)
       const width = () => page.$eval('[data-proto-screen="home"] > div', (el) => el.getBoundingClientRect().width)
-      /* 1000 × 660 fits the 400 × 300 frame at 2.2× */
-      expect(await width()).toBe(880)
+      /* the screens get 660 less the bar, which fits the 400 × 300 frame by height */
+      expect(Math.abs((await width()) - (400 * (660 - BAR)) / 300)).toBeLessThan(1)
+      /* the bar sits above the screens, never over them */
+      const box = (selector: string) =>
+        page.$eval(selector, (el) => {
+          const { top, bottom, height } = el.getBoundingClientRect()
+          return { top, bottom, height }
+        })
+      const bar = await box('[data-proto-bar]')
+      expect((await box('[data-proto-stage]')).top).toBe(bar.bottom)
+      expect(bar).toMatchObject({ top: 40, height: BAR })
 
       await page.click('[aria-label="Scaling"]')
       await page.waitForSelector('[data-proto-menu]')
@@ -210,6 +223,29 @@ describe.skipIf(!findBrowserPath())('prototype player', { timeout: 30_000 }, () 
     } finally {
       await page.evaluate(() => localStorage.removeItem('doop:proto-scaling'))
     }
+  })
+
+  it('cuts a long frame name short on a phone instead of running it under the buttons', async () => {
+    const long: Canvas = {
+      ...CANVAS,
+      frames: CANVAS.frames.map((f) => (f.id === 'home' ? { ...f, name: 'A very long frame name '.repeat(4) } : f)),
+    }
+    await page.setViewport({ width: 320, height: 700 })
+    await page.evaluate((canvas) => (window as unknown as Fixture).seed(canvas), long)
+    await page.evaluate(() => (window as unknown as Fixture).play('home'))
+    await screen('home')
+    const edges = await page.evaluate(() => {
+      /* the left group's last button: the name pushes it along */
+      const left = document.querySelector('[aria-label="Restart prototype"]')!.getBoundingClientRect()
+      const hotspots = document.querySelector('[aria-label="Show hotspots"]')!.getBoundingClientRect()
+      return {
+        leftEnd: left.right,
+        buttonsLeft: hotspots.left,
+        overflow: document.querySelector('[data-proto-bar]')!.scrollWidth,
+      }
+    })
+    expect(edges.leftEnd).toBeLessThanOrEqual(edges.buttonsLeft)
+    expect(edges.overflow).toBeLessThanOrEqual(320)
   })
 
   it('opens the scaling menu from the keyboard without driving the screen', async () => {
@@ -245,10 +281,11 @@ describe.skipIf(!findBrowserPath())('prototype player', { timeout: 30_000 }, () 
       ...CANVAS,
       frames: [{ ...frame('big', '<button>Big</button>'), width: 2000, height: 1400 }],
     }
-    /* the player's box, the screen's box, and how far its scroller can go */
+    /* the screens' box (the player under its bar), the screen's box,
+       and how far its scroller can go */
     const measure = () =>
       page.$eval('[data-proto-screen="big"]', (scroller) => {
-        const player = scroller.closest('[data-prototype-player]')!.getBoundingClientRect()
+        const player = scroller.closest('[data-proto-stage]')!.getBoundingClientRect()
         scroller.scrollTo(scroller.scrollWidth, scroller.scrollHeight)
         const box = scroller.firstElementChild!.getBoundingClientRect()
         return {
@@ -267,11 +304,12 @@ describe.skipIf(!findBrowserPath())('prototype player', { timeout: 30_000 }, () 
     }
     try {
       await page.evaluate((canvas) => (window as unknown as Fixture).seed(canvas), big)
+      await page.setViewport({ width: 1000, height: 700 + BAR })
       /* 2000 × 1400 at 1× in a 1000 × 700 player: scrolled to the far corner */
       expect(await playAt('actual')).toMatchObject({ scrolled: true, right: 0, bottom: 0 })
       /* at 0.5×: 1000 × 700 fills the width exactly, no room to scroll */
       expect(await playAt('fit-width')).toMatchObject({ right: 0, bottom: 0, left: 0, top: 0 })
-      await page.setViewport({ width: 1000, height: 600 })
+      await page.setViewport({ width: 1000, height: 600 + BAR })
       /* 1000 × 700 in 1000 × 600: scrolls down to the bottom edge */
       expect(await playAt('fit-width')).toMatchObject({ scrolled: true, bottom: 0, left: 0 })
       /* 0.5× covers 1000 × 600: 100px cropped, 50 each side, nothing to scroll */
