@@ -17,6 +17,7 @@ import { api } from '../lib/api'
 import { posthog } from '../lib/posthog'
 import { useStore } from '../lib/store'
 import { useT } from '../lib/i18n'
+import { commentCursorStyle } from '../lib/commentCursor'
 import { CommentComposer, CommentPin, CommentThread } from './CommentPopovers'
 import { CommentThreadLayer } from './FrameLabelLayer'
 import { isResidentLimit } from './TeamAllowance'
@@ -210,6 +211,7 @@ export function PrototypeComments({
         <div
           ref={surfaceRef}
           className="absolute inset-0 z-[3] cursor-comment"
+          style={commentCursorStyle()}
           data-proto-comment-surface=""
           onClick={onSurfaceClick}
           /* the cover takes the wheel from the screen: hand it on, so a long
