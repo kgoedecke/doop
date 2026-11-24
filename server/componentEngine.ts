@@ -1975,7 +1975,7 @@ export function inferBindings(root: Element, limit = 12): string[] {
 }
 
 /* ------------------------------------------------------------------ */
-/* Shape matching: lookalikes and repeated structures                  */
+/* Shape matching: repeated structures                                 */
 /* ------------------------------------------------------------------ */
 
 const MAX_SHAPE_ELEMENTS = 200

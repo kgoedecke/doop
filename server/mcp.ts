@@ -209,7 +209,7 @@ function withEscapeNote<T extends { content: { type: 'text' | 'image'; [k: strin
   return result
 }
 
-/** What a frame write could not do with components, and components it redrew by hand. */
+/** What a frame write could not do with components. */
 function withComponentNotes<T extends ToolContent>(result: T, frame: Frame, options?: { review?: boolean }): T {
   return withNotesFirst(result, componentWriteNotes(frame, options))
 }

@@ -46,7 +46,6 @@ import {
   attrOf,
   compactDocument,
   detachedMarkup,
-  elementCount,
   findAllMarked,
   findMarked,
   inferBindings,
@@ -64,7 +63,6 @@ import {
   readInstance,
   renderInstance,
   setAttr,
-  shapeOf,
   splice,
   stampParts,
   useMarkup,
@@ -1460,36 +1458,6 @@ function describeCandidate(shape: string, occurrences: Occurrence[], size: numbe
     example: { frame_id: first.frame.id, frame_name: first.frame.name, element: pathTo(first.el) },
     shape: shape.slice(0, 160),
   }
-}
-
-/** Elements on a frame that look exactly like an existing component but are not instances of it. */
-export function lookalikesIn(frame: Frame): { component: string; occurrences: number; usage: string }[] {
-  const defs = activeComponents(store.getComponents(frame.canvasId)).filter((def) => def.template)
-  if (!defs.length) return []
-  const shapes = new Map(
-    defs.flatMap((def) => {
-      const root = parseTemplateRoot(def.template)
-      const shape = root ? shapeOf(root) : undefined
-      return root && shape && elementCount(root) + (attrOf(root, 'class') ? 1 : 0) >= 2 ? [[shape, def] as const] : []
-    }),
-  )
-  if (!shapes.size) return []
-  const counts = new Map<ComponentDef, number>()
-  const doc = parse(frame.html)
-  const measured = measureTree(doc)
-  const stack: Tree.ChildNode[] = [...doc.childNodes]
-  for (let node = stack.pop(); node; node = stack.pop()) {
-    if (!isElement(node)) continue
-    if (attrOf(node, INSTANCE_ATTR) !== undefined || attrOf(node, COMPONENT_ATTR) !== undefined) continue
-    const shape = measured.get(node)?.shape
-    const def = shape ? shapes.get(shape) : undefined
-    if (def) {
-      counts.set(def, (counts.get(def) ?? 0) + 1)
-      continue
-    }
-    stack.push(...node.childNodes)
-  }
-  return [...counts].map(([def, occurrences]) => ({ component: def.name, occurrences, usage: usageExample(def) }))
 }
 
 /* ------------------------------------------------------------------ */

@@ -12,7 +12,6 @@ import {
   importableEntry,
   libraryCatalog,
   libraryConsumers,
-  lookalikesIn,
   publishToLibrary,
   unpublishFromLibrary,
   usageExample,
@@ -853,19 +852,13 @@ export function libraryFeatureEvent(name: string, input: Record<string, unknown>
   return undefined
 }
 
-/** What an agent should hear after writing a frame: what could not be done, and components it redrew by hand.
- *  `review` is a whole-frame write (create, replace, a finished stream), which also hears what it should
- *  have reused: blocks repeated by hand and colours the canvas has as tokens. */
+/** What an agent should hear after writing a frame: what could not be done with its components and,
+ *  for a whole-frame write (`review`: create, replace, a finished stream), what it should have reused:
+ *  a screen using none of the canvas's components, blocks repeated by hand, colours the canvas has as tokens. */
 export function componentWriteNotes(frame: Frame, { review = false }: { review?: boolean } = {}): string[] {
   const notes = actions.takeComponentIssues(frame.id).map((issue) => `COMPONENT: ${issue.message}`)
   const canvas = review ? store.getCanvas(frame.canvasId) : undefined
   if (canvas) notes.push(...(optional(() => frameReuseNotes(canvas, frame)) ?? []))
-  /* said after a write that has landed: when the budget is spent, the note is simply not made */
-  for (const lookalike of optional(() => lookalikesIn(frame)) ?? []) {
-    notes.push(
-      `COMPONENT: ${lookalike.occurrences} element${lookalike.occurrences === 1 ? '' : 's'} in this frame match${lookalike.occurrences === 1 ? 'es' : ''} “${lookalike.component}” but ${lookalike.occurrences === 1 ? 'is' : 'are'} not linked to it, so ${lookalike.occurrences === 1 ? 'it' : 'they'} will not follow changes. Use ${lookalike.usage} instead.`,
-    )
-  }
   return notes
 }
 
