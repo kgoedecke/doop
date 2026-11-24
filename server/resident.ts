@@ -26,6 +26,7 @@ import { RESIDENT_TASK_LIMIT } from './allowance.ts'
 import * as actions from './actions.ts'
 import { captureFeature, captureTokenResults } from './featureEvents.ts'
 import { inspectFrame, renderFrame } from './screenshot.ts'
+import { FIT_AXES, FIT_ON, fitNotes, fitWrittenFrame, readFitAxes, updateFrameMetaWithFit } from './frameFit.ts'
 import { AGENT_ROLES, DEFAULT_ROLE_ID, roleById, roleByAgentName, roleName } from '../shared/agents.ts'
 import { resolvePersonMentions, withoutAgentMentions, type Mentionable } from '../shared/personMentions.ts'
 import { commentPeople, threadAuthorIds } from './canvasPeople.ts'
@@ -88,7 +89,7 @@ import {
 } from './inspiration.ts'
 import type { Actor, AgentTask, Canvas, ElementComment, Frame } from '../shared/types.ts'
 import { canvasPages, framePageId, MAX_CANVAS_NAME, MAX_PAGE_NAME, pageFrames, samePages } from '../shared/pages.ts'
-import { addPage, pageList, parsePageList, savePages, updateFrameMeta } from './pageTools.ts'
+import { addPage, pageList, parsePageList, savePages } from './pageTools.ts'
 import { isCanvasComment, isFrameComment } from '../shared/comments.ts'
 import { websiteAccessErrorMessage } from './websiteAccess.ts'
 import { executeGuardedBatch } from './guardedBatch.ts'
@@ -332,6 +333,25 @@ interface RunState {
   /** some of the run's work was queued by an automation: such a run never sets approval,
    *  which would sign off its own output and could start the automation again */
   automated?: boolean
+}
+
+/** A run's state before its first tool call; tests start one the same way. */
+export function newRunState(start: Partial<RunState> = {}): RunState {
+  return {
+    mutatedFrames: new Set(),
+    sourceFrames: new Set(),
+    verificationFrames: new Set(),
+    verifiedFrames: new Set(),
+    seenVerified: new Set(),
+    rewriteDrafts: new Map(),
+    vision: false,
+    imagesGenerated: 0,
+    repliedThreads: new Set(),
+    awaitingThreads: new Set(),
+    tokenWrites: 0,
+    arrangeWrites: 0,
+    ...start,
+  }
 }
 
 export interface FramePlacement {
@@ -726,25 +746,14 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
        originating pass that changed nothing has not delivered its card */
     const requireMutation = cards.length > 0 && !role.reviewer
     const messages: Anthropic.MessageParam[] = [{ role: 'user', content: kickoff }]
-    const runState: RunState = {
-      mutatedFrames: new Set(),
-      sourceFrames: new Set(),
-      verificationFrames: new Set(),
-      verifiedFrames: new Set(),
-      seenVerified: new Set(),
-      rewriteDrafts: new Map(),
+    const runState = newRunState({
       vision: model.vision !== false,
       ...(model.userId ? { payerId: model.userId } : {}),
       ...(payer ? { requesterId: payer } : {}),
-      imagesGenerated: 0,
       /* a run about a comment delivers on that comment's page */
       ...(comments[0] ? { placement: placementFor(comments[0], canvas) } : {}),
-      repliedThreads: new Set(),
-      awaitingThreads: new Set(),
-      tokenWrites: 0,
-      arrangeWrites: 0,
       automated: cards.some(isAutomationCard),
-    }
+    })
     let refused = false
     let crashed = false
     let staleAccount = false
@@ -1268,6 +1277,7 @@ const TOOLS: Anthropic.Tool[] = [
             'Canvas position in px. Optional: left out, the frame lands on the page the request is about — beside the pin of a canvas comment, else to the right of the existing frames.',
         },
         y: { type: 'number', description: 'Canvas position in px. Optional, see x.' },
+        fit_to_content: { type: 'string', enum: [...FIT_AXES], description: FIT_ON.create },
       },
       required: ['name', 'width', 'height', 'html'],
     },
@@ -1331,6 +1341,7 @@ const TOOLS: Anthropic.Tool[] = [
       properties: {
         frame_id: { type: 'string' },
         html: { type: 'string', description: 'Complete, self-contained HTML document' },
+        fit_to_content: { type: 'string', enum: [...FIT_AXES], description: FIT_ON.set },
       },
       required: ['frame_id', 'html'],
     },
@@ -1743,6 +1754,7 @@ const TOOLS: Anthropic.Tool[] = [
         y: { type: 'number', description: 'Canvas position in px' },
         width: { type: 'number', description: 'px; the design is not rescaled' },
         height: { type: 'number', description: 'px; the design is not rescaled' },
+        fit_to_content: { type: 'string', enum: [...FIT_AXES], description: FIT_ON.update },
         locked: { type: 'boolean', description: 'true keeps humans from selecting, moving or deleting it' },
       },
       required: ['frame_id'],
@@ -1993,7 +2005,10 @@ async function runResidentTool(
           html?: string
           x?: number
           y?: number
+          fit_to_content?: unknown
         }
+        const fitAxes = readFitAxes(raw.fit_to_content)
+        if (!fitAxes.ok) return fail(fitAxes.error)
         const html = completeHtml(raw.html)
         if (!html) return fail('create_frame requires a complete non-empty HTML document ending in </html>')
         const inline = inlineDataRefusal(html, '', 'resident')
@@ -2001,17 +2016,20 @@ async function runResidentTool(
         if (html.length > MAX_REWRITE_CHUNK_CHARS) {
           return fail(`create_frame HTML must be compact (at most ${MAX_REWRITE_CHUNK_CHARS} characters)`)
         }
-        const f = actions.createFrame(
+        const created = actions.createFrame(
           canvasId,
           createFrameInput({ ...raw, html }, runState.placement, store.getCanvas(canvasId)),
           actor,
         )
-        if (!f) return fail('canvas not found')
+        if (!created) return fail('canvas not found')
+        const fit = fitAxes.value ? await fitWrittenFrame(created, fitAxes.value, actor) : undefined
+        const f = fit?.frame ?? created
         runState.mutatedFrames.add(f.id)
         unverify(runState, f.id)
         return ok(
           [
             `created frame ${f.id} ("${f.name}", ${Math.round(f.width)}x${Math.round(f.height)}) — it is revealing to viewers now`,
+            ...fitNotes(fit),
             ...componentWriteNotes(f, { review: true }),
           ].join('\n'),
         )
@@ -2095,6 +2113,8 @@ async function runResidentTool(
       case 'set_frame_html': {
         const f = store.getFrame(input.frame_id)
         if (!f || f.canvasId !== canvasId) return fail('frame not found on this canvas')
+        const fitAxes = readFitAxes((block.input as { fit_to_content?: unknown }).fit_to_content)
+        if (!fitAxes.ok) return fail(fitAxes.error)
         const html = completeHtml(input.html)
         if (!html) {
           return fail(
@@ -2109,13 +2129,16 @@ async function runResidentTool(
         const inline = inlineDataRefusal(html, existingHtml(f), 'resident')
         if (inline) return fail(inline)
         /* a whole-document write, as MCP set_frame_html: it may replace a design another agent streams */
-        actions.updateFrame(input.frame_id, { html }, actor, { replace: true })
+        const written = actions.updateFrame(input.frame_id, { html }, actor, { replace: true })
+        if (!written) return fail('frame not found on this canvas')
+        const fit = fitAxes.value ? await fitWrittenFrame(written, fitAxes.value, actor) : undefined
         runState.mutatedFrames.add(input.frame_id)
         unverify(runState, input.frame_id)
         return ok(
           [
             'applied — the new design is revealing to viewers now',
-            ...componentWriteNotes(store.getFrame(input.frame_id)!, { review: true }),
+            ...fitNotes(fit),
+            ...componentWriteNotes(fit?.frame ?? written, { review: true }),
           ].join('\n'),
         )
       }
@@ -2608,6 +2631,8 @@ async function runResidentTool(
         const canvas = store.getCanvas(canvasId)
         const f = store.getFrame(input.frame_id)
         if (!canvas || !f || f.canvasId !== canvasId) return fail('frame not found on this canvas')
+        const fitAxes = readFitAxes(raw.fit_to_content)
+        if (!fitAxes.ok) return fail(fitAxes.error)
         /* the store updates the frame object in place, so what it was is read first */
         const arrangement = (frame: typeof f) =>
           [frame.name, framePageId(canvas, frame), frame.x, frame.y, frame.width, frame.height, !!frame.locked].join(
@@ -2616,7 +2641,7 @@ async function runResidentTool(
         const before = { width: f.width, height: f.height, arrangement: arrangement(f) }
         const text = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim() : undefined)
         const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : undefined)
-        const updated = updateFrameMeta(
+        const updated = await updateFrameMetaWithFit(
           canvas,
           f.id,
           {
@@ -2628,10 +2653,11 @@ async function runResidentTool(
             height: num(raw.height),
             locked: typeof raw.locked === 'boolean' ? raw.locked : undefined,
           },
+          fitAxes.value,
           actor,
         )
         if (!updated.ok) return fail(updated.error)
-        const frame = updated.value
+        const { frame, note } = updated.value
         /* a new size changes what renders, so it is a design change to verify */
         if (frame.width !== before.width || frame.height !== before.height) {
           runState.mutatedFrames.add(frame.id)
@@ -2640,7 +2666,7 @@ async function runResidentTool(
         /* a save that changed nothing has not delivered anything */
         if (arrangement(frame) !== before.arrangement) runState.arrangeWrites += 1
         return ok(
-          `frame ${frame.id} is now "${frame.name}" on page ${framePageId(canvas, frame)} at (${Math.round(frame.x)}, ${Math.round(frame.y)}), ${Math.round(frame.width)}x${Math.round(frame.height)}${frame.locked ? ', locked' : ''}`,
+          `frame ${frame.id} is now "${frame.name}" on page ${framePageId(canvas, frame)} at (${Math.round(frame.x)}, ${Math.round(frame.y)}), ${Math.round(frame.width)}x${Math.round(frame.height)}${frame.locked ? ', locked' : ''}${note ? `\n${note}` : ''}`,
         )
       }
       case 'update_canvas': {

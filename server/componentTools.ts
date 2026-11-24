@@ -261,7 +261,7 @@ export const COMPONENT_TOOLS: ComponentTool[] = [
             ...inferredProps(inferred),
           },
           note: [
-            `The main is frame main_frame_id on the Components page. No instance was placed: to use it, write ${usageExample(def)} in a frame's HTML, or call insert_instance. Call get_frame_screenshot on main_frame_id, and resize that frame to fit with update_frame.${inferredNote(inferred)}`,
+            `The main is frame main_frame_id on the Components page. No instance was placed: to use it, write ${usageExample(def)} in a frame's HTML, or call insert_instance. Call get_frame_screenshot on main_frame_id, and fit that frame to it with update_frame's fit_to_content "both".${inferredNote(inferred)}`,
             ...(optional(() => componentReuseNotes(canvas, def, shared.autoProps)) ?? []),
           ].join('\n'),
           frames: outcomeFrames({ canvas } as ToolContext, def),
@@ -374,7 +374,7 @@ export const COMPONENT_TOOLS: ComponentTool[] = [
         data: { ok: failed.length === 0, created: made.length, failed: failed.length, results },
         note: [
           made.length
-            ? `Made ${made.length} component${made.length === 1 ? '' : 's'} on the Components page. No instance was placed: compose screens from them with\n${usage}\nCall get_frame_screenshot on a main_frame_id or two, and resize a main to fit with update_frame. Props each one inferred are in its inferred_props.`
+            ? `Made ${made.length} component${made.length === 1 ? '' : 's'} on the Components page. No instance was placed: compose screens from them with\n${usage}\nCall get_frame_screenshot on a main_frame_id or two, and fit a main to its content with update_frame's fit_to_content "both". Props each one inferred are in its inferred_props.`
             : 'Nothing was made.',
           ...(failed.length
             ? [
