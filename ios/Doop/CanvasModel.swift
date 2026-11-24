@@ -31,6 +31,12 @@ final class CanvasModel: ObservableObject {
     @Published var error: String?
     @Published var deleted = false
     @Published var selectedElement: SelectedElement?
+    /// A thread whose pin was tapped on the canvas: the comments panel opens on it.
+    @Published var focusedCommentID: String?
+    /// A comment being written at a spot the person long-pressed, shown as a draft pin.
+    @Published var commentDraft: CommentDraft?
+    /// A thread picked in the Comments list: the canvas moves to its pin, then clears this.
+    @Published var flyToCommentID: String?
     @Published var viewportCommand = 0
     /// Measured composer height, used when fitting frames above the floating controls.
     var composerHeight: CGFloat = 160
@@ -389,7 +395,6 @@ final class CanvasModel: ObservableObject {
         }
     }
 
-    /// A comment pinned to an element when one is selected, else to the frame body.
     /// A picked element is only as good as the HTML it was picked in: its selector
     /// path can point elsewhere once that HTML changes, whichever way the change
     /// arrived (a frame event, a reconnect resync, a reload). Drop it then.
@@ -400,16 +405,54 @@ final class CanvasModel: ObservableObject {
         if frame == nil || frame?.html.hashValue != element.htmlHash { selectedElement = nil }
     }
 
-    func comment(_ text: String, frameID: String) async throws {
+    /// The selection bar's Comment: a draft on the picked element, else just inside
+    /// the selected frame's top-left, as the web pins a comment made from a frame's name.
+    func startCommentOnSelection() {
         pruneSelection()
-        let element = selectedElement?.frameID == frameID ? selectedElement : nil
-        let data = try await client.data("/api/frames/\(frameID)/comments", method: "POST", body: [
-            "text": text, "selector": element?.selector ?? "body", "snippet": element?.text ?? "",
-        ])
-        // A successful post is visible immediately, including when the socket
-        // is reconnecting. Its later broadcast replaces this same ID.
+        guard let frame = selected else { return }
+        let origin = CGPoint(x: frame.x, y: frame.y)
+        if let element = selectedElement, element.frameID == frame.id {
+            let point = element.rect.origin
+            commentDraft = CommentDraft(
+                target: .element(frameID: frame.id, selector: element.selector, snippet: String(element.text.prefix(400)),
+                                 point: point, origin: element.rect.origin),
+                world: CGPoint(x: origin.x + point.x, y: origin.y + point.y), label: "\(frame.name) · \(element.label)")
+        } else {
+            let point = CGPoint(x: 8, y: 8)
+            commentDraft = CommentDraft(target: .frame(frameID: frame.id, point: point),
+                                        world: CGPoint(x: origin.x + point.x, y: origin.y + point.y), label: frame.name)
+        }
+        focusedCommentID = nil
+    }
+
+    func reply(_ text: String, to rootID: String) async throws {
+        let data = try await client.data("/api/comments/\(rootID)/replies", method: "POST", body: ["text": text])
         let comment = try JSONDecoder().decode(CanvasComment.self, from: data)
         upsert(comment, into: &comments)
+    }
+
+    /// Post the draft placed by a long-press, anchored the way the web's Comment tool anchors.
+    func postDraft(_ text: String) async throws {
+        guard let draft = commentDraft else { return }
+        let data: Data
+        switch draft.target {
+        case let .element(frameID, selector, snippet, point, origin):
+            data = try await client.data("/api/frames/\(frameID)/comments", method: "POST", body: [
+                "text": text, "selector": selector, "snippet": snippet, "x": point.x, "y": point.y,
+                "elementOrigin": ["x": origin.x, "y": origin.y],
+            ])
+        case let .frame(frameID, point):
+            data = try await client.data("/api/frames/\(frameID)/comments", method: "POST", body: [
+                "text": text, "selector": "body", "x": point.x, "y": point.y,
+            ])
+        case let .canvas(pageID, point):
+            data = try await client.data("/api/canvases/\(id)/comments", method: "POST", body: [
+                "text": text, "pageId": pageID, "x": point.x, "y": point.y,
+            ])
+        }
+        let comment = try JSONDecoder().decode(CanvasComment.self, from: data)
+        upsert(comment, into: &comments)
+        if commentDraft == draft { commentDraft = nil }
     }
 
     func deleteFrame(_ frameID: String) async throws {
@@ -527,6 +570,23 @@ struct PromptScope: Equatable {
     var key: String { scope.selector.map { "\(scope.frameId):\($0)" } ?? scope.frameId }
 }
 
+/// Where a long-press asked for a new comment.
+struct CommentDraft: Equatable {
+    enum Target: Equatable {
+        /// An element: the point pressed and the element's top-left, both in frame px.
+        case element(frameID: String, selector: String, snippet: String, point: CGPoint, origin: CGPoint)
+        /// A frame's background, at a point in frame px.
+        case frame(frameID: String, point: CGPoint)
+        /// Empty canvas, at a world point on a page.
+        case canvas(pageID: String, point: CGPoint)
+    }
+    var target: Target
+    /// Where the draft pin sits in the world.
+    var world: CGPoint
+    /// What the composer says the comment is on.
+    var label: String
+}
+
 /// An element picked inside a frame by the Blitz hit test.
 struct SelectedElement: Equatable, Sendable {
     var frameID: String
@@ -602,4 +662,9 @@ extension CanvasModel {
 private func upsert<T: Identifiable>(_ item: T, into collection: inout [T]) {
     if let index = collection.firstIndex(where: { $0.id == item.id }) { collection[index] = item }
     else { collection.append(item) }
+}
+
+/// Up to two initials of a name, as pins and comment rows show it.
+func commentInitials(_ name: String) -> String {
+    name.split(separator: " ").prefix(2).compactMap { $0.first.map(String.init) }.joined().uppercased()
 }

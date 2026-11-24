@@ -226,7 +226,9 @@ struct ConnectionChecks {
         failNext = true
         do { try await model.pasteFrame(original); preconditionFailure("Expected paste failure") } catch {}
         precondition(!model.canUndo && model.canvas?.frames.isEmpty == true)
-        try await model.comment("Saved without a socket echo", frameID: "f1")
+        model.commentDraft = CommentDraft(target: .frame(frameID: "f1", point: CGPoint(x: 4, y: 4)), world: .zero, label: "f1")
+        try await model.postDraft("Saved without a socket echo")
+        precondition(model.commentDraft == nil)
         precondition(model.comments.count == 1)
         let echo = try JSONSerialization.data(withJSONObject: ["type": "comment", "comment": ["id": "posted", "frameId": "f1", "from": "Tester", "text": "Saved without a socket echo", "at": 30]])
         model.apply(try JSONDecoder().decode(CanvasEvent.self, from: echo))
