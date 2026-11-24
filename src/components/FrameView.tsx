@@ -1091,7 +1091,16 @@ export const FrameView = memo(function FrameView({
   const pinsShown = useStore((s) => s.viewOptions.comments || s.tool === 'comment')
   /* a pin being dragged stays mounted: its release listeners live on it */
   const draggedPin = useStore((s) => s.commentDrag?.id)
-  const [probe, setProbe] = useState<ProbeHit | null>(null)
+  const [probe, setProbeState] = useState<ProbeHit | null>(null)
+  /* the store's pick when the probe was last set: the probe is only written
+     back into the store (see below) while that pick still stands */
+  const probedOver = useRef<{ frameId: string; selector: string } | null>(null)
+  /** Show `hit` as this frame's probe. Only from an event or a reply, never
+   *  during render: it notes the store's pick it was set over. */
+  function setProbe(hit: ProbeHit | null) {
+    probedOver.current = useStore.getState().selectedElement
+    setProbeState(hit)
+  }
   useEffect(() => {
     // The request also distinguishes a return to previously rendered HTML
     // while a newer document is still being delivered.
@@ -1120,7 +1129,6 @@ export const FrameView = memo(function FrameView({
         ...(hit ? { hit: { snippet: hit.snippet, ...(hit.elementId ? { elementId: hit.elementId } : {}) } } : {}),
       })
       setMenuProbe(null)
-      setProbe(hit ?? null)
       /* a right-click inside a multi-pick keeps the pick, the clicked layer
          its primary, so the menu's commands act on all of it */
       const picked = store.selectedElement?.frameId === frame.id ? pickedSelectors(store) : []
@@ -1128,7 +1136,10 @@ export const FrameView = memo(function FrameView({
       const wasSelected = store.selectedIds.includes(frame.id)
       const others = wasSelected && store.selectedIds.length > 1
       /* a shape among several selected keeps them all, as its Layers row does */
-      if (hit && standalone === hit.selector && others) return
+      if (hit && standalone === hit.selector && others) {
+        setProbe(hit)
+        return
+      }
       /* a shape on the canvas is its frame: the right-click selects it, so a
          stale frame selection is not what Move to page or Group act on, and a
          layer inside one (a group's) narrows the selection to its frame, so
@@ -1141,6 +1152,8 @@ export const FrameView = memo(function FrameView({
         /* nothing under the pointer: the pick goes, and its panel with it */
         store.pickElement(null)
       }
+      /* set over the pick just made, which it shows */
+      setProbe(hit ?? null)
     })
     return () => {
       cancelled = true
@@ -1356,7 +1369,7 @@ export const FrameView = memo(function FrameView({
      outline never reappears when the frame is picked again */
   useLayoutEffect(() => {
     // eslint-disable-next-line react/set-state-in-effect -- queued on purpose, see above
-    if (!selected) setProbe(null)
+    if (!selected) setProbeState(null)
   }, [selected])
   const [wasSelected, setWasSelected] = useState(selected)
   if (wasSelected !== selected) {
@@ -1377,7 +1390,7 @@ export const FrameView = memo(function FrameView({
   if (requestedThread !== seenThreadRequest) {
     setSeenThreadRequest(requestedThread)
     if (requestedThread) {
-      setProbe(null)
+      setProbeState(null)
       setComposing(false)
       setOpenThread(requestedThread.id)
     }
@@ -1402,6 +1415,12 @@ export const FrameView = memo(function FrameView({
          frame's entire document */
       if (cur?.frameId === frame.id) useStore.getState().setSelectedElement(null)
     } else if (probeSel) {
+      /* the store picked again after this probe was set (⌘G picks the group
+         it made, a Layers row its layer): that pick is the newer one, and the
+         frame resolves it into a probe of its own. A reply that set the probe
+         just before must not take it back. */
+      const over = probedOver.current
+      if (cur?.frameId !== over?.frameId || cur?.selector !== over?.selector) return
       const el = { frameId: frame.id, selector: probeSel }
       /* the Comment tool outlines the element without sliding its properties panel in */
       if (useStore.getState().tool === 'comment') useStore.getState().setSelectedElement(el)
@@ -1427,7 +1446,7 @@ export const FrameView = memo(function FrameView({
      removes the previous element's outline. */
   useLayoutEffect(() => {
     // eslint-disable-next-line react/set-state-in-effect -- queued on purpose, see above
-    if (!wantedSel) setProbe((p) => (p?.selector === FRAME_COMMENT_SELECTOR ? p : null))
+    if (!wantedSel) setProbeState((p) => (p?.selector === FRAME_COMMENT_SELECTOR ? p : null))
   }, [wantedSel])
   /* the rest of a multi-element pick: each is outlined like the primary,
      re-located whenever the document changes. A string key keeps the
@@ -1489,6 +1508,11 @@ export const FrameView = memo(function FrameView({
     const live = useStore.getState().selectedElement
     selectReq.current += 1
     if (live?.frameId !== frame.id || live.selector !== wantedSel) return
+    /* a pick made elsewhere (a Layers row, ⌘G's new group, a drag) is newer
+       than a click still waiting on its hit test: that reply must not land
+       after it and take it back, so the click's probe is dropped now rather
+       than when this select answers */
+    cancelProbe()
     selectSel.current = wantedSel
     iframeRef.current?.contentWindow?.postMessage(
       { type: 'doop:select', reqId: selectReq.current, selector: wantedSel },
@@ -1571,7 +1595,8 @@ export const FrameView = memo(function FrameView({
            leaving edit mode keeps the last element selected. A refresh for
            the same element (a save while editing) only updates its outline,
            so it can't take back a pick made in Layers meanwhile. */
-        if (hit) setProbe((p) => (moved || p?.selector === hit.selector ? hit : p))
+        if (hit && moved) setProbe(hit)
+        else if (hit) setProbeState((p) => (p?.selector === hit.selector ? hit : p))
       }
       if (ev.data?.type === 'doop:located' && typeof ev.data.reqId === 'string') {
         if (ev.data.reqId === '__layer-hover__') {
@@ -1596,7 +1621,7 @@ export const FrameView = memo(function FrameView({
         if (ev.data.reqId === '__probe__') {
           /* Refresh both the outline and handle eligibility after style edits. */
           const rect = ev.data.rect as ProbeHit['rect'] | null
-          setProbe((p) => {
+          setProbeState((p) => {
             if (!p || p.selector !== ev.data.selector) return p
             if (!rect) return null
             const box = ev.data.box as ProbeHit['box'] | null
@@ -2419,7 +2444,7 @@ export const FrameView = memo(function FrameView({
                   selector={probe.selector}
                   geometry={{ rect: probe.rect, rotation: probe.rotation ?? 0, box: probe.box ?? probe.rect }}
                   onGeometry={(g: ElementGeometry) =>
-                    setProbe((p) => (p && p.selector === probe.selector ? { ...p, ...g } : p))
+                    setProbeState((p) => (p && p.selector === probe.selector ? { ...p, ...g } : p))
                   }
                   onResizing={(on) => {
                     if (on) clearHover()

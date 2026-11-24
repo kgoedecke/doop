@@ -4,6 +4,7 @@ import {
   commentMoves,
   drag,
   drawingPage,
+  holdReplies,
   page,
   patchRequests,
   saved,
@@ -312,29 +313,21 @@ describe.skipIf(!findBrowserPath())('drawing on the canvas', { timeout: 30_000 }
     }
     await seedFrames([source])
     const rect = await visibleDrawing('Slow')
-    const iframe = (await (await page.$('iframe[title="Slow"]'))!.contentFrame())!
-    await iframe.evaluate(() =>
-      window.addEventListener(
-        'message',
-        (event) => {
-          if (event.data?.type !== 'doop:drawing-hit' || event.data.delayed) return
-          event.stopImmediatePropagation()
-          setTimeout(() => {
-            window.dispatchEvent(
-              new MessageEvent('message', { data: { ...event.data, delayed: true }, source: event.source }),
-            )
-            document.body.dataset.replied = 'true'
-          }, 250)
-        },
-        true,
-      ),
+    /* the frame answers the press only once the button is up: its hit test
+       is held in the page and handed on just after the release */
+    await holdReplies('doop:drawing-hit-result')
+    await page.evaluate(() =>
+      window.addEventListener('pointerup', () => setTimeout(() => window.releaseReplies()), {
+        once: true,
+        capture: true,
+      }),
     )
     await page.mouse.move(rect.x + 40, rect.y + 40)
     await page.mouse.down()
     await page.mouse.move(900, 600)
     if (cancel) await page.keyboard.press('Escape')
     await page.mouse.up()
-    await iframe.waitForFunction(() => document.body.dataset.replied === 'true')
+    await page.waitForFunction(() => window.heldReplies!.delivered > 0)
     if (cancel) {
       await page.evaluate(
         () => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))),
@@ -342,8 +335,12 @@ describe.skipIf(!findBrowserPath())('drawing on the canvas', { timeout: 30_000 }
       expect(saved).toEqual([source])
       expect(await page.$('iframe[title="Moving drawing"]')).toBeNull()
     } else {
-      const result = await waitForFrames(2)
-      expect(result[0]!.html).not.toContain('data-doop-drawing')
+      /* the drawing's new frame is saved first, then its source without it */
+      await page.waitForFunction(() => {
+        const frames = window.drawingHarness.state().frames
+        return frames.length === 2 && !frames[0]!.html.includes('data-doop-drawing')
+      })
+      const result = await page.evaluate(() => window.drawingHarness.state().frames)
       expect(result[1]).toMatchObject({ width: 100, height: 100, name: 'Rectangle' })
     }
   })
