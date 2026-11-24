@@ -12,7 +12,8 @@
       import { Stage } from '/src/components/Stage.tsx'
       import { useStore } from '/src/lib/store.ts'
       import { undo, redo } from '/src/lib/history.ts'
-      import { formatSelectionText } from '/src/lib/layerEdits.ts'
+      import { formatSelectionText, nudgeSelection } from '/src/lib/layerEdits.ts'
+      import { downloadElementExport, downloadFrameExport } from '/src/lib/frameExport.ts'
       import { TooltipProvider } from '/src/components/ui/tooltip.tsx'
       import { importSvgInBrowser } from '/src/lib/svgImport.ts'
       import '/src/styles.css'
@@ -46,6 +47,12 @@
         /* several Layers rows picked, the last the primary */
         pickMany: (frameId, selectors) => useStore.getState().pickElements(frameId, selectors),
         formatText: (command) => formatSelectionText(command),
+        nudge: nudgeSelection,
+        exportSvg: (id, element) => {
+          const frame = useStore.getState().canvas?.frames.find((item) => item.id === id)
+          if (!frame) throw new Error('Missing frame for export')
+          return element ? downloadElementExport(frame, element, 'svg') : downloadFrameExport(frame, 'svg')
+        },
         /* an SVG file read the way a paste reads it, with the browser's computed styles */
         importSvg: (markup, name) => importSvgInBrowser(markup, name, { key: 'k' }),
       }

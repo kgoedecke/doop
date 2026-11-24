@@ -198,7 +198,9 @@ describe.skipIf(!findBrowserPath())('zooming over a frame being edited', { timeo
       '<body style="margin:0"><div id="box" style="height:300px;overflow:auto;display:flex;flex-direction:column-reverse">' +
       '<p id="copy" style="font:32px/1.4 Arial;margin:40px;flex:none">Edit me</p><div style="height:400px;flex:none"></div></div></body>'
     await showCanvasPage(page, [{ ...TEXT, html }])
-    const frame = page.frames().find((f) => f !== page.mainFrame() && !f.detached)!
+    const iframe = await page.waitForSelector('iframe[data-doop-frame]')
+    const frame = (await iframe!.contentFrame())!
+    await frame.waitForSelector('#copy')
     /* the text sits at the box's bottom, where it starts scrolled */
     const text = await frame.$eval('#copy', (el) => {
       const r = el.getBoundingClientRect()

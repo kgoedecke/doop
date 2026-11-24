@@ -31,16 +31,11 @@ export async function elementMoveTarget(
   return reply?.result as { free: boolean; drop: LayoutDrop | null } | undefined
 }
 
-/** Where the frame's body places its absolute layers from, in design px
- *  from the frame's corner (a positioned body with a margin moves it), and
- *  the scale it draws them at; the corner itself when the frame is not
- *  mounted. */
-export function bodyPlacementOrigin(frameId: string): PlacementOrigin | Promise<PlacementOrigin> {
-  /* nothing to ask, and no turn of the event loop spent, without a live frame */
-  if (!windows.has(frameId)) return FRAME_CORNER
-  return requestFrame(frameId, 'doop:placement-origin', {}).then(
-    (reply) => (reply?.origin as PlacementOrigin | undefined) ?? FRAME_CORNER,
-  )
+/** Where the body places absolute layers relative to the frame's corner.
+ *  Null means the live document cannot be read, not that its offset is zero. */
+export async function bodyPlacementOrigin(frameId: string, html: string): Promise<PlacementOrigin | null> {
+  const reply = await readFramePlacement(frameId, html, 'doop:placement-origin', {})
+  return (reply?.origin as PlacementOrigin | undefined) ?? null
 }
 
 export interface PlacementOrigin {
@@ -48,14 +43,27 @@ export interface PlacementOrigin {
   y: number
   scale: { x: number; y: number }
 }
-const FRAME_CORNER: PlacementOrigin = { x: 0, y: 0, scale: { x: 1, y: 1 } }
 
-/** How the element sits once the Layers panel moves it to `target`: the
- *  placement a canvas drag there would give it, or undefined to keep its
- *  styles as authored (and when the frame is not mounted). */
-export async function layerPlacement(frameId: string, selector: string, target: DropTarget) {
-  const reply = await requestFrame(frameId, 'doop:layer-placement', { selector, target })
-  return (reply?.styles ?? undefined) as FlowPlacement | undefined
+/** Undefined means keep authored styles; null means the placement could not
+ *  be read and the move must not be saved. */
+export async function layerPlacement(frameId: string, selector: string, target: DropTarget, html: string) {
+  const reply = await readFramePlacement(frameId, html, 'doop:layer-placement', { selector, target })
+  if (!reply || !('styles' in reply)) return null
+  return (reply.styles ?? undefined) as FlowPlacement | undefined
+}
+
+async function readFramePlacement(
+  frameId: string,
+  html: string,
+  type: 'doop:placement-origin' | 'doop:layer-placement',
+  payload: Record<string, unknown>,
+): Promise<Record<string, unknown> | null> {
+  const readiness = await prepareFrameDocument(frameId, html)
+  if (readiness !== 'ready' && readiness !== true) return null
+  const win = windows.get(frameId)
+  if (!win || shownDocuments.get(frameId) !== html) return null
+  const reply = await requestFrame(frameId, type, payload)
+  return windows.get(frameId) === win && shownDocuments.get(frameId) === html ? reply : null
 }
 
 /** The runtime's summary of one element: computed styles resolved to what
@@ -185,17 +193,23 @@ export async function editElementGeometry(
 interface PendingAsk {
   win: Window
   replyType: string
+  timeout: number
   resolve: (reply: Record<string, unknown>) => void
 }
 
 const REPLY_TIMEOUT_MS = 2000
 
 const windows = new Map<string, Window>()
+const frameIds = new WeakMap<MessageEventSource, string>()
+const windowListeners = new WeakMap<MessageEventSource, Set<(event: MessageEvent) => void>>()
 /* ⌘Y outline mode, which a frame mounted later picks up when it registers */
 let outlines = false
 const changeListeners = new Map<string, Set<() => void>>()
 const selectionListeners = new Map<string, Set<() => void>>()
 const pending = new Map<number, PendingAsk>()
+/* Rendering user HTML can outlast an ordinary request. Remember only the
+   newest document request per frame, until it answers or its window goes away. */
+const documentRequests = new Map<string, { win: Window; reqId: number; html: string; onShown: () => void }>()
 let nextReq = 0
 let listening = false
 
@@ -203,16 +217,19 @@ function listen() {
   if (listening) return
   listening = true
   window.addEventListener('message', (ev: MessageEvent) => {
+    const { source } = ev
+    if (!source) return
+    windowListeners.get(source)?.forEach((listener) => listener(ev))
     const data = ev.data as { type?: string; reqId?: number } | null
     if (data?.type === 'doop:frame-updated' || data?.type === 'doop:text-selection') {
       const listeners = data.type === 'doop:frame-updated' ? changeListeners : selectionListeners
-      for (const [frameId, win] of windows) {
-        if (ev.source === win) listeners.get(frameId)?.forEach((cb) => cb())
-      }
+      const frameId = frameIds.get(source)
+      if (frameId !== undefined) listeners.get(frameId)?.forEach((cb) => cb())
       return
     }
     if (typeof data?.type !== 'string' || typeof data.reqId !== 'number') return
-    if (data.type !== 'doop:settle-result') finishRequest(ev.source, data.type, data.reqId, data)
+    if (data.type === 'doop:html-result') finishFrameDocument(source, data.reqId)
+    if (data.type !== 'doop:settle-result') finishRequest(source, data.type, data.reqId, data)
   })
 }
 
@@ -220,6 +237,7 @@ function finishRequest(source: MessageEventSource | null, type: string, reqId: n
   const ask = pending.get(reqId)
   if (!ask || ask.replyType !== type || source !== ask.win) return
   pending.delete(reqId)
+  window.clearTimeout(ask.timeout)
   ask.resolve(data)
 }
 
@@ -228,8 +246,22 @@ export function finishFrameSettle(win: Window, reqId: number) {
   finishRequest(win, 'doop:settle-result', reqId, { type: 'doop:settle-result', reqId })
 }
 
+/** Listen to one iframe, including its bootstrap before it can answer requests. */
+export function onFrameMessage(win: Window, listener: (event: MessageEvent) => void): () => void {
+  listen()
+  const listeners = windowListeners.get(win) ?? new Set()
+  listeners.add(listener)
+  windowListeners.set(win, listeners)
+  return () => {
+    if (listeners.delete(listener) && !listeners.size) windowListeners.delete(win)
+  }
+}
+
 export function registerFrameWindow(frameId: string, win: Window) {
+  const previous = windows.get(frameId)
+  if (previous && previous !== win) unregisterFrameWindow(frameId, previous)
   windows.set(frameId, win)
+  frameIds.set(win, frameId)
   if (outlines) win.postMessage({ type: 'doop:outlines', on: true }, '*')
   changeListeners.get(frameId)?.forEach((cb) => cb())
 }
@@ -237,20 +269,69 @@ export function registerFrameWindow(frameId: string, win: Window) {
 export function unregisterFrameWindow(frameId: string, win: Window) {
   if (windows.get(frameId) !== win) return
   windows.delete(frameId)
+  frameIds.delete(win)
   shownDocuments.delete(frameId)
+  documentRequests.delete(frameId)
 }
 
 /* The HTML each frame's runtime has acknowledged showing; absent while a
    newer document is still on its way there. */
 const shownDocuments = new Map<string, string>()
 const documentListeners = new Map<string, Set<() => void>>()
+const frameLoadRequests = new Set<(frameId: string) => boolean>()
+
+/** Register the active page's loader for commands that need a live document. */
+export function onFrameLoadRequest(load: (frameId: string) => boolean): () => void {
+  frameLoadRequests.add(load)
+  return () => {
+    frameLoadRequests.delete(load)
+  }
+}
+
+/** An explicit command can start its frame ahead of the background queue. */
+export function prepareFrameDocument(frameId: string, html?: string): 'ready' | 'unavailable' | Promise<boolean> {
+  const isReady = () => (html === undefined ? shownDocuments.has(frameId) : shownDocuments.get(frameId) === html)
+  if (isReady()) return 'ready'
+  let loading = windows.has(frameId)
+  for (const load of frameLoadRequests) {
+    if (load(frameId)) {
+      loading = true
+      break
+    }
+  }
+  return loading ? waitForDocument(frameId, isReady, 5_000) : 'unavailable'
+}
 
 /** Record what the frame's runtime shows: the acknowledged HTML, or null
  *  once a newer document has been posted and not yet acknowledged. */
 export function noteFrameDocument(frameId: string, html: string | null) {
   if (html === null) shownDocuments.delete(frameId)
-  else shownDocuments.set(frameId, html)
+  else {
+    documentRequests.delete(frameId)
+    shownDocuments.set(frameId, html)
+  }
   documentListeners.get(frameId)?.forEach((cb) => cb())
+}
+
+/** Send current HTML and track its acknowledgement even after read timeouts.
+ *  A newer render or a replacement window invalidates the previous reply. */
+export function showFrameDocument(frameId: string, html: string, onShown: () => void): void {
+  const win = windows.get(frameId)
+  if (!win) return
+  listen()
+  const reqId = ++nextReq
+  documentRequests.set(frameId, { win, reqId, html, onShown })
+  noteFrameDocument(frameId, null)
+  win.postMessage({ type: 'doop:html', html, reqId }, '*')
+}
+
+function finishFrameDocument(source: MessageEventSource, reqId: number) {
+  const frameId = frameIds.get(source)
+  if (frameId === undefined) return
+  const request = documentRequests.get(frameId)
+  if (!request || request.reqId !== reqId || request.win !== source) return
+  noteFrameDocument(frameId, request.html)
+  request.onShown()
 }
 
 /** Resolve true once the frame's runtime shows `html`, false if it does not
@@ -258,7 +339,11 @@ export function noteFrameDocument(frameId: string, html: string | null) {
  *  throttled render, and a hit test on the older document would name its
  *  elements, not the ones `html` has in those places. */
 export function frameShows(frameId: string, html: string): Promise<boolean> {
-  if (shownDocuments.get(frameId) === html) return Promise.resolve(true)
+  return waitForDocument(frameId, () => shownDocuments.get(frameId) === html, REPLY_TIMEOUT_MS)
+}
+
+function waitForDocument(frameId: string, isReady: () => boolean, timeoutMs: number): Promise<boolean> {
+  if (isReady()) return Promise.resolve(true)
   return new Promise((resolve) => {
     const set = documentListeners.get(frameId) ?? new Set()
     documentListeners.set(frameId, set)
@@ -269,9 +354,9 @@ export function frameShows(frameId: string, html: string): Promise<boolean> {
       resolve(shown)
     }
     const check = () => {
-      if (shownDocuments.get(frameId) === html) done(true)
+      if (isReady()) done(true)
     }
-    const timer = window.setTimeout(() => done(false), REPLY_TIMEOUT_MS)
+    const timer = window.setTimeout(() => done(false), timeoutMs)
     set.add(check)
   })
 }
@@ -313,12 +398,12 @@ export function requestFrame(
   nextReq += 1
   const reqId = nextReq
   return new Promise((resolve) => {
-    pending.set(reqId, { win, replyType: `${type}-result`, resolve })
-    win.postMessage({ ...payload, type, reqId }, '*')
     /* a frame that unloads mid-request would leave the promise hanging */
-    window.setTimeout(() => {
+    const timeout = window.setTimeout(() => {
       if (pending.delete(reqId)) resolve(null)
     }, timeoutMs)
+    pending.set(reqId, { win, replyType: `${type}-result`, timeout, resolve })
+    win.postMessage({ ...payload, type, reqId }, '*')
   })
 }
 
@@ -333,12 +418,13 @@ export interface FrameSnapshot {
   html: string | null
 }
 
-/** The frame's document as the runtime shows it, or null when the frame
- *  is not mounted. A mounted frame that does not answer in time counts as
- *  one that could not be read, never as unmounted: its saved HTML would
- *  render without what the runtime shows. */
+/** Capture the live document, including frames still waiting to start. Return
+ *  null when no live document is available, and a failed snapshot when the
+ *  runtime times out. */
 export async function snapshotFrame(frameId: string): Promise<FrameSnapshot | null> {
-  if (!windows.has(frameId)) return null
+  const readiness = await prepareFrameDocument(frameId)
+  if (readiness === 'unavailable') return null
+  if (!readiness) return { html: null }
   const reply = await requestFrame(frameId, 'doop:snapshot', {}, SNAPSHOT_TIMEOUT_MS)
   return { html: typeof reply?.html === 'string' ? reply.html : null }
 }

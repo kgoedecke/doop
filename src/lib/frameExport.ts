@@ -9,7 +9,7 @@ import {
 import { MAX_LAYER_SELECTOR_CHARS } from '../../shared/elementId'
 import type { Frame } from '../../shared/types'
 import { isDesktopShell } from './shell'
-import { inspectElement } from './frameBridge'
+import { inspectElement, prepareFrameDocument } from './frameBridge'
 import { clipToFrame, cropRaster, frameSvg, rasterizeFrame, type ClipRect } from './frameRaster'
 import { useStore } from './store'
 import { t } from './i18n'
@@ -139,6 +139,8 @@ async function rasterExport(frame: Frame, format: RasterFormat, scale: number, c
  *  part to keep, so the element's inherited styles and what paints behind
  *  it are exactly what the person sees. */
 async function measureElement(frame: Frame, selector: string): Promise<ClipRect | null> {
+  const readiness = await prepareFrameDocument(frame.id)
+  if (readiness === 'unavailable' || !readiness) return null
   const info = await inspectElement(frame.id, selector).catch(() => null)
   return info ? clipToFrame(info.rect, frame) : null
 }

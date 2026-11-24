@@ -268,6 +268,7 @@ export const panels: Catalog['panels'] = {
   copyPngFailed: 'Não foi possível copiar o PNG',
   copyPngTimedOut: 'A cópia do PNG demorou demais — tente de novo',
   copyPngDone: 'PNG copiado',
+  frameStillLoading: 'Este frame ainda está carregando. Tente novamente em instantes.',
   exportElementMissing: 'Não foi possível encontrar o elemento para exportar — o frame está na tela?',
 
   frameExportTitle: 'Exportar “{name}”',

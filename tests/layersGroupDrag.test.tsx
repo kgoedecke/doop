@@ -3,10 +3,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import type { Canvas, Frame } from '../shared/types'
+import type { FlowPlacement } from '../src/lib/layers'
 
 type StackWrite = { id: string; z: number }
 const restackFrames = vi.fn((_canvasId: string, _frames: StackWrite[]) => Promise.resolve([]))
 const updateFrame = vi.fn((_id: string, _patch: unknown, _expected?: number) => Promise.resolve())
+const placement = vi.fn<() => Promise<FlowPlacement | null | undefined>>(async () => undefined)
 const deleteFrame = vi.fn((_id: string, _expected?: number) => Promise.resolve())
 vi.mock('../src/lib/api', () => ({
   api: {
@@ -24,7 +26,7 @@ vi.mock('../src/lib/posthog', () => ({ posthog: { capture: vi.fn() } }))
 vi.mock('../src/lib/frameBridge', () => ({
   requestFrame: () => Promise.resolve(null),
   inspectElement: () => Promise.resolve({ rect: { x: 5, y: 5, width: 40, height: 20 } }),
-  layerPlacement: () => Promise.resolve(undefined),
+  layerPlacement: () => placement(),
   settleFrames: () => Promise.resolve(),
 }))
 
@@ -97,6 +99,8 @@ const flush = () => act(async () => {})
 
 describe('LayersPanel multi-selection drag', () => {
   beforeEach(() => {
+    placement.mockReset()
+    placement.mockResolvedValue(undefined)
     restackFrames.mockClear()
     updateFrame.mockClear()
     deleteFrame.mockClear()
@@ -143,6 +147,28 @@ describe('LayersPanel multi-selection drag', () => {
       expect(doc.querySelector(sel)).not.toBeNull()
       expect(row(`f1|${sel}`).getAttribute('aria-selected')).toBe('true')
     }
+  })
+
+  it('does not save a layer drop without layout data', async () => {
+    act(() => row('f1').querySelector<HTMLElement>('[data-icon]')?.click())
+    const before = html('f1')
+    placement.mockResolvedValueOnce(null)
+    dragRow(`f1|${PB}`, `f1|${PA}`, 2)
+    await flush()
+    expect(placement).toHaveBeenCalledOnce()
+    expect(updateFrame).not.toHaveBeenCalled()
+    expect(html('f1')).toBe(before)
+  })
+
+  it('does not partially save a group drop when one placement is unavailable', async () => {
+    const before = html('f1')
+    placement.mockResolvedValueOnce(undefined).mockResolvedValueOnce(null)
+    act(() => useStore.getState().pickElements('f1', [PA, PB]))
+    dragRow(`f1|${PA}`, `f1|${IT}`, 2)
+    await flush()
+    expect(placement).toHaveBeenCalledTimes(2)
+    expect(updateFrame).not.toHaveBeenCalled()
+    expect(html('f1')).toBe(before)
   })
 
   it('restacks the selected top-level rows as one run', () => {

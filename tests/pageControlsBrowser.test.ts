@@ -274,7 +274,7 @@ describe.skipIf(!findBrowserPath())('page list controls and keyboard history', (
     /* the room's broadcast can paint the frame before the create response
        selects it; a canvas with one page has no page picker to wait on */
     await page.waitForSelector('[role="treeitem"][aria-selected="true"]')
-    expect(await page.$$('iframe[data-doop-frame]')).toHaveLength(before + 1)
+    await page.waitForFunction((n) => document.querySelectorAll('iframe[data-doop-frame]').length === n, {}, before + 1)
     const deleted = page.waitForResponse(
       (response) =>
         response.request().method() === 'DELETE' && /^\/api\/frames\//.test(new URL(response.url()).pathname),

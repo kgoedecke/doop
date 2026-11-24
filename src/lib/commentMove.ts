@@ -4,7 +4,7 @@ import { frameDesignPoint } from '../../shared/frameRotation'
 import { FRAME_COMMENT_SELECTOR, sameCommentAnchor, type CommentAnchorInput } from '../../shared/comments'
 import { useStore } from './store'
 import { api } from './api'
-import { requestFrame } from './frameBridge'
+import { prepareFrameDocument, requestFrame } from './frameBridge'
 
 /**
  * Moving a comment pin. The pin's pointer gesture lives in CommentPin; this
@@ -59,7 +59,7 @@ export function frameAtPoint(
 
 /** The anchor a pin dropped at a world point takes. `probe` asks a frame's
  *  document what sits at a design point; it answers null for the frame's
- *  own background, or when the frame cannot be asked. */
+ *  own background. */
 export async function resolveCommentDrop(
   canvas: Pick<Canvas, 'id' | 'pages' | 'frames'>,
   pageId: string,
@@ -88,9 +88,12 @@ export async function resolveCommentDrop(
 }
 
 async function probeFrame(frameId: string, x: number, y: number): Promise<CommentDropHit | null> {
+  const readiness = prepareFrameDocument(frameId)
+  if (readiness === 'unavailable' || !(await readiness)) throw new Error('Comment destination frame is unavailable')
   const reply = await requestFrame(frameId, 'doop:probe', { x, y })
   const hit = reply?.hit as CommentDropHit | null | undefined
-  if (!hit || typeof hit.selector !== 'string') return null
+  if (hit === null) return null
+  if (!hit || typeof hit.selector !== 'string') throw new Error('Comment destination frame did not answer the probe')
   return {
     selector: hit.selector,
     ...(typeof hit.elementId === 'string' ? { elementId: hit.elementId } : {}),
@@ -105,9 +108,10 @@ export async function dropComment(root: ElementComment, point: Point): Promise<v
   const s = useStore.getState()
   if (!s.canvas) return
   const pageId = s.activePageId ?? canvasPages(s.canvas)[0]!.id
-  const anchor = await resolveCommentDrop(s.canvas, pageId, point, probeFrame)
-  if (sameCommentAnchor(root, anchor)) return
   try {
+    const anchor = await resolveCommentDrop(s.canvas, pageId, point, probeFrame)
+    const now = useStore.getState()
+    if (now.canvas?.id !== s.canvas.id || now.activePageId !== s.activePageId || sameCommentAnchor(root, anchor)) return
     await api.moveComment(root.id, anchor)
   } catch (err) {
     console.error(err)

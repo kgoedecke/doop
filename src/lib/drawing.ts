@@ -211,18 +211,18 @@ export function saveDrawing(drawing: Drawing, target: DrawingTarget, options?: {
     // This gesture is complete. Navigation only cancels drafts; queued saves
     // still belong to their recorded canvas/page, not the current viewport.
     if (target.frameId) {
-      /* absolute from the corner the body places its layers from, which a
-         positioned body with a margin moves off the frame's own; asked
-         before the frame is read, so no edit lands between the two */
-      const asked = bodyPlacementOrigin(target.frameId)
-      const at = asked instanceof Promise ? await asked : asked
-      /* the store as it is after that wait: an edit made meanwhile is the
-         document this drawing goes into */
+      /* Measure the same HTML we are about to edit. An unloaded or
+         superseded document cannot tell us where the body places layers. */
       const live = useStore.getState().canvas
       const canvas = live?.id === target.canvasId ? live : await api.getCanvas(target.canvasId)
       const frame = canvas.frames.find((f) => f.id === target.frameId)
       if (!frame || frame.locked || frame.hidden) {
         s.pushNotice('Couldn’t add the drawing: its frame was deleted, locked, or hidden.')
+        return
+      }
+      const at = await bodyPlacementOrigin(frame.id, frame.html)
+      if (!at) {
+        s.pushNotice('Couldn’t read the frame layout. Try drawing again.')
         return
       }
       const doc = new DOMParser().parseFromString(frame.html, 'text/html')
@@ -239,7 +239,7 @@ export function saveDrawing(drawing: Drawing, target: DrawingTarget, options?: {
       el.id = `doop-drawing-${crypto.randomUUID()}`
       doc.body.append(el)
       const html = '<!doctype html>\n' + doc.documentElement.outerHTML
-      const saved = await api.updateFrame(frame.id, { html })
+      const saved = await api.updateFrame(frame.id, { html }, frame.updatedAt)
       if (useStore.getState().canvas?.id !== target.canvasId) return
       // Each completed drawing is its own undo step, even when drawn quickly.
       recordUpdates([{ frameId: frame.id, before: { html: frame.html }, after: { html } }])

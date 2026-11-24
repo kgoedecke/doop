@@ -1,4 +1,13 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type RefObject,
+} from 'react'
 import { roleOf, toolAllowed, useStore, type Viewport } from '../lib/store'
 import { usePaper, type Paper } from '../lib/paper'
 import { roleAllows } from '../../shared/canvasRole'
@@ -32,6 +41,7 @@ import { MeasureOverlay } from './MeasureOverlay'
 import { SnapGuides } from './SnapGuides'
 import { GuideLines, Rulers } from './Rulers'
 import { useIsMobile } from '../hooks/use-mobile'
+import { useFrameLoading } from '../hooks/useFrameLoading'
 import { isTypingTarget, MOD_KEY, pressedKey } from '../lib/keys'
 import { cn } from '../lib/utils'
 import { gesture } from '../lib/gesture'
@@ -301,10 +311,9 @@ export function Stage({
     return () => window.removeEventListener('popstate', onPop)
   }, [])
 
-  /* Viewport → DOM without React: no component subscribes to the viewport, so
-     pan/zoom never renders anything. A store subscription writes the world
-     transform, the grid layer, the --zoom variable (which counter-scales
-     labels/pins/cursors from CSS), and the zoom pill's % directly. */
+  /* Write camera changes straight to the DOM so panning and zooming don't
+     re-render frames that are already live. The --zoom variable counter-scales
+     labels, pins and cursors. */
   useLayoutEffect(() => {
     function apply(vp: { x: number; y: number; zoom: number }) {
       const world = worldRef.current
@@ -1267,7 +1276,13 @@ export function Stage({
             >
               <CommentThreadLayer.Provider value={threadLayer}>
                 <FrameLabelLayer.Provider value={labelLayer}>
-                  <FrameStack frames={canvas?.frames ?? []} layoutZoom={layoutZoom} onFollowLink={followFrameLink} />
+                  <FrameStack
+                    key={`${canvas?.id}:${activePageId}`}
+                    stage={ref}
+                    frames={canvas?.frames ?? []}
+                    layoutZoom={layoutZoom}
+                    onFollowLink={followFrameLink}
+                  />
                 </FrameLabelLayer.Provider>
                 <GhostFrames />
                 <FlowOverlay />
@@ -1477,25 +1492,35 @@ function byCreation(a: Frame, b: Frame) {
  *  layer isolates the stack, so the overlays after it (cursors, guides, the
  *  marquee) stay above every frame. */
 function FrameStack({
+  stage,
   frames,
   layoutZoom,
   onFollowLink,
 }: {
+  stage: RefObject<HTMLDivElement>
   frames: Frame[]
   layoutZoom: number
   onFollowLink: (source: Frame, href: string) => void
 }) {
   const mounted = useMemo(() => [...frames].sort(byCreation), [frames])
   const rank = useMemo(() => new Map(frames.map((f, i) => [f.id, i + 1])), [frames])
+  const { started, onDocumentReady } = useFrameLoading(stage, mounted)
   return (
     <div className="absolute top-0 left-0 isolate">
-      {mounted.map((f) =>
-        f.hidden ? (
-          <HiddenFrameView key={f.id} frame={f} stack={rank.get(f.id)} />
-        ) : (
-          <FrameView key={f.id} frame={f} stack={rank.get(f.id)} layoutZoom={layoutZoom} onFollowLink={onFollowLink} />
-        ),
-      )}
+      {mounted.map((f) => {
+        if (f.hidden) return <HiddenFrameView key={f.id} frame={f} stack={rank.get(f.id)} />
+        if (!started.has(f.id)) return null
+        return (
+          <FrameView
+            key={f.id}
+            frame={f}
+            stack={rank.get(f.id)}
+            layoutZoom={layoutZoom}
+            onFollowLink={onFollowLink}
+            onDocumentReady={onDocumentReady}
+          />
+        )
+      })}
     </div>
   )
 }

@@ -78,6 +78,15 @@ let busy = false
 /* saves still in flight from a drag: undo/redo wait for them so the inverse
    write never lands before (and gets overwritten by) the original */
 let inflight: Promise<unknown> = Promise.resolve()
+const pendingFrameEdits = new Set<Promise<unknown>>()
+
+export function trackPendingFrameEdit(edit: Promise<unknown>) {
+  pendingFrameEdits.add(edit)
+  const remove = () => {
+    pendingFrameEdits.delete(edit)
+  }
+  void edit.then(remove, remove)
+}
 
 export function trackSave(p: Promise<unknown>) {
   inflight = inflight.then(() => p.catch(() => undefined))
@@ -94,6 +103,7 @@ export function historyEpoch() {
 export function clearHistory() {
   undoStack = []
   redoStack = []
+  pendingFrameEdits.clear()
   epoch++
 }
 
@@ -900,6 +910,8 @@ async function step(direction: 'undo' | 'redo') {
   busy = true
   let entry: Entry | undefined
   try {
+    // A keyboard edit may be waiting for a frame whose window does not exist yet.
+    if (pendingFrameEdits.size) await Promise.allSettled(pendingFrameEdits)
     await settleFrames()
     await inflight
     const from = direction === 'undo' ? undoStack : redoStack

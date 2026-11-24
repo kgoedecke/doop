@@ -24,6 +24,8 @@ import { currentPageCanvas } from '../lib/pages'
 import {
   finishFrameSettle,
   noteFrameDocument,
+  showFrameDocument,
+  onFrameMessage,
   registerFrameWindow,
   requestFrame,
   unregisterFrameWindow,
@@ -342,19 +344,21 @@ interface HoverHit {
 }
 
 /* Counter-scaled overlays (labels, pins, popovers) get their scale from the
-   `--zoom` CSS variable the Stage sets, so a viewport change never re-renders
-   this component — memo holds as long as the frame and layout zoom are unchanged. */
+   `--zoom` CSS variable the Stage sets, so camera changes don't re-render
+   frames whose document has already started. */
 export const FrameView = memo(function FrameView({
   frame,
   stack,
   layoutZoom,
   onFollowLink,
+  onDocumentReady,
 }: {
   frame: Frame
   /** its place in the page's paint order (the Stage's z-index), front highest */
   stack?: number
   layoutZoom: number
   onFollowLink?: (source: Frame, href: string) => void
+  onDocumentReady?: (id: string) => void
 }) {
   const t = useT()
   const [menuTarget, setMenuTarget] = useState<
@@ -1017,9 +1021,10 @@ export const FrameView = memo(function FrameView({
         }),
       )
     }
-    function onMsg(ev: MessageEvent) {
-      const win = iframeRef.current?.contentWindow
-      if (ev.data?.type === 'doop:frame-ready' && win && ev.source === win) {
+    const win = iframeRef.current?.contentWindow
+    if (!win) return
+    const unsubscribe = onFrameMessage(win, (ev) => {
+      if (ev.data?.type === 'doop:frame-ready') {
         /* a fresh document wears no canvas cursor yet: forget what the last
            one was sent, and send it once the first render has settled (the
            effect below sends it too on the first boot; the second is a no-op) */
@@ -1035,14 +1040,13 @@ export const FrameView = memo(function FrameView({
         }
         setRuntimeReady(true)
       }
-      if (ev.data?.type === 'doop:bleed-want' && win && ev.source === win) {
+      if (ev.data?.type === 'doop:bleed-want') {
         const px = Number((ev.data as { px?: unknown }).px)
         setBleed(Number.isFinite(px) ? Math.min(1024, Math.max(0, px)) : 0)
       }
-    }
-    window.addEventListener('message', onMsg)
+    })
     return () => {
-      window.removeEventListener('message', onMsg)
+      unsubscribe()
       runtimePort.current?.close()
       runtimePort.current = null
     }
@@ -1062,18 +1066,18 @@ export const FrameView = memo(function FrameView({
     if (!runtimeReady || editing || suspendPost || html !== frame.html || html === localHtml.current) return
     localHtml.current = null
     const request = ++htmlRequest.current
-    noteFrameDocument(frame.id, null)
     let cancelled = false
-    void requestFrame(frame.id, 'doop:html', { html }).then((reply) => {
-      if (!reply || request !== htmlRequest.current) return
-      /* the runtime shows it whether or not this effect is still current */
-      noteFrameDocument(frame.id, html)
-      if (!cancelled) setRuntimeDocument({ html, request })
+    showFrameDocument(frame.id, html, () => {
+      if (request !== htmlRequest.current) return
+      if (!cancelled) {
+        setRuntimeDocument({ html, request })
+        onDocumentReady?.(frame.id)
+      }
     })
     return () => {
       cancelled = true
     }
-  }, [runtimeReady, html, frame.html, frame.id, editing, suspendPost])
+  }, [runtimeReady, html, frame.html, frame.id, editing, suspendPost, onDocumentReady])
 
   /* ---- element comments ---- */
   const frameComments = useStore((s) => s.comments).filter((c) => c.frameId === frame.id)
@@ -1474,8 +1478,9 @@ export const FrameView = memo(function FrameView({
   }, [runtimeReady, wantedSel, probeSel, frame.id, html, frame.html])
 
   useEffect(() => {
-    function onMsg(ev: MessageEvent) {
-      if (ev.source !== iframeRef.current?.contentWindow) return
+    const win = iframeRef.current?.contentWindow
+    if (!win) return
+    return onFrameMessage(win, (ev) => {
       if (ev.data?.type === 'doop:probe-result' && ev.data.reqId === probeReq.current) {
         const probed = (ev.data.hit ?? null) as ProbeHit | null
         /* the Comment tool on the frame's own background comments on the frame */
@@ -1590,9 +1595,7 @@ export const FrameView = memo(function FrameView({
         const rect = ev.data.rect as { x: number; y: number; width: number } | null
         setPinPos((m) => ({ ...m, [ev.data.reqId]: rect ? { x: rect.x, y: rect.y } : null }))
       }
-    }
-    window.addEventListener('message', onMsg)
-    return () => window.removeEventListener('message', onMsg)
+    })
   }, [frame.id])
 
   /* Esc dismisses popovers (edit mode has its own Esc path inside the iframe) */
@@ -1737,8 +1740,9 @@ export const FrameView = memo(function FrameView({
       if (before !== undefined) recordUpdate(frame.id, { html: before }, { html }, discrete)
     }
     saveEditedRef.current = saveEdited
-    function onMsg(ev: MessageEvent) {
-      if (ev.source !== iframeRef.current?.contentWindow) return
+    const win = iframeRef.current?.contentWindow
+    if (!win) return
+    return onFrameMessage(win, (ev) => {
       if (ev.data?.type === 'doop:edit-esc') {
         setEditing(false)
         /* the keyboard was in the frame's document while the text was being
@@ -1768,9 +1772,7 @@ export const FrameView = memo(function FrameView({
           )
         })
       }
-    }
-    window.addEventListener('message', onMsg)
-    return () => window.removeEventListener('message', onMsg)
+    })
   }, [frame.id])
 
   /* deselecting the frame ends the edit session. Selection lives in the
