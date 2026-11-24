@@ -266,15 +266,34 @@ describe.skipIf(!findBrowserPath())('fit_to_content in a browser', () => {
     expect(panel.height).toBe(300)
   }, 60_000)
 
-  it('counts body margins, positioned layers and overflowing text, not fixed bars, hidden menus or clipped content', async () => {
+  it('fits percentage children without releasing their containing block', async () => {
+    for (const height of [200, 800]) {
+      const frame = frameWith(doc(block(0, 'height:50%') + block(300), 'margin:0;height:100vh'), { height })
+      expect((await fit(frame)).isError).toBeFalsy()
+      expect(frame.height).toBe(600)
+    }
+  }, 60_000)
+
+  it('uses native document overflow for generated and positioned content', async () => {
+    const documents = [
+      doc('<style>body::after{content:"";position:absolute;top:200px;width:40px;height:100px}</style>' + block(100)),
+      doc(
+        '<div style="position:relative"><div style="height:100px;overflow:hidden"><div style="position:absolute;top:200px;width:50px;height:100px"></div></div></div>',
+      ),
+    ]
+    for (const html of documents) {
+      const frame = frameWith(html, { height: 100 })
+      expect((await fit(frame)).isError).toBeFalsy()
+      expect(frame.height).toBe(300)
+    }
+  }, 60_000)
+
+  it('counts body margins, positioned layers and overflowing text, excluding fixed bars and clipped content', async () => {
     const frame = frameWith(
       doc(
         block(100) +
           '<div style="position:absolute;top:400px;width:10px;height:50px"></div>' +
           '<div style="position:fixed;top:0;height:2000px;width:100%"></div>' +
-          '<nav style="position:absolute;top:0;height:2000px;width:10px;visibility:hidden"></nav>' +
-          '<nav style="position:absolute;top:0;height:2000px;width:10px;opacity:0"></nav>' +
-          '<div style="position:relative;height:0"><ul style="position:absolute;top:0;height:900px;margin:0;visibility:hidden">menu</ul></div>' +
           `<div style="height:60px;overflow:hidden">${block(2000)}</div>`,
         'margin:20px',
       ),
@@ -400,6 +419,50 @@ describe.skipIf(!findBrowserPath())('fit_to_content in a browser', () => {
     )
     await fit(tagged, { fit_to_content: 'width' })
     expect(tagged.width).toBe(150)
+  }, 60_000)
+
+  it('accounts for invisible elements when they create real document overflow', async () => {
+    const frame = frameWith(
+      doc(block(100) + '<nav style="position:absolute;top:0;height:700px;width:10px;visibility:hidden"></nav>'),
+    )
+    expect((await fit(frame)).isError).toBeFalsy()
+    expect(frame.height).toBe(700)
+  }, 60_000)
+
+  it('follows the last responsive width and verifies the requested axes', async () => {
+    const html = doc(
+      '<style>.b{width:100px;height:20px}@media(max-width:100px){.b{width:180px}}@media(min-width:170px) and (max-width:190px){.b{width:250px}}@media(min-width:240px) and (max-width:260px){.b{width:320px}}</style><div class="b"></div>',
+    )
+    for (const axes of ['width', 'both']) {
+      const frame = frameWith(html)
+      expect((await fit(frame, { fit_to_content: axes })).isError).toBeFalsy()
+      expect(frame).toMatchObject({ width: 320, height: axes === 'both' ? 20 : 300 })
+    }
+    const wide = frameWith(doc('<div style="width:700px;height:100px"></div>'))
+    expect((await fit(wide, { fit_to_content: 'width', name: 'resized' })).isError).toBe(true)
+    expect(wide).toMatchObject({ width: 400, name: 'Fit' })
+  }, 60_000)
+
+  it('rejects candidates that overflow only on a fresh load at the final size', async () => {
+    for (const [axes, script] of [
+      ['height', 'box.style.height = (innerHeight === 200 ? 900 : 200) + "px"'],
+      ['width', 'box.style.width = (innerWidth === 200 ? 350 : 200) + "px"'],
+      ['both', 'box.style.width = (innerWidth === 200 && innerHeight === 100 ? 350 : 200) + "px"'],
+    ]) {
+      const frame = frameWith(doc('<div id="box" style="height:100px"></div><script>' + script + '</script>'))
+      const result = await fit(frame, { fit_to_content: axes, name: 'resized' })
+      expect(result.isError, axes).toBe(true)
+      expect(texts(result)).toContain('overflows when loaded')
+      expect(frame).toMatchObject({ width: 400, height: 300, name: 'Fit' })
+    }
+  }, 60_000)
+
+  it('loads tall frames above the inspection viewport cap for a width fit', async () => {
+    const frame = frameWith(
+      doc('<div id="box"></div><script>box.style.width = innerHeight > 4000 ? "300px" : "100px"</script>'),
+    )
+    expect((await fit(frame, { fit_to_content: 'width', height: 5000 })).isError).toBeFalsy()
+    expect(frame.width).toBe(300)
   }, 60_000)
 
   it('hugs to what a media query lays out at the narrower width', async () => {
@@ -666,35 +729,32 @@ describe.skipIf(!findBrowserPath())('fit_to_content in a browser', () => {
     expect(set.content[1]!.text).toContain('now 512px tall')
   }, 60_000)
 
-  it('sends the write before measuring, and never jumps a playback ahead', async () => {
-    const html = doc(block(333) + `<p>${'A design long enough to play back over a few ticks. '.repeat(200)}</p>`)
-    const result = await callTool('create_frame', {
+  it('delivers the write before the browser wait and keeps metadata broadcasts at the current playback position', async () => {
+    const measuring = holdNextMeasure()
+    const pending = callTool('create_frame', {
       canvas_id: canvasId,
       name: 'Played',
-      html,
+      html: doc(block(333)),
       fit_to_content: 'height',
     })
+    await measuring.reached
+    try {
+      const created = sent.find((message) => message.type === 'frame:created')?.frame
+      expect(created).toBeDefined()
+      const frame = store.getFrame(created!.id)!
+      const before = sent.length
+      actions.updateFrame(frame.id, { height: frame.height }, agent())
+      actions.setFrameApproval(frame.id, true, { id: OWNER, name: 'Fit Owner' })
+      actions.restackFrames(canvasId, [{ id: frame.id, z: 99 }], agent())
+      const updates = sent.slice(before).filter((message) => message.type === 'frame:updated')
+      expect(updates).toHaveLength(3)
+      for (const update of updates) expect(update.frame!.html.length).toBeLessThan(frame.html.length)
+    } finally {
+      measuring.release()
+    }
+    const result = await pending
     expect(result.isError).toBeFalsy()
-    const { frame } = JSON.parse(result.content[0]!.text!) as { frame: { height: number } }
-    const created = sent.findIndex((message) => message.type === 'frame:created')
-    const resized = sent.findIndex(
-      (message) => message.type === 'frame:updated' && message.frame?.height === frame.height,
-    )
-    expect(created).toBeGreaterThanOrEqual(0)
-    expect(resized).toBeGreaterThan(created)
-    /* the playback is still running: the resize carries what viewers have been shown, not the whole design */
-    const stored = store.getFrame(sent[resized]!.frame!.id)!.html
-    expect(sent[resized]!.frame!.html.length).toBeLessThan(stored.length)
-    /* a sign-off mid-playback does not jump it ahead either */
-    const before = sent.length
-    actions.setFrameApproval(sent[resized]!.frame!.id, true, { id: OWNER, name: 'Fit Owner' })
-    const approved = sent.slice(before).find((message) => message.type === 'frame:updated')
-    expect(approved?.frame?.html.length).toBeLessThan(stored.length)
-    /* nor does a restack */
-    const restacking = sent.length
-    actions.restackFrames(canvasId, [{ id: sent[resized]!.frame!.id, z: 99 }], agent())
-    const restacked = sent.slice(restacking).find((message) => message.type === 'frame:updated')
-    expect(restacked?.frame?.html.length).toBeLessThan(stored.length)
+    expect(result.content[1]!.text).toContain('now 333px tall')
   }, 60_000)
 
   it('sends a frame mid-stream healed when only its details change', async () => {

@@ -3,7 +3,7 @@ import type { Actor, Canvas, Frame } from '../shared/types.ts'
 import * as actions from './actions.ts'
 import { checkpoint } from './journal.ts'
 import { checkFrameMeta, type FrameMetaPatch, type PageToolResult, updateFrameMeta } from './pageTools.ts'
-import { type ContentExtent, type ContentProbe, measureContent } from './screenshot.ts'
+import { type ContentExtent, type ContentProbe, freshFrameOverflow, measureContent } from './screenshot.ts'
 import { designPx } from './renderLimits.ts'
 import { store } from './store.ts'
 
@@ -25,7 +25,7 @@ export const FIT_HEIGHT_MAX = MAX_EXPORT_SIDE
 
 /** What every tool taking fit_to_content tells the agent about it. */
 const FIT_DESCRIPTION =
-  'Sizes the frame to its content, measured in a browser, instead of guessing a size and checking screenshots. "height": the frame becomes as tall as its content at its width; parts sized in vh are laid out at the fitted height, and a design whose content always outgrows its viewport (a 100vh hero with more below) is refused. "width": the frame narrows to hug its content and never gets wider; for a component main, a badge or a card, not a screen, where a centred max-width layout would lose its side margins. "both": hugs the width, then fits the height at it, and hugs the width again at that height until the two agree.'
+  'Sizes the frame to its content, measured in a browser, instead of guessing a size and checking screenshots. "height": the frame becomes as tall as its content at its width; parts sized in vh are laid out at the fitted height, and a design whose content always outgrows its viewport (a 100vh hero with more below) is refused. "width": the frame narrows to hug its content and never gets wider; for a component main, a badge or a card, not a screen, where a centred max-width layout would lose its side margins. "both": hugs the width, then fits the height at it, and hugs the width again at that height until the two agree. Each fitted axis is checked for document overflow on a fresh load before saving.'
 
 /** fit_to_content's full description on each tool, the same for MCP agents and the resident. */
 export const FIT_ON = {
@@ -143,21 +143,40 @@ export async function settleHeight(start: number, measure: HeightMeasure): Promi
   return { kind: 'outgrows' }
 }
 
-/** How many times a hug is measured again at the width it gave. */
-const HUG_MEASURES = 3
-
-/** The width the content hugs to, never past `from`. Measured again at the hugged width, since
- *  a media query there may lay the content out wider, and again at that, until it holds. A
- *  narrower layout there is not taken: content at width:100% shrinks to its text when hugged. */
+/** CSS fit-content supplies the starting width. At narrower breakpoints the unmodified
+ * document may overflow it. Only return a width that Chromium observed to fit. */
 async function hugWidth(probe: ContentProbe, from: number, height: number): Promise<number> {
-  let width = from
-  for (let measures = 0; measures < HUG_MEASURES; measures++) {
-    const hugged = designPx(Math.min(await probe.width(width, height), from))
-    if (measures > 0 && hugged <= width) return width
-    width = hugged
-    if (width >= from) return from
+  let width = Math.min(from, designPx(await probe.width(from, height)))
+  for (let attempt = 0; attempt < 6; attempt++) {
+    const extra = (await probe.overflow(width, height)).width
+    if (!extra) return width
+    if (width >= from) break
+    width = Math.min(from, width + extra)
   }
-  return width
+  throw new Error('Could not fit the content within the starting width. Set width explicitly.')
+}
+
+/** Releasing a viewport-tall body for the intrinsic estimate can collapse percentage children.
+ * If the original CSS overflows at the estimate, bracket a passing height, then bisect. Both
+ * loops are bounded by log2(FIT_HEIGHT_MAX). */
+async function fitScrollableHeight(probe: ContentProbe, width: number, proposal: number): Promise<number> {
+  const overflow = async (height: number) => (await probe.overflow(width, height)).height
+  const extra = await overflow(proposal)
+  if (!extra) return proposal
+  let low = proposal
+  let high = Math.min(proposal + extra, FIT_HEIGHT_MAX)
+  while (high === low || (await overflow(high))) {
+    if (high === FIT_HEIGHT_MAX)
+      throw new Error(`The document still overflows at the ${FIT_HEIGHT_MAX}px export limit. Set height explicitly.`)
+    low = high
+    high = Math.min(high * 2, FIT_HEIGHT_MAX)
+  }
+  while (high - low > 1) {
+    const mid = Math.floor((low + high) / 2)
+    if (await overflow(mid)) low = mid
+    else high = mid
+  }
+  return high
 }
 
 type FitSize = { width: number; height: number }
@@ -175,16 +194,18 @@ const OUTGROWS =
  *  the content out wider there, until a width and the height settled at it agree. */
 async function measuredSize(frame: Frame, from: FitSize, axes: FitAxes): Promise<PageToolResult<FitSize>> {
   if (!frame.html.trim()) return { ok: false, error: FIT_NEEDS_HTML }
+  if (!(Number.isFinite(from.width) && from.width > 0 && Number.isFinite(from.height) && from.height > 0))
+    return { ok: false, error: 'A fit needs positive frame dimensions.' }
   const hug = (probe: ContentProbe, height: number) => hugWidth(probe, designPx(from.width), height)
   try {
-    return await measureContent({ ...frame, ...from }, async (probe): Promise<PageToolResult<FitSize>> => {
+    const candidate = await measureContent({ ...frame, ...from }, async (probe): Promise<PageToolResult<FitSize>> => {
       let width = fitsWidth(axes) ? await hug(probe, from.height) : from.width
       if (!fitsHeight(axes)) return { ok: true, value: { width, height: from.height } }
       let height = from.height
       for (let pass = 0; pass < BOTH_PASSES; pass++) {
         const settled = await settleHeight(height, (at) => probe.height(width, at))
         if (settled.kind !== 'fits') return { ok: false, error: OUTGROWS }
-        height = settled.height
+        height = await fitScrollableHeight(probe, width, settled.height)
         if (!fitsWidth(axes)) return { ok: true, value: { width, height } }
         const rehugged = await hug(probe, height)
         if (rehugged === width) return { ok: true, value: { width, height } }
@@ -195,6 +216,14 @@ async function measuredSize(frame: Frame, from: FitSize, axes: FitAxes): Promise
         error: `the content's width and height keep changing each other (a height media query or a width in vh): pass width or height and fit the other side`,
       }
     })
+    if (!candidate.ok) return candidate
+    const extra = await freshFrameOverflow({ ...frame, ...candidate.value })
+    if ((fitsWidth(axes) && extra.width) || (fitsHeight(axes) && extra.height))
+      return {
+        ok: false,
+        error: 'The document still overflows when loaded at the fitted size. Set the dimensions explicitly.',
+      }
+    return candidate
   } catch (e) {
     return { ok: false, error: `could not measure the frame: ${e instanceof Error ? e.message : String(e)}` }
   }
@@ -242,7 +271,7 @@ export async function updateFrameMetaWithFit(
   const checked = checkFrameMeta(canvas, patch, { allowEmpty: true })
   if (!checked.ok) return checked
   const measured = store.getFrame(frameId)
-  if (!measured) return { ok: false, error: `frame ${frameId} not found` }
+  if (!measured || measured.canvasId !== canvas.id) return { ok: false, error: `frame ${frameId} not found` }
   if (actions.isFrameMidStream(frameId))
     return { ok: false, error: 'the frame is still streaming: fit it once the stream is done' }
   const snapshot = { ...measured }
@@ -256,8 +285,9 @@ export async function updateFrameMetaWithFit(
   if (!current || current.canvasId !== canvas.id) return { ok: false, error: `frame ${frameId} not found` }
   if (
     current.html !== snapshot.html ||
-    (patch.width === undefined && current.width !== snapshot.width) ||
-    (patch.height === undefined && current.height !== snapshot.height)
+    current.width !== snapshot.width ||
+    current.height !== snapshot.height ||
+    actions.isFrameMidStream(frameId)
   )
     return {
       ok: false,

@@ -292,7 +292,7 @@
   (`updateFrameMetaWithFit`, `fitWrittenFrame`, `readFitAxes`, the shared wording in `FIT_ON`),
   sizes the frame to its content as the server's Chromium lays it out, so agents stop guessing
   sizes between screenshots (#532). `"width"` hugs, as a Figma frame does: the root at
-  `width: fit-content` for one measure, never wider than the frame, measured again at the hugged width, up to three times, in case a media query lays it out wider (never narrower: a `width:100%` card would shrink to its text)
+  `width: fit-content` for one measure, never wider than the frame, checked against document scroll overflow with the authored CSS at each proposed width (up to six attempts), in case a media query lays it out wider
   (`hugWidth`), at the frame's height with nothing released (switched off before the viewport changes, so resize handlers see the canvas's layout), held at the left in a right-to-left page; it suits component mains and cards, not screens, where a centred max-width layout
   would lose its gutters. `"both"` hugs, then fits the height at that width, and hugs again at that height until the two agree (three passes, then refused). Only the measured
   sides are written; a height fit is made at the call's new `width` and a width fit at its new `height`, and the page loads at that size. Each measure waits two animation frames (the frame's own resize,
@@ -310,7 +310,11 @@
   frame (a 100vh hero with more below) or grows by more than 0.6 of it (`STEEPEST_FIT`) is
   refused. Content filling the frame exactly is measured at a 1px viewport: a `min-height:100vh`
   wrapper still flows to its content there and shrinks to it (searched from there when vh parts inside still grow), a `height:100vh` one collapses to
-  its overflow and keeps its height, as does one whose padding or border outlasts the tiny viewport: at that floor its content spills out of its box, which a wrapper that grows never does. Capped at `FIT_HEIGHT_MAX` (`MAX_EXPORT_SIDE`). The patch is
+  its overflow and keeps its height, as does one whose padding or border outlasts the tiny viewport: at that floor its content spills out of its box, which a wrapper that grows never does. The intrinsic estimate is checked against native scroll overflow with authored dimensions
+  restored. If percentage children or positioned content need more height, the search brackets
+  a passing height and refines it within `MAX_EXPORT_SIDE`. A fresh render at the final size
+  verifies every requested axis together, including layouts set by scripts at startup. Overflow
+  beyond the allowed size or after the fresh load refuses the fit. The patch is
   checked (`checkFrameMeta`) before the browser is asked; a fit is refused with the side it measures
   (`height` for a height fit, `width` for a width fit), while an
   agent streams into the frame, and when the design changed during the measurement, and a refused

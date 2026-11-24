@@ -172,7 +172,7 @@ export function frameViewport(width: number, height: number, deviceScaleFactor =
   return { width: designPx(width), height: designPx(height), deviceScaleFactor }
 }
 
-async function loadFrameInto(page: Page, frame: Frame): Promise<void> {
+async function loadFrameInto(page: Page, frame: Frame, fitting = false): Promise<void> {
   const assetOrigin = new URL(env.BETTER_AUTH_URL).origin
   await guardPublicPageRequests(page, {
     allowUrl: (url) =>
@@ -184,7 +184,7 @@ async function loadFrameInto(page: Page, frame: Frame): Promise<void> {
   })
   /* A viewport does not need to span an entire imported landing page for
      layout/computed-style inspection; full-page content remains in the DOM. */
-  await page.setViewport(frameViewport(frame.width, Math.min(frame.height, 4000)))
+  await page.setViewport(frameViewport(frame.width, fitting ? frame.height : Math.min(frame.height, 4000)))
   /* setContent leaves the page on about:blank, where the relative /a/...
      asset URLs of imported frames resolve nowhere. In the app an iframe
      inherits the page origin; here a <base> stands in for it — unless the
@@ -208,12 +208,14 @@ async function loadFrameInto(page: Page, frame: Frame): Promise<void> {
       waitUntil: 'load',
       timeout: 8000,
     })
-  } catch {
+  } catch (error) {
+    if (fitting) throw error
     /* Slow external resources: inspect whatever has rendered. */
   }
   /* `load` does not cover a face from a linked stylesheet (Google Fonts):
      without this a capture intermittently shows the fallback fonts */
-  await settleFonts(page.mainFrame())
+  const fonts = await settleFonts(page.mainFrame())
+  if (fitting && fonts !== 'loaded') throw new Error('Fonts did not settle while fitting the frame.')
   await new Promise((resolve) => setTimeout(resolve, 120))
 }
 
@@ -679,6 +681,8 @@ export interface ContentExtent {
 export interface ContentProbe {
   /** the content's height, the root and body let go of a height that follows the viewport */
   height: (width: number, height: number) => Promise<ContentExtent>
+  /** Remaining document overflow at the proposed viewport, with authored dimensions restored. */
+  overflow: (width: number, height: number) => Promise<{ width: number; height: number }>
   /** the width the content hugs to: the root shrunk to fit its content, never past `width` */
   width: (width: number, height: number) => Promise<number>
 }
@@ -695,7 +699,7 @@ const FOLLOW_PROBE_PX = 200
  *  design out. */
 export function measureContent<T>(frame: Frame, settle: (probe: ContentProbe) => Promise<T>): Promise<T> {
   return renderer.withPage('measuring the frame', RENDER_TIMEOUT_MS, async (page) => {
-    await loadFrameInto(page, frame)
+    await loadFrameInto(page, frame, true)
     await installNameShim(page)
     let released: { width: number; rule: string } | undefined
     const layOut = async (width: number, height: number, release: boolean) => {
@@ -716,9 +720,32 @@ export function measureContent<T>(frame: Frame, settle: (probe: ContentProbe) =>
       return page.evaluate(contentExtent, hug, released?.rule ?? '')
     }
     return settle({
+      overflow: async (width, height) => {
+        await layOut(width, height, false)
+        return page.evaluate(documentOverflow)
+      },
       height: (width, height) => measure(width, height, false),
       width: async (width, height) => (await measure(width, height, true)).right,
     })
+  })
+}
+
+function documentOverflow() {
+  const root = document.scrollingElement
+  if (!root) throw new Error('The frame has no document scrollport.')
+  return {
+    width: Math.max(0, root.scrollWidth - root.clientWidth),
+    height: Math.max(0, root.scrollHeight - root.clientHeight),
+  }
+}
+
+/** A new page starts at the candidate size before any design scripts execute. No fit styles
+ * are installed. The search page has already released its renderer slot. */
+export function freshFrameOverflow(frame: Frame) {
+  return renderer.withPage('verifying the fitted frame', RENDER_TIMEOUT_MS, async (page) => {
+    await loadFrameInto(page, frame, true)
+    await page.evaluate(settleDocument)
+    return page.evaluate(documentOverflow)
   })
 }
 
