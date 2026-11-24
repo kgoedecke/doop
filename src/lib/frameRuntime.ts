@@ -18,17 +18,21 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
   ${FRAME_DROP_RUNTIME}
   ${FRAME_PROTO_RUNTIME}
   /* horizontal overscroll inside a frame must not chain to the parent page,
-     where the browser turns it into a history back/forward swipe. A frame
-     is an artboard, so it never wears a scrollbar either (its content still
-     scrolls): important, and html:root so a design's own :root or body.x
-     rule cannot outrank it.
+     where the browser turns it into a history back/forward swipe. Hide
+     scrollbars on canvas artboards, but keep them in Present's viewport.
      Adopted sheet, not a <style> tag — the morph would wipe a tag from <head>. */
   var vSheet = null
   try {
     vSheet = new CSSStyleSheet()
-    vSheet.replaceSync('html,body{overscroll-behavior-x:none}html:root,html:root>body{scrollbar-width:none!important}html:root::-webkit-scrollbar,html:root>body::-webkit-scrollbar{display:none!important}[data-v-path-hidden]{visibility:hidden!important}svg[data-doop-drawing="path"]{overflow:visible}')
+    frameSheet(false)
     document.adoptedStyleSheets = document.adoptedStyleSheets.concat(vSheet)
   } catch (e) {}
+  function frameSheet(viewport) {
+    if (!vSheet) return
+    vSheet.replaceSync('html,body{overscroll-behavior-x:none}' +
+      (viewport ? '' : 'html:root,html:root>body{scrollbar-width:none!important}html:root::-webkit-scrollbar,html:root>body::-webkit-scrollbar{display:none!important}') +
+      '[data-v-path-hidden]{visibility:hidden!important}svg[data-doop-drawing="path"]{overflow:visible}')
+  }
   /* ⌘Y outline mode: every box drawn as a hairline, fills and shadows off.
      Adopted like the sheet above, so no save or export ever carries it. */
   var vOutlineSheet = null
@@ -2105,6 +2109,7 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
       parent.postMessage({ type: 'doop:style-gesture-result', reqId: d.reqId, info: changed ? inspect(d.selector) : null }, '*')
     }
     if (d.type === 'doop:html' && typeof d.html === 'string' && !editing) {
+      if (d.viewport === true) frameSheet(true)
       render(d.html)
       notifyFrameUpdated()
       protoHtmlChanged()

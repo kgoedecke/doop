@@ -360,8 +360,9 @@ After creating a frame or finishing a significant edit, you MUST call get_frame_
 and judge the render like a senior designer. Evaluate each item, give a one-line verdict,
 and fix real issues before moving on:
 
-- **Fit**: content clipped at the frame edge, or a large dead zone below? Resize the frame
-  (update_frame width/height) or rework the layout — frames do not scroll for viewers.
+- **Fit**: content unexpectedly clipped at the frame edge, or a large dead zone below? Resize
+  the frame (update_frame width/height) or rework the layout. For an intentionally long website,
+  make the frame a viewport and let the document or its inner regions scroll in Present.
 - **Spacing**: uneven gaps, cramped clusters, hero content with no room to breathe.
 - **Hierarchy**: can you tell heading from body from caption at a glance?
 - **Contrast**: text you would squint at; elements dissolving into their background.
