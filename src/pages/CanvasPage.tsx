@@ -57,8 +57,10 @@ import { AccessBanner } from '../components/AccessBanner'
 import { ShareModal } from '../components/ShareModal'
 import { ExportModal } from '../components/ExportModal'
 import { AppIcon } from '../components/ui/brand-mark'
+import { CardFailureNotices } from '../components/CardFailureNotices'
+import { RepoAgentGuide, type RepoGuideState } from '../components/RepoAgentGuide'
 import { pageFrames } from '../../shared/pages'
-import type { Frame } from '../../shared/types'
+import type { Frame, GithubImportRunner } from '../../shared/types'
 import { ImportStepFooter, ImportStepHeader, SourcePicker } from '../components/ImportSources'
 import { importSources } from '../components/importSourceList'
 import { PresentMode } from '../components/PresentMode'
@@ -112,6 +114,8 @@ import {
 } from '../components/ui/icons'
 import { Badge, badgeVariants } from '../components/ui/badge'
 import { Pressable } from '../components/ui/pressable'
+import { MetaLine } from '../components/ui/tile'
+import { ChoiceList, ChoiceRow } from '../components/ui/choice-list'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -127,7 +131,7 @@ import { Toast, ToastAction, ToastSpinner } from '../components/ui/toast'
 import { Tooltip } from '../components/ui/tooltip'
 import { Note } from '../components/ui/note'
 import { Textarea } from '../components/ui/textarea'
-import { Modal, ModalActions, ModalEyebrow, ModalLede, ModalTitle } from '../components/ui/modal'
+import { Modal, ModalActions, ModalLede, ModalSource, ModalTitle } from '../components/ui/modal'
 import { createCenteredFrame } from '../lib/framePlacement'
 import { RULER_PX } from '../components/Rulers'
 import { NO_CANVAS, onViewCommand, syncViewMenu } from '../lib/viewMenu'
@@ -1396,10 +1400,18 @@ export function CanvasPage({
             const imported = t('canvas.itemsImported', { count: frameIds.length })
             showToast(failedCount ? t('canvas.importedWithFailures', { imported, failed: failedCount }) : imported)
           }}
-          onQueued={(cardCount) => {
+          onQueued={(cardCount, runner) => {
             setShowImport(false)
             setGhInstallPass(null)
-            showToast(t('canvas.cardsQueued', { count: cardCount }))
+            showToast(
+              runner.kind === 'plan'
+                ? t(runner.online ? 'canvas.cardsQueuedPlan' : 'canvas.cardsQueuedPlanOffline', { count: cardCount })
+                : t('canvas.cardsQueued', { count: cardCount }),
+            )
+          }}
+          onConnectAgent={() => {
+            posthog.capture('agent_connection_opened')
+            setShowConnect(true)
           }}
         />
       )}
@@ -1418,6 +1430,7 @@ export function CanvasPage({
           </Toast>
         )
       )}
+      <CardFailureNotices />
     </div>
   )
 }
@@ -1430,6 +1443,7 @@ function ImportModal({
   onClose,
   onDone,
   onQueued,
+  onConnectAgent,
 }: {
   canvasId: string
   installPass: string | null
@@ -1439,7 +1453,9 @@ function ImportModal({
   onClose: () => void
   onDone: (frameIds: string[], failedCount: number) => void
   /** a repo import queues cards on the board instead of landing frames */
-  onQueued: (cardCount: number) => void
+  onQueued: (cardCount: number, runner: GithubImportRunner) => void
+  /** open Connect AI over the import, for a repo import's own agent */
+  onConnectAgent: () => void
 }) {
   /* which source's screen is open — null is the picker; landing back from
      GitHub's install flow jumps straight to that screen */
@@ -1458,6 +1474,9 @@ function ImportModal({
   const [repoSelected, setRepoSelected] = useState<Set<string>>(new Set())
   const [extractSystem, setExtractSystem] = useState(true)
   const [showPages, setShowPages] = useState(false)
+  /* a repo import with no Doop Agent: who should build it, then how to hand
+     the cards to the person's own agent, since nothing starts on its own */
+  const [repoGuide, setRepoGuide] = useState<RepoGuideState | null>(null)
 
   function errorMessage(caught: unknown, fallback: string) {
     if (caught instanceof ApiError) return String(caught.body.error ?? fallback)
@@ -1558,6 +1577,12 @@ function ImportModal({
     })
   }
 
+  /* an agent of their own connected from the guide: import again, for it */
+  function retryRepoImport() {
+    setRepoGuide(null)
+    void importRepoScreens()
+  }
+
   async function importRepoScreens() {
     if (!repoReview || busy || (!repoSelected.size && !extractSystem)) return
     setBusy('importing')
@@ -1565,6 +1590,35 @@ function ImportModal({
     const screens = repoReview.manifest.screens.filter((s) => repoSelected.has(screenKey(s)))
     try {
       const result = await api.importGithubScreens(canvasId, repoReview.connection.id, screens, extractSystem)
+      const runner = result.runner ?? { kind: 'doop' as const }
+      if (runner.kind === 'agent') {
+        posthog.capture('github_screens_imported', {
+          requested_count: screens.length,
+          queued_count: result.cards.length,
+          rejected_count: result.rejected.length,
+          runner: 'agent',
+        })
+        /* cards already waiting for it keep their place: show those */
+        const waiting = result.cards.length
+          ? result.cards
+          : useStore
+              .getState()
+              .tasks.filter(
+                (task) =>
+                  task.payload?.outside &&
+                  task.payload.connectionId === repoReview.connection.id &&
+                  !task.endedAt &&
+                  !task.failedAt,
+              )
+              .map((task) => task.id)
+        setRepoGuide({ stage: 'agent', cardIds: waiting, client: runner.client })
+        setBusy(null)
+        return
+      }
+      if (!result.cards.length && result.handedOver) {
+        onQueued(result.handedOver, runner)
+        return
+      }
       if (!result.cards.length) {
         setError(result.rejected.length ? t('canvas.errScreensGone') : t('canvas.errAlreadyOnBoard'))
         setBusy(null)
@@ -1574,12 +1628,14 @@ function ImportModal({
         requested_count: screens.length,
         queued_count: result.cards.length,
         rejected_count: result.rejected.length,
+        runner: runner.kind,
       })
-      onQueued(result.cards.length)
+      onQueued(result.cards.length, runner)
     } catch (e) {
       if (isResidentLimit(e)) {
-        useStore.getState().setLimitWall(true)
-        onClose()
+        /* nobody can build it yet: ask who should, without losing the pick */
+        setRepoGuide({ stage: 'connect' })
+        setBusy(null)
         return
       }
       setError(errorMessage(e, t('canvas.errRepoImportFailed')))
@@ -1631,16 +1687,25 @@ function ImportModal({
       onClose={() => !busy && onClose()}
     >
       <>
-        {repoReview ? (
+        {repoGuide && repoReview ? (
+          <RepoAgentGuide
+            canvasId={canvasId}
+            repo={repoReview.connection.repo}
+            state={repoGuide}
+            onConnectAgent={onConnectAgent}
+            onAgentConnected={retryRepoImport}
+            onClose={onClose}
+          />
+        ) : repoReview ? (
           <>
-            <div className="flex flex-col items-start justify-between gap-2.5 sm:flex-row sm:gap-6">
-              <div className="flex flex-col gap-[5px]">
-                <ModalEyebrow>{t('canvas.reviewBeforeImport')}</ModalEyebrow>
-                <ModalTitle>{t('canvas.repoTitle')}</ModalTitle>
-              </div>
-              <Badge shape="pill">
-                {repoReview.connection.repo}@{repoReview.connection.branch}
-              </Badge>
+            <div className="flex flex-col gap-[5px]">
+              <ModalTitle>{t('canvas.repoTitle')}</ModalTitle>
+              <ModalSource
+                href={`https://github.com/${repoReview.connection.repo}/tree/${repoReview.connection.branch.split('/').map(encodeURIComponent).join('/')}`}
+              >
+                {repoReview.connection.repo}
+                <span className="text-ink-ghost">@{repoReview.connection.branch}</span>
+              </ModalSource>
             </div>
             <ModalLede>
               {repoReview.manifest.framework
@@ -1833,12 +1898,9 @@ function ImportModal({
           </>
         ) : (
           <>
-            <div className="flex flex-col items-start justify-between gap-2.5 sm:flex-row sm:gap-6">
-              <div className="flex flex-col gap-[5px]">
-                <ModalEyebrow>{t('canvas.reviewBeforeImport')}</ModalEyebrow>
-                <ModalTitle>{t('canvas.choosePages')}</ModalTitle>
-              </div>
-              <Badge shape="pill">{new URL(discovery.siteUrl).hostname}</Badge>
+            <div className="flex flex-col gap-[5px]">
+              <ModalTitle>{t('canvas.choosePages')}</ModalTitle>
+              <ModalSource href={discovery.siteUrl}>{new URL(discovery.siteUrl).hostname}</ModalSource>
             </div>
             <ModalLede>{t('canvas.pagesFound', { count: discovery.pages.length })}</ModalLede>
             <SelectionBar
@@ -2102,28 +2164,23 @@ function SyncKeysSection({ canvasId, onBack }: { canvasId: string; onBack: () =>
           </div>
         </div>
       ))}
-      <div className="mt-4 flex flex-col items-stretch gap-2 sm:flex-row">
-        <Field className="flex-1" label={t('canvas.appName')} labelVariant="form" htmlFor="sync-app-name">
+      <Field className="mt-4" label={t('canvas.appName')} labelVariant="form" htmlFor="sync-app-name">
+        <div className="flex gap-2">
           <Input
             id="sync-app-name"
             variant="well"
-            inputSize="lg"
+            className="min-w-0 flex-1"
             placeholder={t('canvas.appNamePlaceholder')}
             value={name}
             disabled={busy}
             onChange={(e) => setAppName(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && create()}
           />
-        </Field>
-        <Button
-          variant="primary"
-          className="justify-center self-end sm:h-12"
-          disabled={busy || !name.trim()}
-          onClick={create}
-        >
-          {t('canvas.createKey')}
-        </Button>
-      </div>
+          <Button variant="default" size="sm" disabled={busy || !name.trim()} onClick={create}>
+            {t('canvas.createKey')}
+          </Button>
+        </div>
+      </Field>
       <ol className="mt-3 flex flex-col divide-y divide-line-soft rounded-[10px] border border-line">
         {[
           [t('canvas.syncStep1Title'), t('canvas.syncStep1Detail')],
@@ -2215,41 +2272,49 @@ function GithubSection({
     }
   }
 
-  async function connectInstalledRepo(fullName: string) {
-    if (busy || !installPass) return
+  /* connect, then straight on to the screens; the server hands back the
+     existing connection (with the new credential) when this canvas already
+     has the repo on that branch, so it replaces its row instead of adding one */
+  async function connectAndAnalyze(
+    body: { repo: string; pass: string } | { repo: string; token: string },
+    via: 'app' | 'token',
+  ) {
     setBusy('connecting')
     setError(null)
+    let conn: GithubConnectionInfo
     try {
-      const conn = await api.connectGithub(canvasId, { repo: fullName, pass: installPass })
-      setConnections((c) => [conn, ...(c ?? [])])
-      setBusy(null)
-      posthog.capture('github_repo_connected', { via: 'app' })
+      conn = await api.connectGithub(canvasId, body)
+      setConnections((c) => [conn, ...(c ?? []).filter((x) => x.id !== conn.id)])
+      posthog.capture('github_repo_connected', { via })
     } catch (e) {
       failed(e, t('canvas.errConnectRepo'))
+      return false
     }
+    await runAnalysis(conn)
+    return true
+  }
+
+  async function connectInstalledRepo(fullName: string) {
+    if (busy || !installPass) return
+    await connectAndAnalyze({ repo: fullName, pass: installPass }, 'app')
   }
 
   async function connectRepo() {
     if (busy || !repo.trim() || !token.trim()) return
-    setBusy('connecting')
-    setError(null)
-    try {
-      const conn = await api.connectGithub(canvasId, {
-        repo: repo.trim(),
-        token: token.trim(),
-      })
-      setConnections((c) => [conn, ...(c ?? [])])
+    if (await connectAndAnalyze({ repo: repo.trim(), token: token.trim() }, 'token')) {
       setRepo('')
       setToken('')
-      setBusy(null)
-      posthog.capture('github_repo_connected', { via: 'token' })
-    } catch (e) {
-      failed(e, t('canvas.errConnectRepo'))
     }
   }
 
-  async function analyze(conn: GithubConnectionInfo) {
+  function analyze(conn: GithubConnectionInfo) {
     if (busy) return
+    void runAnalysis(conn)
+  }
+
+  /* a connected repo goes straight on to its screens: connecting is only
+     ever done to import, so there is no second click for it */
+  async function runAnalysis(conn: GithubConnectionInfo) {
     setBusy(conn.id)
     setError(null)
     try {
@@ -2295,32 +2360,50 @@ function GithubSection({
         lede={t('canvas.githubLede')}
       />
       <div className="mt-[22px] flex flex-col gap-2.5">
-        {(connections ?? []).map((conn) => (
-          <div key={conn.id} className="flex flex-col gap-1.5">
-            <div className="flex items-center gap-2 text-[13px]">
-              <b className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap font-semibold">
-                {conn.repo}
-                <span className="font-normal text-ink-faint">@{conn.branch}</span>
-              </b>
-              <Note className="mr-auto shrink-0">
-                {conn.frames ? t('canvas.screens', { count: conn.frames }) : t('canvas.nothingImported')}
-              </Note>
-              <Button size="sm" className="px-2.5 text-xs" disabled={!!busy} onClick={() => analyze(conn)}>
-                {busy === conn.id ? t('canvas.analyzing') : t('canvas.analyze')}
-              </Button>
-              <Button
-                variant="bare"
-                size="icon-sm"
-                className="-mr-1.5 hover:bg-accent-ink/10 hover:text-accent-ink"
-                title={t('canvas.disconnectRepo')}
-                aria-label={t('canvas.disconnectRepo')}
-                onClick={() => disconnect(conn.id)}
-              >
-                <XIcon size={14} />
-              </Button>
-            </div>
+        {!!connections?.length && (
+          <div className="flex flex-col gap-1.5">
+            <span className="text-caption text-ink-faint">{t('canvas.connectedRepos')}</span>
+            <ChoiceList>
+              {connections.map((conn) => (
+                <ChoiceRow
+                  key={conn.id}
+                  icon={<AppIcon brand="github" size={32} />}
+                  title={
+                    <>
+                      {conn.repo}
+                      <span className="font-normal text-ink-faint">@{conn.branch}</span>
+                    </>
+                  }
+                  description={
+                    busy === conn.id ? (
+                      t('canvas.analyzing')
+                    ) : (
+                      <MetaLine className="text-label">
+                        {!!conn.frames && <span>{t('canvas.screens', { count: conn.frames })}</span>}
+                        <span>{t('canvas.pickScreens')}</span>
+                      </MetaLine>
+                    )
+                  }
+                  disabled={!!busy}
+                  onClick={() => analyze(conn)}
+                  action={
+                    <Button
+                      variant="bare"
+                      size="icon-sm"
+                      className="hover:bg-accent-ink/10 hover:text-accent-ink"
+                      disabled={!!busy}
+                      title={t('canvas.disconnectRepo')}
+                      aria-label={t('canvas.disconnectRepo')}
+                      onClick={() => disconnect(conn.id)}
+                    >
+                      <XIcon size={14} />
+                    </Button>
+                  }
+                />
+              ))}
+            </ChoiceList>
           </div>
-        ))}
+        )}
         {unconnectedRepos && (
           <div className="flex flex-col gap-1.5 rounded-[11px] border border-line bg-paper p-2.5">
             <b className="text-[12px] text-ink-soft">{t('canvas.pickRepo')}</b>
@@ -2373,10 +2456,11 @@ function GithubSection({
         )}
         {(!appEnabled || showTokenForm) && (
           <div className="flex flex-col gap-2">
-            <div className="flex flex-col items-stretch gap-2 sm:flex-row">
+            <Field label={t('canvas.repoUrlLabel')} labelVariant="form" htmlFor="github-repo-url">
               <Input
+                id="github-repo-url"
                 variant="well"
-                className="flex-1 font-mono text-[12px]"
+                className="font-mono text-[12px]"
                 placeholder={t('canvas.repoPlaceholder')}
                 value={repo}
                 disabled={!!busy}
@@ -2385,9 +2469,12 @@ function GithubSection({
                   setError(null)
                 }}
               />
+            </Field>
+            <Field label={t('canvas.tokenLabel')} labelVariant="form" htmlFor="github-token">
               <Input
+                id="github-token"
                 variant="well"
-                className="flex-1 font-mono text-[12px]"
+                className="font-mono text-[12px]"
                 type="password"
                 placeholder={t('canvas.tokenPlaceholder')}
                 value={token}
@@ -2398,7 +2485,7 @@ function GithubSection({
                 }}
                 onKeyDown={(e) => e.key === 'Enter' && connectRepo()}
               />
-            </div>
+            </Field>
             <Button
               variant="primary"
               className="justify-center self-start"

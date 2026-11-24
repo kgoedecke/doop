@@ -1,11 +1,12 @@
 import { nanoid } from 'nanoid'
-import { and, desc, eq } from 'drizzle-orm'
+import { and, desc, eq, sql } from 'drizzle-orm'
 import { db } from './db/index.ts'
 import { githubConnections } from './db/schema.ts'
 import { sanitizeSnapshotHtml } from './ingest.ts'
 import * as githubApp from './githubApp.ts'
 import { env } from './env.ts'
 import type { Frame } from '../shared/types.ts'
+import { branchCandidates, parseRepoRef } from '../shared/githubRepo.ts'
 
 /**
  * GitHub repo as an import source — a ONE-TIME, CODE-ONLY job: connect a
@@ -54,8 +55,6 @@ function connectionAuth(conn: Pick<GithubConnection, 'token' | 'installationId'>
   return Promise.reject(new Error('connection has no credential — reconnect the repository'))
 }
 
-const REPO_RE = /^[\w.-]+\/[\w.-]+$/
-
 /* ------------------------------------------------------------------ */
 /* GitHub API client — thin fetch wrappers, no SDK                     */
 
@@ -84,6 +83,29 @@ async function ghJson<T>(token: string, path: string): Promise<T> {
 /* ------------------------------------------------------------------ */
 /* Connection CRUD                                                     */
 
+/** The branch a `/tree/…` or `/blob/…` link names: the longest prefix of its
+ *  path that is a branch of the repo, so `feature/login/src` finds
+ *  `feature/login`. The default branch is the usual answer and costs no
+ *  request; the other prefixes are asked about at once. */
+async function linkedBranch(auth: string, repo: string, treePath: string[], defaultBranch: string): Promise<string> {
+  const candidates = branchCandidates(treePath)
+  const longerThanDefault = candidates.filter((name) => name.length > defaultBranch.length)
+  const startsWithDefault = candidates.includes(defaultBranch)
+  const asked = startsWithDefault ? longerThanDefault : candidates
+  const found = await Promise.all(
+    asked.map(async (name) => {
+      const res = await gh(auth, `/repos/${repo}/branches/${encodeURIComponent(name)}`)
+      if (res.ok) return true
+      if (res.status !== 404) throw new Error(`GitHub API error ${res.status}`)
+      return false
+    }),
+  )
+  const longest = asked.find((_, i) => found[i])
+  if (longest) return longest
+  if (startsWithDefault) return defaultBranch
+  throw new Error(`no branch "${treePath.join('/')}" in ${repo}`)
+}
+
 export async function createConnection(input: {
   canvasId: string
   repo: string
@@ -96,11 +118,9 @@ export async function createConnection(input: {
   branch?: string
   createdBy: string
 }): Promise<GithubConnection> {
-  const repo = input.repo
-    .trim()
-    .replace(/^https?:\/\/github\.com\//i, '')
-    .replace(/\.git$/, '')
-  if (!REPO_RE.test(repo)) throw new Error('repository must be "owner/name"')
+  const ref = parseRepoRef(input.repo)
+  if (!ref) throw new Error('paste the repository’s GitHub link, e.g. https://github.com/owner/repo')
+  const { repo } = ref
   const token = input.token?.trim() || null
   /* App mode grants exactly what GitHub showed the user — refuse anything
      the install did not select, or that the user may not reach even though
@@ -118,7 +138,31 @@ export async function createConnection(input: {
      website importer and stays out of this flow entirely. */
   const auth = await connectionAuth({ token, installationId })
   const meta = await ghJson<{ default_branch: string }>(auth, `/repos/${repo}`)
-  const branch = input.branch?.trim() || meta.default_branch
+  const branch =
+    input.branch?.trim() ||
+    (ref.treePath ? await linkedBranch(auth, repo, ref.treePath, meta.default_branch) : meta.default_branch)
+
+  /* connecting a repo this canvas already has (a token that expired, an
+     analysis that failed) gives that connection the new credential rather
+     than a second row */
+  const [existing] = await db
+    .select()
+    .from(githubConnections)
+    .where(
+      and(
+        eq(githubConnections.canvasId, input.canvasId),
+        sql`lower(${githubConnections.repo}) = ${repo.toLowerCase()}`,
+        eq(githubConnections.branch, branch),
+      ),
+    )
+  if (existing) {
+    const [updated] = await db
+      .update(githubConnections)
+      .set({ token, installationId })
+      .where(eq(githubConnections.id, existing.id))
+      .returning()
+    return updated ?? existing
+  }
 
   const row: GithubConnection = {
     id: nanoid(8),
@@ -346,12 +390,26 @@ export async function analyzeConnection(conn: GithubConnection): Promise<RepoMan
 
 /** The repo's blob paths at the branch head — the reconstruction pass uses
  *  this to resolve a screen's import closure. */
+/* an import reads the tree once per card and per file request: keep it a
+   few minutes per connection, so one import is a handful of tree fetches */
+const TREE_TTL_MS = 5 * 60_000
+const trees = new Map<string, { at: number; paths: Promise<string[]> }>()
+
 export async function fetchTreePaths(conn: GithubConnection): Promise<string[]> {
-  const tree = await ghJson<{ tree: { path: string; type: string }[] }>(
-    await connectionAuth(conn),
-    `/repos/${conn.repo}/git/trees/${encodeURIComponent(conn.branch)}?recursive=1`,
-  )
-  return tree.tree.filter((e) => e.type === 'blob').map((e) => e.path)
+  const key = `${conn.id}:${conn.repo}:${conn.branch}`
+  const kept = trees.get(key)
+  if (kept && Date.now() - kept.at < TREE_TTL_MS) return kept.paths
+  const paths = (async () => {
+    const tree = await ghJson<{ tree: { path: string; type: string }[] }>(
+      await connectionAuth(conn),
+      `/repos/${conn.repo}/git/trees/${encodeURIComponent(conn.branch)}?recursive=1`,
+    )
+    return tree.tree.filter((e) => e.type === 'blob').map((e) => e.path)
+  })()
+  trees.set(key, { at: Date.now(), paths })
+  /* a failed read is not kept: the next call asks again */
+  paths.catch(() => trees.delete(key))
+  return paths
 }
 
 const MAX_FILE_BYTES = 1_500_000

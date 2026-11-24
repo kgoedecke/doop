@@ -27,16 +27,22 @@ interface ChoiceRowProps extends Omit<React.ComponentProps<'button'>, 'title'> {
   description?: React.ReactNode
   /** what sits at the right edge; a chevron unless given */
   trailing?: React.ReactNode
+  /** a control of the row's own beside it (a remove ✕), outside the row's button */
+  action?: React.ReactNode
 }
 
-function ChoiceRow({ icon, title, description, trailing, disabled, className, ...props }: ChoiceRowProps) {
+function ChoiceRow({ icon, title, description, trailing, action, disabled, className, ...props }: ChoiceRowProps) {
   return (
-    <div role="listitem" className="border-b border-line-soft last:border-b-0">
+    <div
+      role="listitem"
+      className={cn('border-b border-line-soft last:border-b-0', action && 'flex items-center pr-2')}
+    >
       <Pressable
         data-slot="choice-row"
         disabled={disabled}
         className={cn(
           'group flex items-center gap-3.5 px-4 py-3 transition-colors',
+          action && 'min-w-0 flex-1',
           disabled ? 'cursor-default' : 'hover:bg-sub',
           className,
         )}
@@ -51,6 +57,7 @@ function ChoiceRow({ icon, title, description, trailing, disabled, className, ..
           {trailing ?? <ChevronRightIcon size="rail" />}
         </span>
       </Pressable>
+      {action}
     </div>
   )
 }

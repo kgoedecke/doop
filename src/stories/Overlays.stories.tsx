@@ -1,6 +1,6 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
 import { useState } from 'react'
-import { Modal, ModalActions, ModalEyebrow, ModalLede, ModalTitle } from '@/components/ui/modal'
+import { Modal, ModalActions, ModalEyebrow, ModalLede, ModalSource, ModalTitle } from '@/components/ui/modal'
 import { ConfirmDialog } from '@/components/ui/alert-dialog'
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet'
 import { Button } from '@/components/ui/button'
@@ -66,6 +66,21 @@ function ModalDemo() {
 }
 
 export const ModalStory: Story = { name: 'Modal', render: () => <ModalDemo /> }
+
+/** A review's header: what is being reviewed sits under the title, as a link
+ *  to it (`ModalSource`), never an eyebrow above it. */
+export const ModalSourceStory: Story = {
+  name: 'Modal with source',
+  render: () => (
+    <Modal size="md" showClose onClose={() => {}}>
+      <div className="flex flex-col gap-[5px]">
+        <ModalTitle>Import the design system</ModalTitle>
+        <ModalSource href="https://github.com/kgoedecke/doop">kgoedecke/doop@main</ModalSource>
+      </div>
+      <ModalLede>Each component or page you pick becomes a card on the board.</ModalLede>
+    </Modal>
+  ),
+}
 
 function ConfirmDemo() {
   const [open, setOpen] = useState(false)

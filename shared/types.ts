@@ -503,7 +503,17 @@ export interface RepoCardPayload {
   importId: string
   /** the screen to sketch — absent on a design-system card */
   screen?: RepoScreenRef
+  /** queued for the requester's own MCP agent (Claude Code, Codex…) because
+   *  they have no Doop Agent plan: the resident never claims it, an MCP agent
+   *  takes it with take_repo_cards */
+  outside?: true
 }
+
+/** Who carries out a repo import's cards: the Doop Agent on a model account,
+ *  the Claude Plan on the person's desktop, or their own MCP agent (`client`
+ *  is its OAuth application's name, for opening it with a prompt). */
+export type GithubImportRunner =
+  { kind: 'doop' } | { kind: 'plan'; online: boolean } | { kind: 'agent'; client?: string }
 
 /** Human feedback left on an agent task: an open request on the canvas that ANY
  *  agent can pick up — delivered inside the next identified agent tool result. */

@@ -29,6 +29,11 @@ const BY_CONTEXT = [
   'list_canvases', // a resident run is scoped to its canvas
   'create_canvas',
   'get_profile',
+  /* repo import cards queued for a person's own MCP agent; the resident runs
+     its repo cards itself (runRepoCards), reading the repo the same way */
+  'take_repo_cards',
+  'read_repo_files',
+  'finish_repo_card',
 ]
 
 /** Real gaps: MCP agents can do these and resident agents cannot yet. */

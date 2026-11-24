@@ -24,6 +24,7 @@ import type {
   Frame,
   FrameVersion,
   FrameVersionInfo,
+  GithubImportRunner,
   LibraryPublishPolicy,
   LinkSharingPolicy,
   WorkspaceDetail,
@@ -254,6 +255,10 @@ export interface RepoManifest {
 export interface GithubImportResult {
   cards: string[]
   rejected: string[]
+  /** who carries the cards out (absent from a server before this) */
+  runner?: GithubImportRunner
+  /** cards that were waiting for their own agent, now the Doop Agent's */
+  handedOver?: number
 }
 
 export interface DiscoveredPage {

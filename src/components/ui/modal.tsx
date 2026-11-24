@@ -154,6 +154,21 @@ function ModalEyebrow({ className, ...props }: React.ComponentProps<'span'>) {
   )
 }
 
+/** What a review is of (a repo, a site, a file), under the modal's title;
+ *  a link to it when there is somewhere to go. */
+function ModalSource({ href, className, children }: { href?: string; className?: string; children: React.ReactNode }) {
+  const cls = cn('self-start text-body text-ink-faint', href && 'hover:text-ink-soft', className)
+  return href ? (
+    <a data-slot="modal-source" href={href} target="_blank" rel="noreferrer" className={cls}>
+      {children}
+    </a>
+  ) : (
+    <span data-slot="modal-source" className={cls}>
+      {children}
+    </span>
+  )
+}
+
 function ModalTitle({ className, ...props }: React.ComponentProps<typeof DialogPrimitive.Title>) {
   return (
     <DialogPrimitive.Title
@@ -208,6 +223,7 @@ function MarkdownBlock({ className, ...props }: React.ComponentProps<'pre'>) {
 }
 
 export {
+  ModalSource,
   Modal,
   ModalEyebrow,
   ModalTitle,

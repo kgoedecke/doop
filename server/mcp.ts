@@ -44,6 +44,7 @@ import {
 } from '../shared/designTokens.ts'
 import { webFontFamilies, webFontsBrief } from '../shared/webFonts.ts'
 import * as actions from './actions.ts'
+import { deliverRepoCard, readRepoFilesFor, repoCardBrief, repoCardTask } from './githubRecon.ts'
 import { canvasRole } from './access.ts'
 import { roleAllows, type CanvasRole } from '../shared/canvasRole.ts'
 import { isAgentKeySecret, verifyAgentKey } from './agentKeys.ts'
@@ -431,7 +432,20 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
   const withFeedback = <T extends ToolContent>(result: T, canvasId: string, actor?: Actor): T =>
     roleAllows(roleOn(canvasId), 'edit') ? appendFeedback(result, canvasId, actor) : result
   const withFeedbackNotice = <T extends ToolContent>(result: T, canvasId: string, actor?: Actor): T =>
-    roleAllows(roleOn(canvasId), 'edit') ? appendFeedbackNotice(result, canvasId, actor) : result
+    roleAllows(roleOn(canvasId), 'edit')
+      ? appendRepoCardsNotice(appendFeedbackNotice(result, canvasId, actor), canvasId)
+      : result
+  /* repo import cards this account queued for its own agent (no Doop Agent plan) */
+  const appendRepoCardsNotice = <T extends ToolContent>(result: T, canvasId: string): T => {
+    const mine = actions.waitingOutsideCards(canvasId, ownerId)
+    if (!mine.length) return result
+    const repos = [...new Set(mine.map((c) => c.payload?.repo))].join(', ')
+    result.content.push({
+      type: 'text' as const,
+      text: `REPO IMPORT — ${mine.length} card${mine.length === 1 ? '' : 's'} from ${repos} queued for you on this canvas (your person imported a GitHub repo and asked you to build it). Call take_repo_cards({ canvas_id, agent_name }) to take and build them.`,
+    })
+    return result
+  }
   const withStatusNudge = <T extends ToolContent>(result: T, canvasId: string, actor?: Actor): T =>
     roleAllows(roleOn(canvasId), 'edit') ? appendStatusNudge(result, canvasId, actor) : result
   const noComment = (id: string) => err(`no comment with id ${id} on this canvas`)
@@ -1315,6 +1329,146 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
         }),
         note: "These requests are now assigned to you. Address each one (a human request overrides the don't-touch-others'-frames etiquette), review with get_frame_screenshot, and update your set_status.",
       })
+    },
+  )
+
+  /* GitHub import cards queued for this account's own agent: the person has
+     no Doop Agent plan, so the server reads the repo and the agent designs */
+  server.registerTool(
+    'take_repo_cards',
+    {
+      title: 'Take queued GitHub import cards',
+      description:
+        'Take the GitHub repo import cards queued for your account on a canvas (a person imported a repo in Doop, and with no Doop Agent plan connected the work waits for you). Returns the cards you now hold: a design-system card (distill the repo’s real palette, type, radii and component idioms into markdown) and screen cards (rebuild one page or component from its source as a self-contained HTML document), each with the repository tree to investigate. Read files with read_repo_files, then deliver each with finish_repo_card. Do design-system cards first: their guide grounds the screens. Calling it again returns the cards you still hold, plus more from the queue.',
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+      inputSchema: {
+        canvas_id: z.string(),
+        agent_name: agentName,
+        limit: z.number().int().min(1).max(12).optional().describe('How many cards to hold at once (default 4).'),
+      },
+    },
+    async ({ canvas_id, agent_name, limit }) => {
+      if (!canvasFor(canvas_id, 'edit')) return noCanvas(canvas_id)
+      const actor = actorFrom(agent_name)
+      arrive(canvas_id, agent_name)
+      const cards = actions.takeOutsideRepoCards(canvas_id, actor, ownerId, limit ?? 4)
+      if (!cards.length) return text({ cards: [], note: 'No repo import cards are waiting on this canvas.' })
+      const briefs = []
+      for (const card of cards) {
+        try {
+          const brief = await repoCardBrief(canvas_id, card)
+          if (!brief) {
+            actions.failCard(canvas_id, card.id, 'This card lost its repository details. Import again.')
+            continue
+          }
+          const screen = card.payload?.screen
+          briefs.push({
+            card_id: card.id,
+            kind: card.kind,
+            repo: card.payload?.repo,
+            ...(screen
+              ? {
+                  screen: {
+                    title: screen.title,
+                    route: screen.route,
+                    source_path: screen.sourcePath,
+                    kind: screen.kind,
+                  },
+                }
+              : {}),
+            task: repoCardTask(card, brief),
+            tree: brief.tree,
+          })
+        } catch (e) {
+          actions.failCard(
+            canvas_id,
+            card.id,
+            `Could not read the repository: ${e instanceof Error ? e.message : String(e)}. Retry when you are ready.`,
+          )
+        }
+      }
+      actions.narrateAgent(canvas_id, actor, `Importing ${briefs[0]?.repo ?? 'a repository'} from GitHub`)
+      return text({
+        cards: briefs,
+        note: 'These cards are yours now and show on the board under your name. For each: read_repo_files → design → finish_repo_card. After a screen lands, check it with get_frame_screenshot and fix it with set_frame_html or edit_frame_html (keep the doop-github-screen meta). If one cannot be done, finish_repo_card with failed_reason.',
+      })
+    },
+  )
+
+  server.registerTool(
+    'read_repo_files',
+    {
+      title: 'Read files from an imported GitHub repo',
+      description:
+        'Read files from the repository behind a repo import card you hold (take_repo_cards). Paths come from the card’s tree. Up to 15 files and about 100 KB a call; ask again for more.',
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+      inputSchema: {
+        canvas_id: z.string(),
+        card_id: z.string(),
+        paths: z.array(z.string()).min(1).max(15),
+        agent_name: agentName,
+      },
+    },
+    async ({ canvas_id, card_id, paths, agent_name }) => {
+      if (!canvasFor(canvas_id, 'edit')) return noCanvas(canvas_id)
+      const card = actions.outsideCardOf(canvas_id, card_id, actorFrom(agent_name), ownerId)
+      if (!card) return err(`you hold no open repo import card ${card_id} on this canvas — call take_repo_cards first`)
+      try {
+        return text({ files: await readRepoFilesFor(canvas_id, card, paths) })
+      } catch (e) {
+        return err(e instanceof Error ? e.message : String(e))
+      }
+    },
+  )
+
+  server.registerTool(
+    'finish_repo_card',
+    {
+      title: 'Deliver a GitHub import card',
+      description:
+        'Deliver a repo import card you hold. A screen card takes `html` (the complete document, ending with <!-- doop-height: N -->; omit it for committed-HTML screens) and lands it as a frame beside the import’s other screens. A design-system card takes `markdown` and pins it as the canvas guideline. Pass `failed_reason` instead when the card cannot be done; the person sees it on the board and can retry.',
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+      inputSchema: {
+        canvas_id: z.string(),
+        card_id: z.string(),
+        html: z.string().max(1_000_000).optional(),
+        markdown: z.string().max(60_000).optional(),
+        failed_reason: z.string().max(300).optional(),
+        agent_name: agentName,
+      },
+    },
+    async ({ canvas_id, card_id, html, markdown, failed_reason, agent_name }) => {
+      if (!canvasFor(canvas_id, 'edit')) return noCanvas(canvas_id)
+      const actor = actorFrom(agent_name)
+      const card = actions.outsideCardOf(canvas_id, card_id, actor, ownerId)
+      if (!card) return err(`you hold no open repo import card ${card_id} on this canvas — call take_repo_cards first`)
+      if (failed_reason) {
+        actions.failCard(canvas_id, card.id, failed_reason)
+        return withFeedback(text({ ok: true, card_id, failed: true }), canvas_id, actor)
+      }
+      try {
+        const landed = await deliverRepoCard(
+          canvas_id,
+          card,
+          { ...(html !== undefined ? { html } : {}), ...(markdown !== undefined ? { markdown } : {}) },
+          actor,
+          'mcp',
+        )
+        const left = actions.takeOutsideRepoCards(canvas_id, actor, ownerId, 0).length
+        if ('guideline' in landed)
+          return withFeedback(text({ ok: true, card_id, guideline: landed.guideline, left }), canvas_id, actor)
+        const { frame } = landed
+        return withFeedback(
+          textWithNudge(
+            { ok: true, card_id, frame_id: frame.id, width: frame.width, height: frame.height, left },
+            REVIEW_NUDGE,
+          ),
+          canvas_id,
+          actor,
+        )
+      } catch (e) {
+        return err(e instanceof Error ? e.message : String(e))
+      }
     },
   )
 

@@ -820,6 +820,13 @@ document that faithfully renders it — real CSS derived from its actual classes
 design tokens, realistic placeholder data, no scripts. Design at the frame's width and
 resize the frame to the content. Keep the marker meta so the frame stays traceable.
 
+A person without a Doop Agent plan who imports a repo queues the import for you: tool
+results then carry a REPO IMPORT notice. take_repo_cards hands you the cards (a design
+system, then screens) with the repository tree; read_repo_files reads source through
+Doop's GitHub connection, so you need no checkout; finish_repo_card lands each screen
+as a placed, marked frame, or pins the design system as the canvas guideline. Review
+every landed screen with get_frame_screenshot and fix it in place.
+
 ## Synced from a live app
 
 Frames a team's live app sends through the design-sync snippet are captures of real

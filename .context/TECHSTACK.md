@@ -161,6 +161,25 @@
   `/api/skills` for the scope it will make the canvas in. The composer also has a Skills button that
   writes the `/`, and its menu ends with "New skill", the skills card's form via `?skill=new`. Tests: `skills.test.ts`, `skillsHttp.test.ts`, `residentSkills.test.ts`,
   `skillMenu.test.tsx`, `skillsCard.test.tsx`, `agentInstructionsSkills.test.tsx`.
+- GitHub import runners (`server/index.ts` import route, `server/githubRecon.ts`, `shared/agentLaunch.ts`,
+  `src/components/RepoAgentGuide.tsx`): the route answers who builds the cards (`runner`): the Doop Agent on a
+  model account; the Claude Plan, whose desktop session gets the cards with `read_repo_files` / `finish_repo_card`
+  harness tools (`runRepoCardsOnHarness`; it waits while the desktop is offline); or, with no Doop Agent but an MCP
+  agent of their own, cards marked `payload.outside` that no resident claims and only that person's agent takes with MCP
+  `take_repo_cards`, `read_repo_files`, `finish_repo_card` (a REPO IMPORT notice tells it; a delivery runs the
+  inline-data rule of every agent write, and a card lands once however often it is delivered; the repo tree is kept
+  five minutes per connection, `fetchTreePaths`). With neither, the import
+  window asks who should build it and re-imports once an agent connects. The window opens the person's agent with
+  the prompt filled in (`agentLaunch`: Claude Code `claude-cli://`, Claude Desktop `claude://`, claude.ai and
+  ChatGPT `?q=`, Cursor `cursor.com/link/prompt`; Codex a terminal command) and shows the cards' progress. Connecting
+  a plan and importing again hands waiting cards to the Doop Agent. Repo runs narrate presence only
+  (`narrateAgent`), so a failed card never leaves a finished-looking task; a card the person queued that fails while
+  the canvas is open is a toast (`CardFailureNotices`), and repo cards nobody took yet show as waiting in Recent tasks. In a browser, Settings shows a Plan that is
+  on as connected, with the desktop's online state from `/api/agent-runners`. A repo is connected by its GitHub link
+  (`parseRepoRef` in `shared/githubRepo.ts`: browser links, clone URLs or `owner/repo`; a `/tree/` or `/blob/` link's
+  branch is the longest prefix of its path the repo has), connecting a repo the canvas already has on that branch
+  gives that connection the new credential, and connecting goes straight on to the screen picker. Tests:
+  `repoCards.test.ts`, `agentLaunch.test.ts`, `githubRepo.test.ts`, the connect-by-link cases in `github.test.ts`.
 - Agent feedback (`server/agentFeedback.ts`, `shared/agentFeedback.ts`): agents talk to the Doop
   team through two MCP tools, which the resident agent has under the same names. `report_issue`
   (kind `issue`: `bug`, `tool_error`, `confusing`, `missing_capability`, `other`) is for where Doop

@@ -180,6 +180,8 @@ describe('nested monorepo roots', () => {
 /* ---- REST surface: access rules and validation, no GitHub network calls —
    a malformed repo name fails before any fetch leaves the server. */
 
+import { createServer, type Server as HttpServer } from 'node:http'
+import type { AddressInfo } from 'node:net'
 import { afterAll, beforeAll } from 'vitest'
 import { Client, startServer, type Server } from './harness.ts'
 
@@ -215,7 +217,7 @@ describe('github connection REST', () => {
   it('rejects malformed repo names and missing tokens before touching GitHub', async () => {
     const bad = await owner.post(`/api/canvases/${canvasId}/github`, { repo: 'not a repo', token: 'x' })
     expect(bad.status).toBe(400)
-    expect((await bad.json()).error).toMatch(/owner\/name/)
+    expect((await bad.json()).error).toMatch(/GitHub link/)
     const noToken = await owner.post(`/api/canvases/${canvasId}/github`, { repo: 'acme/app', token: '  ' })
     expect(noToken.status).toBe(400)
   })
@@ -224,5 +226,67 @@ describe('github connection REST', () => {
     expect((await owner.post(`/api/canvases/${canvasId}/github/nope/analyze`)).status).toBe(404)
     expect((await owner.post(`/api/canvases/${canvasId}/github/nope/import`, { screens: [] })).status).toBe(404)
     expect((await stranger.post(`/api/canvases/${canvasId}/github/nope/analyze`)).status).toBe(403)
+  })
+})
+
+/* ---- connecting by the repo's link, against just enough of GitHub: acme/app
+   on main, with a `feature/login` branch */
+
+describe('github connect by link', () => {
+  let fake: HttpServer
+  let linked: Server
+  let owner: Client
+  let canvasId: string
+
+  beforeAll(async () => {
+    fake = createServer((req, res) => {
+      const path = new URL(req.url ?? '/', 'http://fake').pathname
+      const ok = (body: unknown) => {
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify(body))
+      }
+      if (path === '/repos/acme/app') return ok({ default_branch: 'main' })
+      if (path === '/repos/acme/app/branches/feature%2Flogin') return ok({ name: 'feature/login' })
+      res.writeHead(404).end()
+    })
+    await new Promise<void>((resolve) => fake.listen(0, '127.0.0.1', resolve))
+    linked = await startServer({ GITHUB_API_URL: `http://127.0.0.1:${(fake.address() as AddressInfo).port}` })
+    owner = new Client(linked)
+    await owner.signUp('gh-linker@test.dev', 'Linker')
+    canvasId = (await (await owner.post('/api/canvases', { name: 'Linked' })).json()).id
+  }, 70_000)
+
+  afterAll(() => {
+    linked?.stop()
+    fake?.close()
+  })
+
+  const connect = (repo: string, token = 'github_pat_one') =>
+    owner.post(`/api/canvases/${canvasId}/github`, { repo, token })
+
+  it('takes the link as pasted and the repo’s default branch', async () => {
+    const res = await connect('https://github.com/acme/app')
+    expect(res.status).toBe(200)
+    expect(await res.json()).toMatchObject({ repo: 'acme/app', branch: 'main' })
+  })
+
+  it('connecting the same repo again replaces the credential instead of adding a connection', async () => {
+    const list = async () => (await (await owner.get(`/api/canvases/${canvasId}/github`)).json()) as { id: string }[]
+    const before = await list()
+    const again = await (await connect('https://github.com/acme/app/tree/main', 'github_pat_two')).json()
+    const after = await list()
+    expect(after).toHaveLength(before.length)
+    expect(again.id).toBe(before.find((conn) => conn.id === again.id)?.id)
+  })
+
+  it('finds a branch with a slash in a folder link', async () => {
+    const res = await connect('https://github.com/acme/app/tree/feature/login/src/app')
+    expect(await res.json()).toMatchObject({ repo: 'acme/app', branch: 'feature/login' })
+  })
+
+  it('refuses a link to a branch the repo does not have', async () => {
+    const res = await connect('https://github.com/acme/app/tree/nope')
+    expect(res.status).toBe(400)
+    expect((await res.json()).error).toMatch(/no branch "nope"/)
   })
 })

@@ -16,6 +16,8 @@ import {
   wrapRepoHtml,
   type GithubConnection,
 } from './github.ts'
+import type Anthropic from '@anthropic-ai/sdk'
+import { inlineDataRefusal } from './inlineData.ts'
 import type { Actor, AgentTask, Frame, RepoScreenRef } from '../shared/types.ts'
 
 /**
@@ -459,6 +461,9 @@ export async function runRepoCards(
   model: AgentModel,
   actor: Actor,
 ): Promise<void> {
+  /* the Claude Plan runs whole agent sessions on the person's desktop and
+     cannot take single model turns: hand it the cards with repo tools */
+  if (model.runHarness) return runRepoCardsOnHarness(canvasId, cards, model, actor)
   const repoCards = cards.filter(isRepoCard)
   const byConnection = new Map<string, RepoCard[]>()
   for (const card of repoCards) {
@@ -499,7 +504,7 @@ export async function runRepoCards(
         continue
       }
       try {
-        actions.setAgentStatus(canvasId, actor, `Reading ${repo}’s design system — theme, tokens, type`)
+        actions.narrateAgent(canvasId, actor, `Reading ${repo}’s design system — theme, tokens, type`)
         const md = await extractDesignSystem(conn, paths, model)
         actions.setGuideline(canvasId, designSystemSlug(repo), md, actor, undefined, `${repo} design system`)
         actions.advanceCard(canvasId, card.id, actor)
@@ -522,7 +527,7 @@ export async function runRepoCards(
         }
         const screen = card.payload.screen!
         try {
-          actions.setAgentStatus(
+          actions.narrateAgent(
             canvasId,
             actor,
             screen.source === 'static'
@@ -712,4 +717,321 @@ async function sketchScreen(
         actor,
       })) ?? frame
   }
+}
+
+/* ------------------------------------------------------------------ */
+/* Cards built by the requester's own MCP agent                        */
+
+/** What an agent needs to start a repo card: the tree to investigate and the
+ *  frame width the screen is designed at. */
+export async function repoCardBrief(
+  canvasId: string,
+  card: AgentTask,
+): Promise<{ tree: string; width?: number; guideline?: string } | undefined> {
+  if (!isRepoCard(card)) return undefined
+  const conn = await getConnection(canvasId, card.payload.connectionId)
+  if (!conn) return undefined
+  const paths = await fetchTreePaths(conn)
+  const screen = card.payload.screen
+  return {
+    tree: treeExcerpt(paths, screen?.sourcePath ?? 'src/x'),
+    ...(screen ? { width: isCompact(screen) ? COMPONENT_W : PAGE_W } : { guideline: designSystemSlug(conn.repo) }),
+  }
+}
+
+/** Read repository files for an agent building a card: only paths in the
+ *  tree, at most MAX_REQUESTED_FILES and MAX_REQUESTED_BYTES a call. */
+export async function readRepoFilesFor(
+  canvasId: string,
+  card: AgentTask,
+  wanted: string[],
+): Promise<{ path: string; text?: string; error?: string }[]> {
+  if (!isRepoCard(card)) throw new Error('not a repository card')
+  const conn = await getConnection(canvasId, card.payload.connectionId)
+  if (!conn) throw new Error(`the connection to ${card.payload.repo} was removed`)
+  const pathSet = new Set(await fetchTreePaths(conn))
+  let budget = MAX_REQUESTED_BYTES
+  const files: { path: string; text?: string; error?: string }[] = []
+  for (const path of [...new Set(wanted)].slice(0, MAX_REQUESTED_FILES)) {
+    if (!pathSet.has(path)) {
+      files.push({ path, error: 'not in the repository tree' })
+      continue
+    }
+    if (budget <= 0) {
+      files.push({ path, error: 'over this call’s size budget — ask for it again in another call' })
+      continue
+    }
+    try {
+      let text = await fetchRepoFile(conn, path)
+      if (text.length > budget) text = text.slice(0, budget) + '\n/* …truncated… */'
+      budget -= text.length
+      files.push({ path, text })
+    } catch {
+      files.push({ path, error: 'unreadable (binary or too large)' })
+    }
+  }
+  return files
+}
+
+/**
+ * An agent finished a sketch card: its document lands as the screen's frame,
+ * placed beside the import's other frames, marked with the repo provenance,
+ * `repo:` image references transplanted from the repository. A static screen
+ * (repo HTML) needs no document: the repository's own file lands as it is.
+ */
+async function landSketchFromAgent(
+  canvasId: string,
+  card: AgentTask,
+  document: string | undefined,
+  actor: Actor,
+  surface: 'mcp' | 'resident',
+): Promise<Frame> {
+  if (!isRepoCard(card) || !card.payload.screen) throw new Error('not a screen card')
+  if (document && document.length > MAX_AGENT_DOCUMENT_CHARS)
+    throw new Error(
+      `the document is ${document.length} characters; a screen is at most ${MAX_AGENT_DOCUMENT_CHARS}. Leave data and files out of it.`,
+    )
+  /* the same rule as every agent frame write: no files packed into a design */
+  const refusal = inlineDataRefusal(document, '', surface)
+  if (refusal) throw new Error(refusal)
+  const screen = card.payload.screen
+  const conn = await getConnection(canvasId, card.payload.connectionId)
+  if (!conn) throw new Error(`the connection to ${card.payload.repo} was removed`)
+  if (screen.source === 'static' && !document) {
+    const html = wrapRepoHtml(await fetchRepoFile(conn, screen.sourcePath), conn, screen)
+    return placeRepoFrame(canvasId, conn, screen, html, PAGE_W, STATIC_H, actor)
+  }
+  if (!document) throw new Error('html is required for this screen')
+  const { html, height } = extractHtml([{ type: 'text', text: document }])
+  const withAssets = await resolveRepoAssets(conn, html, new Set(await fetchTreePaths(conn)))
+  const width = isCompact(screen) ? COMPONENT_W : PAGE_W
+  const frame = await placeRepoFrame(
+    canvasId,
+    conn,
+    screen,
+    wrapGeneratedHtml(withAssets, conn, screen),
+    width,
+    height,
+    actor,
+  )
+  markSynced(conn.id)
+  return frame
+}
+
+/** An agent finished a design-system card: its markdown becomes the pinned
+ *  guideline the repo's screens follow. Returns the guideline's name. */
+async function landDesignSystemFromAgent(
+  canvasId: string,
+  card: AgentTask,
+  markdown: string,
+  actor: Actor,
+): Promise<string> {
+  if (!isRepoCard(card) || card.kind !== 'design-system') throw new Error('not a design-system card')
+  const name = designSystemSlug(card.payload.repo)
+  actions.setGuideline(canvasId, name, markdown.trim(), actor, undefined, `${card.payload.repo} design system`)
+  return name
+}
+
+/** The largest screen document an agent may deliver. */
+const MAX_AGENT_DOCUMENT_CHARS = 1_000_000
+
+/* cards whose delivery is under way: a retried call must not land twice */
+const delivering = new Set<string>()
+
+/**
+ * Land what an agent made for a repo card it holds, then advance the card: a
+ * design-system card's markdown becomes the pinned guideline, a screen's
+ * document its frame. A second delivery of a card already being delivered,
+ * or already done, is refused.
+ */
+export async function deliverRepoCard(
+  canvasId: string,
+  card: AgentTask,
+  input: { html?: string; markdown?: string },
+  actor: Actor,
+  surface: 'mcp' | 'resident',
+): Promise<{ guideline: string } | { frame: Frame }> {
+  if (delivering.has(card.id) || card.endedAt || card.failedAt)
+    throw new Error(`card ${card.id} is already delivered or being delivered`)
+  delivering.add(card.id)
+  try {
+    if (card.kind === 'design-system') {
+      if (!input.markdown?.trim()) throw new Error('a design-system card takes `markdown`')
+      const guideline = await landDesignSystemFromAgent(canvasId, card, input.markdown, actor)
+      actions.advanceCard(canvasId, card.id, actor)
+      return { guideline }
+    }
+    const frame = await landSketchFromAgent(canvasId, card, input.html, actor, surface)
+    actions.advanceCard(canvasId, card.id, actor)
+    return { frame }
+  } finally {
+    delivering.delete(card.id)
+  }
+}
+
+/** What an agent is asked to do for one card, for the MCP tools and the
+ *  Claude Plan's run alike. */
+export function repoCardTask(card: AgentTask, brief: { width?: number; guideline?: string }): string {
+  const screen = card.payload?.screen
+  if (!screen)
+    return `Read the theme/token modules, tailwind or framework config, global styles and app shell. Write markdown with Palette (hex + role), Typography (faces, weights, scale, Google Fonts links), Shape & space, Component idioms and a ready-to-paste :root block, all taken from the code. It becomes the canvas guideline "${brief.guideline}".`
+  if (screen.source === 'static')
+    return 'This screen is committed HTML: finish the card with no html and it lands as it is.'
+  const what =
+    screen.kind === 'page' ? 'page top to bottom' : `${screen.kind} as an isolated library card with its key variants`
+  return `Read ${screen.sourcePath} and what it imports, plus the theme, global CSS and locale files that shape it. Then write ONE complete self-contained HTML document, exactly ${brief.width}px wide, that renders this ${what}: real palette and fonts from the code, the real copy verbatim, realistic data, no <script>. Reference repository images as src="repo:path/in/tree" and they are copied in. End with <!-- doop-height: N -->.`
+}
+
+const HARNESS_TOOLS: Anthropic.Tool[] = [
+  {
+    name: 'read_repo_files',
+    description:
+      'Read files from the repository behind one of your cards, by path from its tree. Up to 15 files and about 100 KB a call; ask again for more.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        card_id: { type: 'string' },
+        paths: { type: 'array', items: { type: 'string' } },
+      },
+      required: ['card_id', 'paths'],
+    },
+  },
+  {
+    name: 'finish_repo_card',
+    description:
+      'Deliver one card: `html` (the complete document) for a screen card, `markdown` for a design-system card, or `failed_reason` when it cannot be done.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        card_id: { type: 'string' },
+        html: { type: 'string' },
+        markdown: { type: 'string' },
+        failed_reason: { type: 'string' },
+      },
+      required: ['card_id'],
+    },
+  },
+]
+
+const HARNESS_SYSTEM = `You are Doop's designer, importing a product into a Doop canvas from its GitHub repository. Fidelity to the real product is the whole job: never invent the brand or the copy. For every card, investigate with read_repo_files first (styling: theme and token modules, global CSS, tailwind config; copy: locale and content files; shared layout like nav and footer), then deliver it with finish_repo_card. Do the design-system card first; follow what it found in every screen. Each screen is ONE self-contained HTML document with real inline CSS, no <script>, ending with <!-- doop-height: N -->. Finish every card, or fail it with a reason.`
+
+/**
+ * Repo cards on a connection that runs whole agent sessions (the Claude Plan
+ * on the person's desktop): one session gets every card with its tree, reads
+ * the repo through read_repo_files and lands each card with finish_repo_card.
+ * A card the session leaves unfinished fails with its reason, never silently.
+ */
+async function runRepoCardsOnHarness(
+  canvasId: string,
+  cards: AgentTask[],
+  model: AgentModel,
+  actor: Actor,
+): Promise<void> {
+  const open = new Map<string, AgentTask>()
+  const sections = new Map<string, string>()
+  for (const card of cards) {
+    if (!isRepoCard(card)) {
+      actions.failCard(canvasId, card.id, 'This card lost its repository details. Import again.')
+      continue
+    }
+    try {
+      const brief = await repoCardBrief(canvasId, card)
+      if (!brief) {
+        actions.failCard(
+          canvasId,
+          card.id,
+          `The connection to ${card.payload.repo} was removed. Reconnect the repository and import again.`,
+        )
+        continue
+      }
+      open.set(card.id, card)
+      const screen = card.payload.screen
+      sections.set(
+        card.id,
+        [
+          `## Card ${card.id}: ${card.kind === 'design-system' ? `design system of ${card.payload.repo}` : `${screen!.title} (${screen!.route}, ${screen!.sourcePath})`}`,
+          repoCardTask(card, brief),
+          `Repository tree:\n${brief.tree}`,
+        ].join('\n\n'),
+      )
+    } catch (err) {
+      actions.failCard(canvasId, card.id, failureReason(err))
+    }
+  }
+  if (!open.size) return
+  /* design systems first, so the prompt reads in the order the work goes */
+  const ordered = [...open.values()].sort(
+    (a, b) => Number(b.kind === 'design-system') - Number(a.kind === 'design-system'),
+  )
+  actions.narrateAgent(canvasId, actor, `Importing ${ordered[0]!.payload!.repo} on your Claude Plan`)
+  const reply = (
+    block: Anthropic.ToolUseBlockParam,
+    content: string,
+    isError = false,
+  ): Anthropic.ToolResultBlockParam => ({
+    type: 'tool_result',
+    tool_use_id: block.id,
+    content,
+    ...(isError ? { is_error: true } : {}),
+  })
+  const done = () => [...open.values()].every((c) => c.endedAt || c.failedAt)
+  let result: Awaited<ReturnType<NonNullable<AgentModel['runHarness']>>>
+  try {
+    result = await model.runHarness!({
+      canvasId,
+      system: HARNESS_SYSTEM,
+      prompt: `Import these ${open.size} cards.\n\n${ordered.map((c) => sections.get(c.id)).join('\n\n---\n\n')}`,
+      tools: HARNESS_TOOLS,
+      maxTurns: 200,
+      isCanceled: done,
+      execute: async (block) => {
+        const input = (block.input ?? {}) as Record<string, unknown>
+        const card = open.get(String(input.card_id ?? ''))
+        if (!card || card.endedAt || card.failedAt) return reply(block, `No open card ${String(input.card_id)}.`, true)
+        try {
+          if (block.name === 'read_repo_files') {
+            const paths = Array.isArray(input.paths) ? input.paths.map(String) : []
+            return reply(block, JSON.stringify(await readRepoFilesFor(canvasId, card, paths)))
+          }
+          if (block.name === 'finish_repo_card') {
+            if (typeof input.failed_reason === 'string' && input.failed_reason) {
+              actions.failCard(canvasId, card.id, input.failed_reason.slice(0, 300))
+              return reply(block, 'Card marked failed.')
+            }
+            actions.narrateAgent(
+              canvasId,
+              actor,
+              card.kind === 'design-system'
+                ? `Pinning ${card.payload!.repo}’s design system`
+                : `Landing ${card.payload!.screen!.title} from ${card.payload!.repo}`,
+            )
+            await deliverRepoCard(
+              canvasId,
+              card,
+              {
+                ...(typeof input.html === 'string' ? { html: input.html } : {}),
+                ...(typeof input.markdown === 'string' ? { markdown: input.markdown } : {}),
+              },
+              actor,
+              'resident',
+            )
+            return reply(block, `Card ${card.id} landed.`)
+          }
+          return reply(block, `Unknown tool ${block.name}.`, true)
+        } catch (err) {
+          return reply(block, err instanceof Error ? err.message : String(err), true)
+        }
+      },
+    })
+  } catch (err) {
+    result = { success: false, text: err instanceof Error ? err.message : String(err) }
+  } finally {
+    actions.narrateAgent(canvasId, actor, '')
+  }
+  const reason = result.success
+    ? 'Your Claude Plan finished its run without delivering this card. Retry when you are ready.'
+    : result.fromDoop
+      ? result.text
+      : `Your Claude Plan stopped: ${result.text.slice(0, 200)}. Retry when you are ready.`
+  for (const card of open.values()) if (!card.endedAt && !card.failedAt) actions.failCard(canvasId, card.id, reason)
 }

@@ -54,6 +54,16 @@ export const canvas = {
   itemsImported: { one: '{count} item imported', other: '{count} items imported' },
   importedWithFailures: '{imported} · {failed} failed',
   cardsQueued: { one: '{count} card queued — Doop is on it', other: '{count} cards queued — Doop is on it' },
+  cardsQueuedPlan: {
+    one: '{count} card queued — your desktop’s Claude is on it',
+    other: '{count} cards queued — your desktop’s Claude is on it',
+  },
+  cardsQueuedPlanOffline: {
+    one: '{count} card queued — it starts when your desktop app is back online',
+    other: '{count} cards queued — they start when your desktop app is back online',
+  },
+  cardFailed: '“{card}” failed: {reason}',
+  cardsFailed: '{count} cards failed: {reason}',
   appUpdated: 'doop was updated',
   reload: 'Reload',
 
@@ -150,7 +160,6 @@ export const canvas = {
   saveName: 'Save name',
 
   /* import: shared */
-  reviewBeforeImport: 'Review before import',
   selectAll: 'Select all',
   clear: 'Clear',
   importing: 'Importing…',
@@ -180,6 +189,22 @@ export const canvas = {
   errScreensGone: 'Those screens are no longer in the repository — re-run the scan',
   errAlreadyOnBoard: 'Everything you picked is already on the board',
   errRepoImportFailed: 'repository import failed',
+  repoGuideConnectTitle: 'Who should build this?',
+  repoGuideConnectLede:
+    'Rebuilding screens from source code needs an AI. Pick one, and this import carries on from here.',
+  repoGuidePlanTitle: 'Connect a plan, and Doop builds it',
+  repoGuidePlanDescription: 'Your ChatGPT subscription, an API key, or Claude in the desktop app. Then import again.',
+  repoGuideAgentTitle: 'Use your own agent',
+  repoGuideAgentDescription: 'Claude Code, Codex, Cursor or Claude: you prompt it, and it builds the screens here.',
+  repoForAgentTitle: 'Queued for {agent}',
+  repoForAgentLede: '{agent} builds these cards: it reads the repo through Doop and lands each screen on this canvas.',
+  repoForAgentStepOpenLink: 'Open {agent} with the prompt filled in, and send it.',
+  repoForAgentStepPaste: 'Paste this into the agent you connected to Doop.',
+  repoForAgentStepRun: 'Run this in a terminal to start {agent} on the cards.',
+  repoForAgentStepWatch: 'Screens land on this canvas as it works.',
+  repoForAgentOpen: 'Open in {agent}',
+  repoProgressWaiting: 'Waiting for your agent to take the cards…',
+  repoProgress: '{agent} took {taken} of {total} cards · {landed} landed · {failed} failed',
 
   /* import: website */
   websiteTitle: 'Import a website',
@@ -234,9 +259,9 @@ export const canvas = {
   githubForbidden: 'Repo connections are for canvas members — ask the owner for durable access.',
   githubLede:
     'Doop reads the repo’s routing conventions and lists its screens for review. Nothing lands until you pick.',
-  nothingImported: 'nothing imported yet',
+  connectedRepos: 'Connected repos',
+  pickScreens: 'Pick screens to import',
   analyzing: 'Analyzing…',
-  analyze: 'Analyze',
   disconnectRepo: 'Disconnect this repository',
   pickRepo: 'Pick a repository to connect to this canvas',
   private: 'private',
@@ -248,7 +273,12 @@ export const canvas = {
   openingGithub: 'Opening GitHub…',
   connectGithub: 'Connect GitHub',
   pasteToken: 'paste a token instead',
-  repoPlaceholder: 'owner/repository',
+  dropHere: 'Drag & drop here, or',
+  chooseFile: 'choose file',
+  fileType: 'File type: {types}',
+  repoUrlLabel: 'GitHub repository URL',
+  tokenLabel: 'Access token',
+  repoPlaceholder: 'https://github.com/owner/repo',
   tokenPlaceholder: 'Fine-grained token (github_pat_…)',
   githubNoteApp: 'Access is scoped to the repos you pick and revocable on GitHub.',
   githubNoteToken: 'A fine-grained, read-only token — it never leaves the server.',
