@@ -169,6 +169,8 @@ describe('an agent working with components', () => {
       verificationFrames: new Set<string>(),
       verifiedFrames: new Set<string>(),
       seenVerified: new Set<string>(),
+      componentChecks: new Map(),
+      componentWrites: 0,
       rewriteDrafts: new Map<string, string>(),
       vision: false,
       imagesGenerated: 0,
