@@ -76,10 +76,14 @@ export function PrototypePlayer({
   startFrameId,
   onClose,
   syncUrl = false,
+  initialScaling,
 }: {
   startFrameId: string
   onClose?: () => void
   syncUrl?: boolean
+  /** the scaling a link asked for: it wins over the viewer's stored pick, but
+   *  is not stored itself */
+  initialScaling?: ProtoScaling
 }) {
   const frames = useStore((s) => s.canvas?.frames)
   const canvasId = useStore((s) => s.canvas?.id)
@@ -142,10 +146,19 @@ export function PrototypePlayer({
     return () => observer.disconnect()
   }, [])
 
-  const [scaling, setScalingState] = useState(readProtoScaling)
+  const [scaling, setScalingState] = useState(() => initialScaling ?? readProtoScaling())
+  /* once the link names a scaling (it asked for one, or the viewer picked),
+     every URL the player writes or shares carries it */
+  const [inUrl, setInUrl] = useState(initialScaling !== undefined)
   const setScaling = (next: ProtoScaling) => {
     saveProtoScaling(next)
     setScalingState(next)
+    setInUrl(true)
+    if (syncUrl) {
+      const url = new URL(location.href)
+      url.searchParams.set('scaling', next)
+      history.replaceState(history.state, '', url)
+    }
   }
 
   function entryFor(
@@ -195,7 +208,7 @@ export function PrototypePlayer({
   }
 
   function prototypeUrl(frameId: string) {
-    return canvasId ? prototypePath(canvasId, frameId) : location.pathname
+    return canvasId ? prototypePath(canvasId, frameId, inUrl ? scaling : undefined) : location.pathname
   }
 
   /* Back pops one screen; with the browser's history in play the popstate
@@ -519,7 +532,7 @@ export function PrototypePlayer({
             size="sm"
             className={playerBtn}
             aria-label={t('panels.protoNewTab')}
-            onClick={() => window.open(prototypePath(canvasId, current.frameId), '_blank', 'noopener')}
+            onClick={() => window.open(prototypePath(canvasId, current.frameId, scaling), '_blank', 'noopener')}
           >
             <ExportIcon size="rail" />
           </IconButton>

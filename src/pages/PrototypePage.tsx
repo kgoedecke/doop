@@ -7,14 +7,16 @@ import { navigate } from '../lib/navigate'
 import { PrototypePlayer } from '../components/PrototypePlayer'
 import { Button } from '../components/ui/button'
 import { AuthCard, AuthCardText, AuthScreen } from '../components/ui/screen'
+import { isProtoScaling } from '../lib/prototypePlayer'
 import { useT } from '@/lib/i18n'
 
 /**
- * /c/<canvasId>/proto[?frame=<id>|?page=<id>] — the prototype player as a
+ * /c/<canvasId>/proto[?frame=<id>|?page=<id>][&scaling=<mode>] — the prototype player as a
  * page of its own, the link to hand to someone who should click through the
  * flow. It joins the canvas room like the editor (the server's canvas access
  * gate decides who gets in, and frames stay live) but draws no editor chrome.
- * Without a frame it opens on the page's flow start.
+ * Without a frame it opens on the page's flow start; `scaling` (one of
+ * PROTO_SCALINGS) overrides the viewer's own pick for this link.
  */
 export function PrototypePage({ canvasId }: { canvasId: string }) {
   const canvas = useStore((s) => s.canvas)
@@ -59,5 +61,8 @@ export function PrototypePage({ canvasId }: { canvasId: string }) {
         </AuthCard>
       </AuthScreen>
     )
-  return <PrototypePlayer startFrameId={start.id} syncUrl />
+  const scaling = query.get('scaling')
+  return (
+    <PrototypePlayer startFrameId={start.id} initialScaling={isProtoScaling(scaling) ? scaling : undefined} syncUrl />
+  )
 }
