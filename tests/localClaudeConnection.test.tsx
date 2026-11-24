@@ -51,6 +51,7 @@ afterEach(() => {
   container.remove()
 })
 it('hides Refresh on a healthy disconnected row and rechecks status before selecting Claude', async () => {
+  expect(container.textContent).toContain('Your Claude subscription, on this computer')
   expect(button('Refresh')).toBeUndefined()
   mocks.refresh.mockImplementation(async () => {
     expect(mocks.select).not.toHaveBeenCalled()
@@ -107,6 +108,17 @@ describe('a connected Plan', () => {
   }
   const pick = (item: HTMLElement) => act(async () => item.click())
   const toggle = () => container.querySelector<HTMLElement>('[role="switch"]')!
+
+  it('names the computer it runs on, never a Mac, since the shell runs Claude Code on Windows and Linux too', async () => {
+    mocks.state = { ...on, native: { ...on.native, plan: 'pro' } } as typeof on
+    await mount({ isDefault: false, onMakeDefault: vi.fn() })
+    expect(container.textContent).toContain('This computer · Pro')
+    await pick(openMenu('More for Claude Plan')('Claude Code settings…')!)
+    expect(document.querySelector('[role="dialog"]')!.textContent).toContain(
+      'Which Claude Code Doop runs on this computer',
+    )
+    expect(document.body.textContent).not.toMatch(/\bMac\b/)
+  })
 
   it('removes the connection with Disconnect in its menu, and the pane hears about it', async () => {
     mocks.state = on

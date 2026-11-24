@@ -469,8 +469,8 @@ export function LocalClaudeRow({ isDefault = false, onMakeDefault, onChange }: P
         name={t('models.claudePlan')}
         sub={
           native?.plan
-            ? `${t('models.thisMac')} · ${native.plan.charAt(0).toUpperCase()}${native.plan.slice(1)}`
-            : t('models.thisMac')
+            ? `${t('models.thisComputer')} · ${native.plan.charAt(0).toUpperCase()}${native.plan.slice(1)}`
+            : t('models.thisComputer')
         }
         state={active ? 'on' : 'off'}
         isDefault={isDefault}
