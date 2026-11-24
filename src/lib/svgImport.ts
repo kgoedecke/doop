@@ -385,13 +385,18 @@ function nameOf(el: Element): string {
 class Walker {
   layers = 0
   visited = 0
-  constructor(
-    private readonly read: StyleReader,
-    /** The viewport a shape's percentages refer to: the nearest svg's viewBox. */
-    private viewport: Viewport,
-    private readonly maxLayers = MAX_LAYERS,
-    private readonly maxElements = MAX_ELEMENTS,
-  ) {}
+  private readonly read: StyleReader
+  /** The viewport a shape's percentages refer to: the nearest svg's viewBox. */
+  private viewport: Viewport
+  private readonly maxLayers: number
+  private readonly maxElements: number
+
+  constructor(read: StyleReader, viewport: Viewport, maxLayers = MAX_LAYERS, maxElements = MAX_ELEMENTS) {
+    this.read = read
+    this.viewport = viewport
+    this.maxLayers = maxLayers
+    this.maxElements = maxElements
+  }
 
   visit(el: Element, parentCtm: Matrix): Node | null {
     if (++this.visited > this.maxElements || this.layers >= this.maxLayers) return null
@@ -608,12 +613,15 @@ class Writer {
   /** Every id the file declared, plus the copies made here: what gets the prefix. */
   private readonly ids = new Set<string>()
 
-  constructor(
-    private readonly source: Element,
-    private readonly content: Box,
-    private readonly key: string,
-    read: StyleReader,
-  ) {
+  private readonly source: Element
+  private readonly content: Box
+  private readonly key: string
+
+  constructor(source: Element, content: Box, key: string, read: StyleReader) {
+    this.source = source
+    this.content = content
+    this.key = key
+
     this.doc = new DOMParser().parseFromString('<!doctype html><html><head></head><body></body></html>', 'text/html')
     this.defs = this.doc.createElementNS(SVG_NS, 'defs')
     for (const el of source.querySelectorAll([...DEF_TAGS].join(','))) {

@@ -26,14 +26,14 @@ import { transaction } from './journal.ts'
 export type BudgetReason = 'bytes' | 'time'
 
 export class WorkBudgetError extends Error {
-  constructor(
-    readonly operation: string,
-    readonly canvasId: string | undefined,
-    readonly reason: BudgetReason,
-    /** what an operation of several steps had finished, and keeps, when a later step was
-     *  refused; absent when nothing was changed at all */
-    readonly done?: string,
-  ) {
+  readonly operation: string
+  readonly canvasId: string | undefined
+  readonly reason: BudgetReason
+  /** what an operation of several steps had finished, and keeps, when a later step was
+   *  refused; absent when nothing was changed at all */
+  readonly done?: string
+
+  constructor(operation: string, canvasId: string | undefined, reason: BudgetReason, done?: string) {
     const where = canvasId ? ` on canvas ${canvasId}` : ''
     const limit =
       reason === 'bytes'
@@ -45,6 +45,11 @@ export class WorkBudgetError extends Error {
     super(
       `“${operation}”${where} was stopped: it needed ${limit}, the most one operation may do, so the server stays responsive for everyone else. ${outcome}`,
     )
+    this.operation = operation
+    this.canvasId = canvasId
+    this.reason = reason
+    this.done = done
+
     this.name = 'WorkBudgetError'
   }
 

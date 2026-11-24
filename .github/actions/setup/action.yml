@@ -1,0 +1,24 @@
+# What every CI job that runs the project's code starts with: bun as the
+# package manager, the repo's one Node (.node-version) as the runtime, and the
+# installed dependencies. In one place, so a job never runs on whichever Node
+# the machine happens to have.
+name: Set up the toolchain
+description: Bun, the Node pinned in .node-version, and bun install
+
+inputs:
+  bun-version:
+    description: Bun to install; empty for the one setup-bun picks (packageManager)
+    required: false
+    default: ''
+
+runs:
+  using: composite
+  steps:
+    - uses: oven-sh/setup-bun@v2
+      with:
+        bun-version: ${{ inputs.bun-version }}
+    - uses: actions/setup-node@v4
+      with:
+        node-version-file: .node-version
+    - run: bun install --frozen-lockfile
+      shell: bash

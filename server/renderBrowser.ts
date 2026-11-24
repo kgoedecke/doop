@@ -140,9 +140,11 @@ export class RenderGate {
   private background = 0
   private readonly waiting: Waiter[] = []
 
-  constructor(
-    private readonly tuning: Pick<RendererTuning, 'maxConcurrent' | 'maxBackground' | 'maxQueued' | 'queueTimeoutMs'>,
-  ) {}
+  private readonly tuning: Pick<RendererTuning, 'maxConcurrent' | 'maxBackground' | 'maxQueued' | 'queueTimeoutMs'>
+
+  constructor(tuning: Pick<RendererTuning, 'maxConcurrent' | 'maxBackground' | 'maxQueued' | 'queueTimeoutMs'>) {
+    this.tuning = tuning
+  }
 
   get stats() {
     return { active: this.active, background: this.background, queued: this.waiting.length }

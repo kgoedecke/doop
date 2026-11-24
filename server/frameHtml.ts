@@ -11,13 +11,16 @@ import type { Frame, WireFrame } from '../shared/types.ts'
  */
 
 export class FrameHtmlNotLoadedError extends Error {
-  constructor(
-    readonly frameId: string,
-    readonly canvasId: string,
-  ) {
+  readonly frameId: string
+  readonly canvasId: string
+
+  constructor(frameId: string, canvasId: string) {
     super(
       `frame ${frameId}'s HTML was read before its page of canvas ${canvasId} was loaded — await store.loadPages (or store.load) at the entry point`,
     )
+    this.frameId = frameId
+    this.canvasId = canvasId
+
     this.name = 'FrameHtmlNotLoadedError'
   }
 }

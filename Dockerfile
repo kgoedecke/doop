@@ -30,9 +30,9 @@ COPY package.json bun.lock ./
 RUN bun install --frozen-lockfile --production
 
 # ---- runtime ----
-# Node, not bun: the server runs under tsx, and puppeteer-core, PGlite and ws
+# Node, not bun: the server runs on Node, and puppeteer-core, PGlite and ws
 # are exercised on Node in CI and in every dev session.
-FROM node:22-slim
+FROM node:26.13.1-slim
 WORKDIR /app
 
 # Chromium for get_frame_screenshot (puppeteer-core drives the system browser).
@@ -58,5 +58,6 @@ COPY shared ./shared
 
 EXPOSE 4400
 HEALTHCHECK --interval=30s --timeout=5s CMD node -e "fetch('http://localhost:'+process.env.PORT+'/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
-# the installed binary rather than npx: npm is not what resolves packages here
-CMD ["node_modules/.bin/tsx", "server/index.ts"]
+# Node runs the TypeScript source itself (type stripping); no loader, no wrapper process,
+# so `docker stop` signals the server directly and it flushes its writes before exiting
+CMD ["node", "server/index.ts"]

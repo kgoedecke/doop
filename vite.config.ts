@@ -33,6 +33,13 @@ export default defineConfig({
     /* seven files drive a real Chromium; closing one under a full parallel
        run can outlast the 10s default */
     hookTimeout: 30_000,
+    /* a timeout is there to catch a test that hangs, not one that ran on a
+       busy machine: vitest's 5s default is sized for unit tests, and here
+       tests boot servers, migrate databases and drive Chromium on shared CI
+       cores, where a 300ms test can take 5s. Slow tests still show in the
+       report (slowTestThreshold) without failing the run. */
+    testTimeout: 30_000,
+    slowTestThreshold: 2_000,
   },
   /* Error tracking resolves minified stack frames through the .map next to
      each bundle. The source is public (AGPL), so the maps are too; browsers

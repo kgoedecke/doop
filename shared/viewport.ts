@@ -1,4 +1,4 @@
-import type { PeerViewport } from './types'
+import type { PeerViewport } from './types.ts'
 
 /** A camera another client sent us is only usable if every field is a finite
  *  number and the zoom and stage size are positive — anything else would put

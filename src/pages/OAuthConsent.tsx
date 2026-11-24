@@ -10,8 +10,11 @@ type Failure = { key: PlainMessageKey } | { text: string }
 /** Thrown for a failure whose words are ours, so the message is picked in the
  *  active language when it is shown rather than when it happens. */
 class ConsentError extends Error {
-  constructor(readonly key: PlainMessageKey) {
+  readonly key: PlainMessageKey
+
+  constructor(key: PlainMessageKey) {
     super(key)
+    this.key = key
   }
 }
 

@@ -57,7 +57,9 @@
 
 ## TypeScript
 
-- `strict: true`, `noEmit: true` (type-check only; Vite/tsx handle actual transpilation).
+- `strict: true`, `noEmit: true` (type-check only; Vite and Node's type stripping handle the rest).
+  `erasableSyntaxOnly` and `verbatimModuleSyntax` are on: Node strips server types at runtime, so no
+  parameter properties or enums, and type-only imports use `import type`.
   `bun run typecheck` runs `tsgo`, the native TypeScript 7 compiler from `@typescript/native-preview`,
   which rejects `baseUrl` - keep path mapping in `paths` only. The `typescript` package stays at 5.x
   for editors and the ESLint parser.

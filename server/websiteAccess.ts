@@ -4,8 +4,12 @@ import { TimeoutError, type HTTPResponse, type Page } from 'puppeteer-core'
  * automated browser. Different callers need different recovery instructions:
  * connected agents may have their own browser, while resident agents do not. */
 export class WebsiteCaptureUnavailableError extends Error {
-  constructor(readonly reason: string) {
+  readonly reason: string
+
+  constructor(reason: string) {
     super(`${reason}, so Doop could not capture the page. Try another public URL or use screenshots as references.`)
+    this.reason = reason
+
     this.name = 'WebsiteCaptureUnavailableError'
   }
 }
