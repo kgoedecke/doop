@@ -16,7 +16,7 @@ import * as actions from '../server/actions.ts'
 import * as propagation from '../server/propagation.ts'
 import { blankComponent, contextFor } from '../server/components.ts'
 import { compactDocument } from '../server/componentEngine.ts'
-import { findComponentCandidates, lookalikesIn } from '../server/componentActions.ts'
+import { findComponentCandidates } from '../server/componentActions.ts'
 import { COMPONENT_ATTR, INSTANCE_ATTR } from '../shared/components.ts'
 import { renderedHtml } from './rendered.ts'
 import type { Actor } from '../shared/types.ts'
@@ -402,8 +402,8 @@ describe('hostile markup', () => {
     const { canvas, def, page } = setup()
     const around = doc(deep(20_000, `<doop-use component="Button"></doop-use>`))
     expect(actions.updateFrame(page.id, { html: around }, actor)).toBeDefined()
-    expect(lookalikesIn(store.getFrame(page.id)!)).toEqual([])
-    expect(findComponentCandidates(store.getCanvas(canvas.id)!).length).toBeGreaterThanOrEqual(0)
+    /* reading such a frame for candidates does not throw */
+    expect(() => findComponentCandidates(store.getCanvas(canvas.id)!)).not.toThrow()
 
     const main = actions.createFrame(canvas.id, { name: 'Deep', html: '' }, actor)!
     const before = current(canvas.id, def.id).rev

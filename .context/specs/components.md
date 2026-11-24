@@ -5,21 +5,21 @@ through tools, and read them back in a short form.
 
 ## Problems and decisions
 
-| Problem                                             | Decision                                                                            |
-| --------------------------------------------------- | ----------------------------------------------------------------------------------- |
-| Agents redraw components                            | Catalog in `get_canvas` and the resident prompt; a note when a write has lookalikes |
-| Component payloads are expensive to read            | `get_frame` returns `<doop-use>`; the full form is opt-in                           |
-| Override ID paths are intricate                     | Attributes are props; part-keyed overrides are there when needed                    |
-| Agents read pre-override values                     | Instances read back with their real props and overridden parts                      |
-| Errors found only in a screenshot                   | Unknown names and values come back in the write's result, with what is valid        |
-| Markup or CSS dropped without a word                | A binding on `<doop-use>` and CSS rules not kept are named in the result            |
-| Inferred props named `text`, `text-2`               | Named by what the element is, and listed in `create_component`'s result             |
-| Edits break the link, or get thrown away            | Any edit becomes the narrowest override that holds it; no detach needed             |
-| Sweeping edits have unknown blast radius            | `update_component` reports impact, with `dry_run`                                   |
-| Variant explosion                                   | An enum prop is `data-<name>` on the root, and variants are CSS                     |
-| Canvases that grew without components               | `create_component` from one copy, then `<doop-use>` in place of the others          |
-| Components disconnected from code                   | Optional `code` mapping; compact form reads like JSX                                |
-| Libraries silently change consumers, or are one-way | Linked copies; updates shown, pulled on request                                     |
+| Problem                                             | Decision                                                                       |
+| --------------------------------------------------- | ------------------------------------------------------------------------------ |
+| Agents redraw components                            | Catalog in `get_canvas` and the resident prompt; a note on a screen using none |
+| Component payloads are expensive to read            | `get_frame` returns `<doop-use>`; the full form is opt-in                      |
+| Override ID paths are intricate                     | Attributes are props; part-keyed overrides are there when needed               |
+| Agents read pre-override values                     | Instances read back with their real props and overridden parts                 |
+| Errors found only in a screenshot                   | Unknown names and values come back in the write's result, with what is valid   |
+| Markup or CSS dropped without a word                | A binding on `<doop-use>` and CSS rules not kept are named in the result       |
+| Inferred props named `text`, `text-2`               | Named by what the element is, and listed in `create_component`'s result        |
+| Edits break the link, or get thrown away            | Any edit becomes the narrowest override that holds it; no detach needed        |
+| Sweeping edits have unknown blast radius            | `update_component` reports impact, with `dry_run`                              |
+| Variant explosion                                   | An enum prop is `data-<name>` on the root, and variants are CSS                |
+| Canvases that grew without components               | One copy made a component in place, the rest replaced with `<doop-use>`        |
+| Components disconnected from code                   | Optional `code` mapping; compact form reads like JSX                           |
+| Libraries silently change consumers, or are one-way | Linked copies; updates shown, pulled on request                                |
 
 ## Model
 
@@ -277,7 +277,7 @@ parses first and saves after: `updateComponent` reads the template before it sav
 main's empty frame is removed if its write is refused, a stream chunk's library adoption is put back (also when the last chunk's whole-frame pass is the one
 refused, and the room hears of an adoption only after the chunk is in the frame), and an
 import of several components takes back the ones it had made. A check that runs after a write has landed
-(the css-not-kept note, lookalike and reuse notes, reading instances back, an inserted instance's id) goes
+(the css-not-kept note, reuse notes, reading instances back, an inserted instance's id) goes
 through `optional()`: out of budget it is left out, never turned into a refusal of a finished write.
 A sync that had already updated a
 dependency says what it updated (`WorkBudgetError.afterPartialWork`). `workBudgetCommit.test.ts` makes each

@@ -260,15 +260,6 @@ describe('an agent working with components', () => {
     expect(result.text).toContain('no prop “nope”')
   })
 
-  it('is told when it redrew a component by hand', async () => {
-    const canvas = newCanvas()
-    await button(canvas.id)
-    const result = await call('create_frame', { canvas_id: canvas.id, name: 'Redrawn', html: `<div>${BUTTON}</div>` })
-    expect(result.text).toContain('match')
-    expect(result.text).toContain('“Button”')
-    expect(result.text).toContain('<doop-use')
-  })
-
   it('changes every instance with one call, and sees the impact first', async () => {
     const canvas = newCanvas()
     const created = await button(canvas.id)

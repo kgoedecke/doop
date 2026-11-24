@@ -153,6 +153,27 @@ describe('component usage', () => {
     expect(usageScans().framesScanned - before.framesScanned).toBe(0)
     await client.close()
   })
+
+  it('parses no frame that only uses a component when update_component changes it', async () => {
+    const { canvas, button, frames } = fixture()
+    const [clientSide, serverSide] = InMemoryTransport.createLinkedPair()
+    await buildMcpServer('Owner', OWNER).connect(serverSide)
+    const client = new Client({ name: 'usage-test', version: '0' })
+    await client.connect(clientSide)
+    const using = frames.filter((frame) => framed(frame.id).includes(`data-doop-instance="${button.def.id}"`))
+    expect(using.length).toBeGreaterThan(0)
+    /* each frame as it was when the call began: what parsing it would have handed the engine */
+    const before = using.map((frame) => framed(frame.id))
+    parsed.documents.length = 0
+    const response = (await client.callTool({
+      name: 'update_component',
+      arguments: { canvas_id: canvas.id, agent_name: 'Tester', component: 'Button', css: '.btn { color: red }' },
+    })) as { isError?: boolean }
+    expect(response.isError).toBeFalsy()
+    /* the instances follow later, in the propagation queue: the call itself reads none of their frames */
+    for (const html of before) expect(parsed.documents).not.toContain(html)
+    await client.close()
+  })
 })
 
 describe('a dry run of update_component', () => {
