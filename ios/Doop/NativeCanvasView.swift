@@ -65,6 +65,11 @@ struct NativeCanvasView: View {
             }
             ZStack(alignment: .bottom) {
                 VStack(spacing: 10) {
+                    if let id = model.focusedCommentID, model.comments.contains(where: { $0.id == id }) {
+                        PinnedThreadCard(model: model, rootID: id).id(id)
+                    } else if model.commentDraft != nil {
+                        NewCommentCard(model: model)
+                    } else {
                     if peoplePickerOpen {
                         peoplePicker
                     } else if pagePickerOpen {
@@ -77,6 +82,7 @@ struct NativeCanvasView: View {
                         selectionActions
                     }
                     composer
+                    }
                 }.frame(maxWidth: 620).padding(12)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
@@ -824,7 +830,7 @@ struct NativeCanvasView: View {
                 guard let selection = model.selection else { return }
                 runSelectionAction { try await model.deleteSelection(selection) }
             }
-            selectionAction("Comment", symbol: "bubble.left", id: "comment", disabled: model.selection == nil) { sheet = .comments }
+            selectionAction("Comment", symbol: "bubble.left", id: "comment", disabled: model.selected == nil) { model.startCommentOnSelection() }
             selectionAction("Export", symbol: "square.and.arrow.up", id: "export", disabled: model.selection == nil) { openExport() }
         }.padding(.horizontal, 4).padding(.vertical, 1)
     }
@@ -1204,136 +1210,138 @@ private struct TasksPanel: View {
 
 private struct CommentsPanel: View {
     @ObservedObject var model: CanvasModel
-    @State private var text = ""
-    @State private var sending = false
-    @State private var error: String?
-    @FocusState private var composing: Bool
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.closeCanvasPanel) private var closePanel
+    @State private var showResolved = false
 
-    private var threads: [(root: CanvasComment, replies: [CanvasComment])] {
+    struct Thread: Identifiable {
+        var root: CanvasComment
+        var replies: [CanvasComment]
+        var id: String { root.id }
+        var lastAt: Double { replies.last?.at ?? root.at }
+    }
+
+    struct Group: Identifiable {
+        var id: String
+        var title: String
+        var threads: [Thread]
+    }
+
+    private var threads: [Thread] {
         let comments = model.pageComments
-        return comments.filter { $0.parentId == nil }.sorted { $0.at > $1.at }.map { root in
-            (root, comments.filter { $0.parentId == root.id }.sorted { $0.at < $1.at })
+        return comments.filter { $0.parentId == nil }.map { root in
+            Thread(root: root, replies: comments.filter { $0.parentId == root.id }.sorted { $0.at < $1.at })
         }
     }
 
-    private var canPost: Bool {
-        !sending && model.selectedID != nil && !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    /// Threads under their frame (canvas comments together), the most recently active first.
+    private func groups(_ list: [Thread]) -> [Group] {
+        let sorted = list.sorted { $0.lastAt > $1.lastAt }
+        var order: [String] = []
+        var byKey: [String: [Thread]] = [:]
+        for thread in sorted {
+            let key = thread.root.frameId ?? "canvas"
+            if byKey[key] == nil { order.append(key) }
+            byKey[key, default: []].append(thread)
+        }
+        return order.map { key in
+            let title = key == "canvas" ? "Canvas" : (model.canvas?.frames.first { $0.id == key }?.name ?? "Deleted frame")
+            return Group(id: key, title: title, threads: byKey[key] ?? [])
+        }
     }
 
     var body: some View {
+        let open = threads.filter { $0.root.resolvedAt == nil }
+        let resolved = threads.filter { $0.root.resolvedAt != nil }
         PanelNavigation("Comments") {
             ScrollView {
-                LazyVStack(spacing: 0) {
-                    if threads.isEmpty {
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    if open.isEmpty {
                         VStack(spacing: 8) {
                             Image(systemName: "bubble.left.and.bubble.right").font(.largeTitle).foregroundStyle(.secondary)
-                            Text("No comments yet").font(.headline)
-                            Text("Feedback on this page shows up here.").font(.subheadline).foregroundStyle(.secondary)
+                            Text("No open comments").font(.headline)
+                            Text("Press and hold anywhere on the canvas to leave one.")
+                                .font(.subheadline).foregroundStyle(.secondary)
                         }
-                        .multilineTextAlignment(.center).padding(.top, 64)
+                        .multilineTextAlignment(.center).frame(maxWidth: .infinity).padding(.vertical, 48)
                     }
-                    ForEach(Array(threads.enumerated()), id: \.element.root.id) { index, thread in
-                        if index > 0 { Divider() }
-                        CommentThreadCard(root: thread.root, replies: thread.replies, frameName: frameName(thread.root))
+                    groupList(groups(open))
+                    if !resolved.isEmpty {
+                        Button { withAnimation(.snappy) { showResolved.toggle() } } label: {
+                            HStack(spacing: 6) {
+                                Text("Resolved (\(resolved.count))")
+                                Image(systemName: "chevron.right").rotationEffect(.degrees(showResolved ? 90 : 0))
+                                Spacer(minLength: 0)
+                            }
+                            .font(.subheadline.weight(.medium)).foregroundStyle(.secondary)
+                            .padding(.vertical, 14).contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        if showResolved { groupList(groups(resolved)).opacity(0.6) }
+                    }
+                    if !open.isEmpty {
+                        Label("Press and hold on the canvas to comment.", systemImage: "hand.point.up.left")
+                            .font(.caption).foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity).padding(.vertical, 18)
                     }
                 }
-                .padding(.horizontal, 22).padding(.vertical, 4)
+                .padding(.horizontal, 20)
             }
-            .scrollDismissesKeyboard(.interactively)
-            .safeAreaInset(edge: .bottom, spacing: 0) { composer }
         }
     }
 
-    private var composer: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            if let element = model.selectedElement {
-                Label(element.label, systemImage: "scope")
-                    .font(.caption.weight(.medium)).foregroundStyle(.secondary).lineLimit(1)
-                    .padding(.horizontal, 6)
+    @ViewBuilder private func groupList(_ groups: [Group]) -> some View {
+        ForEach(groups) { group in
+            Text(group.title)
+                .font(.caption.weight(.semibold)).foregroundStyle(.secondary).lineLimit(1)
+                .padding(.top, 16).padding(.bottom, 2)
+            ForEach(group.threads) { thread in
+                Button { show(thread) } label: { ThreadRow(thread: thread) }
+                    .buttonStyle(.plain)
+                    .accessibilityHint("Shows the comment on the canvas")
             }
-            TextField("Leave feedback…", text: $text, axis: .vertical)
-                .lineLimit(1...5).focused($composing)
-                .padding(.horizontal, 6).padding(.top, 4)
-            HStack(spacing: 8) {
-                Menu {
-                    Picker("Frame", selection: Binding(get: { model.selectedID }, set: { model.select($0) })) {
-                        ForEach(model.pageFrames) { Text($0.name).tag(Optional($0.id)) }
-                    }
-                } label: {
-                    Label(model.pageFrames.first { $0.id == model.selectedID }?.name ?? "Choose a frame",
-                          systemImage: "rectangle.on.rectangle")
-                        .font(.subheadline).lineLimit(1)
-                        .padding(.horizontal, 12).padding(.vertical, 7)
-                        .background(.primary.opacity(0.06), in: Capsule())
-                }
-                .foregroundStyle(model.selectedID == nil ? .secondary : .primary)
-                Spacer(minLength: 0)
-                Button(action: post) {
-                    Group {
-                        if sending { ProgressView() } else { Image(systemName: "arrow.up").font(.body.weight(.semibold)) }
-                    }
-                    .frame(width: 34, height: 34)
-                    .foregroundStyle(canPost ? Color(uiColor: .systemBackground) : .secondary)
-                    .background(canPost ? Color.primary : Color.primary.opacity(0.08), in: Circle())
-                }
-                .disabled(!canPost)
-                .accessibilityLabel("Post comment")
-            }
-            if let error { Text(error).font(.caption).foregroundStyle(.red).padding(.horizontal, 6) }
-        }
-        .padding(10)
-        .background(.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 22, style: .continuous))
-        .padding(.horizontal, 14).padding(.bottom, 14).padding(.top, 6)
-    }
-
-    private func frameName(_ comment: CanvasComment) -> String {
-        guard let id = comment.frameId else { return "Canvas" }
-        return model.canvas?.frames.first { $0.id == id }?.name ?? "Deleted frame"
-    }
-
-    private func post() {
-        guard let id = model.selectedID else { return }
-        sending = true
-        error = nil
-        Task {
-            do { try await model.comment(text, frameID: id); text = "" } catch { self.error = error.localizedDescription }
-            sending = false
         }
     }
-}
 
-private struct CommentThreadCard: View {
-    let root: CanvasComment
-    let replies: [CanvasComment]
-    let frameName: String
+    /// Close the list and show the thread at its pin.
+    private func show(_ thread: Thread) {
+        model.commentDraft = nil
+        model.focusedCommentID = thread.root.id
+        model.flyToCommentID = thread.root.id
+        if let closePanel { closePanel() } else { dismiss() }
+    }
 
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 6) {
-                Label(frameName, systemImage: "rectangle.on.rectangle").lineLimit(1)
-                Spacer(minLength: 0)
-                if root.resolvedAt != nil {
-                    Label("Resolved", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
+    private struct ThreadRow: View {
+        let thread: Thread
+
+        var body: some View {
+            VStack(alignment: .leading, spacing: 6) {
+                CommentRow(comment: thread.root, lineLimit: 3)
+                if !thread.replies.isEmpty {
+                    Text("\(thread.replies.count) \(thread.replies.count == 1 ? "reply" : "replies") · "
+                         + Date(timeIntervalSince1970: thread.lastAt / 1000).formatted(.relative(presentation: .named)))
+                        .font(.caption.weight(.medium)).foregroundStyle(.tint)
+                        .padding(.leading, 38)
                 }
             }
-            .font(.caption.weight(.medium)).foregroundStyle(.secondary)
-            CommentRow(comment: root)
-            ForEach(replies) { CommentRow(comment: $0).padding(.leading, 38) }
+            .padding(.vertical, 10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
         }
-        .padding(.vertical, 14)
-        .opacity(root.resolvedAt == nil ? 1 : 0.7)
     }
 }
 
 private struct CommentRow: View {
     let comment: CanvasComment
+    var lineLimit: Int? = nil
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
-            Text(comment.from.split(separator: " ").prefix(2).compactMap { $0.first.map(String.init) }.joined())
-                .font(.caption.weight(.semibold)).foregroundStyle(.tint)
+            Text(commentInitials(comment.from))
+                .font(.caption.weight(.semibold)).foregroundStyle(.white)
                 .frame(width: 28, height: 28)
-                .background(.tint.opacity(0.15), in: Circle())
+                // Solid, as the person's pin on the canvas: a tint vanishes on the glass panel.
+                .background(Color(uiColor: commentAuthorColor(comment.from)), in: Circle())
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 3) {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
@@ -1341,7 +1349,11 @@ private struct CommentRow: View {
                     Text(Date(timeIntervalSince1970: comment.at / 1000).formatted(.relative(presentation: .named)))
                         .font(.caption).foregroundStyle(.secondary).lineLimit(1)
                 }
-                Text(comment.text).font(.subheadline).textSelection(.enabled)
+                if let lineLimit {
+                    Text(comment.text).font(.subheadline).lineLimit(lineLimit)
+                } else {
+                    Text(comment.text).font(.subheadline).textSelection(.enabled)
+                }
             }
             Spacer(minLength: 0)
         }
@@ -1383,5 +1395,128 @@ private struct CanvasBackSwipeGuard: UIViewControllerRepresentable {
             for (gesture, enabled) in gestures { gesture.isEnabled = enabled }
             gestures.removeAll()
         }
+    }
+}
+
+/// The composer a long-press opens: one new comment at the pressed spot, apart from
+/// the Comments list, the way the web's Comment tool asks right at the pin.
+private struct NewCommentCard: View {
+    @ObservedObject var model: CanvasModel
+    @State private var text = ""
+    @State private var sending = false
+    @State private var error: String?
+    @FocusState private var focused: Bool
+
+    private var canPost: Bool { !sending && !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Label(model.commentDraft?.label ?? "", systemImage: "mappin").lineLimit(1)
+                Spacer(minLength: 0)
+                Button { model.commentDraft = nil } label: { Image(systemName: "xmark").font(.caption.weight(.semibold)) }
+                    .buttonStyle(.plain).frame(width: 28, height: 28).contentShape(Rectangle())
+                    .accessibilityLabel("Cancel comment")
+            }
+            .font(.caption.weight(.medium)).foregroundStyle(.secondary)
+            .padding(.horizontal, 6)
+            HStack(alignment: .bottom, spacing: 8) {
+                TextField("Add a comment…", text: $text, axis: .vertical)
+                    .lineLimit(1...5).focused($focused)
+                    .padding(.horizontal, 6).padding(.vertical, 7)
+                CommentSendButton(enabled: canPost, sending: sending, label: "Post comment", action: post)
+            }
+            if let error { Text(error).font(.caption).foregroundStyle(.red).padding(.horizontal, 6) }
+        }
+        .padding(10)
+        .modifier(ComposerGlass(cornerRadius: 22))
+        .onAppear { focused = true }
+        // A new spot pressed while the card is open keeps what was typed.
+    }
+
+    private func post() {
+        sending = true
+        error = nil
+        Task {
+            do { try await model.postDraft(text); text = "" } catch { self.error = error.localizedDescription }
+            sending = false
+        }
+    }
+}
+
+/// One thread, opened by tapping its pin: its messages and a reply field, without
+/// the frame line the full list needs (the pin already shows where it is).
+private struct PinnedThreadCard: View {
+    @ObservedObject var model: CanvasModel
+    let rootID: String
+    @State private var text = ""
+    @State private var sending = false
+    @State private var error: String?
+
+    private var root: CanvasComment? { model.comments.first { $0.id == rootID } }
+    private var replies: [CanvasComment] {
+        model.comments.filter { $0.parentId == rootID }.sorted { $0.at < $1.at }
+    }
+    private var canPost: Bool { !sending && !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 12) {
+                    if let root { CommentRow(comment: root) }
+                    ForEach(replies) { CommentRow(comment: $0) }
+                }
+                .padding(.horizontal, 6).padding(.top, 6)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .frame(maxHeight: 240)
+            .fixedSize(horizontal: false, vertical: true)
+            .overlay(alignment: .topTrailing) {
+                Button { model.focusedCommentID = nil } label: { Image(systemName: "xmark").font(.caption.weight(.semibold)) }
+                    .buttonStyle(.plain).foregroundStyle(.secondary)
+                    .frame(width: 28, height: 28).contentShape(Rectangle())
+                    .accessibilityLabel("Close thread")
+            }
+            HStack(alignment: .bottom, spacing: 8) {
+                TextField("Reply…", text: $text, axis: .vertical)
+                    .lineLimit(1...5)
+                    .padding(.horizontal, 10).padding(.vertical, 7)
+                    .background(.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 17, style: .continuous))
+                CommentSendButton(enabled: canPost, sending: sending, label: "Post reply", action: post)
+            }
+            if let error { Text(error).font(.caption).foregroundStyle(.red).padding(.horizontal, 6) }
+        }
+        .padding(10)
+        .modifier(ComposerGlass(cornerRadius: 22))
+    }
+
+    private func post() {
+        sending = true
+        error = nil
+        Task {
+            do { try await model.reply(text, to: rootID); text = "" } catch { self.error = error.localizedDescription }
+            sending = false
+        }
+    }
+}
+
+/// The round send button under a comment field.
+private struct CommentSendButton: View {
+    let enabled: Bool
+    let sending: Bool
+    let label: String
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Group {
+                if sending { ProgressView() } else { Image(systemName: "arrow.up").font(.body.weight(.semibold)) }
+            }
+            .frame(width: 34, height: 34)
+            .foregroundStyle(enabled ? Color(uiColor: .systemBackground) : .secondary)
+            .background(enabled ? Color.primary : Color.primary.opacity(0.08), in: Circle())
+        }
+        .disabled(!enabled)
+        .accessibilityLabel(label)
     }
 }

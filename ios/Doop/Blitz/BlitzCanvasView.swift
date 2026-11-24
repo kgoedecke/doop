@@ -29,6 +29,13 @@ final class CanvasView: UIView, UIGestureRecognizerDelegate {
     private var labels: [String: CATextLayer] = [:]
     private var cursors: [String: CursorLayer] = [:]
     private var workBadges: [String: FrameWorkBadge] = [:]
+    private var commentPins: [String: CommentPin] = [:]
+    /// The pin of a comment being written, at the spot that was long-pressed.
+    private let draftPin = CommentPin()
+    /// Where element comments' elements sit in each frame (frame-relative design
+    /// px), for the HTML they were found in; nil marks an element not found.
+    private var elementOrigins: [String: (html: Int, origins: [String: CGPoint?])] = [:]
+    private var locating = Set<String>()
     private var zoom: CGFloat = 1
     private var offset = CGPoint(x: 40, y: 80)
     private var fitted = false
@@ -109,7 +116,15 @@ final class CanvasView: UIView, UIGestureRecognizerDelegate {
         // Two fingers tapping zooms out, as in Maps.
         let twoFingerTap = UITapGestureRecognizer(target: self, action: #selector(twoFingerTapped))
         twoFingerTap.numberOfTouchesRequired = 2
-        for gesture in [pan, pinch, tap, doubleTapDrag, twoFingerTap] {
+        // Press and hold to comment on that spot, as the web's Comment tool does.
+        let longPress = UILongPressGestureRecognizer(target: self, action: #selector(longPressed))
+        longPress.minimumPressDuration = 0.45
+        // A second press held still is the start of a Maps zoom, not a comment.
+        longPress.require(toFail: doubleTapDrag)
+        draftPin.layer.isHidden = true
+        draftPin.update(author: "+", replies: 0)
+        chrome.insertSublayer(draftPin.layer, below: selectionOutline)
+        for gesture in [pan, pinch, tap, doubleTapDrag, twoFingerTap, longPress] {
             gesture.delegate = self
             addGestureRecognizer(gesture)
         }
@@ -157,6 +172,11 @@ final class CanvasView: UIView, UIGestureRecognizerDelegate {
     }
 
     override func gestureRecognizerShouldBegin(_ gesture: UIGestureRecognizer) -> Bool {
+        // A held frame title is about to be dragged and a held pin is a thread: neither starts a comment.
+        if gesture is UILongPressGestureRecognizer {
+            let point = gesture.location(in: self)
+            if label(at: point) != nil || commentPin(at: point) != nil { return false }
+        }
         // The finger of a double-tap-and-drag zooms; it never also pans.
         if gesture is UIPanGestureRecognizer, oneFingerZoom != nil { return false }
         // A finger landing stops a camera animation where it is, as in Maps.
@@ -184,6 +204,12 @@ final class CanvasView: UIView, UIGestureRecognizerDelegate {
             }
             relayout?.cancel()
             pendingWakes.removeAll()
+            locating.removeAll()
+            elementOrigins.removeAll()
+            // A draft or open thread belongs to the page it was made on.
+            if model.commentDraft != nil || model.focusedCommentID != nil {
+                DispatchQueue.main.async { [model] in model.commentDraft = nil; model.focusedCommentID = nil }
+            }
             fitted = false
             zoom = 1
             offset = CGPoint(x: 40, y: 80)
@@ -197,6 +223,8 @@ final class CanvasView: UIView, UIGestureRecognizerDelegate {
             labels[id] = nil
             workBadges[id]?.remove()
             workBadges[id] = nil
+            locating = locating.filter { !$0.hasPrefix(id + ":") }
+            elementOrigins[id] = nil
             frames[id] = nil
         }
         // Fit before creating layers so the first bitmaps are requested at the
@@ -259,7 +287,7 @@ final class CanvasView: UIView, UIGestureRecognizerDelegate {
                         guard p.count == 2 else { return }
                         self.model.select(held.id)
                         held.pickElement(at: CGPoint(x: p[0], y: p[1])) { [weak self] info, htmlHash in
-                            guard let self, htmlHash == held.html.hashValue else { return }
+                            guard let self, htmlHash == held.htmlHash else { return }
                             if let info, let rect = info.frameRect {
                                 self.model.selectedElement = SelectedElement(frameID: held.id, nodeID: info.id, selector: info.selector, label: info.label, text: info.text, rect: rect, htmlHash: htmlHash)
                                 canvasLog.info("picked \(info.label, privacy: .public) selector \(info.selector, privacy: .public) rect \(NSCoder.string(for: rect), privacy: .public) text \(info.text.prefix(60), privacy: .public)")
@@ -281,7 +309,104 @@ final class CanvasView: UIView, UIGestureRecognizerDelegate {
         for frame in frames.values { frame.selected = frame.id == model.selectedID }
         syncCursors()
         syncWorkBadges()
+        syncCommentPins()
+        flyToRequestedComment()
         drawChrome()
+    }
+
+    /// Open threads on this page, as the web shows them: one pin per root comment.
+    private var pinnedThreads: [CanvasComment] {
+        model.pageComments.filter { $0.parentId == nil && $0.resolvedAt == nil }
+    }
+
+    /// Bring a thread picked in the list into view, above the card that shows it.
+    private func flyToRequestedComment() {
+        guard let id = model.flyToCommentID else { return }
+        DispatchQueue.main.async { [weak self] in self?.model.flyToCommentID = nil }
+        guard let comment = model.comments.first(where: { $0.id == id }), let world = pinPoint(comment) else { return }
+        let target = CGPoint(x: bounds.midX, y: bounds.height * 0.35)
+        let newZoom = max(zoom, 0.5)
+        animateCamera(zoom: newZoom, offset: CGPoint(x: target.x - world.x * newZoom, y: target.y - world.y * newZoom), pivot: target)
+    }
+
+    private func syncCommentPins() {
+        let roots = pinnedThreads
+        let ids = Set(roots.map(\.id))
+        for (id, pin) in commentPins where !ids.contains(id) {
+            pin.layer.removeFromSuperlayer()
+            commentPins[id] = nil
+        }
+        let replies = Dictionary(grouping: model.pageComments.compactMap(\.parentId), by: { $0 }).mapValues(\.count)
+        for root in roots {
+            let pin = commentPins[root.id] ?? {
+                let pin = CommentPin()
+                // Under the selection outlines and cursors, over the frames' titles.
+                chrome.insertSublayer(pin.layer, below: selectionOutline)
+                commentPins[root.id] = pin
+                return pin
+            }()
+            pin.update(author: root.from, replies: replies[root.id] ?? 0, color: commentAuthorColor(root.from))
+        }
+        locateCommentedElements(roots)
+    }
+
+    /// Ask each frame where its commented elements are, once per version of its HTML.
+    private func locateCommentedElements(_ roots: [CanvasComment]) {
+        let viewArea = toWorldRect(bounds.insetBy(dx: -bounds.width / 2, dy: -bounds.height / 2))
+        let byFrame = Dictionary(grouping: roots.filter { $0.elementId != nil && $0.frameId != nil }, by: { $0.frameId! })
+        for (frameID, comments) in byFrame {
+            // Off-screen frames wait: their pins are hidden by the viewport anyway, and
+            // a document is built for a frame only once it is drawn.
+            guard let frame = frames[frameID], frame.hasDocument, frame.rect.intersects(viewArea) else { continue }
+            let hash = frame.htmlHash
+            let wanted = Set(comments.compactMap(\.elementId))
+            let known = elementOrigins[frameID]
+            if let known, known.html == hash, wanted.isSubset(of: known.origins.keys) { continue }
+            let key = "\(frameID):\(hash):\(wanted.sorted().joined(separator: ","))"
+            guard !locating.contains(key) else { continue }
+            locating.insert(key)
+            frame.locateElements(Array(wanted)) { [weak self] origins, htmlHash in
+                guard let self else { return }
+                self.locating.remove(key)
+                guard htmlHash == self.frames[frameID]?.htmlHash else { return }
+                self.elementOrigins[frameID] = (htmlHash, origins)
+                self.drawChrome()
+            }
+        }
+    }
+
+    /// Where a thread's pin sits in the world, or nil when its anchor is gone.
+    private func pinPoint(_ comment: CanvasComment) -> CGPoint? {
+        guard let frameID = comment.frameId else {
+            guard let x = comment.x, let y = comment.y else { return nil }
+            return CGPoint(x: x, y: y)
+        }
+        guard let frame = frames[frameID] else { return nil }
+        let local: CGPoint
+        if let elementID = comment.elementId {
+            // As the web's `elementCommentPosition`: the point tapped while the element
+            // has not moved, else its top-left; a missing element hides the pin.
+            let located = elementOrigins[frameID].flatMap { $0.html == frame.htmlHash ? $0.origins[elementID] : nil }
+            if let found = located {
+                guard let origin = found else { return nil }
+                if let x = comment.x, let y = comment.y, let then = comment.elementOrigin,
+                   abs(origin.x - then.x) < 0.5, abs(origin.y - then.y) < 0.5 {
+                    local = CGPoint(x: x, y: y)
+                } else {
+                    local = origin
+                }
+            } else if let x = comment.x, let y = comment.y {
+                local = CGPoint(x: x, y: y) // until the frame answers
+            } else { return nil }
+        } else {
+            guard let x = comment.x, let y = comment.y else { return nil }
+            local = CGPoint(x: x, y: y)
+        }
+        return CGPoint(x: frame.rect.minX + local.x, y: frame.rect.minY + local.y)
+    }
+
+    private func commentPin(at screenPoint: CGPoint) -> String? {
+        pinnedThreads.reversed().first { commentPins[$0.id].map { !$0.layer.isHidden && $0.hitFrame.contains(screenPoint) } ?? false }?.id
     }
 
     /// One badge per frame on this page with an agent at work on it.
@@ -499,6 +624,8 @@ final class CanvasView: UIView, UIGestureRecognizerDelegate {
                          viewportInFrame: inView.isNull ? nil : inView.offsetBy(dx: -frame.rect.minX, dy: -frame.rect.minY))
         }
         if frames.values.contains(where: { $0.animating && $0.rect.intersects(viewport) }) { ensureAnimationLoop() }
+        // Frames that came into view (or got their document) can now place their pins.
+        locateCommentedElements(pinnedThreads)
     }
 
     private func toWorldRect(_ rect: CGRect) -> CGRect {
@@ -551,6 +678,21 @@ final class CanvasView: UIView, UIGestureRecognizerDelegate {
             guidePath.addLine(to: toScreen(end))
         }
         snapGuideLayer.path = snapGuides.isEmpty ? nil : guidePath.cgPath
+        if let draft = model.commentDraft {
+            draftPin.layer.isHidden = false
+            draftPin.place(at: toScreen(draft.world))
+        } else {
+            draftPin.layer.isHidden = true
+        }
+        for root in pinnedThreads {
+            guard let pin = commentPins[root.id] else { continue }
+            if let point = pinPoint(root) {
+                pin.layer.isHidden = false
+                pin.place(at: toScreen(point))
+            } else {
+                pin.layer.isHidden = true
+            }
+        }
         for person in model.pagePresences {
             guard let cursor = cursors[person.clientId], let point = person.cursor else { continue }
             let world = CGPoint(x: point.x, y: point.y)
@@ -582,11 +724,52 @@ final class CanvasView: UIView, UIGestureRecognizerDelegate {
         labels.first { !$0.value.isHidden && $0.value.frame.insetBy(dx: 0, dy: -6).contains(screenPoint) }?.key
     }
 
+    @objc private func longPressed(_ gesture: UILongPressGestureRecognizer) {
+        guard gesture.state == .began else { return }
+        let point = gesture.location(in: self)
+        model.focusedCommentID = nil
+        let world = toWorld(point)
+        window?.endEditing(true)
+        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        guard let frame = frame(at: point) else {
+            model.commentDraft = CommentDraft(target: .canvas(pageID: model.activePageID, point: world), world: world, label: "Canvas")
+            revealDraft(at: point)
+            return
+        }
+        revealDraft(at: point)
+        let id = frame.id
+        let name = frame.name
+        let inFrame = CGPoint(x: world.x - frame.rect.minX, y: world.y - frame.rect.minY)
+        // Shown at once on the frame; narrowed to the element once the hit test answers.
+        let draft = CommentDraft(target: .frame(frameID: id, point: inFrame), world: world, label: name)
+        model.commentDraft = draft
+        frame.pickElement(at: inFrame) { [weak self] info, htmlHash in
+            guard let self, self.model.commentDraft == draft, htmlHash == frame.htmlHash,
+                  let info, let rect = info.frameRect, !["html", "body"].contains(info.tag.lowercased()) else { return }
+            self.model.commentDraft = CommentDraft(
+                target: .element(frameID: id, selector: info.selector, snippet: String(info.text.prefix(400)), point: inFrame, origin: rect.origin),
+                world: world, label: "\(name) · \(info.label)")
+        }
+    }
+
+    /// Slide a draft pin pressed low on the screen up, so the composer and keyboard leave it in view.
+    private func revealDraft(at point: CGPoint) {
+        let target = bounds.height * 0.32
+        guard point.y > target else { return }
+        animateCamera(zoom: zoom, offset: CGPoint(x: offset.x, y: offset.y - (point.y - target)), pivot: point)
+    }
+
     @objc private func tapped(_ gesture: UITapGestureRecognizer) {
         let point = gesture.location(in: self)
         // The prompt is a SwiftUI sibling, not a child of this UIView.
         // End editing in the window without adding a competing tap gesture.
         window?.endEditing(true)
+        if let thread = commentPin(at: point) {
+            model.commentDraft = nil
+            model.focusedCommentID = thread
+            return
+        }
+        model.focusedCommentID = nil
         model.selectedElement = nil
         if let frame = frame(at: point) {
             let id = frame.id
@@ -598,7 +781,7 @@ final class CanvasView: UIView, UIGestureRecognizerDelegate {
                 // The HTML moved on while the hit test ran: this result describes an element
                 // that may no longer exist, so it is not selected.
                 guard let self, self.model.selectedID == id, let info, let rect = info.frameRect,
-                      htmlHash == frame.html.hashValue else { return }
+                      htmlHash == frame.htmlHash else { return }
                 self.model.selectedElement = SelectedElement(frameID: id, nodeID: info.id, selector: info.selector, label: info.label, text: info.text, rect: rect, htmlHash: htmlHash)
                 self.drawChrome()
             }
@@ -816,7 +999,11 @@ private final class FrameLayer {
     private(set) var rect: CGRect
     private(set) var name: String
     var selected = false
-    private(set) var html: String
+    private(set) var html: String {
+        didSet { htmlHash = html.hashValue }
+    }
+    /// The hash of `html`, worked out once per change: pins compare it on every camera move.
+    private(set) var htmlHash: Int
     private var document: BlitzDocument?
     private var documentIDValue = 0
     /// Bitmap pixels per CSS pixel of the last requested render.
@@ -887,6 +1074,7 @@ private final class FrameLayer {
         rect = CGRect(x: frame.x, y: frame.y, width: frame.width, height: frame.height)
         name = frame.name
         html = frame.html
+        htmlHash = frame.html.hashValue
         targetScale = Self.parkedScale
         self.baseURL = baseURL
         layer.anchorPoint = .zero
@@ -1223,10 +1411,27 @@ private final class FrameLayer {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in self?.pickElement(at: point, completion: completion) }
             return
         }
-        let htmlHash = html.hashValue
+        let htmlHash = self.htmlHash
         BlitzDocument.queue.async {
             let info = document.pickableElement(at: point).flatMap { document.info(for: $0) }
             DispatchQueue.main.async { completion(info, htmlHash) }
+        }
+    }
+
+    /// The top-left of each element carrying one of these `data-doop-id`s, in the
+    /// frame's design px (nil for one not in the document), with the HTML hash read.
+    /// Asked only of a frame that has its document: locating never builds one.
+    func locateElements(_ ids: [String], completion: @escaping ([String: CGPoint?], Int) -> Void) {
+        guard let document else { return }
+        let htmlHash = self.htmlHash
+        BlitzDocument.queue.async {
+            var origins: [String: CGPoint?] = [:]
+            for id in ids {
+                let escaped = id.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
+                let rect = document.element(matching: "[data-doop-id=\"\(escaped)\"]").flatMap { document.info(for: $0)?.frameRect }
+                origins[id] = rect?.origin
+            }
+            DispatchQueue.main.async { completion(origins, htmlHash) }
         }
     }
 
@@ -1437,4 +1642,92 @@ final class DoubleTapDragGesture: UIGestureRecognizer {
         phase = .idle
         wasTap = false
     }
+}
+
+/// A comment thread's pin, drawn like the web's: a disc with the author's
+/// initials whose bottom-left corner is the point commented on, and a count
+/// of replies. Screen space, so it keeps its size at every zoom.
+private final class CommentPin {
+    let layer = CALayer()
+    private let bubble = CAShapeLayer()
+    private let initials = CATextLayer()
+    private let badge = CAShapeLayer()
+    private let count = CATextLayer()
+    private static let size: CGFloat = 28
+    private static let font = UIFont.systemFont(ofSize: 11, weight: .semibold)
+    private static let badgeFont = UIFont.systemFont(ofSize: 9, weight: .bold)
+
+    /// Tap target: the bubble plus a margin, since a pin is small under a finger.
+    var hitFrame: CGRect { layer.frame.insetBy(dx: -8, dy: -8) }
+
+    init() {
+        layer.anchorPoint = CGPoint(x: 0, y: 1)
+        layer.bounds = CGRect(x: 0, y: 0, width: Self.size, height: Self.size)
+        let s = Self.size
+        // Rounded everywhere but the bottom-left, which points at the spot.
+        let path = UIBezierPath()
+        path.move(to: CGPoint(x: 0, y: s))
+        path.addLine(to: CGPoint(x: 0, y: s / 2))
+        path.addArc(withCenter: CGPoint(x: s / 2, y: s / 2), radius: s / 2, startAngle: .pi, endAngle: .pi / 2, clockwise: true)
+        path.close()
+        bubble.path = path.cgPath
+        bubble.fillColor = UIColor.tintColor.cgColor
+        bubble.strokeColor = UIColor.white.cgColor
+        bubble.lineWidth = 2
+        bubble.shadowColor = UIColor.black.cgColor
+        bubble.shadowOpacity = 0.2
+        bubble.shadowRadius = 3
+        bubble.shadowOffset = CGSize(width: 0, height: 1)
+        for text in [initials, count] {
+            text.contentsScale = UIScreen.main.scale
+            text.alignmentMode = .center
+        }
+        initials.font = Self.font
+        initials.fontSize = Self.font.pointSize
+        initials.foregroundColor = UIColor.white.cgColor
+        initials.frame = CGRect(x: 0, y: (s - 14) / 2, width: s, height: 14)
+        badge.fillColor = UIColor.label.cgColor
+        badge.strokeColor = UIColor.white.cgColor
+        badge.lineWidth = 1.5
+        count.font = Self.badgeFont
+        count.fontSize = Self.badgeFont.pointSize
+        count.foregroundColor = UIColor.systemBackground.cgColor
+        layer.addSublayer(bubble)
+        layer.addSublayer(initials)
+        layer.addSublayer(badge)
+        badge.addSublayer(count)
+    }
+
+    func update(author: String, replies: Int, color: UIColor = .tintColor) {
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        bubble.fillColor = color.cgColor
+        initials.string = commentInitials(author)
+        badge.isHidden = replies == 0
+        if replies > 0 {
+            // Every message in the thread, as the web's pin counts it.
+            let total = replies + 1
+            let label = total > 99 ? "99+" : "\(total)"
+            let width = max(16, (label as NSString).size(withAttributes: [.font: Self.badgeFont]).width + 8)
+            badge.frame = CGRect(x: Self.size - width + 6, y: -6, width: width, height: 16)
+            badge.path = UIBezierPath(roundedRect: badge.bounds, cornerRadius: 8).cgPath
+            count.string = label
+            count.frame = CGRect(x: 0, y: 2, width: width, height: 12)
+        }
+        CATransaction.commit()
+    }
+
+    func place(at point: CGPoint) {
+        let s = UIScreen.main.scale
+        layer.position = CGPoint(x: (point.x * s).rounded() / s, y: (point.y * s).rounded() / s)
+    }
+}
+
+/// A person's colour by name, as the web's `colorFor` (shared/types.ts) picks it from `CURSOR_PALETTE`.
+func commentAuthorColor(_ name: String) -> UIColor {
+    let palette: [UInt32] = [0x2743EE, 0x0E9F6E, 0x8B5CF6, 0xD0341F, 0xC77800, 0xD62A7E, 0x0E8A8A, 0x8E2E5C]
+    var h: UInt32 = 0
+    for unit in name.utf16 { h = h &* 31 &+ UInt32(unit) }
+    let rgb = palette[Int(h % UInt32(palette.count))]
+    return UIColor(red: CGFloat((rgb >> 16) & 0xff) / 255, green: CGFloat((rgb >> 8) & 0xff) / 255, blue: CGFloat(rgb & 0xff) / 255, alpha: 1)
 }

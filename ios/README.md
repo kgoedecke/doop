@@ -39,6 +39,16 @@ HTML/CSS engine (Stylo + Taffy + Parley), compiled into the app as a static libr
   `DoubleTapDragGesture`). Taps zoom with a 0.3 s glide that a finger landing
   stops. Double tap a frame's title to fit that frame; the fit control fits the
   board. Pan, tap to select and dismiss the keyboard, drag a frame by its title.
+  Open comment threads show as pins, as on the web: a disc with the author's
+  initials whose bottom-left corner is the spot (a canvas point, a point on a frame,
+  or an element found by its `data-doop-id` in the frame's Blitz document, at the
+  point tapped while the element has not moved, else its top-left), with a count
+  when the thread has replies, in the author's colour (the web's `colorFor`).
+  Tapping a pin opens a card with that thread and a reply field. Press and hold
+  anywhere to comment there: on an element, a point on a frame's background, or
+  empty canvas, the same anchors as the web's Comment tool; a draft pin marks the
+  spot and the canvas moves it clear of the composer. The Comments list groups
+  open threads by frame; tapping one glides to its pin and opens it.
   Zoom runs from 3% to 1600%, the web's range; from 300% a hairline pixel grid
   fades in over the canvas (fully shown at 500%, the web's `pixelGridOpacity`),
   each line on a device pixel. Dragged frames snap to other frames' edges
@@ -348,8 +358,7 @@ exists only on the local dev database.
 - Native SSO needs a browser authentication session plus a secure server callback /
   single-use session exchange. Email/password is the implemented sign-in path.
 - Model-account setup currently opens Doop's account settings in the system browser.
-- Element comments pin to the selected element; replies and resolution controls have
-  not yet moved to native UI.
+- Comment threads can be replied to natively; resolving still happens on the web.
 - Frames that depend on scripts render as static HTML. A per-frame WebKit fallback
   for those is the next tier, not built yet.
 - Advanced web workflows such as design memory, GitHub imports, workspace billing,
