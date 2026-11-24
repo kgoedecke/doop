@@ -1921,6 +1921,21 @@ export function healPartialHtml(html: string): string {
   return html
 }
 
+/** What viewers have of a frame mid-playback: the first `shown` chars, healed to paint. */
+function revealedHtml(frame: Frame, shown: number): string {
+  return shown >= frame.html.length ? frame.html : healPartialHtml(frame.html.slice(0, shown))
+}
+
+/** The frame as viewers have it, for a broadcast that does not change its design (a
+ *  rename, resize, restack or sign-off): mid-playback the part revealed so far, or the
+ *  finished design would flash in before the playback goes on from where it was; mid-stream
+ *  what arrived, healed like every chunk, so a script cut off mid-way never runs. */
+function frameForViewers(frame: Frame): Frame {
+  const playing = reveals.get(frame.id)
+  if (playing) return { ...frame, html: revealedHtml(frame, playing.shown) }
+  return streams.has(frame.id) ? { ...frame, html: healPartialHtml(frame.html) } : frame
+}
+
 function commonPrefixLen(a: string, b: string): number {
   const n = Math.min(a.length, b.length)
   let i = 0
@@ -2018,8 +2033,11 @@ setInterval(() => {
     /* drain the rest evenly so the playback lands exactly at the deadline */
     const ticksLeft = Math.max(1, Math.ceil((r.deadline - now) / TICK_MS))
     r.shown = Math.min(total, r.shown + Math.ceil(remaining / ticksLeft))
-    const partial = r.shown >= total ? frame.html : healPartialHtml(frame.html.slice(0, r.shown))
-    broadcast(frame.canvasId, { type: 'frame:updated', frame: { ...frame, html: partial }, actor: r.actor })
+    broadcast(frame.canvasId, {
+      type: 'frame:updated',
+      frame: { ...frame, html: revealedHtml(frame, r.shown) },
+      actor: r.actor,
+    })
   }
   expireIdleStreams(now)
 }, TICK_MS)
@@ -2705,7 +2723,7 @@ export const updateFrame = atomic(function updateFrame(
       finishStream(frameId, false)
       finishReveal(frameId)
     }
-    broadcast(frame.canvasId, { type: 'frame:updated', frame, actor })
+    broadcast(frame.canvasId, { type: 'frame:updated', frame: htmlChanged ? frame : frameForViewers(frame), actor })
     if (htmlChanged) {
       logActivity(frame.canvasId, actor, `updated the design of “${frame.name}”`, frame.id)
     } else if (patch.name !== undefined && patch.name !== prevName) {
@@ -2735,7 +2753,7 @@ export const restackFrames = atomic(function restackFrames(
 ): Frame[] | undefined {
   if (writes.some((w) => store.getFrame(w.id)?.canvasId !== canvasId)) return undefined
   const frames = writes.map((w) => store.updateFrame(w.id, { z: w.z }, actor.name)!)
-  for (const frame of frames) broadcast(canvasId, { type: 'frame:updated', frame, actor })
+  for (const frame of frames) broadcast(canvasId, { type: 'frame:updated', frame: frameForViewers(frame), actor })
   touch(canvasId, actor, frames[0]?.id)
   return frames
 })
@@ -2764,7 +2782,7 @@ export const setFrameApproval = atomic(function setFrameApproval(
       }
     : null
   const frame = store.updateFrame(frameId, { approval }, actor.name)!
-  broadcast(frame.canvasId, { type: 'frame:updated', frame, actor })
+  broadcast(frame.canvasId, { type: 'frame:updated', frame: frameForViewers(frame), actor })
   logActivity(
     frame.canvasId,
     actor,

@@ -286,6 +286,11 @@
   `MAX_PAGE_NAME`. The guide's "Frames and HTML" section says when a page beats a frame. Tests:
   the page and `update_canvas` cases in `mcp-tools.test.ts`, `residentPageTools.test.ts` (the
   resident has the same tool).
+- MCP and the built-in agent accept `fit_to_content: "height"` on `update_frame`, `create_frame`,
+  and `set_frame_html`. Chromium measures document scroll overflow at the requested width, keeps
+  existing scrolling panels usable, and verifies the chosen height on a fresh load. A failed
+  update applies none of its metadata. Create and HTML writes commit before the optional fit.
+  Tests live in `frameFit.test.ts` and `residentPageTools.test.ts`.
 - Feature usage events: a feature an agent can reach reports from the server through
   `captureFeature` (`server/featureEvents.ts`) at the REST route, MCP tool and resident tool, on the
   signed-in user, the agent's connecting user or the resident run's requester, with `via` (`ui`,

@@ -83,6 +83,25 @@ export function savePages(
   return { ok: true, value: actions.setCanvasPages(canvas.id, pages, actor) }
 }
 
+/** A frame metadata patch as the store takes it: unset fields dropped, the
+ *  page checked against the canvas and the rotation normalised. Empty is
+ *  refused unless `allowEmpty` (a fit adds the height afterwards). */
+export function checkFrameMeta(
+  canvas: Canvas,
+  patch: FrameMetaPatch,
+  { allowEmpty = false } = {},
+): PageToolResult<FrameMetaPatch> {
+  const clean = Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined)) as FrameMetaPatch
+  if (!allowEmpty && !Object.keys(clean).length) return { ok: false, error: 'nothing to update' }
+  if (clean.pageId !== undefined && !canvasPages(canvas).some((p) => p.id === clean.pageId))
+    return { ok: false, error: `no page ${clean.pageId} on this canvas — the pages are: ${pageListText(canvas)}` }
+  if (clean.rotation !== undefined) {
+    if (!Number.isFinite(clean.rotation)) return { ok: false, error: 'rotation must be a finite number of degrees' }
+    clean.rotation = normalizeRotation(clean.rotation)
+  }
+  return { ok: true, value: clean }
+}
+
 /** Rename, move, resize or (un)lock a frame, or move it to another page. */
 export function updateFrameMeta(
   canvas: Canvas,
@@ -90,14 +109,8 @@ export function updateFrameMeta(
   patch: FrameMetaPatch,
   actor: Actor,
 ): PageToolResult<Frame> {
-  const clean = Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined)) as FrameMetaPatch
-  if (!Object.keys(clean).length) return { ok: false, error: 'nothing to update' }
-  if (clean.pageId !== undefined && !canvasPages(canvas).some((p) => p.id === clean.pageId))
-    return { ok: false, error: `no page ${clean.pageId} on this canvas — the pages are: ${pageListText(canvas)}` }
-  if (clean.rotation !== undefined) {
-    if (!Number.isFinite(clean.rotation)) return { ok: false, error: 'rotation must be a finite number of degrees' }
-    clean.rotation = normalizeRotation(clean.rotation)
-  }
-  const frame = actions.updateFrame(frameId, clean, actor)
+  const checked = checkFrameMeta(canvas, patch)
+  if (!checked.ok) return checked
+  const frame = actions.updateFrame(frameId, checked.value, actor)
   return frame ? { ok: true, value: frame } : { ok: false, error: `frame ${frameId} not found` }
 }

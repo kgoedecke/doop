@@ -2,6 +2,7 @@ import { env, windowsBrowserDirectories } from './env.ts'
 import fs from 'node:fs'
 import path from 'node:path'
 import puppeteer, { type Browser, type Page } from 'puppeteer-core'
+import { MAX_EXPORT_SIDE } from '../shared/exportScale.ts'
 import type { Frame } from '../shared/types.ts'
 import { guardPublicPageRequests } from './publicUrl.ts'
 import { withHostedIcons } from './iconProxy.ts'
@@ -166,7 +167,7 @@ export async function loadFramePage(frame: Frame, options?: PageOptions): Promis
   }
 }
 
-async function loadFrameInto(page: Page, frame: Frame): Promise<void> {
+async function loadFrameInto(page: Page, frame: Frame, fitting = false): Promise<void> {
   const assetOrigin = new URL(env.BETTER_AUTH_URL).origin
   await guardPublicPageRequests(page, {
     allowUrl: (url) =>
@@ -180,7 +181,7 @@ async function loadFrameInto(page: Page, frame: Frame): Promise<void> {
     width: Math.max(1, Math.round(frame.width)),
     /* A viewport does not need to span an entire imported landing page for
        layout/computed-style inspection; full-page content remains in the DOM. */
-    height: Math.max(1, Math.min(Math.round(frame.height), 4000)),
+    height: Math.max(1, Math.min(Math.round(frame.height), fitting ? MAX_EXPORT_SIDE : 4000)),
     deviceScaleFactor: 1,
   })
   /* setContent leaves the page on about:blank, where the relative /a/...
@@ -188,22 +189,139 @@ async function loadFrameInto(page: Page, frame: Frame): Promise<void> {
      inherits the page origin; here a <base> stands in for it — unless the
      frame brought its own (website imports do). */
   let html = withHostedPhotos(withHostedIcons(frame.html || '<!doctype html><html><body></body></html>'))
+  /* the editor morphs every design into a standards-mode document (FRAME_BOOTSTRAP in
+     src/lib/frameRuntime.ts), so a design without a doctype renders the same way here */
+  if (!/^\s*<!doctype/i.test(html)) html = `<!doctype html>${html}`
   if (!/<base\s/i.test(html)) {
     const baseTag = `<base href="${assetOrigin.replace(/"/g, '&quot;')}/">`
-    html = /<head[^>]*>/i.test(html) ? html.replace(/<head([^>]*)>/i, `<head$1>${baseTag}`) : baseTag + html
+    /* never ahead of the doctype, which would put the page in quirks mode */
+    /* <head>, never <header> */
+    html = /<head(?=[\s>])[^>]*>/i.test(html)
+      ? html.replace(/<head(?=[\s>])([^>]*)>/i, `<head$1>${baseTag}`)
+      : /<html[^>]*>/i.test(html)
+        ? html.replace(/<html([^>]*)>/i, `<html$1><head>${baseTag}</head>`)
+        : html.replace(/^\s*<!doctype[^>]*>/i, (doctype) => doctype + baseTag)
   }
   try {
     await page.setContent(html, {
       waitUntil: 'load',
       timeout: 8000,
     })
-  } catch {
+  } catch (error) {
+    if (fitting) throw error
     /* Slow external resources: inspect whatever has rendered. */
   }
   /* `load` does not cover a face from a linked stylesheet (Google Fonts):
      without this a capture intermittently shows the fallback fonts */
   await settleFonts(page.mainFrame())
   await new Promise((resolve) => setTimeout(resolve, 120))
+}
+
+/** Estimates at different viewport heights use the same loaded page, with the original CSS.
+ * Return the requested height plus any remaining document overflow. Content scrolling inside
+ * a panel has its own scrollport and does not add to the document height. */
+async function requiredHeight(page: Page, height: number): Promise<number> {
+  await page.evaluate(async () => {
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+    for (const animation of document.getAnimations()) {
+      if (Number.isFinite(animation.effect?.getComputedTiming().endTime) && animation.playbackRate !== 0)
+        animation.finish()
+    }
+  })
+  if ((await settleFonts(page.mainFrame())) !== 'loaded')
+    throw new Error('Fonts did not settle while fitting the frame.')
+  const overflow = await page.evaluate(() => {
+    const root = document.scrollingElement
+    if (!root) throw new Error('The frame has no document scrollport.')
+    return Math.max(0, root.scrollHeight - root.clientHeight)
+  })
+  return height + overflow
+}
+
+/** Bracket a fit, then refine within that bracket. Responsive layouts need not be monotone:
+ * only heights observed to fit may be returned. Doubling and bisection each take at most
+ * log2(MAX_EXPORT_SIDE) steps. */
+async function findFittingHeight(
+  start: number,
+  opening: number,
+  measure: (at: number) => Promise<number>,
+): Promise<number> {
+  let low: number
+  let high: number
+  if (opening <= start) {
+    if (start === 1) return start
+    const tiny = await measure(1)
+    if (tiny === 1) return start // A viewport-sized design supplies no smaller intrinsic height.
+    low = 1
+    high = start
+    if (tiny < high) {
+      if ((await measure(tiny)) <= tiny) high = tiny
+      else low = tiny
+    }
+  } else {
+    low = start
+    high = Math.min(opening, MAX_EXPORT_SIDE)
+    while (high === low || (await measure(high)) > high) {
+      if (high === MAX_EXPORT_SIDE)
+        throw new Error(`No verified height within the ${MAX_EXPORT_SIDE}px export limit. Set height explicitly.`)
+      low = high
+      high = Math.min(high * 2, MAX_EXPORT_SIDE)
+    }
+  }
+  // Static content usually lands at exactly its scrollHeight on the first try.
+  if (high - low <= 1 || (await measure(high - 1)) > high - 1) return high
+  high--
+  while (high - low > 1) {
+    const mid = Math.floor((low + high) / 2)
+    if ((await measure(mid)) <= mid) high = mid
+    else low = mid
+  }
+  return high
+}
+
+export async function measureFrameHeight(frame: Frame): Promise<number> {
+  const start = Math.min(MAX_EXPORT_SIDE, Math.max(1, Math.round(frame.height)))
+  const candidate = await renderer.withPage('fitting the frame height', RENDER_TIMEOUT_MS, async (page) => {
+    await loadFrameInto(page, { ...frame, height: start }, true)
+    const opening = await requiredHeight(page, start)
+    // An app shell may fit even when its header and footer have squeezed its scrolling
+    // main down to zero. Preserve the usable height of existing scrolling panels.
+    const panels =
+      opening === start
+        ? await page.evaluateHandle(() =>
+            Array.from(document.querySelectorAll('*'))
+              .filter(
+                (el) =>
+                  el !== document.scrollingElement &&
+                  el.clientHeight > 0 &&
+                  el.scrollHeight > el.clientHeight &&
+                  ['auto', 'scroll'].includes(getComputedStyle(el).overflowY),
+              )
+              .map((el) => ({ el, height: el.clientHeight })),
+          )
+        : undefined
+    return findFittingHeight(start, opening, async (height) => {
+      if (page.viewport()?.height !== height)
+        await page.setViewport({ width: Math.max(1, Math.round(frame.width)), height, deviceScaleFactor: 1 })
+      const needed = await requiredHeight(page, height)
+      if (
+        panels &&
+        needed === height &&
+        height < start &&
+        (await panels.evaluate((items) => items.some(({ el, height }) => !el.isConnected || el.clientHeight < height)))
+      )
+        return start
+      return needed
+    })
+  })
+  // A fresh render at the candidate is authoritative for scripts that read innerHeight only
+  // at startup. Release the search page first so a fit needs only one renderer slot at a time.
+  return renderer.withPage('verifying the fitted frame height', RENDER_TIMEOUT_MS, async (page) => {
+    await loadFrameInto(page, { ...frame, height: candidate }, true)
+    if ((await requiredHeight(page, candidate)) > candidate)
+      throw new Error('The document still overflows when loaded at the fitted height. Set height explicitly.')
+    return candidate
+  })
 }
 
 export interface FrameInspection {
