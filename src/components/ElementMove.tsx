@@ -186,6 +186,8 @@ export function useElementMove(frame: Frame, layoutZoom: number) {
     let layerReady: Promise<ElementInfo | null> | null = null
     let layerPoint: { x: number; y: number; pointerX: number; pointerY: number } | null = null
     let layerWork: Promise<void> = Promise.resolve()
+    /* the point the last finished preview put the layer at */
+    let appliedPoint: { x: number; y: number; pointerX: number; pointerY: number } | null = null
     let inFlight = false
     let picked = false
     /* an ⌥⇧ drag's copy, once it is in the live document: the gesture moves
@@ -313,6 +315,7 @@ export function useElementMove(frame: Frame, layoutZoom: number) {
         if (!info) return cancel()
         const selector = movingSelector()
         updateLayer(await editElementGeometry(frame.id, selector, { kind: 'move', x: point.x, y: point.y }))
+        appliedPoint = point
         if (closed) return
         const result = await moveTarget(selector, point.pointerX, point.pointerY)
         if (closed) return
@@ -353,12 +356,16 @@ export function useElementMove(frame: Frame, layoutZoom: number) {
           // Drain a preview before restoring styles or saving. A slow hit-test
           // must never repaint after Escape, or commit the previous pointer slot.
           await layerWork
+          /* put the layer where it was let go before asking where it lands:
+             on a busy main thread the last preview can trail the pointer,
+             and a drop reads the layer's live box */
+          if (commit && final && final !== appliedPoint && sourceUnchanged())
+            updateLayer(await editElementGeometry(frame.id, selector, { kind: 'move', x: final.x, y: final.y }))
           const result =
             commit && final && sourceUnchanged()
               ? await moveTarget(selector, final.pointerX, final.pointerY)
               : undefined
           if (commit && final && sourceUnchanged() && result?.free) {
-            updateLayer(await editElementGeometry(frame.id, selector, { kind: 'move', x: final.x, y: final.y }))
             const saves = sourceUnchanged()
             const done = await styleGesture(frame.id, selector, saves ? 'commit' : 'cancel')
             /* the runtime's save carries the copy along; the copy is the pick */
