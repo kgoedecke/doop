@@ -1,9 +1,11 @@
 /* The ChatGPT app surface of the MCP server. ChatGPT (and any MCP Apps host)
    can render an HTML component next to a tool result; here that is a preview
    card showing the frames a tool just touched, rendered from the public
-   /i/<frame>.png route, with a button that opens the canvas. The model keeps
-   getting the same text results it always did — the component only reads
-   `structuredContent`, so other MCP clients are unaffected.
+   /i/<frame>.png route, with a button that opens it in Doop: the frame itself
+   when the card shows one, else the canvas, each frame then carrying its own
+   Open link. The model keeps getting the same text results it always did —
+   the component only reads `structuredContent`, so other MCP clients are
+   unaffected.
 
    Two generations of host API coexist: the MCP Apps standard
    (`_meta.ui.*`, `text/html;profile=mcp-app`, `ui/notifications/tool-result`
@@ -19,11 +21,12 @@ import type { Frame } from '../shared/types.ts'
    below must bump the version or linked users keep the old card. A chat
    that holds a retired URI fails with "Failed to fetch template", so a
    bumped version is ADDED to RETIRED_PREVIEW_URIS, never replaced. */
-const PREVIEW_VERSION = 3
+const PREVIEW_VERSION = 4
 export const FRAME_PREVIEW_URI = `ui://doop/frame-preview-${PREVIEW_VERSION}.html`
 export const RETIRED_PREVIEW_URIS: readonly string[] = [
   'ui://doop/frame-preview-1.html',
   'ui://doop/frame-preview-2.html',
+  'ui://doop/frame-preview-3.html',
 ]
 const PREVIEW_MIME = 'text/html;profile=mcp-app'
 
@@ -106,7 +109,7 @@ export function embedsPreview(clientName: string | undefined): boolean {
 }
 
 const WIDGET_DESCRIPTION =
-  'Shows a rendered preview of the Doop frames this tool touched, with a button that opens the canvas.'
+  'Shows a rendered preview of the Doop frames this tool touched, with links that open each frame in Doop.'
 
 /** Registers the component resource. One per server instance; the host
  *  fetches it once per URI and caches it, so the URI doubles as a version. */
@@ -204,11 +207,15 @@ export function framePreviewHtml(): string {
   .grid { display: grid; gap: 12px; align-items: start; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }
   .grid.one { grid-template-columns: 1fr; }
   .card { border: 1px solid var(--line); border-radius: var(--border-radius-md, 12px); overflow: hidden; background: var(--well); }
-  .card a { display: block; text-decoration: none; color: inherit; }
+  .card > a { display: block; text-decoration: none; color: inherit; cursor: pointer; }
+  .card > a:hover .shot, .card > a:focus-visible .shot { outline: 2px solid var(--ink); outline-offset: -2px; }
   .shot { display: block; width: 100%; background: var(--well); object-fit: contain; object-position: top; }
   .meta { display: flex; justify-content: space-between; gap: 8px; padding: 8px 10px; background: var(--surface); border-top: 1px solid var(--line); font-size: 12px; }
   .meta b { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .meta span { color: var(--ink-soft); flex: none; }
+  .meta .side { display: flex; gap: 10px; align-items: baseline; flex: none; }
+  .meta .frame-open { color: var(--brand); font-weight: 600; text-decoration: none; }
+  .meta .frame-open:hover { text-decoration: underline; }
   .empty { color: var(--ink-soft); font-size: 13px; margin: 0; }
   .shot.missing { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; min-height: 96px; color: var(--ink-soft); font-size: 12px; }
   .retry { appearance: none; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); color: var(--ink); font: inherit; font-size: 12px; padding: 4px 12px; cursor: pointer; }
@@ -258,9 +265,13 @@ export function framePreviewHtml(): string {
   function render(data) {
     if (!data || !data.canvas) { root.innerHTML = '<p class="empty">Nothing to preview yet.</p>'; reportSize(); return; }
     var frames = Array.isArray(data.frames) ? data.frames : [];
+    /* one frame shown: the button opens it, not the canvas around it. With
+       several, it opens the canvas and each frame has its own Open link. */
+    var single = frames.length === 1 && frames[0].url ? frames[0] : null;
+    var target = single ? single.url : data.canvas.url;
     var html = '<div class="head"><div><div class="title">' + esc(data.canvas.name || 'Canvas') + '</div>' +
       '<div class="sub">' + (frames.length === 1 ? '1 frame' : frames.length + ' frames') + ' · Doop</div></div>' +
-      '<button class="open" type="button" data-href="' + esc(data.canvas.url) + '">Open in Doop</button></div>';
+      '<button class="open" type="button" data-href="' + esc(target) + '" title="' + esc(single ? 'Open ' + single.name + ' in Doop' : 'Open the canvas in Doop') + '">Open in Doop</button></div>';
     if (!frames.length) html += '<p class="empty">This canvas has no frames yet.</p>';
     else {
       var shown = frames.slice(0, MAX_SHOWN);
@@ -271,8 +282,9 @@ export function framePreviewHtml(): string {
         var shot = f.empty
           ? '<div class="shot missing" style="aspect-ratio:' + esc(ratio) + '; max-height: 240px;"><span>Design in progress</span></div>'
           : '<img class="shot" src="' + esc(f.image_url) + '" alt="' + esc(f.name) + '" loading="lazy" style="aspect-ratio:' + esc(ratio) + '; max-height: 480px;" />';
-        html += '<div class="card"><a href="' + esc(f.url) + '" data-href="' + esc(f.url) + '">' + shot + '</a>' +
-          '<div class="meta"><b>' + esc(f.name) + '</b><span>' + esc(f.width) + '×' + esc(f.height) + '</span></div></div>';
+        var openLink = single ? '' : '<a class="frame-open" href="' + esc(f.url) + '" data-href="' + esc(f.url) + '" title="Open ' + esc(f.name) + ' in Doop">Open</a>';
+        html += '<div class="card"><a href="' + esc(f.url) + '" data-href="' + esc(f.url) + '" title="Open ' + esc(f.name) + ' in Doop">' + shot + '</a>' +
+          '<div class="meta"><b>' + esc(f.name) + '</b><div class="side"><span>' + esc(f.width) + '×' + esc(f.height) + '</span>' + openLink + '</div></div></div>';
       }
       if (frames.length > shown.length) {
         var rest = frames.length - shown.length;
