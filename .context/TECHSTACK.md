@@ -1032,7 +1032,7 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   it selects the new shapes only if the selection and page are still the ones it started from. Tests: `canvasGroups.test.ts`. A
   click picks the outermost canvas group around the hit, a double-click on a picked group goes one
   level in, and with a layer inside picked clicks pick its siblings (`groupLevel`); comments still
-  pin to the element under the pointer. Drops (`frameDropRuntime.ts`, canvas drags of layers and
+  pin to the element under the pointer. Drops (`src/frame-runtime/drop.ts`, canvas drags of layers and
   of shapes on the frame, and Layers panel moves through `layerPlacement`): into a flex or grid box
   an absolute layer becomes a flow item; into a box that places its layers by hand (`freeform`:
   the body, a canvas group, or a box already holding absolute layers, with nothing else in flow)
@@ -1059,8 +1059,8 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   custom properties, as one `<style data-doop-carried>`, every rule scoped through a
   `data-doop-carried-scope` mark on the moved root so the destination's own layers keep their
   look); copy/paste across frames carries it the same way. Tests: `layerTransfer.test.ts`, `layersDragAcross.test.tsx`, `styleCarry.test.ts`.
-- A vector's stroke spills past its box, as in Figma (`src/lib/frameBleed.ts`, `bleed` in
-  `frameRuntime.ts`): a drawn path's `<svg>` paints its overflow (a runtime sheet), and a standalone
+- A vector's stroke spills past its box, as in Figma (`src/lib/frameBleed.ts`,
+  `src/frame-runtime/bleed.ts`): a drawn path's `<svg>` paints its overflow (a runtime sheet), and a standalone
   shape's iframe, which can paint nothing past its own edge, reaches a margin past the frame on every
   side. The runtime asks for it (`doop:bleed-want`, half of the widest stroke past the box through the
   shape's transform, a miter join or square cap further, in 16px steps up to 1024) and insets its body
@@ -1149,7 +1149,7 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   anywhere else on it moves the value by the share of the width travelled (never jumping to the
   pointer); a click still types, mouse and pen only. Tests: `inspectorScrub.test.tsx`,
   `valueSlide.test.tsx`.
-- Frame fill (`FrameFillSection` in `Inspector.tsx`, `rootFill` in `frameRuntime.ts`): the frame
+- Frame fill (`FrameFillSection` in `Inspector.tsx`, `rootFill` in `src/frame-runtime/inspect.ts`): the frame
   Inspector has a Fill section, as a Figma frame does, and it is the element panel's own
   (`FillSection` in `ElementPanel.tsx`: colour, opacity, token binding, image fill). It edits the
   background of the root element that paints the frame, read live through `doop:root-fill`:
@@ -1479,7 +1479,7 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   `workspaceLibraries.test.tsx`, `libraryResume.test.ts`.
 - Prototypes (`.context/specs/prototyping.md`): interactions are `data-doop-on` /
   `data-doop-action` (or the JSON `data-doop-interactions`) attributes in frame HTML, parsed by
-  `shared/prototype.ts`, whose parser the frame runtime inlines by source. `PrototypePlayer.tsx`
+  `shared/prototype.ts`, whose parser the frame runtime bundles too (`src/frame-runtime/proto.ts`). `PrototypePlayer.tsx`
   (Play, and the full-page `/c/<id>/proto`) runs them with Web Animations transitions, under the
   desktop tab strip (`--app-inset`), its controls in a bar above the screens (never over the design), scaled by the viewer's pick (actual size, responsive, fit width,
   fit, fill; `screenLayout`, remembered under `doop:proto-scaling`); the
@@ -1636,6 +1636,19 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
 - Tailwind CSS 4.3.3 (`@tailwindcss/vite` 4.3.3) - styling; `tw-animate-css` 1.4.0 for animation
   utilities. Design tokens in `src/styles.css` (see `.context/DESIGN.md`).
 - Tauri 2.9.0 (`@tauri-apps/cli`, `desktop/src-tauri`) - desktop app wrapper around the web build.
+- Frame runtime (`src/frame-runtime/`): the script every frame iframe runs (morphing posted HTML in,
+  hit testing, text editing, styles, the key relay, prototype triggers), written as TypeScript modules
+  and type-checked and linted with the rest of `src/`. `vitePlugin.ts` (registered in `vite.config.ts`,
+  so dev, `vite build`, vitest, the fixture build and Storybook all get it) bundles `main.ts` with
+  esbuild into one strict IIFE served as `virtual:frame-runtime`, and `FRAME_BOOTSTRAP`
+  (`src/lib/frameRuntime.ts`) inlines it in each frame's `srcdoc`: frames stay sandboxed
+  (`allow-scripts`, no same origin), so the script is never loaded from Doop's origin. Every module
+  only declares; `main.ts` sets everything up in one order, since listeners on one target run in the
+  order they were added. `channel.ts` pins the intrinsics the key relay and the command check rely on
+  when it is evaluated, before any design script runs; the runtime's own timers come from
+  `timers.ts`. The dev server rebuilds the script when one of its sources changes. Tests:
+  `frameRuntimeBuild.test.ts`, `frameRuntimeCss.test.ts` and the `*Browser.test.ts` files that drive
+  frames.
 - Chromium shell (the macOS app): `desktop/src-tauri-chromium` builds the same sources (its
   `[[bin]]` and build script point into `desktop/src-tauri`) on Tauri 3.0.0-alpha.5 with
   `tauri-runtime-cef` 3.0.0-alpha.6 (CEF 154, Chromium 154), so frame iframes render out of the

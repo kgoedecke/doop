@@ -92,16 +92,6 @@ describe('parseInteractions', () => {
     for (const bad of ['javascript:alert(1)', 'data:text/html,hi', 'ftp://example.com', 'file:///etc/passwd', 'nope'])
       expect(parseInteractions({ on: 'click', action: `url:${bad}` })).toEqual([])
   })
-
-  it('is self-contained, so the frame runtime can inline its source', () => {
-    const inlined = new Function(`return (${parseInteractions.toString()})`)() as typeof parseInteractions
-    const attrs = {
-      on: 'click',
-      action: 'url:https://example.com',
-      interactions: '[{"on":"key:Space","action":"overlay:o1","transition":"push-left"}]',
-    }
-    expect(inlined(attrs)).toEqual(parseInteractions(attrs))
-  })
 })
 
 describe('interactionAttributes', () => {

@@ -6,7 +6,7 @@ import { holdsPlaced } from './groupLayout'
  * The Layers panel's view of a frame: the element tree of its HTML, parsed
  * on the parent side (the iframe is sandboxed, so the panel cannot walk the
  * live document). Every node carries the same selector the frame runtime
- * produces for it (frameRuntime.ts cssPath), which is what lets a row in the
+ * produces for it (cssPath in src/frame-runtime/geometry.ts), which is what lets a row in the
  * panel and an outline in the frame refer to the same element.
  */
 

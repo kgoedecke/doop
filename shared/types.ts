@@ -478,7 +478,7 @@ export interface AgentTask {
 
 export interface CardScope {
   frameId: string
-  /** element selector inside the frame (frameRuntime cssPath); absent = whole frame */
+  /** element selector inside the frame (cssPath in src/frame-runtime/geometry.ts); absent = whole frame */
   selector?: string
 }
 

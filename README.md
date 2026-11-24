@@ -1127,7 +1127,7 @@ change them together.
 
 Frame HTML renders in `<iframe sandbox="allow-scripts">` — scripts run, but no same-origin access and
 no reach into the app. Each iframe loads a small bootstrap once; new HTML is `postMessage`d in and
-**DOM-morphed in place** (`src/lib/frameRuntime.ts`), so updates and streaming ticks never white-flash
+**DOM-morphed in place** (`src/frame-runtime/morph.ts`), so updates and streaming ticks never white-flash
 the frame with a full document reload. Changed `<script>`s re-execute; unchanged styles/fonts are
 untouched. The realtime layer is plain JSON over a per-canvas WebSocket room;
 REST/MCP mutations are broadcast to the room by the shared actions layer, so human and agent edits go

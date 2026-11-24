@@ -60,7 +60,7 @@ export async function layerPlacement(frameId: string, selector: string, target: 
 
 /** The runtime's summary of one element: computed styles resolved to what
  *  the Design panel shows, plus the inline styles the element already carries.
- *  Mirrors `inspect()` in frameRuntime.ts — keep the two in lockstep. */
+ *  What `inspect()` in src/frame-runtime/inspect.ts answers; the compiler holds the two together. */
 export interface ElementInfo {
   tag: string
   id: string
@@ -83,8 +83,8 @@ export interface ElementInfo {
   rect: { x: number; y: number; width: number; height: number }
   /** Rendered bounds relative to the parent's border box, in frame pixels. */
   geometry: {
-    x: number
-    y: number
+    x: number | null
+    y: number | null
     rotation: number | null
     scaleX: number
     scaleY: number
@@ -107,7 +107,7 @@ export interface ElementInfo {
   height: number | null
   widthValue: string
   heightValue: string
-  flexGrow: number
+  flexGrow: number | null
   boxSizing: string
   /** Unrounded computed padding and border sums, for content-box sizing. */
   boxExtras: { width: number; height: number }
