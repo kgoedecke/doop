@@ -148,6 +148,19 @@ also install it in Claude Desktop on macOS and Windows. Installation, build and 
 notes live in [`claude-extension/README.md`](../claude-extension/README.md). No directory
 submission or publication is performed by the build.
 
+## VS Code extension
+
+`vscode-extension/` is the Doop extension for VS Code and its forks (see its README), published as `doop.doop` by
+`.github/workflows/vscode-extension.yml`. Bump `version` in `vscode-extension/package.json`, merge, then push the
+tag `vscode-v<version>`: the workflow checks the tag matches, builds the VSIX, publishes it to the Visual Studio
+Marketplace (`VSCE_PAT` secret: an Azure DevOps token with Marketplace → Manage, all accessible organizations) and
+Open VSX, which Cursor, Windsurf and VSCodium read (`OVSX_PAT` secret), and attaches it to a GitHub Release. A store
+whose secret is missing is skipped with a warning. PRs touching the extension and manual runs build it and upload
+the VSIX as an artifact. The publisher (`doop` on marketplace.visualstudio.com/manage) and the Open VSX namespace
+(`ovsx create-namespace doop`) are made by hand, once. The extension id is also `EDITOR_EXTENSION_ID` in
+`shared/editorConnect.ts`, which the server checks sign-in links against. The server routes it needs (`/editor/*`)
+ship with the web app, so deploy the server before tagging.
+
 ## Codex desktop setup
 
 Connect AI → Codex can register Doop directly in the shared Codex config through

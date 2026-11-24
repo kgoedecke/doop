@@ -129,6 +129,24 @@
   is checked again when it runs) and `get_canvas` (`customAgents`) read it. Work left for an agent
   that is deleted or off goes to Doop. Routes: `/api/agents` and `/api/agents/builtin`
   (`?workspace=`, members only). Tests: `customAgents.test.ts`, `customAgentsHttp.test.ts`.
+- Editor extension (`vscode-extension/`, `server/editorConnect.ts`, `shared/editorConnect.ts`,
+  `src/pages/EditorConnect.tsx`): Doop in VS Code and its forks, online only. The activity bar lists the account's
+  canvases (MCP `list_canvases` with the extension's agent key), a canvas opens as a webview tab holding the live app
+  in an iframe, the editor's own agent mode gets `/mcp` through `registerMcpServerDefinitionProvider`, and "Connect
+  Coding Agents…" writes the `doop` entry into Claude Code (its CLI, else `~/.claude.json`), Codex (only its own
+  table, every header spelling found, `vscode-extension/src/toml.ts`), Cursor, Gemini CLI and Windsurf configs.
+  Sign-in: `/editor/connect` (signed in, confirm) answers a two-minute code over the editor's deep link
+  (`<scheme>://doop.doop/auth`, only known editor schemes and this extension's authority), and `POST
+/editor/exchange` trades it once for an agent key named after the editor, minted then, so an unfinished sign-in
+  leaves no key. `/editor/whoami` checks a pasted key; `/editor/sign-out` deletes the key. The canvas view signs in
+  with `POST /editor/embed-ticket` (Bearer key, one minute, single use) and `GET /editor/embed`, which only for an
+  iframe (`Sec-Fetch-Dest`) sets the session cookie as `SameSite=None; Secure; Partitioned`, since a webview's iframe
+  is third party and the usual Lax cookie is never sent. Every view of one key shares one session, marked by its
+  `userAgent` (`agentKeys.embedSessionAgent`), which `deleteAgentKey` deletes with the key. The cookie is Secure, so a
+  self-hosted server on plain http (not localhost) cannot sign the view in; the tab says so. Codes and tickets are in
+  memory (one process). Built by `scripts/build-vscode-extension.mjs` (`--vsix` packs it), published on a `vscode-v*`
+  tag by `.github/workflows/vscode-extension.yml`. Tests: `editorConnect.test.ts`, `editorConnectHttp.test.ts`,
+  `vscodeToml.test.ts`.
 - Agent identity (`shared/agentIdentity.ts`): an outside agent is its account and its `agent_name`,
   not the name alone, so two people's "Claude" on a shared canvas are two agents with their own
   presence and tasks. `mcpAgentKey` hashes the two into the opaque `agentKey` on the `Actor`, the

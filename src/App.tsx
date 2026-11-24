@@ -8,6 +8,8 @@ import { CanvasPage } from './pages/CanvasPage'
 import { PrototypePage } from './pages/PrototypePage'
 import { AuthPage } from './pages/AuthPage'
 import { DesktopHandoff } from './pages/DesktopHandoff'
+import { EditorConnect } from './pages/EditorConnect'
+import { EDITOR_CONNECT_PATH } from '../shared/editorConnect'
 import { DesktopSignIn } from './pages/DesktopSignIn'
 import { DesktopConnect } from './pages/DesktopConnect'
 import { DESKTOP_CONNECT_PATH } from '../shared/desktopConnect'
@@ -213,6 +215,8 @@ export function App() {
     <DesktopCodexSetup key={route} />
   ) : path === DESKTOP_HANDOFF_PATH ? (
     <DesktopHandoff />
+  ) : path === EDITOR_CONNECT_PATH ? (
+    <EditorConnect email={session.user.email} />
   ) : path === '/oauth/consent' ? (
     <OAuthConsent email={session.user.email} />
   ) : path.startsWith('/admin') ? (

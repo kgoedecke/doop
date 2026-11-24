@@ -134,6 +134,8 @@ export default tseslint.config(
       'node_modules/',
       'desktop/src-tauri/target/',
       'desktop/src-tauri-chromium/target/',
+      'vscode-extension/out/',
+      'vscode-extension/dist/',
       'storybook-static/',
     ],
   },

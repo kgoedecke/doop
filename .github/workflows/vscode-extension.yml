@@ -1,0 +1,97 @@
+# Builds the Doop extension for VS Code and its forks (vscode-extension/) and
+# publishes it to both stores:
+# - Visual Studio Marketplace (VS Code itself), with the VSCE_PAT secret: an
+#   Azure DevOps personal access token with the Marketplace → Manage scope,
+#   "All accessible organizations", for the `doop` publisher.
+# - Open VSX (Cursor, Windsurf, VSCodium, …), with the OVSX_PAT secret: an
+#   open-vsx.org access token of an account that owns the `doop` namespace.
+#
+# - Tag `vscode-v<version>` → checks the tag matches vscode-extension/
+#   package.json's version, builds the VSIX, publishes it to every store whose
+#   secret is set (a missing one is a warning, not a failure) and attaches it
+#   to a GitHub Release.
+# - Manual dispatch, and PRs touching the extension → build and test only; the
+#   VSIX is uploaded as a workflow artifact.
+#
+# Deploy the server before tagging: the extension signs in through the
+# /editor/* routes that ship with the web app (.context/RELEASE.md).
+name: VS Code Extension
+
+on:
+  push:
+    tags: ['vscode-v*']
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '.github/workflows/vscode-extension.yml'
+      - 'vscode-extension/**'
+      - 'shared/editorConnect.ts'
+      - 'scripts/build-vscode-extension.mjs'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install --frozen-lockfile
+      - name: Tag matches the extension's version
+        if: startsWith(github.ref, 'refs/tags/vscode-v')
+        run: |
+          version=$(node -p "require('./vscode-extension/package.json').version")
+          if [ "${GITHUB_REF_NAME}" != "vscode-v${version}" ]; then
+            echo "::error::tag ${GITHUB_REF_NAME} does not match vscode-extension/package.json version ${version}"
+            exit 1
+          fi
+      - name: Typecheck
+        run: bunx tsgo -p vscode-extension/tsconfig.json
+      - name: Test the link rules
+        run: bunx vitest run tests/editorConnect.test.ts --project parallel
+      - name: Build the VSIX
+        run: node scripts/build-vscode-extension.mjs --vsix
+      - uses: actions/upload-artifact@v4
+        with:
+          name: doop-vsix
+          path: vscode-extension/dist/doop.vsix
+          if-no-files-found: error
+
+  publish:
+    if: startsWith(github.ref, 'refs/tags/vscode-v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: doop-vsix
+      - uses: oven-sh/setup-bun@v2
+      - name: Publish to the Visual Studio Marketplace
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+        run: |
+          if [ -z "$VSCE_PAT" ]; then
+            echo "::warning::VSCE_PAT is not set: skipped the Visual Studio Marketplace"
+            exit 0
+          fi
+          bunx @vscode/vsce@3.6.0 publish --packagePath doop.vsix --pat "$VSCE_PAT"
+      - name: Publish to Open VSX
+        env:
+          OVSX_PAT: ${{ secrets.OVSX_PAT }}
+        run: |
+          if [ -z "$OVSX_PAT" ]; then
+            echo "::warning::OVSX_PAT is not set: skipped Open VSX"
+            exit 0
+          fi
+          bunx ovsx@0.10.6 publish doop.vsix --pat "$OVSX_PAT"
+      - name: Attach the VSIX to a GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp doop.vsix "doop-${GITHUB_REF_NAME#vscode-v}.vsix"
+          gh release create "$GITHUB_REF_NAME" "doop-${GITHUB_REF_NAME#vscode-v}.vsix" \
+            --repo "$GITHUB_REPOSITORY" --title "VS Code extension ${GITHUB_REF_NAME#vscode-v}" \
+            --notes "The Doop extension for VS Code, Cursor, Windsurf and VSCodium. Install from the Visual Studio Marketplace or Open VSX, or download the VSIX below and run \`code --install-extension\` on it."

@@ -108,6 +108,7 @@ import { RendererBusyError } from './renderBrowser.ts'
 import { getAsset, reconcileAssetRefs, beginTicketUpload, endTicketUpload, createAsset } from './assets.ts'
 import * as ingest from './ingest.ts'
 import * as agentKeys from './agentKeys.ts'
+import { mountEditorPublicRoutes, mountEditorSessionRoutes } from './editorConnect.ts'
 import * as backgrounds from './backgrounds.ts'
 import { serveIcon } from './iconProxy.ts'
 import { servePhoto } from './photoProxy.ts'
@@ -973,6 +974,7 @@ for (const extension of extensions) {
 }
 
 app.use(express.json({ limit: '10mb' }))
+mountEditorPublicRoutes(app)
 app.all('/gemini-cloud/mcp/:id', (req, res, next) => {
   handleGeminiCloudMcp(req, res).catch(next)
 })
@@ -1111,6 +1113,8 @@ app.use('/api', async (req, res, next) => {
     next(err)
   }
 })
+
+mountEditorSessionRoutes(app)
 
 /* Frames in REST answers. A client that composes frames itself says so with a header
    (shared/frameCompose.ts) and is answered with their source. Every other one (the
