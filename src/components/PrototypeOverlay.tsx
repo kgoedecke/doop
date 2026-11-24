@@ -49,6 +49,12 @@ function worldRect(frame: Frame, rect: Rect): Rect {
   }
 }
 
+/** Which links the stage draws: every one while no frame is in focus, else
+ *  only those leaving or entering a frame in focus, as Figma does. */
+function showsLink(focus: ReadonlySet<string>, sourceId: string, targetId: string | undefined): boolean {
+  return focus.size === 0 || focus.has(sourceId) || (targetId !== undefined && focus.has(targetId))
+}
+
 function contains(f: Frame, x: number, y: number) {
   return x >= f.x && x <= f.x + f.width && y >= f.y && y <= f.y + f.height
 }
@@ -70,6 +76,7 @@ function Connectors({ frames, startFrameId }: { frames: Frame[]; startFrameId?: 
   const [scans, setScans] = useState<Record<string, ScannedHotspot[]>>({})
   const zoom = useStore((s) => s.viewport.zoom)
   const picked = useStore((s) => s.selectedElement)
+  const selectedIds = useStore((s) => s.selectedIds)
   const fullCanvas = useStore((s) => s.canvas)
   const t = useT()
 
@@ -98,6 +105,14 @@ function Connectors({ frames, startFrameId }: { frames: Frame[]; startFrameId?: 
   const byId = useMemo(() => new Map((fullCanvas?.frames ?? []).map((f) => [f.id, f])), [fullCanvas])
   const onPage = useMemo(() => new Map(frames.map((f) => [f.id, f])), [frames])
 
+  /* the frames whose links show: a picked element's frame, else the selected
+     frames; only frames drawn here count, so selecting a hidden frame or a
+     shape without hotspots leaves the whole map up */
+  const focus = useMemo(() => {
+    const ids = picked ? [picked.frameId] : selectedIds
+    return new Set(ids.filter((id) => onPage.has(id)))
+  }, [selectedIds, picked, onPage])
+
   const links = useMemo(() => {
     const out: { key: string; box: Rect; path: string | null; label: LinkLabel | null; picked: boolean }[] = []
     for (const frame of frames) {
@@ -106,6 +121,7 @@ function Connectors({ frames, startFrameId }: { frames: Frame[]; startFrameId?: 
         const isPicked = picked?.frameId === frame.id && picked.selector === spot.selector
         for (const [m, interaction] of spot.interactions.entries()) {
           const key = `${frame.id}:${n}:${m}`
+          if (!showsLink(focus, frame.id, targetsFrame(interaction) ? interaction.target : undefined)) continue
           if (!targetsFrame(interaction)) {
             out.push({ key, box, path: null, label: describe(interaction), picked: isPicked })
             continue
@@ -132,7 +148,7 @@ function Connectors({ frames, startFrameId }: { frames: Frame[]; startFrameId?: 
       }
     }
     return out
-  }, [frames, scans, onPage, byId, fullCanvas, picked])
+  }, [frames, scans, onPage, byId, fullCanvas, picked, focus])
 
   const start = startFrameId ? onPage.get(startFrameId) : undefined
   const sourceFrame = picked ? onPage.get(picked.frameId) : undefined

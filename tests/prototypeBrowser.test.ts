@@ -17,6 +17,8 @@ type Fixture = {
   editFrame: (id: string, html: string) => void
   addRawFrame: () => void
   mountStage: (prototypeMode: boolean) => void
+  selectFrame: (id: string | null) => void
+  pickElement: (el: { frameId: string; selector: string } | null) => void
 }
 
 const doc = (body: string) =>
@@ -340,6 +342,34 @@ describe.skipIf(!findBrowserPath())('prototype player', { timeout: 30_000 }, () 
     /* home → detail and home → menu; detail's Back and menu's Close are labels */
     await page.waitForFunction(() => document.querySelectorAll('[data-proto-connector]').length === 2)
     expect(await page.$eval('[data-flow-start]', (el) => (el as HTMLElement).dataset.flowStart)).toBe('home')
+
+    /* a selected frame shows only the links into and out of it: connectors
+       and the label-only links (detail's Back, menu's Close) alike */
+    const shown = (connectors: number, labels: number) =>
+      page.waitForFunction(
+        (connectors, labels) =>
+          document.querySelectorAll('[data-proto-connector]').length === connectors &&
+          document.querySelectorAll('[data-prototype-overlay] text').length === labels,
+        {},
+        connectors,
+        labels,
+      )
+    await shown(2, 2)
+    await page.evaluate(() => (window as unknown as Fixture).selectFrame('detail'))
+    await shown(1, 1)
+    await page.evaluate(() => (window as unknown as Fixture).selectFrame('home'))
+    await shown(2, 0)
+    await page.evaluate(() => (window as unknown as Fixture).selectFrame('menu'))
+    await shown(1, 1)
+    await page.evaluate(() => (window as unknown as Fixture).selectFrame(null))
+    await shown(2, 2)
+    /* a picked element counts as its frame being selected */
+    await page.evaluate(() =>
+      (window as unknown as Fixture).pickElement({ frameId: 'detail', selector: 'body > button' }),
+    )
+    await shown(1, 1)
+    await page.evaluate(() => (window as unknown as Fixture).pickElement(null))
+    await shown(2, 2)
   })
 
   it('keeps interactions inert in a frame the editor drives', async () => {
