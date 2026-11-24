@@ -2884,9 +2884,7 @@ const componentCreateBody = z.object({
 })
 const libraryPublishBody = z.object({
   components: z.array(z.string().max(200)).max(500).optional(),
-  dryRun: z.boolean().optional(),
 })
-const libraryUpdateBody = z.object({ dryRun: z.boolean().optional() })
 const componentPatchBody = z.object({
   name: z.string().max(200).optional(),
   description: z.string().max(2000).optional(),
@@ -2897,7 +2895,6 @@ const componentPatchBody = z.object({
   find: z.string().optional(),
   replace: z.string().optional(),
   expectedRev: z.number().optional(),
-  dryRun: z.boolean().optional(),
 })
 
 function componentBody<T>(res: express.Response, schema: z.ZodType<T>, body: unknown): T | undefined {
@@ -3112,13 +3109,12 @@ app.post('/api/canvases/:id/library/publish', (req, res) => {
   const body = componentBody(res, libraryPublishBody, req.body ?? {})
   if (!body) return
   componentRoute(res, () => {
-    const result = publishToLibrary(canvas.id, body.components, userActor(req), req.user!.id, body.dryRun === true)
-    if (!result.dry_run)
-      captureFeature(req.user!.id, 'library_published', 'ui', {
-        canvas_id: canvas.id,
-        published: result.published.length,
-        removed: result.removed.length,
-      })
+    const result = publishToLibrary(canvas.id, body.components, userActor(req), req.user!.id)
+    captureFeature(req.user!.id, 'library_published', 'ui', {
+      canvas_id: canvas.id,
+      published: result.published.length,
+      removed: result.removed.length,
+    })
     return result
   })
 })
@@ -3131,8 +3127,6 @@ app.post(
   writeRoute(async (req, res) => {
     const canvas = requireCanvas(req, res, req.params.id, 'edit')
     if (!canvas) return
-    const body = componentBody(res, libraryUpdateBody, req.body ?? {})
-    if (!body) return
     const userId = req.user!.id
     const allowed = (need: CanvasRole) => (id: string) => {
       const other = store.getCanvas(id)
@@ -3140,17 +3134,15 @@ app.post(
     }
     try {
       const report = await updateLibraryConsumers(canvas.id, userActor(req), {
-        dryRun: body.dryRun === true,
         canEdit: allowed('edit'),
         canRead: allowed('view'),
         publisherId: userId,
       })
-      if (!report.dry_run)
-        captureFeature(userId, 'library_updated_everywhere', 'ui', {
-          canvas_id: canvas.id,
-          canvases: report.canvases.length,
-          skipped: report.skipped.length,
-        })
+      captureFeature(userId, 'library_updated_everywhere', 'ui', {
+        canvas_id: canvas.id,
+        canvases: report.canvases.length,
+        skipped: report.skipped.length,
+      })
       res.json(report)
     } catch (error) {
       /* the same answers as its neighbours: 402 for the plan, 400 for a refusal. Anything

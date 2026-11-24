@@ -283,18 +283,6 @@ describe('an agent working with components', () => {
       'R',
     )
 
-    const dry = await call('update_component', {
-      canvas_id: canvas.id,
-      component: 'Button',
-      find: 'class="btn"',
-      replace: 'class="btn big"',
-      dry_run: true,
-    })
-    expect(dry.data.dry_run).toBe(true)
-    expect(dry.data.impact.instances).toBe(3)
-    expect(dry.data.impact.approvals_affected).toBe(1)
-    expect(store.getFrame(a)!.html).not.toContain('btn big')
-
     const applied = await call('update_component', {
       canvas_id: canvas.id,
       component: 'Button',
@@ -316,7 +304,7 @@ describe('an agent working with components', () => {
     expect(store.getFrame(a)!.html).toContain('Keep A')
   })
 
-  it('keeps overrides attached when the main is rewritten wholesale, and reports any it could not', async () => {
+  it('keeps overrides attached when the main is rewritten wholesale', async () => {
     const canvas = newCanvas()
     await button(canvas.id)
     const frameId = await framed(canvas.id, '<doop-use component="Button" id="abc123"></doop-use>')
@@ -333,12 +321,11 @@ describe('an agent working with components', () => {
     })
     expect(store.getFrame(frameId)!.html).toContain('color: red')
     /* a rewrite with no keys at all: same structure, new look */
-    const rewrite = await call('update_component', {
+    await call('update_component', {
       canvas_id: canvas.id,
       component: 'Button',
       html: '<button class="btn wide"><span class="label" data-doop-prop="label">Go</span></button>',
     })
-    expect(rewrite.data.impact.overrides_orphaned).toEqual([])
     const html = store.getFrame(frameId)!.html
     expect(html).toContain('btn wide')
     expect(html).toContain('color: red')

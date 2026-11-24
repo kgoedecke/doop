@@ -283,8 +283,8 @@ needs a reusable piece the system lacks, add it, then use it.
   are captured as overrides on that element alone and survive every later change to the main. Do
   not detach to make a small change.
 - To change them all, call update_component with find + replace, and read the impact it reports.
-  Approved frames keep their sign-off: following a component is not an edit. Use dry_run first on anything
-  widely used. Never edit each instance by hand.
+  Approved frames keep their sign-off: following a component is not an edit. Never edit each
+  instance by hand.
 - After changing a component, use get_component_preview to check the appearance you edited. Omit props
   for the default, or pass e.g. {"tone": ["solid", "ghost"]} to compare two tones at the default size.
 - Keep data-doop-part, data-doop-prop, data-doop-if and data-doop-slot when editing a main: part
@@ -306,8 +306,8 @@ needs a reusable piece the system lacks, add it, then use it.
   canvases still to pull) and sync_component on each; without a component it pulls all that wait.
   Publish when the human asks, in any words ("make it available to the team"), not on your own
   initiative; it never changes another canvas until that canvas pulls. Only when the human asks
-  for the change on every canvas: update_library_everywhere on the library canvas (dry_run first;
-  it changes other people's canvases; approved frames keep their sign-off).`
+  for the change on every canvas: update_library_everywhere on the library canvas (ask the human
+  first: it changes other people's canvases; approved frames keep their sign-off).`
 
 export const DOOP_GUIDE = `# Doop Agent Guide
 

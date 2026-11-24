@@ -78,13 +78,12 @@ describe('workspace component library', () => {
     expect((await canvasOf(libraryId)).landingPageId).toBeUndefined()
   })
 
-  it('publishes a snapshot, and a dry run publishes nothing', async () => {
-    const dry = await owner.post(`/api/canvases/${libraryId}/library/publish`, { dryRun: true })
-    expect((await json<{ published: unknown[] }>(dry)).published).toHaveLength(1)
+  it('publishes a snapshot', async () => {
     expect((await libraryOf(libraryId)).library).toBe(false)
 
     const res = await owner.post(`/api/canvases/${libraryId}/library/publish`, {})
     expect(res.status, await res.clone().text()).toBe(200)
+    expect((await json<{ published: unknown[] }>(res.clone())).published).toHaveLength(1)
     const status = await libraryOf(libraryId)
     expect(status.library).toBe(true)
     expect(status.changes[0]!.change).toBe('unchanged')
@@ -281,7 +280,6 @@ describe('workspace component library', () => {
     expect((await statusFor(admin)).canPublish).toBe(true)
     for (const refused of [
       await member.post(`/api/canvases/${kit}/library/publish`, {}),
-      await member.post(`/api/canvases/${kit}/library/publish`, { dryRun: true }),
       await member.delete(`/api/canvases/${kit}/library`),
     ]) {
       expect(refused.status).toBe(403)

@@ -102,12 +102,11 @@ describe('workspace library tools', () => {
     const consumer = workspaceCanvas('Landing', workspace.id)
     await card(library.id)
 
-    const dry = await call('publish_library', { canvas_id: library.id, dry_run: true })
-    expect(dry.data.published.map((entry: { name: string }) => entry.name)).toEqual(['Card'])
     expect((await call('get_canvas', { canvas_id: consumer.id })).data.workspaceLibraries).toBeUndefined()
 
     const published = await call('publish_library', { canvas_id: library.id })
     expect(published.isError).toBe(false)
+    expect(published.data.published.map((entry: { name: string }) => entry.name)).toEqual(['Card'])
     expect(published.data.is_library).toBe(true)
     expect(published.data.still_unpublished).toEqual([])
 
@@ -135,7 +134,7 @@ describe('workspace library tools', () => {
     await call('update_component', { canvas_id: library.id, component: 'Card', find: 'Title', replace: 'Heading' })
 
     policy.adminsOnly = true
-    for (const args of [{}, { dry_run: true }, { unpublish: true }]) {
+    for (const args of [{}, { unpublish: true }]) {
       const refused = await call('publish_library', { canvas_id: library.id, ...args })
       expect(refused.isError).toBe(true)
       expect(refused.text).toContain('limited to its owner and admins')
@@ -158,17 +157,6 @@ describe('workspace library tools', () => {
     await call('publish_library', { canvas_id: library.id })
     await call('import_component', { canvas_id: consumer.id, source_canvas_id: library.id, component: 'Card' })
 
-    /* a dry run on the library counts its own canvas, and names who else follows it */
-    const dry = await call('update_component', {
-      canvas_id: library.id,
-      component: 'Card',
-      find: 'Title',
-      replace: 'Heading',
-      dry_run: true,
-    })
-    expect(dry.data.impact.instances).toBe(0)
-    expect(dry.data.library_used_by).toEqual([{ canvas_id: consumer.id, canvas_name: 'Landing', components: ['Card'] }])
-    expect(dry.text).toContain('The impact counts this canvas only')
     /* find + replace is for the template: text that is in the CSS says so */
     const inCss = await call('update_component', {
       canvas_id: library.id,
@@ -179,7 +167,17 @@ describe('workspace library tools', () => {
     expect(inCss.isError).toBe(true)
     expect(inCss.text).toContain('pass the whole changed stylesheet as css')
 
-    await call('update_component', { canvas_id: library.id, component: 'Card', find: 'Title', replace: 'Heading' })
+    /* an update on the library counts its own canvas, and names who else follows it */
+    const changed = await call('update_component', {
+      canvas_id: library.id,
+      component: 'Card',
+      find: 'Title',
+      replace: 'Heading',
+    })
+    expect(changed.data.impact.instances).toBe(0)
+    expect(changed.data.library_used_by).toEqual([
+      { canvas_id: consumer.id, canvas_name: 'Landing', components: ['Card'] },
+    ])
     const before = await call('list_components', { canvas_id: consumer.id })
     expect(before.data.components[0].library_update_available).toBeUndefined()
 
@@ -273,7 +271,7 @@ describe('workspace library tools', () => {
 
     /* nothing is behind yet: it says so and touches nothing */
     const early = await call('update_library_everywhere', { canvas_id: library.id })
-    expect(early.data).toMatchObject({ dry_run: false, canvases: [], skipped: [] })
+    expect(early.data).toMatchObject({ canvases: [], skipped: [] })
     expect(early.text).toContain('already has its latest publication')
 
     await call('update_component', { canvas_id: library.id, component: 'Card', find: 'Title', replace: 'Heading' })
@@ -282,24 +280,15 @@ describe('workspace library tools', () => {
     expect(republished.text).toContain('update_library_everywhere')
     expect(landing.frames[0]!.html).toContain('Title')
 
-    const dry = await call('update_library_everywhere', { canvas_id: library.id, dry_run: true })
-    expect(dry.isError).toBe(false)
-    expect(dry.data.dry_run).toBe(true)
-    expect(dry.data.canvases).toEqual([
+    const done = await call('update_library_everywhere', { canvas_id: library.id })
+    expect(done.isError).toBe(false)
+    expect(done.data.canvases).toEqual([
       { canvas_id: landing.id, canvas_name: 'Landing', updated: ['Card'], frames_changed: 1, approvals_withdrawn: 0 },
       { canvas_id: pricing.id, canvas_name: 'Pricing', updated: ['Card'], frames_changed: 1, approvals_withdrawn: 0 },
     ])
     /* the canvas this account cannot open is counted, not named */
-    expect(dry.data.skipped).toEqual([expect.objectContaining({ reason: 'no_edit_access' })])
-    expect(dry.data.skipped[0].canvas_id).toBeUndefined()
-    expect(dry.text).toContain('nothing was changed')
-    expect(landing.frames[0]!.html).toContain('Title')
-    expect(pricing.frames[0]!.html).toContain('Title')
-
-    const done = await call('update_library_everywhere', { canvas_id: library.id })
-    expect(done.isError).toBe(false)
-    expect(done.data.canvases).toEqual(dry.data.canvases)
-    expect(done.data.skipped).toHaveLength(1)
+    expect(done.data.skipped).toEqual([expect.objectContaining({ reason: 'no_edit_access' })])
+    expect(done.data.skipped[0].canvas_id).toBeUndefined()
     expect(done.text).toContain('Updated 2 canvases')
     for (const consumer of [landing, pricing]) {
       expect(consumer.frames[0]!.html).toContain('Heading')
@@ -311,7 +300,7 @@ describe('workspace library tools', () => {
       expect(getActivity(consumer.id).filter((item) => item.message.includes('“Design system”'))).toHaveLength(1)
     }
     expect(store.getComponents(theirs.id)[0]!.template).toContain('Title')
-    expect((await call('publish_library', { canvas_id: library.id, dry_run: true })).data.used_by).toEqual([
+    expect((await call('publish_library', { canvas_id: library.id })).data.used_by).toEqual([
       { canvas_id: landing.id, canvas_name: 'Landing', components: ['Card'] },
       { canvas_id: pricing.id, canvas_name: 'Pricing', components: ['Card'] },
     ])

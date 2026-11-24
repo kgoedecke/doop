@@ -291,7 +291,6 @@ it('offers a library with canvases on an older version to update them everywhere
   ]
   const published = status({ library: true, changes: [{ id: 'c1', name: 'Button', change: 'unchanged' }], behind })
   mocks.updateLibraryEverywhere.mockResolvedValue({
-    dry_run: false,
     canvases: [
       { canvas_id: 'k1', canvas_name: 'Landing', updated: ['Button'], frames_changed: 2, approvals_withdrawn: 0 },
     ],
