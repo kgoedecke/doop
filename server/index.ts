@@ -186,6 +186,7 @@ import {
   type SentFrames,
   type SharedChange,
 } from './legacyFrames.ts'
+import { canvasAppBanner } from '../shared/iosApp.ts'
 import { COMPOSES_HEADER } from '../shared/frameCompose.ts'
 
 const PORT = env.PORT
@@ -4008,6 +4009,14 @@ if (env.isProduction) {
   /* a missing bundle or source map is a 404, not the app shell: HTML served
      as a .js or .map breaks module loads and source map resolution */
   app.get('/assets/*', (_req, res) => res.sendStatus(404))
+  /* Safari reads Smart App Banners from the initial document, before React
+     mounts. The native app checks the canvas link against its signed-in server. */
+  let canvasIndex: string | undefined
+  app.get('/c/:canvasId', (req, res) => {
+    canvasIndex ??= readFileSync(path.join(dist, 'index.html'), 'utf8')
+    const content = canvasAppBanner(req.params.canvasId, new URL(env.BETTER_AUTH_URL).origin)
+    res.type('html').send(canvasIndex.replace('</head>', `<meta name="apple-itunes-app" content="${content}"></head>`))
+  })
   app.get('*', (_req, res) => res.sendFile(path.join(dist, 'index.html')))
 }
 

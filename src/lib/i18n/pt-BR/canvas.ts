@@ -18,6 +18,7 @@ export const canvas: Catalog['canvas'] = {
   viewOnly: 'Somente visualização',
   readOnlyViewBanner: 'Você só pode visualizar este canvas.',
   readOnlyCommentBanner: 'Você só pode visualizar e comentar este canvas.',
+  accountOptions: 'Opções de conta',
   guestBanner: 'Cadastre-se para comentar, editar e muito mais.',
   dismissBanner: 'Dispensar',
   canvasIdTitle: 'Id do canvas — os agentes usam isto com as ferramentas MCP',

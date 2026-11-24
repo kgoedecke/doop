@@ -34,6 +34,7 @@ function AuthCard({
   title,
   as: Element = 'div',
   align = 'start',
+  inSheet = false,
   className,
   children,
   ...props
@@ -41,6 +42,7 @@ function AuthCard({
   title: React.ReactNode
   /** `form` when the card is the form, as on the sign-in screen */
   as?: 'div' | 'form'
+  inSheet?: boolean
   /** centred: the wordmark and every line of copy sit on the card's axis */
   align?: 'start' | 'center'
 }) {
@@ -48,14 +50,15 @@ function AuthCard({
     <Element
       data-slot="auth-card"
       className={cn(
-        'flex w-[min(400px,100%)] flex-col gap-3.5 rounded-card border border-line bg-surface p-6 pt-[30px] shadow-pop sm:p-9 sm:pb-7',
+        'flex w-[min(400px,100%)] flex-col gap-3.5',
+        inSheet ? 'mx-auto' : 'rounded-card border border-line bg-surface p-6 pt-[30px] shadow-pop sm:p-9 sm:pb-7',
         align === 'center' && 'text-center',
         className,
       )}
       {...props}
     >
-      <Wordmark className={cn('mb-1.5', align === 'center' && 'self-center')} />
-      <DashTitle className="break-words">{title}</DashTitle>
+      {!inSheet && <Wordmark className={cn('mb-1.5', align === 'center' && 'self-center')} />}
+      <DashTitle className={cn('break-words', inSheet && 'pr-9')}>{title}</DashTitle>
       {children}
     </Element>
   )

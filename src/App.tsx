@@ -58,6 +58,10 @@ export function App() {
   const [route, setRoute] = useState(location.pathname + location.search)
   const path = route.split('?')[0]!
   const { data: session, isPending } = authClient.useSession()
+  // Better Auth marks signed-out refetches pending too. Only the first
+  // lookup needs a loading screen; later checks must preserve the open form.
+  const [sessionChecked, setSessionChecked] = useState(!isPending)
+  if (!sessionChecked && !isPending) setSessionChecked(true)
   /* a signed-out guest on a share link asked for the sign-in form */
   const [guestAuth, setGuestAuth] = useState<'signin' | 'signup' | null>(null)
   const signInRequired = useStore((s) => s.signInRequired)
@@ -135,7 +139,7 @@ export function App() {
     if (localAgentUser) return startLocalAgent(localAgentUser)
   }, [localAgentUser])
 
-  if (isPending)
+  if (isPending && !sessionChecked)
     return (
       <>
         <ShellDragBar />

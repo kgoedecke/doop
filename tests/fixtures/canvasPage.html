@@ -2,6 +2,7 @@
 <html>
   <head>
     <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
   </head>
   <body>
     <div id="root"></div>
@@ -13,7 +14,8 @@
       import { useStore } from '/src/lib/store.ts'
       import '/src/styles.css'
 
-      const canvasId = new URLSearchParams(location.search).get('fixtureCanvasId') ?? 'c'
+      const query = new URLSearchParams(location.search)
+      const canvasId = query.get('fixtureCanvasId') ?? 'c'
 
       /* the canvas page as an editor has it open, with all its chrome; the
          test hands it the canvas the room would have sent */
@@ -29,7 +31,11 @@
         frameHtml: (id) => useStore.getState().canvas.frames.find((frame) => frame.id === id).html,
       }
       createRoot(document.getElementById('root')).render(
-        React.createElement(TooltipProvider, null, React.createElement(CanvasPage, { canvasId })),
+        React.createElement(
+          TooltipProvider,
+          null,
+          React.createElement(CanvasPage, { canvasId, guest: query.has('fixtureGuest') }),
+        ),
       )
     </script>
   </body>

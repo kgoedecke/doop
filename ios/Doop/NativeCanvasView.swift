@@ -31,7 +31,7 @@ struct NativeCanvasView: View {
     @State private var actionBusy = false
     @State private var clipboardAvailable = CanvasClipboard.isAvailable
     @State private var copiedSelection = false
-    private let summary: CanvasSummary
+    private let initialName: String
     private let currentUser: DoopUser?
     private enum Panel: Identifiable {
         case frames, inspector, tasks, comments, pages
@@ -48,10 +48,10 @@ struct NativeCanvasView: View {
         }
     }
 
-    init(summary: CanvasSummary, client: DoopClient, currentUser: DoopUser? = nil) {
+    init(id: String, name: String, client: DoopClient, currentUser: DoopUser? = nil) {
         self.currentUser = currentUser
-        self.summary = summary
-        _model = StateObject(wrappedValue: CanvasModel(id: summary.id, client: client))
+        self.initialName = name
+        _model = StateObject(wrappedValue: CanvasModel(id: id, client: client))
     }
 
     var body: some View {
@@ -158,7 +158,7 @@ struct NativeCanvasView: View {
         .background(CanvasBackSwipeGuard())
         // With a side rail the buttons live in the rail and the name is a glass pill over the
         // canvas, so the bar holds nothing: let the canvas show through it, as through the rail.
-        .navigationTitle(sideRailWidth > 0 ? "" : model.canvas?.name ?? summary.name).navigationBarTitleDisplayMode(.inline)
+        .navigationTitle(sideRailWidth > 0 ? "" : model.canvas?.name ?? initialName).navigationBarTitleDisplayMode(.inline)
         .toolbarBackground(sideRailWidth > 0 ? .hidden : .automatic, for: .navigationBar)
         .toolbar {
             if sideRailWidth > 0 {
@@ -166,9 +166,9 @@ struct NativeCanvasView: View {
                 // the system draws as a glass pill level with the rail's clock. It opens Pages.
                 ToolbarItem(placement: .topBarLeading) {
                     Button { openPagePicker() } label: {
-                        Text(model.canvas?.name ?? summary.name).font(.headline).lineLimit(1)
+                        Text(model.canvas?.name ?? initialName).font(.headline).lineLimit(1)
                     }
-                    .accessibilityLabel("Canvas \(model.canvas?.name ?? summary.name), pages")
+                    .accessibilityLabel("Canvas \(model.canvas?.name ?? initialName), pages")
                     .accessibilityIdentifier("canvas.name")
                 }
                 // Agents at work, level with the name: the first one, and how many more.

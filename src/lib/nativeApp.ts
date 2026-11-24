@@ -1,3 +1,5 @@
+import { useEffect } from 'react'
+import { IOS_APP_ID, canvasAppBanner } from '../../shared/iosApp'
 import { isDesktopShell } from './shell'
 
 /* Which of Doop's native apps suits the browser this page runs in, and
@@ -10,7 +12,7 @@ export type NativeAppPlatform = 'macos' | 'windows' | 'linux' | 'ios'
 /* absolute, like DOWNLOAD_URL in siteLinks.ts: the installers and the listing are the same
    whichever server the page came from. The /download/* routes on doop.design
    resolve the newest desktop release at request time. */
-export const APP_STORE_URL = 'https://apps.apple.com/us/app/doop-design/id6820090720'
+export const APP_STORE_URL = `https://apps.apple.com/us/app/doop-design/id${IOS_APP_ID}`
 const INSTALLERS: Record<Exclude<NativeAppPlatform, 'ios'>, string> = {
   macos: 'https://doop.design/download/mac',
   windows: 'https://doop.design/download/windows',
@@ -71,4 +73,18 @@ export function desktopCardDismissed(): boolean {
 export function iosPromptSnoozed(now = Date.now()): boolean {
   const at = readDismissals().ios
   return at !== undefined && now - at < IOS_PROMPT_SNOOZE_MS
+}
+
+/** Direct canvas links carry the tag in the initial HTML. Keep it in sync
+ * when the SPA opens another canvas or leaves the editor. */
+export function useCanvasAppBanner(canvasId: string) {
+  useEffect(() => {
+    if (nativeAppPlatform() !== 'ios') return
+    const existing = document.head.querySelector<HTMLMetaElement>('meta[name="apple-itunes-app"]')
+    const meta = existing ?? document.createElement('meta')
+    meta.name = 'apple-itunes-app'
+    meta.content = canvasAppBanner(canvasId, location.origin)
+    if (!existing) document.head.append(meta)
+    return () => meta.remove()
+  }, [canvasId])
 }
