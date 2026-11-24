@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { Fragment, useEffect, useState } from 'react'
 import { authClient } from '../lib/auth'
 import { authErrorCode, authErrorMessage } from '../lib/authError'
 import { BrandMark } from '../components/ui/brand-mark'
@@ -215,7 +215,11 @@ let browserSignInNotice: string | null = null
 
 /** `initialMode` opens the form on sign-up or sign-in, for a guest on a
  *  shared canvas who pressed one of the two (src/components/AccessBanner.tsx). */
-export function AuthPage({ initialMode }: { initialMode?: 'signin' | 'signup' } = {}) {
+export function AuthPage({
+  initialMode,
+  inSheet = false,
+}: { initialMode?: 'signin' | 'signup'; inSheet?: boolean } = {}) {
+  const Screen = inSheet ? Fragment : AuthScreen
   const t = useT()
   const oidc = useOidcConfig()
   /* better-auth lands password-reset links on /auth/reset?token=… */
@@ -404,8 +408,12 @@ export function AuthPage({ initialMode }: { initialMode?: 'signin' | 'signup' } 
 
   if (autoRedirect && !error) {
     return (
-      <AuthScreen>
-        <AuthCard title={t('auth.redirectingTo', { provider: oidc.displayName ?? '' })} align="center">
+      <Screen>
+        <AuthCard
+          inSheet={inSheet}
+          title={t('auth.redirectingTo', { provider: oidc.displayName ?? '' })}
+          align="center"
+        >
           <AuthCardText>{t('auth.taglineSignin')}</AuthCardText>
           <Button
             variant="link"
@@ -422,26 +430,28 @@ export function AuthPage({ initialMode }: { initialMode?: 'signin' | 'signup' } 
             {t('auth.signInAnotherWay')}
           </Button>
         </AuthCard>
-      </AuthScreen>
+      </Screen>
     )
   }
 
   return (
-    <AuthScreen>
-      <ServerSettings />
-      <AuthCard as="form" title={t(TITLES[mode])} onSubmit={submit}>
-        <AuthCardText className="mb-2">
-          {mode === 'forgot' ? (
-            t('auth.forgotBlurb')
-          ) : mode === 'reset' ? (
-            t('auth.resetBlurb')
-          ) : (
-            <>
-              {t('auth.taglineBefore')} <em className="not-italic text-brand">{t('auth.taglineEmphasis')}</em>
-              {t('auth.taglineAfter')} {mode === 'signin' ? t('auth.taglineSignin') : t('auth.taglineSignup')}
-            </>
-          )}
-        </AuthCardText>
+    <Screen>
+      {!inSheet && <ServerSettings />}
+      <AuthCard inSheet={inSheet} as="form" title={t(TITLES[mode])} onSubmit={submit}>
+        {(!inSheet || mode === 'forgot' || mode === 'reset') && (
+          <AuthCardText className="mb-2">
+            {mode === 'forgot' ? (
+              t('auth.forgotBlurb')
+            ) : mode === 'reset' ? (
+              t('auth.resetBlurb')
+            ) : (
+              <>
+                {t('auth.taglineBefore')} <em className="not-italic text-brand">{t('auth.taglineEmphasis')}</em>
+                {t('auth.taglineAfter')} {mode === 'signin' ? t('auth.taglineSignin') : t('auth.taglineSignup')}
+              </>
+            )}
+          </AuthCardText>
+        )}
         {(oidc.enabled || oidc.google || oidc.microsoft || oidc.apple) && (mode === 'signin' || mode === 'signup') && (
           <>
             {oidc.google && (
@@ -605,6 +615,6 @@ export function AuthPage({ initialMode }: { initialMode?: 'signin' | 'signup' } 
           </Button>
         )}
       </AuthCard>
-    </AuthScreen>
+    </Screen>
   )
 }

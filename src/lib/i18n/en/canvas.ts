@@ -19,6 +19,7 @@ export const canvas = {
   viewOnly: 'View only',
   readOnlyViewBanner: 'You can only view this canvas.',
   readOnlyCommentBanner: 'You can only view and comment on this canvas.',
+  accountOptions: 'Account options',
   guestBanner: 'Sign up to comment, edit and more.',
   dismissBanner: 'Dismiss',
   canvasIdTitle: 'Canvas id — agents use this with the MCP tools',

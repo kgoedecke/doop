@@ -50,7 +50,8 @@ import { LimitWall, isResidentLimit } from '../components/TeamAllowance'
 import { WorkingNow } from '../components/WorkingNow'
 import { MobilePanelTabs, SideRail } from '../components/SideRail'
 import { LayersPanel, LayersRailToggle } from '../components/LayersPanel'
-import { IosAppPrompt } from '../components/NativeAppPromo'
+import { MobileGuestSheet } from '../components/MobileGuestSheet'
+import { useCanvasAppBanner } from '../lib/nativeApp'
 import { noteActiveDay } from '../lib/githubStar'
 import { Onboarding } from '../components/Onboarding'
 import { AccessBanner } from '../components/AccessBanner'
@@ -267,6 +268,9 @@ export function CanvasPage({
   const readOnly = useStore((s) => guest || !canEditOpenCanvas(s))
   const editorReady = useStore((s) => !guest && s.canvas?.id === canvasId && canEditOpenCanvas(s))
   const isMobile = useIsMobile()
+  const mobileGuest = guest && isMobile
+  const [guestSheetExpanded, setGuestSheetExpanded] = useState(true)
+  useCanvasAppBanner(canvasId)
   const prototypeMode = useStore((s) => s.prototypeMode)
   const [panelWidths, setPanelWidths] = useState(readPanelWidths)
   const [viewportWidth, setViewportWidth] = useState(() => window.innerWidth)
@@ -875,11 +879,12 @@ export function CanvasPage({
   return (
     /* --app-inset is 0 normally; the impersonation shell raises it so this
        fixed layer starts below the banner instead of under it */
-    <div className="fixed inset-x-0 bottom-0 top-[var(--app-inset,0px)] bg-canvas">
+    <div
+      className={cn('fixed inset-x-0 bottom-0 top-[var(--app-inset,0px)] bg-canvas', mobileGuest && 'flex flex-col')}
+    >
       {/* Floating pills over the canvas, which shows through the transparent
           bar: the title pill on the left, live presence centred, sharing on
-          the right. Tablet (xs..md) folds the text actions into the •••
-          sheet; phone (< xs) wraps to two rows. ⌘. hides the chrome (this
+          the right. Phones and tablets fold actions into the ••• sheet. ⌘. hides the chrome (this
           bar, the panels, the toolbars) with display:none rather than
           unmounting it, so what it holds — a composer draft, the expanded
           layers, a scroll position — is exactly as it was when ⌘. brings it
@@ -891,7 +896,7 @@ export function CanvasPage({
         className={cn(uiHidden && 'hidden')}
         style={rulerInset ? { top: rulerInset, left: rulerInset } : undefined}
       >
-        <div className="flex min-w-0 items-center gap-2 max-xs:basis-full">
+        <div className="flex min-w-0 items-center gap-2">
           <BarPill className="min-w-0 gap-1 pr-3 pl-1">
             <MainMenu
               trigger={
@@ -1005,7 +1010,7 @@ export function CanvasPage({
             </Button>
           )}
         </div>
-        <div className="ml-auto hidden items-center gap-1.5 max-md:flex max-xs:order-3">
+        <div className="ml-auto hidden shrink-0 items-center gap-1.5 max-md:flex">
           <div
             className="mr-1 flex items-center max-sm:hidden"
             title={others.map((p) => p.name).join(', ') || t('canvas.justYou')}
@@ -1043,12 +1048,21 @@ export function CanvasPage({
       {/* the canvas runs under the transparent top bar to the window's top
           edge; the floating chrome gets its own layer that starts below the
           bar, so every panel offset stays measured from there */}
-      <div className="absolute inset-0 overflow-hidden" style={chromeVars}>
+      <div
+        className={cn('overflow-hidden', mobileGuest ? 'relative min-h-0 flex-1' : 'absolute inset-0')}
+        style={chromeVars}
+      >
         {find && !presenting && !uiHidden && <FindBar mode={find} step={findStep} onClose={() => setFind(null)} />}
-        <Stage onAddFrame={addFrame} insets={stageInsets} bounds={stageBounds} docked={docked} />
+        <Stage
+          onAddFrame={addFrame}
+          insets={stageInsets}
+          bounds={stageBounds}
+          docked={docked}
+          hideTools={mobileGuest && !!loadedCanvasId && guestSheetExpanded}
+        />
         <div
           className={cn(
-            'pointer-events-none absolute inset-x-0 bottom-0 top-[50px] max-md:top-14 max-xs:top-[100px]',
+            'pointer-events-none absolute inset-x-0 bottom-0 top-[50px] max-md:top-14',
             uiHidden && 'hidden',
           )}
           /* panel offsets are measured from this layer, so moving it past
@@ -1103,8 +1117,7 @@ export function CanvasPage({
               line; this per-agent stack is only for windows too narrow for it */}
           <WorkingNow style={{ left: chrome.left }} className="min-[1180px]:hidden" />
           {!readOnly && <Onboarding canvasId={canvasId} />}
-          <IosAppPrompt />
-          <AccessBanner guest={guest} onSignUp={onSignUp} onSignIn={onSignIn} />
+          {!mobileGuest && <AccessBanner guest={guest} onSignUp={onSignUp} onSignIn={onSignIn} />}
           {!isMobile &&
             (layersOpen ? (
               <LayersPanel
@@ -1193,6 +1206,13 @@ export function CanvasPage({
         </div>
       </div>
 
+      {guest && loadedCanvasId && (
+        <MobileGuestSheet
+          launcherVisible={mobileGuest && !uiHidden}
+          expanded={guestSheetExpanded}
+          onExpandedChange={setGuestSheetExpanded}
+        />
+      )}
       {isMobile && (
         <>
           <Sheet open={showMobileActions} onOpenChange={setShowMobileActions}>

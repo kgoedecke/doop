@@ -7,7 +7,7 @@ import { IconButton } from './ui/icon-button'
 import { EyeIcon, XIcon } from './ui/icons'
 
 const bannerClass =
-  'pointer-events-auto absolute bottom-3.5 left-1/2 z-30 flex max-w-[calc(100%-32px)] -translate-x-1/2 items-center gap-3 rounded-panel bg-surface py-1.5 pr-1.5 pl-3.5 text-body text-ink shadow-pop max-md:bottom-[72px]'
+  'pointer-events-auto absolute bottom-3.5 left-1/2 z-30 flex max-w-[calc(100%-32px)] -translate-x-1/2 items-center gap-3 rounded-panel bg-surface py-1.5 pr-1.5 pl-3.5 text-body text-ink shadow-pop max-md:bottom-[calc(112px+env(safe-area-inset-bottom))] max-md:w-max'
 
 /** The note at the foot of a canvas someone can only look at, as Figma
  *  shows it: a signed-out guest is asked to sign up, a signed-in viewer or
@@ -34,10 +34,10 @@ export function AccessBanner({
       <div role="status" className={cn(bannerClass, className)}>
         <span className="min-w-0">{t('canvas.guestBanner')}</span>
         <span className="flex flex-none items-center gap-1.5">
-          <Button size="sm" onClick={onSignIn}>
+          <Button size="sm" data-guest-auth="signin" onClick={onSignIn}>
             {t('auth.signIn')}
           </Button>
-          <Button size="sm" variant="primary" onClick={onSignUp}>
+          <Button size="sm" variant="primary" data-guest-auth="signup" onClick={onSignUp}>
             {t('auth.signUp')}
           </Button>
         </span>

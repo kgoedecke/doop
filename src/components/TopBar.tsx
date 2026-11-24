@@ -8,37 +8,34 @@ import { Tooltip } from './ui/tooltip'
 import { cn } from '@/lib/utils'
 import { useT } from '../lib/i18n'
 
-const topBarVariants = cva(
-  'z-40 flex flex-none items-center max-xs:h-[100px] max-xs:flex-wrap max-xs:content-center max-xs:gap-y-2 max-xs:py-2',
-  {
-    variants: {
-      variant: {
-        /* a full-width strip with a hairline under it (the automation editor) */
-        solid: 'h-14 gap-4 border-b border-line-soft bg-surface px-4 max-md:gap-2.5 max-md:px-3',
-        /* the canvas editor: no strip at all — floating pills over the
+const topBarVariants = cva('z-40 flex flex-none items-center', {
+  variants: {
+    variant: {
+      /* a full-width strip with a hairline under it (the automation editor) */
+      solid:
+        'h-14 gap-4 border-b border-line-soft bg-surface px-4 max-md:gap-2.5 max-md:px-3 max-xs:h-[100px] max-xs:flex-wrap max-xs:content-center max-xs:gap-y-2 max-xs:py-2',
+      /* the canvas editor: no strip at all — floating pills over the
            canvas, which shows through the transparent bar. The pills sit
            14px from the top edge, the same as from the left and right ones.
            Only the pills take the pointer; the gaps between them pan and
            select as canvas. */
-        canvas:
-          'pointer-events-none absolute inset-x-0 top-0 h-[50px] items-start gap-2.5 bg-transparent px-3.5 pt-3.5 max-md:h-14 max-md:items-center max-md:gap-2 max-md:px-3 max-md:pt-0 [&>*]:pointer-events-auto',
-        /* the canvas editor with docked panels: a solid strip over the
+      canvas:
+        'pointer-events-none absolute inset-x-0 top-0 h-[50px] items-start gap-2.5 bg-transparent px-3.5 pt-3.5 max-md:h-14 max-md:items-center max-md:gap-2 max-md:px-3 max-md:pt-0 [&>*]:pointer-events-auto',
+      /* the canvas editor with docked panels: a solid strip over the
            columns, the pills flat inside it. The leading folder glyph lines
            up with the Layers panel's own icon, 14px in. */
-        docked:
-          'absolute inset-x-0 top-0 h-11 items-center gap-2.5 border-b border-line-soft bg-surface pr-3.5 pl-0.5 [&_[data-slot=bar-pill]]:shadow-none',
-      },
+      docked:
+        'absolute inset-x-0 top-0 h-11 items-center gap-2.5 border-b border-line-soft bg-surface pr-3.5 pl-0.5 [&_[data-slot=bar-pill]]:shadow-none',
     },
-    defaultVariants: { variant: 'solid' },
   },
-)
+  defaultVariants: { variant: 'solid' },
+})
 
 /**
  * The top bar of a full-screen working surface — the canvas screen and the
  * automation editor share it, so a name field, a view switch and an action
- * cluster look and behave the same on both. Three tiers: desktop is one row
- * with the full action set, tablet folds text actions into a ••• sheet,
- * phone wraps to two rows with the name on top.
+ * cluster look and behave the same on both. The canvas folds actions into a ••• sheet on
+ * smaller screens. The automation editor wraps to two rows on phones.
  */
 export function TopBar({
   className,

@@ -8,10 +8,13 @@ struct AgentActivityAttributes: ActivityAttributes {
     let serverOrigin: String
 }
 
-/// The link a Live Activity opens: `doop://canvas/<id>?server=<origin>`.
+/// The link a Live Activity or Safari banner opens: `doop://canvas/<id>?server=<origin>`.
 /// ContentView answers it by opening that canvas when the app is signed in
 /// to the same server.
-enum CanvasLink {
+struct CanvasLink: Equatable {
+    let canvasID: String
+    let serverOrigin: String
+
     static func url(canvasID: String, serverOrigin: String) -> URL? {
         var components = URLComponents()
         components.scheme = "doop"
@@ -21,11 +24,14 @@ enum CanvasLink {
         return components.url
     }
 
-    static func parse(_ url: URL) -> (canvasID: String, serverOrigin: String)? {
+    static func parse(_ url: URL) -> CanvasLink? {
         guard url.scheme == "doop", url.host == "canvas",
               let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
               let server = components.queryItems?.first(where: { $0.name == "server" })?.value else { return nil }
         let id = String(url.path.dropFirst())
-        return id.isEmpty ? nil : (id, server)
+        // Canvas IDs are a single URL path segment, including when used for a REST lookup.
+        let allowed = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_.~")
+        guard !id.isEmpty, id != ".", id != "..", id.unicodeScalars.allSatisfy(allowed.contains) else { return nil }
+        return CanvasLink(canvasID: id, serverOrigin: server)
     }
 }

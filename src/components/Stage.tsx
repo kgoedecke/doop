@@ -199,6 +199,7 @@ export function Stage({
   insets = NO_INSETS,
   bounds,
   docked = false,
+  hideTools = false,
 }: {
   onAddFrame: () => void
   /** px the top bar, floating panels and islands cover at each of the
@@ -210,6 +211,7 @@ export function Stage({
   bounds?: StageInsets
   /** the panels are docked, so the tool rail is a full-height column too */
   docked?: boolean
+  hideTools?: boolean
 }) {
   const ref = useRef<HTMLDivElement>(null)
   /* read by the fit callbacks, which outlive a render */
@@ -890,7 +892,7 @@ export function Stage({
         byPointer = false
         return
       }
-      if (isTyping(e) || !byPointer) return
+      if (isTyping(e) || !byPointer || (e.target instanceof Element && e.target.closest('[role="dialog"]'))) return
       const control = (e.target as HTMLElement).closest<HTMLElement>(PRESSABLE)
       if (!control) return
       control.blur()
@@ -1322,7 +1324,7 @@ export function Stage({
             'absolute bottom-[calc(8px+env(safe-area-inset-bottom))] left-1/2 z-[35] -translate-x-1/2 sm:bottom-4',
             'md:top-[calc(var(--chrome-top,0px)+10px)] md:bottom-auto md:left-[var(--rail-left,14px)] md:translate-x-0 md:transition-[left] md:duration-150',
             docked && 'md:top-[var(--chrome-top,0px)] md:bottom-0',
-            uiHidden && 'hidden',
+            (uiHidden || hideTools) && 'hidden',
           )}
         >
           {isDrawingTool(tool) && (
@@ -1391,7 +1393,7 @@ export function Stage({
 
         <ZoomControls
           labelRef={zoomLabelRef}
-          hidden={uiHidden}
+          hidden={uiHidden || hideTools}
           onZoomIn={() => ref.current && zoomCentered(ref.current, useStore.getState().viewport.zoom * 1.25)}
           onZoomOut={() => ref.current && zoomCentered(ref.current, useStore.getState().viewport.zoom / 1.25)}
           onZoomTo={(zoom) => ref.current && zoomCentered(ref.current, zoom)}
