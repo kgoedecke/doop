@@ -43,6 +43,14 @@
         selection: () => useStore.getState().selectedElement,
         updateHtml: (html) => useStore.getState().patchFrameLocal('f', { html }),
         selectMany: (ids) => useStore.getState().selectMany(ids),
+        pick: (selectors) => {
+          useStore.getState().select('f')
+          useStore.getState().pickElements('f', selectors)
+        },
+        picked: () => useStore.getState().selectedElements,
+        selectedIds: () => useStore.getState().selectedIds,
+        openPanel: () => useStore.getState().setElementPanelOpen(true),
+        panelOpen: () => useStore.getState().elementPanelOpen,
         undo,
         redo,
       }

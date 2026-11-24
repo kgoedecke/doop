@@ -1103,7 +1103,13 @@ export const FrameView = memo(function FrameView({
     )
       return
     let cancelled = false
-    void requestFrame(frame.id, 'doop:context-hit', { x: menuProbe.x, y: menuProbe.y }).then((reply) => {
+    /* a multi-pick goes along: a right-click inside one of its layers is that
+       layer's, so the pick is kept. A single pick is not: the menu targets the
+       layer under the pointer, a cell inside a picked row included */
+    const now = useStore.getState()
+    const picks = now.selectedElement?.frameId === frame.id ? pickedSelectors(now) : []
+    const selected = picks.length > 1 ? picks : []
+    void requestFrame(frame.id, 'doop:context-hit', { x: menuProbe.x, y: menuProbe.y, selected }).then((reply) => {
       const store = useStore.getState()
       const live = store.canvas?.frames.find((f) => f.id === frame.id)
       if (cancelled || menuProbe.request !== menuRequest.current || store.ctxMenu?.frameId !== frame.id) return
@@ -1118,14 +1124,23 @@ export const FrameView = memo(function FrameView({
       /* a right-click inside a multi-pick keeps the pick, the clicked layer
          its primary, so the menu's commands act on all of it */
       const picked = store.selectedElement?.frameId === frame.id ? pickedSelectors(store) : []
+      const standalone = live ? standaloneSelector(live) : null
+      const wasSelected = store.selectedIds.includes(frame.id)
+      const others = wasSelected && store.selectedIds.length > 1
+      /* a shape among several selected keeps them all, as its Layers row does */
+      if (hit && standalone === hit.selector && others) return
       /* a shape on the canvas is its frame: the right-click selects it, so a
-         stale frame selection is not what Move to page or Group act on */
-      if (hit && live && standaloneSelector(live) === hit.selector && !store.selectedIds.includes(frame.id)) {
-        store.select(frame.id)
-      }
+         stale frame selection is not what Move to page or Group act on, and a
+         layer inside one (a group's) narrows the selection to its frame, so
+         the menu acts on that layer alone */
+      if (hit && standalone && (!wasSelected || others)) store.select(frame.id)
       if (hit && picked.length > 1 && picked.includes(hit.selector)) {
         store.pickElements(frame.id, [...picked.filter((s) => s !== hit.selector), hit.selector])
-      } else store.setSelectedElement(hit ? { frameId: frame.id, selector: hit.selector } : null)
+      } else if (hit) store.setSelectedElement({ frameId: frame.id, selector: hit.selector })
+      else {
+        /* nothing under the pointer: the pick goes, and its panel with it */
+        store.pickElement(null)
+      }
     })
     return () => {
       cancelled = true
@@ -1859,10 +1874,18 @@ export const FrameView = memo(function FrameView({
            Inspector waits until the menu closes — it must not slide in
            underneath the menu the user just opened */
         const alreadySelected = store.selectedIds.includes(frame.id)
-        /* a right-click inside a group keeps the group, so Delete takes all */
-        if (!alreadySelected || menuKind.current === 'element') select(frame.id)
-        closePopovers()
-        store.pickElement(null)
+        const elementMenu = menuKind.current === 'element'
+        /* a right-click inside a group keeps the group, so Delete takes all;
+           a shape on the canvas is a frame of the group, whichever menu */
+        if (!alreadySelected || (elementMenu && !standaloneSelector(frame))) select(frame.id)
+        /* the element menu keeps the pick and its outline until its hit
+           answers: a right-click inside a multi-pick keeps it (the hit's
+           effect above decides) */
+        if (elementMenu) closeElementPopovers()
+        else {
+          closePopovers()
+          store.pickElement(null)
+        }
         store.openCtxMenu({ frameId: frame.id, deferPanel: !alreadySelected })
       }}
     >
