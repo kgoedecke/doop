@@ -4,10 +4,13 @@ import Foundation
 public struct FrameStream: Equatable {
     public var name: String
     public var color: String
+    /// When the stream began (ms), so the newest of an agent's streams can be told apart.
+    public var since: Double
 
-    public init(name: String, color: String) {
+    public init(name: String, color: String, since: Double = 0) {
         self.name = name
         self.color = color
+        self.since = since
     }
 }
 

@@ -35,6 +35,8 @@ final class CanvasModel: ObservableObject {
     @Published var focusedCommentID: String?
     /// A comment being written at a spot the person long-pressed, shown as a draft pin.
     @Published var commentDraft: CommentDraft?
+    /// A frame the canvas should glide to and fit; the canvas clears it once there.
+    @Published var flyToFrameID: String?
     /// A thread picked in the Comments list: the canvas moves to its pin, then clears this.
     @Published var flyToCommentID: String?
     @Published var viewportCommand = 0
@@ -103,6 +105,30 @@ final class CanvasModel: ObservableObject {
         }
     }
     var selected: DesignFrame? { pageFrames.first { $0.id == selectedID } }
+
+    /// The frame an agent is at work on, as the web follows an agent (`agentFollowFrame`):
+    /// the frame this agent's own presence has open, else the newest frame streamed under
+    /// its name. Names are not unique (two people's "Claude"), so the presence comes first.
+    func workingFrame(of agent: WorkingAgent) -> String? {
+        let frames = Set((canvas?.frames ?? []).map(\.id))
+        if let id = presences.first(where: { $0.clientId == agent.id })?.activeFrameId, frames.contains(id) {
+            return id
+        }
+        return streams.filter { $0.value.name == agent.name && frames.contains($0.key) }
+            .max { $0.value.since < $1.value.since }?.key
+    }
+
+    /// Show the frame an agent works on, switching to its page first. False when
+    /// the agent has no frame yet (a card nobody has picked up).
+    @discardableResult func goToWork(of agent: WorkingAgent) -> Bool {
+        guard let id = workingFrame(of: agent) else { return false }
+        // Selecting reveals the frame's page, the default one for a frame with no page.
+        select(id)
+        commentDraft = nil
+        focusedCommentID = nil
+        flyToFrameID = id
+        return true
+    }
     var canEdit: Bool { connected && pendingEdits == 0 && !undoing }
     var canUndo: Bool { canEdit && !undoStack.isEmpty }
 
@@ -274,7 +300,7 @@ final class CanvasModel: ObservableObject {
         case "frame:streaming":
             guard let frameID = event.frameId else { break }
             if event.active == true, let actor = event.actor {
-                streams[frameID] = FrameStream(name: actor.name, color: actor.color)
+                streams[frameID] = FrameStream(name: actor.name, color: actor.color, since: Date().timeIntervalSince1970 * 1000)
             } else {
                 streams[frameID] = nil
             }
