@@ -67,11 +67,24 @@ import {
   frameEditProblem,
   libraryCatalog,
   unbalancedProblem,
+  usageOf,
 } from './componentActions.ts'
 import { activeComponents } from '../shared/components.ts'
 import { isAutomationCard } from '../shared/automations.ts'
 import { getUserName } from './auth.ts'
 import { settleForRead } from './propagation.ts'
+import {
+  type CheckState,
+  markChecksSeen,
+  noteComponentChange,
+  noteComponentScreenshot,
+  noteFrameChange,
+  noteFrameScreenshot,
+  stillToCheck,
+  unchecked,
+  uncheckedKey,
+  unverifyFrame,
+} from './changeChecks.ts'
 import { runOperation } from './workBudget.ts'
 import { detached, savepoint } from './journal.ts'
 import { existingStyle, existingStyleBrief } from './existingStyle.ts'
@@ -239,7 +252,7 @@ Rules:
 ${FRAME_STYLES}
 ${LEAN_FRAMES}
 - Prefer edit_frame_html (exact find/replace) for small changes; use set_frame_html only when the change is structural.
-- After any visual change, call screenshot_frame and LOOK at the result. If it doesn't clearly satisfy the feedback, fix it before finishing. Check reuse too: a part of the canvas's component system drawn inline, a reusable piece (button, input, nav, card, row) that is not a component yet, a block repeated that is not a <doop-use>, or a hex, font or size a token already names.
+- After any visual change, call screenshot_frame and LOOK at the result. If it doesn't clearly satisfy the feedback, fix it before finishing. Every frame you wrote needs a screenshot taken after your last write to it; a component change needs one look, at its main, at any frame using it, or with screenshot_component. Tool results say what is still to check: a run that finishes with anything unchecked is failed. Check reuse too: a part of the canvas's component system drawn inline, a reusable piece (button, input, nav, card, row) that is not a component yet, a block repeated that is not a <doop-use>, or a hex, font or size a token already names.
 - Call set_status when you start ("Fixing: …") and when your focus shifts. One line, under 80 chars, present tense. People watch this live.
 - Never leave a frame worse than you found it.
 - Reference sites: when a request names a site or URL — a redesign of it, or "like acme.com" — call import_webpage with as_reference=true FIRST so an editable HTML snapshot lands on the canvas, then call screenshot_frame on that imported source and design from what is actually there: its real copy, nav labels, product facts, and imagery direction. Leave the imported source unchanged and deliver your work in a separate frame. If importing or editing the snapshot itself is the requested deliverable, use as_reference=false. view_website is read-only; use it only when you need to inspect a live page without adding it to the canvas. A redesign that invents content is wrong even when it looks good. If automated access is blocked and there is no existing source frame or attached screenshot, stop and ask the user to attach screenshots; never approximate the site from guesses.
@@ -318,20 +331,13 @@ export function requestedSkillsPrompt(
   return skillsBlock(skillsForCanvas(canvas), text)
 }
 
-interface RunState {
-  mutatedFrames: Set<string>
+/** What the run did and what it still owes. What it changed and has to look at
+ *  before finishing is the CheckState (server/changeChecks.ts); with `vision`
+ *  false screenshots are skipped and nothing has to be looked at. */
+interface RunState extends CheckState {
   sourceFrames: Set<string>
-  verificationFrames: Set<string>
-  verifiedFrames: Set<string>
-  /* the verified frames whose screenshots the model has had back in a
-     turn, and that nothing has changed since: a screenshot taken on the
-     last allowed turn was never looked at */
-  seenVerified: Set<string>
   rewriteDrafts: Map<string, string>
   blockedWebsiteAccess?: string
-  /** false = the model cannot see images: screenshots are skipped and the
-   *  visual-verification requirement does not apply to this run */
-  vision: boolean
   /** whose account pays for generated images: the run's payer, else the server key */
   payerId?: string
   /** the person whose work this run claims, whoever pays for the model
@@ -355,6 +361,9 @@ interface RunState {
    *  reordered or deleted, a frame renamed, moved or its approval set): work a
    *  card can ask for on its own, delivered without a design change */
   arrangeWrites: number
+  /** component writes that took (made, changed, restored, imported, pulled or
+   *  deleted): work a card can ask for on its own, often with no frame edited */
+  componentWrites: number
   /** some of the run's work was queued by an automation: such a run never sets approval,
    *  which would sign off its own output and could start the automation again */
   automated?: boolean
@@ -368,6 +377,8 @@ export function newRunState(start: Partial<RunState> = {}): RunState {
     verificationFrames: new Set(),
     verifiedFrames: new Set(),
     seenVerified: new Set(),
+    componentChecks: new Map(),
+    componentWrites: 0,
     rewriteDrafts: new Map(),
     vision: false,
     imagesGenerated: 0,
@@ -445,12 +456,17 @@ function deliverableFrameIds(runState: RunState): string[] {
 }
 
 /** Whether the run has delivered anything a card can ask for: a frame of its
- *  own changed or created, or a token or arrangement write that took.
+ *  own changed or created, or a token, arrangement or component write that took.
  *  Exported for tests. */
 export function deliveredWork(
-  runState: Pick<RunState, 'mutatedFrames' | 'sourceFrames' | 'tokenWrites' | 'arrangeWrites'>,
+  runState: Pick<RunState, 'mutatedFrames' | 'sourceFrames' | 'tokenWrites' | 'arrangeWrites' | 'componentWrites'>,
 ): boolean {
-  return deliverableFrameIds(runState as RunState).length > 0 || runState.tokenWrites > 0 || runState.arrangeWrites > 0
+  return (
+    deliverableFrameIds(runState as RunState).length > 0 ||
+    runState.tokenWrites > 0 ||
+    runState.arrangeWrites > 0 ||
+    runState.componentWrites > 0
+  )
 }
 
 /** How many of a token call's results took. Exported for tests. */
@@ -458,15 +474,20 @@ export function tokenWritesIn(results: readonly TokenResult[]): number {
   return results.filter((r) => r.result !== 'error').length
 }
 
-/** A change to a frame undoes every check of it, seen or not. */
-function unverify(runState: Pick<RunState, 'verifiedFrames' | 'seenVerified'>, frameId: string) {
-  runState.verifiedFrames.delete(frameId)
-  runState.seenVerified.delete(frameId)
+/** What the run has changed on this canvas and not yet looked at (server/changeChecks.ts).
+ *  `seen`: only looks whose results reached the model. Exported for tests. */
+export function uncheckedChanges(runState: CheckState, canvasId: string, options?: { seen?: boolean }) {
+  return unchecked(runState, (frameId) => store.getFrame(frameId)?.canvasId === canvasId, options)
 }
 
-function verificationFrameIds(runState: RunState): string[] {
-  return [...new Set([...runState.mutatedFrames, ...runState.verificationFrames])]
+function stillToCheckOn(runState: CheckState, canvasId: string): string {
+  return stillToCheck(uncheckedChanges(runState, canvasId), (frameId) => store.getFrame(frameId)?.name ?? frameId)
 }
+
+/* an API run that would finish with something unchecked is reminded in a turn of its own,
+   again after a fix-up that changed another frame or the same one, but only a few times:
+   one that cannot or will not look is failed, not looped */
+const MAX_CHECK_REMINDERS = 3
 
 function completeHtml(value: unknown): string | undefined {
   if (typeof value !== 'string') return undefined
@@ -793,7 +814,7 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
     let unavailableModel = false
     let finished = false
     let mutationNudgeSent = false
-    let verificationNudgeSent = false
+    let checkReminders = 0
     let outputLimitNudgeSent = false
     let turnsUsed = 0
 
@@ -937,6 +958,11 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
                 content: 'This task has been stopped.',
                 is_error: true,
               }
+            /* the harness has no turns to count: a screenshot answered before the next call
+               is taken as seen, since Claude Code asks for a call once the earlier results
+               are in front of the model (calls sent together in one message are the
+               exception, and only a run stopped at its limit reads this) */
+            markChecksSeen(runState)
             return execTool(block, canvasId, actor, runState)
           },
         })
@@ -955,7 +981,7 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
           /* the status showing when the connection dropped, so a recovered
              run picks its narration back up instead of staying "reconnecting" */
           let interruptedStatus: string | undefined
-          runState.seenVerified = new Set(runState.verifiedFrames)
+          markChecksSeen(runState)
           const res = await retryModelTurn(
             () =>
               runModel({
@@ -1074,14 +1100,15 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
             })
             continue
           }
-          const unverified = runState.vision
-            ? verificationFrameIds(runState).filter((id) => !runState.verifiedFrames.has(id))
-            : []
-          if (cards.length > 0 && unverified.length > 0 && !verificationNudgeSent) {
-            verificationNudgeSent = true
+          if (
+            cards.length > 0 &&
+            uncheckedChanges(runState, canvasId).length > 0 &&
+            checkReminders < MAX_CHECK_REMINDERS
+          ) {
+            checkReminders += 1
             messages.push({
               role: 'user',
-              content: `You have not visually verified ${unverified.join(', ')}. Call screenshot_frame for each frame, inspect the render, and fix any problems before finishing.`,
+              content: `You have not visually verified everything you changed. ${stillToCheckOn(runState, canvasId)} Inspect each render and fix any problems before finishing.`,
             })
             continue
           }
@@ -1137,24 +1164,20 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
       runState.rewriteDrafts.size === 0 &&
       deliveredWork(runState) &&
       !blockedWebsiteAccess &&
-      !(runState.vision && verificationFrameIds(runState).some((id) => !runState.seenVerified.has(id)))
+      uncheckedChanges(runState, canvasId, { seen: true }).length === 0
     if (cappedDone) finished = true
     const exhausted = capped && !cappedDone
     if (exhausted) actions.setAgentStatus(canvasId, actor, 'Hit its limit — waiting for a retry')
     const noMutation = finished && requireMutation && !deliveredWork(runState) && !blockedWebsiteAccess
     const unverifiedMutation =
-      finished &&
-      runState.vision &&
-      !blockedWebsiteAccess &&
-      cards.length > 0 &&
-      verificationFrameIds(runState).some((id) => !runState.verifiedFrames.has(id))
+      finished && !blockedWebsiteAccess && cards.length > 0 && uncheckedChanges(runState, canvasId).length > 0
     if (blockedWebsiteAccess && !staleAccount) {
       actions.setAgentStatus(canvasId, actor, 'Website blocked — needs screenshots')
     }
     if (noMutation) actions.setAgentStatus(canvasId, actor, 'Nothing changed — waiting for a retry')
     if (unverifiedMutation) actions.setAgentStatus(canvasId, actor, 'Change not verified — waiting for a retry')
     console.log(
-      `[resident] run end canvas=${canvasId} agent=${role.name} turns=${turnsUsed} finished=${finished} capped=${capped} refused=${refused} crashed=${crashed} mutations=${runState.mutatedFrames.size} sources=${runState.sourceFrames.size} deliverables=${deliverableFrames.length} tokenWrites=${runState.tokenWrites} arrangeWrites=${runState.arrangeWrites} verified=${runState.verifiedFrames.size}`,
+      `[resident] run end canvas=${canvasId} agent=${role.name} turns=${turnsUsed} finished=${finished} capped=${capped} refused=${refused} crashed=${crashed} mutations=${runState.mutatedFrames.size} sources=${runState.sourceFrames.size} deliverables=${deliverableFrames.length} tokenWrites=${runState.tokenWrites} arrangeWrites=${runState.arrangeWrites} componentWrites=${runState.componentWrites} verified=${runState.verifiedFrames.size}`,
     )
     let summary = ''
     if (finished) {
@@ -2019,10 +2042,32 @@ export async function execTool(
     content,
   })
 
+  const toCheckBefore = uncheckedKey(uncheckedChanges(runState, canvasId))
   /* one tool call is one operation, as over MCP: a work budget of its own (server/workBudget.ts) */
-  return runOperation(`resident ${block.name}`, canvasId, () =>
+  const answered = await runOperation(`resident ${block.name}`, canvasId, () =>
     runResidentTool(canvasId, block, actor, runState, input, ok, fail),
   )
+  /* a call that changed what is left to look at says what is left: the desktop harness
+     has no turn of its own to be reminded in */
+  return !answered.is_error && uncheckedKey(uncheckedChanges(runState, canvasId)) !== toCheckBefore
+    ? withNote(answered, stillToCheckOn(runState, canvasId))
+    : answered
+}
+
+/** Whether a frame shows a component now: it holds its main, or an instance of it. */
+function frameShows(canvasId: string, frameId: string, componentId: string): boolean {
+  const canvas = store.getCanvas(canvasId)
+  if (!canvas) return false
+  if ((canvas.components ?? []).find((def) => def.id === componentId)?.mainFrameId === frameId) return true
+  return usageOf(canvas, componentId).frames.some((frame) => frame.id === frameId)
+}
+
+/** A tool result with a line of text after what it answered. */
+function withNote(result: Anthropic.ToolResultBlockParam, note: string): Anthropic.ToolResultBlockParam {
+  const content = result.content
+  if (typeof content === 'string' || content === undefined)
+    return { ...result, content: content ? `${content}\n${note}` : note }
+  return { ...result, content: [...content, { type: 'text', text: note }] }
 }
 
 async function runResidentTool(
@@ -2076,8 +2121,7 @@ async function runResidentTool(
         if (!created) return fail('canvas not found')
         const fit = fitAxes.value ? await fitWrittenFrame(created, fitAxes.value, actor) : undefined
         const f = fit?.frame ?? created
-        runState.mutatedFrames.add(f.id)
-        unverify(runState, f.id)
+        noteFrameChange(runState, f.id)
         return ok(
           [
             `created frame ${f.id} ("${f.name}", ${Math.round(f.width)}x${Math.round(f.height)}) — it is revealing to viewers now`,
@@ -2162,8 +2206,7 @@ async function runResidentTool(
             'inline' in edited ? edited.inline : frameEditProblem(edited.problem, '"find" text', 'get_frame_html'),
           )
         }
-        runState.mutatedFrames.add(input.frame_id)
-        unverify(runState, input.frame_id)
+        noteFrameChange(runState, input.frame_id)
         const notes = componentWriteNotes(store.getFrame(input.frame_id)!)
         return ok(notes.length ? `applied\n${notes.join('\n')}` : 'applied')
       }
@@ -2196,8 +2239,7 @@ async function runResidentTool(
         if (written && 'inline' in written) return fail(written.inline)
         if (!written) return fail('frame not found on this canvas')
         const fit = fitAxes.value ? await fitWrittenFrame(written, fitAxes.value, actor) : undefined
-        runState.mutatedFrames.add(input.frame_id)
-        unverify(runState, input.frame_id)
+        noteFrameChange(runState, input.frame_id)
         return ok(
           [
             'applied — the new design is revealing to viewers now',
@@ -2254,8 +2296,7 @@ async function runResidentTool(
         })
         if (committed && 'inline' in committed) return fail(committed.inline)
         runState.rewriteDrafts.delete(input.frame_id)
-        runState.mutatedFrames.add(input.frame_id)
-        unverify(runState, input.frame_id)
+        noteFrameChange(runState, input.frame_id)
         return ok(
           [
             `committed ${html.length} characters — the new design is revealing to viewers now`,
@@ -2474,7 +2515,7 @@ async function runResidentTool(
         if (existing) {
           runState.sourceFrames.add(existing.id)
           runState.verificationFrames.add(existing.id)
-          unverify(runState, existing.id)
+          unverifyFrame(runState, existing.id)
           return ok(
             `Reusing the existing editable source snapshot ${existing.id} ("${existing.name}") for ${requestedUrl}; no duplicate frame was added. Call screenshot_frame with frame_id=${existing.id}. Leave this source frame unchanged and deliver the new design separately.`,
           )
@@ -2485,7 +2526,7 @@ async function runResidentTool(
         runState.mutatedFrames.add(f.id)
         if (raw.as_reference) runState.sourceFrames.add(f.id)
         else runState.sourceFrames.delete(f.id)
-        unverify(runState, f.id)
+        unverifyFrame(runState, f.id)
         return ok(
           `Imported ${requestedUrl} as editable frame ${f.id} ("${f.name}", ${Math.round(f.width)}x${Math.round(f.height)}, ${f.html.length} HTML characters). Call screenshot_frame with frame_id=${f.id}.${
             raw.as_reference
@@ -2745,8 +2786,7 @@ async function runResidentTool(
         const { frame, note } = updated.value
         /* a new size changes what renders, so it is a design change to verify */
         if (frame.width !== before.width || frame.height !== before.height) {
-          runState.mutatedFrames.add(frame.id)
-          unverify(runState, frame.id)
+          noteFrameChange(runState, frame.id)
         }
         /* a save that changed nothing has not delivered anything */
         if (arrangement(frame) !== before.arrangement) runState.arrangeWrites += 1
@@ -2840,9 +2880,7 @@ async function runResidentTool(
         const blocks = runState.vision
           ? await frameImageBlocks(f)
           : `Screenshot skipped: the selected model cannot view images. Frame "${f.name}" is ${f.width}×${f.height}px. Verify your work with get_frame_html and inspect_frame instead.`
-        if (runState.mutatedFrames.has(input.frame_id) || runState.verificationFrames.has(input.frame_id)) {
-          runState.verifiedFrames.add(input.frame_id)
-        }
+        noteFrameScreenshot(runState, f.id, (componentId) => frameShows(canvasId, f.id, componentId))
         return ok(blocks)
       }
       case 'screenshot_component': {
@@ -2853,7 +2891,9 @@ async function runResidentTool(
         try {
           const combos = previewCombinations(def, props.data)
           if (!runState.vision) return ok('Preview skipped: the selected model cannot view images.')
-          return ok(await frameImageBlocks(previewFrame(canvasId, def, combos)))
+          const blocks = await frameImageBlocks(previewFrame(canvasId, def, combos))
+          noteComponentScreenshot(runState, def.id)
+          return ok(blocks)
         } catch (e) {
           if (e instanceof PreviewQueryError) return fail(e.message)
           throw e
@@ -2879,12 +2919,16 @@ async function runResidentTool(
           surface: 'resident',
         })
         if (!outcome.ok) return fail(outcome.error)
-        const { data, note, frames } = outcome.result
+        const { data, note, frames, changed } = outcome.result
+        /* a component-level call says what it changed and which frames show it: one look at
+           any of them checks it. Otherwise its frames are ones it wrote (an instance placed or
+           changed), each to be looked at. */
+        if (changed?.length) runState.componentWrites += 1
+        for (const change of changed ?? []) noteComponentChange(runState, change)
         const libraryEvent = libraryFeatureEvent(block.name, block.input as Record<string, unknown>, data)
         if (libraryEvent) captureFeature(runState.requesterId, libraryEvent, 'resident', { canvas_id: canvasId })
         const notes = (frames ?? []).flatMap((frame) => {
-          runState.mutatedFrames.add(frame.id)
-          unverify(runState, frame.id)
+          if (!changed) noteFrameChange(runState, frame.id)
           return componentWriteNotes(frame)
         })
         return ok([JSON.stringify(data), ...(note ? [note] : []), ...notes].join('\n'))

@@ -30,6 +30,7 @@ import { WriteRefusedError } from './writeRefusal.ts'
 import { transaction } from './journal.ts'
 import { readableSources, runCanvasWrite, type ComponentView } from './canvasWrites.ts'
 import { updateLibraryConsumers } from './libraryUpdates.ts'
+import type { ComponentChange } from './changeChecks.ts'
 
 /**
  * The component tools every agent gets, over MCP (server/mcp.ts) or in the server
@@ -71,7 +72,26 @@ export interface ToolContext {
   surface?: Surface
 }
 
-export type ToolResult = { data: unknown; note?: string; frames?: Frame[] }
+export type ToolResult = {
+  data: unknown
+  note?: string
+  /** the frames the call touched: the ones it wrote and the ones following a component it changed */
+  frames?: Frame[]
+  /** set by a call that changes components rather than writing frames itself: each component
+   *  it changed, with the frames showing it (its main and every frame using it), any one of
+   *  which shows the change. No frames: nothing on the canvas looks any different. */
+  changed?: ComponentChange[]
+}
+
+/** Every component of a canvas at its revision: what a write that added or changed none leaves alone. */
+function componentsStamp(canvasId: string): string {
+  return (store.getCanvas(canvasId)?.components ?? []).map((def) => `${def.id}:${def.rev}:${def.status}`).join(',')
+}
+
+/** A component a call changed, and the frames that show it. */
+function changeOf(def: ComponentDef, frames: readonly Frame[]): ComponentChange {
+  return { id: def.id, name: def.name, frameIds: frames.map((frame) => frame.id) }
+}
 
 interface ComponentTool {
   name: string
@@ -252,6 +272,7 @@ export const COMPONENT_TOOLS: ComponentTool[] = [
             ...(optional(() => componentReuseNotes(canvas, def, shared.autoProps)) ?? []),
           ].join('\n'),
           frames: view.frames,
+          changed: [changeOf(def, view.frames)],
         }
       }
       if (typeof input.frame_id !== 'string' || typeof input.element !== 'string')
@@ -281,6 +302,7 @@ export const COMPONENT_TOOLS: ComponentTool[] = [
           ...(optional(() => componentReuseNotes(canvas, component, shared.autoProps)) ?? []),
         ].join('\n'),
         frames: view.frames,
+        changed: [changeOf(component, view.frames)],
       }
     },
   },
@@ -359,6 +381,7 @@ export const COMPONENT_TOOLS: ComponentTool[] = [
           ...notes,
         ].join('\n'),
         frames: made.flatMap((entry) => viewOr(canvas, entry.component, entry.view).frames),
+        changed: made.map((entry) => changeOf(entry.component, viewOr(canvas, entry.component, entry.view).frames)),
       }
     },
   },
@@ -430,6 +453,7 @@ export const COMPONENT_TOOLS: ComponentTool[] = [
                 ...(optional(() => componentReuseNotes(canvas, result.component)) ?? []),
               ].join('\n'),
               frames: view.frames,
+              changed: [changeOf(result.component, view.frames)],
             }),
       }
     },
@@ -559,6 +583,8 @@ export const COMPONENT_TOOLS: ComponentTool[] = [
             : 'Nothing on the canvas uses it, so there was nothing to detach.'
           : 'No frame was changed: its instances look the same and no longer follow it. restore_component brings it back; delete_component with detach_instances=true turns what is left into plain markup.',
         frames: touched,
+        /* nothing looks any different, its instances detached or not */
+        changed: [{ id: result.component_id, name: result.deleted, frameIds: [] }],
       }
     },
   },
@@ -585,6 +611,7 @@ export const COMPONENT_TOOLS: ComponentTool[] = [
             ? 'Its old main was gone, so a new one was written on the Components page (main_frame_id).'
             : 'Its instances follow it again.',
         frames: view.frames,
+        changed: [changeOf(def, view.frames)],
       }
     },
   },
@@ -610,6 +637,7 @@ export const COMPONENT_TOOLS: ComponentTool[] = [
         data: { ok: true, ...result, component: view.entry, rev: result.component.rev },
         ...(note ? { note } : {}),
         frames: view.frames,
+        changed: [changeOf(result.component, view.frames)],
       }
     },
   },
@@ -628,6 +656,7 @@ export const COMPONENT_TOOLS: ComponentTool[] = [
       /* a workspace library goes by the canvas, like its fonts: whoever may edit here may use it */
       const shared = librariesForCanvas(canvas).some((library) => library.canvasId === source)
       if (!shared && !canRead(source)) throw new ComponentError('this account cannot read that canvas')
+      const before = componentsStamp(canvas.id)
       const { component: def, view } = await runCanvasWrite(canvas.id, {
         type: 'import-component',
         from: source,
@@ -635,9 +664,13 @@ export const COMPONENT_TOOLS: ComponentTool[] = [
         actor,
         view: true,
       })
+      const shown = viewOr(canvas, def, view)
       return {
-        data: { ok: true, component: viewOr(canvas, def, view).entry },
+        data: { ok: true, component: shown.entry },
         note: `Use it with ${usageExample(def)}.`,
+        /* a copy has a main of its own to look at; a linked one shows nowhere here yet. Importing
+           what the canvas already has adds nothing, and is no change */
+        changed: componentsStamp(canvas.id) === before ? [] : [changeOf(def, shown.frames)],
       }
     },
   },
@@ -663,6 +696,7 @@ export const COMPONENT_TOOLS: ComponentTool[] = [
           data: { ok: true, updated: result.updated.length > 0, components: result.updated.map((def) => def.name) },
           ...(result.waiting ? {} : { note: 'No workspace-library update is waiting on this canvas.' }),
           frames: result.frames ?? [],
+          changed: result.updated.map((def) => changeOf(def, outcomeFrames({ canvas } as ToolContext, def))),
         }
       }
       const ref = String(component)
@@ -677,6 +711,7 @@ export const COMPONENT_TOOLS: ComponentTool[] = [
       return {
         data: { ok: true, updated: result.updated, component: shown.entry },
         frames: result.updated ? shown.frames : [],
+        changed: result.updated ? [changeOf(result.component, shown.frames)] : [],
       }
     },
   },

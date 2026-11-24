@@ -240,6 +240,8 @@ server/index.ts` in prod. `erasableSyntaxOnly` and `verbatimModuleSyntax` in tsc
   failure the relay words itself (`fromDoop`: the desktop went away, a worker is down) is shown as it
   is. A shell from before `limitReached` is read by its fallback text (`shellResult`).
   Tests: `runFailure.test.ts`, `result_event_reads_is_error_and_errors` in `claude.rs`.
+- Checked work (`server/changeChecks.ts`, its header has the rules): a resident run on a card must have
+  looked at what it changed before it finishes. Tests: `residentChecks.test.ts`.
 - Model menus (`server/modelCatalog.ts`, `GET /api/model-account/models`): the connected
   account's picker asks the provider's catalog with the user's own key when it opens (the
   composer's `ModelPicker`) or mounts (Settings, `useAgentModels`), merging the curated entries of
