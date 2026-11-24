@@ -1017,6 +1017,16 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
     return null
   }
 
+  /* the picked layer the point is on itself, not inside */
+  function pickedAt(selected, el) {
+    var selectors = Array.isArray(selected) ? selected : []
+    for (var i = 0; i < selectors.length; i++) {
+      var picked = styleTarget(selectors[i])
+      if (picked === el && !isLocked(picked)) return picked
+    }
+    return null
+  }
+
   function drawingHit(x, y, standalone, selected) {
     // Inside an entered standalone the press is a layer's, as in a frame.
     if (standalone && enteredStandalone(selected)) return null
@@ -1205,10 +1215,14 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
   }
 
   /* Right-click can reach a lock so the menu can unlock it. SVGs are one
-     layer in the rail, and their paths share that same context menu. */
-  function contextHit(x, y) {
+     layer in the rail, and their paths share that same context menu. A
+     right-click inside a layer of the multi-pick it is sent is that layer's,
+     so the pick is kept and the menu acts on all of it. */
+  function contextHit(x, y, selected) {
     var el = document.elementFromPoint(viewX(x), viewX(y))
     if (!el || el === document.body || el === document.documentElement) return null
+    var picked = pickedAt(selected, el) || pickedAround(selected, el)
+    if (picked) return hitInfo(picked)
     el = el.closest('[data-doop-locked]') || el.closest('[data-doop-drawing]') || el.closest('svg') || el
     return hitInfo(el)
   }
@@ -2214,7 +2228,7 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
         hit: inner && inner !== shallow ? hitInfo(inner) : null }, '*')
     }
     if (d.type === 'doop:context-hit') {
-      parent.postMessage({ type: 'doop:context-hit-result', reqId: d.reqId, hit: contextHit(d.x, d.y) }, '*')
+      parent.postMessage({ type: 'doop:context-hit-result', reqId: d.reqId, hit: contextHit(d.x, d.y, d.selected) }, '*')
     }
     if (d.type === 'doop:drawing-hit') {
       parent.postMessage({ type: 'doop:drawing-hit-result', reqId: d.reqId, hit: drawingHit(d.x, d.y, d.standalone, d.selected) }, '*')

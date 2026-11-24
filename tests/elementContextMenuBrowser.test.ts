@@ -14,6 +14,11 @@ declare global {
       selection: () => { frameId: string; selector: string } | null
       updateHtml: (html: string) => void
       selectMany: (ids: string[]) => void
+      pick: (selectors: string[]) => void
+      picked: () => string[]
+      selectedIds: () => string[]
+      openPanel: () => void
+      panelOpen: () => boolean
       undo: () => Promise<void>
       redo: () => Promise<void>
     }
@@ -328,6 +333,67 @@ describe.skipIf(!findBrowserPath())('frame and element context menus', () => {
     expect(stamped).toEqual(['#text'])
     const link = new URL(await page.evaluate(() => navigator.clipboard.readText()))
     expect(link.searchParams.has('selector')).toBe(false)
+  })
+
+  it('keeps a multi-pick when the right-click lands on a layer inside one of the picked', async () => {
+    saved = { ...saved, html: saved.html.replace('>First</div>', '><span id="inner">First</span></div>') }
+    await page.evaluate((frame) => window.contextMenuHarness.seed([frame]), saved)
+    await (await frameDoc())!.waitForSelector('#inner')
+    await page.evaluate(() => window.contextMenuHarness.pick(['#text', '#box']))
+    await rightClick('#inner')
+    expect(await page.evaluate(() => window.contextMenuHarness.picked())).toEqual(['#text', '#box'])
+    expect(await page.evaluate(() => window.contextMenuHarness.selection())).toEqual({ frameId: 'f', selector: '#box' })
+  })
+
+  it('keeps two selected canvas shapes selected when one is right-clicked', async () => {
+    const shape =
+      '<body data-doop-canvas-element="true"><div data-doop-drawing="rect" style="width:100px;height:100px;background:red"></div></body>'
+    saved = { ...saved, width: 100, height: 100, html: shape }
+    const other = { ...saved, id: 'g', name: 'Other', x: 300 }
+    await page.evaluate((frames) => window.contextMenuHarness.seed(frames), [saved, other])
+    await page.evaluate(() => window.contextMenuHarness.selectMany(['g', 'f']))
+    await rightClick('[data-doop-drawing]')
+    expect(await page.evaluate(() => window.contextMenuHarness.selectedIds())).toEqual(['g', 'f'])
+  })
+
+  it('keeps a multi-pick when the right-click lands on a picked layer inside a group', async () => {
+    const group =
+      '<div id="group" data-doop-drawing="group" style="display:flex;gap:10px">' +
+      '<div id="a" style="width:60px;height:60px;background:#ddd"></div>' +
+      '<div id="b" style="width:60px;height:60px;background:#bbb"></div></div>'
+    saved = { ...saved, html: saved.html.replace('<div id="box"', group + '<div id="box"') }
+    await page.evaluate((frame) => window.contextMenuHarness.seed([frame]), saved)
+    await (await frameDoc())!.waitForSelector('#b')
+    await page.evaluate(() => window.contextMenuHarness.pick(['#a', '#b']))
+    await rightClick('#a')
+    expect(await page.evaluate(() => window.contextMenuHarness.picked())).toEqual(['#b', '#a'])
+  })
+
+  it('narrows several selected frames to a group shape when a layer inside it is right-clicked', async () => {
+    const shape =
+      '<body data-doop-canvas-element="true"><div data-doop-drawing="group" style="width:100px;height:100px">' +
+      '<div id="part" data-doop-drawing="rect" style="width:50px;height:50px;background:red"></div>' +
+      '<div data-doop-drawing="rect" style="width:50px;height:50px;background:blue"></div></div></body>'
+    saved = { ...saved, width: 100, height: 100, html: shape }
+    const other = { ...saved, id: 'g', name: 'Other', x: 300 }
+    await page.evaluate((frames) => window.contextMenuHarness.seed(frames), [saved, other])
+    await page.evaluate(() => window.contextMenuHarness.selectMany(['g', 'f']))
+    await rightClick('#part')
+    expect(await page.evaluate(() => window.contextMenuHarness.selectedIds())).toEqual(['f'])
+    const picked = await page.evaluate(() => window.contextMenuHarness.selection())
+    expect(picked?.frameId).toBe('f')
+    expect(await (await frameDoc())!.$eval(picked!.selector, (el) => el.id)).toBe('part')
+  })
+
+  it('closes the element panel when a right-click finds no layer', async () => {
+    await page.evaluate(() => {
+      window.contextMenuHarness.pick(['#box'])
+      window.contextMenuHarness.openPanel()
+    })
+    await page.mouse.click(500, 440, { button: 'right' })
+    await page.waitForFunction(() => document.querySelector('[role="menuitem"]')?.textContent?.startsWith('Copy'))
+    expect(await page.evaluate(() => window.contextMenuHarness.selection())).toBeNull()
+    expect(await page.evaluate(() => window.contextMenuHarness.panelOpen())).toBe(false)
   })
 
   it('does not open the frame or background menu in empty frame space', async () => {
