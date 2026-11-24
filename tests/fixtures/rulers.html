@@ -30,6 +30,7 @@
           frames: useStore.getState().canvas?.frames ?? [],
           guides: useStore.getState().canvas?.guides ?? [],
           selectedGuideId: useStore.getState().selectedGuideId,
+          viewport: useStore.getState().viewport,
         }),
         undo,
         redo,
