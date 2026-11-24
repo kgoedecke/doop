@@ -92,6 +92,8 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
    take longer than the default test timeout on CI. */
 /* the player's control bar above the screens, in px */
 const BAR = 40
+/* the pager's strip under them, on a page with frames to step to */
+const PAGER = 56
 
 describe.skipIf(!findBrowserPath())('prototype player', { timeout: 30_000 }, () => {
   const pages = pagePerTest()
@@ -189,9 +191,9 @@ describe.skipIf(!findBrowserPath())('prototype player', { timeout: 30_000 }, () 
       await screen('home')
       expect(await page.$eval('[data-prototype-player]', (el) => el.getBoundingClientRect().top)).toBe(40)
       const width = () => page.$eval('[data-proto-screen="home"] > div', (el) => el.getBoundingClientRect().width)
-      /* the screens get 660 less the bar, which fits the 400 × 300 frame by height */
-      expect(Math.abs((await width()) - (400 * (660 - BAR)) / 300)).toBeLessThan(1)
-      /* the bar sits above the screens, never over them */
+      /* the screens get 660 less the bar and the pager, which fits the 400 × 300 frame by height */
+      expect(Math.abs((await width()) - (400 * (660 - BAR - PAGER)) / 300)).toBeLessThan(1)
+      /* the bar sits above the screens and the pager below, never over them */
       const box = (selector: string) =>
         page.$eval(selector, (el) => {
           const { top, bottom, height } = el.getBoundingClientRect()
@@ -200,6 +202,9 @@ describe.skipIf(!findBrowserPath())('prototype player', { timeout: 30_000 }, () 
       const bar = await box('[data-proto-bar]')
       expect((await box('[data-proto-stage]')).top).toBe(bar.bottom)
       expect(bar).toMatchObject({ top: 40, height: BAR })
+      const pager = await box('[data-proto-pager]')
+      expect((await box('[data-proto-stage]')).bottom).toBe(pager.top)
+      expect(pager).toMatchObject({ bottom: 700, height: PAGER })
 
       await page.click('[aria-label="Scaling"]')
       await page.waitForSelector('[data-proto-menu]')
@@ -283,7 +288,8 @@ describe.skipIf(!findBrowserPath())('prototype player', { timeout: 30_000 }, () 
       ...CANVAS,
       frames: [{ ...frame('big', '<button>Big</button>'), width: 2000, height: 1400 }],
     }
-    /* the screens' box (the player under its bar), the screen's box,
+    /* the screens' box (the player between its bar and its pager strip, kept
+       even for this one-frame page), the screen's box,
        and how far its scroller can go */
     const measure = () =>
       page.$eval('[data-proto-screen="big"]', (scroller) => {
@@ -306,12 +312,12 @@ describe.skipIf(!findBrowserPath())('prototype player', { timeout: 30_000 }, () 
     }
     try {
       await page.evaluate((canvas) => (window as unknown as Fixture).seed(canvas), big)
-      await page.setViewport({ width: 1000, height: 700 + BAR })
+      await page.setViewport({ width: 1000, height: 700 + BAR + PAGER })
       /* 2000 × 1400 at 1× in a 1000 × 700 player: scrolled to the far corner */
       expect(await playAt('actual')).toMatchObject({ scrolled: true, right: 0, bottom: 0 })
       /* at 0.5×: 1000 × 700 fills the width exactly, no room to scroll */
       expect(await playAt('fit-width')).toMatchObject({ right: 0, bottom: 0, left: 0, top: 0 })
-      await page.setViewport({ width: 1000, height: 600 + BAR })
+      await page.setViewport({ width: 1000, height: 600 + BAR + PAGER })
       /* 1000 × 700 in 1000 × 600: scrolls down to the bottom edge */
       expect(await playAt('fit-width')).toMatchObject({ scrolled: true, bottom: 0, left: 0 })
       /* 0.5× covers 1000 × 600: 100px cropped, 50 each side, nothing to scroll */
@@ -634,6 +640,57 @@ describe.skipIf(!findBrowserPath())('prototype player', { timeout: 30_000 }, () 
       await page.click('[aria-label="Back"]')
       await page.waitForFunction(() => document.querySelector('[data-proto-current]')?.textContent === 'HOME')
       expect(await current()).toBe('HOME')
+    })
+
+    it('steps through the page with the pager, and a click around the screen hides the UI', async () => {
+      await page.evaluate((canvas) => {
+        const w = window as unknown as Fixture
+        w.seed(canvas)
+        w.play('home')
+      }, CANVAS)
+      await screen('home')
+      const count = () => page.$eval('[data-proto-count]', (el) => el.textContent)
+      expect(await count()).toBe('1 / 3')
+      expect(await page.$eval('[aria-label="Previous frame"]', (el) => (el as HTMLButtonElement).disabled)).toBe(true)
+      await page.click('[aria-label="Next frame"]')
+      await page.waitForFunction(() => document.querySelector('[data-proto-count]')?.textContent === '2 / 3')
+      expect(await current()).toBe('DETAIL')
+      await page.click('[aria-label="Next frame"]')
+      await page.waitForFunction(() => document.querySelector('[data-proto-count]')?.textContent === '3 / 3')
+      expect(await page.$eval('[aria-label="Next frame"]', (el) => (el as HTMLButtonElement).disabled)).toBe(true)
+      await page.click('[aria-label="Previous frame"]')
+      await page.waitForFunction(() => document.querySelector('[data-proto-count]')?.textContent === '2 / 3')
+      /* the screen stepped to takes the keys, not the pager's button */
+      await page.waitForFunction(() => document.activeElement?.matches('iframe[data-doop-proto-frame="detail"]'))
+
+      /* the letterbox around the 400x300 screen, then back */
+      const stage = (await page.$eval('[data-proto-stage]', (el) => {
+        const r = el.getBoundingClientRect()
+        return { x: r.left + 5, y: r.top + r.height / 2 }
+      }))!
+      const screenBox = () =>
+        page.$eval('[data-proto-screen="detail"] > div', (el) => JSON.stringify(el.getBoundingClientRect()))
+      const before = await screenBox()
+      const shown = () =>
+        page.$$eval('[data-proto-bar], [data-proto-pager]', (els) =>
+          els.map((el) => getComputedStyle(el).visibility === 'visible'),
+        )
+      await page.mouse.click(stage.x, stage.y)
+      await page.waitForFunction(() =>
+        [...document.querySelectorAll('[data-proto-bar], [data-proto-pager]')].every(
+          (el) => getComputedStyle(el).visibility === 'hidden',
+        ),
+      )
+      /* the UI keeps its room: the screen neither moves nor rescales */
+      expect(await screenBox()).toBe(before)
+      /* where the bar was brings it back, for a screen with no space around it */
+      await page.mouse.click(500, BAR / 2)
+      await page.waitForFunction(() =>
+        [...document.querySelectorAll('[data-proto-bar], [data-proto-pager]')].every(
+          (el) => getComputedStyle(el).visibility === 'visible',
+        ),
+      )
+      expect(await shown()).toEqual([true, true])
     })
 
     it('pins a comment to the element clicked in comment mode, without playing it', async () => {

@@ -5,6 +5,10 @@ import {
   type Interaction,
   type ProtoTransition,
 } from '../../shared/prototype'
+import type { Canvas, CanvasPageInfo, Frame } from '../../shared/types'
+import { canvasPages, framePageId } from '../../shared/pages'
+import { isCanvasElement as isCanvasElementHtml } from './drawing'
+import { readingOrder } from '../../shared/frameOrder'
 
 /** How the two screens of a navigation move: keyframes for the screen coming
  *  in and the one going out, and which of them is drawn on top. Back plays
@@ -164,4 +168,49 @@ export function historyStep(stack: readonly ProtoPlace[], target: ProtoPlace): '
   if (top && prev && prev.depth === target.depth && prev.frameId === target.frameId && top.depth === prev.depth + 1)
     return 'back'
   return 'jump'
+}
+
+/** A frame a viewer can go to: not hidden, and not a standalone shape on the canvas. */
+function steppable(frame: Frame): boolean {
+  return !frame.hidden && !(frame.html && isCanvasElementHtml(frame.html))
+}
+
+/** The frames a viewer can jump to, page by page in reading order: every
+ *  frame that is not hidden and not a standalone shape on the canvas. */
+export function jumpTargets(
+  canvas: Pick<Canvas, 'id' | 'pages' | 'frames'>,
+): { page: CanvasPageInfo; frames: Frame[] }[] {
+  const shown = canvas.frames.filter(steppable)
+  return canvasPages(canvas)
+    .map((page) => ({
+      page,
+      frames: readingOrder(shown.filter((f) => framePageId(canvas, f) === page.id)),
+    }))
+    .filter((group) => group.frames.length)
+}
+
+/** Where the screen shown sits among its page's frames, for the player's
+ *  ‹ n / N › pager (Figma's): its 1-based place, the count, and the frames
+ *  either side. Null when the screen is not one of them (a hidden frame) or
+ *  its page has no other frame to step to. */
+export interface PagerPlace {
+  index: number
+  total: number
+  prev: string | null
+  next: string | null
+}
+
+export function pagerPlace(canvas: Pick<Canvas, 'id' | 'pages' | 'frames'>, frameId: string): PagerPlace | null {
+  const shown = canvas.frames.find((f) => f.id === frameId)
+  if (!shown || !steppable(shown)) return null
+  const page = framePageId(canvas, shown)
+  const frames = readingOrder(canvas.frames.filter((f) => steppable(f) && framePageId(canvas, f) === page))
+  if (frames.length < 2) return null
+  const at = frames.findIndex((f) => f.id === frameId)
+  return {
+    index: at + 1,
+    total: frames.length,
+    prev: frames[at - 1]?.id ?? null,
+    next: frames[at + 1]?.id ?? null,
+  }
 }
