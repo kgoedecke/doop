@@ -18,6 +18,44 @@ export interface ModelOption {
   recommended?: boolean
 }
 
+/* a GPT or o-series id: its family and version, then its words, then an
+   optional snapshot date (`gpt-6.2-sol-2026-11-01`) */
+const OPENAI_ID = /^(gpt-\d+(?:\.\d+)?|o\d+)((?:-[a-z0-9.]+)*?)(-\d{4}-\d{2}-\d{2})?$/
+
+/** An OpenAI id spelled the way the curated menu spells it:
+ *  `gpt-6.1-sol` → "GPT-6.1 Sol", `o4-mini` → "o4 Mini". An id of another
+ *  shape is returned as it is. */
+export function openaiModelName(id: string): string {
+  const match = OPENAI_ID.exec(id)
+  if (!match) return id
+  const [, family = '', words = '', date = ''] = match
+  return [
+    family.replace(/^gpt-/, 'GPT-'),
+    ...words
+      .split('-')
+      .filter(Boolean)
+      .map((word) => word.charAt(0).toUpperCase() + word.slice(1)),
+    ...(date ? [date.slice(1)] : []),
+  ].join(' ')
+}
+
+/** The name a catalog gives a model, unless it only re-spells the id
+ *  ("GPT-6.1-Sol", "gpt-6.1-sol"): then the id formatted like the curated
+ *  entries, so one menu never mixes two spellings of the same scheme. */
+export function openaiDisplayName(id: string, displayName: string | undefined): string {
+  const name = displayName?.trim()
+  if (name && name.toLowerCase().replace(/\s+/g, '-') !== id) return name
+  return openaiModelName(id)
+}
+
+/** How new an OpenAI model's generation is, for ordering a menu newest
+ *  first: GPT-6.2 is [6, 2], GPT-6 is [6, 0]. The o-series predates GPT-5,
+ *  and an id of no known shape sorts last with it. */
+export function openaiGeneration(id: string): [number, number] {
+  const match = /^gpt-(\d+)(?:\.(\d+))?/.exec(id)
+  return match ? [Number(match[1]), Number(match[2] ?? 0)] : [0, 0]
+}
+
 /**
  * The OpenRouter roster. Ids and image-input capability verified against
  * GET https://openrouter.ai/api/v1/models (input_modalities) — re-check both

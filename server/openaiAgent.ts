@@ -29,19 +29,22 @@ import { ModelStreamInterruptedError } from './modelTurnRetry.ts'
 export const CHATGPT_URL = env.CHATGPT_RESPONSES_URL
 export const OPENAI_URL = env.OPENAI_RESPONSES_URL
 /**
- * The OpenAI tiers a ChatGPT sign-in and an API key can both reach: GPT-6.2
- * Sol (OpenAI's recommended everyday model, and the default), GPT-6 Astra
- * (on Codex it needs a Plus plan or better) and the three GPT-5.6 tiers.
- * Users pick one in Settings — they are paying for it, and the tiers trade
- * real money against real quality — so this list is the menu, not a detail.
- * Astra bills several times Sol per token, which is a choice to opt into.
+ * The OpenAI tiers a ChatGPT sign-in and an API key can both reach: the
+ * current lineup on developers.openai.com/api/docs/models (checked
+ * 2026-11-24), GPT-6.2 Astra and Sol, GPT-6.1 Terra and GPT-6 Luna, the
+ * newest of each tier. On Codex, Astra and Sol run "on supported plans", and
+ * an Enterprise or Edu admin has to switch them on first. Users pick one in
+ * Settings — they are paying for it, and the tiers trade real money against
+ * real quality — so this list is the menu, not a detail. Ordered best-first;
+ * the default is Sol, which OpenAI calls its go-to model for everyday work
+ * and Codex selects by default: Astra bills four times Sol per token, which
+ * is a choice to opt into. The live catalog adds older generations below.
  */
 export const AGENT_MODELS = [
+  { id: 'gpt-6.2-astra', name: 'GPT-6.2 Astra', blurb: 'Flagship — the sharpest reasoning, at the highest price' },
   { id: 'gpt-6.2-sol', name: 'GPT-6.2 Sol', blurb: 'The everyday workhorse. A good default for design work' },
-  { id: 'gpt-6-astra', name: 'GPT-6 Astra', blurb: 'Newest flagship — the sharpest reasoning, at the highest price' },
-  { id: 'gpt-5.6-sol', name: 'GPT-5.6 Sol', blurb: 'Flagship — the most detail and polish, and the priciest' },
-  { id: 'gpt-5.6-terra', name: 'GPT-5.6 Terra', blurb: 'The previous workhorse, cheaper per token' },
-  { id: 'gpt-5.6-luna', name: 'GPT-5.6 Luna', blurb: 'Fastest and cheapest — fine for small, mechanical edits' },
+  { id: 'gpt-6.1-terra', name: 'GPT-6.1 Terra', blurb: 'Fast and efficient, at half the price of Sol' },
+  { id: 'gpt-6-luna', name: 'GPT-6 Luna', blurb: 'Fastest and cheapest — fine for small, mechanical edits' },
 ] as const
 
 export const DEFAULT_OPENAI_MODEL = env.DOOP_AGENT_OPENAI_MODEL
@@ -93,8 +96,8 @@ export interface TurnResult {
  *  key was rotated) — the user has to reconnect. */
 export class ModelAuthError extends Error {}
 
-/** The account is fine but cannot run the chosen model — Astra still rolling
- *  out to a ChatGPT plan, an API key without access to it — so the fix is a
+/** The account is fine but cannot run the chosen model — Astra not on a
+ *  ChatGPT plan, an API key without access to it — so the fix is a
  *  different tier in Settings, not a reconnect. */
 export class ModelUnavailableError extends Error {}
 

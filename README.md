@@ -447,8 +447,9 @@ catalog, asked with that account's credential when the picker opens (`server/mod
 `GET /api/model-account/models`): the Codex backend's catalog for a ChatGPT subscription (the
 same list the Codex CLI reads, asked as `CHATGPT_CODEX_CLIENT_VERSION`), OpenAI's and
 Anthropic's `/v1/models`, Gemini's `/v1beta/models`. A newly released model is on the menu
-without an upgrade; the curated entries above sit on top as recommendations, a curated tier the
-account cannot run is left off, and the curated menu alone is served if the provider cannot be
+without an upgrade; the newest generation leads, the curated entries above it within each
+generation as recommendations, every id is spelled the way the curated ones are, a curated tier
+the account cannot run is left off, and the curated menu alone is served if the provider cannot be
 reached. OpenRouter, DeepSeek, Kimi and Kimi Code stay on their curated rosters, whose hand-checked vision
 flags are what the run relies on. DeepSeek and Kimi return their reasoning as `reasoning_content`
 and refuse a tool-calling conversation that leaves it out, so the transport keeps it in the run's
@@ -459,8 +460,9 @@ endpoints are fixed constants: a user-supplied endpoint would be a URL the serve
 context — an SSRF vector — so custom endpoints stay server-level configuration only.
 
 Either way the user picks their **model tier** in Settings from that provider's curated menu — on
-OpenAI, `gpt-6.2-sol` (the default workhorse), `gpt-6-astra` (flagship; on a ChatGPT subscription
-it needs Plus or better), `gpt-5.6-sol`, `gpt-5.6-terra` or `gpt-5.6-luna` (cheap and fast). They are paying for it, so the choice is theirs;
+OpenAI, `gpt-6.2-astra` (the flagship, priciest; on a ChatGPT subscription it runs on supported
+plans, and Enterprise and Edu admins switch it on), `gpt-6.2-sol` (the default workhorse),
+`gpt-6.1-terra` (fast and efficient) or `gpt-6-luna` (cheapest and fastest). They are paying for it, so the choice is theirs;
 `DOOP_AGENT_OPENAI_MODEL`, `DOOP_AGENT_OPENROUTER_MODEL`, `DOOP_AGENT_GEMINI_MODEL`,
 `DOOP_AGENT_DEEPSEEK_MODEL`, `DOOP_AGENT_KIMI_MODEL` and `DOOP_AGENT_KIMI_CODE_MODEL` only set the default they start on. Note that
 `gpt-5.4` and `gpt-5.4-mini` retire from ChatGPT-authenticated Codex on **31 August 2026**, so

@@ -160,19 +160,18 @@ describe('model menu', () => {
     vi.resetModules()
   })
 
-  it('offers GPT-6.2 Sol and GPT-6 Astra above the GPT-5.6 tiers', () => {
+  it('offers the newest of each tier, best first', () => {
     expect(AGENT_MODELS.map((model) => model.id)).toEqual([
+      'gpt-6.2-astra',
       'gpt-6.2-sol',
-      'gpt-6-astra',
-      'gpt-5.6-sol',
-      'gpt-5.6-terra',
-      'gpt-5.6-luna',
+      'gpt-6.1-terra',
+      'gpt-6-luna',
     ])
-    expect(isKnownModel('gpt-6-astra')).toBe(true)
+    expect(isKnownModel('gpt-6.2-astra')).toBe(true)
     expect(isKnownModel('gpt-6')).toBe(false)
   })
 
-  it('defaults to GPT-6.2 Sol when no override is set, whatever this shell exports', async () => {
+  it('defaults to Sol when no override is set, whatever this shell exports', async () => {
     vi.stubEnv('DOOP_AGENT_OPENAI_MODEL', '')
     vi.resetModules()
     const fresh = await import('../server/openaiAgent.ts')
