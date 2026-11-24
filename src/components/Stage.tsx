@@ -35,6 +35,7 @@ import { GuideLines, Rulers } from './Rulers'
 import { useIsMobile } from '../hooks/use-mobile'
 import { isMenuTarget, isTypingTarget, MOD_KEY, pressedKey } from '../lib/keys'
 import { cn } from '../lib/utils'
+import { commentCursorStyle } from '../lib/commentCursor'
 import { gesture } from '../lib/gesture'
 import { hasFrameClip, pasteFrameAtScreen } from '../lib/frameClipboard'
 import { MenuHint } from './ui/menu'
@@ -1243,7 +1244,7 @@ export function Stage({
                             : 'cursor-crosshair! [&_:not([data-comment-ui]_*)]:cursor-crosshair!'
                         : 'cursor-default',
             )}
-            style={{ ...bounds, ...paperStyle(paper) }}
+            style={{ ...bounds, ...paperStyle(paper), ...(tool === 'comment' ? commentCursorStyle() : null) }}
             onPointerDownCapture={drawing.onPointerDown}
             onDoubleClickCapture={drawing.onDoubleClick}
             onTouchStartCapture={drawing.onTouchStart}

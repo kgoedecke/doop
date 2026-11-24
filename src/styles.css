@@ -287,16 +287,11 @@
 @utility corner-squircle {
   corner-shape: superellipse(1.4);
 }
-/* The Comment tool's cursor: the same round bubble as the Comment icon
-   (Lucide message-circle) with a + inside, its hotspot on the bubble's tail.
-   Ink fill with a paper outline so it reads on both the light and the dark
-   canvas, like a native cursor; crosshair when a browser cannot show image
-   cursors. */
+/* The Comment tool's cursor: a small copy of the comment pin in the viewer's
+   own colour, built by src/lib/commentCursor.ts and set as --comment-cursor
+   on the surface that shows it; crosshair where it is not set. */
 @utility cursor-comment {
-  cursor:
-    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'%3E%3Cpath d='M7.9 20A9 9 0 1 0 4 16.1L2 22Z' fill='%2317171b' stroke='%23fff' stroke-width='1.5' stroke-linejoin='round'/%3E%3Cpath d='M12 8v6M9 11h6' stroke='%23fff' stroke-width='1.8' stroke-linecap='round'/%3E%3C/svg%3E")
-      2 22,
-    crosshair;
+  cursor: var(--comment-cursor, crosshair);
 }
 
 /* Pen and path-editing cursors, drawn like Figma's: ink with a paper outline so they
