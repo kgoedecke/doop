@@ -378,7 +378,7 @@ export function initDesktopShell() {
   listenForDesktopLinks()
   /* capture phase, so a field that stops its keys (the zoom input, a colour
      field) cannot swallow the tab and Settings shortcuts; a frame relays them from inside
-     too, text editing included (frameRuntime.ts) */
+     too, text editing included (src/frame-runtime/keyRelay.ts) */
   document.addEventListener(
     'keydown',
     (e) => {

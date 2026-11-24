@@ -2,6 +2,7 @@ import { defineConfig } from 'vitest/config'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import { fileURLToPath } from 'node:url'
+import { frameRuntime } from './src/frame-runtime/vitePlugin.ts'
 
 /* Dev ports. The defaults are the only ones anyone normally needs; the env
    overrides exist so a second worktree can run its own pair without fighting
@@ -18,7 +19,7 @@ const clipboardTests = [
 ]
 
 export default defineConfig({
-  plugins: [react(), tailwindcss()],
+  plugins: [react(), tailwindcss(), frameRuntime()],
   test: {
     /* agent worktrees live under .claude/ inside the repo; their copies of the
        suite must not run as ours */

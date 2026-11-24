@@ -72,9 +72,8 @@ export interface InteractionAttrs {
 /**
  * Parse an element's interaction attributes: the single-attribute form first,
  * then every entry of the JSON form. Invalid entries are dropped, never
- * repaired. SELF-CONTAINED ON PURPOSE: the frame runtime inlines this
- * function's source (`parseInteractions.toString()`) into the sandboxed
- * iframe, so it must not reference anything outside its own body.
+ * repaired. The frame runtime bundles it too (src/frame-runtime/proto.ts),
+ * so both sides of the sandbox read interactions the same way.
  */
 export function parseInteractions(attrs: InteractionAttrs): Interaction[] {
   const transitions = [

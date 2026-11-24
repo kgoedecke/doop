@@ -889,7 +889,7 @@ function DesignTab({
         : info.textAlign
   const flexAxis = flexSizeAxis(info)
   function modeFor(axis: 'width' | 'height') {
-    return flexAxis === axis && info.flexGrow > 0 ? 'fill' : sizeMode(info[`${axis}Value`])
+    return flexAxis === axis && (info.flexGrow ?? 0) > 0 ? 'fill' : sizeMode(info[`${axis}Value`])
   }
   function fixedSize(axis: 'width' | 'height', value: number): StylePatch {
     return {
