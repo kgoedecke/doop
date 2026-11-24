@@ -11,7 +11,13 @@ declare global {
       viewport: (viewport: { x: number; y: number; zoom: number }) => void
       comments: (comments: ElementComment[]) => void
       select: (ids: string[]) => void
-      state: () => { rulers: boolean; frames: Frame[]; guides: CanvasGuide[]; selectedGuideId: string | null }
+      state: () => {
+        rulers: boolean
+        frames: Frame[]
+        guides: CanvasGuide[]
+        selectedGuideId: string | null
+        viewport: { x: number; y: number; zoom: number }
+      }
       undo: () => Promise<void>
       redo: () => Promise<void>
     }

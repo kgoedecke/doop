@@ -6,6 +6,7 @@ import { onViewCommand } from '../lib/viewMenu'
 import type { Frame } from '../../shared/types'
 import { usePageCanvas, currentPageCanvas, usePageLoading } from '../lib/pages'
 import { sendWs } from '../lib/ws'
+import { wheelScrollUnder } from '../lib/wheelScroll'
 import { throttle } from '../lib/throttle'
 import { FrameView, HiddenFrameView } from './FrameView'
 import { CanvasComments, type CanvasComposeAt } from './CanvasComments'
@@ -738,10 +739,17 @@ export function Stage({
     }
 
     function onWheel(e: WheelEvent) {
-      /* let overlays with their own scrollbar scroll instead of panning */
-      if ((e.target as Element | null)?.closest('[data-stage-scroll]')) return
+      /* ⌘/Ctrl+wheel (and a trackpad pinch) zooms wherever the pointer is */
+      const zooming = e.ctrlKey || e.metaKey
+      if (!zooming) {
+        /* an overlay with its own scrollbar (an open comment thread, a menu)
+           scrolls instead of panning, and keeps the turns past its end */
+        const scroll = wheelScrollUnder(e.target, el!, e)
+        if (scroll === 'scrolls') return
+        if (scroll === 'stops') return e.preventDefault()
+      }
       e.preventDefault()
-      if (e.ctrlKey || e.metaKey) {
+      if (zooming) {
         const rect = el!.getBoundingClientRect()
         pivotX = e.clientX - rect.left
         pivotY = e.clientY - rect.top
