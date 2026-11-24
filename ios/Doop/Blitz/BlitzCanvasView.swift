@@ -229,7 +229,7 @@ final class CanvasView: UIView, UIGestureRecognizerDelegate {
         }
         // Fit before creating layers so the first bitmaps are requested at the
         // fitted density, not at 1:1 for every frame on the board.
-        if (!fitted || frames.isEmpty), !current.isEmpty, bounds.width > 0 { fit(current) }
+        if (!fitted || frames.isEmpty), !current.isEmpty, bounds.width > 0 { fitOrLand(current) }
         var added = false
         for frame in current {
             if let existing = frames[frame.id] {
@@ -303,7 +303,7 @@ final class CanvasView: UIView, UIGestureRecognizerDelegate {
         #endif
         if fitCommand != model.viewportCommand {
             fitCommand = model.viewportCommand
-            fit(current)
+            fitOrLand(current)
             scheduleRelayout()
         }
         for frame in frames.values { frame.selected = frame.id == model.selectedID }
@@ -311,6 +311,7 @@ final class CanvasView: UIView, UIGestureRecognizerDelegate {
         syncWorkBadges()
         syncCommentPins()
         flyToRequestedComment()
+        flyToRequestedFrame()
         drawChrome()
     }
 
@@ -834,17 +835,63 @@ final class CanvasView: UIView, UIGestureRecognizerDelegate {
     /// it fits that frame instead, a way back to the whole design.
     private func doubleTapped(at point: CGPoint) {
         window?.endEditing(true)
-        if let id = label(at: point), let frame = frames[id] {
-            let padded = frame.rect.insetBy(dx: -frame.rect.width * 0.05, dy: -frame.rect.height * 0.05)
-            let viewport = unobscuredViewport
-            let fitZoom = max(Self.minZoom, min(Self.maxZoom, min(viewport.width / padded.width, viewport.height / padded.height)))
-            model.select(id)
-            animateCamera(zoom: fitZoom,
-                          offset: CGPoint(x: viewport.midX - padded.midX * fitZoom, y: viewport.midY - padded.midY * fitZoom),
-                          pivot: CGPoint(x: viewport.midX, y: viewport.midY))
+        if let id = label(at: point), frames[id] != nil {
+            glide(toFrame: id)
             return
         }
         zoomCamera(by: 2, at: point)
+    }
+
+    /// The camera that fills the open part of the screen with a frame and a little margin.
+    private func camera(fitting rect: CGRect) -> (zoom: CGFloat, offset: CGPoint) {
+        let padded = rect.insetBy(dx: -rect.width * 0.05, dy: -rect.height * 0.05)
+        let viewport = unobscuredViewport
+        let fitZoom = max(Self.minZoom, min(Self.maxZoom, min(viewport.width / padded.width, viewport.height / padded.height)))
+        return (fitZoom, CGPoint(x: viewport.midX - padded.midX * fitZoom, y: viewport.midY - padded.midY * fitZoom))
+    }
+
+    /// Select a frame and glide until it fills the open part of the screen.
+    private func glide(toFrame id: String) {
+        guard let frame = frames[id] else { return }
+        let target = camera(fitting: frame.rect)
+        model.select(id)
+        let viewport = unobscuredViewport
+        animateCamera(zoom: target.zoom, offset: target.offset, pivot: CGPoint(x: viewport.midX, y: viewport.midY))
+    }
+
+    /// A page shown fresh: land on the frame an agent's pill asked for, else fit the page.
+    /// Landing directly avoids a fit of the whole page followed by a glide to the frame.
+    private func fitOrLand(_ current: [DesignFrame]) {
+        guard let id = model.flyToFrameID, let frame = current.first(where: { $0.id == id }), bounds.width > 0 else {
+            fit(current)
+            return
+        }
+        fitted = true
+        (zoom, offset) = camera(fitting: CGRect(x: frame.x, y: frame.y, width: frame.width, height: frame.height))
+        restOnPixels()
+        applyTransform()
+        DispatchQueue.main.async { [weak self] in
+            if self?.model.flyToFrameID == id { self?.model.flyToFrameID = nil }
+        }
+    }
+
+    /// Go to a frame asked for from outside the canvas (an agent's pill). A frame that is
+    /// gone, or not on the page shown, drops the request rather than taking the camera later.
+    private func flyToRequestedFrame() {
+        guard let id = model.flyToFrameID, bounds.width > 0 else { return }
+        let onPage = model.pageFrames.contains { $0.id == id }
+        guard onPage else {
+            DispatchQueue.main.async { [weak self] in
+                if self?.model.flyToFrameID == id { self?.model.flyToFrameID = nil }
+            }
+            return
+        }
+        guard frames[id] != nil else { return } // its layer arrives in this sync
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.model.flyToFrameID == id else { return }
+            self.model.flyToFrameID = nil
+            self.glide(toFrame: id)
+        }
     }
 
     /// Zoom by `factor` keeping the world point under `point` still, animated.

@@ -148,9 +148,9 @@ struct NativeCanvasView: View {
                             .accessibilityIdentifier("canvas.connectionStatus")
                     }
                     // Agents at work, as the web's WorkingNow pills: tap for the task list.
-                    // With a side rail they sit in the bar beside the canvas name instead.
+                    // With a side rail they sit beside the canvas name instead.
                     ForEach(sideRailWidth > 0 ? [] : model.workingAgents) { agent in
-                        Button { sheet = .tasks } label: { WorkingAgentPill(agent: agent) }
+                        Button { model.goToWork(of: agent) } label: { WorkingAgentPill(agent: agent) }
                             .buttonStyle(.plain)
                             .transition(.move(edge: .top).combined(with: .opacity))
                     }
@@ -160,6 +160,47 @@ struct NativeCanvasView: View {
                 .padding(.top, 12)
                 .animation(.snappy(duration: 0.25), value: model.workingAgents)
             }
+            .overlay(alignment: .topLeading) {
+                // With a side rail the bar's title is hidden, and items placed in the bar are
+                // moved into its overflow menu once the rail fills up (a collaborator's people
+                // button is enough). The name and the first working agent are pills of our own.
+                if sideRailWidth > 0 {
+                    // The agent gets a line of its own: beside a long canvas name its status had no room.
+                    VStack(alignment: .leading, spacing: 8) {
+                        Button { openPagePicker() } label: {
+                            Text(model.canvas?.name ?? initialName).font(.headline).lineLimit(1)
+                                .padding(.horizontal, 22).frame(height: 40)
+                                .modifier(ComposerGlass(cornerRadius: 20))
+                                .contentShape(Capsule())
+                        }
+                        .buttonStyle(.plain)
+                        .layoutPriority(1)
+                        .accessibilityLabel("Canvas \(model.canvas?.name ?? initialName), pages")
+                        .accessibilityIdentifier("canvas.name")
+                        if let agent = model.workingAgents.first {
+                            // At most 420 pt wide, and as narrow as its status: the spacer takes
+                            // the rest of the cap, so the glass never stretches past the words.
+                            HStack(spacing: 0) {
+                                Button { model.goToWork(of: agent) } label: {
+                                    WorkingAgentLabel(agent: agent, others: model.workingAgents.count - 1)
+                                        .padding(.leading, 18).padding(.trailing, 20).frame(height: 40)
+                                        .modifier(ComposerGlass(cornerRadius: 20))
+                                        .contentShape(Capsule())
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityIdentifier("canvas.workingAgent")
+                                Spacer(minLength: 0)
+                            }
+                            .frame(maxWidth: 420)
+                            .transition(.move(edge: .top).combined(with: .opacity))
+                        }
+                    }
+                    .padding(.leading, 16).padding(.top, 8)
+                    // Clear of the rail, and of a panel open beside the canvas.
+                    .padding(.trailing, sideRailWidth + 16 + (sidePanel == nil ? 0 : sidePanelWidth + 8))
+                    .animation(.snappy(duration: 0.25), value: model.workingAgents)
+                }
+            }
         }
         .background(CanvasBackSwipeGuard())
         // With a side rail the buttons live in the rail and the name is a glass pill over the
@@ -167,30 +208,6 @@ struct NativeCanvasView: View {
         .navigationTitle(sideRailWidth > 0 ? "" : model.canvas?.name ?? initialName).navigationBarTitleDisplayMode(.inline)
         .toolbarBackground(sideRailWidth > 0 ? .hidden : .automatic, for: .navigationBar)
         .toolbar {
-            if sideRailWidth > 0 {
-                // The bar's title is hidden with a side rail; the name is a leading item, which
-                // the system draws as a glass pill level with the rail's clock. It opens Pages.
-                ToolbarItem(placement: .topBarLeading) {
-                    Button { openPagePicker() } label: {
-                        Text(model.canvas?.name ?? initialName).font(.headline).lineLimit(1)
-                    }
-                    .accessibilityLabel("Canvas \(model.canvas?.name ?? initialName), pages")
-                    .accessibilityIdentifier("canvas.name")
-                }
-                // Agents at work, level with the name: the first one, and how many more.
-                if let agent = model.workingAgents.first {
-                    // A pill of its own, not merged into the name's glass.
-                    #if compiler(>=6.2)
-                    if #available(iOS 26.0, *) { ToolbarSpacer(.fixed, placement: .topBarLeading) }
-                    #endif
-                    ToolbarItem(placement: .topBarLeading) {
-                        Button { sheet = .tasks } label: {
-                            WorkingAgentLabel(agent: agent, others: model.workingAgents.count - 1)
-                        }
-                        .accessibilityIdentifier("canvas.workingAgent")
-                    }
-                }
-            }
             ToolbarItem(placement: .primaryAction) {
                 if !model.presences.isEmpty {
                     Button { openPeoplePicker() } label: { Image(systemName: "person.2") }
@@ -1043,7 +1060,7 @@ private struct WorkingAgentPill: View {
     let agent: WorkingAgent
     var body: some View {
         WorkingAgentLabel(agent: agent)
-            .padding(.leading, 10).padding(.trailing, 12).frame(height: 32)
+            .padding(.leading, 16).padding(.trailing, 18).frame(height: 32)
             .modifier(ComposerGlass(cornerRadius: 16))
             .contentShape(Capsule())
             .accessibilityIdentifier("canvas.workingAgent")
@@ -1060,15 +1077,15 @@ private struct WorkingAgentLabel: View {
         HStack(spacing: 7) {
             ComposerBrandMark(name: agent.name, color: color).frame(width: 14, height: 14)
             Text(agent.name).font(.footnote.weight(.semibold)).foregroundStyle(.primary).fixedSize()
-            // Truncates to the room it is given; the name, count and matrix keep theirs.
+            // As wide as its words, truncated to the room it is given; the name, count and
+            // matrix keep theirs. (A flexible frame here stretched the pill past short statuses.)
             Text(agent.status).font(.footnote).foregroundStyle(.secondary).lineLimit(1).truncationMode(.tail)
-                .frame(maxWidth: 320, alignment: .leading)
             if others > 0 { Text("+\(others)").font(.footnote.weight(.medium)).foregroundStyle(.secondary).fixedSize() }
             DotMatrix()
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(agent.name): \(agent.status)\(others > 0 ? ", and \(others) more" : "")")
-        .accessibilityHint("Shows agent tasks")
+        .accessibilityHint("Goes to the frame it is working on, once it has one")
     }
 }
 
