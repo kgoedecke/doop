@@ -29,7 +29,7 @@ import { getExportSettings } from '../exportSettings'
 import { trackPngCopy } from '../exportEvents'
 import { elementExportTarget } from '../layers'
 import type { Chord } from './chords'
-import { IS_MAC, matchesChord } from './chords'
+import { IS_MAC, matchesChord, type KeyInput } from './chords'
 import {
   addAutoLayout,
   align,
@@ -1203,6 +1203,13 @@ export function runAction(action: CanvasAction) {
 export function takesKey(action: CanvasAction, typing: boolean): boolean {
   if (!host || host.presenting || action.hintOnly) return false
   return !typing || !!action.keys?.some((chord) => chord.global)
+}
+
+/** The chord is one of the canvas's own, whether or not its action could
+ *  run now: an open menu still keeps such a chord from the browser (⌘D
+ *  bookmarking, ⌘K the search bar) while running nothing. */
+export function isCanvasChord(e: KeyInput, mac = IS_MAC): boolean {
+  return ACTIONS.some((action) => !action.hintOnly && action.keys?.some((chord) => matchesChord(e, chord, mac)))
 }
 
 type KeyEventLike = Pick<

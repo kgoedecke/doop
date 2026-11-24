@@ -39,6 +39,14 @@ export function isTypingTarget(target: EventTarget | null): target is HTMLElemen
   return target instanceof HTMLElement && (target.matches('input, textarea, select') || target.isContentEditable)
 }
 
+/** Focus is in an open menu (a context or dropdown menu). As in Figma, the
+ *  canvas's shortcuts rest while one is open: a letter is the menu's
+ *  typeahead, moving to the item that starts with it, ↩, Tab, Esc and the
+ *  arrows walk and close it, and ⌘ chords and the clipboard do nothing. */
+export function isMenuTarget(target: EventTarget | null): boolean {
+  return target instanceof Element && target.closest('[role="menu"]') !== null
+}
+
 /** ⌘. (Ctrl+. elsewhere): Figma's "hide UI" — only the bare chord, so
  *  ⌘⇧. and ⌥-variants stay free for the browser and the OS. */
 export function isHideUiShortcut(e: Pick<KeyboardEvent, 'key' | 'metaKey' | 'ctrlKey' | 'altKey' | 'shiftKey'>) {
