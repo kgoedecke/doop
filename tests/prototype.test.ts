@@ -17,6 +17,7 @@ import {
   sanitizeInteraction,
   screenLayout,
   transitionFrames,
+  pagerPlace,
 } from '../src/lib/prototypePlayer'
 import { elementInteractions, withElementInteractions } from '../src/lib/prototype'
 
@@ -278,5 +279,48 @@ describe('remapFrameTargets', () => {
     const html =
       '<p>Use navigate:old to link</p><a href="https://x.test/?q=overlay:old">x</a><a data-doop-action="navigate:old-two"></a>'
     expect(remapFrameTargets(html, ids)).toBe(html)
+  })
+})
+
+describe('pagerPlace', () => {
+  const at = (id: string, x: number, y: number, extra: Partial<Frame> = {}): Frame => ({
+    id,
+    canvasId: 'c',
+    pageId: 'p1',
+    name: id,
+    x,
+    y,
+    width: 100,
+    height: 100,
+    html: '<p>x</p>',
+    createdAt: 0,
+    updatedAt: 0,
+    updatedBy: 'Test',
+    ...extra,
+  })
+  const canvas: Pick<Canvas, 'id' | 'pages' | 'frames'> = {
+    id: 'c',
+    pages: [
+      { id: 'p1', name: 'Deck' },
+      { id: 'p2', name: 'Other' },
+    ],
+    frames: [
+      at('s3', 0, 300),
+      at('s1', 0, 0),
+      at('s2', 200, 0),
+      at('hidden', 400, 0, { hidden: true }),
+      at('elsewhere', 0, 0, { pageId: 'p2' }),
+    ],
+  }
+
+  it("steps through the shown frame's page in reading order", () => {
+    expect(pagerPlace(canvas, 's1')).toEqual({ index: 1, total: 3, prev: null, next: 's2' })
+    expect(pagerPlace(canvas, 's2')).toEqual({ index: 2, total: 3, prev: 's1', next: 's3' })
+    expect(pagerPlace(canvas, 's3')).toEqual({ index: 3, total: 3, prev: 's2', next: null })
+  })
+
+  it('shows nothing for a hidden frame or a page with one frame', () => {
+    expect(pagerPlace(canvas, 'hidden')).toBeNull()
+    expect(pagerPlace(canvas, 'elsewhere')).toBeNull()
   })
 })

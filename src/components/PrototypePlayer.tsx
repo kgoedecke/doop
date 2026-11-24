@@ -1,6 +1,6 @@
-import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react'
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { useComposedFrame } from '../lib/frameCompose'
-import type { Canvas, Frame } from '../../shared/types'
+import type { Frame } from '../../shared/types'
 import type { Interaction, ProtoTransition } from '../../shared/prototype'
 import { canCommentOpenCanvas, useStore } from '../lib/store'
 import { frameHtmlReady } from '../lib/pages'
@@ -11,6 +11,8 @@ import {
   fitScale,
   historyStep,
   isProtoScaling,
+  jumpTargets,
+  pagerPlace,
   protoHistoryState,
   readProtoHistory,
   readProtoScaling,
@@ -18,13 +20,11 @@ import {
   saveProtoScaling,
   screenLayout,
   transitionFrames,
+  type PagerPlace,
   type ProtoScaling,
   type ScreenLayout,
 } from '../lib/prototypePlayer'
 import { prototypePath } from '../lib/prototype'
-import { canvasPages, framePageId } from '../../shared/pages'
-import { isCanvasElement as isCanvasElementHtml } from '../lib/drawing'
-import { readingOrder } from '../../shared/frameOrder'
 import { IconButton } from './ui/icon-button'
 import { cn } from '@/lib/utils'
 import { Pressable } from './ui/pressable'
@@ -33,6 +33,8 @@ import { CommentThreadLayer } from './FrameLabelLayer'
 import {
   ArrowLeftIcon,
   ChevronDownIcon,
+  ChevronLeftIcon,
+  ChevronRightIcon,
   CommentIcon,
   ExportIcon,
   HistoryIcon,
@@ -175,6 +177,10 @@ export function PrototypePlayer({
   /* a viewer who loses comment access mid-way leaves comment mode with it */
   const commentsOn = commenting && canComment
   const [threadLayer, setThreadLayer] = useState<HTMLDivElement | null>(null)
+  /* a click on the player around the screens hides its bar and pager, as
+     Figma's does, and the next one brings them back; they keep their room,
+     so the screens neither move nor rescale */
+  const [chromeHidden, setChromeHidden] = useState(false)
 
   const [scaling, setScalingState] = useState(readProtoScaling)
   const setScaling = (next: ProtoScaling) => {
@@ -493,11 +499,20 @@ export function PrototypePlayer({
       className="fixed inset-x-0 bottom-0 top-[var(--app-inset,0px)] z-[80] flex flex-col overflow-hidden bg-code"
       role="dialog"
       aria-label={t('panels.protoAria', { name: shownFrame?.name ?? t('panels.protoMissingLower') })}
+      /* hidden, the bar and the pager keep their room, and a click there
+         (where they were) brings them back: under Fill, or on a screen larger
+         than the stage, there is no empty space around the screens to click */
+      onClick={(e) => {
+        if (chromeHidden && e.target === e.currentTarget) setChromeHidden(false)
+      }}
       data-prototype-player=""
     >
       <CommentThreadLayer.Provider value={threadLayer}>
         <div
-          className="relative z-10 flex h-10 shrink-0 items-center justify-between gap-2 border-b border-white/10 px-2 text-code-ink"
+          className={cn(
+            'relative z-10 flex h-10 shrink-0 items-center justify-between gap-2 border-b border-white/10 px-2 text-code-ink',
+            chromeHidden && chromeOff,
+          )}
           data-proto-bar=""
         >
           <div className="flex min-w-0 items-center gap-1">
@@ -564,8 +579,22 @@ export function PrototypePlayer({
             )}
           </div>
         </div>
-        {/* the screens: everything under the bar, which never covers them */}
-        <div ref={stageRef} className="relative min-h-0 flex-1 overflow-hidden" data-proto-stage="">
+        {/* the screens: everything between the bar and the pager, which never cover them */}
+        <div
+          ref={stageRef}
+          className="relative min-h-0 flex-1 overflow-hidden"
+          data-proto-stage=""
+          onClick={(e) => {
+            /* only the empty space around the screens: a click in a screen
+               stays in its iframe, and comment threads sit in their own layer */
+            const target = e.target as HTMLElement
+            if (target !== e.currentTarget && !target.hasAttribute('data-proto-screen')) return
+            /* a scrollable screen's wrapper: its scrollbars are not empty space */
+            const { offsetX, offsetY } = e.nativeEvent
+            if (offsetX >= target.clientWidth || offsetY >= target.clientHeight) return
+            setChromeHidden((h) => !h)
+          }}
+        >
           {(viewport ? base : []).map(({ entry, role }) => {
             const frame = frameById(entry.frameId)
             return (
@@ -637,24 +666,78 @@ export function PrototypePlayer({
             </div>
           )}
         </div>
+        <Pager
+          frameId={(move?.to ?? current).frameId}
+          hidden={chromeHidden}
+          onStep={(id) => {
+            /* the screen stepped to takes the keys, as one picked from the menu
+               does: Enter or Space for the design never press the pager again */
+            focusHandoff.current = true
+            navigate(id, 'instant', 0)
+          }}
+        />
       </CommentThreadLayer.Provider>
     </div>
   )
 }
 
-const playerBtn = 'text-code-ink/80 hover:bg-white/10 hover:text-code-ink'
-
-/** The frames a viewer can jump to, page by page in reading order: every
- *  frame that is not hidden and not a standalone shape on the canvas. */
-function jumpTargets(canvas: Pick<Canvas, 'id' | 'pages' | 'frames'>) {
-  const shown = canvas.frames.filter((f) => !f.hidden && !(f.html && isCanvasElementHtml(f.html)))
-  return canvasPages(canvas)
-    .map((page) => ({
-      page,
-      frames: readingOrder(shown.filter((f) => framePageId(canvas, f) === page.id)),
-    }))
-    .filter((group) => group.frames.length)
+/** Figma's ‹ n / N › under the screens: steps through the frames of the
+ *  shown screen's page in reading order, as a navigation with no transition,
+ *  so Back returns from a step. Not shown when there is nowhere to step. */
+function Pager({ frameId, hidden, onStep }: { frameId: string; hidden: boolean; onStep: (frameId: string) => void }) {
+  /* the canvas's own fields, not the canvas: presence, cursors and agent
+     status change it all the time under a playing prototype */
+  const id = useStore((s) => s.canvas?.id)
+  const pages = useStore((s) => s.canvas?.pages)
+  const frames = useStore((s) => s.canvas?.frames)
+  const place = useMemo(
+    () => (id && frames ? pagerPlace({ id, pages, frames }, frameId) : null),
+    [id, pages, frames, frameId],
+  )
+  /* the strip is there whether or not there is anywhere to step, so going to
+     a page of one frame, or a frame added to this one, never moves the screens */
+  return (
+    <div className={cn('flex h-14 shrink-0 items-center justify-center', hidden && chromeOff)} data-proto-pager="">
+      {place && <PagerControls place={place} onStep={onStep} />}
+    </div>
+  )
 }
+
+function PagerControls({ place, onStep }: { place: PagerPlace; onStep: (frameId: string) => void }) {
+  const t = useT()
+  const { prev, next } = place
+  return (
+    <div className="flex h-10 items-center rounded-panel bg-white/10 px-1 text-code-ink">
+      <IconButton
+        size="md"
+        className={playerBtn}
+        aria-label={t('panels.protoPrevFrame')}
+        disabled={!prev}
+        onClick={() => prev && onStep(prev)}
+      >
+        <ChevronLeftIcon />
+      </IconButton>
+      <span className="h-5 w-px bg-white/15" />
+      <span className="min-w-16 px-3 text-center text-body tabular-nums" data-proto-count="">
+        {t('panels.protoCount', { index: place.index, total: place.total })}
+      </span>
+      <span className="h-5 w-px bg-white/15" />
+      <IconButton
+        size="md"
+        className={playerBtn}
+        aria-label={t('panels.protoNextFrame')}
+        disabled={!next}
+        onClick={() => next && onStep(next)}
+      >
+        <ChevronRightIcon />
+      </IconButton>
+    </div>
+  )
+}
+
+const playerBtn = 'text-code-ink/80 hover:bg-white/10 hover:text-code-ink'
+/* hidden UI keeps its room, so the screens stay put at the same scale */
+const chromeOff = 'invisible'
 
 /** The current screen's name, and a menu of every frame to jump to: a jump
  *  is a navigation with no transition, so Back returns from it. */
