@@ -28,6 +28,7 @@
       window.messages = []
       window.addEventListener('message', (ev) => window.messages.push(ev.data))
       window.seed = (canvas) => useStore.getState().setCanvas(canvas)
+      window.seedComments = (comments) => useStore.getState().setComments(comments)
       window.editFrame = (id, html) => {
         const frame = useStore.getState().canvas.frames.find((f) => f.id === id)
         useStore.getState().upsertFrame({ ...frame, html, updatedAt: frame.updatedAt + 1 })

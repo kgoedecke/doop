@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react'
+import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react'
 import { useComposedFrame } from '../lib/frameCompose'
-import type { Frame } from '../../shared/types'
+import type { Canvas, Frame } from '../../shared/types'
 import type { Interaction, ProtoTransition } from '../../shared/prototype'
-import { useStore } from '../lib/store'
+import { canCommentOpenCanvas, useStore } from '../lib/store'
 import { frameHtmlReady } from '../lib/pages'
 import { showFrames } from '../lib/ws'
 import { posthog } from '../lib/posthog'
@@ -22,8 +22,24 @@ import {
   type ScreenLayout,
 } from '../lib/prototypePlayer'
 import { prototypePath } from '../lib/prototype'
+import { canvasPages, framePageId } from '../../shared/pages'
+import { isCanvasElementHtml } from '../../shared/canvasPreview'
+import { readingOrder } from '../../shared/frameOrder'
 import { IconButton } from './ui/icon-button'
-import { ArrowLeftIcon, ExportIcon, HistoryIcon, HotspotIcon, ScalingIcon, XIcon } from './ui/icons'
+import { cn } from '@/lib/utils'
+import { Pressable } from './ui/pressable'
+import { PrototypeComments } from './PrototypeComments'
+import { CommentThreadLayer } from './FrameLabelLayer'
+import {
+  ArrowLeftIcon,
+  ChevronDownIcon,
+  CommentIcon,
+  ExportIcon,
+  HistoryIcon,
+  HotspotIcon,
+  ScalingIcon,
+  XIcon,
+} from './ui/icons'
 import {
   DropdownMenu,
   DropdownMenuCaption,
@@ -144,6 +160,19 @@ export function PrototypePlayer({
     observer.observe(root)
     return () => observer.disconnect()
   }, [])
+
+  /* comment mode (C, or the toolbar's bubble): clicks on the screen pin
+     comments instead of playing the prototype */
+  const canComment = useStore(canCommentOpenCanvas)
+  const [commenting, setCommentingState] = useState(false)
+  const commentingRef = useRef(false)
+  const setCommenting = (next: boolean) => {
+    commentingRef.current = next
+    setCommentingState(next)
+  }
+  /* a viewer who loses comment access mid-way leaves comment mode with it */
+  const commentsOn = commenting && canComment
+  const [threadLayer, setThreadLayer] = useState<HTMLDivElement | null>(null)
 
   const [scaling, setScalingState] = useState(readProtoScaling)
   const setScaling = (next: ProtoScaling) => {
@@ -280,8 +309,10 @@ export function PrototypePlayer({
   }
 
   /* Escape: an open overlay closes first; then the screen's own key:Escape
-     interaction; then, over the editor, the player itself */
+     interaction; then, over the editor, the player itself. Comment mode
+     goes before all of them: Esc leaves it as it does on the canvas */
   function escape() {
+    if (commentingRef.current && canComment) return setCommenting(false)
     if (overlaysRef.current.length) return closeOverlay()
     const win = topWindow()
     if (!win) return onClose?.()
@@ -332,9 +363,9 @@ export function PrototypePlayer({
   }
 
   /* the latest handlers for the listeners below, which subscribe once */
-  const handlers = useRef({ escape, back, jumpTo, release, topWindow })
+  const handlers = useRef({ escape, back, jumpTo, release, topWindow, commentKey })
   useLayoutEffect(() => {
-    handlers.current = { escape, back, jumpTo, release, topWindow }
+    handlers.current = { escape, back, jumpTo, release, topWindow, commentKey }
   })
 
   useEffect(() => {
@@ -344,6 +375,8 @@ export function PrototypePlayer({
          Escape on the button still leaves the player */
       const target = e.target instanceof Element ? e.target : null
       if (target?.closest('[data-proto-menu]')) return
+      /* a comment being written or answered types into its own field */
+      if (target?.closest('[data-proto-comment]')) return
       if (target?.closest('[data-proto-menu-trigger]') && e.key !== 'Escape') return
       /* capture phase, and modal: no key reaches the editor underneath (an
          arrow would nudge the selected frame, Delete would remove it) */
@@ -351,6 +384,7 @@ export function PrototypePlayer({
       if (e.key === 'Escape') return handlers.current.escape()
       if (e.repeat || e.metaKey || e.ctrlKey) return
       const win = handlers.current.topWindow()
+      if (e.key.toLowerCase() === 'c' && !e.altKey && !e.shiftKey && handlers.current.commentKey(win)) return
       win?.postMessage({ type: 'doop:proto-key', key: e.key, reqId: `key-${e.timeStamp}` }, '*')
     }
     const onUp = () => handlers.current.release()
@@ -384,6 +418,24 @@ export function PrototypePlayer({
     },
     [],
   )
+
+  /** Switch comment mode; false when this viewer may not comment. */
+  function toggleComments(): boolean {
+    if (!canComment) return false
+    setCommenting(!commentingRef.current)
+    return true
+  }
+
+  /** C: the screen's own key:c interaction goes first, as Escape's does;
+   *  only a C nothing on the screen takes switches comment mode. */
+  function commentKey(win: Window | undefined): boolean {
+    if (!canComment) return false
+    if (!win) return toggleComments()
+    askKey(win, 'c')
+      .then((handled) => !handled && toggleComments())
+      .catch(console.error)
+    return true
+  }
 
   function flashHotspots() {
     for (const win of windows.current.values()) win.postMessage({ type: 'doop:proto-hotspots' }, '*')
@@ -441,104 +493,134 @@ export function PrototypePlayer({
       aria-label={t('panels.protoAria', { name: shownFrame?.name ?? t('panels.protoMissingLower') })}
       data-prototype-player=""
     >
-      {base.map(({ entry, role }) => {
-        const frame = frameById(entry.frameId)
-        return (
-          <div
-            key={entry.key}
-            ref={(el) => {
-              if (el) wrappers.current.set(entry.key, el)
-              else wrappers.current.delete(entry.key)
-            }}
-            className={`absolute inset-0 grid ${screenPlacement}`}
-            data-proto-screen={entry.frameId}
-            data-proto-role={role}
-            style={{
-              zIndex: role === 'from' ? (outgoingOnTop ? 2 : 1) : role === 'to' ? (outgoingOnTop ? 1 : 2) : 1,
-              /* the incoming screen stays hidden until its document has rendered */
-              visibility: role === 'to' && !move?.ready ? 'hidden' : undefined,
-            }}
-          >
-            <ProtoScreen
-              {...screenProps(entry)}
-              layout={frame ? screenLayout(frame, viewport, scaling) : undefined}
-              interactive={role !== 'from' && !overlays.length}
-              onReady={onScreenReady}
-            />
-          </div>
-        )
-      })}
-
-      {overlays.map((entry, index) => {
-        const frame = frameById(entry.frameId)
-        const scale = frame
-          ? Math.min(baseScale, fitScale(frame, { w: viewport.w * OVERLAY_FIT, h: viewport.h * OVERLAY_FIT }))
-          : 1
-        return (
-          <div key={entry.key} className="absolute inset-0 z-[5] grid place-items-center">
-            <div className="absolute inset-0 bg-black/45" data-proto-scrim="" onClick={closeOverlay} />
+      <CommentThreadLayer.Provider value={threadLayer}>
+        {base.map(({ entry, role }) => {
+          const frame = frameById(entry.frameId)
+          return (
             <div
+              key={entry.key}
               ref={(el) => {
                 if (el) wrappers.current.set(entry.key, el)
                 else wrappers.current.delete(entry.key)
               }}
-              className="relative shadow-pop"
-              data-proto-overlay={entry.frameId}
-              style={{ opacity: readyOverlays.has(entry.key) ? 1 : 0 }}
+              className={`absolute inset-0 grid ${screenPlacement}`}
+              data-proto-screen={entry.frameId}
+              data-proto-role={role}
+              style={{
+                zIndex: role === 'from' ? (outgoingOnTop ? 2 : 1) : role === 'to' ? (outgoingOnTop ? 1 : 2) : 1,
+                /* the incoming screen stays hidden until its document has rendered */
+                visibility: role === 'to' && !move?.ready ? 'hidden' : undefined,
+              }}
             >
               <ProtoScreen
                 {...screenProps(entry)}
-                layout={frame ? { width: frame.width, height: frame.height, scale } : undefined}
-                interactive={index === overlays.length - 1}
-                onReady={() => onOverlayReady(entry)}
+                layout={frame ? screenLayout(frame, viewport, scaling) : undefined}
+                interactive={role !== 'from' && !overlays.length}
+                commenting={commentsOn && role === 'still' && !overlays.length}
+                onReady={onScreenReady}
               />
             </div>
-          </div>
-        )
-      })}
+          )
+        })}
 
-      <div className="absolute top-3 right-3 z-10 flex items-center gap-1 rounded-pill bg-black/55 p-1 text-code-ink opacity-70 backdrop-blur-[6px] transition-opacity duration-150 hover:opacity-100 focus-within:opacity-100">
-        <span className="max-w-[180px] truncate px-2 text-caption text-code-ink/80" data-proto-current="">
-          {shownFrame?.name ?? t('panels.protoMissing')}
-        </span>
-        <IconButton
-          size="sm"
-          className={playerBtn}
-          aria-label={t('common.back')}
-          disabled={stack.length < 2 && !overlays.length}
-          onClick={() => back()}
-        >
-          <ArrowLeftIcon size="rail" />
-        </IconButton>
-        <IconButton size="sm" className={playerBtn} aria-label={t('panels.protoRestart')} onClick={restart}>
-          <HistoryIcon size="rail" />
-        </IconButton>
-        <IconButton size="sm" className={playerBtn} aria-label={t('panels.protoHotspots')} onClick={flashHotspots}>
-          <HotspotIcon size="rail" />
-        </IconButton>
-        <ScalingMenu scaling={scaling} onChange={setScaling} />
-        {onClose && canvasId && (
+        {overlays.map((entry, index) => {
+          const frame = frameById(entry.frameId)
+          const scale = frame
+            ? Math.min(baseScale, fitScale(frame, { w: viewport.w * OVERLAY_FIT, h: viewport.h * OVERLAY_FIT }))
+            : 1
+          return (
+            <div key={entry.key} className="absolute inset-0 z-[5] grid place-items-center">
+              <div className="absolute inset-0 bg-black/45" data-proto-scrim="" onClick={closeOverlay} />
+              <div
+                ref={(el) => {
+                  if (el) wrappers.current.set(entry.key, el)
+                  else wrappers.current.delete(entry.key)
+                }}
+                className="relative shadow-pop"
+                data-proto-overlay={entry.frameId}
+                style={{ opacity: readyOverlays.has(entry.key) ? 1 : 0 }}
+              >
+                <ProtoScreen
+                  {...screenProps(entry)}
+                  layout={frame ? { width: frame.width, height: frame.height, scale } : undefined}
+                  interactive={index === overlays.length - 1}
+                  commenting={commentsOn && index === overlays.length - 1}
+                  onReady={() => onOverlayReady(entry)}
+                />
+              </div>
+            </div>
+          )
+        })}
+
+        <div className="absolute top-3 right-3 z-10 flex items-center gap-1 rounded-pill bg-black/55 p-1 text-code-ink opacity-70 backdrop-blur-[6px] transition-opacity duration-150 hover:opacity-100 focus-within:opacity-100">
+          <FrameMenu
+            currentId={shownFrame?.id}
+            label={shownFrame?.name ?? t('panels.protoMissing')}
+            /* the screen already shown: picking it again only closes an overlay over it */
+            onPick={(id) => {
+              if (id !== current.frameId) navigate(id, 'instant', 0)
+              else if (overlays.length) setOverlays([])
+            }}
+          />
           <IconButton
             size="sm"
             className={playerBtn}
-            aria-label={t('panels.protoNewTab')}
-            onClick={() => window.open(prototypePath(canvasId, current.frameId), '_blank', 'noopener')}
+            aria-label={t('common.back')}
+            disabled={stack.length < 2 && !overlays.length}
+            onClick={() => back()}
           >
-            <ExportIcon size="rail" />
+            <ArrowLeftIcon size="rail" />
           </IconButton>
-        )}
-        {onClose && (
-          <IconButton
-            size="sm"
-            className={playerBtn}
-            aria-label={t('panels.protoExit')}
-            title={t('panels.protoExitTitle')}
-            onClick={onClose}
-          >
-            <XIcon size="rail" />
+          <IconButton size="sm" className={playerBtn} aria-label={t('panels.protoRestart')} onClick={restart}>
+            <HistoryIcon size="rail" />
           </IconButton>
-        )}
-      </div>
+          <IconButton size="sm" className={playerBtn} aria-label={t('panels.protoHotspots')} onClick={flashHotspots}>
+            <HotspotIcon size="rail" />
+          </IconButton>
+          {canComment && (
+            <IconButton
+              size="sm"
+              className={cn(playerBtn, commentsOn && 'bg-white/15 text-code-ink')}
+              aria-label={t('panels.protoComments')}
+              aria-pressed={commentsOn}
+              title={t('panels.protoCommentsTitle')}
+              data-proto-comments=""
+              onClick={() => toggleComments()}
+            >
+              <CommentIcon size="rail" />
+            </IconButton>
+          )}
+          <ScalingMenu scaling={scaling} onChange={setScaling} />
+          {onClose && canvasId && (
+            <IconButton
+              size="sm"
+              className={playerBtn}
+              aria-label={t('panels.protoNewTab')}
+              onClick={() => window.open(prototypePath(canvasId, current.frameId), '_blank', 'noopener')}
+            >
+              <ExportIcon size="rail" />
+            </IconButton>
+          )}
+          {onClose && (
+            <IconButton
+              size="sm"
+              className={playerBtn}
+              aria-label={t('panels.protoExit')}
+              title={t('panels.protoExitTitle')}
+              onClick={onClose}
+            >
+              <XIcon size="rail" />
+            </IconButton>
+          )}
+        </div>
+        {/* the composer and open threads: above the screens, unclipped by them */}
+        <div
+          ref={setThreadLayer}
+          className="pointer-events-none absolute inset-0 z-[20]"
+          data-proto-comment=""
+          onKeyDown={(e) => e.stopPropagation()}
+        />
+      </CommentThreadLayer.Provider>
       {notice && (
         <div className="absolute bottom-5 left-1/2 z-10 -translate-x-1/2 rounded-pill bg-black/70 px-3 py-1.5 text-body text-code-ink">
           {notice}
@@ -549,6 +631,86 @@ export function PrototypePlayer({
 }
 
 const playerBtn = 'text-code-ink/80 hover:bg-white/10 hover:text-code-ink'
+
+/** The frames a viewer can jump to, page by page in reading order: every
+ *  frame that is not hidden and not a standalone shape on the canvas. */
+function jumpTargets(canvas: Pick<Canvas, 'id' | 'pages' | 'frames'>) {
+  const shown = canvas.frames.filter((f) => !f.hidden && !(f.html && isCanvasElementHtml(f.html)))
+  return canvasPages(canvas)
+    .map((page) => ({
+      page,
+      frames: readingOrder(shown.filter((f) => framePageId(canvas, f) === page.id)),
+    }))
+    .filter((group) => group.frames.length)
+}
+
+/** The current screen's name, and a menu of every frame to jump to: a jump
+ *  is a navigation with no transition, so Back returns from it. */
+function FrameMenu({
+  currentId,
+  label,
+  onPick,
+}: {
+  currentId: string | undefined
+  label: string
+  onPick: (frameId: string) => void
+}) {
+  const t = useT()
+  const canvas = useStore((s) => s.canvas)
+  /* worked out only while the menu shows: the canvas changes under a
+     playing prototype all the time (streams, peers' edits) */
+  const [open, setOpen] = useState(false)
+  const groups = open && canvas ? jumpTargets(canvas) : []
+  const titled = groups.length > 1
+  return (
+    <DropdownMenu open={open} onOpenChange={setOpen}>
+      <DropdownMenuTrigger asChild data-proto-menu-trigger="" onKeyDown={(e) => e.stopPropagation()}>
+        <Pressable
+          className="flex max-w-[220px] items-center gap-1 rounded-pill px-2 py-1 text-caption text-code-ink/80 hover:bg-white/10 hover:text-code-ink"
+          aria-label={t('panels.protoJumpTo')}
+          data-proto-frame-menu=""
+        >
+          <span className="truncate" data-proto-current="">
+            {label}
+          </span>
+          <ChevronDownIcon size={12} className="shrink-0" />
+        </Pressable>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent
+        width="lg"
+        align="start"
+        className="z-[90] max-h-[min(70vh,480px)] overflow-y-auto"
+        data-proto-menu=""
+        onKeyDown={(e) => e.stopPropagation()}
+        onCloseAutoFocus={(e) => {
+          const screen = interactiveScreen()
+          if (!screen) return
+          e.preventDefault()
+          screen.focus()
+        }}
+      >
+        <DropdownMenuRadioGroup value={currentId ?? ''}>
+          {groups.map(({ page, frames }, index) => (
+            <Fragment key={page.id}>
+              {index > 0 && <DropdownMenuSeparator />}
+              {titled && <DropdownMenuCaption>{page.name}</DropdownMenuCaption>}
+              {frames.map((frame) => (
+                <DropdownMenuRadioItem
+                  key={frame.id}
+                  value={frame.id}
+                  data-proto-jump={frame.id}
+                  onSelect={() => onPick(frame.id)}
+                >
+                  <span className="truncate">{frame.name}</span>
+                </DropdownMenuRadioItem>
+              ))}
+            </Fragment>
+          ))}
+        </DropdownMenuRadioGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
+}
 
 /** How the player scales its screens: the two recommended choices, then
  *  the scaled ones. */
@@ -649,6 +811,7 @@ function ProtoScreen({
   register,
   onReady,
   onMessage,
+  commenting,
 }: {
   entry: Entry
   frame: Frame | undefined
@@ -660,9 +823,13 @@ function ProtoScreen({
   register: (key: number, win: Window | null) => void
   onReady: (key: number) => void
   onMessage: (data: { type?: string; interaction?: unknown; press?: boolean }) => void
+  /** the top screen while the viewer comments: clicks pin comments */
+  commenting: boolean
 }) {
   const iframeRef = useRef<HTMLIFrameElement>(null)
   const [booted, setBooted] = useState(false)
+  /* each document the runtime has shown: comment pins are located again */
+  const [rendered, setRendered] = useState(0)
   const [shown, setShown] = useState(false)
   const latest = useRef({ onReady, onMessage, register, takeFocus })
   const t = useT()
@@ -685,6 +852,7 @@ function ProtoScreen({
         latest.current.register(key, win)
         setBooted(true)
       } else if (data.type === 'doop:html-result') {
+        setRendered((n) => n + 1)
         if (!first) return
         first = false
         setShown(true)
@@ -745,6 +913,15 @@ function ProtoScreen({
         sandbox="allow-scripts"
         srcDoc={FRAME_BOOTSTRAP}
         style={{ width, height, transform: `scale(${scale})`, transformOrigin: '0 0' }}
+      />
+      <PrototypeComments
+        frame={frame}
+        iframeRef={iframeRef}
+        scale={scale}
+        width={width}
+        height={height}
+        rendered={rendered}
+        commenting={commenting}
       />
     </div>
   )

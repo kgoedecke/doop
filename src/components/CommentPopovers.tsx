@@ -47,6 +47,7 @@ export function CommentPin({
   left,
   top,
   onToggle,
+  still = false,
   children,
 }: {
   /** root comment first, then its replies oldest → newest */
@@ -55,12 +56,15 @@ export function CommentPin({
   left: number
   top: number
   onToggle: () => void
+  /** a pin off the canvas (the prototype player): no drag to re-pin and no
+   *  menu, both of which read the canvas's camera and layers */
+  still?: boolean
   children?: ReactNode
 }) {
   const [root] = thread
   const agentItem = [...thread].reverse().find((x) => x.forAgent && !x.resolvedAt)
   const working = agentItem?.claimedBy && !agentItem.failedAt
-  const movable = useStore(canCommentOpenCanvas)
+  const movable = useStore(canCommentOpenCanvas) && !still
   const dragged = useStore((s) => s.commentDrag?.id === root.id)
   /* the click after a drag's release must not toggle the thread */
   const suppressClick = useRef(false)
@@ -101,7 +105,8 @@ export function CommentPin({
       }
       const v = s.viewport
       const u = prev.viewport
-      if (v === u) return
+      /* a still pin is not in the canvas's world: the camera moves nothing */
+      if (still || v === u) return
       /* the pin is drawn in the world (screen = world × zoom + offset) at a
          constant screen size, so its centre moves with the camera. Worked
          out here rather than measured: the Stage may not have moved the
@@ -116,7 +121,7 @@ export function CommentPin({
       unsub()
       cancelAnimationFrame(raf)
     }
-  }, [showThread, threadLayer, left, top])
+  }, [showThread, threadLayer, left, top, still])
 
   function onPointerDown(e: React.PointerEvent<HTMLDivElement>) {
     e.stopPropagation()
@@ -181,51 +186,53 @@ export function CommentPin({
     }
   }
 
+  const pin = (
+    <div
+      className={cn(
+        'pointer-events-auto absolute z-[4] grid h-[26px] w-[26px] cursor-pointer place-items-center rounded-[50%_50%_50%_4px] border-2 border-white text-[13px] text-white animate-[chip-in_0.25s_ease]',
+        PIN_SCALE,
+        dragged && 'opacity-0',
+        agentItem?.failedAt
+          ? 'bg-accent-ink! font-extrabold shadow-[0_0_0_3px_rgba(208,52,31,0.2),var(--shadow-card)]'
+          : 'shadow-card',
+        working &&
+          "after:absolute after:-inset-1.5 after:rounded-[inherit] after:border-2 after:border-current after:opacity-50 after:content-[''] after:[animation:stream-pulse_1.1s_ease-in-out_infinite]",
+      )}
+      ref={pinRef}
+      style={{ left, top, background: colorFor(root.from) }}
+      onPointerDown={onPointerDown}
+      /* the pin's own menu: stopped here so the frame's or the canvas's
+         menu, whose triggers wrap this one, does not open behind it */
+      onContextMenu={(e) => e.stopPropagation()}
+      onClick={() => {
+        if (suppressClick.current) {
+          suppressClick.current = false
+          return
+        }
+        onToggle()
+      }}
+      title={`${root.from}: ${root.text}${thread.length > 1 ? t('stage.pinReplies', { count: thread.length - 1 }) : ''}`}
+    >
+      {agentItem?.failedAt ? '!' : working ? <SparkIcon size={14} /> : <CommentIcon size={14} />}
+      {showThread &&
+        (threadLayer
+          ? createPortal(
+              <div
+                ref={anchorRef}
+                data-comment-thread-anchor
+                className="pointer-events-none absolute *:pointer-events-auto"
+              >
+                {children}
+              </div>,
+              threadLayer,
+            )
+          : children)}
+    </div>
+  )
+  if (still) return pin
   return (
     <ContextMenu>
-      <ContextMenuTrigger asChild>
-        <div
-          className={cn(
-            'pointer-events-auto absolute z-[4] grid h-[26px] w-[26px] cursor-pointer place-items-center rounded-[50%_50%_50%_4px] border-2 border-white text-[13px] text-white animate-[chip-in_0.25s_ease]',
-            PIN_SCALE,
-            dragged && 'opacity-0',
-            agentItem?.failedAt
-              ? 'bg-accent-ink! font-extrabold shadow-[0_0_0_3px_rgba(208,52,31,0.2),var(--shadow-card)]'
-              : 'shadow-card',
-            working &&
-              "after:absolute after:-inset-1.5 after:rounded-[inherit] after:border-2 after:border-current after:opacity-50 after:content-[''] after:[animation:stream-pulse_1.1s_ease-in-out_infinite]",
-          )}
-          ref={pinRef}
-          style={{ left, top, background: colorFor(root.from) }}
-          onPointerDown={onPointerDown}
-          /* the pin's own menu: stopped here so the frame's or the canvas's
-         menu, whose triggers wrap this one, does not open behind it */
-          onContextMenu={(e) => e.stopPropagation()}
-          onClick={() => {
-            if (suppressClick.current) {
-              suppressClick.current = false
-              return
-            }
-            onToggle()
-          }}
-          title={`${root.from}: ${root.text}${thread.length > 1 ? t('stage.pinReplies', { count: thread.length - 1 }) : ''}`}
-        >
-          {agentItem?.failedAt ? '!' : working ? <SparkIcon size={14} /> : <CommentIcon size={14} />}
-          {showThread &&
-            (threadLayer
-              ? createPortal(
-                  <div
-                    ref={anchorRef}
-                    data-comment-thread-anchor
-                    className="pointer-events-none absolute *:pointer-events-auto"
-                  >
-                    {children}
-                  </div>,
-                  threadLayer,
-                )
-              : children)}
-        </div>
-      </ContextMenuTrigger>
+      <ContextMenuTrigger asChild>{pin}</ContextMenuTrigger>
       <ContextMenuContent>
         <ContextMenuItem onSelect={() => void copyCommentLink(root)}>
           <LinkIcon size="rail" />

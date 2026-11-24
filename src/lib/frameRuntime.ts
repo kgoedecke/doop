@@ -2122,6 +2122,13 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
       if (anchorEl) anchorEl.scrollIntoView({ behavior: 'smooth', block: 'start' })
       else if (!anchorId || anchorId === 'top') window.scrollTo({ top: 0, behavior: 'smooth' })
     }
+    /* a wheel over a cover the editor lays on the frame (the prototype
+       player's comment mode): the document scrolls as if it had the wheel */
+    if (d.type === 'doop:scroll-by' && typeof d.dx === 'number' && typeof d.dy === 'number') {
+      var scroller = document.scrollingElement || document.documentElement
+      scroller.scrollBy(d.dx, d.dy)
+      parent.postMessage({ type: 'doop:scroll-by-result', reqId: d.reqId }, '*')
+    }
     if (d.type === 'doop:cursor') {
       /* a cursor value, never a way to add rules: a brace is refused */
       canvasCursor = typeof d.cursor === 'string' && d.cursor && !/[{}<]/.test(d.cursor) ? d.cursor : null
