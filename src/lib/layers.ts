@@ -486,8 +486,9 @@ export function setElementsHidden(html: string, selectors: string[], hidden: boo
 export function duplicateElements(
   html: string,
   selectors: string[],
-  /** an attribute set on every copy's root, such as a carried-style scope */
-  mark?: { name: string; value: string },
+  /** an attribute set on every copy's root, such as a carried-style scope:
+   *  one value for all, or one per copy in document order */
+  mark?: { name: string; value: string | readonly string[] },
 ): { html: string; selectors: string[]; renamed: Record<string, string> } | null {
   const doc = parse(html)
   const els = findAll(doc, selectors)
@@ -495,7 +496,11 @@ export function duplicateElements(
   const originals = inDocumentOrder(els)
   const copies = originals.map((el) => el.cloneNode(true) as Element)
   const renamed = renameIds(doc, copies)
-  if (mark) for (const copy of copies) copy.setAttribute(mark.name, mark.value)
+  if (mark)
+    copies.forEach((copy, i) => {
+      const value = typeof mark.value === 'string' ? mark.value : mark.value[i]
+      if (value !== undefined) copy.setAttribute(mark.name, value)
+    })
   originals.forEach((el, i) => el.after(copies[i]!))
   return { html: serialize(doc), selectors: copies.map(elementPath), renamed }
 }

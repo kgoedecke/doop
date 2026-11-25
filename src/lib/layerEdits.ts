@@ -10,7 +10,15 @@ import { formatElementText, inspectElement, nudgeElements, requestFrame } from '
 import { isCanvasElement } from './drawing'
 import { copyFrames, duplicateFrames } from './frameClipboard'
 import { writeCanvasClipboard } from './canvasClipboard'
-import { carriedCss, newScope, renameInCss, scopeMarkup, SCOPE_ATTR, withCarriedCss } from './styleCarry'
+import {
+  carriedCss,
+  joinCarriedSheets,
+  newScope,
+  renameInCss,
+  scopeMarkup,
+  SCOPE_ATTR,
+  withCarriedCss,
+} from './styleCarry'
 import {
   deleteFramesTracked,
   dropEntry,
@@ -582,18 +590,31 @@ export function dropLayerCopy(pressed: Frame, selector: string, target: DropTarg
  *  the original relies on come along, scoped to the copy and renamed with
  *  it, as they would for a copy into another frame. */
 export function styledCopy(html: string, selector: string): { html: string; selector: string } | null {
-  const scope = newScope()
-  const duplicated = duplicateElements(html, [selector], { name: SCOPE_ATTR, value: scope })
+  const duplicated = styledCopies(html, [selector])
   const copy = duplicated?.selectors[0]
-  if (!duplicated || !copy) return null
+  return duplicated && copy ? { html: duplicated.html, selector: copy } : null
+}
+
+/** styledCopy for several elements at once, each copy right after its
+ *  original, with one id renaming between them. `selectors` are outermost
+ *  and in document order (outermostSelectors gives them so): the copies'
+ *  paths come back in the same order. Each copy wears a scope of its own,
+ *  so the rules carried for one never reach another (a copy taken from a
+ *  dark section keeps its colours to itself), as a paste of several does. */
+export function styledCopies(html: string, selectors: string[]): { html: string; selectors: string[] } | null {
+  const scopes = selectors.map(() => newScope())
+  const duplicated = duplicateElements(html, selectors, { name: SCOPE_ATTR, value: scopes })
+  if (!duplicated || duplicated.selectors.length !== selectors.length) return null
   const css = Object.keys(duplicated.renamed).length
-    ? renameInCss(carriedCss(html, selector, scope), duplicated.renamed)
+    ? renameInCss(
+        joinCarriedSheets(selectors.map((selector, i) => carriedCss(html, selector, scopes[i]!))),
+        duplicated.renamed,
+      )
     : ''
-  if (css.trim()) return { html: withCarriedCss(duplicated.html, css, scope), selector: copy }
-  /* nothing to carry: the copy needs no scope mark either */
-  const plain = duplicateElements(html, [selector])
-  const at = plain?.selectors[0]
-  return plain && at ? { html: plain.html, selector: at } : null
+  if (css.trim()) return { html: withCarriedCss(duplicated.html, css, scopes), selectors: duplicated.selectors }
+  /* nothing to carry: the copies need no scope mark either */
+  const plain = duplicateElements(html, selectors)
+  return plain && plain.selectors.length === selectors.length ? { html: plain.html, selectors: plain.selectors } : null
 }
 
 /* a drop that would put the element where it already is */

@@ -1208,7 +1208,11 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   several picked layers (or inside one) moves them all: the rest ride the gesture as `followers`
   (`styleGesture` `begin`), each translated by the pressed layer's delta, put back on Escape and
   saved with it as one step; a multi-pick never takes a layout drop, and the pressed layer
-  becomes the pick's primary.
+  becomes the pick's primary. ⌥⇧ on such a drag copies every picked layer instead
+  (`styledCopies`, each copy right after its original and in a carried-style scope of its own):
+  the copies are the gesture and its followers, the originals stay, and the copies become the
+  pick. A locked layer in the pick stops the copy, as it stops ⌘D. Only a single copy can be
+  dragged off its frame; several stay inside it, as a multi-pick move does.
   The iframe runtime hit-tests the pointer in browser paint order and measures CSS layout
   size separately from transformed bounds. Pending pointer events are buffered until its
   reply, so fast drags and cancellation remain reliable. `src/lib/drawingMove.ts` preserves markup and translates coordinates when
