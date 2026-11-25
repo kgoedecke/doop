@@ -67,7 +67,7 @@ describe('desktop sign-in start page', () => {
   })
 
   it('rejects unknown providers and bad challenges, sanitises both landings', () => {
-    expect(parseDesktopSignInQuery(`?provider=github&challenge=${CHALLENGE}&to=/`)).toBeNull()
+    expect(parseDesktopSignInQuery(`?provider=facebook&challenge=${CHALLENGE}&to=/`)).toBeNull()
     expect(parseDesktopSignInQuery('?provider=google&to=/')).toBeNull()
     expect(parseDesktopSignInQuery('?provider=google&challenge=short&to=/')).toBeNull()
     const foreign = parseDesktopSignInQuery(

@@ -67,7 +67,7 @@ export const admin: Catalog['admin'] = {
   ssoNotConfigured: 'Nenhum provedor OIDC está configurado.',
   methodsTitle: 'Formas de acesso',
   methodsDescription:
-    'Como as pessoas entram nesta instância. Quais provedores existem vem do ambiente (OIDC_*, GOOGLE_*, MICROSOFT_*, APPLE_*); o que eles podem fazer é definido aqui.',
+    'Como as pessoas entram nesta instância. Quais provedores existem vem do ambiente (OIDC_*, GOOGLE_*, MICROSOFT_*, GITHUB_*, APPLE_*); o que eles podem fazer é definido aqui.',
   providerEmail: 'E-mail e senha',
   providerSso: '{provider}',
   ssoAutoRedirect: 'Enviar visitantes deslogados direto para cá',

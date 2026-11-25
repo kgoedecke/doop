@@ -37,8 +37,8 @@ export const DESKTOP_SIGNIN_PATH = '/desktop/signin'
 export const DESKTOP_HANDOFF_PATH = '/desktop/handoff'
 
 /** better-auth's social providers, plus 'oidc' for the genericOAuth SSO plugin. */
-export type DesktopSignInProvider = 'google' | 'microsoft' | 'apple' | 'oidc'
-const PROVIDERS: readonly DesktopSignInProvider[] = ['google', 'microsoft', 'apple', 'oidc']
+export type DesktopSignInProvider = 'google' | 'microsoft' | 'github' | 'apple' | 'oidc'
+const PROVIDERS: readonly DesktopSignInProvider[] = ['google', 'microsoft', 'github', 'apple', 'oidc']
 
 /** Where to land once signed in, as better-auth's sign-ins take it: one
  *  path for a returning account and one for an account the sign-in just

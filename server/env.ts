@@ -138,6 +138,8 @@ const schema = {
   MICROSOFT_CLIENT_ID: str({ default: undefined }),
   MICROSOFT_CLIENT_SECRET: str({ default: undefined }),
   MICROSOFT_TENANT_ID: str({ default: 'common' }),
+  GITHUB_CLIENT_ID: str({ default: undefined }),
+  GITHUB_CLIENT_SECRET: str({ default: undefined }),
   APPLE_CLIENT_ID: str({ default: undefined }),
   APPLE_CLIENT_SECRET: str({ default: undefined }),
   APPLE_APP_BUNDLE_IDENTIFIER: str({ default: undefined }),

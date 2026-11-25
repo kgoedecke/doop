@@ -10,7 +10,7 @@ export const FIRST_CANVAS_PATH = '/api/welcome'
  *  sign-in leaves for the IdP and only learns the account is new when it
  *  lands on FIRST_CANVAS_PATH, so that landing carries the method as
  *  ?signup=<method> through to the canvas, where the app reports it. */
-export const SIGNUP_METHODS = ['email', 'google', 'microsoft', 'apple', 'oidc'] as const
+export const SIGNUP_METHODS = ['email', 'google', 'microsoft', 'github', 'apple', 'oidc'] as const
 export type SignupMethod = (typeof SIGNUP_METHODS)[number]
 
 export const SIGNUP_PARAM = 'signup'

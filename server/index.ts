@@ -987,7 +987,7 @@ app.all('/local-agent/mcp/:id', (req, res, next) => {
 
 /* Where a brand-new account lands: the canvas signup created for it
    (server/auth.ts databaseHooks), where the demo agent is waiting to
-   perform. better-auth sends new Google / Microsoft / SSO users here as
+   perform. better-auth sends new Google / Microsoft / GitHub / SSO users here as
    their newUserCallbackURL and the email form comes here too, so every
    signup path shares one landing. Signed out, or without a canvas of their
    own any more, the dashboard will do. Ahead of the /api session guard:

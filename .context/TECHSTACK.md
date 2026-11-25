@@ -1565,7 +1565,7 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
 ## 5. Security and Secrets
 
 - better-auth 1.6.26 - authentication: email/password, generic OIDC/SSO, and Google / Microsoft /
-  Apple sign-in (social providers, `GOOGLE_*` / `MICROSOFT_*` / `APPLE_*` client pairs; the iOS app
+  GitHub / Apple sign-in (social providers, `GOOGLE_*` / `MICROSOFT_*` / `GITHUB_*` / `APPLE_*` client pairs; the iOS app
   signs in with Apple natively against `APPLE_APP_BUNDLE_IDENTIFIER`). Configuration and secrets
   (`BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`, provider client IDs/secrets) come from the
   environment (`.env`, documented in `.env.example`); never committed.
@@ -1610,6 +1610,14 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   refused until an admin has signed in through SSO, so a provider nobody has proven cannot lock the
   instance out. Env keeps secrets and provider wiring only. Tests: `instanceSettings.test.ts`, the
   policy cases in `authFormBrowser.test.ts`.
+
+- GitHub sign-in (`loadGithubConfig`, `fetchGithubIdentity` in `server/auth.ts`): on when
+  `GITHUB_CLIENT_ID` and `GITHUB_CLIENT_SECRET` are both set (an OAuth app, not the `GITHUB_APP_*`
+  importer), reported as `github` by `GET /api/oidc-config`. The profile read is ours rather than
+  better-auth's: the address is the primary one from `/user/emails` with its `verified` flag, which
+  is what lets a sign-in link to an existing unverified account like the other providers do. The
+  public profile address is never used, and a failed read of either endpoint fails the sign-in. It
+  always reads github.com's API, not `GITHUB_API_URL`. Tests: `oidcConfig.test.ts`.
 
 - MCP OAuth (better-auth `mcp()` plugin): 1h access tokens, 30-day refresh tokens
   (`MCP_REFRESH_TOKEN_TTL_S` in `server/mcpTokens.ts`; a refresh issues a new refresh token in a
