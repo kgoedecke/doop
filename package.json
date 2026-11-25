@@ -14,6 +14,7 @@
     "build:claude-extension": "node scripts/build-claude-extension.mjs",
     "build:storybook-cli": "node scripts/build-storybook-cli.mjs",
     "build:cli": "node scripts/build-doop-cli.mjs",
+    "pack:cli": "node scripts/pack-doop-cli.mjs",
     "start": "NODE_ENV=production node server/index.ts",
     "typecheck": "tsgo --noEmit && tsgo -p vscode-extension/tsconfig.json",
     "test": "vitest run",

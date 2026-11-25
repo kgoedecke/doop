@@ -1,5 +1,6 @@
 dist/
 public/claude-extension/
+cli/dist/
 vscode-extension/out/
 vscode-extension/dist/
 public/cli/

@@ -164,7 +164,8 @@ server/index.ts` in prod. `erasableSyntaxOnly` and `verbatimModuleSyntax` in tsc
   413 `too_large`. The agent is its account plus the `Doop-Agent` header, the identity an MCP agent of that
   name has. Tested in `tests/agentApi.test.ts`.
 - Doop CLI (`cli/doop.ts`, `cli/doop/`, built to `public/cli/doop.mjs` by `bun run build:cli` and served at
-  `/cli/doop.mjs`): Doop from a shell, for coding agents and scripts. Frame HTML goes over the agent API;
+  `/cli/doop.mjs`; the same bundle is the npm package `@doop-design/cli`, packed into `cli/dist` by
+  `bun run pack:cli`, released as in [RELEASE.md](RELEASE.md#doop-cli-npm)): Doop from a shell, for coding agents and scripts. Frame HTML goes over the agent API;
   everything else is plain `tools/call` requests to `/mcp` (no session, no SDK), so it has the MCP tools'
   permissions, transactions and human feedback. One dependency-free file, with an agent key for both.
   - Sign-in: `doop login --key`, kept per server in `~/.config/doop/credentials.json` (0600), or `DOOP_API_KEY`.
@@ -1684,6 +1685,8 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
     `main` as a squash, so the PR title becomes the commit subject).
   - `.github/workflows/cla.yml` - CLA check (this is an AGPL-3.0 project with CLA-based
     contribution).
+  - `.github/workflows/publish-cli.yml` - publishes the doop CLI to npm as `@doop-design/cli` on a `cli-v*` tag
+    ([RELEASE.md](RELEASE.md#doop-cli-npm)).
   - `.github/workflows/desktop.yml` / `desktop-release.yml` - Tauri desktop app CI and installer
     release (tag `desktop-v*`, universal macOS DMG, Windows NSIS, Linux AppImage/.deb/.rpm,
     optional Apple signing/notarization).
