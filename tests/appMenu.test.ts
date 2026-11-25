@@ -221,4 +221,33 @@ describe('the shell bridge', () => {
     handler({ payload: { id: 'no-such-command', key: false } })
     expect(host.openShortcuts).toHaveBeenCalledOnce()
   })
+
+  it('takes a pick that echoes a key just typed for that key, though the shell calls it a click', () => {
+    vi.stubGlobal('__DOOP_APP_MENU__', true)
+    initAppMenu()
+    const [, handler] = listen.mock.calls[0] as [string, (e: { payload: unknown }) => void]
+    setActionHost(stubHost())
+    const nextFrame = ACTIONS.find((a) => a.id === 'zoom-next-frame')!
+    const run = vi.spyOn(nextFrame, 'run').mockReturnValue(undefined)
+    const comment = document.createElement('textarea')
+    document.body.append(comment)
+    comment.focus()
+    const now = vi.spyOn(performance, 'now').mockReturnValue(1000)
+    const type = (key: string) => comment.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }))
+    /* an N typed into a comment: the menu's echo of it is not a command */
+    type('n')
+    handler({ payload: { id: 'zoom-next-frame', key: false } })
+    expect(run).not.toHaveBeenCalled()
+    /* one key excuses one pick, and only its own command's */
+    handler({ payload: { id: 'zoom-next-frame', key: false } })
+    expect(run).toHaveBeenCalledOnce()
+    type('i')
+    handler({ payload: { id: 'zoom-next-frame', key: false } })
+    expect(run).toHaveBeenCalledTimes(2)
+    /* a click on the item long after the key is a click */
+    type('n')
+    now.mockReturnValue(2000)
+    handler({ payload: { id: 'zoom-next-frame', key: false } })
+    expect(run).toHaveBeenCalledTimes(3)
+  })
 })
