@@ -14,4 +14,4 @@ Use the connected `doop` MCP server for Doop work. The server provides the curre
 5. When the user asks to implement a Doop design in their codebase, inspect the source frame and its screenshot first, then follow the repository's conventions. Modify the shared canvas only when the user requests design changes.
 6. Finish with a link to the canvas and a brief description of the work completed.
 
-If Doop tools are missing or authentication fails, ask the user to enable the Doop MCP server in Cursor's Customize panel and complete its browser sign-in. Do not request tokens in chat. This plugin connects to `https://doop.design/mcp`; local and self-hosted Doop instances use their own server connection.
+If Doop tools are missing or authentication fails, direct the user to the [Doop connection guide](https://doop.design/docs/get-started) and help them connect or reauthenticate in the MCP client they are using. For hosted Doop, use `https://doop.design/mcp`; for a local or self-hosted instance, use that instance's MCP endpoint. Do not request tokens in chat.
