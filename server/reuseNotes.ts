@@ -23,9 +23,7 @@ const ROOT_PALETTE = 3
 /** Repeated structures inside one frame's markup, biggest first. */
 function repeatsIn(canvas: Canvas, frame: Frame) {
   /* the threshold goes in first: two panels of three rows each are three rows repeated, not two panels */
-  return findComponentCandidates({ ...canvas, frames: [frame] }, MAX_REPEAT_NOTES, REPEATS).filter(
-    (candidate) => candidate.elements_each >= 2,
-  )
+  return findComponentCandidates({ ...canvas, frames: [frame] }, MAX_REPEAT_NOTES, REPEATS, 1, 2)
 }
 
 const plural = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`
