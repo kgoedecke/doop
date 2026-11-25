@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import type { Connection } from './client.ts'
@@ -86,9 +86,12 @@ function readJson<T>(path: string): T | undefined {
   }
 }
 
+/** Writes through a file beside it, so another doop process never reads half of it. */
 function writeJson(path: string, value: unknown): void {
   mkdirSync(dirname(path), { recursive: true })
-  writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`)
+  const partial = `${path}.${process.pid}.tmp`
+  writeFileSync(partial, `${JSON.stringify(value, null, 2)}\n`)
+  renameSync(partial, path)
 }
 
 /* ------------------------------------------------------------------ */
@@ -249,9 +252,7 @@ export function findProject(cwd: string): Project | null {
   for (let dir = resolve(cwd); ; dir = dirname(dir)) {
     const config = readJson<ProjectConfig>(join(dir, PROJECT_DIR, 'config.json'))
     if (config) {
-      const state = readJson<Partial<Pick<Project, 'frames' | 'components' | 'commentsSeenAt'>>>(
-        join(dir, PROJECT_DIR, 'state.json'),
-      )
+      const state = readJson<SavedState>(statePath(dir))
       return checked({
         root: dir,
         config,
@@ -281,11 +282,40 @@ export function createProject(root: string, config: ProjectConfig): Project {
   return project
 }
 
+type SavedState = Partial<Pick<Project, 'frames' | 'components' | 'commentsSeenAt'>>
+
+function statePath(root: string): string {
+  return join(root, PROJECT_DIR, 'state.json')
+}
+
+/** The newer of two comment marks: a `doop wait` in the background may have moved it on. */
+function laterMark(a: number | undefined, b: number | undefined): number | undefined {
+  return a === undefined ? b : b === undefined ? a : Math.max(a, b)
+}
+
 export function saveState(project: Project): void {
-  writeJson(join(project.root, PROJECT_DIR, 'state.json'), {
+  const commentsSeenAt = laterMark(
+    project.commentsSeenAt,
+    readJson<SavedState>(statePath(project.root))?.commentsSeenAt,
+  )
+  writeJson(statePath(project.root), {
     frames: project.frames,
     components: project.components,
-    ...(project.commentsSeenAt === undefined ? {} : { commentsSeenAt: project.commentsSeenAt }),
+    ...(commentsSeenAt === undefined ? {} : { commentsSeenAt }),
+  })
+}
+
+/** Moves only the comment mark, on the state as it is on disk now: `doop wait` runs for
+ *  minutes, often beside a `doop push` that tracks new files, and must not write back the
+ *  frames and components it read when it started. */
+export function saveCommentsSeen(project: Project, at: number): void {
+  const now = readJson<SavedState>(statePath(project.root)) ?? {}
+  const commentsSeenAt = laterMark(now.commentsSeenAt, at)
+  project.commentsSeenAt = commentsSeenAt
+  writeJson(statePath(project.root), {
+    frames: now.frames ?? {},
+    components: now.components ?? {},
+    ...(commentsSeenAt === undefined ? {} : { commentsSeenAt }),
   })
 }
 

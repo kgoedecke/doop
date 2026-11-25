@@ -1,7 +1,7 @@
 import { callJson } from './client.ts'
 import type { Context, Outcome } from './context.ts'
 import { CliError, EXIT, usage } from './errors.ts'
-import { saveState } from './project.ts'
+import { saveCommentsSeen } from './project.ts'
 
 /**
  * `doop wait`: block until a person asks for something on the canvas, print it, exit. An agent
@@ -76,8 +76,7 @@ export async function wait(context: Context): Promise<Outcome> {
   const remember = (comments: Comment[]) => {
     since = Math.max(since, newest(comments))
     if (!project || project.commentsSeenAt === since) return
-    project.commentsSeenAt = since
-    saveState(project)
+    saveCommentsSeen(project, since)
   }
   remember([])
 

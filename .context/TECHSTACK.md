@@ -220,7 +220,9 @@ server/index.ts` in prod. `erasableSyntaxOnly` and `verbatimModuleSyntax` in tsc
   - `doop wait` polls `get_comments` and then `get_feedback` (which claims the requests, so nothing may fail
     after it) every 5s and exits when a person leaves something, or with exit 6 after `--timeout` (30m unless
     set, 0 for none). New comments are those after `commentsSeenAt` in `.doop/state.json`, the newest one a
-    wait has seen, so one left between two waits is reported by the second.
+    wait has seen, so one left between two waits is reported by the second. A wait writes only that mark, onto
+    the state as it is on disk then (`saveCommentsSeen`), so a `push` made while it runs keeps what it tracked;
+    state files are written through a temporary file and renamed.
   - `tokens pull` writes `get_tokens` in any of its formats; `tokens push` sends only what differs from the
     canvas (`create_tokens`, then `set_tokens`), deleting only with `--prune`. `asset upload` fills the
     one-time upload ticket for a local file.
