@@ -28,6 +28,8 @@
         /* the canvas's shared styles as the room would send them after a change */
         setTokens: (tokens, themes) => useStore.getState().setTokensLocal(tokens, themes),
         setComponent: (component) => useStore.getState().setComponentLocal(component.id, component),
+        /* the agents' tasks as the room's init would carry them */
+        setTasks: (tasks) => useStore.getState().setTasks(tasks),
         frameHtml: (id) => useStore.getState().canvas.frames.find((frame) => frame.id === id).html,
       }
       createRoot(document.getElementById('root')).render(

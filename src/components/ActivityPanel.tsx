@@ -25,7 +25,7 @@ import { DotMatrix } from './ui/dot-matrix'
 import { Dot } from './ui/dot'
 import { isResidentLimit } from './TeamAllowance'
 import { CommentsPanel } from './CommentsPanel'
-import { PromptBar } from './PromptBar'
+import { PromptBar, SCOPE_ROW_CLEARANCE } from './PromptBar'
 import { AgentChat } from './AgentChat'
 import { isChatCard } from '../lib/agentChat'
 import { clampRecentHeight, MIN_CHAT_PX, MIN_RECENT_PX, readRecentHeight, writeRecentHeight } from '../lib/agentsSplit'
@@ -153,7 +153,7 @@ export function ActivityPanel({
           {hasChat ? (
             <AgentsSplit />
           ) : (
-            <div className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain">
+            <div className={cn('flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain', SCOPE_ROW_CLEARANCE)}>
               <RecentTasks />
             </div>
           )}
@@ -270,7 +270,8 @@ function AgentsSplit() {
         {/* the hairline, which thickens while hovered, dragged or focused */}
         <span className="h-px w-full bg-line-soft transition-[height,background-color] group-hover:h-[3px] group-hover:bg-line group-focus-visible:h-[3px] group-focus-visible:bg-brand group-active:h-[3px] group-active:bg-brand" />
       </div>
-      <AgentChat className="flex-1" />
+      {/* its end stays clear for the composer's scope chip, which floats there */}
+      <AgentChat className={cn('flex-1', SCOPE_ROW_CLEARANCE)} />
     </div>
   )
 }

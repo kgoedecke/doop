@@ -37,6 +37,10 @@ import { cn } from '@/lib/utils'
 const MAX_ATTACHMENTS = 4
 /** the scope chip's label is cut here so a long text node never eats the row */
 const MAX_SCOPE_LABEL = 24
+/** Bottom padding for the scrolling list right above the composer: the scope
+ *  chip's row (34px: its 10px top padding and the 24px chip) floats over the
+ *  end of that list, and 12px more keeps the last line off the chip's edge. */
+export const SCOPE_ROW_CLEARANCE = 'pb-[46px]'
 /** the field grows with the draft up to this many lines, then scrolls */
 const MAX_COMPOSER_LINES = 6
 /** a ⌘/ older than this is ignored by a composer that mounts later */
@@ -355,13 +359,52 @@ export function PromptBar({ canvasId }: { canvasId: string }) {
   return (
     <div
       className={cn(
-        'flex shrink-0 flex-col gap-1.5 border-t border-line-soft bg-surface px-3 pt-2.5 pb-2',
+        'relative flex shrink-0 flex-col gap-1.5 border-t border-line-soft bg-surface px-3 pt-2.5 pb-2',
+        /* the chip's row above carries the composer's top edge */
+        chip && 'border-t-transparent',
         dropping && 'bg-paper-deep',
       )}
       onDragOver={onDragOver}
       onDragLeave={onDragLeave}
       onDrop={onDrop}
     >
+      {/* the scope chip floats above the composer over the strip the
+          conversation keeps clear at its end (SCOPE_ROW_CLEARANCE), so picking
+          an element or a frame moves nothing in the panel: the composer
+          grows upward over empty space instead of pushing the chat */}
+      {chip && (
+        <div
+          className={cn(
+            'absolute inset-x-0 bottom-full flex border-t border-line-soft bg-surface px-3 pt-2.5',
+            dropping && 'bg-paper-deep',
+          )}
+        >
+          <span
+            className="flex h-6 min-w-0 max-w-full items-center gap-1.5 rounded-[6px] pr-1 pl-2 text-[12px] text-ink-soft shadow-ring"
+            title={
+              chip.kind === 'frame'
+                ? t('panels.promptScopedFrame', { name: chip.label })
+                : t('panels.promptScopedElement', { name: chip.label || t('panels.promptElement') })
+            }
+          >
+            <span className="flex-none text-ink-faint">
+              {chip.kind === 'frame' ? <FrameIcon className="size-3.5" /> : <LayerKindIcon kind={chip.kind} />}
+            </span>
+            <span className="min-w-0 truncate">{clip(chip.label || t('panels.promptElement'))}</span>
+            <Button
+              variant="bare"
+              className="size-4 flex-none justify-center rounded-full p-0 text-ink-faint hover:bg-paper-deep hover:text-ink"
+              aria-label={
+                chip.kind === 'frame' ? t('panels.promptRemoveFrameScope') : t('panels.promptRemoveElementScope')
+              }
+              disabled={busy}
+              onClick={() => setDismissed(scopeKey(chip.scope))}
+            >
+              <XIcon className="size-3" aria-hidden />
+            </Button>
+          </span>
+        </div>
+      )}
       {attachments.length > 0 && (
         <div className="flex flex-wrap gap-1.5">
           {attachments.map((a) => (
@@ -398,34 +441,6 @@ export function PromptBar({ canvasId }: { canvasId: string }) {
             e.target.value = '' // same file can be re-picked after removal
           }}
         />
-        {chip && (
-          <div className="mb-2 flex">
-            <span
-              className="flex h-6 min-w-0 max-w-full items-center gap-1.5 rounded-[6px] pr-1 pl-2 text-[12px] text-ink-soft shadow-ring"
-              title={
-                chip.kind === 'frame'
-                  ? t('panels.promptScopedFrame', { name: chip.label })
-                  : t('panels.promptScopedElement', { name: chip.label || t('panels.promptElement') })
-              }
-            >
-              <span className="flex-none text-ink-faint">
-                {chip.kind === 'frame' ? <FrameIcon className="size-3.5" /> : <LayerKindIcon kind={chip.kind} />}
-              </span>
-              <span className="min-w-0 truncate">{clip(chip.label || t('panels.promptElement'))}</span>
-              <Button
-                variant="bare"
-                className="size-4 flex-none justify-center rounded-full p-0 text-ink-faint hover:bg-paper-deep hover:text-ink"
-                aria-label={
-                  chip.kind === 'frame' ? t('panels.promptRemoveFrameScope') : t('panels.promptRemoveElementScope')
-                }
-                disabled={busy}
-                onClick={() => setDismissed(scopeKey(chip.scope))}
-              >
-                <XIcon className="size-3" aria-hidden />
-              </Button>
-            </span>
-          </div>
-        )}
         {skillMenu.menu}
         <Textarea
           ref={inputRef}
