@@ -83,8 +83,10 @@ jobs:
           "$path" --version
           echo "CHROME_PATH=$path" >> "$GITHUB_ENV"
           # Ubuntu 24.04 lets only the browsers it has an AppArmor profile for
-          # make the user namespaces Chrome's sandbox needs
-          echo 0 | sudo tee /proc/sys/kernel/apparmor_restrict_unprivileged_userns >/dev/null
+          # make the user namespaces Chrome's sandbox needs. Blacksmith's kernel
+          # has no such switch (nothing to lift), so only where it exists.
+          userns=/proc/sys/kernel/apparmor_restrict_unprivileged_userns
+          if [ -e "$userns" ]; then echo 0 | sudo tee "$userns" >/dev/null; fi
       # `bun run test`, not `bun test`: the suite is vitest, and `bun test`
       # would run Bun's own runner against the same files
       - run: bun run test -- --shard=${{ matrix.shard }}/${{ strategy.job-total }}
