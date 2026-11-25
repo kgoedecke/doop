@@ -36,7 +36,7 @@ describe('the doop CLI package', () => {
     expect(manifest.dependencies).toBeUndefined()
     expect(manifest.engines.node).toBe('>=20')
     /* npm's trusted publishing holds this against the repository of publish-cli.yml */
-    expect(manifest.repository.url).toBe('git+https://github.com/doop-design/doop-internal.git')
+    expect(manifest.repository.url).toBe('git+https://github.com/doop-design/doop.git')
 
     const { stdout } = await run('npm', ['pack', '--dry-run', '--json'], { cwd: 'cli/dist' })
     const [packed] = JSON.parse(stdout) as [{ files: { path: string }[] }]
