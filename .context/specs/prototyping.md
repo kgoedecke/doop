@@ -49,8 +49,8 @@ canvas a click therefore still selects. The attributes have no effect on PNG/JPG
 
 ## Player
 
-`PrototypePlayer` evolves `PresentMode`: the frame fills the viewport letterboxed and scaled to
-fit, and stays live (each screen re-posts its frame's HTML when the store updates it).
+`PrototypePlayer` evolves `PresentMode`: by default the frame is letterboxed in the viewport,
+shrunk to fit but never enlarged past its design size, and stays live (each screen re-posts its frame's HTML when the store updates it).
 
 - Each screen boots the frame runtime, renders the HTML, then turns prototype mode on. Triggers
   post `doop:proto-action` with the parsed interaction; the player re-parses it

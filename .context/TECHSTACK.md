@@ -1442,7 +1442,9 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   handled (`actions.recordWorkReply`, `reply` on `tasks` and `feedback`, migration 0056; a later
   pipeline stage replaces an earlier one's), so the answer survives a reload. The line between
   Recent tasks and the chat drags, ↑/↓ on focus, double-click resets (`src/lib/agentsSplit.ts`,
-  per browser under `doop:agents-split`). Tests: `agentChat.test.ts`.
+  per browser under `doop:agents-split`). Recent tasks scrolls itself, its Show all / Show less
+  toggle pinned to its bottom edge in every state, and collapsing scrolls it back to the top.
+  Tests: `agentChat.test.ts`, `recentTasksBrowser.test.ts`.
 - Comment pins move by drag (`src/lib/commentMove.ts`, gesture in `CommentPin`): anyone who may
   comment drags a thread's root pin; a ghost rides the pointer in the world layer
   (`CanvasComments`), above every frame, since the pin itself sits inside a clipped frame surface.
@@ -1578,7 +1580,9 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   `shared/prototype.ts`, whose parser the frame runtime bundles too (`src/frame-runtime/proto.ts`). `PrototypePlayer.tsx`
   (Play, and the full-page `/c/<id>/proto`) runs them with Web Animations transitions, under the
   desktop tab strip (`--app-inset`), its controls in a bar above the screens (never over the design), scaled by the viewer's pick (actual size, responsive, fit width,
-  fit, fill; `screenLayout`, remembered under `doop:proto-scaling`); the
+  fit, fill; `screenLayout`, remembered under `doop:proto-scaling`; Fit, the default, only ever
+  shrinks, as Figma's "Fit width and height" does, so a phone screen on a big monitor stays at its
+  design size, while Fit width and Fill still enlarge); the
   Prototype tab and `PrototypeOverlay.tsx` edit and draw them (every link while no frame is
   selected; with one selected, or an element picked in it, only the links into and out of it, as
   Figma does); MCP has `get_prototype` and
