@@ -297,3 +297,57 @@ describe('reasoning_content', () => {
     )
   })
 })
+
+describe('Gemini thought signatures', () => {
+  /* the shape gemini-4-hydrogen returns for parallel calls: only the first
+     carries the signature, which the next request must send back on it */
+  const signed = {
+    choices: [
+      {
+        finish_reason: 'tool_calls',
+        message: {
+          role: 'assistant',
+          tool_calls: [
+            {
+              id: 'call_1',
+              type: 'function',
+              function: { name: 'set_status', arguments: '{"status":"Designing"}' },
+              extra_content: { google: { thought_signature: 'Es0ECsoEAWkU' } },
+            },
+            { id: 'call_2', type: 'function', function: { name: 'create_frame', arguments: '{"name":"Hero"}' } },
+          ],
+        },
+      },
+    ],
+  }
+
+  it('sends each call back with the extra_content it came with', async () => {
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockImplementationOnce(async () => new Response(JSON.stringify(signed)))
+      .mockImplementationOnce(async () => new Response(JSON.stringify({ choices: [{ message: { content: 'Done' } }] })))
+    const config = geminiConfig('AIzaKey', 'gemini-4-hydrogen', true)
+    const messages: Anthropic.MessageParam[] = [{ role: 'user', content: 'make a hero' }]
+    const first = await runChatCompletionsTurn(config, { system: 'sys', tools: [TOOL], messages, maxTokens: 16000 })
+    messages.push({ role: 'assistant', content: first.content })
+    messages.push({
+      role: 'user',
+      content: [
+        { type: 'tool_result', tool_use_id: 'call_1', content: 'ok' },
+        { type: 'tool_result', tool_use_id: 'call_2', content: 'created' },
+      ],
+    })
+    await runChatCompletionsTurn(config, { system: 'sys', tools: [TOOL], messages, maxTokens: 16000 })
+    const second = JSON.parse(String(fetchSpy.mock.calls[1]![1]!.body)) as {
+      messages: { tool_calls?: Record<string, unknown>[] }[]
+    }
+    const [signedCall, plainCall] = second.messages[2]!.tool_calls!
+    expect(signedCall).toEqual({
+      id: 'call_1',
+      type: 'function',
+      function: { name: 'set_status', arguments: '{"status":"Designing"}' },
+      extra_content: { google: { thought_signature: 'Es0ECsoEAWkU' } },
+    })
+    expect(plainCall).not.toHaveProperty('extra_content')
+  })
+})

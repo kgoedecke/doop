@@ -43,6 +43,12 @@ import type { CustomTokenParam } from '../shared/customProvider.ts'
  * tool-calling conversation that drops it from an earlier assistant turn.
  * The reasoning rides the run's history as a `thinking` block and goes back
  * out where the config asks for it (`echoReasoning`).
+ *
+ * Gemini 3 and later sign each tool call (`extra_content.google.thought_signature`
+ * on the `tool_calls` entry) and refuse (400, "missing a thought_signature")
+ * the next request if the call comes back without it. A call's `extra_content`
+ * rides its `tool_use` block in the run's history and goes back out on the same
+ * call, unchanged; providers that send none get none back.
  */
 
 export const OPENROUTER_URL = env.OPENROUTER_CHAT_URL
@@ -144,7 +150,13 @@ interface ChatToolCall {
   id: string
   type: 'function'
   function: { name: string; arguments: string }
+  /** provider data the call must carry back, e.g. Gemini's thought signature */
+  extra_content?: unknown
 }
+
+/** a `tool_use` block as this transport keeps it: the call's `extra_content`
+ *  stays with it for the next request. Never reaches the Messages API. */
+type ChatToolUseBlock = Anthropic.ToolUseBlockParam & { extra_content?: unknown }
 
 function toMessages(
   system: string,
@@ -170,10 +182,12 @@ function toMessages(
         if (block.type === 'text') texts.push(block.text)
         else if (block.type === 'thinking') thoughts.push(block.thinking)
         else if (block.type === 'tool_use') {
+          const { extra_content } = block as ChatToolUseBlock
           calls.push({
             id: block.id,
             type: 'function',
             function: { name: block.name, arguments: JSON.stringify(block.input ?? {}) },
+            ...(extra_content === undefined ? {} : { extra_content }),
           })
         }
       }
@@ -255,7 +269,7 @@ interface CompletionBody {
       content?: string | null
       reasoning_content?: string | null
       refusal?: string | null
-      tool_calls?: { id?: string; function?: { name?: string; arguments?: string } }[]
+      tool_calls?: { id?: string; function?: { name?: string; arguments?: string }; extra_content?: unknown }[]
     }
   }[]
 }
@@ -287,12 +301,14 @@ function fromCompletion(body: CompletionBody, label: string): TurnResult {
          validation then returns a usable error to the model */
       input = {}
     }
-    content.push({
+    const block: ChatToolUseBlock = {
       type: 'tool_use',
       id: call.id || `call_${randomUUID()}`,
       name: call.function?.name || 'unknown',
       input: input as Record<string, unknown>,
-    })
+      ...(call.extra_content === undefined ? {} : { extra_content: call.extra_content }),
+    }
+    content.push(block)
   }
   const truncated = choice.finish_reason === 'length'
   const stop: StopReason = refused ? 'refusal' : toolCalls > 0 ? 'tool_use' : truncated ? 'max_tokens' : 'end_turn'
