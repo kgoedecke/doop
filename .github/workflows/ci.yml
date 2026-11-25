@@ -16,7 +16,7 @@ jobs:
   # commit-msg hook can't see it, so this is the only place it gets checked.
   commit-message:
     if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
@@ -31,7 +31,7 @@ jobs:
   # sum. Install is ~5s per job (setup-bun restores ~/.bun/install/cache keyed
   # on bun.lock), so the duplication is cheap.
   typecheck:
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
@@ -39,7 +39,7 @@ jobs:
       - run: bun run typecheck
 
   lint:
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
@@ -49,7 +49,7 @@ jobs:
       - run: bun run doc-lint
 
   build:
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
@@ -58,9 +58,9 @@ jobs:
       - run: bun run --bun build
 
   # The suite boots a real server per integration file, which is CPU-bound on
-  # the 2-vCPU runner; sharding across runners is what brings the step down.
+  # the 4-vCPU Blacksmith runner; sharding across runners is what brings the step down.
   test:
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     strategy:
       fail-fast: false
       matrix:
@@ -72,7 +72,7 @@ jobs:
       # The browser tests drive the Chrome named in .chrome-version, not the one
       # the runner image happens to ship: an image update must not be able to
       # change what the suite runs on without a commit here.
-      - uses: actions/cache@v4
+      - uses: actions/cache@v5
         with:
           path: ~/.cache/doop-chrome
           key: chrome-${{ runner.os }}-${{ hashFiles('.chrome-version') }}
@@ -95,6 +95,6 @@ jobs:
   tests:
     needs: test
     if: always()
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     steps:
       - run: test "${{ needs.test.result }}" = success

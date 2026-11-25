@@ -1284,6 +1284,12 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
 ## 8. CI/CD and Delivery
 
 - GitHub Actions:
+  - Runners: Blacksmith (`doop-design` org, app at app.blacksmith.sh). CI on
+    `blacksmith-4vcpu-ubuntu-2404` (the trivial gates on 2 vCPU), the macOS desktop, iOS and Android
+    builds on `blacksmith-12vcpu-macos-*`, the Linux desktop build on `blacksmith-4vcpu-ubuntu-2204`.
+    Windows builds, `cla.yml`, `release-please.yml` and the desktop `release` job stay on GitHub's
+    runners (Blacksmith Windows is in beta; the rest are seconds long). `actions/cache` and the
+    setup actions' caches go to Blacksmith's cache transparently; no `useblacksmith/*` actions.
   - `.github/workflows/ci.yml` - gates `typecheck`, `lint` + `format:check` + `doc-lint`, `build`
     and `test` (four vitest shards) as parallel jobs on push to `main` and on PRs, cancelling
     superseded PR runs; a separate job lints the PR title with commitlint (PRs land on

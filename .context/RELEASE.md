@@ -40,7 +40,7 @@ in `.github/actions/setup-desktop`:
 - Push a tag matching `desktop-v*` -> `dmg-macos` builds a universal (Apple Silicon + Intel) DMG
   of the Chromium shell with `desktop/scripts/macos-universal.sh` (below), `nsis-windows` builds
   `doop_<version>_x64-setup.exe` with `bunx tauri build --bundles nsis`, `linux` builds the
-  x64 AppImage, .deb and .rpm on `ubuntu-22.04` (the oldest runner, for a low glibc floor) with
+  x64 AppImage, .deb and .rpm on Ubuntu 22.04 (`blacksmith-4vcpu-ubuntu-2204`, the oldest image, for a low glibc floor) with
   `bunx tauri build --bundles deb,rpm,appimage`, and a final `release` job (`needs` all three)
   attaches them to one GitHub Release - so a tag is never published with an installer missing.
 - The AppImage is repacked after the build by `desktop/scripts/appimage-drop-wayland.sh` (pinned
