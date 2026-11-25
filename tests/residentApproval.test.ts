@@ -25,7 +25,6 @@ const { deliveredWork, execTool, newRunState } = await import('../server/residen
 const { DEFAULT_ROLE_ID, roleName } = await import('../shared/agents.ts')
 
 const actor = () => actions.resolveActor({ name: roleName(DEFAULT_ROLE_ID), kind: 'agent' })
-const run = (extra: { requesterId?: string; automated?: boolean } = {}) => newRunState(extra)
 const call = (input: unknown) => ({ type: 'tool_use' as const, id: 't1', name: 'set_frame_approval', input })
 const html = '<!doctype html><html><body>hi</body></html>'
 

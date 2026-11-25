@@ -334,8 +334,6 @@ async function tool(name: string, input: Record<string, unknown>, canvas: Canvas
   return outcome
 }
 
-const runState = () => newRunState()
-
 /** A tool call as the resident agent's runner makes it (its own operation): a refusal comes
  *  back as an error result. */
 async function resident(name: string, input: Record<string, unknown>, canvas: Canvas) {

@@ -19,7 +19,6 @@ vi.mock('../server/db/persist.ts', () => ({
   deleteComponent: () => {},
   saveLibraryComponent: () => {},
   deleteLibraryComponent: () => {},
-  settleActorFrame: () => {},
   saveFeedback: () => {},
   saveComment: () => {},
   saveDecision: () => {},

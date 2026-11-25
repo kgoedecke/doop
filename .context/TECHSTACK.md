@@ -499,7 +499,7 @@ themes, components })` puts them in (component blocks at the end of the head, to
   one whose replacement opens or closes more `<doop-use>` / `<template>` tags than its find text,
   or closes one ahead of its opening further than the find text does, so the tags around it would
   pair up wrongly (`tagBalance` in `server/componentEngine.ts`, `unbalancedEdit`; it reads the
-  command alone, so `runCanvasWrite` refuses it before any host, a claimed actor's included;
+  command alone, so `runCanvasWrite` refuses it before it runs;
   `tests/editFrameHtmlBalance.test.ts`).
   `asset_refs` are projected from the composed document (`persist.viewAssetsThrough`), so an asset
   a component's stylesheet names counts, as of the frame's own last write. The browser composes too: its join says `composesFrames` and its REST
@@ -711,11 +711,11 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   fault-injection sweep `workBudgetCommit.test.ts` (memory, a modelled database and a viewer's
   replayed copy, for every write operation) and `writeBoundaryHttp.test.ts` (the real server,
   rebooted on its database).
-- Canvas writes (`server/canvasWrites.ts`, `.context/plans/actor-owns-writes.md` step 2): a frame's
+- Canvas writes (`server/canvasWrites.ts`): a frame's
   HTML and metadata are written through one entry, `runCanvasWrite(canvasId, command)`, a typed
   command carrying intent (`create-frame`, `write-frame`, `edit-frame-html` with its find and
   replace, `frame-meta`, `restack-frames`, `set-approval`, `agent-approval`, `delete-frame`,
-  `restore-version`, `stamp-element-id`, `take-in-edit`, and for streams `append-frame-html`,
+  `restore-version`, `stamp-element-id`, and for streams `append-frame-html`,
   `settle-stream`, `close-stream`, and for tokens `create-tokens`, `set-tokens` (a rename rewrites
   the frames naming the token; a value change writes no frame under lean storage) and
   `set-token-themes` (a theme rename rewrites the frames naming it); each answers the tokens as
@@ -724,54 +724,37 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   for inline data against the frame as the host holds it, by that surface's rule (`heldForms` for
   MCP, read lazily; stored HTML for the resident; a chunk joined to its stream's tail). Contract for every host: always a promise, a failure only its rejection, awaited
   inside an operation that awaits (REST through `writeRoute` in `server/index.ts`, which hands a
-  rejection to `undoRequest`; MCP and resident tool calls; the take-in's `runOperation`), so a
+  rejection to `undoRequest`; MCP and resident tool calls), so a
   rejection undoes the operation. The entry refuses a frame on another canvas than `canvasId`
   (`CanvasMismatchError`) and enforces a command's `ifUpdatedAt` as it writes
   (`FrameVersionConflict`, answered over REST as the 409 `requireFrame` gives). Its only host is
   local: the actions above, which still write synchronously when called, so writes, undo and
   `afterCommit` are as before. Routed: the REST frame routes, MCP and resident frame tools,
-  version restore, `/element-id`, the actor take-in, stream chunks (MCP, REST, the welcome demo)
+  version restore, `/element-id`, stream chunks (MCP, REST, the welcome demo)
   and idle settling. `wireCanvasWrites()`, called once at boot by `server/index.ts`, installs the
-  take-in hooks and the settler the playback tick in `actions.ts` calls (`settleIdleStreams`); so
-  `actions.ts` imports nothing from `canvasWrites.ts`, and unwired, the tick and the actor
-  follower say so instead of settling or taking an edit in. A stream is settled only while it is
+  settler the playback tick in `actions.ts` calls (`settleIdleStreams`); so
+  `actions.ts` imports nothing from `canvasWrites.ts`, and unwired, the tick says so instead of settling. A stream is settled only while it is
   still the one found idle (`lastActivity`); one whose settling fails for anything but its work
   budget is tried 3 times (`SETTLE_ATTEMPTS`, 1 s then 5 s apart), its error logged once, then
-  closed unsettled, as a budget refusal is; a pass never rejects. Tokens from REST, MCP and the resident go through it; their actor flush
-  (`noteActorToken`, `noteActorThemes`) runs beneath the actions, unchanged. Component definitions
+  closed unsettled, as a budget refusal is; a pass never rejects. Tokens from REST, MCP and the resident go through it. Component definitions
   go through it too (`create-component` from markup or an element, `create-components`, each
   entry its own unit, `update-component`, `delete-component`, `restore-component`,
   `restore-component-version`), from REST, MCP and the resident (`server/componentTools.ts`); each
   can answer a `view` (catalog entry and touched frames, read in the write's own step) when it
   asks (`view: true`: the agent tools; REST never asks, and pays nothing for it), and reuse notes
   are read where they always were. Instances go through it too (`insert-instance`, `change-instances`,
-  from `insert_instance`, `update_instances` and REST `/api/frames/:id/instances`), and
-  `replace_matching` is only `createFromElement`: the component (`create-component-for-matching`,
-  which answers the shape and the frames; `create-component` takes no `replaceMatching`), then
-  one `link-matching` per frame; the host reads the definition once per command with its template
-  (parsed templates cached by id and a hash of the template text), so an instance is stamped with
-  the rev it was keyed against, and a revision landing part way is taken up by the frames after
-  it. The first command keeps the component and each that links keeps its frame (on the local
-  host a `checkpoint()`). Only the create can fail the call: a spent budget or a refusal in a
-  frame (`ComponentError`, a component deleted part way, `LibraryAdoptError`) ends the run there
-  with what it linked (`converted`, `changed`, which REST answers as `frames`, `matching_stopped`,
-  and `matching_error` when it was not the budget); anything else rejects, as before. The agents'
-  view is read once after the run, outside a command (the actor host will need a read command).
+  from `insert_instance`, `update_instances` and REST `/api/frames/:id/instances`).
   Imports and ingest go
-  through it with `create-frame` / `write-frame` (webpage and website import over REST, MCP, the
-  resident and the PostHog pull; PSD; Figma; Canva; Meta; `/ingest`; the GitHub sketches).
+  through it with `create-frame` / `write-frame` (webpage and website import over REST, MCP and the
+  resident; Meta; `/ingest`; the GitHub sketches).
   `runImportWrite` is a savepoint of the request or tool call it runs in, else an operation of
-  its own. `landImportFrame` (a website's pages, Figma, Meta) makes each frame its own unit and
+  its own. `landImportFrame` (a website's pages, Meta) makes each frame its own unit and
   answers a refused one as that frame's failure, so pages already landed stay; only a spent work
   budget inside a request or tool call rejects. The REST import routes have no catch of their
   own: any failure goes to `importRefusal`, which undoes the request and answers the JSON 400
   they always did (422 for a work budget). Where one function both fetches and writes (MCP
-  `import_webpage`, `import_psd`, `import_figma`, `import_from_canva`, the PostHog pull,
-  `/ingest`), a write's rejection is marked (`isImportWriteFailure`) so the import's own catch
-  passes it on; the GitHub review round fetches inside its catch and writes outside it. Figma's
-  timed image repair swaps its copies into the frame as it is now, writing with that version's
-  `ifUpdatedAt`; on a conflict it reads the frame again, up to 3 times, so an edit made
-  meanwhile is kept and the images still repaired. Comment anchoring stamps through
+  `import_webpage`, `/ingest`), a write's rejection is marked (`isImportWriteFailure`) so the import's own catch
+  passes it on; the GitHub review round fetches inside its catch and writes outside it. Comment anchoring stamps through
   `stamp-element-id` (a new comment, a moved one; both routes through `writeRoute`, and a
   charged task is given back when the comment is not posted, `server/chargedWork.ts`). The boot
   backfill uses `stamp-element-ids` (`actions.stampElementIds`: every stamp of a frame in one
@@ -794,7 +777,7 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   (`/components/import`, `/components/:id/sync`, `/library/update-consumers`), MCP and the
   resident; `view: true` builds the catalog entry and frames in the write's step, never failing
   it. Copying from a canvas that is not a library still sub-commits per component it updates
-  (`checkpoint()`), as `replace_matching` does. Publishing writes the library's publication, not
+  (`checkpoint()`). Publishing writes the library's publication, not
   a canvas, and is not routed.
   The background queue's frames go through it too (`propagate-frame`, `detach-frame`):
   `server/propagation.ts` sends each frame's turn through the routes `canvasWrites.ts` sets
