@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.15.0](https://github.com/doop-design/doop/compare/desktop-v0.14.0...desktop-v0.15.0) (2026-11-25)
+
+
+### Features
+
+* **desktop:** draw the Windows title bar in the page ([#521](https://github.com/doop-design/doop/issues/521)) ([1687192](https://github.com/doop-design/doop/commit/1687192ac4a1e05b55737dd27bce428db190a2e9))
+
+
+### Bug Fixes
+
+* **agent:** show why a Doop Agent run failed, and stop calling capped runs crashes ([#693](https://github.com/doop-design/doop/issues/693)) ([ac943b0](https://github.com/doop-design/doop/commit/ac943b05b7168f7e65c6d01d4d6fec01f29e10ad))
+* **desktop:** find Claude Code installed with WinGet or npm on Windows ([#716](https://github.com/doop-design/doop/issues/716)) ([3c33e57](https://github.com/doop-design/doop/commit/3c33e572585bf05a5518abfecde211f05acb6989))
+
 ## [0.14.0](https://github.com/kgoedecke/doop/compare/desktop-v0.13.0...desktop-v0.14.0) (2026-11-16)
 
 
