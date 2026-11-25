@@ -404,6 +404,16 @@ describe('the doop CLI', () => {
 
     expect((await doop(['pull', 'designs/components/badge.css', '--force'])).code).toBe(0)
     expect(readFileSync(css, 'utf8')).toContain('#ff0000')
+
+    /* a CSS edit outlives its template file going missing: pull keeps it until --force */
+    writeFileSync(css, readFileSync(css, 'utf8').replace('#ff0000', '#333333'))
+    rmSync(join(work, 'designs/components/badge.html'))
+    expect((await doop(['pull'])).code).toBe(3)
+    expect(readFileSync(css, 'utf8')).toContain('#333333')
+    expect(existsSync(join(work, 'designs/components/badge.html'))).toBe(false)
+    expect((await doop(['pull', 'designs/components/badge.css', '--force'])).code).toBe(0)
+    expect(readFileSync(css, 'utf8')).toContain('#ff0000')
+    expect(existsSync(join(work, 'designs/components/badge.html'))).toBe(true)
   })
 
   it('pulls components into a fresh checkout as components, not as their main frames', async () => {

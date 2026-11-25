@@ -211,7 +211,8 @@ server/index.ts` in prod. `erasableSyntaxOnly` and `verbatimModuleSyntax` in tsc
     `.json` (name, description, props), from `get_component`. A push sends only the parts that changed
     through `update_component` with the pulled revision as `expected_rev`, so the server refuses a stale one
     in the same write (exit 3); new files go through `create_component`. Components are pulled and pushed
-    before frames. A component's main frame is not pulled as a frame, and a component that follows a
+    before frames. A pull over a component whose `.html` is missing still keeps an edit to its `.css` or
+    `.json` (a conflict until `--force`). A component's main frame is not pulled as a frame, and a component that follows a
     workspace library is listed but not pulled. `screenshot` on a component file is `get_component_preview`.
   - `doop expand` (and `pull --expand`) writes a frame as it renders (`get_frame` with `expand_components`)
     to `.doop/expanded/`, marked as generated; `push` refuses any path under `.doop/`.
