@@ -367,6 +367,14 @@
       "created_at": "2026-11-24T17:00:23Z",
       "repoId": 1342943152,
       "pullRequestNo": 649
+    },
+    {
+      "name": "dominik-lenhart",
+      "id": 165905896,
+      "comment_id": 7161255711,
+      "created_at": "2026-11-25T11:36:00Z",
+      "repoId": 1342943152,
+      "pullRequestNo": 667
     }
   ]
 }
