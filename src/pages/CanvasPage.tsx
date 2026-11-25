@@ -58,6 +58,7 @@ import { ShareModal } from '../components/ShareModal'
 import { ExportModal } from '../components/ExportModal'
 import { AppIcon } from '../components/ui/brand-mark'
 import { pageFrames } from '../../shared/pages'
+import { localSourceOrigin } from '../../shared/sourceCanvas'
 import type { Frame } from '../../shared/types'
 import { ImportStepFooter, ImportStepHeader, SourcePicker } from '../components/ImportSources'
 import { importSources } from '../components/importSourceList'
@@ -952,6 +953,11 @@ export function CanvasPage({
                 <ExportIcon className="size-3.5" />
                 {t('canvas.export')}
               </Button>
+              {localSourceOrigin(location.origin) && (
+                <Button asChild variant="bare" className={barPillBtn}>
+                  <a href="/local-canvas.html">{t('canvas.localSource')}</a>
+                </Button>
+              )}
             </BarPill>
           )}
           <BarPill>

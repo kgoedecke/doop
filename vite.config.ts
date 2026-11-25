@@ -37,7 +37,12 @@ export default defineConfig({
   /* Error tracking resolves minified stack frames through the .map next to
      each bundle. The source is public (AGPL), so the maps are too; browsers
      only fetch them when devtools open. */
-  build: { sourcemap: true },
+  build: {
+    sourcemap: true,
+    rolldownOptions: {
+      input: ['index.html', 'local-canvas.html'],
+    },
+  },
   /* mupdf finds its .wasm next to its own module through `import.meta.url`;
      pre-bundling would move the module and lose the file */
   optimizeDeps: { exclude: ['mupdf'] },

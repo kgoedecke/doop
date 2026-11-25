@@ -113,6 +113,34 @@ describe.skipIf(!findBrowserPath())('prototype player', { timeout: 30_000 }, () 
     return page.$eval('[data-proto-current]', (el) => el.textContent)
   }
 
+  it('scrolls long viewport documents and nested regions with real wheel input', async () => {
+    const canvas = {
+      ...CANVAS,
+      frames: [
+        frame(
+          'home',
+          '<div id="nested" style="height:100px;width:160px;overflow:auto;overscroll-behavior:contain"><p style="height:450px">Inner</p></div><p style="height:900px">Page</p>',
+        ),
+      ],
+    }
+    await page.evaluate((next) => (window as unknown as Fixture).seed(next), canvas)
+    await page.evaluate(() => (window as unknown as Fixture).play('home'))
+    const handle = await page.waitForSelector('iframe[data-doop-proto-frame="home"]')
+    const documentFrame = await handle!.contentFrame()
+    await documentFrame.waitForSelector('#nested')
+    const box = (await handle!.boundingBox())!
+    const scale = box.width / 400
+
+    await page.mouse.move(box.x + 40 * scale, box.y + 40 * scale)
+    await page.mouse.wheel({ deltaY: 60 })
+    await documentFrame.waitForFunction(() => (document.querySelector('#nested')?.scrollTop ?? 0) > 0)
+    expect(await documentFrame.evaluate(() => window.scrollY)).toBe(0)
+
+    await page.mouse.move(box.x + 40 * scale, box.y + 160 * scale)
+    await page.mouse.wheel({ deltaY: 140 })
+    await documentFrame.waitForFunction(() => window.scrollY > 0)
+  })
+
   /* a trigger is live once the player has switched the frame's runtime on,
      a moment after the HTML lands — retry the click until it takes. The
      click is dispatched in the frame: the player scales its iframes, which
@@ -437,13 +465,13 @@ describe.skipIf(!findBrowserPath())('prototype player', { timeout: 30_000 }, () 
     })
 
     /* only the top screen takes input: the screen an overlay covers stays put */
-    const COVERED: Canvas = {
+    const covered = (withDelay: boolean): Canvas => ({
       ...CANVAS,
       frames: [
         frame(
           'home',
           `<button id="help" data-doop-on="click" data-doop-action="overlay:menu">Help</button>
-           <div data-doop-on="delay:800" data-doop-action="navigate:detail"></div>
+           ${withDelay ? '<div data-doop-on="delay:800" data-doop-action="navigate:detail"></div>' : ''}
            <div data-doop-on="key:k" data-doop-action="navigate:detail"></div>`,
         ),
         frame('detail', `<button id="back" data-doop-on="click" data-doop-action="back">Back</button>`, 500),
@@ -461,7 +489,7 @@ describe.skipIf(!findBrowserPath())('prototype player', { timeout: 30_000 }, () 
           1500,
         ),
       ],
-    }
+    })
     const focusedScreen = () =>
       page.evaluate(() => (document.activeElement as HTMLElement | null)?.dataset.doopProtoFrame)
     /* a wait that, when it never comes true, says where the focus and the overlays are */
@@ -484,7 +512,7 @@ describe.skipIf(!findBrowserPath())('prototype player', { timeout: 30_000 }, () 
     }
 
     it('runs only the top screen’s delays and keys while an overlay is open', async () => {
-      await page.evaluate((canvas) => (window as unknown as Fixture).seed(canvas), COVERED)
+      await page.evaluate((canvas) => (window as unknown as Fixture).seed(canvas), covered(true))
       await page.evaluate(() => (window as unknown as Fixture).play('home'))
       const home = await screen('home')
       /* a real click focuses the screen that opens the overlay */
@@ -504,7 +532,7 @@ describe.skipIf(!findBrowserPath())('prototype player', { timeout: 30_000 }, () 
     })
 
     it('hands the focus back to the uncovered screen as nested overlays close', async () => {
-      await page.evaluate((canvas) => (window as unknown as Fixture).seed(canvas), COVERED)
+      await page.evaluate((canvas) => (window as unknown as Fixture).seed(canvas), covered(false))
       await page.evaluate(() => (window as unknown as Fixture).play('home'))
       const home = await screen('home')
       await home.$eval('#help', (el) => (el as HTMLElement).focus())

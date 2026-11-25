@@ -14,13 +14,10 @@ const pages: UserConfig = {
     emptyOutDir: true,
     sourcemap: false,
     reportCompressedSize: false,
-    rollupOptions: {
-      input: [
-        'index.html',
-        ...readdirSync('tests/fixtures')
-          .filter((name) => name.endsWith('.html'))
-          .map((name) => `tests/fixtures/${name}`),
-      ],
+    rolldownOptions: {
+      input: readdirSync('tests/fixtures')
+        .filter((name) => name.endsWith('.html'))
+        .map((name) => `tests/fixtures/${name}`),
     },
   },
 }

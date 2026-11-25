@@ -822,6 +822,70 @@ For website viewing/imports, setting `CONTEXT_DEV_API_KEY` makes Context.dev acq
 HTML while Doop still sanitizes it and renders the preview locally; without the key, Doop navigates
 to the public page directly in Chromium.
 
+### Local source canvas: run and edit a React project
+
+The **Local source** action on a locally served Doop canvas opens a separate workspace for a
+trusted React + Vite project. It runs live component viewports side by side. They aren't copies
+of the markup in Doop's editor and aren't synced, exported or published to Community.
+
+1. Start Doop locally and open `http://localhost:4300/local-canvas.html`. If you use a different
+   address, copy the exact origin shown on that page.
+2. In your React project's `vite.config.ts`, add the connector from your Doop checkout alongside
+   your existing React plugin. Use your own project-relative paths in the card configuration:
+
+   ```ts
+   import { doopSourceCanvas } from '../doop/server/sourceCanvasPlugin'
+
+   // In the Vite config's plugins array:
+   doopSourceCanvas({
+     doopOrigin: 'http://localhost:4300',
+     name: 'My project',
+     cards: [
+       {
+         id: 'home',
+         name: 'Home',
+         width: 960,
+         height: 600,
+         entry: 'src/Home.canvas.tsx',
+         source: 'src/Home.tsx',
+       },
+     ],
+   })
+   ```
+
+3. Give each preview entry a default React component export. An entry can render a page or
+   a component at a particular state. Import your app CSS there and wrap it in any providers it
+   needs. Set `source` to the one JSX/TSX file that contains its editable elements.
+4. Start that project on loopback, for example `bun run dev --host 127.0.0.1`. In Doop, connect
+   to the project's displayed address (for example `http://127.0.0.1:5173`) and only connect
+   projects you trust. The Doop and project origins must differ. Doop's backend never receives
+   source or edits.
+
+Mark an intrinsic JSX element with a unique, literal ID in that card's source file:
+
+```tsx
+<h1 data-doop-edit="headline" style={{ color: '#17314c' }}>
+  Your next idea
+</h1>
+```
+
+Select the element in Doop and use **Save to source** to edit plain text or an existing six-digit
+inline text color. The connector edits the JSX literal in place; Vite reloads the live cards when
+you or your coding agent saves the file. Dynamic values, duplicate markers, and spread attributes
+aren't visual write targets. If a file changed since it was selected, reselect to load its latest
+version before you save. **Copy prompt with source reference** prepares a request for the coding
+agent running in your project; it doesn't send the request to Doop's HTML agent.
+
+Doop keeps the previous file in the project's local `.doop-source-recovery/` folder when it saves.
+Keep that folder out of version control. You can delete recovery copies once you no longer need
+them. Visual writes require a local filesystem that supports hard links.
+
+Drag the board or a card's header to pan and use Ctrl/Command + wheel to zoom. Right-click a
+card and choose **Play** to interact with the app and scroll its page or nested regions without
+moving the board. To leave Play, press Escape or right-click the header and choose **Stop playing**.
+When the header is focused, Shift+F10 or the Menu key opens its menu. Stored HTML frames use
+**Present** to scroll long documents.
+
 ### Design sync: push an app's live screens onto a canvas
 
 Server-side import can't reach apps behind SSO or a VPN. The **doop-sync snippet** flips the capture
