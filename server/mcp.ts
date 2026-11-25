@@ -1472,8 +1472,7 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
     },
   )
 
-  /* report_issue and share_feedback: both go to the Doop team, never to the canvas */
-  const tellDoopTeam = async (
+  const saveAgentFeedback = async (
     kind: AgentFeedbackKind,
     input: { category: AgentFeedbackCategory; message: string; tool?: string; canvas_id?: string; agent_name?: string },
   ) => {
@@ -1489,10 +1488,9 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
       canvasId: input.canvas_id,
       userId: ownerId,
     })
-    if (!saved.ok) return err(saved.error)
-    return text({ ok: true, id: saved.id, note: 'Thanks — the Doop team reads these. Carry on with your task.' })
+    return saved.ok ? text(saved) : err(saved.error)
   }
-  const teamMessageFields = {
+  const feedbackFields = {
     tool: z.string().max(80).optional().describe('The Doop tool involved, if any (e.g. "edit_frame_html").'),
     canvas_id: z.string().optional().describe('The canvas you were working on, if any.'),
     agent_name: agentName.optional(),
@@ -1503,7 +1501,7 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
     {
       title: 'Report a problem with Doop',
       description:
-        "Tell the Doop team where Doop itself got in your way, so it can be fixed: a tool that errored or did something other than its description says, a guide or tool description that left you guessing, a capability you needed and did not have, or a workaround you had to invent. Call it whenever you struggle with Doop — after a retry fails, when you fall back to a workaround, or when you give up on part of a task — then carry on with the task. Ideas and suggestions that did not block you go to share_feedback instead. It does not reach the humans on the canvas and does not change any canvas; for the human's design feedback use save_decision. Be specific: what you tried (tool and arguments in brief), what happened, what you expected. Never include secrets.",
+        "Tell the admins of this Doop instance where Doop itself got in your way, so it can be fixed: a tool that errored or did something other than its description says, a guide or tool description that left you guessing, a capability you needed and did not have, or a workaround you had to invent. Call it whenever you struggle with Doop — after a retry fails, when you fall back to a workaround, or when you give up on part of a task — then carry on with the task. Ideas and suggestions that did not block you go to share_feedback instead. It does not notify canvas collaborators or change any canvas. Use save_decision for the human's design feedback. Be specific: what you tried (tool and arguments in brief), what happened, what you expected. Never include secrets.",
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
       inputSchema: {
         category: z
@@ -1516,10 +1514,10 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
           .min(1)
           .max(MAX_AGENT_FEEDBACK_CHARS)
           .describe('What you tried, what happened, and what you expected or needed instead.'),
-        ...teamMessageFields,
+        ...feedbackFields,
       },
     },
-    (input) => tellDoopTeam('issue', input),
+    (input) => saveAgentFeedback('issue', input),
   )
 
   server.registerTool(
@@ -1527,7 +1525,7 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
     {
       title: 'Share an idea or feedback about Doop',
       description:
-        "Tell the Doop team how Doop could work better for agents like you: a tool you wish existed, a parameter or result field that would have saved you calls, a workflow that felt clumsy, or something that worked especially well and should stay. Use it when you notice something worth saying, then carry on with the task. Something that broke or blocked you goes to report_issue instead. It does not reach the humans on the canvas and does not change any canvas; for the human's design feedback use save_decision. Be concrete: what you were doing and what would have helped. Never include secrets.",
+        "Tell the admins of this Doop instance how Doop could work better for agents like you: a tool you wish existed, a parameter or result field that would have saved you calls, a workflow that felt clumsy, or something that worked especially well and should stay. Use it when you notice something worth saying, then carry on with the task. Something that broke or blocked you goes to report_issue instead. It does not notify canvas collaborators or change any canvas. Use save_decision for the human's design feedback. Be concrete: what you were doing and what would have helped. Never include secrets.",
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
       inputSchema: {
         category: z
@@ -1540,10 +1538,10 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
           .min(1)
           .max(MAX_AGENT_FEEDBACK_CHARS)
           .describe('What you were doing and what would have helped (or what worked well).'),
-        ...teamMessageFields,
+        ...feedbackFields,
       },
     },
-    (input) => tellDoopTeam('feedback', input),
+    (input) => saveAgentFeedback('feedback', input),
   )
 
   server.registerTool(

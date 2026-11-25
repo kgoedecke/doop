@@ -201,18 +201,20 @@ server/index.ts` in prod. `erasableSyntaxOnly` and `verbatimModuleSyntax` in tsc
   branch is the longest prefix of its path the repo has), connecting a repo the canvas already has on that branch
   gives that connection the new credential, and connecting goes straight on to the screen picker. Tests:
   `repoCards.test.ts`, `agentLaunch.test.ts`, `githubRepo.test.ts`, the connect-by-link cases in `github.test.ts`.
-- Agent feedback (`server/agentFeedback.ts`, `shared/agentFeedback.ts`): agents talk to the Doop
-  team through two MCP tools, which the resident agent has under the same names. `report_issue`
+- Agent feedback (`server/agentFeedback.ts`, `shared/agentFeedback.ts`): agents report to the instance
+  admins through two MCP tools, which the resident agent has under the same names. `report_issue`
   (kind `issue`: `bug`, `tool_error`, `confusing`, `missing_capability`, `other`) is for where Doop
   got in their way; `share_feedback` (kind `feedback`: `idea`, `improvement`, `praise`, `other`) is
   for what would help or what worked. Each takes a message and optionally the tool and canvas
   involved. Both land in `agent_feedback` with the account and the MCP client's name. `/mcp` is
   stateless (a fresh server per request), so `handleMcpRequest` remembers the `initialize`
   clientInfo name per credential (a hash of the bearer) and falls back to the OAuth application's
-  name. Reports go to PostHog as `agent_feedback_reported` with `kind` and share a cap of 20 an hour
-  per account. Instance admins read them at `GET /api/admin/agent-feedback` (Admin → Agent
+  name. The tools share a cap of 20 reports an hour per account. When PostHog is configured,
+  reports tied to an account emit `agent_feedback_reported` with `kind`. Instance admins read them at `GET /api/admin/agent-feedback` (Admin → Agent
   feedback), 50 at a time with `kind`, `q` (searched on the server, account email included) and a
-  `before=<at>:<id>` cursor for older pages. They never reach the humans on a canvas. Tests:
+  `before=<at>:<id>` cursor for older pages. Reporting does not notify canvas collaborators. The receipt names
+  the Doop team on `https://doop.design` and `https://www.doop.design` and names the instance
+  admins on other origins. Tests:
   `agentFeedback.test.ts`, `agentFeedbackHttp.test.ts` (separate HTTP requests).
 - Claude Code on the desktop (`shared/localAgent.ts`, `server/localAgent.ts`,
   `desktop/src-tauri/src/claude.rs`): the model menu is the CLI's aliases (`CLAUDE_MODEL_ALIASES`),

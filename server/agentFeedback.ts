@@ -1,5 +1,6 @@
 import { and, count, desc, eq, ilike, inArray, lt, or, type SQL } from 'drizzle-orm'
 import { nanoid } from 'nanoid'
+import { env } from './env.ts'
 import { db } from './db/index.ts'
 import { agentFeedback } from './db/schema.ts'
 import * as authSchema from './db/auth-schema.ts'
@@ -11,14 +12,6 @@ import {
   type AgentFeedbackReport,
   type AgentFeedbackSource,
 } from '../shared/agentFeedback.ts'
-
-/**
- * Agents talking to the Doop team. Issues (report_issue) are where Doop got
- * in their way: a tool that failed or misbehaved, a guide that left them
- * guessing, a capability they needed and did not have. Feedback
- * (share_feedback) is what they would add or change, or what worked. Stored for the instance admins (GET /api/admin/agent-feedback)
- * and, on the hosted service, sent to PostHog as `agent_feedback_reported`.
- */
 
 /* an agent stuck in a loop could otherwise report the same failure on every
    turn; issues and feedback share the one budget */
@@ -49,7 +42,7 @@ export interface AgentFeedbackInput {
   userId?: string
 }
 
-export type RecordResult = { ok: true; id: string } | { ok: false; error: string }
+export type RecordResult = { ok: true; id: string; note: string } | { ok: false; error: string }
 
 export async function recordAgentFeedback(input: AgentFeedbackInput): Promise<RecordResult> {
   const message = input.message.trim()
@@ -88,7 +81,12 @@ export async function recordAgentFeedback(input: AgentFeedbackInput): Promise<Re
       message: row.message,
     })
   }
-  return { ok: true, id: row.id }
+  const { origin } = new URL(env.BETTER_AUTH_URL)
+  const note =
+    origin === 'https://doop.design' || origin === 'https://www.doop.design'
+      ? 'Thanks — the Doop team reads these. Carry on with your task.'
+      : "Saved for this instance's admins (Admin → Agent feedback). Carry on with your task."
+  return { ok: true, id: row.id, note }
 }
 
 export const AGENT_FEEDBACK_PAGE_SIZE = 50
