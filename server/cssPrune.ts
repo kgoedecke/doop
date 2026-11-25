@@ -1,4 +1,7 @@
+import { once } from 'node:events'
+import { Worker } from 'node:worker_threads'
 import type { Page } from 'puppeteer-core'
+import { MAX_IMPORT_CSS_BYTES } from './limits.ts'
 import { installNameShim } from './pageShim.ts'
 
 /**
@@ -11,8 +14,7 @@ import { installNameShim } from './pageShim.ts'
  * captured DOM keeps only what styles this page.
  *
  * The browser is the CSS parser: the sheet is injected into the page and
- * walked through CSSOM, so there is no parser dependency and no drift between
- * what we keep and what Chromium understands.
+ * walked through CSSOM, so Chromium decides which rules to keep.
  */
 
 /** Pruning is a size optimisation, never a correctness requirement, so it
@@ -37,7 +39,7 @@ export interface PrunedPage {
 
 /** Runs INSIDE the captured page via page.evaluate, so it must be
  *  self-contained: no closure over module scope, no imports. */
-export function pruneCssInDocument(rawCss: string, deadlineMs: number): PrunedPage {
+export function pruneCssInDocument(rawCss: string, deadlineMs: number): PrunedPage & { lostFont: boolean } {
   const deadline = performance.now() + deadlineMs
 
   /* Pseudo-classes and pseudo-elements describe state, not structure. Strip
@@ -92,15 +94,37 @@ export function pruneCssInDocument(rawCss: string, deadlineMs: number): PrunedPa
   const isGrouping = (rule: CSSRule): rule is CSSGroupingRule =>
     'cssRules' in rule && !(rule instanceof CSSStyleRule) && !(rule instanceof CSSKeyframesRule)
 
+  let lostFont = false
+  const containsLostFont = (rule: CSSRule): boolean => {
+    if ('style' in rule) {
+      const style = rule.style as CSSStyleDeclaration
+      if (
+        !style.getPropertyValue('font') &&
+        Array.from(style).some(
+          (prop) => (prop.startsWith('font-') || prop === 'line-height') && !style.getPropertyValue(prop),
+        )
+      )
+        return true
+    }
+    return 'cssRules' in rule && Array.from((rule as CSSGroupingRule).cssRules).some(containsLostFont)
+  }
+  const serialize = (rule: CSSRule): string => {
+    const text = rule.cssText
+    if (!lostFont && /(?:[;{]\s*)(?:font-[\w-]+|line-height):\s*(?:!important\s*)?;/.test(text)) {
+      lostFont = containsLostFont(rule)
+    }
+    return text
+  }
+
   /* Top-level @font-face decisions wait until every kept rule is known, so
      they pass through the first walk as the rule itself. */
   const keep = (rule: CSSRule): string | CSSFontFaceRule | null => {
-    if (performance.now() >= deadline) return rule.cssText
+    if (performance.now() >= deadline) return serialize(rule)
     if (rule instanceof CSSFontFaceRule) return rule
     if (rule instanceof CSSStyleRule) {
       if (!used(rule.selectorText)) return null
       noteFamilies(rule)
-      return rule.cssText
+      return serialize(rule)
     }
     if (isGrouping(rule)) {
       /* @media, @supports, @layer, @container, @scope… keep the wrapper only
@@ -116,7 +140,7 @@ export function pruneCssInDocument(rawCss: string, deadlineMs: number): PrunedPa
     }
     /* @keyframes, @property, @page, @counter-style… have no selector to
        test. They are small and dropping one breaks a kept rule. */
-    return rule.cssText
+    return serialize(rule)
   }
 
   const style = document.createElement('style')
@@ -141,7 +165,7 @@ export function pruneCssInDocument(rawCss: string, deadlineMs: number): PrunedPa
         .join('\n')
     }
     style.remove()
-    return { css, html: document.documentElement.outerHTML }
+    return { css, html: document.documentElement.outerHTML, lostFont }
   } finally {
     style.remove()
   }
@@ -151,14 +175,38 @@ export function pruneCssInDocument(rawCss: string, deadlineMs: number): PrunedPa
  *  DOM. Returns null if the page cannot run the pruner, so the caller can fall
  *  back to the unpruned sheet: an oversized import is still an import. */
 export async function pruneUnusedCss(page: Page, css: string): Promise<PrunedPage | null> {
+  let worker: Worker | undefined
+  let finished = false
   try {
     await installNameShim(page)
+    const prune = async () => {
+      let source = css
+      if (/\bfont\s*:/i.test(css) && /font-|line-height/i.test(css) && /var\(|\bfont\s*:\s*[-\w]+\s*[;!}]/i.test(css)) {
+        worker = new Worker(new URL('./separateFontShorthands.ts', import.meta.url), {
+          workerData: css,
+          execArgv: [],
+          resourceLimits: { maxOldGenerationSizeMb: 512 },
+        })
+        try {
+          ;[source] = (await once(worker, 'message')) as [string]
+        } catch {
+          // Chromium can still parse stylesheets PostCSS rejects.
+        }
+      }
+      if (finished) return null
+      const pruned = await page.evaluate(pruneCssInDocument, source, PRUNE_DEADLINE_MS)
+      const keepSource = pruned.lostFont && Buffer.byteLength(css) <= MAX_IMPORT_CSS_BYTES
+      return { css: keepSource ? css : pruned.css, html: pruned.html }
+    }
     const pruned = await Promise.race([
-      page.evaluate(pruneCssInDocument, css, PRUNE_DEADLINE_MS),
+      prune(),
       new Promise<null>((resolve) => setTimeout(() => resolve(null), PRUNE_WAIT_MS).unref?.()),
     ])
     return typeof pruned?.css === 'string' && typeof pruned.html === 'string' ? pruned : null
   } catch {
     return null
+  } finally {
+    finished = true
+    if (worker) await worker.terminate()
   }
 }

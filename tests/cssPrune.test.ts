@@ -1,6 +1,7 @@
-import { beforeEach, describe, expect, it } from 'vitest'
+import { assert, beforeEach, describe, expect, it } from 'vitest'
 import type { Page } from 'puppeteer-core'
-import { PRUNE_DEADLINE_MS, pruneCssInDocument } from '../server/cssPrune.ts'
+import { PRUNE_DEADLINE_MS, pruneCssInDocument, pruneUnusedCss } from '../server/cssPrune.ts'
+import { MAX_IMPORT_CSS_BYTES } from '../server/limits.ts'
 import { findBrowserPath } from '../server/screenshot.ts'
 import { pagePerTest } from './browser.ts'
 
@@ -120,6 +121,78 @@ describe.skipIf(!findBrowserPath())('unused CSS pruning', () => {
     )
 
     expect(pruned).toContain('font-family: Shorthand')
+  })
+
+  it.each(['', ' !important'])('preserves the rendered font after a longhand override (%s)', async (priority) => {
+    const result = await pruneUnusedCss(
+      page,
+      ':root { --type: 700 30px/1.5 monospace }' +
+        `@media all { .used { color: teal; font: var(--type)${priority}; font-feature-settings: "case" 1${priority} } }` +
+        '.unused { color: red }',
+    )
+    assert.isNotNull(result)
+    const { css } = result
+    await page.addStyleTag({ content: css })
+
+    const font = await page.$eval('.used', (element) => {
+      const { color, fontFamily, fontSize, fontWeight, lineHeight, fontFeatureSettings } = getComputedStyle(element)
+      return { color, fontFamily, fontSize, fontWeight, lineHeight, fontFeatureSettings }
+    })
+    expect(font).toEqual({
+      color: 'rgb(0, 128, 128)',
+      fontFamily: 'monospace',
+      fontSize: '30px',
+      fontWeight: '700',
+      lineHeight: '45px',
+      fontFeatureSettings: '"case"',
+    })
+    expect(css).not.toContain('.unused')
+  })
+
+  it('keeps the font of a pseudo-element with declarations directly inside a nested media query', async () => {
+    const result = await pruneUnusedCss(
+      page,
+      '.used::before { content: "label"; --type: 30px monospace;' +
+        ' @media all { font: var(--type); font-weight: 700 } } .unused { color: red }',
+    )
+    assert.isNotNull(result)
+    expect(result.css).not.toContain('.unused')
+    await page.addStyleTag({ content: result.css })
+    const font = await page.$eval('.used', (element) => getComputedStyle(element, '::before').fontSize)
+    expect(font).toBe('30px')
+  })
+
+  it('preserves a font declared directly on the root of a nested scope', async () => {
+    const result = await pruneUnusedCss(
+      page,
+      '.used { --type: 30px monospace; @scope (li) { font: var(--type); font-weight: 300 } } .unused { color: red }',
+    )
+    assert.isNotNull(result)
+    await page.addStyleTag({ content: result.css })
+    const font = await page.$eval('li', (element) => {
+      const { fontFamily, fontSize, fontWeight } = getComputedStyle(element)
+      return [fontFamily, fontSize, fontWeight]
+    })
+    expect(font).toEqual(['monospace', '30px', '300'])
+    expect(result.css).not.toContain('.unused')
+  })
+
+  it('keeps pruning an import that overrides a system font', async () => {
+    const result = await pruneUnusedCss(page, '.used { font: menu; font-size: 30px } .unused { color: red }')
+    assert.isNotNull(result)
+    expect(result.css).not.toContain('.unused')
+    await page.addStyleTag({ content: result.css })
+    expect(await page.$eval('.used', (element) => getComputedStyle(element).fontSize)).toBe('30px')
+  })
+
+  it('can still import a large stylesheet when source parsing fails', async () => {
+    const css =
+      ':root { --type: 30px monospace } .used { font: var(--type); font-weight: 700 }' +
+      `.unused { --padding: "${'x'.repeat(MAX_IMPORT_CSS_BYTES)}" } }`
+    const result = await pruneUnusedCss(page, css)
+    assert.isNotNull(result)
+    expect(result.css).toContain('.used')
+    expect(result.css).not.toContain('.unused')
   })
 
   it('keeps at-rules that have no selector to test', async () => {
