@@ -152,7 +152,7 @@ export const ChoicesWithAction: Story = {
   name: 'ChoiceList with row actions',
   render: () => (
     <ChoiceList className="max-w-[560px]">
-      {['kgoedecke/doop', 'kgoedecke/doop-marketing'].map((repo) => (
+      {['doop-design/doop', 'acme/website'].map((repo) => (
         <ChoiceRow
           key={repo}
           icon={<AppIcon brand="github" />}

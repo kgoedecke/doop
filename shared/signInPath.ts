@@ -1,11 +1,11 @@
 /* The app's sign-in page. Every server redirect that needs someone signed in
-   goes here, never to `/`: on the hosted instance a signed-out `/` is the
-   marketing landing page, which has no sign-in form. The page resumes an
+   goes here, never to `/`: a deployment may serve a landing page at a
+   signed-out `/`, which has no sign-in form. The page resumes an
    interrupted flow from its query (`redirect_to`, an MCP authorize request). */
 export const SIGN_IN_PATH = '/auth'
 
-/* Query parameters that mean "sign in, then carry on": the marketing proxy
-   leaves a signed-out `/` carrying one to the app, so the flow survives. */
+/* Query parameters that mean "sign in, then carry on": a signed-out `/`
+   carrying one stays with the app, so the flow survives. */
 export const SIGN_IN_RESUME_PARAMS = ['redirect_to', 'client_id'] as const
 
 const ERROR_PARAMS = ['error', 'error_description']

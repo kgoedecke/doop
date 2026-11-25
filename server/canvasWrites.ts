@@ -847,12 +847,12 @@ function appendLocally(command: AppendFrameHtmlCommand): AppendFrameHtmlResult {
 }
 
 /* ------------------------------------------------------------------ */
-/* Imports and ingest: frames brought in from elsewhere (a webpage, a  */
-/* PSD, Figma, Canva, Meta, the design-sync snippet, a GitHub repo).   */
+/* Imports and ingest: frames brought in from elsewhere (a webpage,    */
+/* Meta, the design-sync snippet, a GitHub repo).                      */
 /* They use the commands above; this is how they call the entry.       */
 /* ------------------------------------------------------------------ */
 
-/** How an import that takes its frame maker as a dependency (webpage, PSD) makes a frame: as
+/** How an import that takes its frame maker as a dependency (a webpage) makes a frame: as
  *  the entry makes it, always a promise, a failure only its rejection. */
 export type CreateImportedFrame = (
   canvasId: string,
@@ -891,7 +891,7 @@ export function isImportWriteFailure(error: unknown): error is Error {
   return error instanceof Error && importWriteFailures.has(error)
 }
 
-/** One frame of an import that lands frame after frame (a website's pages, Figma, Meta): each
+/** One frame of an import that lands frame after frame (a website's pages, Meta): each
  *  frame its own unit (`runImportWrite`), and one refused is answered as `{ ok: false }`, not
  *  rejected, with nothing of it left behind. The frames before it stand, the import reports this
  *  one as failed and goes on, and it never rejects after landing some. A spent work budget
@@ -913,7 +913,7 @@ export async function landImportFrame<const C extends CanvasWrite>(
 
 /* ------------------------------------------------------------------ */
 /* What the server runs through this entry by itself: idle streams on  */
-/* a clock, and a browser's edit its canvas actor committed.           */
+/* a clock.                                                            */
 /* ------------------------------------------------------------------ */
 
 let settling = false

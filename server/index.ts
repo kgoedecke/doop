@@ -608,8 +608,8 @@ setInterval(() => {
 }, 5000)
 
 actions.wire(broadcast, agentTouch)
-/* idle streams settle, and a canvas actor's browser edits are taken in, through the canvas
-   write entry: wired here, once, rather than by importing it */
+/* idle streams settle through the canvas write entry: wired here, once, rather than by
+   importing it */
 wireCanvasWrites()
 /* asset_refs follow each frame as it renders, its components' stylesheets included */
 persist.viewAssetsThrough(composedHtml)
@@ -4328,8 +4328,7 @@ server.listen({ port: PORT, host: HOST }, () => {
     return pages.size > 0 && pages
   })
   /* a browser keeps the pages it read; one the server let go is no longer kept
-     current there (on an actor canvas, its browser edits would not be taken in),
-     so the browser reads it again before it shows it */
+     current there, so the browser reads it again before it shows it */
   store.onPageDropped((canvasId, pageId) => {
     for (const conn of room(canvasId)) {
       if (!conn.onDemand || !conn.pages.delete(pageId)) continue

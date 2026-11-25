@@ -23,7 +23,6 @@ const { deliveredWork, execTool, newRunState, tokenWritesIn } = await import('..
 const { DEFAULT_ROLE_ID, roleName } = await import('../shared/agents.ts')
 
 const actor = () => actions.resolveActor({ name: roleName(DEFAULT_ROLE_ID), kind: 'agent' })
-const run = () => newRunState()
 const call = (name: string, input: unknown) => ({ type: 'tool_use' as const, id: 't1', name, input })
 
 let canvasId: string

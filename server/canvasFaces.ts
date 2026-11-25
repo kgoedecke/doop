@@ -1,5 +1,5 @@
 import { withTokenBlock } from '../shared/designTokens.ts'
-import { componentsUsedBy, syncComponentHead, topSettled } from '../shared/frameCompose.ts'
+import { componentsUsedBy, syncComponentHead } from '../shared/frameCompose.ts'
 import { withFontFaces } from '../shared/fonts.ts'
 import { withWebFontLinks } from '../shared/webFonts.ts'
 import { fontsForCanvas } from './fonts.ts'

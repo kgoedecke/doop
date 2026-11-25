@@ -18,8 +18,8 @@ import { runOperation, WorkBudgetError } from './workBudget.ts'
  *
  * A turn is one frame of one canvas, and a canvas has at most one turn in flight.
  * On the local host a turn's write is done in the tick that starts it and only its
- * answer comes a few microtasks later. A host that answers asynchronously (the
- * canvas actor) makes a turn span ticks: meanwhile other canvases take their turns,
+ * answer comes a few microtasks later. A host that answers asynchronously would make
+ * a turn span ticks: meanwhile other canvases take their turns,
  * and requests write to the canvas as they always could (a write that lands under
  * a turn's preparation is caught by the turn, which asks to go again). A turn that
  * has not answered within `TURN_TIMEOUT_MS` is said as failed for its frame and the

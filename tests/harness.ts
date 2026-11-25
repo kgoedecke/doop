@@ -114,9 +114,9 @@ async function boot(
         /* never the live PostHog project: a key in a developer's shell or
              .env would turn every test signup into an account_created event,
              and the lifecycle-email workflows act on those */
-          POSTHOG_KEY: '',
-          VITE_POSTHOG_KEY: '',
-          /* a store write outside any write boundary is an error here (server/journal.ts),
+        POSTHOG_KEY: '',
+        VITE_POSTHOG_KEY: '',
+        /* a store write outside any write boundary is an error here (server/journal.ts),
              so a path that escapes the all-or-nothing guarantee fails the test that takes it */
         DOOP_WRITE_BOUNDARY: 'throw',
         ...env,
