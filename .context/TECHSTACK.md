@@ -18,6 +18,11 @@ server/index.ts` in prod. `erasableSyntaxOnly` and `verbatimModuleSyntax` in tsc
 ## 2. Core Frameworks and Libraries
 
 - Express 4.19.2 - HTTP server framework in `server/`.
+- Webpage import uses Chromium to prune unused CSS. Before pruning, a time-limited worker uses
+  PostCSS to separate variable and system font shorthands from later font overrides. This
+  preserves imported typography when Chromium serialises the remaining rules. If source parsing
+  fails, Chromium still prunes the stylesheet. The original CSS can be kept when it fits the
+  importer's output limit.
 - React 18.3.1 - UI framework in `src/`.
 - Zustand 4.5.4 - client-side state management.
 - Element ids (`shared/elementId.ts`): anything outside a frame that points at an element
