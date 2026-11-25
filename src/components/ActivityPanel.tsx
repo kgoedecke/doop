@@ -153,7 +153,10 @@ export function ActivityPanel({
           {hasChat ? (
             <AgentsSplit />
           ) : (
-            <div className={cn('flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain', SCOPE_ROW_CLEARANCE)}>
+            /* the strip scrolls itself, so the clearance for the composer's
+               scope chip is kept here, under it, and its pinned toggle stays
+               clear of the chip */
+            <div className={cn('flex min-h-0 flex-1 flex-col', SCOPE_ROW_CLEARANCE)}>
               <RecentTasks />
             </div>
           )}
@@ -219,7 +222,8 @@ function AgentsSplit() {
       <div
         ref={recent}
         className={cn(
-          'flex min-h-0 flex-none flex-col overflow-y-auto overscroll-contain',
+          /* Recent tasks scrolls itself, its toggle pinned to its bottom edge */
+          'flex min-h-0 flex-none flex-col overflow-hidden',
           height === null && 'max-h-[45%]',
         )}
         style={height === null ? undefined : { height, maxHeight: `calc(100% - ${MIN_CHAT_PX}px)` }}
@@ -281,10 +285,14 @@ const RECENT_SHOWN = 3
 
 /* The "Recent tasks" strip at the top of the Agents tab: what each agent is
    working on or just finished, and for whom. "Show all" opens the whole
-   history in the same rows, split into what is running and what is done. */
+   history in the same rows, split into what is running and what is done.
+   The strip scrolls itself, and its toggle after the rows is pinned to the
+   strip's bottom edge, so "Show less" stays in reach however long the list is
+   and wherever it is scrolled. */
 function RecentTasks() {
   const tasks = useStore((s) => s.tasks)
   const [all, setAll] = useState(false)
+  const strip = useRef<HTMLElement>(null)
   /* unclaimed board cards have no agent yet, so they are not activity, except
      repo import cards, which can wait a long while (for the person's own
      agent, or for their desktop to come online) and must show that they do */
@@ -292,9 +300,20 @@ function RecentTasks() {
   const working = useMemo(() => claimed.filter((t) => !t.endedAt && !t.failedAt), [claimed])
   const finished = useMemo(() => claimed.filter((t) => t.endedAt || t.failedAt), [claimed])
   const t = useT()
+  const hasMore = claimed.length > RECENT_SHOWN
+
+  const toggle = () => {
+    /* collapsing goes back to the top, where the three rows left are */
+    if (all && strip.current) strip.current.scrollTop = 0
+    setAll(!all)
+  }
 
   return (
-    <section aria-label={t('panels.activityRecentTasks')} className="flex flex-none flex-col pt-1.5 pb-1">
+    <section
+      ref={strip}
+      aria-label={t('panels.activityRecentTasks')}
+      className={cn('flex min-h-0 flex-initial flex-col overflow-y-auto overscroll-contain pt-1.5', !hasMore && 'pb-1')}
+    >
       <h3 className="flex h-7 flex-none items-center px-3 text-[11.5px] font-normal text-ink-faint">
         {t('panels.activityRecentTasks')}
       </h3>
@@ -308,16 +327,20 @@ function RecentTasks() {
       ) : (
         claimed.slice(0, RECENT_SHOWN).map((task) => <RecentTaskRow key={task.id} task={task} />)
       )}
-      {claimed.length > RECENT_SHOWN && (
-        <Button
-          variant="bare"
-          className="mx-1.5 mt-0.5 h-[26px] flex-none justify-start gap-1.5 self-start rounded-[7px] px-1.5 text-[11.5px] font-normal text-ink-soft"
-          aria-expanded={all}
-          onClick={() => setAll((v) => !v)}
-        >
-          {all ? t('panels.activityShowLess') : t('panels.activityShowAll')}
-          <ChevronDownIcon className={cn('size-3 text-ink-faint transition-transform', all && 'rotate-180')} />
-        </Button>
+      {hasMore && (
+        /* pinned to the strip's bottom edge, on the panel's own fill so the
+           rows scroll under it */
+        <div className="sticky bottom-0 z-[1] flex flex-none bg-surface px-1.5 pt-0.5 pb-1">
+          <Button
+            variant="bare"
+            className="h-[26px] justify-start gap-1.5 rounded-[7px] px-1.5 text-[11.5px] font-normal text-ink-soft"
+            aria-expanded={all}
+            onClick={toggle}
+          >
+            {all ? t('panels.activityShowLess') : t('panels.activityShowAll')}
+            <ChevronDownIcon className={cn('size-3 text-ink-faint transition-transform', all && 'rotate-180')} />
+          </Button>
+        </div>
       )}
     </section>
   )
