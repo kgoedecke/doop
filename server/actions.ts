@@ -1819,17 +1819,32 @@ export function retryCard(canvasId: string, cardId: string, by: string): AgentTa
 /* before it ended), so an agent's one-shot replace or stream can never */
 /* leave itself as the only copy of a design. A full replace always    */
 /* opens a burst; a small tweak joins the open one when the same actor */
-/* made it within BURST_IDLE_MS.                                        */
+/* made it within BURST_IDLE_MS. An agent's tweak opens one anyway once */
+/* AGENT_VERSION_MS have passed since this frame last filed a version,  */
+/* so every edit an agent makes minutes apart can be restored away.    */
 /* ------------------------------------------------------------------ */
 
 interface Burst {
   actor: Actor
   /** when this actor last wrote the frame's HTML */
   lastAt: number
+  /** when this frame last filed a version (since boot), if it has */
+  filedAt?: number
 }
 
 const bursts = new Map<string, Burst>() // frameId -> the burst open on it
 const BURST_IDLE_MS = 2 * 60_000
+/** An agent's tweak files the state it replaced when no version of the frame was filed this
+ *  recently. Short enough that edits an agent makes a step at a time stay undoable, long
+ *  enough that a run of quick fixes is one version. */
+export const AGENT_VERSION_MS = 30_000
+
+/** What an HTML write is to the design history: `replace` always opens a burst and files the
+ *  state it replaced; `tweak` (a small edit) joins the same actor's open burst, except that an
+ *  agent's files once AGENT_VERSION_MS have passed since the frame last filed; `continue` (a
+ *  stream's later chunks and its settling, a component re-rendered into the frame) joins the
+ *  open burst by the people's rule alone. */
+type HtmlChange = 'replace' | 'tweak' | 'continue'
 
 type PriorState = Pick<Frame, 'id' | 'canvasId' | 'html' | 'width' | 'height' | 'updatedAt' | 'updatedBy'>
 
@@ -1840,20 +1855,26 @@ function priorState(f: Frame): PriorState {
   return { id, canvasId, html, width, height, updatedAt, updatedBy }
 }
 
-/** Record that `actor` has just replaced the frame's HTML. `tweak` marks a
- *  small edit that may join the open burst; anything else starts a new one
- *  and files the state it replaced as a version. */
-function noteHtmlChange(prior: PriorState, actor: Actor, tweak: boolean) {
+/** Record that `actor` has just replaced the frame's HTML (`change` says how, `HtmlChange`).
+ *  A write that does not join the open burst starts a new one and files the state it
+ *  replaced as a version. */
+function noteHtmlChange(prior: PriorState, actor: Actor, change: HtmlChange) {
   const open = bursts.get(prior.id)
   const now = Date.now()
-  const joins =
-    tweak &&
+  const sameBurst =
+    change !== 'replace' &&
     open !== undefined &&
     agentKeyOf(open.actor) === agentKeyOf(actor) &&
     open.actor.kind === actor.kind &&
     now - open.lastAt < BURST_IDLE_MS
-  setKey(bursts, prior.id, { actor, lastAt: now })
-  if (joins || !prior.html) return
+  const agentStep =
+    change === 'tweak' &&
+    actor.kind === 'agent' &&
+    (open?.filedAt === undefined || now - open.filedAt >= AGENT_VERSION_MS)
+  const joins = sameBurst && !agentStep
+  const files = !joins && !!prior.html
+  setKey(bursts, prior.id, { actor, lastAt: now, filedAt: files ? now : open?.filedAt })
+  if (!files) return
   /* the open burst wrote this state; without one (first write since boot)
      the frame's own stamp is the best attribution there is, even though a
      move or rename since may have refreshed it */
@@ -1905,7 +1926,7 @@ export const restoreFrameVersion = atomic(async function restoreFrameVersion(
   const patch = { html: prepared.html, width: version.width, height: version.height }
   const frame = store.updateFrame(frameId, patch, actor.name)
   if (!frame) return undefined
-  noteHtmlChange(prior, actor, false)
+  noteHtmlChange(prior, actor, 'replace')
   broadcast(frame.canvasId, { type: 'frame:updated', frame, actor })
   if (prepared.changed.length) propagateFromFrameWrite(frame.canvasId, prepared.changed, actor, frameId)
   logActivity(frame.canvasId, actor, `restored “${frame.name}” to an earlier version by ${version.savedBy}`, frame.id)
@@ -2187,7 +2208,7 @@ function settleIdleStream(frameId: string, s: StreamState) {
   if (before && prepared && !sameStored(before.canvasId, prepared.html, before.html)) {
     const prior = priorState(before)
     const frame = store.updateFrame(frameId, { html: prepared.html }, s.actor.name)!
-    noteHtmlChange(prior, s.actor, true)
+    noteHtmlChange(prior, s.actor, 'continue')
     /* viewers get it healed, like every chunk, so a script cut off mid-way never runs */
     broadcast(frame.canvasId, {
       type: 'frame:updated',
@@ -2502,7 +2523,7 @@ export function propagateIntoFrame(
   /* a component it uses changed, not the frame: sign-off stands (decided 2026-11-12) */
   const updated = store.updateFrame(latest.id, { html }, actor.name, { annotation: true })
   if (!updated) return {}
-  noteHtmlChange(prior, actor, true)
+  noteHtmlChange(prior, actor, 'continue')
   broadcast(canvasId, { type: 'frame:updated', frame: updated, actor })
   return { touched: { id: updated.id, name: updated.name, approvalLost: false } }
 }
@@ -2678,7 +2699,7 @@ const appendChunk = atomic(function appendChunk(
   const prior = priorState(before)
   const frame = store.updateFrame(frameId, { html }, actor.name)!
   /* the opening chunk replaces the design; every later one extends this burst */
-  noteHtmlChange(prior, actor, !starting)
+  noteHtmlChange(prior, actor, starting ? 'replace' : 'continue')
   announceAdopted(before.canvasId, chunked.adopted, actor, true)
 
   if (starting) {
@@ -2870,7 +2891,7 @@ export const updateFrame = atomic(function updateFrame(
      in place, so a reveal would only add churn — and the design history
      files one version per burst of tweaks, not one per keystroke */
   const smallTweak = htmlChanged && shared >= frame.html.length * 0.5 && shared >= prevHtml.length * 0.5
-  if (htmlChanged) noteHtmlChange(prior, actor, smallTweak && !opts.replace)
+  if (htmlChanged) noteHtmlChange(prior, actor, smallTweak && !opts.replace ? 'tweak' : 'replace')
   if (htmlChanged && actor.kind === 'agent') {
     finishStream(frameId, false) /* a full replace ends an open append stream */
     const openReveal = reveals.get(frameId)

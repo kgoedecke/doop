@@ -24,7 +24,12 @@ begins, and the live frame is always the open burst's result.
   prefix-only check, and would have replayed as a reveal.
 - A small tweak joins the open burst when the same actor (name + kind) made it within
   `BURST_IDLE_MS` (2 min) of the burst's last write: `edit_frame_html`, element-panel edits,
-  Inspector typing, non-opening stream chunks. Otherwise it opens a burst too.
+  Inspector typing. Otherwise it opens a burst too. An agent's tweak also opens one when the
+  frame filed no version in the last `AGENT_VERSION_MS` (30 s, since boot), so each step of an
+  agent's edits minutes apart can be restored away; a person's tweaks keep the 2-minute rule.
+- A stream's later chunks and its settling, and a component rendered into the frame again
+  (propagation), continue the open burst by the 2-minute rule alone and never trigger the agent
+  rule (`noteHtmlChange`'s `'continue'`).
 - Snapshots are attributed to the open burst's actor and last write time. After a restart the
   burst table is empty, so the first write files the current state under the frame's own
   `updatedBy`/`updatedAt` with an unknown kind - the only case `saved_by_kind` is null.

@@ -69,6 +69,10 @@ import {
   stampParts,
   useMarkup,
   withDetachedCss,
+  tagBalance,
+  BALANCED_TAGS,
+  type BalancedTag,
+  type TagCount,
 } from './componentEngine.ts'
 import {
   adoptFromLibrary,
@@ -430,6 +434,47 @@ export function frameEditProblem(edit: Exclude<FrameEdit, { html: string }>, fin
     return `${find} occurs ${edit.count} times — include more surrounding context so it matches exactly once.`
   if (edit.problem === 'supplied') return `${find}: ${SUPPLIED_EDIT}.`
   return `${find} not found in the frame HTML. Call ${read} to see the current content.`
+}
+
+/** Why an edit would leave `<doop-use>` or `<template>` tags unpaired: for each such tag, how
+ *  the find text and the replacement open and close it (`TagCount`). */
+export type Unbalanced = { tags: { tag: BalancedTag; find: TagCount; replace: TagCount }[] }
+
+/**
+ * Whether an edit's replacement leaves `<doop-use>` and `<template>` tags paired as the find text
+ * had them: it opens as many more than it closes (`net`), and at no point closes more than the find
+ * text did before opening them again (`low`), so the tags around the edit pair up as they did. An
+ * unclosed `<doop-use>` is read as empty and an unclosed `<template>` swallows the rest of the
+ * document, so such an edit is refused whole. It reads the command alone, so every host refuses
+ * the same edits.
+ */
+export function unbalancedEdit(find: string, replace: string): Unbalanced | undefined {
+  const before = tagBalance(find)
+  const after = tagBalance(replace)
+  const tags = BALANCED_TAGS.filter(
+    (tag) => before[tag].net !== after[tag].net || after[tag].low < before[tag].low,
+  ).map((tag) => ({ tag, find: before[tag], replace: after[tag] }))
+  return tags.length ? { tags } : undefined
+}
+
+/** An unbalanced edit, worded for the agent that asked for it; `find` and `replace` name its
+ *  parameters. */
+export function unbalancedProblem(unbalanced: Unbalanced, find: string, replace: string): string {
+  const advice = `Each edit must leave <doop-use> and <template> tags balanced: include the closing tags in this edit, or replace the whole instance in one call. Nothing was written.`
+  const counts = unbalanced.tags.map(({ tag, find: before, replace: after }) => {
+    const extra = after.net - before.net
+    if (extra === 0)
+      return `closes a <${tag}> before opening one where ${find} does not, so the tags around the edit would pair up wrongly`
+    const [verb, other] = extra > 0 ? ['opens', 'closes'] : ['closes', 'opens']
+    return `${verb} ${Math.abs(extra)} more <${tag}> than it ${other} (${find}: ${netWords(before.net)})`
+  })
+  return `${replace} ${counts.join(', and ')}. ${advice}`
+}
+
+/** A net open-minus-close count in words. */
+function netWords(net: number): string {
+  if (net === 0) return 'balanced'
+  return net > 0 ? `${net} more opened than closed` : `${-net} more closed than opened`
 }
 
 /** Every instance in a frame: what each is, its props, what it overrides. */

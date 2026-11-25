@@ -1,5 +1,6 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import * as actions from '../server/actions.ts'
+import { AGENT_VERSION_MS } from '../server/actions.ts'
 import * as persist from '../server/db/persist.ts'
 import { store } from '../server/store.ts'
 import type { Canvas } from '../shared/types.ts'
@@ -56,5 +57,50 @@ describe('frame history bursts', () => {
     const human = actions.resolveActor({ name: 'Vera', kind: 'user' })
     actions.updateFrame(frame.id, { html: doc('<h1>One!</h1>') }, human)
     expect(filed()).toEqual([doc('<h1>One</h1>')])
+  })
+
+  describe('an agent’s edits minutes apart', () => {
+    let now = 1_000_000
+    beforeEach(() => {
+      now = 1_000_000
+      vi.spyOn(Date, 'now').mockImplementation(() => now)
+    })
+    afterEach(() => vi.restoreAllMocks())
+
+    it('files the state an edit replaced once 30 s have passed since the last version', () => {
+      const frame = actions.createFrame(CANVAS.id, { name: 'hero', html: doc('<h1>One</h1>') }, agent)!
+      now += 5_000
+      actions.updateFrame(frame.id, { html: doc('<h1>One!</h1>') }, agent)
+      now += 10_000
+      actions.updateFrame(frame.id, { html: doc('<h1>One!!</h1>') }, agent)
+      now += AGENT_VERSION_MS
+      actions.updateFrame(frame.id, { html: doc('<h1>One!!!</h1>') }, agent)
+      expect(filed()).toEqual([doc('<h1>One</h1>'), doc('<h1>One!!</h1>')])
+    })
+
+    it('makes an edit after a stream undoable, and files no chunk of the stream itself', () => {
+      const frame = actions.createFrame(CANVAS.id, { name: 'hero' }, agent)!
+      actions.appendFrameHtml(frame.id, `<!doctype html><html><head>${STYLE}</head><body>`, agent, { start: true })
+      now += 40_000
+      actions.appendFrameHtml(frame.id, '<h1>Streamed</h1>', agent)
+      now += 40_000
+      actions.appendFrameHtml(frame.id, '</body></html>', agent, { done: true })
+      expect(filed()).toEqual([])
+      const streamed = store.getFrame(frame.id)!.html
+      now += 60_000
+      actions.updateFrame(frame.id, { html: streamed.replace('Streamed', 'Edited') }, agent)
+      expect(filed()).toEqual([streamed])
+    })
+
+    it('keeps a person’s tweaks in one burst while they keep editing', () => {
+      const human = actions.resolveActor({ name: 'Vera', kind: 'user' })
+      const frame = actions.createFrame(CANVAS.id, { name: 'hero', html: doc('<h1>One</h1>') }, human)!
+      actions.updateFrame(frame.id, { html: doc('<h1>Two</h1>') }, human, { replace: true })
+      now += 60_000
+      actions.updateFrame(frame.id, { html: doc('<h1>Two!</h1>') }, human)
+      now += 60_000
+      actions.updateFrame(frame.id, { html: doc('<h1>Two!!</h1>') }, human)
+      expect(filed()).toEqual([doc('<h1>One</h1>')])
+    })
   })
 })

@@ -1414,6 +1414,46 @@ export function placeholdUses(html: string): string {
   return out + html.slice(cursor)
 }
 
+/** The tags whose opens and closes an edit must keep paired (`tagBalance`). */
+export const BALANCED_TAGS = [USE_TAG, 'template'] as const
+export type BalancedTag = (typeof BALANCED_TAGS)[number]
+
+const BALANCED_TAG = /<(\/?)(doop-use|template)(?=[\s/>]|$)/gi
+
+/** How a piece of HTML leaves one of the `BALANCED_TAGS`: `net`, how many more it opens than
+ *  it closes; `low`, the most it has closed beyond what it opened at any point (0 or less). */
+export interface TagCount {
+  net: number
+  low: number
+}
+
+/**
+ * How a piece of HTML opens and closes each `BALANCED_TAGS` tag, read the way `expandUses`
+ * reads a document: tags inside a script, style, textarea, title or comment, and text inside
+ * another tag's attribute (an instance's override JSON), are not tags. A self-closing
+ * `<doop-use/>` is complete; a `<template/>` opens one, as the HTML parser has it.
+ */
+export function tagBalance(html: string): Record<BalancedTag, TagCount> {
+  const balance: Record<BalancedTag, TagCount> = { [USE_TAG]: { net: 0, low: 0 }, template: { net: 0, low: 0 } }
+  const opaque = opaqueRanges(html)
+  const insideTag = tagWalker(html, opaque)
+  for (const match of html.matchAll(BALANCED_TAG)) {
+    const at = match.index
+    if (opaque.some(([a, b]) => at >= a && at < b) || insideTag(at)) continue
+    const tag = match[2]!.toLowerCase() as BalancedTag
+    const count = balance[tag]
+    if (match[1]) {
+      count.net--
+      count.low = Math.min(count.low, count.net)
+      continue
+    }
+    const end = tagEnd(html, at)
+    if (tag === USE_TAG && end !== -1 && html[end - 1] === '/') continue
+    count.net++
+  }
+  return balance
+}
+
 export function expandUses(
   html: string,
   ctx: EngineContext,
