@@ -9,7 +9,16 @@ without a shell.
 
 ## Install
 
-The CLI is one file with no dependencies, served by the Doop server it talks to. It needs Node 20 or newer.
+```bash
+npm install -g @doop-design/cli     # or: bun add -g @doop-design/cli, pnpm add -g @doop-design/cli
+doop --version
+```
+
+Or run it without installing, which suits CI: `npx @doop-design/cli <command>` (`bunx` works the same). It
+needs Node 20 or newer and has no dependencies.
+
+Every Doop server also serves the CLI it was built with, as one file. Use that for a self-hosted server that
+is older than the latest release, or where no registry is reachable:
 
 ```bash
 curl -fsSL https://doop.design/cli/doop.mjs -o doop && chmod +x doop
@@ -151,11 +160,10 @@ doop call get_frame_screenshot frame_id=Wuszc9yhNj scale:=2
 ## In CI
 
 ```yaml
-- run: curl -fsSL https://doop.design/cli/doop.mjs -o doop.mjs
-- run: node doop.mjs tokens push tokens.json
+- run: npx @doop-design/cli tokens push tokens.json
   env:
     DOOP_API_KEY: ${{ secrets.DOOP_API_KEY }}
-- run: node doop.mjs export --all --format png -o public/designs
+- run: npx @doop-design/cli export --all --format png -o public/designs
   env:
     DOOP_API_KEY: ${{ secrets.DOOP_API_KEY }}
 ```

@@ -840,19 +840,21 @@ to the public page directly in Chromium.
 
 An agent that has a shell (Claude Code, Codex, Cursor) or a CI job can work on a canvas without MCP,
 through the `doop` CLI: frames and components are local files it edits with its own tools, and
-screenshots and exports are written to disk. It is one dependency-free file served by Doop
-itself, and signs in with an agent key.
+screenshots and exports are written to disk. It is one dependency-free file, on npm as
+`@doop-design/cli`, and signs in with an agent key.
 
 ```bash
-curl -fsSL http://localhost:4300/cli/doop.mjs -o doop && chmod +x doop
+npm install -g @doop-design/cli        # or bun add -g, pnpm add -g; npx @doop-design/cli runs it uninstalled
 export DOOP_SERVER=http://localhost:4300 DOOP_API_KEY=dpk_…
 
-./doop link --create "Onboarding v2"   # or an existing canvas: its id, name or URL
-./doop pull                            # frames -> designs/*.html
-./doop push                            # changed files -> the canvas, live
-./doop screenshot designs/hero.html    # prints the path of a PNG
-./doop wait                            # blocks until a person leaves feedback
+doop link --create "Onboarding v2"     # or an existing canvas: its id, name or URL
+doop pull                              # frames -> designs/*.html
+doop push                              # changed files -> the canvas, live
+doop screenshot designs/hero.html      # prints the path of a PNG
+doop wait                              # blocks until a person leaves feedback
 ```
+
+A server also serves the CLI it was built with at `/cli/doop.mjs`, for when no registry is reachable.
 
 `doop init` tells the coding agents in a repository about it. Commands, conflicts, components, CI
 use and the HTTP endpoints underneath are in [docs/cli.md](docs/cli.md).

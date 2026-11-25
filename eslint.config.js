@@ -134,6 +134,7 @@ export default tseslint.config(
       'node_modules/',
       'desktop/src-tauri/target/',
       'desktop/src-tauri-chromium/target/',
+      'cli/dist/',
       'vscode-extension/out/',
       'vscode-extension/dist/',
       'public/cli/',
