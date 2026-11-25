@@ -841,11 +841,12 @@ to the public page directly in Chromium.
 An agent that has a shell (Claude Code, Codex, Cursor) or a CI job can work on a canvas without MCP,
 through the `doop` CLI: frames and components are local files it edits with its own tools, and
 screenshots and exports are written to disk. It is one dependency-free file, on npm as
-`@doop-design/cli`, and signs in with an agent key.
+`@doop-design/cli`. It signs in through the browser, or with an agent key in CI.
 
 ```bash
 npm install -g @doop-design/cli        # or bun add -g, pnpm add -g; npx @doop-design/cli runs it uninstalled
-export DOOP_SERVER=http://localhost:4300 DOOP_API_KEY=dpk_…
+export DOOP_SERVER=http://localhost:4300
+doop login                             # approve in the browser; in CI set DOOP_API_KEY to an agent key
 
 doop link --create "Onboarding v2"     # or an existing canvas: its id, name or URL
 doop pull                              # frames -> designs/*.html

@@ -87,6 +87,9 @@ export default defineConfig({
       '/editor/embed': { target: api },
       '/editor/whoami': { target: api },
       '/editor/sign-out': { target: api },
+      /* the doop CLI's sign-in exchange; /cli/connect is the app's page */
+      '/cli/exchange': { target: api },
+      '/cli/sign-out': { target: api },
       '/relay': { target: api },
       '/blog': { target: api },
       '/robots.txt': { target: api },

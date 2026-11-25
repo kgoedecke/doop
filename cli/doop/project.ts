@@ -68,7 +68,9 @@ export interface Project {
 
 interface Credentials {
   current?: string
-  servers: Record<string, { key: string }>
+  /** `minted`: the key was made for this machine by a browser sign-in, so `doop logout`
+   *  deletes it on the server too. A key the person brought themselves is only forgotten. */
+  servers: Record<string, { key: string; minted?: boolean }>
 }
 
 export function hashOf(html: string): string {
@@ -112,20 +114,27 @@ function writeCredentials(env: NodeJS.ProcessEnv, credentials: Credentials): str
   return path
 }
 
-export function saveKey(env: NodeJS.ProcessEnv, server: string, key: string): string {
+export function saveKey(env: NodeJS.ProcessEnv, server: string, key: string, minted = false): string {
   const credentials = readCredentials(env)
-  credentials.servers[server] = { key }
+  credentials.servers[server] = { key, ...(minted ? { minted } : {}) }
   credentials.current = server
   return writeCredentials(env, credentials)
 }
 
-export function forgetKey(env: NodeJS.ProcessEnv, server: string): boolean {
+/** The key saved for `server`, if any. */
+export function savedKey(env: NodeJS.ProcessEnv, server: string): { key: string; minted?: boolean } | undefined {
+  return readCredentials(env).servers[server]
+}
+
+/** Forgets the key saved for `server` and answers what it was. */
+export function forgetKey(env: NodeJS.ProcessEnv, server: string): { key: string; minted?: boolean } | undefined {
   const credentials = readCredentials(env)
-  if (!credentials.servers[server]) return false
+  const saved = credentials.servers[server]
+  if (!saved) return undefined
   delete credentials.servers[server]
   if (credentials.current === server) delete credentials.current
   writeCredentials(env, credentials)
-  return true
+  return saved
 }
 
 export function normalizeServer(raw: string): string {
@@ -201,7 +210,7 @@ export function resolveConnection(env: NodeJS.ProcessEnv, options: ConnectionOpt
     throw new CliError(
       `no agent key for ${server}`,
       EXIT.auth,
-      'make one in Settings → Agent keys, then run `doop login --key <key>` or set DOOP_API_KEY',
+      'run `doop login`, or set DOOP_API_KEY to an agent key from Settings → Agent keys',
     )
   return {
     server,

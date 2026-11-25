@@ -41,8 +41,13 @@ interface Command {
 const COMMANDS: Record<string, Command> = {
   login: {
     run: login,
-    summary: 'save an agent key (or set DOOP_API_KEY and skip this)',
-    usage: ['doop login --key <dpk_…> [--server <origin>]'],
+    summary: 'sign in: approve in the browser, or pass an agent key (or set DOOP_API_KEY and skip this)',
+    usage: [
+      'doop login                    opens your browser to approve this machine',
+      'doop login --no-browser       prints a link and takes the code it shows, for a machine with no browser',
+      'doop login --key <dpk_…>      an agent key from Settings → Agent keys, for CI',
+      '  --server <origin> signs in to a self-hosted server',
+    ],
   },
   logout: { run: logout, summary: 'forget the saved key', usage: ['doop logout [--server <origin>]'] },
   whoami: { run: whoami, summary: 'the account, server and canvas in use', usage: ['doop whoami'] },

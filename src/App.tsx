@@ -10,6 +10,8 @@ import { AuthPage } from './pages/AuthPage'
 import { DesktopHandoff } from './pages/DesktopHandoff'
 import { EditorConnect } from './pages/EditorConnect'
 import { EDITOR_CONNECT_PATH } from '../shared/editorConnect'
+import { CliConnect } from './pages/CliConnect'
+import { CLI_CONNECT_PATH } from '../shared/cliConnect'
 import { DesktopSignIn } from './pages/DesktopSignIn'
 import { DesktopConnect } from './pages/DesktopConnect'
 import { DESKTOP_CONNECT_PATH } from '../shared/desktopConnect'
@@ -217,6 +219,8 @@ export function App() {
     <DesktopHandoff />
   ) : path === EDITOR_CONNECT_PATH ? (
     <EditorConnect email={session.user.email} />
+  ) : path === CLI_CONNECT_PATH ? (
+    <CliConnect email={session.user.email} />
   ) : path === '/oauth/consent' ? (
     <OAuthConsent email={session.user.email} />
   ) : path.startsWith('/admin') ? (

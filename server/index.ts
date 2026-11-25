@@ -110,6 +110,7 @@ import { getAsset, reconcileAssetRefs, beginTicketUpload, endTicketUpload, creat
 import * as ingest from './ingest.ts'
 import * as agentKeys from './agentKeys.ts'
 import { mountEditorPublicRoutes, mountEditorSessionRoutes } from './editorConnect.ts'
+import { mountCliPublicRoutes, mountCliSessionRoutes } from './cliConnect.ts'
 import * as backgrounds from './backgrounds.ts'
 import { serveIcon } from './iconProxy.ts'
 import { servePhoto } from './photoProxy.ts'
@@ -976,6 +977,7 @@ for (const extension of extensions) {
 
 app.use(express.json({ limit: '10mb' }))
 mountEditorPublicRoutes(app)
+mountCliPublicRoutes(app)
 /* agent keys, not browser sessions: ahead of the session gate on /api */
 mountAgentApi(app)
 app.all('/gemini-cloud/mcp/:id', (req, res, next) => {
@@ -1118,6 +1120,7 @@ app.use('/api', async (req, res, next) => {
 })
 
 mountEditorSessionRoutes(app)
+mountCliSessionRoutes(app)
 
 /* Frames in REST answers. A client that composes frames itself says so with a header
    (shared/frameCompose.ts) and is answered with their source. Every other one (the

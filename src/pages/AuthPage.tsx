@@ -8,6 +8,7 @@ import type { DesktopSignInProvider, ProviderRedirects } from '../lib/desktopAut
 import { safeRelativeTarget } from '../lib/safeTarget'
 import { CODEX_SETUP_PATH } from '../lib/codexConnection'
 import { EDITOR_CONNECT_PATH } from '../../shared/editorConnect'
+import { CLI_CONNECT_PATH } from '../../shared/cliConnect'
 import { signupLanding } from '../../shared/firstCanvas'
 import { isDesktopShell } from '../lib/shell'
 import { posthog } from '../lib/posthog'
@@ -50,7 +51,8 @@ function interruptedTarget(): string | null {
   if (
     location.pathname === '/oauth/consent' ||
     location.pathname === CODEX_SETUP_PATH ||
-    location.pathname === EDITOR_CONNECT_PATH
+    location.pathname === EDITOR_CONNECT_PATH ||
+    location.pathname === CLI_CONNECT_PATH
   )
     return location.pathname + location.search
   const params = new URLSearchParams(location.search)

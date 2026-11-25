@@ -117,4 +117,16 @@ export const auth = {
   editorConnectOpen: 'Open {editor}',
   editorConnectFailed: 'Could not connect the editor. Go back to it and try again.',
   editorConnectBadLink: 'This link is incomplete or not from a Doop editor extension. Start again from your editor.',
+  /* signing the doop CLI in (src/pages/CliConnect.tsx) */
+  cliConnectTitle: 'Connect the doop CLI',
+  cliConnectBody:
+    'The doop CLI on {name} will open your canvases and design on them, as {email}. Only continue if you just ran doop login there. You can disconnect it any time in Settings → Connect AI.',
+  cliConnectAllow: 'Connect the CLI',
+  cliConnectSentTitle: 'Back to your terminal.',
+  cliConnectSentBody: 'The CLI finishes signing in. You can close this tab afterwards.',
+  cliConnectOpen: 'Finish in the terminal',
+  cliConnectCodeTitle: 'Paste this code in your terminal',
+  cliConnectCodeBody: 'It works once, for two minutes, and only in the terminal that asked for it.',
+  cliConnectFailed: 'Could not connect the CLI. Run doop login again.',
+  cliConnectBadLink: 'This link is incomplete or not from the doop CLI. Run doop login again.',
 } as const

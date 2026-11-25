@@ -77,7 +77,7 @@ async function rpc(connection: Connection, method: string, params: Record<string
     throw new CliError(
       `${connection.server} refused the agent key`,
       EXIT.auth,
-      'make a key in Settings → Agent keys, then run `doop login --key <key>` or set DOOP_API_KEY',
+      'run `doop login` again, or set DOOP_API_KEY to an agent key from Settings → Agent keys',
     )
   if (!response.ok)
     throw new CliError(`${connection.server} answered ${response.status}: ${(await response.text()).slice(0, 300)}`)

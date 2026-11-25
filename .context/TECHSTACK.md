@@ -168,6 +168,21 @@ server/index.ts` in prod. `erasableSyntaxOnly` and `verbatimModuleSyntax` in tsc
   `bun run pack:cli`, released as in [RELEASE.md](RELEASE.md#doop-cli-npm)): Doop from a shell, for coding agents and scripts. Frame HTML goes over the agent API;
   everything else is plain `tools/call` requests to `/mcp` (no session, no SDK), so it has the MCP tools'
   permissions, transactions and human feedback. One dependency-free file, with an agent key for both.
+  - Browser sign-in (`shared/cliConnect.ts`, `server/cliConnect.ts`, `src/pages/CliConnect.tsx`,
+    `cli/doop/login.ts`): `doop login` with no key listens on a loopback port and opens `/cli/connect` with a
+    random `state`, the port, the machine's name and the hash of a secret verifier. The page, signed in, asks
+    the person to confirm; `POST /api/cli/connect` answers a two-minute, single-use code as the loopback
+    address to go to (`http://127.0.0.1:<port>/callback`, nothing else) or, with `--no-browser`, as the code
+    itself to paste. `POST /cli/exchange` trades the code and the verifier for an agent key named `doop CLI on
+<machine>`, minted then (`answerWithKey` in `server/editorConnect.ts`, shared with the editor flow); a wrong
+    verifier spends the code. The flow is the editor extension's with a
+    verifier in place of a deep-link allow-list. The CLI trades the code before it
+    answers the browser, so the tab says it worked only when it did. With `CI` set it refuses at once, and where
+    it gets no loopback port it falls back to pasting. Signing in again replaces a minted key and deletes the
+    old one; `doop logout` deletes a key a
+    browser sign-in minted (`POST /cli/sign-out`, where a key can only delete itself) and only forgets one the
+    person brought. `BROWSER=none` keeps the CLI from opening a browser. Tests:
+    `cliConnect.test.ts`, `cliConnectHttp.test.ts`, and the whole flow in `doopCli.test.ts`.
   - Sign-in: `doop login --key`, kept per server in `~/.config/doop/credentials.json` (0600), or `DOOP_API_KEY`.
     A saved key goes to the server it was saved for. A key from the environment or `--key` goes only to a
     server its holder named (`--server`, `DOOP_SERVER`, else doop.design), never to one that only a

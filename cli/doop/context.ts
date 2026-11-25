@@ -34,6 +34,7 @@ export const OPTIONS = {
   interval: { type: 'string' },
   prune: { type: 'boolean' },
   skill: { type: 'boolean' },
+  'no-browser': { type: 'boolean' },
 } as const
 
 export interface Flags {
@@ -67,6 +68,7 @@ export interface Flags {
   interval?: string
   prune?: boolean
   skill?: boolean
+  'no-browser'?: boolean
 }
 
 /** What a command hands back: `text` for a reader, `data` for `--json`. */

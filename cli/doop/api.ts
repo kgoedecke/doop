@@ -104,7 +104,7 @@ async function request(
     throw new CliError(
       `${connection.server} refused the agent key`,
       EXIT.auth,
-      'make a key in Settings → Agent keys, then run `doop login --key <key>` or set DOOP_API_KEY',
+      'run `doop login` again, or set DOOP_API_KEY to an agent key from Settings → Agent keys',
     )
   if (code === 'not_found')
     throw new CliError(message, EXIT.notFound, '`doop canvases` and `doop frames` list what this key can open')
