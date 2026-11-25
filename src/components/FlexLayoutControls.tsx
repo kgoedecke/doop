@@ -1,5 +1,6 @@
 import { useId, useState } from 'react'
 import type { ElementInfo, StylePatch } from '../lib/frameBridge'
+import { commonValue } from '../lib/cssValues'
 import { flexAlignmentAt, flexAxes } from '../lib/flexLayout'
 import { cn } from '../lib/utils'
 import { useT, type PlainMessageKey } from '../lib/i18n'
@@ -44,10 +45,18 @@ const PADDING_SIDES = [
 const VERTICAL: PlainMessageKey[] = ['inspector.vTop', 'inspector.vMiddle', 'inspector.vBottom']
 const HORIZONTAL: PlainMessageKey[] = ['inspector.hLeft', 'inspector.hCenter', 'inspector.hRight']
 
-export function PaddingControls({ info, apply }: { info: ElementInfo; apply: (styles: StylePatch) => void }) {
+export function PaddingControls({
+  selection,
+  apply,
+}: {
+  selection: ElementInfo[]
+  apply: (styles: StylePatch) => void
+}) {
   const t = useT()
   const [expanded, setExpanded] = useState(false)
-  const [top, right, bottom, left] = info.padding
+  const [top, right, bottom, left] = [0, 1, 2, 3].map((index) =>
+    commonValue(selection, (el) => el.padding[index] ?? null),
+  )
   return (
     <div className="mt-2">
       <div className="mb-1 flex items-center justify-between">
@@ -72,7 +81,8 @@ export function PaddingControls({ info, apply }: { info: ElementInfo; apply: (st
               key={side}
               label={t(label)}
               prefix={side[0]!.toUpperCase()}
-              value={info.padding[index] ?? null}
+              value={commonValue(selection, (el) => el.padding[index] ?? null)}
+              placeholder={t('inspector.mixed')}
               unit="px"
               onCommit={(value) => apply({ [`padding-${side}`]: `${Math.max(0, value)}px` })}
             />
@@ -82,7 +92,7 @@ export function PaddingControls({ info, apply }: { info: ElementInfo; apply: (st
             <NumberField
               label={t('inspector.verticalPadding')}
               prefix={<VerticalPaddingIcon size="rail" />}
-              value={top === bottom ? top : null}
+              value={top === bottom ? (top ?? null) : null}
               placeholder={t('inspector.mixed')}
               unit="px"
               onCommit={(value) =>
@@ -92,7 +102,7 @@ export function PaddingControls({ info, apply }: { info: ElementInfo; apply: (st
             <NumberField
               label={t('inspector.horizontalPadding')}
               prefix={<HorizontalPaddingIcon size="rail" />}
-              value={left === right ? left : null}
+              value={left === right ? (left ?? null) : null}
               placeholder={t('inspector.mixed')}
               unit="px"
               onCommit={(value) =>
@@ -106,22 +116,27 @@ export function PaddingControls({ info, apply }: { info: ElementInfo; apply: (st
   )
 }
 
-export function FlexLayoutControls({ info, apply }: { info: ElementInfo; apply: (styles: StylePatch) => void }) {
+export function FlexLayoutControls({
+  selection,
+  apply,
+}: {
+  selection: ElementInfo[]
+  apply: (styles: StylePatch | ((el: ElementInfo) => StylePatch)) => void
+}) {
   const t = useT()
   const spacingName = useId()
-  const axes = flexAxes(info)
-  const column = info.flexDirection.startsWith('column')
-  const reverse = info.flexDirection.endsWith('-reverse')
-  const wrapping = info.flexWrap !== 'nowrap'
-  const distributed = info.justifyContent.startsWith('space-')
-  const mode = distributed ? info.justifyContent : 'fixed'
-  const gap = column ? info.rowGap : info.columnGap
-  const crossGap = column ? info.columnGap : info.rowGap
-  const align = info.alignItems === 'normal' ? 'stretch' : info.alignItems
-  const justify = info.justifyContent === 'normal' ? 'flex-start' : info.justifyContent
+  const common = <V,>(read: (el: ElementInfo) => V) => commonValue(selection, read)
+  const column = common((el) => el.flexDirection.startsWith('column'))
+  const reverse = common((el) => el.flexDirection.endsWith('-reverse'))
+  const wrapping = common((el) => el.flexWrap !== 'nowrap')
+  const distributed = common((el) => el.justifyContent.startsWith('space-'))
+  const mode = common((el) => (el.justifyContent.startsWith('space-') ? el.justifyContent : 'fixed'))
+  const gap = common((el) => (el.flexDirection.startsWith('column') ? el.rowGap : el.columnGap) ?? 0)
+  const crossGap = common((el) => (el.flexDirection.startsWith('column') ? el.columnGap : el.rowGap) ?? 0)
+  const align = common((el) => (el.alignItems === 'normal' ? 'stretch' : el.alignItems))
   const crossOptions = crossAlignments.map(({ value, label }) => ({ value, label: t(label) }))
-  const keptKey = spacing.find(([value]) => value === info.justifyContent)?.[1]
-  const keptSpacing = keptKey ? t(keptKey).toLowerCase() : info.justifyContent.replace('space-', 'space ')
+  const keptKey = spacing.find(([value]) => value === mode)?.[1]
+  const keptSpacing = keptKey ? t(keptKey).toLowerCase() : (mode?.replace('space-', 'space ') ?? '')
 
   return (
     <PropertySection
@@ -132,8 +147,10 @@ export function FlexLayoutControls({ info, apply }: { info: ElementInfo; apply: 
           size="icon-sm"
           className={cn('size-6 rounded-row text-ink-faint', wrapping && 'bg-paper-deep text-ink')}
           aria-label={t('inspector.wrapChildren')}
-          title={info.flexWrap === 'wrap-reverse' ? t('inspector.wrapReverse') : t('inspector.wrapChildren')}
-          aria-pressed={wrapping}
+          title={
+            common((el) => el.flexWrap) === 'wrap-reverse' ? t('inspector.wrapReverse') : t('inspector.wrapChildren')
+          }
+          aria-pressed={wrapping ?? 'mixed'}
           onClick={() => apply({ 'flex-wrap': wrapping ? 'nowrap' : 'wrap' })}
         >
           <WrapTextIcon size="rail" />
@@ -144,8 +161,10 @@ export function FlexLayoutControls({ info, apply }: { info: ElementInfo; apply: 
         <Segmented
           className="min-w-0 flex-1 rounded-row bg-sub p-0.5"
           aria-label={t('inspector.flexDirection')}
-          value={column ? 'column' : 'row'}
-          onValueChange={(value) => apply({ 'flex-direction': `${value}${reverse ? '-reverse' : ''}` })}
+          value={column === null ? '' : column ? 'column' : 'row'}
+          onValueChange={(value) =>
+            apply((el) => ({ 'flex-direction': `${value}${el.flexDirection.endsWith('-reverse') ? '-reverse' : ''}` }))
+          }
         >
           {[
             { value: 'row', label: t('inspector.rowDirection'), Icon: ArrowRightIcon },
@@ -168,8 +187,12 @@ export function FlexLayoutControls({ info, apply }: { info: ElementInfo; apply: 
           className={cn(control, 'w-[30px]', reverse && 'bg-paper-deep text-ink')}
           aria-label={t('inspector.reverseDirection')}
           title={t('inspector.reverseDirection')}
-          aria-pressed={reverse}
-          onClick={() => apply({ 'flex-direction': `${column ? 'column' : 'row'}${reverse ? '' : '-reverse'}` })}
+          aria-pressed={reverse ?? 'mixed'}
+          onClick={() =>
+            apply((el) => ({
+              'flex-direction': `${el.flexDirection.startsWith('column') ? 'column' : 'row'}${reverse ? '' : '-reverse'}`,
+            }))
+          }
         >
           <FlipHorizontal2Icon size="rail" />
         </Button>
@@ -184,8 +207,12 @@ export function FlexLayoutControls({ info, apply }: { info: ElementInfo; apply: 
           >
             {[0, 1, 2].flatMap((y) =>
               [0, 1, 2].map((x) => {
-                const target = flexAlignmentAt(info, x, y)
-                const active = align === target.align && (distributed || justify === target.justify)
+                const active = common((el) => {
+                  const target = flexAlignmentAt(el, x, y)
+                  const align = el.alignItems === 'normal' ? 'stretch' : el.alignItems
+                  const justify = el.justifyContent === 'normal' ? 'flex-start' : el.justifyContent
+                  return align === target.align && (justify.startsWith('space-') || justify === target.justify)
+                })
                 const label = t('inspector.alignChildren', {
                   vertical: t(VERTICAL[y]!),
                   horizontal: t(HORIZONTAL[x]!),
@@ -195,11 +222,17 @@ export function FlexLayoutControls({ info, apply }: { info: ElementInfo; apply: 
                     key={`${x}-${y}`}
                     type="button"
                     aria-label={label}
-                    aria-pressed={active}
+                    aria-pressed={active ?? 'mixed'}
                     title={distributed ? t('inspector.alignKeep', { label, spacing: keptSpacing }) : label}
                     className="group grid place-items-center rounded-tag hover:bg-paper-deep focus-visible:outline-2 focus-visible:outline-ink"
                     onClick={() =>
-                      apply({ 'align-items': target.align, ...(!distributed && { 'justify-content': target.justify }) })
+                      apply((el): StylePatch => {
+                        const target = flexAlignmentAt(el, x, y)
+                        return {
+                          'align-items': target.align,
+                          ...(!el.justifyContent.startsWith('space-') && { 'justify-content': target.justify }),
+                        }
+                      })
                     }
                   >
                     <span
@@ -217,8 +250,9 @@ export function FlexLayoutControls({ info, apply }: { info: ElementInfo; apply: 
             <SelectField
               label={t('inspector.crossAxisAlignment')}
               value={align}
+              placeholder={t('inspector.mixed')}
               options={
-                crossAlignments.some(({ value }) => value === align)
+                !align || crossAlignments.some(({ value }) => value === align)
                   ? crossOptions
                   : [...crossOptions, { value: align, label: align }]
               }
@@ -248,9 +282,10 @@ export function FlexLayoutControls({ info, apply }: { info: ElementInfo; apply: 
                   <NumberField
                     label={t('inspector.gap')}
                     prefix={column ? <RowGapIcon size="rail" /> : <ColumnGapIcon size="rail" />}
-                    value={gap ?? 0}
+                    value={gap}
+                    placeholder={t('inspector.mixed')}
                     unit="px"
-                    onCommit={(value) => apply({ [axes.gap]: `${Math.max(0, value)}px` })}
+                    onCommit={(value) => apply((el) => ({ [flexAxes(el).gap]: `${Math.max(0, value)}px` }))}
                   />
                 )}
               </div>
@@ -263,13 +298,14 @@ export function FlexLayoutControls({ info, apply }: { info: ElementInfo; apply: 
           <NumberField
             label={t('inspector.lineGap')}
             prefix={column ? <ColumnGapIcon size="rail" /> : <RowGapIcon size="rail" />}
-            value={crossGap ?? 0}
+            value={crossGap}
+            placeholder={t('inspector.mixed')}
             unit="px"
-            onCommit={(value) => apply({ [axes.crossGap]: `${Math.max(0, value)}px` })}
+            onCommit={(value) => apply((el) => ({ [flexAxes(el).crossGap]: `${Math.max(0, value)}px` }))}
           />
         </PropertyRow>
       )}
-      <PaddingControls info={info} apply={apply} />
+      <PaddingControls selection={selection} apply={apply} />
     </PropertySection>
   )
 }

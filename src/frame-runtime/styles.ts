@@ -19,7 +19,7 @@ import {
 } from './text'
 import { clearTimeout, setTimeout } from './timers'
 import type { StylePatch } from './types'
-import { paintShapes, takeVectorPaint } from './vector'
+import { paintShapes, takeVectorPaint, vectorShapes } from './vector'
 
 /* Inline styles the Design panel writes: a typed value or a slider lands at
    once and saves once it settles; a gesture (a drag, a scrub) previews in
@@ -53,6 +53,12 @@ export interface StyleEdit extends TextRunEdit {
 
 let styleTimer: number | null = null
 export let styleEdit: StyleEdit | null = null
+let panelSelection: string[] | null = null
+const panelEdits = new Map<unknown, StyleEdit>()
+
+function activeStyleEdits(): StyleEdit[] {
+  return styleEdit ? [...panelEdits.values(), styleEdit] : []
+}
 
 /* a slider fires many of these a second: one save once it settles */
 function scheduleStyleSave(): void {
@@ -182,7 +188,7 @@ export function patchStyle(
   }
 }
 
-export function previewStyle(edit: StyleEdit, el: HTMLElement, styles: StylePatch): void {
+function previewStyle(edit: StyleEdit, el: HTMLElement, styles: StylePatch): void {
   const before = document.createElement('div').style
   before.cssText = el.style.cssText
   const original = document.createElement('div').style
@@ -229,6 +235,64 @@ function gestureFollowers(el: HTMLElement, selectors: unknown): Follower[] {
   return movable.filter((m) => !movable.some((other) => other.el !== m.el && other.el.contains(m.el)))
 }
 
+function newStyleEdit(selector: unknown, el: HTMLElement | null): StyleEdit {
+  return {
+    selector,
+    original: el?.style.cssText ?? '',
+    styles: {},
+    touched: {},
+    runs: [],
+    created: [],
+    renamed: [],
+    followers: [],
+    shapes: [],
+    paint: {},
+  }
+}
+
+/** Remote HTML becomes the cancellation baseline while local previews stay visible. */
+export function rebaseStyleEdits(): void {
+  if (panelSelection) {
+    for (const edit of activeStyleEdits()) {
+      const el = styleTarget(edit.selector)
+      const patch = { ...edit.styles, ...edit.paint }
+      Object.assign(edit, newStyleEdit(edit.selector, el))
+      if (el && Object.keys(patch).length) applyStyleNow(edit.selector, patch)
+    }
+    return
+  }
+  if (!styleEdit) return
+  const target = styleTarget(styleEdit.selector)
+  if (!target) return
+  styleEdit.original = target.style.cssText
+  styleEdit.touched = {}
+  previewStyle(styleEdit, target, styleEdit.styles)
+  if (Object.keys(styleEdit.paint).length) {
+    const shapes = vectorShapes(target)
+    styleEdit.shapes = shapes.map((shape) => ({ el: shape, original: shape.getAttribute('style') }))
+    paintShapes(shapes, styleEdit.paint)
+  }
+}
+
+export function beginPanelEdit(selectors: string[]): void {
+  const editable = selectors.filter((selector) => {
+    const el = styleTarget(selector)
+    return el && !isLocked(el)
+  })
+  if (!editable.length || !beginStyleEdit(editable[editable.length - 1], [])) return
+  panelSelection = selectors
+  for (const selector of editable.slice(0, -1)) {
+    const el = styleTarget(selector)
+    if (el) panelEdits.set(selector, newStyleEdit(selector, el))
+  }
+}
+
+export function panelEditFor(selectors: string[]): StyleEdit | null {
+  return panelSelection?.length === selectors.length && selectors.every((s, i) => s === panelSelection?.[i])
+    ? styleEdit
+    : null
+}
+
 export function beginStyleEdit(selector: unknown, followers: unknown): boolean {
   const el = styleTarget(selector)
   if (!el || isLocked(el)) return false
@@ -238,28 +302,27 @@ export function beginStyleEdit(selector: unknown, followers: unknown): boolean {
   // then has nothing to replace.
   flushStyleSave()
   if (dropPendingTextSave()) postEdited()
-  styleEdit = {
-    selector,
-    original: el.style.cssText,
-    styles: {},
-    touched: {},
-    runs: [],
-    created: [],
-    renamed: [],
-    followers: gestureFollowers(el, followers),
-    shapes: [],
-    paint: {},
-  }
+  styleEdit = newStyleEdit(selector, el)
+  styleEdit.followers = gestureFollowers(el, followers)
   holdStill()
   return true
 }
 
 export function endStyleEdit(selector: unknown, cancel: boolean): boolean {
   if (!styleEdit || styleEdit.selector !== selector) return false
-  const edit = styleEdit
+  const edits = activeStyleEdits()
+  // A picked SVG and its picked child can both paint the same shape.
+  if (cancel) edits.reverse()
+  panelSelection = null
+  panelEdits.clear()
   styleEdit = null
   try {
-    return finishStyleEdit(edit, styleTarget(selector), cancel)
+    let changed = false
+    for (const edit of edits) {
+      if (finishStyleEdit(edit, styleTarget(edit.selector), cancel)) changed = true
+    }
+    if (changed) postEdited(true)
+    return true
   } finally {
     releaseStill()
   }
@@ -289,22 +352,23 @@ function finishStyleEdit(edit: StyleEdit, el: HTMLElement | null, cancel: boolea
     // A cancelled geometry drag must report its restored coordinates,
     // rather than the first frame of a transition back to them.
     if (edit.touched.translate || edit.touched.rotate || edit.touched.scale) settleGeometry(el)
-  } else if (edit.range) {
+    return false
+  }
+  if (edit.range) {
     // The preview was outside the undo history: put it back and apply the
     // gesture's final styles through the undoable path, as one entry.
     restoreTextRuns(edit)
     if (selectedTextRange(el)) styleTextRange(el, edit.styles)
-    postEdited(true)
     postTextState()
-  } else if (
+    return true
+  }
+  return !!(
     Object.keys(edit.touched).length ||
     edit.shapes.length ||
     edit.runs.length ||
     edit.created.length ||
     edit.renamed.length
   )
-    postEdited(true)
-  return true
 }
 
 /* every style the runtime writes lands at once: a typed value, a slider, a
@@ -323,7 +387,8 @@ function applyStyleNow(selector: unknown, styles: StylePatch, uniformText?: bool
   if (!el || isLocked(el)) return false
   const textPatch = isTextPatch(styles)
   /* the gesture this edit belongs to, when it is the pressed element's */
-  const gesture = styleEdit && styleEdit.selector === selector ? styleEdit : null
+  const gesture = styleEdit?.selector === selector ? styleEdit : panelEdits.get(selector)
+  if (panelSelection && !gesture && typeof selector === 'string' && panelSelection.includes(selector)) return false
   const following = styleEdit && !gesture && styleEdit.followers.some((f) => f.selector === selector)
   if (following) {
     // A follower's move previews with the gesture and is restored, or saved,
@@ -360,7 +425,7 @@ function applyStyleNow(selector: unknown, styles: StylePatch, uniformText?: bool
     if (change.nodes) gesture.nodes = change.nodes
     if (change.renamed) change.renamed.forEach((run) => gesture.renamed.push(run))
   }
-  if (textPatch && selectedTextRange(el)) {
+  if (textPatch && !panelSelection && selectedTextRange(el)) {
     // Part of the text is selected: the edit belongs to that run alone. A
     // scrub previews in place and lands once, undoably, when it commits.
     if (gesture) {
