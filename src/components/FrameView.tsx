@@ -33,7 +33,7 @@ import { resolveFrameLink } from '../lib/elementLink'
 import { sendWs } from '../lib/ws'
 import { throttle } from '../lib/throttle'
 import { getIdentity } from '../lib/identity'
-import { FRAME_BOOTSTRAP } from '../lib/frameRuntime'
+import { canvasFrameBootstrap } from '../lib/frameRuntime'
 import { MOD_KEY } from '../lib/keys'
 import { FRAME_DOCUMENTS_TAKE_ZOOM_AS_DENSITY, counterZoom } from '../lib/layoutZoom'
 import { dropEntry, recordCreate, recordUpdate, recordUpdates, trackSave, type HistoryEntry } from '../lib/history'
@@ -920,6 +920,7 @@ export const FrameView = memo(function FrameView({
 
   /* The iframe loads a bootstrap once; HTML is posted in and DOM-morphed in
      place, so updates never white-flash the frame with a full reload. */
+  const [bootstrap] = useState(() => canvasFrameBootstrap(!!frame.html && !isCanvasElement(frame.html)))
   const iframeRef = useRef<HTMLIFrameElement | null>(null)
   const localHtml = useRef<string | null>(null)
   /* what the canvas supplied to the document the runtime shows (`shared` of its last post) */
@@ -2259,7 +2260,7 @@ export const FrameView = memo(function FrameView({
                 title={frame.name}
                 data-doop-frame=""
                 sandbox="allow-scripts"
-                srcDoc={FRAME_BOOTSTRAP}
+                srcDoc={bootstrap}
                 /* The world is laid out at CSS zoom k (Stage), which an iframe
                  passes into its document. Chromium takes it as pixel density:
                  the document keeps its design-px viewport and rasterizes at
