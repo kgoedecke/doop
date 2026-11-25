@@ -496,6 +496,8 @@ export const SETTLING_TOOLS: ReadonlySet<string> = new Set([
   'get_frame_html',
   'inspect_frame',
   'screenshot_frame',
+  /* the agent API's frame read (server/agentApi.ts) */
+  'api frame.read',
 ])
 
 export function settleForRead(tool: string, canvasIds: string[]): Promise<boolean> {
