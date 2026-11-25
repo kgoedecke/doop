@@ -26,7 +26,7 @@ permissions:
 
 jobs:
   archive:
-    runs-on: macos-15
+    runs-on: blacksmith-12vcpu-macos-15
     env:
       ARCHIVE: ios/DerivedData/Doop.xcarchive
     steps:
