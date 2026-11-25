@@ -14,9 +14,10 @@
 #   APPLE_CERTIFICATE / APPLE_CERTIFICATE_PASSWORD
 #                                 a base64 .p12 of an Apple Distribution certificate, and its password
 #                                 (set on the environment: the repo-level pair is desktop's Developer ID)
-# The archive is signed with that certificate; automatic signing fetches the App Store
-# profiles through the API key. Without it Xcode reaches for a development certificate,
-# which the App Manager key cannot create.
+# The archive is signed for development (automatic signing, as the targets are set up):
+# Xcode creates the development certificate and profiles through the API key, and the
+# export re-signs with the distribution certificate. The signing keychain is made the
+# default so the private key Xcode generates lands where it searches.
 # The build number is the workflow run number, so every upload is unique.
 name: iOS Release
 
@@ -66,6 +67,7 @@ jobs:
           security import "$RUNNER_TEMP/dist.p12" -P "$APPLE_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN"
           security set-key-partition-list -S apple-tool:,apple: -k "" "$KEYCHAIN"
           security list-keychain -d user -s "$KEYCHAIN"
+          security default-keychain -d user -s "$KEYCHAIN"
       - name: Write the App Store Connect API key
         if: github.event_name != 'pull_request'
         env:
@@ -85,7 +87,6 @@ jobs:
           -allowProvisioningUpdates
           -authenticationKeyPath "$RUNNER_TEMP/keys/AuthKey.p8"
           -authenticationKeyID "$KEY_ID" -authenticationKeyIssuerID "$ISSUER_ID"
-          CODE_SIGN_IDENTITY="Apple Distribution"
           CURRENT_PROJECT_VERSION=${{ github.run_number }}
           archive
       - name: Archive (unsigned, pipeline check)
