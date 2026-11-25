@@ -50,6 +50,7 @@ import {
   ChevronLeft,
   ChevronRight,
   ChevronsDownUp,
+  ChevronsUpDown,
   Circle,
   CircleHelp,
   CirclePlus,
@@ -210,6 +211,7 @@ export const TrashIcon = icon(Trash2)
 export const CheckIcon = icon(Check)
 export const ChevronRightIcon = icon(ChevronRight)
 export const ChevronDownIcon = icon(ChevronDown)
+export const ChevronsUpDownIcon = icon(ChevronsUpDown)
 export const AlignStartVerticalIcon = icon(AlignStartVertical)
 export const AlignCenterVerticalIcon = icon(AlignCenterVertical)
 export const AlignEndVerticalIcon = icon(AlignEndVertical)

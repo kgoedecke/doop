@@ -48,3 +48,16 @@ it('offers no download inside the desktop app', async () => {
   expect(links.has('Get desktop app')).toBe(false)
   expect(links.get('Doop website')).toBe('https://doop.design/?site')
 })
+
+it('opens from anywhere on the named rail row, name included', async () => {
+  await act(async () => root.render(<AccountMenu named />))
+  const trigger = container.querySelector('button')!
+  expect(trigger.textContent).toContain('Alice Doe')
+  // the visible name names the button, so no aria-label may override it
+  expect(trigger.hasAttribute('aria-label')).toBe(false)
+  await act(async () => {
+    trigger.focus()
+    trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+  })
+  expect(document.querySelector('[role="menu"]')).not.toBeNull()
+})
