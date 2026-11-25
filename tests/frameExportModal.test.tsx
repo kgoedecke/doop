@@ -114,3 +114,34 @@ it('offers the whole selection as one PDF', async () => {
   expect(dialog.textContent).toContain('Download PDF of 2 frames')
   expect(dialog.textContent).toContain('One vector page per frame')
 })
+
+it('downloads the frame as an HTML file from the export dialog', async () => {
+  frame.html = '<main><h1>Poster</h1></main>'
+  const blobs: Blob[] = []
+  const createObjectURL = vi.spyOn(URL, 'createObjectURL').mockImplementation((blob) => {
+    blobs.push(blob as Blob)
+    return 'blob:frame'
+  })
+  const names: string[] = []
+  const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) {
+    names.push(this.download)
+  })
+  try {
+    const dialog = await openExportDialog()
+    const row = Array.from(dialog.querySelectorAll<HTMLElement>('button')).find((button) =>
+      button.textContent?.includes('Download HTML'),
+    )!
+    await act(async () => {
+      row.click()
+    })
+
+    expect(names).toEqual(['Poster.html'])
+    expect(blobs[0]!.type).toBe('text/html;charset=utf-8')
+    expect(await blobs[0]!.text()).toContain('<h1>Poster</h1>')
+    expect(document.querySelector('[role="dialog"]')).toBeNull()
+  } finally {
+    frame.html = ''
+    createObjectURL.mockRestore()
+    click.mockRestore()
+  }
+})

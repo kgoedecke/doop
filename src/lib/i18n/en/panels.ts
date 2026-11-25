@@ -276,7 +276,7 @@ export const panels = {
   exportElementMissing: 'Couldn’t find the element to export — is its frame on screen?',
 
   frameExportTitle: 'Export “{name}”',
-  frameExportLede: 'Download this frame as an image at any scale, or as a vector PDF.',
+  frameExportLede: 'Download this frame as an image at any scale, as a vector PDF, or as its HTML.',
   elementExportLede: 'Download this element as an image, cut from its frame as you see it.',
   frameExportPng: 'Download PNG',
   frameExportPngHint: 'Lossless image at the scale above',
@@ -284,6 +284,8 @@ export const panels = {
   frameExportJpgHint: 'Compressed image at the scale above, a smaller file',
   frameExportSvg: 'Download SVG',
   frameExportSvgHint: 'The frame’s HTML in an SVG: opens in any browser, but not as editable shapes',
+  frameExportHtml: 'Download HTML',
+  frameExportHtmlHint: 'The frame as a page of its own, with the canvas’s tokens and component styles',
   exportScale: 'Scale',
   exportScaleCustom: 'Custom…',
   exportScaleCustomLabel: 'Custom scale, 0.1 to 4',
