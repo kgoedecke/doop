@@ -1,14 +1,14 @@
 # Publishes the doop CLI to npm as @doop-design/cli (scripts/pack-doop-cli.mjs).
 #
-# Push the tag `cli-v<version>`, where <version> is the one in package.json, once the server
-# of that version is deployed: the CLI's version is the app's. A manual run packs the CLI and
-# uploads it as an artifact without publishing, to look at what would go out.
+# Push the tag `cli-v<version>`, where <version> is the one in cli/package.json (the CLI's own,
+# bumped when the CLI changes), once a server the CLI needs is deployed. A manual run packs the
+# CLI and uploads it as an artifact without publishing, to look at what would go out.
 #
 # Publishing uses npm trusted publishing: the package names this repository and this workflow
 # file as its trusted publisher on npmjs.com, so no npm token is stored here. What npm asks for
 # (docs.npmjs.com/trusted-publishers): a GitHub-hosted runner, npm 11.5.1 or newer, `id-token:
 # write`, and a `repository.url` in the package's manifest that is this repository
-# (scripts/pack-doop-cli.mjs). The package's first publish is done by hand (.context/RELEASE.md),
+# (cli/package.json). The package's first publish is done by hand (.context/RELEASE.md),
 # since a trusted publisher is set on a package that exists.
 name: Publish CLI
 

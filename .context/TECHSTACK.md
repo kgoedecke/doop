@@ -165,7 +165,8 @@ server/index.ts` in prod. `erasableSyntaxOnly` and `verbatimModuleSyntax` in tsc
   name has. Tested in `tests/agentApi.test.ts`.
 - Doop CLI (`cli/doop.ts`, `cli/doop/`, built to `public/cli/doop.mjs` by `bun run build:cli` and served at
   `/cli/doop.mjs`; the same bundle is the npm package `@doop-design/cli`, packed into `cli/dist` by
-  `bun run pack:cli`, released as in [RELEASE.md](RELEASE.md#doop-cli-npm)): Doop from a shell, for coding agents and scripts. Frame HTML goes over the agent API;
+  `bun run pack:cli` with its own version in `cli/package.json`, released as in
+  [RELEASE.md](RELEASE.md#doop-cli-npm)): Doop from a shell, for coding agents and scripts. Frame HTML goes over the agent API;
   everything else is plain `tools/call` requests to `/mcp` (no session, no SDK), so it has the MCP tools'
   permissions, transactions and human feedback. One dependency-free file, with an agent key for both.
   - Browser sign-in (`shared/cliConnect.ts`, `server/cliConnect.ts`, `src/pages/CliConnect.tsx`,

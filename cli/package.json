@@ -1,0 +1,34 @@
+{
+  "name": "@doop-design/cli",
+  "version": "0.16.0",
+  "description": "Design on a Doop canvas from a shell: frames and components as local files, for coding agents and CI.",
+  "keywords": [
+    "doop",
+    "design",
+    "canvas",
+    "cli",
+    "mcp",
+    "ai-agents"
+  ],
+  "homepage": "https://doop.design/docs/cli",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/doop-design/doop-internal.git"
+  },
+  "bugs": {
+    "url": "https://github.com/doop-design/doop/issues"
+  },
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "bin": {
+    "doop": "doop.mjs"
+  },
+  "files": [
+    "doop.mjs",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=20"
+  }
+}

@@ -29,9 +29,10 @@ describe('the doop CLI package', () => {
     manifest = JSON.parse(readFileSync('cli/dist/package.json', 'utf8')) as Manifest
   }, 60_000)
 
-  it('carries the app’s version and one dependency-free file', async () => {
-    const app = JSON.parse(readFileSync('package.json', 'utf8')) as { version: string }
-    expect(manifest).toMatchObject({ name: '@doop-design/cli', version: app.version, bin: { doop: 'doop.mjs' } })
+  it('carries its own version and one dependency-free file', async () => {
+    const own = JSON.parse(readFileSync('cli/package.json', 'utf8')) as { version: string }
+    expect(manifest).toMatchObject({ name: '@doop-design/cli', version: own.version, bin: { doop: 'doop.mjs' } })
+    expect(own.version).toMatch(/^\d+\.\d+\.\d+$/)
     expect(manifest.dependencies).toBeUndefined()
     expect(manifest.engines.node).toBe('>=20')
     /* npm's trusted publishing holds this against the repository of publish-cli.yml */
