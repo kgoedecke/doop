@@ -13,7 +13,7 @@
   "homepage": "https://doop.design/docs/cli",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/doop-design/doop-internal.git"
+    "url": "git+https://github.com/doop-design/doop.git"
   },
   "bugs": {
     "url": "https://github.com/doop-design/doop/issues"
