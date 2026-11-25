@@ -112,4 +112,15 @@ export const auth: Catalog['auth'] = {
   editorConnectFailed: 'Não foi possível conectar o editor. Volte a ele e tente de novo.',
   editorConnectBadLink:
     'Este link está incompleto ou não veio de uma extensão do Doop. Comece de novo pelo seu editor.',
+  cliConnectTitle: 'Conectar a CLI do doop',
+  cliConnectBody:
+    'A CLI do doop em {name} vai abrir seus canvases e desenhar neles, como {email}. Continue só se você acabou de rodar doop login lá. Você pode desconectá-la quando quiser em Configurações → Conectar IA.',
+  cliConnectAllow: 'Conectar a CLI',
+  cliConnectSentTitle: 'De volta ao seu terminal.',
+  cliConnectSentBody: 'A CLI conclui o acesso. Você pode fechar esta aba depois.',
+  cliConnectOpen: 'Concluir no terminal',
+  cliConnectCodeTitle: 'Cole este código no seu terminal',
+  cliConnectCodeBody: 'Ele funciona uma vez, por dois minutos, e só no terminal que o pediu.',
+  cliConnectFailed: 'Não foi possível conectar a CLI. Rode doop login de novo.',
+  cliConnectBadLink: 'Este link está incompleto ou não veio da CLI do doop. Rode doop login de novo.',
 }

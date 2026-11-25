@@ -30,13 +30,28 @@ it with `DOOP_SERVER`.
 
 ## Sign in
 
-Make a key under **Settings → Agent keys**, then either save it or pass it in the environment:
+```bash
+doop login
+```
+
+This opens your browser. Sign in to Doop if you aren't, press **Connect the CLI**, and the terminal finishes by
+itself. The CLI is handed an agent key named after your machine (`doop CLI on Kevins-MacBook`), saved in
+`~/.config/doop/credentials.json`. It shows up, and can be revoked, under **Settings → Agent keys**.
+
+`doop logout` deletes that key again.
+
+On a machine with no browser (over SSH, in a container), `doop login --no-browser` prints a link to open on
+any device and takes the code the page shows.
+
+For CI, or anywhere nobody is there to approve, use an agent key directly. Make one under **Settings → Agent
+keys**, then either save it or pass it in the environment:
 
 ```bash
-doop login --key dpk_…              # saved for doop.design in ~/.config/doop/credentials.json
-doop login --server https://your-doop --key dpk_…   # a self-hosted server
-export DOOP_API_KEY=dpk_…           # for CI: nothing is written to disk
+doop login --key dpk_…              # saved for doop.design
+export DOOP_API_KEY=dpk_…           # nothing is written to disk
 ```
+
+For a self-hosted server, name it: `doop login --server https://your-doop`, or set `DOOP_SERVER`.
 
 | Variable          | What it sets                                                        |
 | ----------------- | ------------------------------------------------------------------- |

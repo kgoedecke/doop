@@ -1,7 +1,7 @@
-import { createInterface } from 'node:readline/promises'
 import { callJson, type Connection } from './client.ts'
 import { need, type Context, type Outcome } from './context.ts'
-import { CliError, EXIT, usage } from './errors.ts'
+import { browserLogin, revokeKey } from './login.ts'
+import { usage } from './errors.ts'
 import {
   createProject,
   forgetKey,
@@ -11,6 +11,7 @@ import {
   resolveConnection,
   resolveServer,
   saveKey,
+  savedKey,
 } from './project.ts'
 
 /** Signing in, choosing a canvas, and saying what the agent is doing. */
@@ -26,21 +27,6 @@ interface CanvasEntry {
   workspace_name?: string
 }
 
-async function askForKey(server: string): Promise<string> {
-  if (!process.stdin.isTTY)
-    throw new CliError(
-      'no agent key given',
-      EXIT.auth,
-      `make one at ${server} under Settings → Agent keys, then run \`doop login --key <key>\` or set DOOP_API_KEY`,
-    )
-  const prompt = createInterface({ input: process.stdin, output: process.stderr })
-  try {
-    return (await prompt.question(`Agent key (make one at ${server} under Settings → Agent keys): `)).trim()
-  } finally {
-    prompt.close()
-  }
-}
-
 export async function login(context: Context): Promise<Outcome> {
   /* where the key is saved is where it will be sent from now on, so it is a server its holder
      named (or doop.design): never one that a linked directory's config alone names, and not
@@ -50,26 +36,51 @@ export async function login(context: Context): Promise<Outcome> {
   if (linked && linked !== server)
     throw usage(
       `this directory's canvas is on ${linked}, and \`doop login\` signs in to ${server} unless told otherwise`,
-      `to sign in there: doop login --server ${linked} --key <key>`,
+      `to sign in there: doop login --server ${linked}`,
     )
-  const key = context.flags.key ?? context.args[0] ?? (await askForKey(server))
-  /* the key that was typed is the one that is checked, whatever is saved already */
-  const connection = { server, key, agentName: resolveAgentName(context.env, context.flags) }
-  const { value } = await callJson<Profile>(connection, 'get_profile')
-  const path = saveKey(context.env, server, key)
+  const given = context.flags.key ?? context.args[0]
+  let account: { name: string; id?: string; email?: string }
+  let key: string
+  if (given) {
+    /* the key that was typed is the one that is checked, whatever is saved already */
+    const connection = { server, key: given, agentName: resolveAgentName(context.env, context.flags) }
+    account = (await callJson<Profile>(connection, 'get_profile')).value
+    key = given
+  } else {
+    /* no key: the person approves this CLI in their browser, and it is handed one */
+    const signedIn = await browserLogin(server, context.env, context.flags['no-browser'] === true)
+    account = signedIn.user
+    key = signedIn.key
+  }
+  /* the key this replaces, when a browser sign-in made it for this machine, is deleted: each
+     sign-in mints a new one, and the old ones would otherwise gather in Settings */
+  const before = savedKey(context.env, server)
+  const path = saveKey(context.env, server, key, !given)
+  if (before?.minted && before.key !== key) await revokeKey(server, before.key)
   return {
-    text: `signed in to ${server} as ${value.name}\nkey saved in ${path}\nnext: doop link <canvas id, name or URL>`,
-    data: { server, account: value },
+    text: `signed in to ${server} as ${account.name}\nkey saved in ${path}\nnext: doop link <canvas id, name or URL>`,
+    data: { server, account },
   }
 }
 
-export function logout(context: Context): Promise<Outcome> {
+export async function logout(context: Context): Promise<Outcome> {
   const server = resolveServer(context.env, context.flags, context.project)
-  const removed = forgetKey(context.env, server)
-  return Promise.resolve({
-    text: removed ? `removed the key for ${server}` : `no key was saved for ${server}`,
-    data: { server, removed },
-  })
+  const saved = savedKey(context.env, server)
+  if (!saved) return { text: `no key was saved for ${server}`, data: { server, removed: false, revoked: false } }
+  /* a key the browser sign-in made for this machine is deleted, not left behind in Settings.
+     One the person brought (`--key`) may be in use elsewhere and is only forgotten here.
+     Deleted before it is forgotten: once forgotten, nothing here could delete it */
+  const revoked = saved.minted ? await revokeKey(server, saved.key) : false
+  forgetKey(context.env, server)
+  return {
+    text: revoked
+      ? `signed out of ${server}: this machine's key is deleted`
+      : saved.minted
+        ? `removed the key for ${server} from this machine, but ${server} could not be reached to delete it: ` +
+          'it still works until you remove “doop CLI on …” under Settings → Agent keys'
+        : `removed the key for ${server} from this machine`,
+    data: { server, removed: true, revoked },
+  }
 }
 
 export async function whoami(context: Context): Promise<Outcome> {

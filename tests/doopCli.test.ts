@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { execFile } from 'node:child_process'
+import { execFile, spawn } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -65,7 +65,7 @@ describe('the doop CLI', () => {
   it('says what to do when there is no key, and signs in with one', async () => {
     const anonymous = await doop(['canvases'])
     expect(anonymous.code).toBe(4)
-    expect(anonymous.stderr).toContain('doop login --key')
+    expect(anonymous.stderr).toContain('run `doop login`')
 
     const refused = await doop(['login', '--key', 'dpk_notARealKeyAtAllNotARealKeyAtAll'])
     expect(refused.code).toBe(4)
@@ -77,6 +77,113 @@ describe('the doop CLI', () => {
     expect((await doop(['login', '--key', 'dpk_notARealKeyAtAllNotARealKeyAtAll'])).code).toBe(4)
     expect((await doop(['whoami'])).stdout).toContain('CLI Owner')
   })
+
+  /** Runs `doop login` with no key and no browser to open (BROWSER=none: the test is the
+   *  browser), and answers the sign-in link it printed and how it ended. */
+  async function startLogin(config: string, env: Record<string, string> = {}) {
+    const child = spawn('node', [join(process.cwd(), 'public/cli/doop.mjs'), 'login'], {
+      cwd: config,
+      env: {
+        ...process.env,
+        DOOP_CONFIG_DIR: config,
+        DOOP_SERVER: server.base,
+        DOOP_API_KEY: '',
+        BROWSER: 'none',
+        CI: '',
+        ...env,
+      },
+    })
+    let stderr = ''
+    let stdout = ''
+    child.stdout.on('data', (chunk: Buffer) => (stdout += chunk.toString()))
+    const ended = new Promise<{ code: number | null; stdout: string; stderr: string }>((resolve) =>
+      child.on('close', (code) => resolve({ code, stdout, stderr })),
+    )
+    const link = new Promise<URL>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error(`no sign-in link printed: ${stderr}`)), 20_000)
+      child.stderr.on('data', (chunk: Buffer) => {
+        stderr += chunk.toString()
+        const found = /https?:\/\/\S+\/cli\/connect\?\S+/.exec(stderr)
+        if (!found) return
+        clearTimeout(timer)
+        resolve(new URL(found[0]))
+      })
+    })
+    return { link, ended }
+  }
+
+  /** What the approval page does when the signed-in person presses Connect. */
+  async function approve(link: URL): Promise<string> {
+    const approved = await owner.post('/api/cli/connect', Object.fromEntries(link.searchParams))
+    return ((await approved.json()) as { url: string }).url
+  }
+
+  const cliKeys = async () =>
+    ((await (await owner.get('/api/agent-keys')).json()) as { name: string }[])
+      .map((entry) => entry.name)
+      .filter((name) => name.startsWith('doop CLI on '))
+
+  it('signs in through the browser: the person approves, the CLI is handed a key', async () => {
+    const config = mkdtempSync(join(tmpdir(), 'doop-cli-browser-'))
+    const quiet = { DOOP_CONFIG_DIR: config, DOOP_API_KEY: '' }
+    try {
+      const first = await startLogin(config)
+      const link = await first.link
+      expect(link.origin).toBe(server.base)
+
+      /* something else on the machine finding the port is not the approval */
+      const port = link.searchParams.get('port')
+      expect((await fetch(`http://127.0.0.1:${port}/callback?code=x&state=${'0'.repeat(32)}`)).status).toBe(400)
+
+      expect(await (await fetch(await approve(link))).text()).toContain('Signed in.')
+      const done = await first.ended
+      expect(done.code).toBe(0)
+      expect(done.stdout).toContain(`signed in to ${server.base} as CLI Owner`)
+      expect((await doop(['whoami'], config, quiet)).stdout).toContain('CLI Owner')
+      expect(await cliKeys()).toHaveLength(1)
+
+      /* signing in again replaces this machine's key: the old one does not gather in Settings */
+      const second = await startLogin(config)
+      await fetch(await approve(await second.link))
+      expect((await second.ended).code).toBe(0)
+      expect(await cliKeys()).toHaveLength(1)
+      expect((await doop(['whoami'], config, quiet)).stdout).toContain('CLI Owner')
+
+      /* signing out deletes the key that sign-in made, and leaves the one the person brought */
+      const out = await doop(['logout'], config, quiet)
+      expect(out.stdout).toContain("this machine's key is deleted")
+      expect(await cliKeys()).toHaveLength(0)
+      expect(
+        ((await (await owner.get('/api/agent-keys')).json()) as { name: string }[]).map((entry) => entry.name),
+      ).toContain('CLI')
+    } finally {
+      rmSync(config, { recursive: true, force: true })
+    }
+  }, 90_000)
+
+  it('does not tell the browser it worked when the server refuses the code, and does not wait in CI', async () => {
+    const config = mkdtempSync(join(tmpdir(), 'doop-cli-refused-'))
+    try {
+      const login = await startLogin(config)
+      const link = await login.link
+      /* the right state, a code the server never issued */
+      const callback = `http://127.0.0.1:${link.searchParams.get('port')}/callback?code=made-up&state=${link.searchParams.get('state')}`
+      expect(await (await fetch(callback)).text()).toContain('That did not work.')
+      const done = await login.ended
+      expect(done.code).toBe(4)
+      expect(done.stderr).toContain('this sign-in expired')
+      expect(await cliKeys()).toHaveLength(0)
+
+      /* nobody is there to approve in a pipeline: it says so at once */
+      const started = Date.now()
+      const inCi = await doop(['login'], config, { DOOP_CONFIG_DIR: config, DOOP_API_KEY: '', CI: 'true' })
+      expect(inCi.code).toBe(4)
+      expect(inCi.stderr).toContain('DOOP_API_KEY')
+      expect(Date.now() - started).toBeLessThan(10_000)
+    } finally {
+      rmSync(config, { recursive: true, force: true })
+    }
+  }, 60_000)
 
   it('links a directory to a new canvas', async () => {
     const linked = await doop(['link', '--create', 'From the shell'])

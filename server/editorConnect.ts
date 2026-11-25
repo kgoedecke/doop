@@ -67,9 +67,10 @@ interface Ticket {
 const codes = new Map<string, Code>()
 const tickets = new Map<string, Ticket>()
 
-/** Keeps `value` under a fresh random id. Every entry of a map lives as long, so
+/** Keeps `value` under a fresh random id (the CLI's sign-in codes are kept the same way,
+ *  server/cliConnect.ts). Every entry of a map lives as long, so
  *  insertion order is expiry order: the expired ones are dropped from the front. */
-function remember<T extends { expires: number }>(map: Map<string, T>, value: T): string {
+export function rememberPending<T extends { expires: number }>(map: Map<string, T>, value: T): string {
   const now = Date.now()
   for (const [id, entry] of map) {
     if (entry.expires > now && map.size < MAX_PENDING) break
@@ -80,7 +81,7 @@ function remember<T extends { expires: number }>(map: Map<string, T>, value: T):
   return id
 }
 
-function take<T extends { expires: number }>(map: Map<string, T>, id: unknown): T | null {
+export function takePending<T extends { expires: number }>(map: Map<string, T>, id: unknown): T | null {
   if (typeof id !== 'string') return null
   const entry = map.get(id)
   map.delete(id)
@@ -92,12 +93,32 @@ function bearer(req: Request): string {
   return header.toLowerCase().startsWith('bearer ') ? header.slice(7).trim() : ''
 }
 
-async function userOf(userId: string) {
+export async function accountOf(userId: string) {
   const [row] = await db
     .select({ id: authSchema.user.id, name: authSchema.user.name, email: authSchema.user.email })
     .from(authSchema.user)
     .where(eq(authSchema.user.id, userId))
   return row ?? null
+}
+
+/** The end of a sign-in that was approved in the browser (an editor's, the CLI's): mints an
+ *  agent key named `name` for the account and answers it with whose it is. Minted here, not
+ *  at approval, so a sign-in nobody finishes leaves no key behind. */
+export async function answerWithKey(res: Response, userId: string, name: string): Promise<void> {
+  if (await isBanned(userId)) return void res.status(403).json({ error: 'account suspended' })
+  const user = await accountOf(userId)
+  if (!user) return void res.status(400).json({ error: 'account not found' })
+  const created = await agentKeys.createAgentKey(userId, name)
+  if (!created) return void res.status(409).json({ error: 'too many agent keys — remove one in Settings → Connect AI' })
+  res.json({ key: created.secret, user: { name: user.name, email: user.email } })
+}
+
+/** Signing out of a sign-in like that: deletes the key the request carries. A key can only
+ *  delete itself here, so holding it is the permission. */
+export async function deleteOwnKey(req: Request, res: Response): Promise<void> {
+  const key = await agentKeys.verifyAgentKey(bearer(req))
+  if (key) await agentKeys.deleteAgentKey(key.userId, key.keyId)
+  res.status(204).end()
 }
 
 /** The key a request carries and its account, or null after answering it. */
@@ -111,7 +132,7 @@ async function keyHolder(req: Request, res: Response) {
     res.status(403).json({ error: 'account suspended' })
     return null
   }
-  const user = await userOf(key.userId)
+  const user = await accountOf(key.userId)
   if (!user) {
     res.status(401).json({ error: 'unauthorized' })
     return null
@@ -149,14 +170,9 @@ async function embedSessionCookie(userId: string, keyId: string): Promise<string
 /** Routes the session gate must not cover: mounted before it. */
 export function mountEditorPublicRoutes(app: Express): void {
   app.post(EDITOR_EXCHANGE_PATH, async (req: Request, res: Response) => {
-    const entry = take(codes, req.body?.code)
+    const entry = takePending(codes, req.body?.code)
     if (!entry) return res.status(400).json({ error: 'this sign-in expired — start again from the editor' })
-    if (await isBanned(entry.userId)) return res.status(403).json({ error: 'account suspended' })
-    const user = await userOf(entry.userId)
-    if (!user) return res.status(400).json({ error: 'account not found' })
-    const created = await agentKeys.createAgentKey(entry.userId, entry.name)
-    if (!created) return res.status(409).json({ error: 'too many agent keys — remove one in Settings → Connect AI' })
-    res.json({ key: created.secret, user: { name: user.name, email: user.email } })
+    await answerWithKey(res, entry.userId, entry.name)
   })
 
   app.post(EDITOR_WHOAMI_PATH, async (req: Request, res: Response) => {
@@ -164,18 +180,12 @@ export function mountEditorPublicRoutes(app: Express): void {
     if (holder) res.json({ user: holder.user })
   })
 
-  app.post(EDITOR_SIGN_OUT_PATH, async (req: Request, res: Response) => {
-    const key = await agentKeys.verifyAgentKey(bearer(req))
-    if (key) await agentKeys.deleteAgentKey(key.userId, key.keyId)
-    res.status(204).end()
-  })
+  app.post(EDITOR_SIGN_OUT_PATH, deleteOwnKey)
 
-  /* Also tells the extension whose key it holds: a key revoked in Settings
-     answers 401 here, which is how the editor learns it is signed out. */
   app.post(EDITOR_EMBED_TICKET_PATH, async (req: Request, res: Response) => {
     const holder = await keyHolder(req, res)
     if (!holder) return
-    const ticket = remember(tickets, {
+    const ticket = rememberPending(tickets, {
       userId: holder.userId,
       keyId: holder.keyId,
       expires: Date.now() + TICKET_TTL_MS,
@@ -185,7 +195,7 @@ export function mountEditorPublicRoutes(app: Express): void {
 
   app.get(EDITOR_EMBED_PATH, async (req: Request, res: Response) => {
     const to = embedTarget(req.query.to) ?? '/'
-    const entry = take(tickets, req.query.ticket)
+    const entry = takePending(tickets, req.query.ticket)
     res.setHeader('Cache-Control', 'no-store')
     /* an iframe only: opened as a page, the ticket would sign that browser into the ticket's account */
     if (!entry || req.get('sec-fetch-dest') !== 'iframe' || (await isBanned(entry.userId))) return res.redirect(to)
@@ -204,7 +214,7 @@ export function mountEditorSessionRoutes(app: Express): void {
     const target = editorRedirect(request.redirect)
     if (!target || !/^[0-9a-f]{32}$/.test(request.state))
       return res.status(400).json({ error: 'this link is not from a Doop editor extension' })
-    const code = remember(codes, {
+    const code = rememberPending(codes, {
       userId: req.user!.id,
       name: `${target.editor} extension`,
       expires: Date.now() + CODE_TTL_MS,

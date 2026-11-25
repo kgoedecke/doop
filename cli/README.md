@@ -12,10 +12,8 @@ Or run it without installing: `npx @doop-design/cli <command>`. Needs Node 20 or
 
 ## Use
 
-Make an agent key under **Settings → Agent keys** on doop.design, then:
-
 ```bash
-doop login --key dpk_…              # or set DOOP_API_KEY
+doop login                          # opens your browser to approve this machine
 doop link "Onboarding v2"           # a canvas name, id or URL; --create "Name" makes one
 doop pull                           # frames -> designs/*.html, components -> designs/components/
 # edit the files
@@ -27,7 +25,8 @@ doop wait                           # blocks until a person leaves feedback or a
 `doop init` tells the coding agents that work in a repository about Doop, and `doop guide` explains the loop and
 Doop's design conventions to them. `doop help` lists every command.
 
-For a self-hosted server, name it: `doop login --server https://your-doop --key dpk_…`, or set `DOOP_SERVER`.
+For CI, sign in with an agent key from **Settings → Agent keys**: `doop login --key dpk_…`, or set
+`DOOP_API_KEY`. For a self-hosted server, name it: `doop login --server https://your-doop`, or set `DOOP_SERVER`.
 
 ## Docs
 
