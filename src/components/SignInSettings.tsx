@@ -60,9 +60,12 @@ export function SignInSettings() {
 
   const { settings, providers, workspaces } = view
   const sso = providers.displayName ?? 'SSO'
-  const social = [providers.google && 'Google', providers.microsoft && 'Microsoft', providers.apple && 'Apple'].filter(
-    (name): name is string => !!name,
-  )
+  const social = [
+    providers.google && 'Google',
+    providers.microsoft && 'Microsoft',
+    providers.github && 'GitHub',
+    providers.apple && 'Apple',
+  ].filter((name): name is string => !!name)
   /* why the auto-redirect switch is off-limits right now, if it is */
   const redirectBlocker = !providers.enabled
     ? t('admin.ssoAutoRedirectUnavailable')

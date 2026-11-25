@@ -94,6 +94,10 @@ function MicrosoftMark() {
   return <BrandMark brand="microsoft" size={18} className="shrink-0" />
 }
 
+function GithubMark() {
+  return <BrandMark brand="github" size={18} className="shrink-0" />
+}
+
 function AppleMark() {
   return <BrandMark brand="apple" size={18} className="shrink-0" />
 }
@@ -170,6 +174,7 @@ interface OidcClientConfig extends LoginPolicy {
   displayName?: string
   google: boolean
   microsoft: boolean
+  github: boolean
   /** the browser "Sign in with Apple" (the iOS app's native one is appleNative, not shown here) */
   apple: boolean
 }
@@ -178,6 +183,7 @@ const UNCONFIGURED: OidcClientConfig = {
   enabled: false,
   google: false,
   microsoft: false,
+  github: false,
   apple: false,
   emailPasswordSignup: true,
   ssoAutoRedirect: false,
@@ -314,7 +320,7 @@ export function AuthPage({
     return providerSignIn('oidc', (opts) => authClient.signIn.oauth2({ providerId: 'oidc', ...opts }))
   }
 
-  function socialSignIn(provider: 'google' | 'microsoft' | 'apple') {
+  function socialSignIn(provider: 'google' | 'microsoft' | 'github' | 'apple') {
     return providerSignIn(provider, (opts) => authClient.signIn.social({ provider, ...opts }))
   }
 
@@ -457,70 +463,85 @@ export function AuthPage({
             )}
           </AuthCardText>
         )}
-        {(oidc.enabled || oidc.google || oidc.microsoft || oidc.apple) && (mode === 'signin' || mode === 'signup') && (
-          <>
-            {oidc.google && (
-              <Button
-                variant="default"
-                size="lg"
-                block
-                className="border-line"
-                type="button"
-                onClick={() => socialSignIn('google')}
-                disabled={busy}
-              >
-                <GoogleMark />
-                {t(mode === 'signup' ? 'auth.signUpWith' : 'auth.signInWith', { provider: 'Google' })}
-              </Button>
-            )}
-            {oidc.microsoft && (
-              <Button
-                variant="default"
-                size="lg"
-                block
-                className="border-line"
-                type="button"
-                onClick={() => socialSignIn('microsoft')}
-                disabled={busy}
-              >
-                <MicrosoftMark />
-                {t(mode === 'signup' ? 'auth.signUpWith' : 'auth.signInWith', { provider: 'Microsoft' })}
-              </Button>
-            )}
-            {oidc.apple && (
-              <Button
-                variant="default"
-                size="lg"
-                block
-                className="border-line"
-                type="button"
-                onClick={() => socialSignIn('apple')}
-                disabled={busy}
-              >
-                <AppleMark />
-                {t(mode === 'signup' ? 'auth.signUpWith' : 'auth.signInWith', { provider: 'Apple' })}
-              </Button>
-            )}
-            {oidc.enabled && (
-              <Button
-                variant="default"
-                size="lg"
-                block
-                className="border-line"
-                type="button"
-                onClick={ssoSignIn}
-                disabled={busy}
-              >
-                {t(mode === 'signup' ? 'auth.signUpWith' : 'auth.signInWith', { provider: oidc.displayName ?? '' })}
-              </Button>
-            )}
-            <div className="flex items-center gap-3 text-[11px] uppercase tracking-wide text-ink-faint">
-              <span className="h-px flex-1 bg-line" />
-              {t('auth.or')}
-              <span className="h-px flex-1 bg-line" />
-            </div>
-          </>
-        )}
+        {(oidc.enabled || oidc.google || oidc.microsoft || oidc.github || oidc.apple) &&
+          (mode === 'signin' || mode === 'signup') && (
+            <>
+              {oidc.google && (
+                <Button
+                  variant="default"
+                  size="lg"
+                  block
+                  className="border-line"
+                  type="button"
+                  onClick={() => socialSignIn('google')}
+                  disabled={busy}
+                >
+                  <GoogleMark />
+                  {t(mode === 'signup' ? 'auth.signUpWith' : 'auth.signInWith', { provider: 'Google' })}
+                </Button>
+              )}
+              {oidc.microsoft && (
+                <Button
+                  variant="default"
+                  size="lg"
+                  block
+                  className="border-line"
+                  type="button"
+                  onClick={() => socialSignIn('microsoft')}
+                  disabled={busy}
+                >
+                  <MicrosoftMark />
+                  {t(mode === 'signup' ? 'auth.signUpWith' : 'auth.signInWith', { provider: 'Microsoft' })}
+                </Button>
+              )}
+              {oidc.github && (
+                <Button
+                  variant="default"
+                  size="lg"
+                  block
+                  className="border-line"
+                  type="button"
+                  onClick={() => socialSignIn('github')}
+                  disabled={busy}
+                >
+                  <GithubMark />
+                  {t(mode === 'signup' ? 'auth.signUpWith' : 'auth.signInWith', { provider: 'GitHub' })}
+                </Button>
+              )}
+              {oidc.apple && (
+                <Button
+                  variant="default"
+                  size="lg"
+                  block
+                  className="border-line"
+                  type="button"
+                  onClick={() => socialSignIn('apple')}
+                  disabled={busy}
+                >
+                  <AppleMark />
+                  {t(mode === 'signup' ? 'auth.signUpWith' : 'auth.signInWith', { provider: 'Apple' })}
+                </Button>
+              )}
+              {oidc.enabled && (
+                <Button
+                  variant="default"
+                  size="lg"
+                  block
+                  className="border-line"
+                  type="button"
+                  onClick={ssoSignIn}
+                  disabled={busy}
+                >
+                  {t(mode === 'signup' ? 'auth.signUpWith' : 'auth.signInWith', { provider: oidc.displayName ?? '' })}
+                </Button>
+              )}
+              <div className="flex items-center gap-3 text-[11px] uppercase tracking-wide text-ink-faint">
+                <span className="h-px flex-1 bg-line" />
+                {t('auth.or')}
+                <span className="h-px flex-1 bg-line" />
+              </div>
+            </>
+          )}
         {mode === 'signup' && (
           <Field label={t('auth.nameLabel')} labelVariant="form">
             <Input

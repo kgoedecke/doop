@@ -1079,7 +1079,14 @@ export interface AdminStats {
 /** Admin → Sign-in: the policy, and what it depends on. */
 export interface AdminInstanceSettings {
   settings: InstanceSettings
-  providers: { enabled: boolean; displayName?: string; google: boolean; microsoft: boolean; apple: boolean }
+  providers: {
+    enabled: boolean
+    displayName?: string
+    google: boolean
+    microsoft: boolean
+    github: boolean
+    apple: boolean
+  }
   workspaces: { id: string; name: string; memberCount: number }[]
   /** has an admin signed in through SSO yet? (the auto-redirect guard) */
   ssoAdminSignedIn: boolean

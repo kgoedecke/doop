@@ -66,7 +66,7 @@ export const admin = {
   ssoNotConfigured: 'No OIDC provider is configured.',
   methodsTitle: 'Sign-in methods',
   methodsDescription:
-    'How people get into this instance. Which providers exist comes from its environment (OIDC_*, GOOGLE_*, MICROSOFT_*, APPLE_*); what they may do is set here.',
+    'How people get into this instance. Which providers exist comes from its environment (OIDC_*, GOOGLE_*, MICROSOFT_*, GITHUB_*, APPLE_*); what they may do is set here.',
   providerEmail: 'Email & password',
   providerSso: '{provider}',
   ssoAutoRedirect: 'Send signed-out visitors straight here',

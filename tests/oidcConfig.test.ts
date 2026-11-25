@@ -1,7 +1,11 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { createServer, type Server } from 'node:http'
+import type { AddressInfo } from 'node:net'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { stubEnv, unstubAllEnvs } from './envStub.ts'
 import {
+  fetchGithubIdentity,
   loadAppleConfig,
+  loadGithubConfig,
   loadGoogleConfig,
   loadMicrosoftConfig,
   loadOidcConfig,
@@ -26,6 +30,8 @@ const OIDC_VARS = [
   'MICROSOFT_CLIENT_ID',
   'MICROSOFT_CLIENT_SECRET',
   'MICROSOFT_TENANT_ID',
+  'GITHUB_CLIENT_ID',
+  'GITHUB_CLIENT_SECRET',
   'APPLE_CLIENT_ID',
   'APPLE_CLIENT_SECRET',
   'APPLE_APP_BUNDLE_IDENTIFIER',
@@ -145,6 +151,7 @@ describe('loginProvidersConfig', () => {
       enabled: false,
       google: false,
       microsoft: false,
+      github: false,
       apple: false,
       appleNative: false,
     })
@@ -158,6 +165,7 @@ describe('loginProvidersConfig', () => {
       enabled: false,
       google: true,
       microsoft: false,
+      github: false,
       apple: false,
       appleNative: false,
     })
@@ -174,6 +182,7 @@ describe('loginProvidersConfig', () => {
       displayName: 'SSO',
       google: true,
       microsoft: false,
+      github: false,
       apple: false,
       appleNative: false,
     })
@@ -216,10 +225,174 @@ describe('loadMicrosoftConfig', () => {
       enabled: false,
       google: false,
       microsoft: true,
+      github: false,
       apple: false,
       appleNative: false,
     })
     expect(JSON.stringify(loginProvidersConfig())).not.toContain('m-secret')
+  })
+})
+
+describe('loadGithubConfig', () => {
+  it('returns null when neither var is set', () => {
+    expect(loadGithubConfig()).toBeNull()
+  })
+
+  it.each([{ GITHUB_CLIENT_ID: 'gh-client' }, { GITHUB_CLIENT_SECRET: 'gh-secret' }])(
+    'throws when only one of the pair is set: %o',
+    (partial) => {
+      for (const [key, value] of Object.entries(partial)) stubEnv(key, value)
+      expect(() => loadGithubConfig()).toThrow(/GITHUB_CLIENT_ID.*GITHUB_CLIENT_SECRET/)
+    },
+  )
+
+  it('shows up in loginProvidersConfig without the secret', () => {
+    stubEnv('GITHUB_CLIENT_ID', 'gh-client')
+    stubEnv('GITHUB_CLIENT_SECRET', 'gh-secret')
+
+    expect(loadGithubConfig()).toEqual({ clientId: 'gh-client', clientSecret: 'gh-secret' })
+    expect(loginProvidersConfig()).toMatchObject({ github: true, google: false })
+    expect(JSON.stringify(loginProvidersConfig())).not.toContain('gh-secret')
+  })
+
+  it('stays off when only the repository-import GitHub App is configured', () => {
+    stubEnv('GITHUB_APP_CLIENT_ID', 'app-client')
+    stubEnv('GITHUB_APP_CLIENT_SECRET', 'app-secret')
+
+    expect(loadGithubConfig()).toBeNull()
+  })
+})
+
+describe('fetchGithubIdentity', () => {
+  interface FakeGithub {
+    user?: unknown
+    /** what `/user/emails` answers; left out, it answers 403 */
+    emails?: unknown
+  }
+
+  let api: Server | undefined
+  let apiUrl = ''
+  let requested: string[] = []
+
+  async function fakeGithub(answers: FakeGithub): Promise<void> {
+    requested = []
+    api = createServer((req, res) => {
+      const url = new URL(req.url ?? '/', 'http://localhost')
+      requested.push(url.pathname + url.search)
+      const body =
+        url.pathname === '/user' ? answers.user : url.pathname === '/user/emails' ? answers.emails : undefined
+      if (req.headers.authorization !== 'Bearer gh-token') return void res.writeHead(401).end('{}')
+      if (body === undefined) return void res.writeHead(403).end('{}')
+      res
+        .writeHead(200, { 'Content-Type': 'application/json' })
+        .end(typeof body === 'string' ? body : JSON.stringify(body))
+    })
+    await new Promise<void>((resolve) => api!.listen(0, '127.0.0.1', resolve))
+    apiUrl = `http://127.0.0.1:${(api.address() as AddressInfo).port}`
+  }
+
+  afterEach(() => {
+    api?.close()
+    api = undefined
+  })
+
+  const octocat = {
+    id: 583231,
+    login: 'octocat',
+    name: 'The Octocat',
+    avatar_url: 'https://avatars.example/1',
+    email: null,
+  }
+
+  it('takes the primary address and its verified flag, not the public profile one', async () => {
+    await fakeGithub({
+      user: { ...octocat, email: 'public@example.com' },
+      emails: [
+        { email: 'public@example.com', primary: false, verified: true },
+        { email: 'octo@example.com', primary: true, verified: true },
+      ],
+    })
+
+    expect(await fetchGithubIdentity('gh-token', apiUrl)).toMatchObject({
+      id: '583231',
+      name: 'The Octocat',
+      email: 'octo@example.com',
+      emailVerified: true,
+      image: 'https://avatars.example/1',
+    })
+    expect(requested).toContain('/user/emails?per_page=100')
+  })
+
+  it('reports an unverified primary address as unverified, and names a nameless account by its login', async () => {
+    await fakeGithub({
+      user: { ...octocat, name: null },
+      emails: [{ email: 'octo@example.com', primary: true, verified: false }],
+    })
+
+    expect(await fetchGithubIdentity('gh-token', apiUrl)).toMatchObject({
+      name: 'octocat',
+      email: 'octo@example.com',
+      emailVerified: false,
+    })
+  })
+
+  it('takes a verified address over an unverified one when none is marked primary', async () => {
+    await fakeGithub({
+      user: octocat,
+      emails: [
+        { email: 'stale@example.com', primary: false, verified: false },
+        { email: 'octo@example.com', primary: false, verified: true },
+      ],
+    })
+
+    expect(await fetchGithubIdentity('gh-token', apiUrl)).toMatchObject({
+      email: 'octo@example.com',
+      emailVerified: true,
+    })
+  })
+
+  it('has no address when GitHub lists none, even with a public one on the profile', async () => {
+    await fakeGithub({ user: { ...octocat, email: 'public@example.com' }, emails: [] })
+
+    expect(await fetchGithubIdentity('gh-token', apiUrl)).toMatchObject({ email: null, emailVerified: false })
+  })
+
+  it('is null when the address list cannot be read, rather than half an identity', async () => {
+    await fakeGithub({ user: { ...octocat, email: 'public@example.com' } })
+
+    expect(await fetchGithubIdentity('gh-token', apiUrl)).toBeNull()
+  })
+
+  it('is null when GitHub refuses the token', async () => {
+    await fakeGithub({ user: octocat, emails: [] })
+
+    expect(await fetchGithubIdentity('someone-elses-token', apiUrl)).toBeNull()
+  })
+
+  it('is null when an answer is not JSON or GitHub cannot be reached', async () => {
+    await fakeGithub({ user: '<html>bad gateway</html>', emails: [] })
+    expect(await fetchGithubIdentity('gh-token', apiUrl)).toBeNull()
+
+    api?.close()
+    expect(await fetchGithubIdentity('gh-token', apiUrl)).toBeNull()
+  })
+
+  it('reads github.com, not the host GITHUB_API_URL points the importer at', async () => {
+    await fakeGithub({ user: octocat, emails: [] })
+    stubEnv('GITHUB_API_URL', apiUrl)
+    const calls: string[] = []
+    vi.stubGlobal('fetch', (url: string) => {
+      calls.push(url)
+      return Promise.reject(new Error('offline'))
+    })
+
+    try {
+      expect(await fetchGithubIdentity('gh-token')).toBeNull()
+    } finally {
+      vi.unstubAllGlobals()
+    }
+    expect(calls).toEqual(['https://api.github.com/user', 'https://api.github.com/user/emails?per_page=100'])
+    expect(requested).toEqual([])
   })
 })
 
@@ -244,6 +417,7 @@ describe('loadAppleConfig', () => {
       enabled: false,
       google: false,
       microsoft: false,
+      github: false,
       apple: false,
       appleNative: true,
     })
@@ -261,6 +435,7 @@ describe('loadAppleConfig', () => {
       enabled: false,
       google: false,
       microsoft: false,
+      github: false,
       apple: true,
       appleNative: false,
     })

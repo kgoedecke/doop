@@ -155,7 +155,7 @@ interface OAuthClient {
  * the provider, neither leaves it off, and a half-set pair refuses to boot
  * rather than showing a button that can never complete.
  */
-function loadOAuthClient(prefix: 'GOOGLE' | 'MICROSOFT' | 'APPLE', label: string): OAuthClient | null {
+function loadOAuthClient(prefix: 'GOOGLE' | 'MICROSOFT' | 'APPLE' | 'GITHUB', label: string): OAuthClient | null {
   const clientId = env[`${prefix}_CLIENT_ID`]
   const clientSecret = env[`${prefix}_CLIENT_SECRET`]
   const setCount = [clientId, clientSecret].filter(Boolean).length
@@ -185,6 +185,97 @@ interface MicrosoftConfig extends OAuthClient {
 export function loadMicrosoftConfig(): MicrosoftConfig | null {
   const client = loadOAuthClient('MICROSOFT', 'Microsoft')
   return client && { ...client, tenantId: env.MICROSOFT_TENANT_ID }
+}
+
+/**
+ * Env-gated "Sign in with GitHub": an OAuth app's client pair. Unrelated to
+ * the GITHUB_APP_* set, which is the GitHub App that imports repositories.
+ */
+export function loadGithubConfig(): OAuthClient | null {
+  return loadOAuthClient('GITHUB', 'GitHub')
+}
+
+interface GithubIdentity {
+  id: string
+  name: string
+  email: string | null
+  emailVerified: boolean
+  image: string | undefined
+  /** GitHub's own `/user` answer, as better-auth stores nothing of it but hands it to hooks */
+  profile: Record<string, unknown>
+}
+
+interface GithubEmail {
+  email: string
+  primary: boolean
+  verified: boolean
+}
+
+/* Where a GitHub sign-in reads the profile: github.com's own API, whatever
+   GITHUB_API_URL says. better-auth takes the token from github.com (its
+   authorize and token endpoints are fixed), and a github.com token must not
+   travel to the host an operator pointed the repository importer at. Only the
+   test suite passes another. */
+const GITHUB_SIGN_IN_API = 'https://api.github.com'
+const GITHUB_SIGN_IN_TIMEOUT_MS = 10_000
+
+async function githubJson(url: string, accessToken: string): Promise<unknown> {
+  const res = await fetch(url, {
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      Accept: 'application/vnd.github+json',
+      'X-GitHub-Api-Version': '2022-11-28',
+      'User-Agent': 'doop',
+    },
+    signal: AbortSignal.timeout(GITHUB_SIGN_IN_TIMEOUT_MS),
+  })
+  if (!res.ok) throw new Error(`GitHub answered ${res.status} for ${new URL(url).pathname}`)
+  return res.json()
+}
+
+/**
+ * Who a GitHub access token belongs to. `/user` only carries the address a
+ * person chose to show on their profile (often none), and never says whether
+ * it is verified, so the address comes from `/user/emails` (the `user:email`
+ * scope): the primary one, which is where GitHub itself sends their mail,
+ * with its `verified` flag, or failing that a verified one. The public
+ * profile address is never used: an account made under it would keep it for
+ * good, since later sign-ins match on the GitHub account id.
+ *
+ * Null when either read fails (a refused token, a rate limit, an outage, a
+ * stalled connection), which better-auth turns into a redirect back to the
+ * sign-in page; half an identity is not signed in.
+ */
+export async function fetchGithubIdentity(
+  accessToken: string,
+  apiUrl = GITHUB_SIGN_IN_API,
+): Promise<GithubIdentity | null> {
+  let profile: Record<string, unknown>
+  let emails: GithubEmail[]
+  try {
+    const [user, listed] = await Promise.all([
+      githubJson(`${apiUrl}/user`, accessToken),
+      githubJson(`${apiUrl}/user/emails?per_page=100`, accessToken),
+    ])
+    if (typeof user !== 'object' || user === null || !Array.isArray(listed)) return null
+    profile = user as Record<string, unknown>
+    emails = listed as GithubEmail[]
+  } catch (error) {
+    console.error('GitHub sign-in could not read the profile:', error)
+    return null
+  }
+  if (typeof profile.id !== 'number' && typeof profile.id !== 'string') return null
+
+  const chosen = emails.find((entry) => entry.primary) ?? emails.find((entry) => entry.verified)
+  const login = typeof profile.login === 'string' ? profile.login : ''
+  return {
+    id: String(profile.id),
+    name: (typeof profile.name === 'string' && profile.name) || login,
+    email: chosen?.email ?? null,
+    emailVerified: chosen?.verified === true,
+    image: typeof profile.avatar_url === 'string' ? profile.avatar_url : undefined,
+    profile,
+  }
 }
 
 export interface AppleConfig {
@@ -248,6 +339,7 @@ export function loginProvidersConfig(): {
   displayName?: string
   google: boolean
   microsoft: boolean
+  github: boolean
   /** browser "Sign in with Apple" */
   apple: boolean
   /** the iOS app's native Sign in with Apple */
@@ -258,6 +350,7 @@ export function loginProvidersConfig(): {
     ...oidcPublicConfig(),
     google: loadGoogleConfig() !== null,
     microsoft: loadMicrosoftConfig() !== null,
+    github: loadGithubConfig() !== null,
     apple: apple?.web != null,
     appleNative: apple?.appBundleIdentifier != null,
   }
@@ -265,11 +358,13 @@ export function loginProvidersConfig(): {
 
 /**
  * Shared by every external identity provider doop signs people in through
- * (the OIDC SSO plugin and the Google and Microsoft social providers — each
- * hands this its raw profile: `email` + `email_verified`, or for Microsoft,
- * which only sends email_verified when the app registration asks for it,
- * the `verified_primary_email` optional claim listing addresses the account
- * has proven; better-auth reads exactly the same two signals).
+ * (the OIDC SSO plugin and the social providers — each hands this its raw
+ * profile: `email` + `email_verified`, or for Microsoft, which only sends
+ * email_verified when the app registration asks for it, the
+ * `verified_primary_email` optional claim listing addresses the account has
+ * proven; better-auth reads exactly the same two signals. GitHub has no such
+ * claims, so its sign-in passes what `/user/emails` says of the primary
+ * address: see fetchGithubIdentity).
  *
  * better-auth's account-linking gate requires the LOCAL user row to already
  * be emailVerified before it will link an incoming OAuth sign-in to it —
@@ -379,6 +474,7 @@ function buildAuth() {
   const oidc = loadOidcConfig()
   const google = loadGoogleConfig()
   const microsoft = loadMicrosoftConfig()
+  const github = loadGithubConfig()
   const apple = loadAppleConfig()
   const ipAddressConfig = loadIpAddressConfig()
   /* BETTER_AUTH_SECRET and BETTER_AUTH_URL are required in production; a
@@ -425,6 +521,24 @@ function buildAuth() {
           clientSecret: microsoft.clientSecret,
           tenantId: microsoft.tenantId,
           mapProfileToUser: linkVerifiedProviderEmail,
+        },
+      }),
+      /* GitHub: better-auth's own profile read hands mapProfileToUser the
+         `/user` body, which says nothing of verification, so the read is ours
+         (fetchGithubIdentity) and the primary address's verified flag goes to
+         linkVerifiedProviderEmail under the name the other providers use. */
+      ...(github && {
+        github: {
+          clientId: github.clientId,
+          clientSecret: github.clientSecret,
+          getUserInfo: async (token) => {
+            if (!token.accessToken) return null
+            const identity = await fetchGithubIdentity(token.accessToken)
+            if (!identity) return null
+            const { profile, ...user } = identity
+            await linkVerifiedProviderEmail({ email: user.email, email_verified: user.emailVerified })
+            return { user, data: profile }
+          },
         },
       }),
       /* Apple: the Services ID pair drives the browser flow; the bundle id is

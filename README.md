@@ -658,6 +658,17 @@ ID token includes the `email` and `verified_primary_email` optional claims; with
 Microsoft sign-in still works but only links to an existing account that is already
 verified. Everything else (allowlist, admin promotion) follows the SSO rules above.
 
+### Sign in with GitHub
+
+Same shape as Google. Register an OAuth app under
+[GitHub developer settings](https://github.com/settings/developers) with
+`<BETTER_AUTH_URL>/api/auth/callback/github` as the authorization callback URL, generate a
+client secret, and set `GITHUB_CLIENT_ID` and `GITHUB_CLIENT_SECRET` together. It is a
+separate app from the `GITHUB_APP_*` GitHub App that imports repositories. Doop takes the
+account's primary GitHub address (the `user:email` scope), not the one shown on the public
+profile, and links to an existing account when GitHub has verified that address. Everything
+else (allowlist, admin promotion) follows the SSO rules above.
+
 ### Sign in with Apple
 
 Two independent halves, documented in [.env.example](.env.example). For the web button,
