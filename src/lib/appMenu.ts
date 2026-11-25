@@ -14,7 +14,7 @@
    presenting, never a key another handler owns). Shells older than this
    (no `__DOOP_APP_MENU__`) keep their fixed View menu (viewMenu.ts). */
 
-import { firstChord, type Chord } from './actions/chords'
+import { firstChord, matchesChord, type Chord } from './actions/chords'
 import {
   ACTIONS,
   MENUS,
@@ -139,6 +139,34 @@ export function nativeStates(): NativeItemState[] {
   })
 }
 
+/* The shell's `key` flag reads the event AppKit is handling when the pick is
+   relayed. On the Chromium shell a key reaches the menu only after the page
+   has answered it, and by then a key-up, a scroll or a pointer move can be
+   the current event: the pick arrives as a click, and an N typed into a
+   comment flew to the next frame. So the page keeps the last key it heard
+   itself, and a pick that follows one of the action's own chords this
+   closely is that key, whatever the shell says. A key the page took for
+   itself (Esc closing the find bar) never reaches the menu, so it excuses
+   nothing: a click on the item right after it is a click. */
+const KEY_ECHO_MS = 500
+let heardKey: { event: KeyboardEvent; at: number } | null = null
+
+/* the event itself is kept: whether a handler took the key is only known
+   once it has been through all of them */
+function hearKey(event: KeyboardEvent) {
+  heardKey = { event, at: performance.now() }
+}
+
+/* one key excuses one pick: the next pick of the same item is a click again */
+function echoesHeardKey(action: CanvasAction): boolean {
+  const heard = heardKey
+  if (!heard || heard.event.defaultPrevented || performance.now() - heard.at > KEY_ECHO_MS) return false
+  /* the menu bar is the Mac's, so the chords are read as a Mac reads them */
+  if (!action.keys?.some((chord) => matchesChord(heard.event, chord, true))) return false
+  heardKey = null
+  return true
+}
+
 /** Run what the menu bar picked. A key equivalent keeps the canvas
  *  keyboard's rules; a field in a frame counts as typing, since the page
  *  never saw that key. */
@@ -146,7 +174,8 @@ export function runNativeItem(id: string, key: boolean) {
   const action = ACTIONS.find((a) => a.id === id)
   if (!action) return
   const focused = document.activeElement
-  if (key && !takesKey(action, isTypingTarget(focused) || focused instanceof HTMLIFrameElement)) return
+  const byKey = echoesHeardKey(action) || key
+  if (byKey && !takesKey(action, isTypingTarget(focused) || focused instanceof HTMLIFrameElement)) return
   runAction(action)
 }
 
@@ -208,6 +237,8 @@ export function initAppMenu() {
   useStore.subscribe(scheduleSync)
   /* what Paste can take changes outside the store */
   for (const event of ['copy', 'cut', 'focus'] as const) window.addEventListener(event, scheduleSync)
+  /* capture phase: a field that stops its keys is still heard */
+  window.addEventListener('keydown', hearKey, true)
   bridge.__TAURI__?.event
     ?.listen?.<{ id?: unknown; key?: unknown }>('app-menu', ({ payload }) => {
       if (typeof payload?.id === 'string') runNativeItem(payload.id, payload.key === true)
