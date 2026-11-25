@@ -1687,7 +1687,7 @@ const TOOLS: Anthropic.Tool[] = [
   {
     name: 'report_issue',
     description:
-      'Tell the Doop team where Doop itself got in your way: a tool that errored or behaved other than described, an instruction that left you guessing, or a capability you needed and did not have. Call it after a retry fails or when you fall back to a workaround, then carry on with the task. Ideas that did not block you go to share_feedback. It never reaches the humans on the canvas. Be specific: what you tried, what happened, what you expected. Never include secrets.',
+      'Tell the admins of this Doop instance where Doop itself got in your way: a tool that errored or behaved other than described, an instruction that left you guessing, or a capability you needed and did not have. Call it after a retry fails or when you fall back to a workaround, then carry on with the task. Ideas that did not block you go to share_feedback. It does not notify canvas collaborators or change any canvas. Be specific: what you tried, what happened, what you expected. Never include secrets.',
     input_schema: {
       type: 'object',
       properties: {
@@ -1701,7 +1701,7 @@ const TOOLS: Anthropic.Tool[] = [
   {
     name: 'share_feedback',
     description:
-      'Tell the Doop team how Doop could work better for you: a tool you wish you had, a clumsy workflow, a result that should carry more, or something that worked especially well. Use it when you notice something worth saying, then carry on with the task. Something that broke or blocked you goes to report_issue. It never reaches the humans on the canvas. Never include secrets.',
+      'Tell the admins of this Doop instance how Doop could work better for you: a tool you wish you had, a clumsy workflow, a result that should carry more, or something that worked especially well. Use it when you notice something worth saying, then carry on with the task. Something that broke or blocked you goes to report_issue. It does not notify canvas collaborators or change any canvas. Never include secrets.',
     input_schema: {
       type: 'object',
       properties: {
@@ -2676,7 +2676,7 @@ async function runResidentTool(
           canvasId,
           userId: runState.payerId ?? store.getCanvas(canvasId)?.ownerId,
         })
-        return saved.ok ? ok('sent to the Doop team — carry on with the task') : fail(saved.error)
+        return saved.ok ? ok(saved.note) : fail(saved.error)
       }
       case 'set_guidelines': {
         const raw = block.input as { name?: string; markdown?: string; title?: string }

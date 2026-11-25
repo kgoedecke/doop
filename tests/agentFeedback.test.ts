@@ -1,10 +1,15 @@
-import { beforeAll, expect, it, vi } from 'vitest'
+import { afterEach, beforeAll, expect, it, vi } from 'vitest'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
 import type { drizzle as pgliteDrizzle } from 'drizzle-orm/pglite'
+import { resolveActor } from '../server/actions.ts'
+import { execTool, newRunState } from '../server/resident.ts'
 import { db } from '../server/db/index.ts'
 import { buildMcpServer } from '../server/mcp.ts'
 import { listAgentFeedback, recordAgentFeedback } from '../server/agentFeedback.ts'
+import { stubEnv, unstubAllEnvs } from './envStub.ts'
+
+afterEach(unstubAllEnvs)
 
 vi.mock('../server/db/index.ts', async () => {
   const { PGlite } = await import('@electric-sql/pglite')
@@ -32,7 +37,11 @@ function textOf(result: Awaited<ReturnType<Client['callTool']>>): string {
   return first?.text ?? ''
 }
 
-it('stores what an MCP agent reports, with the account and client it came from', async () => {
+it.each([
+  ['http://localhost:4300', "this instance's admins"],
+  ['https://doop.design', 'the Doop team'],
+])('stores what an MCP agent reports, with the account and client it came from on %s', async (origin, recipient) => {
+  stubEnv('BETTER_AUTH_URL', origin)
   const client = await connectAs('user-report')
   const result = await client.callTool({
     name: 'report_issue',
@@ -44,7 +53,8 @@ it('stores what an MCP agent reports, with the account and client it came from',
     },
   })
   expect(result.isError).toBeFalsy()
-  const { id } = JSON.parse(textOf(result)) as { id: string }
+  const { id, note } = JSON.parse(textOf(result)) as { id: string; note: string }
+  expect(note).toContain(recipient)
 
   const stored = (await listAgentFeedback()).reports.find((r) => r.id === id)
   expect(stored).toMatchObject({
@@ -60,14 +70,19 @@ it('stores what an MCP agent reports, with the account and client it came from',
   await client.close()
 })
 
-it('stores ideas from share_feedback apart from issues', async () => {
+it.each([
+  ['https://design.example.org', "this instance's admins"],
+  ['https://www.doop.design', 'the Doop team'],
+])('stores ideas from share_feedback apart from issues on %s', async (origin, recipient) => {
+  stubEnv('BETTER_AUTH_URL', origin)
   const client = await connectAs('user-idea')
   const result = await client.callTool({
     name: 'share_feedback',
     arguments: { category: 'idea', message: 'a batch edit_frame_html would save me a call per change' },
   })
   expect(result.isError).toBeFalsy()
-  const { id } = JSON.parse(textOf(result)) as { id: string }
+  const { id, note } = JSON.parse(textOf(result)) as { id: string; note: string }
+  expect(note).toContain(recipient)
   expect((await listAgentFeedback()).reports.find((r) => r.id === id)).toMatchObject({
     kind: 'feedback',
     category: 'idea',
@@ -79,6 +94,18 @@ it('stores ideas from share_feedback apart from issues', async () => {
   })
   expect(wrongKind.isError).toBe(true)
   await client.close()
+})
+
+it('tells the resident agent where feedback is saved on a local instance', async () => {
+  stubEnv('BETTER_AUTH_URL', 'http://localhost:4300')
+  const result = await execTool(
+    { type: 'tool_use', id: 'feedback', name: 'share_feedback', input: { category: 'idea', message: 'Add a ruler' } },
+    'local-canvas',
+    resolveActor({ name: 'Doop Agent', kind: 'agent' }),
+    newRunState(),
+  )
+  expect(result.is_error).toBeUndefined()
+  expect(result.content).toContain("this instance's admins")
 })
 
 it('refuses a canvas the account cannot see', async () => {

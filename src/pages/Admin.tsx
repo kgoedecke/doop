@@ -376,9 +376,7 @@ export function Admin() {
 
 type KindFilter = 'all' | AgentFeedbackKind
 
-/** What agents sent the Doop team: issues (report_issue) and ideas or praise
- *  (share_feedback). Search and the kind filter run on the server, so older
- *  reports stay findable; the list loads a page at a time. */
+/** The server filters before paginating, so search includes older reports. */
 function AgentFeedbackList({ q }: { q: string }) {
   const [kind, setKind] = useState<KindFilter>('all')
   const [search, setSearch] = useState(q.trim())

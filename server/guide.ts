@@ -590,7 +590,8 @@ gives PNG, JPG or PDF, export_layer one element (get_guide export).
 
 ## Problems with Doop itself — report_issue and share_feedback
 
-Two tools reach the Doop team, never the humans on the canvas, and change no canvas:
+These tools save reports for this instance's admins under Admin → Agent feedback. They do not
+change the canvas or notify its collaborators.
 
 - report_issue — Doop got in your way: a tool errored or did something other than its
   description says, this guide or a tool description left you guessing, a capability you
