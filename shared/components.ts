@@ -253,6 +253,7 @@ export type ComponentIssueCode =
   | 'library_ambiguous'
   | 'ignored_attribute'
   | 'css_not_kept'
+  | 'css_unmatched'
   | 'css_not_read'
   | 'empty_template'
   | 'unclosed_use'
