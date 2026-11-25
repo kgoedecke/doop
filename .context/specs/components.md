@@ -127,12 +127,21 @@ back to storing them.
   utility class, else what the element or its nearest ancestor is (`h1`-`h6` title, `button` / `a`
   label, `img` image, `li` item, otherwise text); a link's target is `link` or `<name>-link`.
   `create_component` lists them as `inferred_props`.
-- **CSS**: the server has no CSSOM, so rules are matched on what their selectors name, over-keeping
-  occasionally. A rule whose subject is inside a nested component is kept when its selector reaches
+- **CSS**: what is passed as `css` to `create_component` / `update_component` sits in the main's frame
+  as `<style data-doop-component-source="<id>">`, the component's own CSS, kept apart from the page's.
+  Its rules naming something in the main are kept as matched. One naming nothing in the main as it
+  stands is kept too when it is anchored to the component (a compound names a class or id of the main's
+  own elements, or the root's tag in an attribute state): a state the main is not in yet
+  (`.faq-row[open] summary::after`, `details[open] > summary`), an element a script adds, one under a
+  theme class (`html.dark .card.is-on`). It is scoped by its subject,
+  `:is(<selector>):where([data-doop-instance="<id>"], [data-doop-instance="<id>"] *)`, so only elements
+  of an instance are styled, and is named in a `css_unmatched` note in case it is a typo. A rule not
+  anchored (a page's rule pasted along, `.hero h1`; a typo; a nested component's alone, `.btn .label`)
+  is left out and named in `css_not_kept`. The rest of the main's frame stylesheet (a page a component
+  was made from) is matched on what its selectors name, as the server has no CSSOM, over-keeping
+  occasionally: a rule whose subject is inside a nested component is taken when its selector reaches
   there from one of the component's own elements (`.plan .btn`), and applies inside this component's
-  instances only; a bare `.btn` is the nested component's to carry. Rules passed as `css` to
-  `create_component` / `update_component` that were not kept come back as a `css_not_kept` issue naming
-  their selectors. Rules are scoped with `:where([data-doop-instance="<id>"])`, which adds no specificity.
+  instances only; a bare `.btn` is the nested component's to carry. Matched rules are scoped with `:where([data-doop-instance="<id>"])`, which adds no specificity.
   Inherited declarations and used custom properties from `html` / `body` / `:root` land on the instance
   root. Stylesheet links and the Tailwind CDN script are carried as `head`.
 

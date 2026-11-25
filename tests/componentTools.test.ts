@@ -1,5 +1,6 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
+import { parse } from 'parse5'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('../server/db/persist.ts', () => ({
@@ -24,6 +25,9 @@ import { resolveActor, takeComponentIssues } from '../server/actions.ts'
 import { findComponent } from '../server/componentActions.ts'
 import { previewCombinations, previewDocument } from '../server/componentPreview.ts'
 import { activeComponents } from '../shared/components.ts'
+import { splitTopLevel } from '../server/componentCss.ts'
+import { resolveElement } from '../server/elementIds.ts'
+import { elementIs } from '../server/parse5Select.ts'
 
 const OWNER = 'owner-1'
 const AGENT = { agent_name: 'Tester' }
@@ -590,6 +594,103 @@ describe('an agent working with components', () => {
       css: '.plan .btn { width: 50% }',
     })
     expect(clean.text).not.toContain('were not kept')
+  })
+
+  /* #517: the CSS an agent writes for a component is the component's. Doop used to keep only the
+     rules naming something in the main as it stands, so a state it is not in yet ([open], .is-on)
+     or an element a script adds was dropped. A page's own stylesheet is still matched against the
+     main when a component is made from an element on it. */
+  it('keeps rules for states and script-added elements from the css written for a component', async () => {
+    const canvas = newCanvas()
+    const made = await call('create_component', {
+      canvas_id: canvas.id,
+      name: 'FAQ Row',
+      html: '<details class="faq-row"><summary class="q">Question</summary><p class="a">Answer</p></details>',
+      css:
+        '.faq-row { border-bottom: 1px solid #ddd } .faq-row[open] summary::after { content: "−" } .faq-row .copied-toast { opacity: 1 } ' +
+        'details[open] > summary { font-weight: 600 } .hero h1 { font-size: 72px } .nope { color: green }',
+    })
+    expect(made.isError).toBe(false)
+    const faq = findComponent(canvas.id, 'FAQ Row')!
+    expect(faq.rawCss).toContain('.faq-row[open] summary::after { content: "−" }')
+    expect(faq.rawCss).toContain('.faq-row .copied-toast { opacity: 1 }')
+    expect(faq.rawCss).toContain('details[open] > summary { font-weight: 600 }')
+    /* not about this component: a page's rule pasted along, and a typo, are left out and named */
+    expect(faq.rawCss).not.toContain('.hero')
+    expect(faq.rawCss).not.toContain('.nope')
+    expect(made.text).toContain('were not kept: .hero h1, .nope')
+    expect(made.text).toContain('were kept for a state it is not in yet or an element a script adds')
+    /* scoped, so it can never reach outside an instance: every selector of every kept rule names it */
+    const scope = `[data-doop-instance="${faq.id}"]`
+    for (const rule of faq.css.split('\n').filter((line) => line.includes('{') && !line.startsWith('@'))) {
+      for (const selector of rule.slice(0, rule.indexOf('{')).split(/,(?![^(]*\))/)) expect(selector).toContain(scope)
+    }
+
+    /* The white ::after belongs to an open FAQ instance under the dark theme. */
+    const themed = await call('update_component', {
+      canvas_id: canvas.id,
+      component: 'FAQ Row',
+      css: `${faq.rawCss}\nhtml.dark .faq-row[open] summary::after { color: white }`,
+    })
+    expect(themed.isError).toBe(false)
+    const css = findComponent(canvas.id, 'FAQ Row')!.css
+    const whiteRule = css.match(/^([^{}\n]+)\s*\{\s*color:\s*white\s*;?\s*\}/m)
+    expect(whiteRule).toBeTruthy()
+    const subjects = splitTopLevel(whiteRule![1]!, ',').map((selector) => {
+      expect(selector).toMatch(/::after$/)
+      return selector.replace(/::after$/, '')
+    })
+    function matchesSummary(theme: string, state: string, instance: string) {
+      const doc = parse(`<html class="${theme}"><body>
+        <details class="faq-row" ${state} data-doop-instance="${instance}"><summary>Question</summary></details>`)
+      const summary = resolveElement(doc, 'body > details > summary')!
+      return subjects.some((selector) => elementIs(summary, selector))
+    }
+    expect(matchesSummary('dark', 'open', faq.id)).toBe(true)
+    expect(matchesSummary('light', 'open', faq.id)).toBe(false)
+    expect(matchesSummary('dark', '', faq.id)).toBe(false)
+    expect(matchesSummary('dark', 'open', 'other')).toBe(false)
+
+    const page = await framed(
+      canvas.id,
+      '<style>.hero { padding: 80px } .stat { color: red } .stat.is-up .arrow { color: green }</style>' +
+        '<section class="hero"><div class="stat" data-doop-id="stat-one"><b class="value">12</b></div></section>',
+    )
+    const fromPage = await call('create_component', {
+      canvas_id: canvas.id,
+      name: 'Stat',
+      frame_id: page,
+      element: 'stat-one',
+    })
+    expect(fromPage.isError).toBe(false)
+    const stat = findComponent(canvas.id, 'Stat')!
+    expect(stat.rawCss).toContain('.stat { color: red }')
+    /* the page's own rule for another element is not the component's */
+    expect(stat.rawCss).not.toContain('.hero')
+  })
+
+  /* each component keeps the css written for it, and only that: two mains on one page whose
+     blocks share a selector do not take each other's rules */
+  it('keeps one component’s css out of another’s on the same page', async () => {
+    const canvas = newCanvas()
+    const page = await framed(
+      canvas.id,
+      '<div class="item" data-doop-id="item-a"><i class="chev">a</i></div>' +
+        '<div class="item" data-doop-id="item-b"><i class="chev">b</i></div>',
+    )
+    for (const [name, element, rule] of [
+      ['A', 'item-a', '.item[open] .chev { rotate: 90deg }'],
+      ['B', 'item-b', '.item[open] .chev { color: red }'],
+    ] as const) {
+      expect((await call('create_component', { canvas_id: canvas.id, name, frame_id: page, element })).isError).toBe(
+        false,
+      )
+      expect((await call('update_component', { canvas_id: canvas.id, component: name, css: rule })).isError).toBe(false)
+    }
+    expect(findComponent(canvas.id, 'A')!.rawCss).toContain('rotate: 90deg')
+    expect(findComponent(canvas.id, 'A')!.rawCss).not.toContain('color: red')
+    expect(findComponent(canvas.id, 'B')!.rawCss).toContain('color: red')
+    expect(findComponent(canvas.id, 'B')!.rawCss).not.toContain('rotate: 90deg')
   })
 
   it('says where it could not read a component’s CSS past', async () => {

@@ -15,7 +15,7 @@ import {
   type ComponentProp,
 } from '../shared/components.ts'
 import { componentClosure } from '../shared/frameCompose.ts'
-import { extractComponentCss, frameHeadTags, frameStylesheets } from './componentCss.ts'
+import { componentSourceCss, extractComponentCss, frameHeadTags, frameStylesheets } from './componentCss.ts'
 import {
   attrOf,
   contextOfDefs,
@@ -200,6 +200,8 @@ function prepareMains(
   let sheetCache: string | undefined
   let headCache: string[] | undefined
   const sheet = () => (sheetCache ??= frameStylesheets(html))
+  let sourceCache: Map<string, string> | undefined
+  const sources = () => (sourceCache ??= componentSourceCss(html))
   const headTags = () => [...(headCache ??= frameHeadTags(html))]
   for (const found of findMarked(html, COMPONENT_ATTR)) {
     const id = attrOf(found.el, COMPONENT_ATTR) ?? ''
@@ -243,7 +245,7 @@ function prepareMains(
       continue
     }
     const variants = def.props.filter((prop) => prop.type === 'enum').map((prop) => `data-${prop.name}`)
-    const extracted = extractComponentCss(sheet(), found.el, id, variants)
+    const extracted = extractComponentCss(sheet(), found.el, id, variants, sources().get(id))
     const css = withHostedIcons(extracted.css)
     const rawCss = withHostedIcons(extracted.rawCss)
     const head = headTags()

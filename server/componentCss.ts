@@ -1,7 +1,7 @@
 import { serializeOuter, type DefaultTreeAdapterTypes as Tree } from 'parse5'
 import { parse } from './workBudget.ts'
 import { elementIs } from './parse5Select.ts'
-import { CSS_ATTR, DETACHED_CSS_ATTR, HEAD_ATTR, INSTANCE_ATTR } from '../shared/components.ts'
+import { CSS_ATTR, DETACHED_CSS_ATTR, HEAD_ATTR, INSTANCE_ATTR, SOURCE_CSS_ATTR } from '../shared/components.ts'
 import { TOKEN_BLOCK_ATTR } from '../shared/designTokens.ts'
 import { FONT_BLOCK_ATTR } from '../shared/fonts.ts'
 import { WEB_FONT_LINK_ATTR } from '../shared/webFonts.ts'
@@ -303,6 +303,22 @@ interface Relevant {
   prefix: string
 }
 
+/** A rule's selector as kept: matched on the main (`Relevant`), or written for the component and
+ *  matching nothing in it as it stands, scoped by its subject alone (`subject`). */
+type Kept = Relevant & { subject?: true }
+
+/** A pseudo-element ends a selector and cannot sit inside `:is()`. */
+const TRAILING_PSEUDO_ELEMENT = /(::[\w-]+(?:\([^)]*\))?|:(?:before|after|first-line|first-letter))$/i
+
+/** Scoped by its subject: the element it styles has to be an instance or inside one, while what
+ *  the selector says about that element's ancestors is left as written (`html.dark`, a theme
+ *  attribute, a state on the instance root). Specificity stays the selector's own. */
+export function scopeSubject(selector: string, scope: string): string {
+  const pseudo = TRAILING_PSEUDO_ELEMENT.exec(selector)?.[0] ?? ''
+  const base = selector.slice(0, selector.length - pseudo.length).trim()
+  return `:is(${base || '*'}):where(${scope}, ${scope} *)${pseudo}`
+}
+
 /** The selector as far as it concerns the subtree: compounds naming ancestors outside it are cut off.
  *  Null when its subject is not in the subtree at all. A subject inside a nested component counts
  *  only when the selector reaches it from one of the main's own elements (`.plan .btn`): that is
@@ -460,8 +476,33 @@ function ancestorsOf(root: Element): Element[] {
   return chain
 }
 
-/** The selectors in a stylesheet written for one component that name nothing in it, so that
- *  `extractComponentCss` leaves their rules behind: what its author should hear about. */
+/** Whether a selector is about this component: one of its compounds names a class or an id the
+ *  main's own elements have, or the main's root tag in an attribute state (`details[open]`). A
+ *  rule that is not is a page's, a typo, or a nested component's, never kept on trust. */
+function anchored(selector: string, own: Tokens, rootTag: string): boolean {
+  return compoundsOf(selector).some(({ compound }) => {
+    const wanted = compoundTokens(compound)
+    if ([...wanted.classes].some((name) => own.classes.has(name))) return true
+    if ([...wanted.ids].some((id) => own.ids.has(id))) return true
+    return wanted.tags.has(rootTag) && wanted.attrs.size > 0 && wanted.classes.size === 0
+  })
+}
+
+/** Of the selectors `unmatchedSelectors` names for a main, the ones `extractComponentCss` keeps
+ *  anyway when they were written for the component (anchored to it) and the ones it leaves out. */
+export function sortUnmatched(
+  selectors: string[],
+  root: Element,
+  variantAttrs: string[] = [],
+): { kept: string[]; dropped: string[] } {
+  const { own } = mainTokens(root, variantAttrs)
+  const kept = selectors.filter((selector) => anchored(selector, own, root.tagName))
+  return { kept, dropped: selectors.filter((selector) => !kept.includes(selector)) }
+}
+
+/** The selectors in a stylesheet written for one component that name nothing in its main as it
+ *  stands. `extractComponentCss` keeps their rules (scoped by subject); this says which, so the
+ *  author can tell a state or a script-added element from a typo. */
 export function unmatchedSelectors(sheet: string, root: Element, variantAttrs: string[] = []): string[] {
   const tokens = mainTokens(root, variantAttrs)
   const unmatched: string[] = []
@@ -478,6 +519,22 @@ export function unmatchedSelectors(sheet: string, root: Element, variantAttrs: s
   return [...new Set(unmatched)]
 }
 
+/** The CSS written for each component whose main is in this frame: its `data-doop-component-source`
+ *  block, by component id. */
+export function componentSourceCss(html: string): Map<string, string> {
+  const sources = new Map<string, string[]>()
+  /* most frames hold no main made from css: no second parse for them */
+  if (!html.includes(SOURCE_CSS_ATTR)) return new Map()
+  walkElements(parse(html), (el) => {
+    if (el.tagName !== 'style') return
+    const id = el.attrs.find((attr) => attr.name === SOURCE_CSS_ATTR)?.value
+    const text = el.childNodes[0]
+    if (id) sources.set(id, [...(sources.get(id) ?? []), text && 'value' in text ? text.value : ''])
+  })
+  /* the walk runs last-to-first: back in document order, each block on its own lines */
+  return new Map([...sources].map(([id, blocks]) => [id, blocks.reverse().join('\n')]))
+}
+
 const usedFonts = (css: string) =>
   new Set(
     [...css.matchAll(/font(?:-family)?\s*:([^;}]+)/gi)].flatMap((match) =>
@@ -491,7 +548,8 @@ function cssVarsIn(text: string): string[] {
 
 /* blocks the server writes into every frame after the components pass: not a design's own rules,
    and reading them back would freeze a token's value into a component and bump it on the next save */
-const MANAGED_STYLE_ATTRS = new Set([CSS_ATTR, DETACHED_CSS_ATTR, TOKEN_BLOCK_ATTR, FONT_BLOCK_ATTR])
+/* a component's source block is that component's own CSS (`componentSourceCss`), not the page's */
+const MANAGED_STYLE_ATTRS = new Set([CSS_ATTR, DETACHED_CSS_ATTR, TOKEN_BLOCK_ATTR, FONT_BLOCK_ATTR, SOURCE_CSS_ATTR])
 
 /** Everything in a frame's own stylesheets (never another component's copy, nor a managed block). */
 export function frameStylesheets(html: string): string {
@@ -529,16 +587,23 @@ export interface ExtractedCss {
   rawCss: string
 }
 
-/** `variantAttrs` are attributes instances wear and the main need not: `data-<enum prop>` on the root. */
+/** `variantAttrs` are attributes instances wear and the main need not: `data-<enum prop>` on the root.
+ *  `sheet` is the frame's own CSS (`frameStylesheets`, no component's source block in it): its rules are
+ *  taken when their selectors name something in the main. `own` is the CSS written for this component
+ *  (its `data-doop-component-source` block): every rule of it is the component's, whatever it names. */
 export function extractComponentCss(
   sheet: string,
   root: Element,
   componentId: string,
   variantAttrs: string[] = [],
+  own?: string,
 ): ExtractedCss {
   const scope = `[${INSTANCE_ATTR}="${componentId}"]`
   const tokens = mainTokens(root, variantAttrs)
-  const nodes = parseCss(sheet)
+  const pageNodes = parseCss(sheet)
+  const ownNodes = own === undefined ? [] : parseCss(own)
+  /* document rules, @keyframes and @font-face are read from both */
+  const nodes = [...pageNodes, ...ownNodes]
   const customProps = new Map<string, string>()
   const inherited: string[] = []
 
@@ -553,22 +618,37 @@ export function extractComponentCss(
   }
   collectDocumentRules(nodes)
 
-  const keptRules = (list: CssNode[], write: (relevant: Relevant) => string): string[] =>
+  /* a rule written for the component that names nothing in the main as it stands (a state it is
+     not in yet, an element a script adds, one under a theme class on <html>) is kept as written
+     and scoped by its subject, so it reaches nothing outside the instances; but only when it is
+     anchored to the component: a page's rule pasted along (.hero h1), a typo or a rule for a
+     nested component alone (.btn .label) is left out, as before */
+  const keptRules = (list: CssNode[], write: (relevant: Kept) => string, trusted: boolean): string[] =>
     list.flatMap((node) => {
       if (node.kind === 'group') {
-        const inner = keptRules(node.nodes, write)
+        const inner = keptRules(node.nodes, write, trusted)
         return inner.length ? [`${node.prelude} {\n${inner.join('\n')}\n}`] : []
       }
       if (node.kind === 'atomic') return []
       const selectors = splitTopLevel(node.selector, ',').flatMap((selector) => {
         if (isDocumentSelector(selector)) return []
-        const relevant = relevantSelector(selector, tokens)
+        const relevant: Kept | null =
+          relevantSelector(selector, tokens) ??
+          (trusted && anchored(selector, tokens.own, root.tagName)
+            ? { selector: selector.trim(), prefix: '', subject: true }
+            : null)
         return relevant ? [write(relevant)] : []
       })
       return selectors.length ? [`${selectors.join(', ')} {${node.body}}`] : []
     })
-  const rules = keptRules(nodes, ({ selector, prefix }) => scopeSelector(selector, scope, prefix))
-  const rawRules = keptRules(nodes, ({ selector, prefix }) => (prefix ? `${prefix} ${selector}` : selector))
+  const scoped = (kept: Kept) =>
+    kept.subject ? scopeSubject(kept.selector, scope) : scopeSelector(kept.selector, scope, kept.prefix)
+  const raw = ({ selector, prefix }: Kept) => (prefix ? `${prefix} ${selector}` : selector)
+  /* the page's rules first, then the component's own: the order they cascade in on the main's frame.
+     A component made from a page and later given css can hold a rule twice: kept once */
+  const unique = (list: string[]) => [...new Set(list)]
+  const rules = unique([...keptRules(pageNodes, scoped, false), ...keptRules(ownNodes, scoped, true)])
+  const rawRules = unique([...keptRules(pageNodes, raw, false), ...keptRules(ownNodes, raw, true)])
   const ruleText = rules.join('\n')
 
   /* inherited and custom properties land on the instance root, so its text

@@ -39,7 +39,7 @@ import {
   refuseUnclosedUses,
   withinRevision,
 } from './components.ts'
-import { unmatchedSelectors, unreadCss } from './componentCss.ts'
+import { sortUnmatched, unmatchedSelectors, unreadCss } from './componentCss.ts'
 import {
   alignParts,
   attrOf,
@@ -665,16 +665,17 @@ export const createComponentFromHtml = atomic(function createComponentFromHtml(
   writeNewMain(canvasId, def, serializeOuter(root), input.css ?? '', actor, input.width, input.height)
   const component = requireComponent(canvasId, def.id)
   /* the component is made: a note that cannot be worked out within budget is left out */
-  if (input.css) optional(() => reportCssNotKept(component, input.css!))
+  if (input.css) optional(() => reportUnmatchedCss(component, input.css!))
   actions.logComponent(canvasId, actor, `created component “${name}”`)
   return { component, inferred }
 })
 
 const MAX_SELECTORS_NAMED = 8
 
-/** Rules handed over as a component's CSS that it did not keep, or could not read: said in the
- *  result of the call that passed them, since the main's frame still shows them and nothing else would. */
-function reportCssNotKept(def: ComponentDef, css: string) {
+/** CSS handed over for a component that could not be read, or whose selectors name nothing in the
+ *  main as it stands: said in the result of the call that passed them. Those rules are kept (the CSS
+ *  written for a component is its own, scoped to its instances), so this is a hint at a typo, not a loss. */
+function reportUnmatchedCss(def: ComponentDef, css: string) {
   const frame = def.mainFrameId ? store.getFrame(def.mainFrameId) : undefined
   const main = frame
     ? findMarked(frame.html, COMPONENT_ATTR).find((found) => attrOf(found.el, COMPONENT_ATTR) === def.id)
@@ -688,14 +689,23 @@ function reportCssNotKept(def: ComponentDef, css: string) {
     })
   }
   const variants = def.props.filter((prop) => prop.type === 'enum').map((prop) => `data-${prop.name}`)
-  const selectors = unmatchedSelectors(css, main.el, variants)
-  if (!selectors.length) return
-  const more = selectors.length - MAX_SELECTORS_NAMED
-  const named = `${selectors.slice(0, MAX_SELECTORS_NAMED).join(', ')}${more > 0 ? ` and ${more} more` : ''}`
-  actions.addComponentIssue(frame.id, {
-    code: 'css_not_kept',
-    message: `these CSS rules name nothing in “${def.name}” and were not kept: ${named}. A component keeps the rules for its own elements. To restyle a component nested in it, start the selector at one of its own elements (.card .btn), which applies inside this component only; to restyle that component everywhere, update_component it instead.`,
-  })
+  const { kept, dropped } = sortUnmatched(unmatchedSelectors(css, main.el, variants), main.el, variants)
+  const listed = (selectors: string[]) => {
+    const more = selectors.length - MAX_SELECTORS_NAMED
+    return `${selectors.slice(0, MAX_SELECTORS_NAMED).join(', ')}${more > 0 ? ` and ${more} more` : ''}`
+  }
+  if (dropped.length) {
+    actions.addComponentIssue(frame.id, {
+      code: 'css_not_kept',
+      message: `these CSS rules name nothing in “${def.name}” and were not kept: ${listed(dropped)}. A component keeps the rules for its own elements, and the ones starting at one of them for a state it is not in yet or an element a script adds. To restyle a component nested in it, start the selector at one of its own elements (.card .btn), which applies inside this component only; to restyle that component everywhere, update_component it instead.`,
+    })
+  }
+  if (kept.length) {
+    actions.addComponentIssue(frame.id, {
+      code: 'css_unmatched',
+      message: `these CSS rules name nothing in “${def.name}” as its main stands, and were kept for a state it is not in yet or an element a script adds: ${listed(kept)}. If neither, check them for a typo.`,
+    })
+  }
 }
 
 function writeNewMain(
@@ -845,7 +855,7 @@ export const updateComponent = atomic(function updateComponent(
   }
   /* the update has landed: a note that cannot be worked out within budget is left out,
      never turned into a refusal of what is already done */
-  if (input.css) optional(() => reportCssNotKept(requireComponent(canvasId, def.id), input.css!))
+  if (input.css) optional(() => reportUnmatchedCss(requireComponent(canvasId, def.id), input.css!))
   actions.logComponent(canvasId, actor, `updated component “${meta.name}”`)
   return {
     component: requireComponent(canvasId, def.id),

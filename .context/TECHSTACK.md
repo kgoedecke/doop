@@ -1408,7 +1408,11 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   `<doop-user-chip>`. Tests: `componentDrops.test.ts`, the `<doop-use>` cases in `inlineData.test.ts`. A component's CSS is read with CSS escapes honoured (Tailwind's `\'` in
   `[class*='size-']` is part of a class name, not a string); a sheet that still cannot be read to the
   end (a string or block left open, text outside a rule) is reported as `css_not_read` with where it
-  went wrong, beside `css_not_kept`. Tests: `componentCssEscapes.test.ts`.
+  went wrong, beside `css_unmatched`. The CSS written for a component (its `data-doop-component-source`
+  block) is kept apart from the page's: a rule of it naming nothing in the main is kept, scoped by
+  its subject, when it is anchored to the component (a state, a script-added element), and left out
+  as `css_not_kept` when not (`extractComponentCss`'s `own`, `sortUnmatched`, #517). Tests: `componentCssEscapes.test.ts`,
+  the state and script-added cases in `componentTools.test.ts`.
 - Component system first (`SYSTEM_FIRST`, `COMPOSE_CHECK` in `server/guide.ts`): the guide opens
   with a must-do list (tokens, then a component system set up the way a designer sets up a Figma
   file, then screens composed from it; themes are tokens, never a copied frame), the brief creates
