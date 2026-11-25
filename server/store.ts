@@ -1560,8 +1560,9 @@ class Store {
       frame.approval = { ...frame.approval, status: 'needs_review' }
     }
     // Also serves as the optimistic-save version, including writes in the same millisecond.
-    frame.updatedAt = Math.max(Date.now(), frame.updatedAt + 1)
-    frame.updatedBy = by
+    // An annotation moves the version a step and leaves the author: nobody edited the design.
+    frame.updatedAt = opts.annotation ? frame.updatedAt + 1 : Math.max(Date.now(), frame.updatedAt + 1)
+    if (!opts.annotation) frame.updatedBy = by
     const stamp = frame.updatedAt
     const restacked = patch.z !== undefined
     if (before)
@@ -1578,7 +1579,8 @@ class Store {
             if (this.getFrame(frame.id) === frame) persist.saveFrame(frame)
           })
       })
-    this.touchCanvas(c, stamp)
+    /* an annotation changed nothing anyone sees: the canvas is no more recent for it */
+    if (!opts.annotation) this.touchCanvas(c, stamp)
     this.saveFrameLater(frame) // debounced: streaming appends land as one write per burst
     this.saveCanvasLater(c)
     return frame

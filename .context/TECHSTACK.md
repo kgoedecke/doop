@@ -27,6 +27,11 @@ server/index.ts` in prod. `erasableSyntaxOnly` and `verbatimModuleSyntax` in tsc
   so nothing else is re-serialized; `actions.ensureElementId`, exposed as
   `POST /api/frames/:id/element-id` to the comment role) as an annotation: `store.updateFrame`'s
   `annotation` option keeps `ready_for_dev` sign-off, and no version or activity line is written.
+  Nor is it an edit: `updatedBy` stays the design's last author and `updatedAt` moves one step past
+  the version before, not to now (`store.updateFrame`), so a save made against the older version is
+  still a conflict, while agents reading `updatedBy`/`updatedAt` for who is mid-edit are not told a
+  commenter just edited the frame. Every annotation writer (stamps, token and theme renames,
+  component markup written out again) files it so.
   A positional path that does not resolve in the saved HTML (a script-made element, a frame
   mid-stream) is refused, and a comment falls back to the frame at its point. The frame runtime's
   probe reports an existing id as `elementId`; its positional `cssPath` is now only the editor's
