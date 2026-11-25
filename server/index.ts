@@ -102,6 +102,7 @@ import { encryptionConfigured } from './secretBox.ts'
 import * as authSchema from './db/auth-schema.ts'
 import * as persist from './db/persist.ts'
 import { handleMcpRequest } from './mcp.ts'
+import { mountAgentApi } from './agentApi.ts'
 import { createImportedWebpageFrame } from './webpageImport.ts'
 import { refundUnlessDone } from './chargedWork.ts'
 import { RendererBusyError } from './renderBrowser.ts'
@@ -975,6 +976,8 @@ for (const extension of extensions) {
 
 app.use(express.json({ limit: '10mb' }))
 mountEditorPublicRoutes(app)
+/* agent keys, not browser sessions: ahead of the session gate on /api */
+mountAgentApi(app)
 app.all('/gemini-cloud/mcp/:id', (req, res, next) => {
   handleGeminiCloudMcp(req, res).catch(next)
 })

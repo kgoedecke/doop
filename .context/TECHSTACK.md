@@ -150,6 +150,67 @@ server/index.ts` in prod. `erasableSyntaxOnly` and `verbatimModuleSyntax` in tsc
   memory (one process). Built by `scripts/build-vscode-extension.mjs` (`--vsix` packs it), published on a `vscode-v*`
   tag by `.github/workflows/vscode-extension.yml`. Tests: `editorConnect.test.ts`, `editorConnectHttp.test.ts`,
   `vscodeToml.test.ts`.
+- Agent API (`server/agentApi.ts`, mounted at `/api/v1` ahead of the session gate): frames as files over
+  HTTP for a process holding an agent key, which is the only credential it takes (a browser session gets 401).
+  `GET /frames/:id/html` answers the frame as agents edit it (`?form=rendered`: composed, as it renders),
+  `PUT /frames/:id/html` replaces it from the raw body and `POST /canvases/:id/frames?name=&width=&height=&page=`
+  creates one. Writes go through `runCanvasWrite` with the MCP surface's inline-data rule, one operation
+  per request (`withArgsCanvases`), under the roles the MCP tools use, and a read waits for queued component changes as `get_frame` does. A frame's `updatedAt` is its version:
+  the `ETag`, and `If-Match` becomes the write's `ifUpdatedAt`, checked in the same step as the write.
+  An answer to a write is sent after its operation has committed. A write answers the frame, `html_changed` (the canvas stored the markup differently), `warnings` (what
+  could not be done with components), `notes` (reuse advice) and the human `feedback` it claimed. Errors are
+  `{ error: { code, message } }`: 401 `unauthorized`, 403 `forbidden`, 404 `not_found`, 409 `conflict` (with the
+  frame as it is now), 422 `refused` (inline data), 400 `invalid` (a body that is not HTML, a bad `If-Match`),
+  413 `too_large`. The agent is its account plus the `Doop-Agent` header, the identity an MCP agent of that
+  name has. Tested in `tests/agentApi.test.ts`.
+- Doop CLI (`cli/doop.ts`, `cli/doop/`, built to `public/cli/doop.mjs` by `bun run build:cli` and served at
+  `/cli/doop.mjs`): Doop from a shell, for coding agents and scripts. Frame HTML goes over the agent API;
+  everything else is plain `tools/call` requests to `/mcp` (no session, no SDK), so it has the MCP tools'
+  permissions, transactions and human feedback. One dependency-free file, with an agent key for both.
+  - Sign-in: `doop login --key`, kept per server in `~/.config/doop/credentials.json` (0600), or `DOOP_API_KEY`.
+    A saved key goes to the server it was saved for. A key from the environment or `--key` goes only to a
+    server its holder named (`--server`, `DOOP_SERVER`, else doop.design), never to one that only a
+    `.doop/config.json` or a `doop link` URL names (exit 4): a cloned repository must not collect it.
+    A linked directory uses its config's server, whichever one was signed in to last, and `doop login` signs in
+    to a server its holder named (never the linked one unasked) and checks the key it was given. `agent_name` is
+    `--agent`, `DOOP_AGENT_NAME`, else the harness it runs under (Claude, Cursor, Gemini, Codex), else "Doop CLI".
+  - `doop link <id, name or URL>` writes `.doop/config.json` (canvas, server, the directory frames are
+    pulled to; meant to be committed; a `dir` or a tracked path that leaves the project is refused) and `.doop/.gitignore` for `state.json`,
+    `shots/` and `expanded/`.
+  - Frames are files: `pull` writes a frame's HTML to `<dir>/<slug>.html`, `push` sends a changed file and
+    creates a frame from an untracked one. `.doop/state.json` holds, per file, the frame id, the sha256 of
+    the HTML both sides last agreed on and the frame's version. A push carries that version, so the server
+    refuses a stale file as it writes (exit 3) unless `--force`; a frame that moved on without its HTML
+    changing (renamed, approved) is retried at its new version, and an element id stamped for a comment
+    counts as a change, so an older file cannot strip it. A pull over a file that changed locally too is the
+    same conflict. A tracked frame deleted on the canvas is reported as gone and its file kept. After a push
+    the file is rewritten when the canvas stored the markup differently, and `warnings` print first.
+  - Components are files too, in `<dir>/components/`: `<slug>.html` (the template), `.css` (its rules) and
+    `.json` (name, description, props), from `get_component`. A push sends only the parts that changed
+    through `update_component` with the pulled revision as `expected_rev`, so the server refuses a stale one
+    in the same write (exit 3); new files go through `create_component`. Components are pulled and pushed
+    before frames. A component's main frame is not pulled as a frame, and a component that follows a
+    workspace library is listed but not pulled. `screenshot` on a component file is `get_component_preview`.
+  - `doop expand` (and `pull --expand`) writes a frame as it renders (`get_frame` with `expand_components`)
+    to `.doop/expanded/`, marked as generated; `push` refuses any path under `.doop/`.
+  - `screenshot`, `export` and `call` write images and PDFs to disk and print the path (`.doop/shots/` for
+    screenshots); `inspect` prints `problems` only, the full report under `--json`.
+  - `doop wait` polls `get_comments` and then `get_feedback` (which claims the requests, so nothing may fail
+    after it) every 5s and exits when a person leaves something, or with exit 6 after `--timeout` (30m unless
+    set, 0 for none). New comments are those after `commentsSeenAt` in `.doop/state.json`, the newest one a
+    wait has seen, so one left between two waits is reported by the second.
+  - `tokens pull` writes `get_tokens` in any of its formats; `tokens push` sends only what differs from the
+    canvas (`create_tokens`, then `set_tokens`), deleting only with `--prune`. `asset upload` fills the
+    one-time upload ticket for a local file.
+  - `pull` and `push` refuse `--canvas` for another canvas than the linked one, and what the server said
+    beside an earlier step (warnings, claimed feedback) is printed even when a later step fails.
+  - `doop call <tool> key=text… key:=json… key@=file…` runs any MCP tool with `canvas_id` and `agent_name` filled in, `doop tools`
+    lists them, and `doop guide` prints the CLI's own primer (`cli/doop/primer.ts`) ahead of the agent guide.
+    `doop init` writes a marked block into `AGENTS.md` and, in a repository set up for Claude or with
+    `--skill`, `.claude/skills/doop/SKILL.md`.
+  - Output is text, or one JSON document (`ok`, `data`, `notes`, `feedback`) with `--json`. Exit codes: 1
+    failed, 2 usage, 3 conflict, 4 not signed in, 5 not found, 6 wait timed out. Tested in
+    `tests/doopCli.test.ts` against a real server.
 - Agent identity (`shared/agentIdentity.ts`): an outside agent is its account and its `agent_name`,
   not the name alone, so two people's "Claude" on a shared canvas are two agents with their own
   presence and tasks. `mcpAgentKey` hashes the two into the opaque `agentKey` on the `Actor`, the

@@ -263,6 +263,25 @@ function whoseWork(task: { agentName: string; agentKey?: string }, actor: Actor)
   return `${task.agentName}’s`
 }
 
+/** Claimed feedback as an agent is handed it, by get_feedback and by the agent API
+ *  (server/agentApi.ts): who asked, what for, and whose work it is about. */
+export function describeFeedback(
+  canvasId: string,
+  claimed: ReturnType<typeof actions.takeFeedbackFor>,
+  actor: Actor,
+): { from: string; text: string; about?: string; at: string }[] {
+  const tasks = actions.getTasks(canvasId)
+  return claimed.map((item) => {
+    const task = tasks.find((candidate) => candidate.id === item.taskId)
+    return {
+      from: item.from,
+      text: item.text,
+      ...(task ? { about: `${whoseWork(task, actor)} work: “${task.status}”` } : {}),
+      at: new Date(item.at).toISOString(),
+    }
+  })
+}
+
 /** Append any undelivered human feedback for this agent to a tool result.
  *  MCP is pull-based, so this is the channel through which humans steer agents. */
 function appendFeedback<T extends ToolContent>(result: T, canvasId: string, actor?: Actor): T {
@@ -1316,17 +1335,8 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
       const actor = actorFrom(agent_name)
       const fbs = actions.takeFeedbackFor(canvas_id, actor)
       if (fbs.length === 0) return text({ feedback: [], note: 'No open feedback requests right now.' })
-      const tasks = actions.getTasks(canvas_id)
       return text({
-        feedback: fbs.map((f) => {
-          const task = tasks.find((t) => t.id === f.taskId)
-          return {
-            from: f.from,
-            text: f.text,
-            about: task ? `${whoseWork(task, actor)} work: “${task.status}”` : undefined,
-            at: new Date(f.at).toISOString(),
-          }
-        }),
+        feedback: describeFeedback(canvas_id, fbs, actor),
         note: "These requests are now assigned to you. Address each one (a human request overrides the don't-touch-others'-frames etiquette), review with get_frame_screenshot, and update your set_status.",
       })
     },
