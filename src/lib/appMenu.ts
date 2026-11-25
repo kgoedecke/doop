@@ -14,7 +14,7 @@
    presenting, never a key another handler owns). Shells older than this
    (no `__DOOP_APP_MENU__`) keep their fixed View menu (viewMenu.ts). */
 
-import { firstChord, matchesChord, type Chord, type KeyInput } from './actions/chords'
+import { firstChord, matchesChord, type Chord } from './actions/chords'
 import {
   ACTIONS,
   MENUS,
@@ -145,21 +145,24 @@ export function nativeStates(): NativeItemState[] {
    the current event: the pick arrives as a click, and an N typed into a
    comment flew to the next frame. So the page keeps the last key it heard
    itself, and a pick that follows one of the action's own chords this
-   closely is that key, whatever the shell says. */
+   closely is that key, whatever the shell says. A key the page took for
+   itself (Esc closing the find bar) never reaches the menu, so it excuses
+   nothing: a click on the item right after it is a click. */
 const KEY_ECHO_MS = 500
-let heardKey: { chord: KeyInput; at: number } | null = null
+let heardKey: { event: KeyboardEvent; at: number } | null = null
 
-function hearKey(e: KeyboardEvent) {
-  const { key, code, metaKey, ctrlKey, altKey, shiftKey } = e
-  heardKey = { chord: { key, code, metaKey, ctrlKey, altKey, shiftKey }, at: performance.now() }
+/* the event itself is kept: whether a handler took the key is only known
+   once it has been through all of them */
+function hearKey(event: KeyboardEvent) {
+  heardKey = { event, at: performance.now() }
 }
 
 /* one key excuses one pick: the next pick of the same item is a click again */
 function echoesHeardKey(action: CanvasAction): boolean {
   const heard = heardKey
-  if (!heard || performance.now() - heard.at > KEY_ECHO_MS) return false
+  if (!heard || heard.event.defaultPrevented || performance.now() - heard.at > KEY_ECHO_MS) return false
   /* the menu bar is the Mac's, so the chords are read as a Mac reads them */
-  if (!action.keys?.some((chord) => matchesChord(heard.chord, chord, true))) return false
+  if (!action.keys?.some((chord) => matchesChord(heard.event, chord, true))) return false
   heardKey = null
   return true
 }

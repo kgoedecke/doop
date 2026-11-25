@@ -233,7 +233,19 @@ describe('the shell bridge', () => {
     document.body.append(comment)
     comment.focus()
     const now = vi.spyOn(performance, 'now').mockReturnValue(1000)
-    const type = (key: string) => comment.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }))
+    const type = (key: string) => {
+      const event = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })
+      comment.dispatchEvent(event)
+      return event
+    }
+    /* a key the page took never reaches the menu: a click right after it is a click */
+    const taken = (e: Event) => e.preventDefault()
+    comment.addEventListener('keydown', taken)
+    type('n')
+    comment.removeEventListener('keydown', taken)
+    handler({ payload: { id: 'zoom-next-frame', key: false } })
+    expect(run).toHaveBeenCalledOnce()
+    run.mockClear()
     /* an N typed into a comment: the menu's echo of it is not a command */
     type('n')
     handler({ payload: { id: 'zoom-next-frame', key: false } })
