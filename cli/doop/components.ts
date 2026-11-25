@@ -143,7 +143,18 @@ function pullOne(project: Project, doc: ComponentDoc, force: boolean): { base: s
     track(project, base, doc)
     return { base, outcome: 'pulled' }
   }
-  if (local.html === undefined || force) return write()
+  if (force) return write()
+  if (local.html === undefined) {
+    /* the template file is gone, but an edit to the component's CSS or JSON is still the
+       user's: writing the canvas's three files over it would lose it without a word */
+    const edited = tracked
+      ? changedParts(local, tracked)
+      : {
+          css: local.css !== undefined && local.css !== (doc.css ?? ''),
+          meta: local.meta !== undefined && !sameMeta(local.meta, metaOf(doc)),
+        }
+    return edited.css || edited.meta ? { base, outcome: 'conflict' } : write()
+  }
   if (local.html === doc.template && (local.css ?? '') === (doc.css ?? '') && sameMeta(local.meta, metaOf(doc))) {
     track(project, base, doc)
     return { base, outcome: 'up to date' }
