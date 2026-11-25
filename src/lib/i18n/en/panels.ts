@@ -174,6 +174,9 @@ export const panels = {
   activityEmpty: 'No activity yet. Add a frame, or connect an agent.',
 
   promptSendFailed: 'Something went wrong — try again',
+  promptTooManyTargets: 'Select up to {count} targets per prompt.',
+  promptRemoveSelectionScope: 'Remove selection scope',
+  promptSelectionCount: '{count} items selected',
   promptElement: 'element',
   promptTooBig: '“{name}” exceeds the 5 MB limit',
   promptTooMany: { one: 'Up to {count} image per request', other: 'Up to {count} images per request' },

@@ -1,3 +1,4 @@
+import { parseCardScope } from '../shared/cardScope.ts'
 import type { ResolvedMentions } from '../shared/personMentions.ts'
 import { nanoid } from 'nanoid'
 import { indexOfAscii, lastIndexOfAscii } from '../shared/asciiSearch.ts'
@@ -99,7 +100,6 @@ import type {
   ActorKind,
   ActivityItem,
   AgentTask,
-  CardScope,
   DesignDecision,
   ElementComment,
   Frame,
@@ -1612,19 +1612,6 @@ export function endAgentTasks(canvasId: string, agent: Pick<Actor, 'name' | 'age
  *  a pasted document from being stored, broadcast and prompted verbatim. */
 export const MAX_CARD_CHARS = 4_000
 
-const MAX_SELECTOR_CHARS = 1_000
-
-/** The frame (and optional element) a prompt is scoped to — only a frame
- *  that lives on this canvas counts, and a selector rides along only with
- *  its frame. Anything else queues as an unscoped card. */
-function normalizeScope(canvasId: string, scope: unknown): CardScope | undefined {
-  if (!scope || typeof scope !== 'object') return undefined
-  const { frameId, selector } = scope as Record<string, unknown>
-  if (typeof frameId !== 'string' || store.getFrame(frameId)?.canvasId !== canvasId) return undefined
-  const sel = typeof selector === 'string' ? selector.trim().slice(0, MAX_SELECTOR_CHARS) : ''
-  return sel ? { frameId, selector: sel } : { frameId }
-}
-
 export function addQueuedCard(
   canvasId: string,
   title: string,
@@ -1638,7 +1625,8 @@ export function addQueuedCard(
   const clean = title.trim().slice(0, MAX_CARD_CHARS)
   if (!clean || !store.getCanvas(canvasId)) return undefined
   const pipeline = normalizePipeline(agents, canvasRoster(canvasId))
-  const target = normalizeScope(canvasId, scope)
+  const target = parseCardScope(scope, (id) => store.getFrame(id)?.canvasId === canvasId)
+  if (!target && scope && typeof scope === 'object' && 'additionalTargets' in scope) return undefined
   const pick = parseRunnerPick(runner)
   /* reference-image frame ids: only frames that actually live on this canvas */
   const refs = (Array.isArray(attachments) ? attachments : [])

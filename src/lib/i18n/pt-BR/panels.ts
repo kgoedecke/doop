@@ -174,6 +174,9 @@ export const panels: Catalog['panels'] = {
   activityEmpty: 'Nenhuma atividade ainda. Adicione um frame ou conecte um agente.',
 
   promptSendFailed: 'Algo deu errado — tente de novo',
+  promptTooManyTargets: 'Selecione até {count} itens por solicitação.',
+  promptRemoveSelectionScope: 'Remover restrição à seleção',
+  promptSelectionCount: '{count} itens selecionados',
   promptElement: 'elemento',
   promptTooBig: '“{name}” excede o limite de 5 MB',
   promptTooMany: { one: 'Até {count} imagem por pedido', other: 'Até {count} imagens por pedido' },

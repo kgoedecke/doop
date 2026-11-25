@@ -84,7 +84,9 @@ beforeEach(() => {
     composerSend: null,
     flyTo: null,
     selectedId: null,
+    selectedIds: [],
     selectedElement: null,
+    selectedElements: [],
   })
 })
 
@@ -140,6 +142,27 @@ describe('the Agents tab composer', () => {
     await type('make it bolder')
     await press('Enter')
     expect(mocks.addCard).toHaveBeenCalledWith('c1', 'make it bolder', ['doop'], [], { frameId: 'f1' }, undefined)
+  })
+
+  it('scopes an element selection to its picked selectors and leaves the rest of the frame alone', async () => {
+    useStore.setState({ canvas: { ...canvas, frames: [frameOn(canvas.id, 'hero')] } })
+    useStore.getState().select('hero')
+    useStore.getState().pickElements('hero', ['#heading', '#subtitle'])
+    await render()
+    await type('increase the font size')
+    await press('Enter')
+    expect(mocks.addCard).toHaveBeenCalledWith(
+      canvas.id,
+      'increase the font size',
+      ['doop'],
+      [],
+      {
+        frameId: 'hero',
+        selector: '#subtitle',
+        additionalTargets: [{ frameId: 'hero', selector: '#heading' }],
+      },
+      undefined,
+    )
   })
 
   it('takes the keyboard on a focus request', async () => {

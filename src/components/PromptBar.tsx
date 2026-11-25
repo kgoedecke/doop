@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent } from 'react'
-import { useStore, type ComposerSend } from '../lib/store'
+import { pickedSelectors, useStore, type ComposerSend } from '../lib/store'
 import { api, type Allowance } from '../lib/api'
 import { posthog } from '../lib/posthog'
 import { uploadImageFrames } from '../lib/frameClipboard'
@@ -18,7 +18,8 @@ import { resolveRunnerPick } from '../../shared/agentRunner'
 import { AGENT_ROLES, DEFAULT_ROLE_ID, mentionedRoles } from '../../shared/agents'
 import { LayerKindIcon } from './LayerKindIcon'
 import { buildLayerTree, findLayer, layerName } from '../lib/layers'
-import type { CardScope } from '../../shared/types'
+import type { CardScope, CardTarget } from '../../shared/types'
+import { exceedsCardTargetLimit, MAX_CARD_TARGETS, scopeFromTargets } from '../../shared/cardScope'
 import type { LayerKind } from '../lib/layers'
 import { t as translate, useT } from '@/lib/i18n'
 import { cn } from '@/lib/utils'
@@ -55,11 +56,6 @@ interface ScopeChip {
 
 function clip(text: string): string {
   return text.length > MAX_SCOPE_LABEL ? `${text.slice(0, MAX_SCOPE_LABEL - 1).trimEnd()}…` : text
-}
-
-/** "frame:element" for an element scope, the frame id alone for a frame one */
-function scopeKey(scope: CardScope): string {
-  return scope.selector ? `${scope.frameId}:${scope.selector}` : scope.frameId
 }
 
 const MAX_ATTACHMENT_BYTES = 5 * 1024 * 1024 // mirrors the server's asset cap
@@ -165,6 +161,7 @@ async function sendPrompt(args: {
       attachments: refFrames.length,
       agents: mentioned.length,
       scope: scope ? (scope.selector ? 'element' : 'frame') : 'none',
+      targets: scope ? 1 + (scope.additionalTargets?.length ?? 0) : 0,
       runner: runner?.provider ?? 'default',
     })
     flyToNextFrame(
@@ -211,7 +208,10 @@ interface Attachment {
 }
 
 export function PromptBar({ canvasId }: { canvasId: string }) {
+  const t = useT()
   const frames = useStore((s) => s.canvas?.frames)
+  const selectedIds = useStore((s) => s.selectedIds)
+  const selectedElements = useStore((s) => s.selectedElements)
   const selectedId = useStore((s) => s.selectedId)
   const selectedElement = useStore((s) => s.selectedElement)
   const focusAt = useStore((s) => s.composerFocusAt)
@@ -234,10 +234,20 @@ export function PromptBar({ canvasId }: { canvasId: string }) {
   const chip = useMemo<ScopeChip | null>(() => {
     const frame = frames?.find((f) => f.id === (selectedElement?.frameId ?? selectedId))
     if (!frame) return null
-    const scope: CardScope = selectedElement
-      ? { frameId: frame.id, selector: selectedElement.selector }
-      : { frameId: frame.id }
-    if (dismissed === scopeKey(scope)) return null
+    const targets: CardTarget[] = selectedIds.filter((id) => id !== frame.id).map((frameId) => ({ frameId }))
+    if (selectedElement) {
+      for (const selector of pickedSelectors({ selectedElement, selectedElements })) {
+        targets.push({ frameId: frame.id, selector })
+      }
+    } else targets.push({ frameId: frame.id })
+    const scope = scopeFromTargets(targets)!
+    if (dismissed === JSON.stringify(scope)) return null
+    if (scope.additionalTargets) {
+      const label = selectedElement
+        ? t('panels.promptSelectionCount', { count: targets.length })
+        : t('rail.frameCount', { count: targets.length })
+      return { scope, label, kind: selectedElement ? 'box' : 'frame' }
+    }
     if (!selectedElement) return { scope, label: frame.name, kind: 'frame' }
     const node = findLayer(buildLayerTree(frame.html), selectedElement.selector)
     return {
@@ -245,7 +255,7 @@ export function PromptBar({ canvasId }: { canvasId: string }) {
       label: node ? layerName(node) : (selectedElement.selector.split(' > ').at(-1) ?? ''),
       kind: node?.kind ?? 'box',
     }
-  }, [frames, selectedId, selectedElement, dismissed])
+  }, [frames, selectedId, selectedIds, selectedElement, selectedElements, dismissed, t])
   const [attachments, setAttachments] = useState<Attachment[]>([])
   /* attachment slips (too big, too many) — local and brief, unlike a failed
      send, which the store keeps until the draft changes */
@@ -263,7 +273,6 @@ export function PromptBar({ canvasId }: { canvasId: string }) {
     /* the store keeps the draft per canvas, so leaving to add a skill loses nothing */
     offerNew: true,
   })
-  const t = useT()
   const meter = meterText(allowance, t, pickedProvider, picked?.runner.name)
 
   useLayoutEffect(() => {
@@ -311,6 +320,10 @@ export function PromptBar({ canvasId }: { canvasId: string }) {
   async function submit(prompt: string) {
     const clean = prompt.trim()
     if (!clean || busy) return
+    if (exceedsCardTargetLimit(chip?.scope)) {
+      showError(t('panels.promptTooManyTargets', { count: MAX_CARD_TARGETS }))
+      return
+    }
     const files = attachments.map((a) => a.file)
     await sendPrompt({ canvasId, text: clean, files, scope: chip?.scope, allowance })
     /* the thumbnails go once the card is queued: the files were handed to
@@ -325,7 +338,7 @@ export function PromptBar({ canvasId }: { canvasId: string }) {
     if (skillMenu.onKeyDown(e)) return
     if (e.key === 'Escape' && chip) {
       e.preventDefault()
-      setDismissed(scopeKey(chip.scope))
+      setDismissed(JSON.stringify(chip.scope))
       return
     }
     /* Enter sends, ⇧Enter breaks the line; an Enter that commits an IME
@@ -382,9 +395,11 @@ export function PromptBar({ canvasId }: { canvasId: string }) {
           <span
             className="flex h-6 min-w-0 max-w-full items-center gap-1.5 rounded-[6px] pr-1 pl-2 text-[12px] text-ink-soft shadow-ring"
             title={
-              chip.kind === 'frame'
-                ? t('panels.promptScopedFrame', { name: chip.label })
-                : t('panels.promptScopedElement', { name: chip.label || t('panels.promptElement') })
+              chip.scope.additionalTargets
+                ? chip.label
+                : chip.kind === 'frame'
+                  ? t('panels.promptScopedFrame', { name: chip.label })
+                  : t('panels.promptScopedElement', { name: chip.label || t('panels.promptElement') })
             }
           >
             <span className="flex-none text-ink-faint">
@@ -395,10 +410,14 @@ export function PromptBar({ canvasId }: { canvasId: string }) {
               variant="bare"
               className="size-4 flex-none justify-center rounded-full p-0 text-ink-faint hover:bg-paper-deep hover:text-ink"
               aria-label={
-                chip.kind === 'frame' ? t('panels.promptRemoveFrameScope') : t('panels.promptRemoveElementScope')
+                chip.scope.additionalTargets
+                  ? t('panels.promptRemoveSelectionScope')
+                  : chip.kind === 'frame'
+                    ? t('panels.promptRemoveFrameScope')
+                    : t('panels.promptRemoveElementScope')
               }
               disabled={busy}
-              onClick={() => setDismissed(scopeKey(chip.scope))}
+              onClick={() => setDismissed(JSON.stringify(chip.scope))}
             >
               <XIcon className="size-3" aria-hidden />
             </Button>

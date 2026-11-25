@@ -137,6 +137,7 @@ import {
   CUSTOM_API_TYPES,
 } from '../shared/customProvider.ts'
 import { setStoredDefault } from './agentDefaults.ts'
+import { exceedsCardTargetLimit, MAX_CARD_TARGETS } from '../shared/cardScope.ts'
 import { isRunnerProvider } from '../shared/agentRunner.ts'
 import { modelCatalogFor } from './modelCatalog.ts'
 import { mentionedRole } from '../shared/agents.ts'
@@ -3847,6 +3848,9 @@ app.post('/api/canvases/:id/cards', async (req, res) => {
   if (!requireCanvas(req, res, req.params.id, 'edit')) return
   const title = String(req.body?.title ?? '').trim()
   if (!title) return res.status(400).json({ error: 'empty title' })
+  if (exceedsCardTargetLimit(req.body?.scope)) {
+    return res.status(400).json({ error: `Select up to ${MAX_CARD_TARGETS} targets per prompt` })
+  }
   const gate = await allowance.consumeResidentTask(req.user!.id)
   if (!gate.ok) {
     return res.status(403).json({ error: 'resident_limit', used: gate.used, limit: gate.limit })
@@ -3861,7 +3865,10 @@ app.post('/api/canvases/:id/cards', async (req, res) => {
     req.body?.scope,
     req.body?.runner,
   )
-  if (!card) return res.status(404).json({ error: 'canvas not found or empty title' })
+  if (!card) {
+    await allowance.refundResidentTask(gate, req.user!.id)
+    return res.status(404).json({ error: 'Canvas or selected targets no longer available' })
+  }
   res.json(card)
 })
 
