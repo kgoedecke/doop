@@ -186,14 +186,9 @@ const sendViewport = throttle(
   50,
 )
 
-/** The stage's own paint when the page has a colour: the colour, and a dot
- *  grid that reads on it (the theme's dots are tuned to the theme paper). */
+/** The stage's own paint when the page has a colour. */
 function paperStyle(paper: Paper): CSSProperties {
-  if (!paper.background) return {}
-  return {
-    background: paper.background,
-    ['--dot' as string]: paper.tone === 'dark' ? 'rgba(255, 255, 255, 0.09)' : 'rgba(0, 0, 0, 0.09)',
-  }
+  return paper.background ? { background: paper.background } : {}
 }
 
 export function Stage({
@@ -247,7 +242,6 @@ export function Stage({
   )
   const drawing = useCanvasDrawing(ref)
   const worldRef = useRef<HTMLDivElement>(null)
-  const gridRef = useRef<HTMLDivElement>(null)
   const pixelGridRef = useRef<HTMLDivElement>(null)
   const [labelLayer, setLabelLayer] = useState<HTMLDivElement | null>(null)
   const [threadLayer, setThreadLayer] = useState<HTMLDivElement | null>(null)
@@ -257,7 +251,7 @@ export function Stage({
   const activePageId = useStore((s) => s.activePageId)
   /* the page's frames are on their way from the room: it is fitted once they are here */
   const pageLoading = usePageLoading()
-  /* a page with a colour of its own paints the stage, dots in its contrast */
+  /* a page with a colour of its own paints the stage */
   const paper = usePaper()
   const select = useStore((s) => s.select)
   const panMode = useStore((s) => s.panMode)
@@ -309,26 +303,18 @@ export function Stage({
 
   /* Viewport → DOM without React: no component subscribes to the viewport, so
      pan/zoom never renders anything. A store subscription writes the world
-     transform, the grid layer, the --zoom variable (which counter-scales
+     transform, the pixel grid, the --zoom variable (which counter-scales
      labels/pins/cursors from CSS), and the zoom pill's % directly. */
   useLayoutEffect(() => {
     function apply(vp: { x: number; y: number; zoom: number }) {
       const world = worldRef.current
-      const grid = gridRef.current
       const stage = ref.current
-      if (!world || !grid || !stage) return
+      if (!world || !stage) return
       world.style.transform = worldTransform(vp, layoutZoomRef.current)
       stage.style.setProperty('--zoom', String(vp.zoom))
       /* the camera's offset, for chrome drawn in screen px (FrameLabelLayer) */
       stage.style.setProperty('--vx', `${vp.x}px`)
       stage.style.setProperty('--vy', `${vp.y}px`)
-      const period = 26 * vp.zoom
-      grid.style.backgroundSize = `${period}px ${period}px`
-      /* one period of overhang: the layer slides back by up to a period */
-      grid.style.width = grid.style.height = `calc(100% + ${period}px)`
-      const gx = (((vp.x % period) + period) % period) - period
-      const gy = (((vp.y % period) + period) % period) - period
-      grid.style.transform = `translate(${gx}px, ${gy}px)`
       const pixels = pixelGridRef.current
       if (pixels) {
         const opacity = useStore.getState().viewOptions.pixelGrid ? pixelGridOpacity(vp.zoom) : 0
@@ -1263,12 +1249,6 @@ export function Stage({
               bgAt.current = { x: e.clientX, y: e.clientY }
             }}
           >
-            {/* dot grid on its own composited layer: panning is transform-only
-            (zero paint), zooming repaints just this layer's tiny tile */}
-            <div
-              className="pointer-events-none absolute left-0 top-0 origin-top-left will-change-transform [background-image:radial-gradient(circle,var(--dot)_1.2px,transparent_1.2px)]"
-              ref={gridRef}
-            />
             {/* the pixel grid over the bare paper. Each frame draws its own over
                 its document (FrameView's PixelGrid), under its pins, threads and
                 grips, so nothing the canvas puts over the frames is gridded;

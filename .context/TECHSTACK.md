@@ -1042,7 +1042,7 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   shows "Page" then; its Background `ColorField` edits the active page, one undo step
   (`page-background` history entry).
   `src/lib/paper.ts` resolves the paper a page shows (its colour, else the theme) and its tone;
-  `Stage` paints it with contrast dots and a standalone drawing takes its ink from that tone.
+  `Stage` paints it and a standalone drawing takes its ink from that tone.
   Tests: `pageBackground.test.ts`, the background cases in `storePages.test.ts`, `pages.test.ts`
   and `guideEdits.test.ts`.
 - Selection keys (`src/lib/selectionKeys.ts`, chords in `src/lib/keys.ts`), as Figma binds them: ↩
