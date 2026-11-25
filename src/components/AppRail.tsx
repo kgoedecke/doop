@@ -590,10 +590,7 @@ export function AppRail({
             <RocketIcon size="rail" className="text-brand" /> {t('plans.upgradeToPro')}
           </Button>
         )}
-        <div className="flex items-center gap-2.5 px-1">
-          <AccountMenu face side="top" align="start" />
-          <AccountName />
-        </div>
+        <AccountMenu named side="top" align="start" />
       </div>
     </div>
   )
@@ -629,11 +626,6 @@ export function AppRail({
 
 /** the DashLayout column spec that lets the rail set its own width */
 export const railLayout = 'md:grid-cols-[auto_1fr]'
-
-function AccountName() {
-  const { data: session } = authClient.useSession()
-  return <span className="truncate text-body text-ink-soft">{session?.user.name}</span>
-}
 
 function Rule() {
   return <div className="my-2 h-px w-6 bg-line" />

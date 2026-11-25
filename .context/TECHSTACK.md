@@ -1809,7 +1809,9 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   Workspace and Admin alike (a page's own group, such as the admin indexes, goes in as children;
   Settings draws its own rail from the same `ui/dash.tsx` parts); it owns
   the ⌘K search palette (`CanvasSearchModal.tsx`), the connect-an-agent modal, the collapsed
-  narrow state (remembered in `localStorage` under `doop-rail`) and the account face at the bottom.
+  narrow state (remembered in `localStorage` under `doop-rail`) and the account row at the bottom: face,
+  name and an up/down chevron, all one trigger for the account menu (`AccountMenu named`; the narrow
+  rail keeps the face alone).
   From another page the rail sends scope picks home as `/?scope=` and new workspaces as
   `/?workspace=new`. The workspace in view opens under its row: All canvases, People, Fonts, Libraries, and for its owner and admins Plan & billing and Settings (`workspacePanesFor`); on the Workspace page
   they switch its pane in place, elsewhere they go to `/w/<id>?pane=…`, and the page keeps the
