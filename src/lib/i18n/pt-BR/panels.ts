@@ -277,7 +277,7 @@ export const panels: Catalog['panels'] = {
   exportElementMissing: 'Não foi possível encontrar o elemento para exportar — o frame está na tela?',
 
   frameExportTitle: 'Exportar “{name}”',
-  frameExportLede: 'Baixe este frame como imagem em qualquer escala, ou como PDF vetorial.',
+  frameExportLede: 'Baixe este frame como imagem em qualquer escala, como PDF vetorial ou como HTML.',
   elementExportLede: 'Baixe este elemento como imagem, recortado do frame como você o vê.',
   frameExportPng: 'Baixar PNG',
   frameExportPngHint: 'Imagem sem perdas na escala acima',
@@ -286,6 +286,8 @@ export const panels: Catalog['panels'] = {
   frameExportSvg: 'Baixar SVG',
   frameExportSvgHint:
     'O HTML do frame em um SVG: abre em qualquer navegador, não como formas no Illustrator ou no Figma',
+  frameExportHtml: 'Baixar HTML',
+  frameExportHtmlHint: 'O frame como uma página própria, com os tokens e os estilos de componentes do canvas',
   exportScale: 'Escala',
   exportScaleCustom: 'Personalizada…',
   exportScaleCustomLabel: 'Escala personalizada, de 0,1 a 4',

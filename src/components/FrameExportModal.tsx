@@ -3,6 +3,7 @@ import type { Frame } from '../../shared/types'
 import {
   downloadElementExport,
   downloadFrameExport,
+  downloadFrameHtml,
   downloadFramesPdf,
   type ElementTarget,
   type FrameExportFormat,
@@ -53,6 +54,14 @@ export function FrameExportModal({
     onClose()
   }
 
+  /* a frame's source with no render behind it: no scale, and not a pick the
+     Inspector's image export could start from */
+  function downloadHtml() {
+    trackExport('html', 1, 'frame_menu')
+    downloadFrameHtml(frame)
+    onClose()
+  }
+
   const downloadMark = <ImportIcon size="rail" />
   return (
     <Modal size="sm" onClose={onClose}>
@@ -96,6 +105,15 @@ export function FrameExportModal({
             description={groupFrames.length > 1 ? t('panels.frameExportPdfGroupHint') : t('panels.frameExportPdfHint')}
             trailing={downloadMark}
             onClick={downloadPdf}
+          />
+        )}
+        {!element && (
+          <ChoiceRow
+            icon={<AppIcon brand="html" />}
+            title={t('panels.frameExportHtml')}
+            description={t('panels.frameExportHtmlHint')}
+            trailing={downloadMark}
+            onClick={downloadHtml}
           />
         )}
       </ChoiceList>
