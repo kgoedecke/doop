@@ -13,6 +13,10 @@
 #   APP_STORE_CONNECT_PRIVATE_KEY the .p8 contents (the key needs the App Manager role)
 #   APPLE_CERTIFICATE / APPLE_CERTIFICATE_PASSWORD
 #                                 a base64 .p12 of an Apple Distribution certificate, and its password
+#                                 (set on the environment: the repo-level pair is desktop's Developer ID)
+# The archive is signed with that certificate; automatic signing fetches the App Store
+# profiles through the API key. Without it Xcode reaches for a development certificate,
+# which the App Manager key cannot create.
 # The build number is the workflow run number, so every upload is unique.
 name: iOS Release
 
@@ -81,6 +85,7 @@ jobs:
           -allowProvisioningUpdates
           -authenticationKeyPath "$RUNNER_TEMP/keys/AuthKey.p8"
           -authenticationKeyID "$KEY_ID" -authenticationKeyIssuerID "$ISSUER_ID"
+          CODE_SIGN_IDENTITY="Apple Distribution"
           CURRENT_PROJECT_VERSION=${{ github.run_number }}
           archive
       - name: Archive (unsigned, pipeline check)
