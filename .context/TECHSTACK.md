@@ -355,6 +355,12 @@ server/index.ts` in prod. `erasableSyntaxOnly` and `verbatimModuleSyntax` in tsc
   `reasoning_content`, so the transport keeps it as a `thinking` block in the run's history and
   sends it back where the config sets `echoReasoning`. Tests: the `reasoning_content` cases in
   `chatCompletionsAgent.test.ts`, `rosterRouting.test.ts`, `providerKeyAccounts.test.ts`.
+- Gemini keys (`gemini-key`) run on the same transport against Google's OpenAI-compatibility
+  endpoint (`GEMINI_OPENAI_CHAT_URL`). Gemini 3 and later sign tool calls
+  (`tool_calls[].extra_content.google.thought_signature`, on the first call of a parallel set) and
+  refuse (400) the next request if a call comes back unsigned, so a call's `extra_content` stays
+  on its `tool_use` block and goes back out on the same call, for every provider that sends one.
+  Tests: the `Gemini thought signatures` case in `chatCompletionsAgent.test.ts`.
 - Custom providers (`shared/customProvider.ts`, `server/customProviders.ts`,
   `server/customProviderFetch.ts`, `src/components/CustomProviderForm.tsx`): any OpenAI Chat
   Completions or Anthropic Messages endpoint, added in Settings → Doop Agent by name, API type, base
