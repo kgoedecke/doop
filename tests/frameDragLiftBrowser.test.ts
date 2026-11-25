@@ -76,8 +76,8 @@ describe.skipIf(!findBrowserPath())('a dragged frame', { timeout: 60_000 }, () =
 
   /** what holding the frame by its name at `zoom` does to the strip: each
    *  pixel's brightness held, less the frame selected and not held (the
-   *  canvas's dots and the selection ring, which pressing the name also
-   *  draws, cancel out), so anything left is drawn by the hold alone */
+   *  selection ring, which pressing the name also draws, cancels out),
+   *  so anything left is drawn by the hold alone */
   async function held(zoom: number) {
     await page.evaluate(() => (window as unknown as { rulersHarness: Harness }).rulersHarness.select(['f']))
     await settle(zoom)
