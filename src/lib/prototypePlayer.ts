@@ -77,8 +77,8 @@ export function fitScale(frame: { width: number; height: number }, viewport: { w
 
 /** How the player sizes a screen against its viewport: at its design size,
  *  resized to the viewport (the document reflows), scaled to the width
- *  (scrolling down), scaled to fit whole (letterboxed) or scaled to cover
- *  (cropped). */
+ *  (scrolling down), shrunk to fit whole (letterboxed, never enlarged, as
+ *  Figma's "Fit width and height") or scaled to cover (cropped). */
 export const PROTO_SCALINGS = ['actual', 'responsive', 'fit-width', 'fit', 'fill'] as const
 export type ProtoScaling = (typeof PROTO_SCALINGS)[number]
 
@@ -133,7 +133,9 @@ export function screenLayout(
     case 'fill':
       return { ...size, scale: Math.max(viewport.w / frame.width, viewport.h / frame.height) }
     case 'fit':
-      return { ...size, scale: fitScale(frame, viewport) }
+      /* a screen smaller than the player stays at its design size: blown up,
+         a phone screen on a big monitor reads blurry and huge */
+      return { ...size, scale: Math.min(1, fitScale(frame, viewport)) }
   }
 }
 

@@ -260,6 +260,20 @@ describe('player helpers', () => {
     expect(screenLayout(frame, viewport, 'fill')).toEqual({ width: 400, height: 300, scale: 2 })
     expect(screenLayout({ width: 0, height: 300 }, viewport, 'fill').scale).toBe(1)
   })
+
+  it('fits a screen smaller than the player at its design size, never larger', () => {
+    const phone = { width: 375, height: 812 }
+    const monitor = { w: 2560, h: 1300 }
+    expect(screenLayout(phone, monitor, 'fit')).toEqual({ width: 375, height: 812, scale: 1 })
+    /* Fit width still fills the width, as Figma's does */
+    expect(screenLayout(phone, monitor, 'fit-width').scale).toBeCloseTo(2560 / 375)
+  })
+
+  it('shrinks a screen larger than the player to fit it whole', () => {
+    const desktop = { width: 1440, height: 1024 }
+    expect(screenLayout(desktop, { w: 720, h: 1024 }, 'fit').scale).toBe(0.5)
+    expect(screenLayout(desktop, { w: 1440, h: 512 }, 'fit').scale).toBe(0.5)
+  })
 })
 
 describe('remapFrameTargets', () => {

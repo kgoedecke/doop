@@ -225,8 +225,9 @@ describe.skipIf(!findBrowserPath())('prototype player', { timeout: 30_000 }, () 
       await screen('home')
       expect(await page.$eval('[data-prototype-player]', (el) => el.getBoundingClientRect().top)).toBe(40)
       const width = () => page.$eval('[data-proto-screen="home"] > div', (el) => el.getBoundingClientRect().width)
-      /* the screens get 660 less the bar and the pager, which fits the 400 × 300 frame by height */
-      expect(Math.abs((await width()) - (400 * (660 - BAR - PAGER)) / 300)).toBeLessThan(1)
+      /* the screens get 1000 × 660 less the bar and the pager, room for the 400 × 300 frame
+         nearly twice over, and Fit (the default) draws it at its design size, not larger */
+      expect(await width()).toBe(400)
       /* the bar sits above the screens and the pager below, never over them */
       const box = (selector: string) =>
         page.$eval(selector, (el) => {
@@ -240,8 +241,29 @@ describe.skipIf(!findBrowserPath())('prototype player', { timeout: 30_000 }, () 
       expect((await box('[data-proto-stage]')).bottom).toBe(pager.top)
       expect(pager).toMatchObject({ bottom: 700, height: PAGER })
 
+      const widthBecomes = (px: number) =>
+        page.waitForFunction(
+          (want) => document.querySelector('[data-proto-screen="home"] > div')?.getBoundingClientRect().width === want,
+          {},
+          px,
+        )
+      const pick = async (label: string) => {
+        await page.click('[aria-label="Scaling"]')
+        await page.waitForSelector('[data-proto-menu]')
+        await page.$$eval(
+          '[data-proto-menu] [role="menuitemradio"]',
+          (items, text) => (items.find((item) => item.textContent === text) as HTMLElement | undefined)?.click(),
+          label,
+        )
+      }
+
+      /* Fit width fills the player's width, enlarging the screen */
+      await pick('Fit width')
+      await widthBecomes(1000)
+
       await page.click('[aria-label="Scaling"]')
       await page.waitForSelector('[data-proto-menu]')
+      /* the first item, Actual size, by keyboard */
       await page.keyboard.press('ArrowDown')
       await page.keyboard.press('Enter')
       await page.waitForFunction(() => !document.querySelector('[data-proto-menu]'))
@@ -249,18 +271,10 @@ describe.skipIf(!findBrowserPath())('prototype player', { timeout: 30_000 }, () 
       expect(await page.evaluate(() => (window as unknown as Fixture).playerClosed)).toBe(false)
       /* and the keys are the screen's again: a keyboard user is not left nowhere */
       await page.waitForFunction(() => document.activeElement?.matches('iframe[data-doop-proto-frame="home"]'))
-      await page.waitForFunction(
-        () => document.querySelector('[data-proto-screen="home"] > div')?.getBoundingClientRect().width === 400,
-      )
+      await widthBecomes(400)
 
-      await page.click('[aria-label="Scaling"]')
-      await page.waitForSelector('[data-proto-menu]')
-      await page.$$eval('[data-proto-menu] [role="menuitemradio"]', (items) =>
-        (items.find((item) => item.textContent === 'Responsive') as HTMLElement | undefined)?.click(),
-      )
-      await page.waitForFunction(
-        () => document.querySelector('[data-proto-screen="home"] > div')?.getBoundingClientRect().width === 1000,
-      )
+      await pick('Responsive')
+      await widthBecomes(1000)
     } finally {
       await page.evaluate(() => localStorage.removeItem('doop:proto-scaling'))
     }
@@ -317,7 +331,7 @@ describe.skipIf(!findBrowserPath())('prototype player', { timeout: 30_000 }, () 
     expect(await page.evaluate(() => (window as unknown as Fixture).playerClosed)).toBe(false)
   })
 
-  it('scrolls an oversized screen to its far corner, and crops it centred under Fill', async () => {
+  it('scrolls an oversized screen to its far corner, crops it under Fill and shrinks it under Fit', async () => {
     const big: Canvas = {
       ...CANVAS,
       frames: [{ ...frame('big', '<button>Big</button>'), width: 2000, height: 1400 }],
@@ -356,6 +370,16 @@ describe.skipIf(!findBrowserPath())('prototype player', { timeout: 30_000 }, () 
       expect(await playAt('fit-width')).toMatchObject({ scrolled: true, bottom: 0, left: 0 })
       /* 0.5× covers 1000 × 600: 100px cropped, 50 each side, nothing to scroll */
       expect(await playAt('fill')).toEqual({ scrolled: false, right: 0, bottom: 50, left: 0, top: -50 })
+      /* Fit shrinks it whole, letterboxed: at 600 / 1400 it is 857 × 600, 71 spare each side */
+      const fit = await playAt('fit')
+      expect(fit.scrolled).toBe(false)
+      for (const [edge, want] of [
+        ['top', 0],
+        ['bottom', 0],
+        ['left', 500 / 7],
+        ['right', -500 / 7],
+      ] as const)
+        expect(fit[edge]).toBeCloseTo(want, 0)
     } finally {
       await page.evaluate(() => localStorage.removeItem('doop:proto-scaling'))
     }
