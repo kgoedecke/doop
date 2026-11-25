@@ -291,7 +291,9 @@ describe('over MCP', () => {
     expect(set.isError).toBe(true)
     const edit = await call('edit_frame_html', { frame_id: frameId, old_str: '<h1>Hi</h1>', new_str: OPEN_CARD })
     expect(edit.isError).toBe(true)
-    expect(edit.text).toContain('<doop-use component="Card"> is opened and never closed')
+    /* refused before it runs: the replacement opens a tag it does not close (#684) */
+    expect(edit.text).toContain('new_str opens 1 more <doop-use>')
+    expect(edit.text).not.toContain('<doop-use component="Card"> is opened and never closed')
     expect(store.getFrame(frameId)!.html).toBe(before)
 
     /* closed or self-closing, the same edit goes through */
@@ -320,7 +322,7 @@ describe('over MCP', () => {
       new_str: '<p>Inner</p></template>',
     })
     expect(dropped.isError).toBe(true)
-    expect(dropped.text).toContain('never closed')
+    expect(dropped.text).toContain('more <doop-use> than it closes')
     expect(store.getFrame(frameId)!.html).toBe(before)
 
     const copy = await call('edit_frame_html', {

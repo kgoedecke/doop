@@ -440,7 +440,12 @@ themes, components })` puts them in (component blocks at the end of the head, to
   canvas's styles as they are now) and a Memory reference at pin time. Agents' compact form is the
   source, token block gone; `edit_frame_html` (`editFrameHtml` in `server/componentActions.ts`, MCP
   and resident) matches its text in the compact form, the stored source or the composed document,
-  stores the result as source, and refuses an edit that only touched what the canvas supplies.
+  stores the result as source, and refuses an edit that only touched what the canvas supplies, or
+  one whose replacement opens or closes more `<doop-use>` / `<template>` tags than its find text,
+  or closes one ahead of its opening further than the find text does, so the tags around it would
+  pair up wrongly (`tagBalance` in `server/componentEngine.ts`, `unbalancedEdit`; it reads the
+  command alone, so `runCanvasWrite` refuses it before any host, a claimed actor's included;
+  `tests/editFrameHtmlBalance.test.ts`).
   `asset_refs` are projected from the composed document (`persist.viewAssetsThrough`), so an asset
   a component's stylesheet names counts, as of the frame's own last write. The browser composes too: its join says `composesFrames` and its REST
   requests carry `x-doop-composes-frames`, so it is sent sources; the store keeps sources

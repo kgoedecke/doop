@@ -54,7 +54,14 @@ import {
 } from './guide.ts'
 import { zodToJsonSchema } from 'zod-to-json-schema'
 import { z } from 'zod'
-import { catalog, compactFrameHtml, findComponent, frameEditProblem, libraryCatalog } from './componentActions.ts'
+import {
+  catalog,
+  compactFrameHtml,
+  findComponent,
+  frameEditProblem,
+  libraryCatalog,
+  unbalancedProblem,
+} from './componentActions.ts'
 import { activeComponents } from '../shared/components.ts'
 import { isAutomationCard } from '../shared/automations.ts'
 import { getUserName } from './auth.ts'
@@ -1322,7 +1329,7 @@ const TOOLS: Anthropic.Tool[] = [
   {
     name: 'edit_frame_html',
     description:
-      'Exact find/replace in a frame\'s HTML — the change morphs into the live render. Use for small, targeted changes. "find" must occur exactly once.',
+      'Exact find/replace in a frame\'s HTML — the change morphs into the live render. Use for small, targeted changes. "find" must occur exactly once. "replace" must open and close as many <doop-use> and <template> tags as "find" does: an edit that leaves one unclosed is refused, so include the closing tags in the same edit or replace the whole instance.',
     input_schema: {
       type: 'object',
       properties: {
@@ -2102,6 +2109,7 @@ async function runResidentTool(
         })
         if (!edited.ok) {
           if ('missing' in edited) return fail('frame not found on this canvas')
+          if ('unbalanced' in edited) return fail(unbalancedProblem(edited.unbalanced, '"find" text', '"replace" text'))
           return fail(
             'inline' in edited ? edited.inline : frameEditProblem(edited.problem, '"find" text', 'get_frame_html'),
           )

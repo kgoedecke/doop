@@ -21,6 +21,8 @@ import {
   restoreComponent,
   restoreComponentVersion,
   updateComponent,
+  unbalancedEdit,
+  type Unbalanced,
   type CreateFromElement,
   type CreateFromHtml,
   type FrameEdit,
@@ -371,7 +373,12 @@ export type EditFrameHtmlResult =
   | { ok: true; frame: Frame }
   | { ok: false; missing: true }
   | { ok: false; problem: Exclude<FrameEdit, { html: string }> }
+  | UnbalancedRefusal
   | InlineRefusal
+
+/** An edit that would leave `<doop-use>` or `<template>` tags unpaired: refused, nothing
+ *  written, with what to do instead (componentActions.unbalancedEdit). */
+export type UnbalancedRefusal = { ok: false; unbalanced: Unbalanced }
 
 /** A write an agent sent that would add inline data: refused, nothing written. The one shape
  *  of that refusal for every command, and only ever the answer to a command that may carry
@@ -685,6 +692,9 @@ export function runCanvasWrite<const C extends CanvasWrite>(
 ): Promise<CanvasWriteResult<C>> {
   try {
     checkCommand(canvasId, command)
+    /* refused alike wherever it runs: it depends on the command alone */
+    const unbalanced = command.type === 'edit-frame-html' && unbalancedEdit(command.find, command.replace)
+    if (unbalanced) return Promise.resolve({ ok: false, unbalanced } as CanvasWriteResult<C>)
     /* the dispatch is the one place types are asserted: TypeScript cannot follow a command's
        type into the handler of that type (a correlated union). `satisfies` above checks each
        handler against its command, and `CanvasWriteResults` is read off the handlers, so what

@@ -116,6 +116,7 @@ import {
   catalog,
   compactFrameHtml,
   frameEditProblem,
+  unbalancedProblem,
   deletedComponentsInUse,
   findComponent,
   instancesIn,
@@ -2569,7 +2570,7 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
       title: 'Edit a frame’s HTML in place',
       _meta: previewMeta('Editing the frame…', 'Frame edited'),
       description:
-        'Make a targeted edit to a frame: exact find-and-replace in its HTML, as get_frame returned it (a <doop-use> can be edited like any tag). Use this for small tweaks (copy, a color, spacing, one element) instead of resending the whole document — the change morphs into the rendered frame in place. old_str must appear EXACTLY ONCE in the current HTML (call get_frame first if unsure); include enough surrounding context to make it unique. Keep data-doop-* attributes on the element you edit: comments and links point at its data-doop-id.',
+        'Make a targeted edit to a frame: exact find-and-replace in its HTML, as get_frame returned it (a <doop-use> can be edited like any tag). Use this for small tweaks (copy, a color, spacing, one element) instead of resending the whole document — the change morphs into the rendered frame in place. old_str must appear EXACTLY ONCE in the current HTML (call get_frame first if unsure); include enough surrounding context to make it unique. Keep data-doop-* attributes on the element you edit: comments and links point at its data-doop-id. new_str must open and close as many <doop-use> and <template> tags as old_str does: an edit that leaves one unclosed is refused, so include the closing tags in the same edit or replace the whole instance in one call.',
       annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
       inputSchema: {
         frame_id: z.string(),
@@ -2593,6 +2594,7 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
       })
       if (!edited.ok) {
         if ('missing' in edited) return noFrame(frame_id)
+        if ('unbalanced' in edited) return err(unbalancedProblem(edited.unbalanced, 'old_str', 'new_str'))
         return err('inline' in edited ? edited.inline : frameEditProblem(edited.problem, 'old_str', 'get_frame'))
       }
       const frame = edited.frame
