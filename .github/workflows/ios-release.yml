@@ -5,7 +5,9 @@
 # - PRs touching this file → archive only, unsigned, so the pipeline stays valid.
 #
 # Signing uses Xcode cloud-managed ("automatic") signing driven by an App Store
-# Connect API key, so no certificates or profiles are stored in the repo. Secrets:
+# Connect API key, so no certificates or profiles are stored in the repo. The
+# secrets live in the `ios-release` environment, which only `ios-v*` tags and
+# `main` may use, so a workflow pushed on another branch cannot read them. Secrets:
 #   APP_STORE_CONNECT_KEY_ID      the key id shown in App Store Connect → Users and Access → Integrations
 #   APP_STORE_CONNECT_ISSUER_ID   the issuer id on the same page
 #   APP_STORE_CONNECT_PRIVATE_KEY the .p8 contents (the key needs the App Manager role)
@@ -27,6 +29,8 @@ permissions:
 jobs:
   archive:
     runs-on: blacksmith-12vcpu-macos-15
+    # PR runs archive unsigned and need no secrets, so they stay outside the environment.
+    environment: ${{ github.event_name != 'pull_request' && 'ios-release' || '' }}
     env:
       ARCHIVE: ios/DerivedData/Doop.xcarchive
     steps:
