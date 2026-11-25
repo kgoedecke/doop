@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, expect, it } from 'vitest'
-import { carriedCss, renameInCss, scopeMarkup, withCarriedCss } from '../src/lib/styleCarry'
+import { carriedCss, joinCarriedSheets, renameInCss, scopeMarkup, withCarriedCss } from '../src/lib/styleCarry'
 
 const page = (head: string, body: string) => `<!doctype html>\n<html><head>${head}</head><body>${body}</body></html>`
 /* every carried rule is limited to the moved markup through its scope mark */
@@ -554,5 +554,28 @@ describe('withCarriedCss', () => {
     expect(once).toContain('<style data-doop-carried="">.card { padding: 8px; }</style>')
     expect(withCarriedCss(once, '.card { padding: 8px; }')).toBe(once)
     expect(withCarriedCss(dest, '')).toBe(dest)
+  })
+})
+
+describe('joinCarriedSheets', () => {
+  it('keeps a rule two subtrees share once, at its last place, and each scoped rule', () => {
+    const font = "@font-face { font-family: 'Brand'; src: url('a.woff2') }"
+    const spin = '@keyframes spin { from { rotate: 0deg } to { rotate: 360deg } }'
+    const joined = joinCarriedSheets([
+      `${font}\n${spin}\n[s="a"] { color: red }`,
+      `${font}\n/* a } in a comment */ [s="b"] { content: "}" }\n${spin}`,
+    ])
+    expect(joined.split('\n')).toEqual([
+      '[s="a"] { color: red }',
+      font,
+      '/* a } in a comment */ [s="b"] { content: "}" }',
+      spin,
+    ])
+  })
+
+  it('keeps a statement wherever it stands', () => {
+    expect(joinCarriedSheets(['@layer base;\na { color: red }', '@layer base;'])).toBe(
+      '@layer base;\na { color: red }\n@layer base;',
+    )
   })
 })

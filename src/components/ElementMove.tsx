@@ -5,7 +5,7 @@ import { createPortal } from 'react-dom'
 import type { Frame } from '../../shared/types'
 import { isCanvasElement } from '../lib/drawing'
 import { standaloneSelector } from '../lib/layerEdits'
-import { elementPath } from '../lib/layers'
+import { elementPath, outermostSelectors } from '../lib/layers'
 import {
   drawingDropFrame,
   drawingPreview,
@@ -35,8 +35,9 @@ import {
   copyLayerOut,
   dropLayer,
   dropLayerCopy,
+  isLayerLocked,
   layerCopyDocument,
-  styledCopy,
+  styledCopies,
   type WorldRect,
 } from '../lib/layerEdits'
 import { currentPageCanvas } from '../lib/pages'
@@ -115,8 +116,9 @@ export function useElementMove(frame: Frame, layoutZoom: number) {
   ): boolean {
     const s = useStore.getState()
     /* ⌥⇧-drag with a layer of this frame picked copies the layer, not the
-       frame: the copy rides the pointer, the original stays (with its id, so
-       its comments and links stay put) */
+       frame (every picked layer, when the press is on one of several): the
+       copies ride the pointer, the originals stay (with their ids, so their
+       comments and links stay put) */
     const duplicating = e.altKey && e.shiftKey && s.selectedElement?.frameId === frame.id
     if ((e.altKey && !duplicating) || !e.isPrimary || !frame.html) return false
     if (!e.shiftKey && s.selectedIds.includes(frame.id) && s.selectedIds.length > 1) return false
@@ -190,15 +192,32 @@ export function useElementMove(frame: Frame, layoutZoom: number) {
     let appliedPoint: { x: number; y: number; pointerX: number; pointerY: number } | null = null
     let inFlight = false
     let picked = false
-    /* an ⌥⇧ drag's copy, once it is in the live document: the gesture moves
-       it in place of the layer pressed */
-    let copy: { selector: string; html: string } | null = null
+    /* an ⌥⇧ drag's copies, once they are in the live document: the gesture
+       moves the pressed layer's copy in place of the layer pressed, and the
+       other picked layers' copies in place of its followers */
+    let copy: { selector: string; followers: string[]; html: string } | null = null
     const movingSelector = () => copy?.selector ?? layer!.selector
-    /* the copy's document beside the original, worked out once */
+    const movingFollowers = () => copy?.followers ?? followers
+    /* the copies' document beside the originals, worked out once */
+    let copyRefused = false
     const planCopy = () => {
-      if (copy || !layer) return copy
-      const duplicated = styledCopy(frame.html, layer.selector)
-      if (duplicated) copy = duplicated
+      if (copy || copyRefused || !layer) return copy
+      const pressed = layer.selector
+      const pick = followers.length ? outermostSelectors(frame.html, [...followers, pressed]) : null
+      /* a press inside another picked layer copies the layer pressed alone */
+      const sources = pick?.includes(pressed) ? pick : [pressed]
+      /* a locked layer is not copied, and as ⌘D does, it stops the copy of
+         the pick it is in */
+      copyRefused = sources.some((selector) => isLayerLocked(frame, selector))
+      if (copyRefused) return copy
+      const duplicated = styledCopies(frame.html, sources)
+      if (!duplicated) return copy
+      const at = sources.indexOf(pressed)
+      copy = {
+        html: duplicated.html,
+        selector: duplicated.selectors[at]!,
+        followers: duplicated.selectors.filter((_, i) => i !== at),
+      }
       return copy
     }
     /* an ⌥⇧ copy dragged past its frame's edge rides over the canvas as a
@@ -295,7 +314,7 @@ export function useElementMove(frame: Frame, layoutZoom: number) {
        flow) is for one layer alone, so several picked layers always move
        freely, by translation */
     const moveTarget = (selector: string, pointerX: number, pointerY: number) =>
-      followers.length
+      movingFollowers().length
         ? Promise.resolve({ free: true, drop: null })
         : elementMoveTarget(frame.id, selector, pointerX, pointerY)
     function previewLayer() {
@@ -305,7 +324,7 @@ export function useElementMove(frame: Frame, layoutZoom: number) {
         layerReady = finishing.current.then(async () => {
           if (!sourceUnchanged()) return null
           const moving = duplicating ? await insertCopy() : selector
-          return moving ? styleGesture(frame.id, moving, 'begin', followers) : null
+          return moving ? styleGesture(frame.id, moving, 'begin', movingFollowers()) : null
         })
       }
       inFlight = true
@@ -368,9 +387,11 @@ export function useElementMove(frame: Frame, layoutZoom: number) {
           if (commit && final && sourceUnchanged() && result?.free) {
             const saves = sourceUnchanged()
             const done = await styleGesture(frame.id, selector, saves ? 'commit' : 'cancel')
-            /* the runtime's save carries the copy along; the copy is the pick */
-            if (copy && saves) useStore.getState().pickElement({ frameId: frame.id, selector })
-            else if (copy) await removeCopy()
+            /* the runtime's save carries the copies along; the copies are the pick */
+            if (copy && saves) {
+              if (copy.followers.length) useStore.getState().pickElements(frame.id, [...copy.followers, selector])
+              else useStore.getState().pickElement({ frameId: frame.id, selector })
+            } else if (copy) await removeCopy()
             updateLayer(done)
           } else {
             updateLayer(await styleGesture(frame.id, selector, 'cancel'))
@@ -407,8 +428,13 @@ export function useElementMove(frame: Frame, layoutZoom: number) {
         point[locked] = origin[locked]
       }
       const local = frameDesignPoint(point, frame)
+      /* only a single layer's copy leaves its frame: several move together
+         inside it, as a multi-pick move does */
       const outside =
-        duplicating && !!layer && (local.x < 0 || local.y < 0 || local.x > frame.width || local.y > frame.height)
+        duplicating &&
+        !!layer &&
+        !planCopy()?.followers.length &&
+        (local.x < 0 || local.y < 0 || local.x > frame.width || local.y > frame.height)
       const start = outside && layer ? outsideBox(layer) : bounds
       rect = { ...start, x: start.x + point.x - origin.x, y: start.y + point.y - origin.y }
       /* off its frame, the copy lines up with the frames on the page */
@@ -614,7 +640,7 @@ export function useElementMove(frame: Frame, layoutZoom: number) {
     cleanup.current = cancel
     const selected = s.selectedElement?.frameId === frame.id ? s.selectedElement.selector : undefined
     /* every picked layer of this frame: a press on one of them, or inside one,
-       moves them all (an ⌥⇧ copy is of the pressed layer alone) */
+       moves (or, ⌥⇧, copies) them all */
     const pickedHere = selected ? pickedSelectors(s) : []
     /* hit-test the document this gesture checks against, not the one the
        frame still shows while a newer version is on its way in */
@@ -644,7 +670,7 @@ export function useElementMove(frame: Frame, layoutZoom: number) {
         if (layer && layer.selector === shell) layer = null
         if (layer) {
           const pressed = layer.selector
-          followers = duplicating || !pickedHere.includes(pressed) ? [] : pickedHere.filter((x) => x !== pressed)
+          followers = pickedHere.includes(pressed) ? pickedHere.filter((x) => x !== pressed) : []
           bounds = { ...layer.rect, x: frame.x + layer.rect.x, y: frame.y + layer.rect.y }
           snapTargets = toSnapTargets(layer.snapRects)
           if (!press.shiftKey) pickHit()
