@@ -77,7 +77,7 @@ jobs:
             echo "::warning::VSCE_PAT is not set: skipped the Visual Studio Marketplace"
             exit 0
           fi
-          bunx @vscode/vsce@3.6.0 publish --packagePath doop.vsix --pat "$VSCE_PAT"
+          bunx @vscode/vsce@3.6.0 publish --packagePath doop.vsix --pat "$VSCE_PAT" --skip-duplicate
       - name: Publish to Open VSX
         env:
           OVSX_PAT: ${{ secrets.OVSX_PAT }}
@@ -86,12 +86,13 @@ jobs:
             echo "::warning::OVSX_PAT is not set: skipped Open VSX"
             exit 0
           fi
-          bunx ovsx@0.10.6 publish doop.vsix --pat "$OVSX_PAT"
+          bunx ovsx@0.10.6 publish doop.vsix --pat "$OVSX_PAT" --skip-duplicate
       - name: Attach the VSIX to a GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           cp doop.vsix "doop-${GITHUB_REF_NAME#vscode-v}.vsix"
+          gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 && { echo "release exists"; exit 0; }
           gh release create "$GITHUB_REF_NAME" "doop-${GITHUB_REF_NAME#vscode-v}.vsix" \
             --repo "$GITHUB_REPOSITORY" --title "VS Code extension ${GITHUB_REF_NAME#vscode-v}" \
             --notes "The Doop extension for VS Code, Cursor, Windsurf and VSCodium. Install from the Visual Studio Marketplace or Open VSX, or download the VSIX below and run \`code --install-extension\` on it."
