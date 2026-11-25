@@ -234,6 +234,10 @@ async function pushOne(
   if (tracked) {
     const changed = changedParts(local, tracked)
     if (!changed.html && !changed.css && !changed.meta && !force) return { base, outcome: 'unchanged', id: tracked.id }
+    /* a name or description change does not move the revision, so `expected_rev` cannot catch
+       someone else's: the canvas's own copy is checked against what was last pulled instead */
+    if (changed.meta && !force && !sameMeta(metaOf(await readComponent(context, tracked.id)), tracked.meta))
+      return { base, outcome: 'conflict', id: tracked.id }
     const meta = local.meta
     try {
       const written = await callJson<unknown>(context.connection, 'update_component', {
