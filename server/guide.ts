@@ -577,7 +577,8 @@ gives PNG, JPG or PDF, export_layer one element (get_guide export).
 - Call get_canvas before adding or editing anything. Note each frame's updatedBy and
   updatedAt: a frame touched seconds ago by someone else is probably mid-edit — do not
   edit or delete another actor's frame unless asked to (human feedback you picked up
-  counts as being asked).
+  counts as being asked). A comment, a token rename or a component update is not an edit:
+  updatedBy stays and updatedAt moves by a millisecond.
 - Put new work in new frames beside existing ones; omit x/y to auto-place.
 - Keep the SAME agent_name for your whole session. It is your identity in the room.
 - You act with the canvas role of the account you connected through: a view link reads, a
