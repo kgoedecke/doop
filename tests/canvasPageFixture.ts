@@ -1,7 +1,7 @@
 import type { Page } from 'puppeteer-core'
 import type { WireComponentDef } from '../shared/components'
 import type { DesignToken } from '../shared/designTokens'
-import type { Canvas, CanvasPageInfo, Frame } from '../shared/types'
+import type { AgentTask, Canvas, CanvasPageInfo, Frame } from '../shared/types'
 import { fixtureUrl } from './browser'
 
 declare global {
@@ -14,6 +14,8 @@ declare global {
       setTokens: (tokens: DesignToken[], themes: string[]) => void
       /** a component as the room's `component` message would set it */
       setComponent: (component: WireComponentDef) => void
+      /** the agents' tasks as the room's init would carry them */
+      setTasks: (tasks: AgentTask[]) => void
       /** the frame's HTML as the store holds it */
       frameHtml: (id: string) => string
     }
