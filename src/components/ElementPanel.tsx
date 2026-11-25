@@ -320,7 +320,7 @@ export function ElementPanel({
             </Tooltip>
           )}
         </div>
-        <PanelTabPanel value="design">
+        <PanelTabPanel value="design" data-design-panel="element">
           <PanelBody>
             <ComponentSection frame={frame} selector={selector} />
             {info ? (

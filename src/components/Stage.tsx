@@ -1245,7 +1245,18 @@ export function Stage({
                         : 'cursor-default',
             )}
             style={{ ...bounds, ...paperStyle(paper), ...(tool === 'comment' ? commentCursorStyle() : null) }}
-            onPointerDownCapture={drawing.onPointerDown}
+            onPointerDownCapture={(e) => {
+              const field = document.activeElement
+              // Canvas presses can prevent the native blur that commits a Design field.
+              if (
+                e.button === 0 &&
+                e.isPrimary &&
+                field instanceof HTMLElement &&
+                field.matches('[data-design-panel] input, [data-design-panel="element"] textarea')
+              )
+                field.blur()
+              drawing.onPointerDown(e)
+            }}
             onDoubleClickCapture={drawing.onDoubleClick}
             onTouchStartCapture={drawing.onTouchStart}
             onPointerDown={onPointerDown}
