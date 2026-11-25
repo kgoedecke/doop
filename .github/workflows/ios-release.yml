@@ -14,10 +14,15 @@
 #   APPLE_CERTIFICATE / APPLE_CERTIFICATE_PASSWORD
 #                                 a base64 .p12 of an Apple Distribution certificate, and its password
 #                                 (set on the environment: the repo-level pair is desktop's Developer ID)
+#   IOS_PROFILE_APP / IOS_PROFILE_ACTIVITY
+#                                 base64 App Store profiles "Doop App Store CI" and
+#                                 "Doop Activity App Store CI" for that certificate
 # The archive is signed for development (automatic signing, as the targets are set up):
-# Xcode creates the development certificate and profiles through the API key, and the
-# export re-signs with the distribution certificate. The signing keychain is made the
-# default so the private key Xcode generates lands where it searches.
+# Xcode creates the development certificate and profiles through the API key. The signing
+# keychain is made the default so the private key Xcode generates lands where it searches.
+# The export re-signs manually with the distribution certificate and the two profiles
+# (ios/ExportOptions.plist): automatic export would need cloud signing, which an App
+# Manager key may not use.
 # The build number is the workflow run number, so every upload is unique.
 name: iOS Release
 
@@ -68,6 +73,18 @@ jobs:
           security set-key-partition-list -S apple-tool:,apple: -k "" "$KEYCHAIN"
           security list-keychain -d user -s "$KEYCHAIN"
           security default-keychain -d user -s "$KEYCHAIN"
+      - name: Install the App Store provisioning profiles
+        if: github.event_name != 'pull_request'
+        env:
+          IOS_PROFILE_APP: ${{ secrets.IOS_PROFILE_APP }}
+          IOS_PROFILE_ACTIVITY: ${{ secrets.IOS_PROFILE_ACTIVITY }}
+        run: |
+          set -euo pipefail
+          for dir in "$HOME/Library/MobileDevice/Provisioning Profiles" "$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles"; do
+            mkdir -p "$dir"
+            echo "$IOS_PROFILE_APP" | base64 --decode > "$dir/doop-appstore.mobileprovision"
+            echo "$IOS_PROFILE_ACTIVITY" | base64 --decode > "$dir/doop-activity-appstore.mobileprovision"
+          done
       - name: Write the App Store Connect API key
         if: github.event_name != 'pull_request'
         env:

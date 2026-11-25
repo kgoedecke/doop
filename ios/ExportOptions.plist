@@ -7,7 +7,16 @@
 	<key>destination</key>
 	<string>upload</string>
 	<key>signingStyle</key>
-	<string>automatic</string>
+	<string>manual</string>
+	<key>signingCertificate</key>
+	<string>Apple Distribution</string>
+	<key>provisioningProfiles</key>
+	<dict>
+		<key>design.doop.ios</key>
+		<string>Doop App Store CI</string>
+		<key>design.doop.ios.activity</key>
+		<string>Doop Activity App Store CI</string>
+	</dict>
 	<key>teamID</key>
 	<string>N29YR8ZK97</string>
 	<key>uploadSymbols</key>
