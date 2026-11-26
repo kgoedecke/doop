@@ -17,7 +17,8 @@ server/index.ts` in prod. `erasableSyntaxOnly` and `verbatimModuleSyntax` in tsc
 
 ## 2. Core Frameworks and Libraries
 
-- Express 4.19.2 - HTTP server framework in `server/`.
+- Express 5.3 - HTTP server framework in `server/`: a rejected async handler reaches the error handlers, and route
+  paths use path-to-regexp 8 syntax (a named wildcard, `/{*splat}`; no `?`, `(` or regex in a path string).
 - React 18.3.1 - UI framework in `src/`.
 - Zustand 4.5.4 - client-side state management.
 - Element ids (`shared/elementId.ts`): anything outside a frame that points at an element

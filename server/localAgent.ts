@@ -92,7 +92,7 @@ localAgentRouter.post('/stop', (req, res, next) => {
 
 /** An unguessable, short-lived run token grants only this canvas's resident tools.
  * Recheck membership and bans on every request, independently of browser cookies. */
-export async function handleLocalAgentMcp(req: Request, res: Response) {
+export async function handleLocalAgentMcp(req: Request<{ id: string }>, res: Response) {
   const token = req.headers.authorization?.replace(/^Bearer /, '') ?? ''
   const id = req.params.id ?? ''
   const run = localAgentRuns.authorized(id, token)

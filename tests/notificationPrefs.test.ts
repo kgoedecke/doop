@@ -24,8 +24,8 @@ beforeAll(async () => {
     next()
   })
   app.use(notificationsRouter)
-  await new Promise<void>((resolve) => {
-    server = app.listen(0, '127.0.0.1', resolve)
+  await new Promise<void>((resolve, reject) => {
+    server = app.listen(0, '127.0.0.1', (error) => (error ? reject(error) : resolve()))
   })
   origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`
 })

@@ -182,12 +182,14 @@ export function mountAgentApi(app: express.Express): void {
    *  handler answers a refusal at once (nothing was written) and hands back its answer to a
    *  write as a `Reply`, which is sent after the operation has committed: nothing that leaves
    *  the process says a write happened before it has. */
+  /* every agent API route names one frame or canvas by `:id` */
+  type IdRequest = express.Request<{ id: string }>
   const route =
     (
       name: string,
-      target: (req: express.Request) => Record<string, string>,
-      handler: (req: express.Request, res: express.Response) => unknown,
-    ): express.RequestHandler =>
+      target: (req: IdRequest) => Record<string, string>,
+      handler: (req: IdRequest, res: express.Response) => unknown,
+    ): express.RequestHandler<{ id: string }> =>
     (req, res, next) => {
       withArgsCanvases(target(req), () => handler(req, res), name)
         .then((reply) => {
