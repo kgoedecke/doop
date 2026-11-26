@@ -406,6 +406,14 @@ export const COMPONENT_TOOLS: ComponentTool[] = [
       props: z.array(propSchema).optional().describe('Full replacement of the prop metadata'),
       code: codeSchema.optional(),
       expected_rev: z.number().optional().describe('Refuse if the component has moved past this revision'),
+      expected_name: z
+        .string()
+        .optional()
+        .describe('Refuse if the name is no longer this (a rename does not move the revision)'),
+      expected_description: z
+        .string()
+        .optional()
+        .describe('Refuse if the description is no longer this (a new description does not move the revision)'),
     },
     async run(input, { canvas, actor, canRead }) {
       if (input.html !== undefined && input.template !== undefined)
@@ -423,6 +431,10 @@ export const COMPONENT_TOOLS: ComponentTool[] = [
           ...(input.props !== undefined ? { props: input.props as never } : {}),
           ...(input.code !== undefined ? { code: input.code as never } : {}),
           ...(input.expected_rev !== undefined ? { expectedRev: Number(input.expected_rev) } : {}),
+          ...(input.expected_name !== undefined ? { expectedName: String(input.expected_name) } : {}),
+          ...(input.expected_description !== undefined
+            ? { expectedDescription: String(input.expected_description) }
+            : {}),
         },
         actor,
         view: true,
