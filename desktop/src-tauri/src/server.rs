@@ -75,6 +75,23 @@ fn config_file(app: &AppHandle) -> Option<PathBuf> {
     } else {
         "server.json"
     };
+    // Tauri 2 builds the menu before it sets up its path plugin, and the
+    // macOS menu asks which server is active (menu::item): app.path() would
+    // panic there. That one read works the folder out by hand, as
+    // chromium_profile_dir does; Tauri 3 has the resolver by then.
+    #[cfg(target_os = "macos")]
+    if app
+        .try_state::<tauri::path::PathResolver<crate::ShellRuntime>>()
+        .is_none()
+    {
+        let home = std::env::var_os("HOME")?;
+        return Some(
+            PathBuf::from(home)
+                .join("Library/Application Support")
+                .join(&app.config().identifier)
+                .join(name),
+        );
+    }
     app.path().app_data_dir().ok().map(|dir| dir.join(name))
 }
 
