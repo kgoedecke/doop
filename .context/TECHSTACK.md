@@ -1534,8 +1534,9 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   (`replace`: MCP and resident `set_frame_html`, the resident's rewrite commit). The scanner skips
   `<doop-use` text in scripts, styles, textareas, titles and comments and in names like
   `<doop-user-chip>`. Tests: `componentDrops.test.ts`, the `<doop-use>` cases in `inlineData.test.ts`. A component's CSS is read with CSS escapes honoured (Tailwind's `\'` in
-  `[class*='size-']` is part of a class name, not a string); a sheet that still cannot be read to the
-  end (a string or block left open, text outside a rule) is reported as `css_not_read` with where it
+  `[class*='size-']` is part of a class name, not a string) and comments cut by the same read (a `/*`
+  inside a string or an unquoted `url(…)` is text); a sheet that still cannot be read to the end (a
+  string, block or comment left open, text outside a rule) is reported as `css_not_read` with where it
   went wrong, beside `css_unmatched`. The CSS written for a component (its `data-doop-component-source`
   block) is kept apart from the page's: a rule of it naming nothing in the main is kept, scoped by
   its subject, when it is anchored to the component (a state, a script-added element), and left out

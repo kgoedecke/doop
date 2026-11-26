@@ -685,7 +685,7 @@ function reportUnmatchedCss(def: ComponentDef, css: string) {
   if (unread) {
     actions.addComponentIssue(frame.id, {
       code: 'css_not_read',
-      message: `the CSS for “${def.name}” could not be read past: ${unread}. Rules from there on may be missing or wrong. Look for a quote, brace or bracket that is not closed or not escaped, or text outside a rule; get_component shows the CSS as stored.`,
+      message: `the CSS for “${def.name}” could not be read past: ${unread}. Rules from there on may be missing or wrong. Look for a quote, brace, bracket or comment that is not closed or not escaped, or text outside a rule; get_component shows the CSS as stored.`,
     })
   }
   const variants = def.props.filter((prop) => prop.type === 'enum').map((prop) => `data-${prop.name}`)
