@@ -61,7 +61,7 @@ import {
   SYSTEM_FIRST,
 } from './guide.ts'
 import { zodToJsonSchema } from 'zod-to-json-schema'
-import { TOOL_SHAPES } from './agentToolShapes.ts'
+import { TOOL_SHAPES, type SharedToolName } from './agentToolShapes.ts'
 import { z } from 'zod'
 import {
   catalog,
@@ -1363,14 +1363,14 @@ interface ResidentSchemaOptions<Key extends string> {
 }
 
 /**
- * A tool's parameters as the Doop Agent's model sees them: the JSON Schema of the one zod shape MCP registers
- * (agentToolShapes.ts, componentTools.ts), converted with the options the MCP SDK converts it with, so the two
- * surfaces cannot drift apart.
+ * A tool's parameters as the Doop Agent takes them: the one zod shape MCP registers (agentToolShapes.ts,
+ * componentTools.ts), with the run's own options. Its model is shown them (`jsonSchemaOf`) and its calls are
+ * checked against them (`checkedInput`), so the two surfaces cannot drift apart.
  */
-function residentInputSchema<Shape extends z.ZodRawShape>(
+function residentParameters<Shape extends z.ZodRawShape>(
   shape: Shape,
   options: ResidentSchemaOptions<keyof Shape & string> = {},
-): Anthropic.Tool['input_schema'] {
+): z.AnyZodObject {
   const { describe = {}, required = [], omit = [], extend = {} } = options
   const wording: Partial<Record<string, string>> = describe
   const fields: z.ZodRawShape = {}
@@ -1380,42 +1380,125 @@ function residentInputSchema<Shape extends z.ZodRawShape>(
     const description = wording[key] ?? field.description
     fields[key] = description ? kept.describe(description) : kept
   }
-  const schema = zodToJsonSchema(z.object({ ...fields, ...extend }), { strictUnions: true, pipeStrategy: 'input' })
-  return schema as Anthropic.Tool['input_schema']
+  return z.object({ ...fields, ...extend })
 }
+
+/** Parameters as the model reads them: JSON Schema, converted with the options the MCP SDK converts with. */
+function jsonSchemaOf(parameters: z.AnyZodObject): Anthropic.Tool['input_schema'] {
+  return zodToJsonSchema(parameters, { strictUnions: true, pipeStrategy: 'input' }) as Anthropic.Tool['input_schema']
+}
+
+/** Each shared tool's parameters, with the Doop Agent's own wording where its run reads one differently. A shared
+ *  tool left out, or a name that is not one, fails the type check. */
+const SHARED_PARAMETERS = {
+  set_status: residentParameters(TOOL_SHAPES.set_status),
+  create_frame: residentParameters(TOOL_SHAPES.create_frame, {
+    required: ['width', 'height'],
+    describe: {
+      pageId:
+        'The page to create it on, from the page list (create_canvas_page returns a new one). Optional: left out, the frame lands on the page the request is about, else the first page.',
+      html: 'Complete, self-contained HTML document',
+      width: 'px, e.g. 1200',
+      height: 'px, e.g. 630',
+      x: 'Canvas position in px. Optional: left out, the frame lands beside the pin of a canvas comment on that page, else to the right of the existing frames.',
+      y: 'Canvas position in px. Optional, see x.',
+      /* a run streams a rewrite with begin/append/commit_frame_rewrite, not append_frame_html */
+      fit_to_content: FIT_ON.create,
+    },
+  }),
+  inspect_frame: residentParameters(TOOL_SHAPES.inspect_frame),
+  edit_frame_html: residentParameters(TOOL_SHAPES.edit_frame_html),
+  set_frame_html: residentParameters(TOOL_SHAPES.set_frame_html, {
+    describe: { html: 'Complete, self-contained HTML document' },
+  }),
+  upload_font: residentParameters(TOOL_SHAPES.upload_font, {
+    omit: ['local_file', 'data'],
+    required: ['source_url'],
+  }),
+  search_images: residentParameters(TOOL_SHAPES.search_images),
+  generate_image: residentParameters(TOOL_SHAPES.generate_image),
+  list_backgrounds: residentParameters(TOOL_SHAPES.list_backgrounds),
+  search_icons: residentParameters(TOOL_SHAPES.search_icons),
+  search_logos: residentParameters(TOOL_SHAPES.search_logos),
+  view_website: residentParameters(TOOL_SHAPES.view_website),
+  import_webpage: residentParameters(TOOL_SHAPES.import_webpage, {
+    extend: {
+      as_reference: z
+        .boolean()
+        .describe(
+          'True for source material that must remain unchanged; false when the imported snapshot itself is the deliverable',
+        ),
+    },
+  }),
+  get_reference: residentParameters(TOOL_SHAPES.get_reference, {
+    describe: { reference_id: 'Reference id from the pinned-references list in your request' },
+  }),
+  search_inspiration: residentParameters(TOOL_SHAPES.search_inspiration),
+  save_decision: residentParameters(TOOL_SHAPES.save_decision, {
+    describe: {
+      decision: `The decision and its reason, at most ${MAX_DECISION_CHARS} characters; split longer feedback into separate calls by topic. E.g. "Followed oatside-soft-shelf: its candlelit warmth suits an evening grocery brand better than the bright, clinical set"`,
+    },
+  }),
+  reply_to_comment: residentParameters(TOOL_SHAPES.reply_to_comment, {
+    describe: {
+      comment_id: 'The comment id given in the request (any comment in the thread works)',
+      text: 'The reply, written to the person who asked',
+    },
+    extend: {
+      awaiting_answer: z
+        .boolean()
+        .optional()
+        .describe(
+          'true when you are asking something you need answered before you can do the work: the request is handed back to the person, the thread stays open for their reply, and you should finish without changing a frame.',
+        ),
+    },
+  }),
+  set_frame_approval: residentParameters(TOOL_SHAPES.set_frame_approval),
+  resolve_comment: residentParameters(TOOL_SHAPES.resolve_comment, {
+    describe: { comment_id: 'The comment id given in the request' },
+  }),
+  report_issue: residentParameters(TOOL_SHAPES.report_issue),
+  share_feedback: residentParameters(TOOL_SHAPES.share_feedback),
+  set_guidelines: residentParameters(TOOL_SHAPES.set_guidelines),
+  get_tokens: residentParameters(TOOL_SHAPES.get_tokens),
+  create_tokens: residentParameters(TOOL_SHAPES.create_tokens),
+  set_tokens: residentParameters(TOOL_SHAPES.set_tokens),
+  set_token_themes: residentParameters(TOOL_SHAPES.set_token_themes),
+  update_frame: residentParameters(TOOL_SHAPES.update_frame),
+  update_canvas: residentParameters(TOOL_SHAPES.update_canvas),
+  create_canvas_page: residentParameters(TOOL_SHAPES.create_canvas_page),
+  set_canvas_pages: residentParameters(TOOL_SHAPES.set_canvas_pages, {
+    describe: { expectedPages: 'The ordered pages as you last saw them' },
+  }),
+  get_prototype: residentParameters(TOOL_SHAPES.get_prototype),
+  set_prototype_start: residentParameters(TOOL_SHAPES.set_prototype_start, {
+    describe: { pageId: "The page; defaults to the start frame's page (the first page when clearing)" },
+  }),
+  export_layer: residentParameters(TOOL_SHAPES.export_layer),
+} satisfies Record<SharedToolName, z.AnyZodObject>
+
+/* screenshot_component is the Doop Agent's preview of get_component_preview, which has no shared shape */
+const SCREENSHOT_COMPONENT_PARAMETERS = residentParameters({ component: z.string(), props: previewProps })
 
 const TOOLS: Anthropic.Tool[] = [
   {
     name: 'set_status',
     description:
       'Broadcast a one-line "what I am doing right now" to everyone watching the canvas. Call it when you start and whenever your focus shifts.',
-    input_schema: residentInputSchema(TOOL_SHAPES.set_status),
+    input_schema: jsonSchemaOf(SHARED_PARAMETERS.set_status),
   },
   {
     name: 'create_frame',
     description:
       'Add a new frame to the canvas — use this when a queued card asks for a new design rather than a change to an existing frame. Streams in live for viewers. ' +
       COMPOSE_CHECK,
-    input_schema: residentInputSchema(TOOL_SHAPES.create_frame, {
-      required: ['width', 'height'],
-      describe: {
-        pageId:
-          'The page to create it on, from the page list (create_canvas_page returns a new one). Optional: left out, the frame lands on the page the request is about, else the first page.',
-        html: 'Complete, self-contained HTML document',
-        width: 'px, e.g. 1200',
-        height: 'px, e.g. 630',
-        x: 'Canvas position in px. Optional: left out, the frame lands beside the pin of a canvas comment on that page, else to the right of the existing frames.',
-        y: 'Canvas position in px. Optional, see x.',
-        /* a run streams a rewrite with begin/append/commit_frame_rewrite, not append_frame_html */
-        fit_to_content: FIT_ON.create,
-      },
-    }),
+    input_schema: jsonSchemaOf(SHARED_PARAMETERS.create_frame),
   },
   {
     name: 'inspect_frame',
     description:
       "Inspect the rendered page without relying on class names. Returns a compact semantic element outline, visible text, geometry, computed colors, typography, radii, shadows, and CSS variables, plus `problems`: content past the frame's edge, text cut off by its box, and text or controls overlapping (candidates to check against the screenshot; a deliberate overlap is fine). Pass selectors to report on those elements instead of the automatic outline. Use this before working with large frames, for cross-frame visual references and to pin down layout faults.",
-    input_schema: residentInputSchema(TOOL_SHAPES.inspect_frame),
+    input_schema: jsonSchemaOf(SHARED_PARAMETERS.inspect_frame),
   },
   {
     name: 'get_frame_html',
@@ -1439,16 +1522,14 @@ const TOOLS: Anthropic.Tool[] = [
     name: 'edit_frame_html',
     description:
       "Exact find/replace in a frame's HTML — the change morphs into the live render. Use for small, targeted changes. old_str must occur exactly once. new_str must open and close as many <doop-use> and <template> tags as old_str does: an edit that leaves one unclosed is refused, so include the closing tags in the same edit or replace the whole instance.",
-    input_schema: residentInputSchema(TOOL_SHAPES.edit_frame_html),
+    input_schema: jsonSchemaOf(SHARED_PARAMETERS.edit_frame_html),
   },
   {
     name: 'set_frame_html',
     description:
       'Replace a frame with a complete compact HTML document in one call. Use only when the entire html argument is under 12,000 characters; use the staged rewrite tools for larger documents. ' +
       COMPOSE_CHECK,
-    input_schema: residentInputSchema(TOOL_SHAPES.set_frame_html, {
-      describe: { html: 'Complete, self-contained HTML document' },
-    }),
+    input_schema: jsonSchemaOf(SHARED_PARAMETERS.set_frame_html),
   },
   {
     name: 'begin_frame_rewrite',
@@ -1488,197 +1569,161 @@ const TOOLS: Anthropic.Tool[] = [
     name: 'upload_font',
     description:
       'Add a font file (ttf/otf/woff/woff2, one face per file, max 10 MB) to the font library this canvas designs with, from a public URL of the file itself (not a CSS file). Then name the family in CSS (font-family: "Family", sans-serif) and Doop writes the @font-face. This is how a font that is not in the canvas library or the hosted fonts gets into a design: never inline a font file as a base64 data: URI. Upload each weight and style you use as its own file.',
-    input_schema: residentInputSchema(TOOL_SHAPES.upload_font, {
-      omit: ['local_file', 'data'],
-      required: ['source_url'],
-    }),
+    input_schema: jsonSchemaOf(SHARED_PARAMETERS.upload_font),
   },
   {
     name: 'search_images',
     description:
       'Search free stock photography and get candidate photos WITH visual thumbnails — look at them and pick the one that fits the frame. Use concrete, scene-level queries ("team collaborating loft office", not "business"). Embed the chosen image_url directly in frame HTML with object-fit: cover and a real alt text.',
-    input_schema: residentInputSchema(TOOL_SHAPES.search_images),
+    input_schema: jsonSchemaOf(SHARED_PARAMETERS.search_images),
   },
   {
     name: 'generate_image',
     description: `Generate an image from a text prompt with AI and get a permanent URL to embed, plus a preview to judge. ${imageGen.IMAGE_PROVIDER_NOTE} For visuals stock search cannot supply: brand-specific illustration, product renders, mascots, abstract hero art in the frame's exact palette. Prefer search_images for ordinary photography. It spends the requester's quota or money and takes 20–60 seconds, so write ONE considered prompt (subject, style, composition, palette hexes, lighting, what to leave out) and refine a near miss by prompt.`,
-    input_schema: residentInputSchema(TOOL_SHAPES.generate_image),
+    input_schema: jsonSchemaOf(SHARED_PARAMETERS.generate_image),
   },
   {
     name: 'list_backgrounds',
     description:
       "Browse a curated library of premium backgrounds for hero sections, section bands and bento tiles (glows, grainy meshes, aurora, neon, painterly scenes) as a page of thumbnails, each with palette hexes and a ready-to-paste CSS line that includes a legibility scrim. Reach for it when a hero or full-bleed section wants atmosphere, depth or a focal glow; a quiet typographic design can stay flat, but a default two-stop gradient is rarely right. Filter by tone (light/dark — match your copy color), slot and style; an optional query only reorders. Then decide like a designer: does one genuinely fit the frame's style and palette? If yes use it and put copy in its text_zone; if not, call again with a different filter or draw the background yourself.",
-    input_schema: residentInputSchema(TOOL_SHAPES.list_backgrounds),
+    input_schema: jsonSchemaOf(SHARED_PARAMETERS.list_backgrounds),
   },
   {
     name: 'search_icons',
     description:
       'Search 200,000+ open-source UI icons, returned as hotlinkable SVG URLs. Search the concept ("shopping cart", "arrow right"). Results are semantically named ids — pick by name. For company logos use search_logos instead.',
-    input_schema: residentInputSchema(TOOL_SHAPES.search_icons),
+    input_schema: jsonSchemaOf(SHARED_PARAMETERS.search_icons),
   },
   {
     name: 'search_logos',
     description:
       'Find a company\'s logo by brand name or domain — returns the company\'s real mark as a hotlinkable URL (thumbnail included when possible), plus open-source vector marks for well-known brands. The exact domain ("acme.io") resolves far more reliably than a name. Use for customer-logo walls, integration rows, testimonial cards, press bars. Favicon-sourced logos are small rasters — display at 32px or less, never scale up.',
-    input_schema: residentInputSchema(TOOL_SHAPES.search_logos),
+    input_schema: jsonSchemaOf(SHARED_PARAMETERS.search_logos),
   },
   {
     name: 'view_website',
     description:
       'Read-only inspection of a public web page: acquires its current HTML and returns a locally rendered desktop screenshot plus visible text without changing the canvas. Use import_webpage instead when the page needs to land on the canvas as an editable HTML snapshot.',
-    input_schema: residentInputSchema(TOOL_SHAPES.view_website),
+    input_schema: jsonSchemaOf(SHARED_PARAMETERS.view_website),
   },
   {
     name: 'import_webpage',
     description:
       'Import one public web page onto the current canvas as an editable HTML snapshot. Scripts and iframes are removed and stylesheets are inlined. Set as_reference=true when it is source material for a separate design; matching reference snapshots are reused across pipeline stages. Set false when importing or editing the snapshot itself is the deliverable; this creates a fresh deliverable copy. Call screenshot_frame on the returned frame.',
-    input_schema: residentInputSchema(TOOL_SHAPES.import_webpage, {
-      extend: {
-        as_reference: z
-          .boolean()
-          .describe(
-            'True for source material that must remain unchanged; false when the imported snapshot itself is the deliverable',
-          ),
-      },
-    }),
+    input_schema: jsonSchemaOf(SHARED_PARAMETERS.import_webpage),
   },
   {
     name: 'get_reference',
     description:
       'Read a pinned style reference — a design a human marked "more like this" — as a rendered screenshot plus its HTML. References are listed in your request when the canvas has them. Match the reference\'s palette, typography and spacing in what you design.',
-    input_schema: residentInputSchema(TOOL_SHAPES.get_reference, {
-      describe: { reference_id: 'Reference id from the pinned-references list in your request' },
-    }),
+    input_schema: jsonSchemaOf(SHARED_PARAMETERS.get_reference),
   },
   {
     name: 'search_inspiration',
     description:
       'Search One Page Love\'s hand-curated gallery of real, well-designed live websites and SEE thumbnails of each, with their tags (style, colour, fonts, genre, sections). Call it FIRST when writing a design brief — it is the required inspiration step, especially for landing pages. Query the genre plus the look you want in the words the catalog is tagged with ("saas landing page, dark minimal", "finance, editorial", "portfolio, typographic", "pricing, illustrative"), not the product noun alone. The catalog is landing pages and one-page sites, not app screens: for a dashboard or app UI, query the product\'s register ("saas, minimal") and take the type, colour and density from it. Study the thumbnails, pick the ONE exemplar that fits the brief best and follow it — do not blend several — and name it in the brief. Do not embed these screenshots in a frame.',
-    input_schema: residentInputSchema(TOOL_SHAPES.search_inspiration),
+    input_schema: jsonSchemaOf(SHARED_PARAMETERS.search_inspiration),
   },
   {
     name: 'save_decision',
     description: `Record a design decision and why it was made, in the canvas Memory, so humans and later agents know what was committed to and the reason: a direction you chose (the exemplar you followed, the mood, the accent) or a change you made at someone's request (colours changed, corners rounded). A decision is the why, not a store for values: the palette, fonts and scale live in tokens (create_tokens, set_tokens). Save one decision and its rationale per call, at most ${MAX_DECISION_CHARS} characters, split by topic. Design taste only, never one-off content edits.`,
-    input_schema: residentInputSchema(TOOL_SHAPES.save_decision, {
-      describe: {
-        decision: `The decision and its reason, at most ${MAX_DECISION_CHARS} characters; split longer feedback into separate calls by topic. E.g. "Followed oatside-soft-shelf: its candlelit warmth suits an evening grocery brand better than the bright, clinical set"`,
-      },
-    }),
+    input_schema: jsonSchemaOf(SHARED_PARAMETERS.save_decision),
   },
   {
     name: 'reply_to_comment',
     description:
       'Answer inside a comment thread on this canvas — the person who left the comment sees it under their pin. Use it when a request needs a decision only they can make, or deserves a word mid-task; your final message is posted into every thread you worked on automatically, so do not repeat it here. Plain prose and no agent @mentions; to bring a person in, write @ and their name as the thread spells it ("@Ana Souza") and they are emailed. Replying does not resolve the thread.',
-    input_schema: residentInputSchema(TOOL_SHAPES.reply_to_comment, {
-      describe: {
-        comment_id: 'The comment id given in the request (any comment in the thread works)',
-        text: 'The reply, written to the person who asked',
-      },
-      extend: {
-        awaiting_answer: z
-          .boolean()
-          .optional()
-          .describe(
-            'true when you are asking something you need answered before you can do the work: the request is handed back to the person, the thread stays open for their reply, and you should finish without changing a frame.',
-          ),
-      },
-    }),
+    input_schema: jsonSchemaOf(SHARED_PARAMETERS.reply_to_comment),
   },
   {
     name: 'set_frame_approval',
     description:
       'Mark a frame ready for dev, or move it back to draft, for the person who asked you. Only when they explicitly ask for that: never approve your own designs unasked. The approval is recorded as theirs, made through you, and starts any approval automations on the canvas like a human sign-off. Editing the HTML or size afterwards moves it to needs_review.',
-    input_schema: residentInputSchema(TOOL_SHAPES.set_frame_approval),
+    input_schema: jsonSchemaOf(SHARED_PARAMETERS.set_frame_approval),
   },
   {
     name: 'resolve_comment',
     description:
       'Close a comment thread you have fully dealt with, before finishing. Resolving the root closes the whole thread. Threads you were asked to work on are resolved for you when the run finishes, so call this only to close one early, or one you answered without changing a frame.',
-    input_schema: residentInputSchema(TOOL_SHAPES.resolve_comment, {
-      describe: { comment_id: 'The comment id given in the request' },
-    }),
+    input_schema: jsonSchemaOf(SHARED_PARAMETERS.resolve_comment),
   },
   {
     name: 'report_issue',
     description:
       'Tell the Doop team where Doop itself got in your way: a tool that errored or behaved other than described, an instruction that left you guessing, or a capability you needed and did not have. Call it after a retry fails or when you fall back to a workaround, then carry on with the task. Ideas that did not block you go to share_feedback. It never reaches the humans on the canvas. Be specific: what you tried, what happened, what you expected. Never include secrets.',
-    input_schema: residentInputSchema(TOOL_SHAPES.report_issue),
+    input_schema: jsonSchemaOf(SHARED_PARAMETERS.report_issue),
   },
   {
     name: 'share_feedback',
     description:
       'Tell the Doop team how Doop could work better for you: a tool you wish you had, a clumsy workflow, a result that should carry more, or something that worked especially well. Use it when you notice something worth saying, then carry on with the task. Something that broke or blocked you goes to report_issue. It never reaches the humans on the canvas. Never include secrets.',
-    input_schema: residentInputSchema(TOOL_SHAPES.share_feedback),
+    input_schema: jsonSchemaOf(SHARED_PARAMETERS.share_feedback),
   },
   {
     name: 'set_guidelines',
     description:
       "Create, replace or delete a named style guide on this canvas (markdown, max 24,000 chars; empty string deletes). Write rules other designers and agents can execute directly: palette hexes, font families, spacing/radius/shadow conventions, layout recipes, do/don't lists. Also how you persist a redesign audit (binding Direction + descriptive source baseline) so every later job inherits it.",
-    input_schema: residentInputSchema(TOOL_SHAPES.set_guidelines),
+    input_schema: jsonSchemaOf(SHARED_PARAMETERS.set_guidelines),
   },
   {
     name: 'get_tokens',
     description:
       "This canvas's design tokens (CSS custom properties frames use as var(--name)), as JSON, a :root CSS block, a Tailwind v4 @theme block or markdown tables for a styleguide. Filter by type or a name glob.",
-    input_schema: residentInputSchema(TOOL_SHAPES.get_tokens),
+    input_schema: jsonSchemaOf(SHARED_PARAMETERS.get_tokens),
   },
   {
     name: 'create_tokens',
     description:
       'Add design tokens to this canvas: each needs a CSS custom property name (--color-primary), a type and a value (a CSS value, or var(--other) to alias a token that exists or comes earlier in the batch). Names follow Tailwind v4 namespaces (--color-*, --spacing-*, --radius-*, --font-*, --text-*, --leading-*, --tracking-*, --container-*, --breakpoint-*). Reuse existing tokens before creating new ones. Use them in frames as var(--name), never the literal.',
-    input_schema: residentInputSchema(TOOL_SHAPES.create_tokens),
+    input_schema: jsonSchemaOf(SHARED_PARAMETERS.create_tokens),
   },
   {
     name: 'set_tokens',
     description:
       'Change (value, type, description), rename (new_name) or delete (delete: true) design tokens by name. Every frame naming a changed token is restyled at once.',
-    input_schema: residentInputSchema(TOOL_SHAPES.set_tokens),
+    input_schema: jsonSchemaOf(SHARED_PARAMETERS.set_tokens),
   },
   {
     name: 'set_token_themes',
     description:
       'Replace this canvas\'s token themes (light, dark, …) and their order. A frame switches theme with data-doop-theme="<theme>" on its <html> or on a subtree; a theme that leaves takes its values with it.',
-    input_schema: residentInputSchema(TOOL_SHAPES.set_token_themes),
+    input_schema: jsonSchemaOf(SHARED_PARAMETERS.set_token_themes),
   },
   {
     name: 'update_frame',
     description:
       "Change a frame's metadata in one call, without touching its design: rename it (name), move it on its page (x, y), resize it (width, height), turn it (rotation), lock or unlock it, or move it to another page (pageId; it keeps its x/y unless you pass new ones and lands in front of that page's frames). Pass only what changes. To reorganize a canvas, move frames with this and reorder pages with set_canvas_pages — never recreate a frame to move it.",
-    input_schema: residentInputSchema(TOOL_SHAPES.update_frame),
+    input_schema: jsonSchemaOf(SHARED_PARAMETERS.update_frame),
   },
   {
     name: 'update_canvas',
     description:
       'Rename this canvas: the name on its tab and in the dashboard. Everyone viewing it sees the new name at once. Pages are renamed with set_canvas_pages, frames with update_frame.',
-    input_schema: residentInputSchema(TOOL_SHAPES.update_canvas),
+    input_schema: jsonSchemaOf(SHARED_PARAMETERS.update_canvas),
   },
   {
     name: 'create_canvas_page',
     description:
       'Add a new, empty page at the end of this canvas and get its id back. Use a page when a body of work deserves its own board (a second product surface, web vs. mobile, a round of explorations) and a frame when it is one screen. Move frames onto it with update_frame, or reorder it with set_canvas_pages.',
-    input_schema: residentInputSchema(TOOL_SHAPES.create_canvas_page),
+    input_schema: jsonSchemaOf(SHARED_PARAMETERS.create_canvas_page),
   },
   {
     name: 'set_canvas_pages',
     description:
       'Rename, reorder or delete pages by sending the complete ordered page list. expectedPages is the list as you last saw it (the kickoff, or the last page tool result); if a collaborator changed it since, the call is refused with the current list. A page that still holds frames cannot be deleted: move its frames with update_frame first. To add a page, use create_canvas_page.',
-    input_schema: residentInputSchema(TOOL_SHAPES.set_canvas_pages, {
-      describe: { expectedPages: 'The ordered pages as you last saw them' },
-    }),
+    input_schema: jsonSchemaOf(SHARED_PARAMETERS.set_canvas_pages),
   },
   {
     name: 'get_prototype',
     description:
       'List the clickable-prototype wiring of this canvas: each page with its flow start frame, and every interaction (data-doop-on / data-doop-action attributes in frame HTML) with its trigger, action and target. Interactions whose target frame does not exist carry a problem; fix them with edit_frame_html. Call it after wiring a flow.',
-    input_schema: residentInputSchema(TOOL_SHAPES.get_prototype),
+    input_schema: jsonSchemaOf(SHARED_PARAMETERS.get_prototype),
   },
   {
     name: 'set_prototype_start',
     description:
       "Choose the frame a page's clickable prototype starts on (the player at /c/<canvas>/proto opens there). Pass null as frame_id to clear it; the flow then starts on the page's top-left frame.",
-    input_schema: residentInputSchema(TOOL_SHAPES.set_prototype_start, {
-      describe: { pageId: "The page; defaults to the start frame's page (the first page when clearing)" },
-    }),
+    input_schema: jsonSchemaOf(SHARED_PARAMETERS.set_prototype_start),
   },
   {
     name: 'screenshot_frame',
@@ -1694,7 +1739,7 @@ const TOOLS: Anthropic.Tool[] = [
     name: 'export_layer',
     description:
       "Export ONE element (layer) of a frame as a PNG or JPG: the frame rendered whole, cut to that element's box. Returns public URLs that re-render when the frame changes. Name the element by element_id (its data-doop-id) or, when it has none, by selector (any CSS selector; the first match is used).",
-    input_schema: residentInputSchema(TOOL_SHAPES.export_layer),
+    input_schema: jsonSchemaOf(SHARED_PARAMETERS.export_layer),
   },
 ]
 
@@ -1703,14 +1748,55 @@ for (const tool of COMPONENT_TOOLS) {
   TOOLS.push({
     name: tool.name,
     description: tool.description,
-    input_schema: residentInputSchema(tool.shape),
+    input_schema: jsonSchemaOf(residentParameters(tool.shape)),
   })
 }
 TOOLS.push({
   name: 'screenshot_component',
   description: previewDescription,
-  input_schema: residentInputSchema({ component: z.string(), props: previewProps }),
+  input_schema: jsonSchemaOf(SCREENSHOT_COMPONENT_PARAMETERS),
 })
+
+/** What a call is checked against, by tool, keeping the parameters it does not list (a tool's old spellings, below)
+ *  for its handler. The resident-only tools with a hand-written schema have none. */
+const TOOL_PARAMETERS = new Map<string, z.AnyZodObject>(
+  [
+    ...Object.entries(SHARED_PARAMETERS),
+    ...COMPONENT_TOOLS.map((tool) => [tool.name, residentParameters(tool.shape)] as const),
+    ['screenshot_component', SCREENSHOT_COMPONENT_PARAMETERS] as const,
+  ].map(([name, parameters]) => [name, parameters.passthrough()]),
+)
+
+/** A tool's parameter names before it took MCP's: a model copying an earlier call keeps working. */
+const OLD_SPELLINGS: Partial<Record<string, Record<string, string>>> = {
+  edit_frame_html: { find: 'old_str', replace: 'new_str' },
+  set_prototype_start: { page_id: 'pageId' },
+}
+
+/**
+ * A call's input checked against the parameters its model was shown, as an MCP call is before its handler runs:
+ * refused with what is wrong, or handed on as the check made it (text trimmed, defaults filled in). An optional
+ * parameter given as null counts as not given, as the handlers read it before they were checked.
+ */
+function checkedInput(name: string, input: unknown): { ok: true; input: unknown } | { ok: false; error: string } {
+  const parameters = TOOL_PARAMETERS.get(name)
+  if (!parameters) return { ok: true, input }
+  const given: Record<string, unknown> = { ...(typeof input === 'object' && input !== null ? input : {}) }
+  for (const [old, current] of Object.entries(OLD_SPELLINGS[name] ?? {}))
+    if (old in given && given[current] == null) {
+      given[current] = given[old]
+      delete given[old]
+    }
+  const shape: z.ZodRawShape = parameters.shape
+  for (const [key, value] of Object.entries(given)) {
+    const field = shape[key]
+    if (value === null && field?.isOptional() && !field.isNullable()) delete given[key]
+  }
+  const checked = parameters.safeParse(given)
+  if (checked.success) return { ok: true, input: checked.data }
+  const issues = checked.error.issues.map((issue) => `${issue.path.join('.') || 'input'}: ${issue.message}`)
+  return { ok: false, error: `Invalid arguments for ${name}: ${issues.join('; ')}` }
+}
 
 /** A frame_id that null clears, as MCP takes it; an empty string, this tool's way to clear before it took MCP's
  *  null, clears too. undefined is neither. */
@@ -1795,11 +1881,13 @@ async function frameImageBlocks(
 
 /** Runs one tool call of the resident's loop. Exported for tests. */
 export async function execTool(
-  block: Anthropic.ToolUseBlockParam,
+  given: Anthropic.ToolUseBlockParam,
   canvasId: string,
   actor: ReturnType<typeof actions.resolveActor>,
   runState: RunState,
 ): Promise<Anthropic.ToolResultBlockParam> {
+  const checked = checkedInput(given.name, given.input)
+  const block = checked.ok ? { ...given, input: checked.input } : given
   const input = block.input as { frame_id: string } & Record<string, string>
   const fail = (msg: string): Anthropic.ToolResultBlockParam => ({
     type: 'tool_result',
@@ -1815,9 +1903,11 @@ export async function execTool(
 
   const toCheckBefore = uncheckedKey(uncheckedChanges(runState, canvasId))
   /* one tool call is one operation, as over MCP: a work budget of its own (server/workBudget.ts) */
-  const answered = await runOperation(`resident ${block.name}`, canvasId, () =>
-    runResidentTool(canvasId, block, actor, runState, input, ok, fail),
-  )
+  const answered = !checked.ok
+    ? fail(checked.error)
+    : await runOperation(`resident ${block.name}`, canvasId, () =>
+        runResidentTool(canvasId, block, actor, runState, input, ok, fail),
+      )
   /* a call that changed what is left to look at says what is left: the desktop harness
      has no turn of its own to be reminded in */
   return !answered.is_error && uncheckedKey(uncheckedChanges(runState, canvasId)) !== toCheckBefore
@@ -1963,9 +2053,8 @@ async function runResidentTool(
         const f = store.getFrame(input.frame_id)
         if (!f || f.canvasId !== canvasId) return fail('frame not found on this canvas')
         if (typeof f.html !== 'string') return fail('frame HTML is unavailable; retry after the frame reloads')
-        /* find/replace are this tool's names before it took MCP's: a model copying an earlier call keeps working */
-        const find = input.old_str ?? input.find
-        const replace = input.new_str ?? input.replace
+        const find = input.old_str
+        const replace = input.new_str
         if (typeof find !== 'string' || !find) return fail('old_str must be a non-empty exact HTML string')
         if (typeof replace !== 'string') return fail('new_str must be an HTML string')
         /* matched in the form get_frame_html showed, or the stored or composed one if that is
@@ -2626,14 +2715,12 @@ async function runResidentTool(
         return ok(JSON.stringify(prototypeReport(canvas)))
       }
       case 'set_prototype_start': {
-        /* page_id is this tool's spelling before it took MCP's: a model copying an earlier call keeps working */
-        const raw = block.input as { frame_id?: unknown; pageId?: unknown; page_id?: unknown }
+        const raw = block.input as { frame_id?: unknown; pageId?: unknown }
         const frameId = clearableFrameId(raw.frame_id)
         if (frameId === undefined) return fail('frame_id must be a frame id, or null to clear')
         const canvas = store.getCanvas(canvasId)
         if (!canvas) return fail('canvas not found')
-        const given = raw.pageId ?? raw.page_id
-        const pageId = typeof given === 'string' && given ? given : undefined
+        const pageId = typeof raw.pageId === 'string' && raw.pageId ? raw.pageId : undefined
         const result = setPrototypeStart(canvas, pageId, frameId, actor)
         if (!result.ok) return fail(result.error)
         captureFeature(runState.requesterId, 'prototype_start_set', 'resident', {

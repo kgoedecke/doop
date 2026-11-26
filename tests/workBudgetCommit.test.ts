@@ -627,7 +627,12 @@ const OPERATIONS: Record<string, Case> = {
     run: ({ canvas }) =>
       resident(
         'create_frame',
-        { name: 'Hero', html: doc('<doop-use component="Button"></doop-use><doop-use component="Badge"></doop-use>') },
+        {
+          name: 'Hero',
+          html: doc('<doop-use component="Button"></doop-use><doop-use component="Badge"></doop-use>'),
+          width: 640,
+          height: 480,
+        },
         canvas,
       ),
   },
