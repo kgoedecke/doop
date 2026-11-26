@@ -5,7 +5,7 @@ import { createPortal } from 'react-dom'
 import type { Frame } from '../../shared/types'
 import { isCanvasElement } from '../lib/drawing'
 import { standaloneSelector } from '../lib/layerEdits'
-import { elementPath } from '../lib/layers'
+import { elementPath, outermostSelectors } from '../lib/layers'
 import {
   drawingDropFrame,
   drawingPreview,
@@ -17,6 +17,7 @@ import {
 } from '../lib/drawingMove'
 import {
   editElementGeometry,
+  type LayerCopyLayout,
   elementMoveTarget,
   frameShows,
   noteFrameDocument,
@@ -35,8 +36,8 @@ import {
   copyLayerOut,
   dropLayer,
   dropLayerCopy,
-  layerCopyDocument,
-  styledCopy,
+  planLayerCopyOut,
+  styledCopies,
   type WorldRect,
 } from '../lib/layerEdits'
 import { currentPageCanvas } from '../lib/pages'
@@ -66,6 +67,7 @@ export interface ElementMoveHit {
   locked?: boolean
   /** the parent box and siblings, in design px, for snapping */
   snapRects?: DrawingRect[]
+  copyLayout?: LayerCopyLayout[]
 }
 
 /** Hit testing happens inside the iframe. Buffer pointer events while it
@@ -192,13 +194,16 @@ export function useElementMove(frame: Frame, layoutZoom: number) {
     let picked = false
     /* an ⌥⇧ drag's copy, once it is in the live document: the gesture moves
        it in place of the layer pressed */
-    let copy: { selector: string; html: string } | null = null
-    const movingSelector = () => copy?.selector ?? layer!.selector
-    /* the copy's document beside the original, worked out once */
+    let copy: ReturnType<typeof styledCopies> = null
+    let copyLayout: LayerCopyLayout[] = []
+    let primaryCopy = 0
+    const movingSelector = () => copy?.selectors[primaryCopy] ?? layer!.selector
     const planCopy = () => {
-      if (copy || !layer) return copy
-      const duplicated = styledCopy(frame.html, layer.selector)
-      if (duplicated) copy = duplicated
+      if (!copy && layer) {
+        const originals = copyLayout.length ? copyLayout.map((l) => l.selector) : [layer.selector]
+        primaryCopy = originals.indexOf(layer.selector)
+        copy = styledCopies(frame.html, originals, copyLayout)
+      }
       return copy
     }
     /* an ⌥⇧ copy dragged past its frame's edge rides over the canvas as a
@@ -208,18 +213,21 @@ export function useElementMove(frame: Frame, layoutZoom: number) {
     /* the layer's box on the canvas, around the spot its centre has in its
        (maybe turned) frame and unturned: a copy leaving the frame leaves
        the frame's turn behind */
-    let canvasBox: DrawingRect | null = null
-    const outsideBox = (hitLayer: ElementMoveHit): DrawingRect => {
-      if (canvasBox) return canvasBox
-      const { width, height } = hitLayer.rect
-      const centre = frameWorldPoint(
-        { x: contentOffset.x + hitLayer.rect.x + width / 2, y: contentOffset.y + hitLayer.rect.y + height / 2 },
-        frame,
+    let outsideCopy: ReturnType<typeof planLayerCopyOut> = null
+    const planOutside = (hit: ElementMoveHit) => {
+      const layers = copyLayout.length ? copyLayout : [hit]
+      return planLayerCopyOut(
+        frame.html,
+        layers.map(({ selector, rect }) => {
+          const centre = frameWorldPoint(
+            { x: contentOffset.x + rect.x + rect.width / 2, y: contentOffset.y + rect.y + rect.height / 2 },
+            frame,
+          )
+          return { selector, rect: { ...rect, x: centre.x - rect.width / 2, y: centre.y - rect.height / 2 } }
+        }),
+        hit.selector,
       )
-      canvasBox = { x: centre.x - width / 2, y: centre.y - height / 2, width, height }
-      return canvasBox
     }
-    let outsidePreview: string | null = null
     /* the frame and, once the hit test names the element, its parent and
        siblings, in world px */
     let snapTargets: DrawingRect[] = [frame]
@@ -274,7 +282,7 @@ export function useElementMove(frame: Frame, layoutZoom: number) {
       noteFrameDocument(frame.id, null)
       if (!(await showFrameHtml(frame.id, planned.html))) return null
       noteFrameDocument(frame.id, planned.html)
-      return planned.selector
+      return planned.selectors[primaryCopy] ?? null
     }
     /* back over its own frame, the copy shows in the document again */
     function leaveOutside() {
@@ -305,7 +313,20 @@ export function useElementMove(frame: Frame, layoutZoom: number) {
         layerReady = finishing.current.then(async () => {
           if (!sourceUnchanged()) return null
           const moving = duplicating ? await insertCopy() : selector
-          return moving ? styleGesture(frame.id, moving, 'begin', followers) : null
+          if (!moving) return null
+          const following = copy ? copy.selectors.filter((selector) => selector !== moving) : followers
+          const info = await styleGesture(frame.id, moving, 'begin', following)
+          if (info && copy && copyLayout.length) {
+            // Inserting siblings can change a flow box's position. Align the primary first: its followers move with it.
+            const planned = copy
+            const align = (i: number) => {
+              const { x, y } = copyLayout[i]!.rect
+              return editElementGeometry(frame.id, planned.selectors[i]!, { kind: 'move', x, y })
+            }
+            await align(primaryCopy)
+            await Promise.all(copyLayout.map((_, i) => (i === primaryCopy ? null : align(i))))
+          }
+          return info
         })
       }
       inFlight = true
@@ -369,7 +390,8 @@ export function useElementMove(frame: Frame, layoutZoom: number) {
             const saves = sourceUnchanged()
             const done = await styleGesture(frame.id, selector, saves ? 'commit' : 'cancel')
             /* the runtime's save carries the copy along; the copy is the pick */
-            if (copy && saves) useStore.getState().pickElement({ frameId: frame.id, selector })
+            if (copy && saves)
+              useStore.getState().pickElements(frame.id, [...copy.selectors.filter((s) => s !== selector), selector])
             else if (copy) await removeCopy()
             updateLayer(done)
           } else {
@@ -397,6 +419,7 @@ export function useElementMove(frame: Frame, layoutZoom: number) {
       if (!moved && Math.hypot(ev.clientX - startX, ev.clientY - startY) < 4) return
       moved = true
       if (!bounds) return
+      if (duplicating && followers.length && copyLayout.length !== pickedHere.length) return cancel()
       pickHit()
       setMovingOwner(owner)
       const point = toWorld(ev.clientX, ev.clientY)
@@ -409,7 +432,11 @@ export function useElementMove(frame: Frame, layoutZoom: number) {
       const local = frameDesignPoint(point, frame)
       const outside =
         duplicating && !!layer && (local.x < 0 || local.y < 0 || local.x > frame.width || local.y > frame.height)
-      const start = outside && layer ? outsideBox(layer) : bounds
+      if (outside && layer) {
+        outsideCopy ??= planOutside(layer)
+        if (!outsideCopy) return cancel()
+      }
+      const start = outside && outsideCopy ? outsideCopy.bounds : bounds
       rect = { ...start, x: start.x + point.x - origin.x, y: start.y + point.y - origin.y }
       /* off its frame, the copy lines up with the frames on the page */
       const targets = outside ? (currentPageCanvas()?.frames.filter((f) => !f.hidden) ?? []) : snapTargets
@@ -424,10 +451,9 @@ export function useElementMove(frame: Frame, layoutZoom: number) {
         rect = { ...rect, x: locked === 'x' ? rect.x : snapped.x, y: locked === 'y' ? rect.y : snapped.y }
         useStore.getState().setSnapGuides(snapped.guides.filter((g) => (g.axis === 'v' ? 'x' : 'y') !== locked))
       } else useStore.getState().setSnapGuides([])
-      if (layer && outside) {
+      if (layer && outside && outsideCopy) {
         const planned = planCopy()
-        outsidePreview ??= layerCopyDocument(frame.html, layer.selector)
-        if (!planned || !outsidePreview) return
+        if (!planned) return
         /* the copy goes into the document even when the drag left the frame
            at once, held at the original's spot, so the preview hides the copy
            and never a layer its path names in the original's document */
@@ -445,11 +471,11 @@ export function useElementMove(frame: Frame, layoutZoom: number) {
         setLayoutDrop(null)
         setPreview({
           rect,
-          html: outsidePreview,
+          html: outsideCopy.documentHtml,
           target: dropOut.into,
           world: world!,
           owner,
-          selector: planned.selector,
+          selector: planned.selectors.join(', '),
         })
         return
       }
@@ -539,13 +565,13 @@ export function useElementMove(frame: Frame, layoutZoom: number) {
       if (closed) return
       if (!hit && !layer) return
       const complete = moved && !gesture.pinching && !closed
-      if (layer && dropOut && complete) {
+      if (layer && outsideCopy && dropOut && complete) {
         /* let go off its frame: the copy lands there, the source is left as
            it was; the preview holds until the copy shows */
         const out = dropOut
         cancel(
           false,
-          copyLayerOut(frame, layer.selector, out.rect, out.into ?? undefined).then(() => undefined),
+          copyLayerOut(frame, outsideCopy, out.rect, out.into ?? undefined).then(() => undefined),
         )
         return
       }
@@ -613,9 +639,9 @@ export function useElementMove(frame: Frame, layoutZoom: number) {
     surface.addEventListener('lostpointercapture', onLostCapture)
     cleanup.current = cancel
     const selected = s.selectedElement?.frameId === frame.id ? s.selectedElement.selector : undefined
-    /* every picked layer of this frame: a press on one of them, or inside one,
-       moves them all (an ⌥⇧ copy is of the pressed layer alone) */
-    const pickedHere = selected ? pickedSelectors(s) : []
+    const selection = selected ? pickedSelectors(s) : []
+    const pickedHere =
+      duplicating && selection.length > 1 ? (outermostSelectors(frame.html, selection) ?? []) : selection
     /* hit-test the document this gesture checks against, not the one the
        frame still shows while a newer version is on its way in */
     const drawingHit = finishing.current.then(async () => {
@@ -625,7 +651,7 @@ export function useElementMove(frame: Frame, layoutZoom: number) {
         ? requestFrame(frame.id, 'doop:drawing-hit', {
             ...frameDesignPoint(origin, frame),
             standalone,
-            selected: pickedHere.length > 1 ? pickedHere : selected,
+            selected: pickedHere.length > 1 ? pickedHere : pickedHere[0],
           })
         : null
     })
@@ -636,15 +662,16 @@ export function useElementMove(frame: Frame, layoutZoom: number) {
       if (!hit) {
         const response = await requestFrame(frame.id, 'doop:move-hit', {
           ...frameDesignPoint(origin, frame),
-          selected: pickedHere.length > 1 ? pickedHere : selected,
+          copying: duplicating,
+          selected: pickedHere.length > 1 ? pickedHere : pickedHere[0],
         })
         if (closed) return
-        layer = (response?.hit ?? null) as ElementMoveHit | null
-        /* the standalone's own root moves with its shell, by the frame drag */
-        if (layer && layer.selector === shell) layer = null
-        if (layer) {
-          const pressed = layer.selector
-          followers = duplicating || !pickedHere.includes(pressed) ? [] : pickedHere.filter((x) => x !== pressed)
+        const candidate = (response?.hit ?? null) as ElementMoveHit | null
+        if (candidate && candidate.selector !== shell) {
+          const pressed = candidate.selector
+          followers = pickedHere.includes(pressed) ? pickedHere.filter((x) => x !== pressed) : []
+          copyLayout = candidate.copyLayout ?? []
+          layer = candidate
           bounds = { ...layer.rect, x: frame.x + layer.rect.x, y: frame.y + layer.rect.y }
           snapTargets = toSnapTargets(layer.snapRects)
           if (!press.shiftKey) pickHit()

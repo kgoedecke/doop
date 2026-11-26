@@ -291,7 +291,7 @@ describe.skipIf(!findBrowserPath())('drawing on the canvas', { timeout: 30_000 }
     expect(saved[0]!.html).not.toMatch(/id="child"[^>]*translate/)
   })
 
-  it('leaves the rest of a pick where it is when Escape cancels the drag', async () => {
+  it.each(['move', 'copy'])('restores both picked layers when Escape cancels a %s drag', async (action) => {
     const source = layerFrame(
       rectangle +
         '<div id="box" style="position:absolute;left:300px;top:60px;width:120px;height:90px;background:teal"></div>',
@@ -305,13 +305,26 @@ describe.skipIf(!findBrowserPath())('drawing on the canvas', { timeout: 30_000 }
     const rect = await visibleDrawing('Layers', '#rect')
     const box = await visibleDrawing('Layers', '#box')
     await page.mouse.move(rect.x + 40, rect.y + 40)
+    const copying = action === 'copy'
+    if (copying) {
+      await page.keyboard.down('Alt')
+      await page.keyboard.down('Shift')
+    }
     await page.mouse.down()
     await page.mouse.move(rect.x + 80, rect.y + 40, { steps: 5 })
-    await expect.poll(async () => (await visibleDrawing('Layers', '#box')).x).toBeCloseTo(box.x + 40, 0)
+    await expect
+      .poll(async () => (await visibleDrawing('Layers', copying ? '#box-copy' : '#box')).x)
+      .toBeCloseTo(box.x + 40, 0)
     await page.keyboard.press('Escape')
     await expect.poll(async () => (await visibleDrawing('Layers', '#box')).x).toBeCloseTo(box.x, 0)
     expect((await visibleDrawing('Layers', '#rect')).x).toBeCloseTo(rect.x, 0)
     await page.mouse.up()
+    if (copying) {
+      await page.keyboard.up('Shift')
+      await page.keyboard.up('Alt')
+      const frame = (await (await page.$('iframe[title="Layers"]'))!.contentFrame())!
+      await frame.waitForFunction(() => !document.querySelector('#rect-copy, #box-copy'))
+    }
     await page.evaluate(() => new Promise((resolve) => setTimeout(resolve, 300)))
     expect(patchRequests).toBe(0)
     expect(saved[0]!.html).toBe(source.html)
@@ -398,6 +411,72 @@ describe.skipIf(!findBrowserPath())('drawing on the canvas', { timeout: 30_000 }
     await expect.poll(() => saved[0]!.html).toBe(source.html)
   })
 
+  it.each(['#rect', '#second'])(
+    'Alt+Shift-drags both selected layers by %s at their original spacing with one Undo',
+    async (pressed) => {
+      const source = layerFrame(
+        '<section style="display:flex;gap:50px;padding:40px">' +
+          '<div><span id="rect" style="padding:5px;background:coral">First layer</span></div>' +
+          '<svg id="second" width="80" height="50" style="margin-top:35px"><rect width="80" height="50" fill="teal"/></svg></section>',
+      )
+      await seedFrames([source])
+      await page.evaluate(() => {
+        window.drawingHarness.viewport({ x: 40, y: 20, zoom: 1 })
+        window.drawingHarness.selectFrames(['layers'])
+        window.drawingHarness.pickMany('layers', ['#rect', '#second'])
+      })
+      const first = await visibleDrawing('Layers', '#rect')
+      const second = await visibleDrawing('Layers', '#second')
+      await page.keyboard.down('Alt')
+      await page.keyboard.down('Shift')
+      const start = pressed === '#rect' ? first : second
+      await drag([start.x + 15, start.y + 8], [start.x + 135, start.y + 115])
+      await page.keyboard.up('Shift')
+      await page.keyboard.up('Alt')
+      await expect.poll(() => patchRequests).toBe(1)
+      expect(saved[0]?.html).toContain('id="second-copy"')
+      expect(await page.evaluate(() => window.drawingHarness.state().selectedElements)).toEqual([
+        pressed === '#rect' ? '#second-copy' : '#rect-copy',
+        pressed + '-copy',
+      ])
+      const firstCopy = await visibleDrawing('Layers', '#rect-copy')
+      const secondCopy = await visibleDrawing('Layers', '#second-copy')
+      expect(secondCopy.width).toBeCloseTo(second.width, 0)
+      expect(secondCopy.height).toBeCloseTo(second.height, 0)
+      expect(firstCopy.x - first.x).toBeCloseTo(120, 0)
+      expect(firstCopy.y - first.y).toBeCloseTo(107, 0)
+      expect(secondCopy.x - firstCopy.x).toBeCloseTo(second.x - first.x, 0)
+      expect(secondCopy.y - firstCopy.y).toBeCloseTo(second.y - first.y, 0)
+      expect(await visibleDrawing('Layers', '#rect')).toEqual(first)
+      expect(await visibleDrawing('Layers', '#second')).toEqual(second)
+      await page.evaluate(() => window.drawingHarness.undo())
+      await expect.poll(() => saved[0]?.html).toBe(source.html)
+    },
+  )
+
+  it('copies the selected parent once when dragging its selected child', async () => {
+    const source = layerFrame(
+      '<div id="parent" style="position:absolute;left:40px;top:40px;width:100px">' +
+        '<div id="child" style="height:60px;background:teal">Layer</div></div>',
+    )
+    await seedFrames([source])
+    await page.evaluate(() => {
+      window.drawingHarness.viewport({ x: 40, y: 20, zoom: 1 })
+      window.drawingHarness.selectFrames(['layers'])
+      window.drawingHarness.pickMany('layers', ['#parent', '#child'])
+    })
+    const child = await visibleDrawing('Layers', '#child')
+    await page.keyboard.down('Alt')
+    await page.keyboard.down('Shift')
+    await drag([child.x + 15, child.y + 15], [child.x + 115, child.y + 115])
+    await page.keyboard.up('Shift')
+    await page.keyboard.up('Alt')
+    await expect.poll(() => patchRequests).toBe(1)
+    const frame = (await (await page.$('iframe[title="Layers"]'))!.contentFrame())!
+    expect(await frame.$$eval('#parent-copy > #child-copy', (els) => els.length)).toBe(1)
+    expect(await frame.$$eval('[id^=child]', (els) => els.length)).toBe(2)
+  })
+
   it.each(['canvas', 'frame'])('⌥⇧-drags a copy of the picked layer off its frame onto the %s', async (onto) => {
     /* a source rule with !important, carried along, must not beat the drop's placement */
     const source = layerFrame(
@@ -454,6 +533,40 @@ describe.skipIf(!findBrowserPath())('drawing on the canvas', { timeout: 30_000 }
     await page.evaluate(() => window.drawingHarness.undo())
     if (onto === 'canvas') await expect.poll(() => saved.length).toBe(1)
     else await expect.poll(() => saved.find((f) => f.id === 'other')!.html).toBe(other.html)
+  })
+
+  it.each(['canvas', 'frame'])('drops both layer copies onto the %s in one undo step', async (onto) => {
+    const source = layerFrame(
+      rectangle + '<label id="label" for="rect" style="position:absolute;left:180px;top:90px">Label</label>',
+    )
+    const dest = { ...layerFrame('<p id="rect">Existing</p>'), id: 'other', name: 'Other', x: 900 }
+    const frames = onto === 'frame' ? [source, dest] : [source]
+    const originalDocs = frames.map((frame) => frame.html)
+    await seedFrames(frames)
+    await page.evaluate(() => {
+      window.drawingHarness.viewport({ x: 40, y: 20, zoom: 1 })
+      window.drawingHarness.selectFrames(['layers'])
+      window.drawingHarness.pickMany('layers', ['#label', '#rect'])
+    })
+    const first = await visibleDrawing('Layers', '#rect')
+    const label = await visibleDrawing('Layers', '#label')
+    await page.keyboard.down('Alt')
+    await page.keyboard.down('Shift')
+    await drag([first.x + 40, first.y + 40], [first.x + 830, first.y + 50])
+    await page.keyboard.up('Shift')
+    await page.keyboard.up('Alt')
+    await expect.poll(() => (onto === 'frame' ? patchRequests : saved.length - 1)).toBe(1)
+    const title = onto === 'frame' ? 'Other' : 'Group'
+    const id = onto === 'frame' ? 'rect-copy' : 'rect'
+    const copy = await visibleDrawing(title, '#' + id)
+    const copyLabel = await visibleDrawing(title, 'label[for="' + id + '"]')
+    if (onto === 'frame')
+      expect(await page.evaluate(() => window.drawingHarness.state().selectedElement?.selector)).toBe('#rect-copy')
+    expect(copyLabel.x - copy.x).toBeCloseTo(label.x - first.x, 0)
+    expect(copyLabel.y - copy.y).toBeCloseTo(label.y - first.y, 0)
+    expect(saved[0]?.html).toBe(source.html)
+    await page.evaluate(() => window.drawingHarness.undo())
+    await expect.poll(() => saved.map((frame) => frame.html)).toEqual(originalDocs)
   })
 
   it('⌥⇧-drags a copy out of a turned frame from where the layer shows', async () => {

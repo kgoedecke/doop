@@ -84,6 +84,7 @@ interface Command {
   elementId?: unknown
   hidden?: unknown
   locked?: unknown
+  copying?: unknown
   grouped?: unknown
   standalone?: unknown
   target?: DropTarget | null
@@ -369,7 +370,8 @@ function handle(d: Command, ev: MessageEvent): void {
   if (d.type === 'doop:drawing-hit') {
     answer('doop:drawing-hit-result', d.reqId, { hit: drawingHit(d.x, d.y, d.standalone, d.selected) })
   }
-  if (d.type === 'doop:move-hit') answer('doop:move-hit-result', d.reqId, { hit: moveHit(d.x, d.y, d.selected) })
+  if (d.type === 'doop:move-hit')
+    answer('doop:move-hit-result', d.reqId, { hit: moveHit(d.x, d.y, d.selected, d.copying === true) })
   if (d.type === 'doop:placement-origin') {
     // where the body's absolute layers are placed from, for new drawings
     answer('doop:placement-origin-result', d.reqId, { origin: placementOrigin(document.body) })

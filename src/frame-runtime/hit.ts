@@ -1,4 +1,4 @@
-import type { ElementMeasure } from '../lib/frameBridge'
+import type { ElementMeasure, LayerCopyLayout } from '../lib/frameBridge'
 import { viewX } from './bleed'
 import { isLocked, styleTarget } from './dom'
 import { editing } from './edit'
@@ -27,6 +27,7 @@ export interface HitInfo {
   box: Size
   locked: boolean
   snapRects?: Rect[]
+  copyLayout?: LayerCopyLayout[]
 }
 
 export interface DrawingHit {
@@ -269,15 +270,50 @@ export function contextHit(x: number, y: number, selected: Selected): HitInfo | 
   return hitInfo(el)
 }
 
-export function moveHit(x: number, y: number, selected: Selected): HitInfo | null {
+function layoutForCopies(selectors: unknown[]): LayerCopyLayout[] {
+  const layout: LayerCopyLayout[] = []
+  for (const selector of selectors) {
+    const el = styleTarget(selector)
+    if (!el || typeof selector !== 'string' || !elementGeometry(el, true).enabled) return []
+    const rect = designRect(el)
+    const css = getComputedStyle(el)
+    const layer: LayerCopyLayout = { selector, rect }
+    if (css.position !== 'absolute' && css.position !== 'fixed') {
+      const borderBox = css.boxSizing === 'border-box'
+      const widthExtras = borderBox
+        ? 0
+        : parseFloat(css.paddingLeft) +
+          parseFloat(css.paddingRight) +
+          parseFloat(css.borderLeftWidth) +
+          parseFloat(css.borderRightWidth)
+      const heightExtras = borderBox
+        ? 0
+        : parseFloat(css.paddingTop) +
+          parseFloat(css.paddingBottom) +
+          parseFloat(css.borderTopWidth) +
+          parseFloat(css.borderBottomWidth)
+      layer.flowSize = {
+        width: css.width === 'auto' ? Math.max(0, el.offsetWidth - widthExtras) + 'px' : css.width,
+        height: css.height === 'auto' ? Math.max(0, el.offsetHeight - heightExtras) + 'px' : css.height,
+      }
+    }
+    layout.push(layer)
+  }
+  return layout
+}
+
+export function moveHit(x: number, y: number, selected: Selected, copying: boolean): HitInfo | null {
   let el = elementAt(x, y, selected)
   // A selected group moves as a whole even when the press hits a child.
   const picked = el && pickedAround(selected, el)
   if (picked) el = picked
   else if (el) el = groupLevel(el, selected, false)
+  const copyingSelection = copying && Array.isArray(selected) && selected.length > 1
   while (el && el !== document.body && el !== document.documentElement) {
-    if (elementGeometry(el).enabled) {
+    const copyPicked = copyingSelection && selected.includes(cssPath(el))
+    if (elementGeometry(el, copyPicked).enabled) {
       const info = hitInfo(el)
+      if (copyPicked) info.copyLayout = layoutForCopies(selected)
       info.snapRects = snapRects(el)
       return info
     }

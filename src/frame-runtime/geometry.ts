@@ -148,7 +148,7 @@ export function parentBounds(el: Element): Rect {
     : designRect(p)
 }
 
-export function elementGeometry(el: Element): ElementGeometry {
+export function elementGeometry(el: Element, allowInline = false): ElementGeometry {
   const cs = getComputedStyle(el)
   const rect = designRect(el)
   const bounds = parentBounds(el)
@@ -160,7 +160,8 @@ export function elementGeometry(el: Element): ElementGeometry {
     matrix.is2D &&
     (cs.rotate === 'none' || /^-?[\d.]+deg$/.test(cs.rotate)) &&
     scale.length <= 2 &&
-    (cs.display !== 'inline' ||
+    (allowInline ||
+      cs.display !== 'inline' ||
       /^(IMG|VIDEO|IFRAME|CANVAS|OBJECT|EMBED)$/.test(el.tagName) ||
       el instanceof SVGSVGElement) &&
     cs.display !== 'contents' &&
