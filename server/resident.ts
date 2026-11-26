@@ -108,7 +108,6 @@ import {
   previewFrame,
   previewProps,
 } from './componentPreview.ts'
-import { prototypeReport, setPrototypeStart } from './prototypeTools.ts'
 import {
   describeInspiration,
   INSPIRATION_NO_MATCH_NOTE,
@@ -118,8 +117,9 @@ import {
   searchInspiration,
 } from './inspiration.ts'
 import type { Actor, AgentTask, Canvas, ElementComment, Frame } from '../shared/types.ts'
-import { canvasPages, framePageId, MAX_CANVAS_NAME, MAX_PAGE_NAME, pageFrames, samePages } from '../shared/pages.ts'
-import { addPage, frameMetaError, pageList, parsePageList, savePages } from './pageTools.ts'
+import { canvasPages, framePageId, pageFrames } from '../shared/pages.ts'
+import { frameMetaError, pageList } from './pageTools.ts'
+import { sharedToolHandler } from './sharedToolHandlers.ts'
 import { runCanvasWrite } from './canvasWrites.ts'
 import { isCanvasComment, isFrameComment } from '../shared/comments.ts'
 import { websiteAccessErrorMessage } from './websiteAccess.ts'
@@ -1798,13 +1798,6 @@ function checkedInput(name: string, input: unknown): { ok: true; input: unknown 
   return { ok: false, error: `Invalid arguments for ${name}: ${issues.join('; ')}` }
 }
 
-/** A frame_id that null clears, as MCP takes it; an empty string, this tool's way to clear before it took MCP's
- *  null, clears too. undefined is neither. */
-function clearableFrameId(given: unknown): string | null | undefined {
-  if (given === null) return null
-  return typeof given === 'string' ? given.trim() || null : undefined
-}
-
 function canReadCanvas(userId: string, canvasId: string): boolean {
   const other = store.getCanvas(canvasId)
   return !!other && roleAllows(canvasRole(userId, other), 'view')
@@ -2675,60 +2668,6 @@ async function runResidentTool(
           `frame ${frame.id} is now "${frame.name}" on page ${framePageId(canvas, frame)} at (${Math.round(frame.x)}, ${Math.round(frame.y)}), ${Math.round(frame.width)}x${Math.round(frame.height)}${frame.rotation ? `, turned ${frame.rotation}°` : ''}${frame.locked ? ', locked' : ''}${note ? `\n${note}` : ''}`,
         )
       }
-      case 'update_canvas': {
-        const name = typeof input.name === 'string' ? input.name.trim() : ''
-        if (!name || name.length > MAX_CANVAS_NAME) return fail(`name must be 1-${MAX_CANVAS_NAME} characters`)
-        const before = store.getCanvas(canvasId)?.name
-        const canvas = actions.renameCanvas(canvasId, name, actor)
-        if (!canvas) return fail('canvas not found')
-        if (canvas.name !== before) runState.arrangeWrites += 1
-        return ok(JSON.stringify({ name: canvas.name }))
-      }
-      case 'create_canvas_page': {
-        const name = typeof input.name === 'string' ? input.name.trim() : ''
-        if (!name || name.length > MAX_PAGE_NAME) return fail(`name must be 1-${MAX_PAGE_NAME} characters`)
-        const created = addPage(canvasId, name, actor)
-        if (!created.ok) return fail(created.error)
-        runState.arrangeWrites += 1
-        return ok(
-          JSON.stringify({
-            page: created.value.page,
-            pages: created.value.pages.map(({ id, name }) => ({ id, name })),
-          }),
-        )
-      }
-      case 'set_canvas_pages': {
-        const canvas = store.getCanvas(canvasId)
-        if (!canvas) return fail('canvas not found')
-        const raw = block.input as { expectedPages?: unknown; pages?: unknown }
-        const pages = parsePageList(raw.pages)
-        if (typeof pages === 'string') return fail(pages)
-        const previous = pageList(canvas)
-        const saved = savePages(canvas, raw.expectedPages, pages, actor)
-        if (!saved.ok) return fail(saved.error)
-        if (!samePages(previous, saved.value)) runState.arrangeWrites += 1
-        return ok(JSON.stringify({ pages: saved.value.map(({ id, name }) => ({ id, name })) }))
-      }
-      case 'get_prototype': {
-        const canvas = store.getCanvas(canvasId)
-        if (!canvas) return fail('canvas not found')
-        return ok(JSON.stringify(prototypeReport(canvas)))
-      }
-      case 'set_prototype_start': {
-        const raw = block.input as { frame_id?: unknown; pageId?: unknown }
-        const frameId = clearableFrameId(raw.frame_id)
-        if (frameId === undefined) return fail('frame_id must be a frame id, or null to clear')
-        const canvas = store.getCanvas(canvasId)
-        if (!canvas) return fail('canvas not found')
-        const pageId = typeof raw.pageId === 'string' && raw.pageId ? raw.pageId : undefined
-        const result = setPrototypeStart(canvas, pageId, frameId, actor)
-        if (!result.ok) return fail(result.error)
-        captureFeature(runState.requesterId, 'prototype_start_set', 'resident', {
-          canvas_id: canvasId,
-          cleared: frameId === null,
-        })
-        return ok(JSON.stringify({ pages: result.pages }))
-      }
       case 'export_layer': {
         const raw = block.input as {
           frame_id?: unknown
@@ -2781,6 +2720,20 @@ async function runResidentTool(
         }
       }
       default: {
+        const shared = sharedToolHandler(block.name)
+        if (shared) {
+          const canvas = store.getCanvas(canvasId)
+          if (!canvas) return fail('canvas not found')
+          const outcome = shared.run(block.input as Record<string, unknown>, {
+            canvas,
+            actor,
+            userId: runState.requesterId,
+            surface: 'resident',
+          })
+          if (!outcome.ok) return fail(outcome.error)
+          if (outcome.arranged) runState.arrangeWrites += 1
+          return ok(JSON.stringify(outcome.data))
+        }
         if (!COMPONENT_TOOL_NAMES.includes(block.name)) return fail(`unknown tool ${block.name}`)
         const canvas = store.getCanvas(canvasId)
         if (!canvas) return fail('canvas not found')

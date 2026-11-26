@@ -9,7 +9,6 @@ import { db } from './db/index.ts'
 import * as authSchema from './db/auth-schema.ts'
 import { canvasPages, framePageId, MAX_CANVAS_NAME } from '../shared/pages.ts'
 import { normalizePageBackground } from '../shared/pageBackground.ts'
-import { prototypeReport, prototypeUrl, setPrototypeStart } from './prototypeTools.ts'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js'
 import type { Request, Response } from 'express'
@@ -17,8 +16,8 @@ import { fromNodeHeaders } from 'better-auth/node'
 import { z } from 'zod'
 import { store } from './store.ts'
 import { composedHtml, stampRender } from './frameCompose.ts'
-import { addPage, savePages } from './pageTools.ts'
-import { TOOL_SHAPES } from './agentToolShapes.ts'
+import { TOOL_SHAPES, type SharedToolName } from './agentToolShapes.ts'
+import { sharedToolHandler } from './sharedToolHandlers.ts'
 import { isImportWriteFailure, runCanvasWrite } from './canvasWrites.ts'
 import { FIT_NEEDS_HTML, type FittedFrame, fitNotes, fitWrittenFrame, updateFrameMetaWithFit } from './frameFit.ts'
 import { fontsForCanvas } from './fonts.ts'
@@ -494,6 +493,24 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
   const arrive = (canvasId: string, agent_name?: string) => {
     if (agent_name) actions.heartbeatAgent(canvasId, actorFrom(agent_name))
   }
+  /** A tool's shared handler (server/sharedToolHandlers.ts) behind what MCP does around any call: the account's
+   *  access to the canvas, the agent's presence, and the feedback waiting for it. */
+  const sharedHandler = (name: SharedToolName) => {
+    const handler = sharedToolHandler(name)
+    if (!handler) throw new Error(`${name} has no shared handler`)
+    return async (args: { canvas_id: string; agent_name?: string } & Record<string, unknown>) => {
+      const canvas = canvasFor(args.canvas_id, handler.access)
+      if (!canvas) return noCanvas(args.canvas_id)
+      arrive(args.canvas_id, args.agent_name)
+      const actor = actorFrom(args.agent_name)
+      const outcome = handler.run(args, { canvas, actor, userId: ownerId, surface: 'mcp' })
+      if (!outcome.ok) return err(outcome.error)
+      return handler.access === 'view'
+        ? withFeedbackNotice(text(outcome.data), canvas.id, args.agent_name ? actor : undefined)
+        : withFeedback(text(outcome.data), canvas.id, actor)
+    }
+  }
+
   const server = new McpServer({ name: 'doop-canvas', version: packageJson.version }, { instructions: INSTRUCTIONS })
   loadToolTargets(server)
   registerFramePreview(server)
@@ -652,13 +669,7 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
         agent_name: agentName,
       },
     },
-    async ({ canvas_id, name, agent_name }) => {
-      if (!canvasFor(canvas_id, 'edit')) return noCanvas(canvas_id)
-      const actor = actorFrom(agent_name)
-      const canvas = actions.renameCanvas(canvas_id, name, actor)
-      if (!canvas) return noCanvas(canvas_id)
-      return withFeedback(text({ ok: true, id: canvas.id, name: canvas.name }), canvas_id, actor)
-    },
+    sharedHandler('update_canvas'),
   )
 
   server.registerTool(
@@ -1456,14 +1467,7 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
         agent_name: agentName,
       },
     },
-    async ({ canvas_id, pages, expectedPages, agent_name }) => {
-      const canvas = canvasFor(canvas_id, 'edit')
-      if (!canvas) return noCanvas(canvas_id)
-      const actor = actorFrom(agent_name)
-      const saved = savePages(canvas, expectedPages, pages, actor)
-      if (!saved.ok) return err(saved.error)
-      return withFeedback(text({ ok: true, pages: saved.value }), canvas_id, actor)
-    },
+    sharedHandler('set_canvas_pages'),
   )
 
   server.registerTool(
@@ -1479,17 +1483,7 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
         agent_name: agentName,
       },
     },
-    async ({ canvas_id, name, agent_name }) => {
-      const canvas = canvasFor(canvas_id, 'edit')
-      if (!canvas) return noCanvas(canvas_id)
-      const created = addPage(canvas_id, name, actorFrom(agent_name))
-      if (!created.ok) return err(created.error)
-      return withFeedback(
-        text({ ok: true, page: created.value.page, pages: created.value.pages }),
-        canvas_id,
-        actorFrom(agent_name),
-      )
-    },
+    sharedHandler('create_canvas_page'),
   )
 
   server.registerTool(
@@ -1530,12 +1524,7 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
       inputSchema: { canvas_id: z.string(), agent_name: agentName },
     },
-    async ({ canvas_id, agent_name }) => {
-      const canvas = canvasFor(canvas_id, 'view')
-      if (!canvas) return noCanvas(canvas_id)
-      arrive(canvas_id, agent_name)
-      return text(prototypeReport(canvas))
-    },
+    sharedHandler('get_prototype'),
   )
 
   server.registerTool(
@@ -1551,18 +1540,7 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
         agent_name: agentName,
       },
     },
-    async ({ canvas_id, pageId, frame_id, agent_name }) => {
-      const canvas = canvasFor(canvas_id, 'edit')
-      if (!canvas) return noCanvas(canvas_id)
-      const result = setPrototypeStart(canvas, pageId, frame_id, actorFrom(agent_name))
-      if (!result.ok) return err(result.error)
-      captureFeature(ownerId, 'prototype_start_set', 'mcp', { canvas_id: canvas.id, cleared: frame_id === null })
-      return withFeedback(
-        text({ ok: true, pages: result.pages, prototype_url: prototypeUrl(canvas.id) }),
-        canvas_id,
-        actorFrom(agent_name),
-      )
-    },
+    sharedHandler('set_prototype_start'),
   )
 
   server.registerTool(

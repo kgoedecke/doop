@@ -1,7 +1,7 @@
 import { normalizeRotation } from '../shared/frameRotation.ts'
 import * as actions from './actions.ts'
-import { MAX_PAGES, PageLimitError } from './store.ts'
-import { canvasPages, framePageId, MAX_PAGE_NAME, samePages } from '../shared/pages.ts'
+import { PageLimitError } from './store.ts'
+import { canvasPages, framePageId, samePages } from '../shared/pages.ts'
 import type { Actor, Canvas, CanvasPageInfo, Frame } from '../shared/types.ts'
 
 /**
@@ -17,8 +17,6 @@ export type FrameMetaPatch = Partial<
   Pick<Frame, 'name' | 'pageId' | 'x' | 'y' | 'width' | 'height' | 'locked' | 'rotation'>
 >
 
-const MAX_PAGE_ID = 100
-
 /** The canvas's pages as a tool reports them: id and name, in order. */
 export function pageList(canvas: Canvas): CanvasPageInfo[] {
   return canvasPages(canvas).map(({ id, name }) => ({ id, name }))
@@ -28,23 +26,6 @@ function pageListText(canvas: Canvas): string {
   return pageList(canvas)
     .map((page) => `${page.id} ("${page.name}")`)
     .join(', ')
-}
-
-/** A model's page list, checked the way the MCP schema checks it. */
-export function parsePageList(raw: unknown): CanvasPageInfo[] | string {
-  if (!Array.isArray(raw) || raw.length === 0) return 'pages must be a non-empty list of { id, name }'
-  if (raw.length > MAX_PAGES) return `a canvas holds at most ${MAX_PAGES} pages`
-  const pages: CanvasPageInfo[] = []
-  for (const entry of raw as unknown[]) {
-    const { id, name } = (entry ?? {}) as { id?: unknown; name?: unknown }
-    const cleanId = typeof id === 'string' ? id.trim() : ''
-    const cleanName = typeof name === 'string' ? name.trim() : ''
-    if (!cleanId || cleanId.length > MAX_PAGE_ID) return 'every page needs its id from the current page list'
-    if (!cleanName || cleanName.length > MAX_PAGE_NAME)
-      return `every page needs a name of 1-${MAX_PAGE_NAME} characters`
-    pages.push({ id: cleanId, name: cleanName })
-  }
-  return pages
 }
 
 /** Add an empty page at the end of the canvas. */
