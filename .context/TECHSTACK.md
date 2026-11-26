@@ -335,7 +335,11 @@ server/index.ts` in prod. `erasableSyntaxOnly` and `verbatimModuleSyntax` in tsc
   call itself threw on the person's own connection, never one of ours or a server-tier one. A
   failure the relay words itself (`fromDoop`: the desktop went away, a worker is down) is shown as it
   is. A shell from before `limitReached` is read by its fallback text (`shellResult`).
-  Tests: `runFailure.test.ts`, `result_event_reads_is_error_and_errors` in `claude.rs`.
+  The shell's page polls the relay every 3s under an id it draws per page load
+  (`src/lib/localAgent.ts`), and one id per account answers: another is kept out only while the
+  current one is online and running a job, so a reloaded page takes over an idle one at once and a
+  reload mid-run still ends that run as disconnected (`poll` in `server/localAgentRuns.ts`).
+  Tests: `runFailure.test.ts`, `localAgentRuns.test.ts`, `result_event_reads_is_error_and_errors` in `claude.rs`.
 - Checked work (`server/changeChecks.ts`, its header has the rules): a resident run on a card must have
   looked at what it changed before it finishes. Tests: `residentChecks.test.ts`.
 - Model menus (`server/modelCatalog.ts`, `GET /api/model-account/models`): the connected

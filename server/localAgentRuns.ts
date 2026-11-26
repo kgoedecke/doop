@@ -38,15 +38,24 @@ export class LocalAgentRuns {
     return now - (this.devices.get(userId)?.at ?? 0) < 30_000
   }
 
+  /** One device per account answers polls. Another is kept out only while the
+   *  current one is online and running a job, which it must not lose. An idle
+   *  one gives way at once: a reloaded page polls under a new id, and a task
+   *  queued meanwhile would otherwise sit unclaimable until the old id went
+   *  offline and the sweep ended it as disconnected. */
   poll(userId: string, deviceId: string, now = Date.now()): LocalAgentJob | null {
     const device = this.devices.get(userId)
-    if (device && device.id !== deviceId && this.online(userId, now)) return null
+    if (device && device.id !== deviceId && this.online(userId, now) && this.running(userId, device.id)) return null
     this.devices.set(userId, { id: deviceId, at: now })
     const run = [...this.runs.values()].find((r) => r.userId === userId && !r.closing && !r.request.isCanceled?.())
     if (!run || (run.deviceId && run.deviceId !== deviceId)) return null
     run.deviceId = deviceId
     run.lastSeen = now
     return run.job
+  }
+
+  private running(userId: string, deviceId: string) {
+    return [...this.runs.values()].some((r) => r.userId === userId && r.deviceId === deviceId)
   }
 
   start(

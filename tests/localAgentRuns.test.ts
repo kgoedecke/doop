@@ -89,6 +89,32 @@ describe('local Claude run ownership', () => {
     expect(runs.authorized(job.id, job.token)).toBeUndefined()
   })
 
+  it('lets a reloaded page claim a run queued right after the reload', async () => {
+    const runs = new LocalAgentRuns()
+    const now = Date.now()
+    runs.poll('alice', 'before-reload', now)
+    /* the reloaded page polls under a new id while the old one still counts as online */
+    expect(runs.poll('alice', 'after-reload', now + 2_000)).toBeNull()
+    const result = runs.start('alice', { model: 'default' }, harness())
+    await runs.expire(now + 31_000)
+    const job = runs.poll('alice', 'after-reload', now + 32_000)!
+    expect(job).not.toBeNull()
+    expect(await runs.finish(job.id, 'alice', 'after-reload', { success: true, text: 'Done' })).toBe(true)
+    expect(await result).toEqual({ success: true, text: 'Done' })
+  })
+
+  it('keeps a second device out while the first is running a job', async () => {
+    const runs = new LocalAgentRuns()
+    const now = Date.now()
+    const first = runs.start('alice', { model: 'default' }, harness())
+    const second = runs.start('alice', { model: 'default' }, harness())
+    const job = runs.poll('alice', 'first', now)!
+    expect(runs.poll('alice', 'second', now + 1_000)).toBeNull()
+    expect(runs.poll('alice', 'first', now + 3_000)?.id).toBe(job.id)
+    await runs.cancel('alice')
+    await Promise.all([first, second])
+  })
+
   it('ends a run still going after 30 minutes as one that reached its limit', async () => {
     const runs = new LocalAgentRuns()
     const result = runs.start('alice', { model: 'default' }, harness())
