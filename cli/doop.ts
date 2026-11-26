@@ -17,9 +17,9 @@
  * Built to public/cli/doop.mjs by scripts/build-doop-cli.mjs and served by Doop, so a server
  * always hands out the CLI that matches its tools. Behaviour: .context/reference/agents.md.
  */
-import { parseArgs } from 'node:util'
+import { parseCommandLine } from './doop/args.ts'
 import { asset } from './doop/assets.ts'
-import { OPTIONS, createContext, type Context, type Flags, type Outcome } from './doop/context.ts'
+import { createContext, type Context, type Flags, type Outcome } from './doop/context.ts'
 import { CliError, EXIT, usage } from './doop/errors.ts'
 import { diff, frames } from './doop/frames.ts'
 import { expand, exportFrames, inspect, screenshot } from './doop/look.ts'
@@ -152,8 +152,7 @@ function overview(): string {
 
 function parse(argv: string[]): { flags: Flags; positionals: string[] } {
   try {
-    const { values, positionals } = parseArgs({ args: argv, options: OPTIONS, allowPositionals: true, strict: true })
-    return { flags: values, positionals }
+    return parseCommandLine(argv)
   } catch (error) {
     throw usage(error instanceof Error ? error.message : String(error), '`doop help` lists the commands and options')
   }

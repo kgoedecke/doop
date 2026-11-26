@@ -237,6 +237,9 @@ server/index.ts` in prod. `erasableSyntaxOnly` and `verbatimModuleSyntax` in tsc
     lists them, and `doop guide` prints the CLI's own primer (`cli/doop/primer.ts`) ahead of the agent guide.
     `doop init` writes a marked block into `AGENTS.md` and, in a repository set up for Claude or with
     `--skill`, `.claude/skills/doop/SKILL.md`.
+  - Ids are nanoid's ten characters, so one in 64 starts with a dash: `parseCommandLine` (`cli/doop/args.ts`)
+    reads an id-shaped word that is no option's spelling as an argument, or as the value of the option before it,
+    where `parseArgs` alone refused it as an unknown option. Tests: `doopCliArgs.test.ts`.
   - Output is text, or one JSON document (`ok`, `data`, `notes`, `feedback`) with `--json`. Exit codes: 1
     failed, 2 usage, 3 conflict, 4 not signed in, 5 not found, 6 wait timed out. Tested in
     `tests/doopCli.test.ts` against a real server.
