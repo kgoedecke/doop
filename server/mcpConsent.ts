@@ -1,5 +1,6 @@
 import type { BetterAuthPlugin } from 'better-auth'
-import { APIError, createAuthMiddleware, getSessionFromCtx } from 'better-auth/api'
+import { APIError, createAuthMiddleware, getSessionFromCtx, isAPIError } from 'better-auth/api'
+import { parseCookies, parseSetCookieHeader } from 'better-auth/cookies'
 
 /* better-auth's MCP plugin (1.6.26) puts the consent page in front of an
    authorization only when the client asks for it with `prompt=consent`. A
@@ -29,6 +30,9 @@ interface PendingAuthorization {
 }
 
 const MCP_DEFAULT_SCOPE = ['openid']
+
+/** Where better-auth's MCP plugin keeps an authorize request for after sign-in. */
+const LOGIN_PROMPT_COOKIE = 'oidc_login_prompt'
 
 /** The scopes the plugin will grant for this request, read the way it reads them. */
 export function requestedScopes(query: Query): string[] {
@@ -118,6 +122,35 @@ export function mcpConsentGuard() {
             const pending = stored && parsePending(stored.value)
             if (pending && pending.userId !== session.user.id)
               throw new APIError('UNAUTHORIZED', { error: 'invalid_request', error_description: 'Invalid code' })
+          }),
+        },
+      ],
+    },
+  } satisfies BetterAuthPlugin
+}
+
+/* After sign-in, the MCP plugin resumes the interrupted authorize with a 302.
+   The email form signs in with fetch, which follows it out of sight, so the
+   consent page never shows. A fetch gets `{ redirect: true, url }` instead,
+   which the auth client navigates to. Must run after mcp()'s own hook. */
+export function mcpSignInRedirect() {
+  return {
+    id: 'doop-mcp-sign-in-redirect',
+    hooks: {
+      after: [
+        {
+          matcher: (ctx) => ctx.headers?.get('sec-fetch-mode') === 'cors',
+          handler: createAuthMiddleware(async (ctx) => {
+            if (!parseCookies(ctx.headers?.get('cookie') ?? '').get(LOGIN_PROMPT_COOKIE)) return
+            const responseHeaders = ctx.context.responseHeaders
+            const sessionCookie = ctx.context.authCookies.sessionToken.name
+            if (!parseSetCookieHeader(responseHeaders?.get('set-cookie') ?? '').has(sessionCookie)) return
+            const returned = ctx.context.returned
+            if (!isAPIError(returned) || returned.statusCode !== 302) return
+            const url = responseHeaders?.get('location')
+            if (!url) return
+            responseHeaders?.delete('location')
+            return ctx.json({ redirect: true, url })
           }),
         },
       ],
