@@ -32,7 +32,10 @@ import { type Chord, matchesChord } from './actions/chords'
 export type CanvasTab = { id: string; name: string }
 
 type ShellWindow = Window & {
+  /** the shell's own `open_external` command is there (desktop/src-tauri/src/external.rs) */
+  __DOOP_OPEN_EXTERNAL__?: boolean
   __TAURI__?: {
+    core?: { invoke?: (command: string, args?: Record<string, unknown>) => Promise<unknown> }
     opener?: { openUrl?: (url: string) => Promise<void> }
     event?: { listen?: <T>(name: string, handler: (event: { payload: T }) => void) => Promise<() => void> }
     deepLink?: { getCurrent?: () => Promise<string[] | null> }
@@ -245,8 +248,8 @@ export async function beginBrowserSignIn(
   provider: DesktopSignInProvider,
   redirects: ProviderRedirects,
 ): Promise<boolean> {
-  const open = shellWindow.__TAURI__?.opener?.openUrl
-  if (typeof open !== 'function') return false
+  const open = browserOpener()
+  if (!open) return false
   const challenge = newChallenge()
   if (!rememberPendingSignIn(challenge)) return false
   try {
@@ -344,11 +347,29 @@ function listenForDesktopLinks() {
 
 /* ---------- external links ---------- */
 
-/** Hand a URL to the system browser via the shell's opener IPC. False on
- *  pre-0.1.2 shells (no IPC) and in plain browsers. */
+/** How this shell hands a web link to the system browser: its own
+ *  `open_external` command where it has one, which a Linux AppImage needs to
+ *  start the browser outside the bundle's libraries; the opener plugin on
+ *  shells from before it. Null on pre-0.1.2 shells (no IPC) and in plain
+ *  browsers. */
+function browserOpener(): ((url: string) => Promise<unknown>) | null {
+  const tauri = shellWindow.__TAURI__
+  const invoke = tauri?.core?.invoke
+  if (shellWindow.__DOOP_OPEN_EXTERNAL__ === true && typeof invoke === 'function') {
+    return (url) => invoke('open_external', { url })
+  }
+  const openUrl = tauri?.opener?.openUrl
+  return typeof openUrl === 'function' ? (url) => openUrl(url) : null
+}
+
+/** Hand a web URL to the system browser through the shell. False for any
+ *  other scheme, on pre-0.1.2 shells (no IPC) and in plain browsers. */
 export function openExternal(url: string): boolean {
-  const open = shellWindow.__TAURI__?.opener?.openUrl
-  if (typeof open !== 'function') return false
+  /* the shell's browser path takes web links only; a mailto: or tel: link is
+     the caller's to assign, which the shell's navigation handler passes on */
+  if (!/^https?:/i.test(url)) return false
+  const open = browserOpener()
+  if (!open) return false
   open(url).catch(console.error)
   return true
 }

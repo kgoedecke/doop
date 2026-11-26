@@ -8,7 +8,8 @@
 // strip at the top of the page (src/components/DesktopTabs.tsx) and leaves
 // room for the traffic lights. Tabs are purely a web-app concept — the shell
 // only marks the page as desktop; opening links in the system browser goes
-// through the opener plugin, granted in capabilities/default.json.
+// through the `open_external` command (src/external.rs), granted in
+// capabilities/default.json.
 //
 // Windows opens with the native frame, and the page drops it itself
 // (set_decorations, granted in capabilities/default.json) and draws the
@@ -58,7 +59,9 @@ mod appimage;
 mod claude;
 mod claude_extension;
 mod codex;
+mod external;
 mod fonts;
+mod host_env;
 mod server;
 mod updates;
 mod view_menu;
@@ -336,6 +339,7 @@ fn main() {
             claude::claude_stop,
             claude_extension::claude_add_extension,
             codex::codex_add_mcp,
+            external::open_external,
             fonts::fonts_choose_local,
             fonts::fonts_read_local,
             server::server_status,
@@ -385,9 +389,17 @@ fn main() {
         .setup(|app| {
             // macOS registers doop:// from the bundle's Info.plist, so it
             // only works installed; Windows and Linux can register at
-            // runtime, which also makes `tauri dev` receive links.
-            #[cfg(any(windows, target_os = "linux"))]
+            // runtime, which also makes `tauri dev` receive links. On Linux
+            // the plugin runs the host's xdg-mime and update-desktop-database,
+            // which a system may lack: links then do not come back, but the
+            // app still opens (and an AppImage registers again below, under
+            // the host's environment: src/appimage.rs).
+            #[cfg(windows)]
             app.deep_link().register_all()?;
+            #[cfg(target_os = "linux")]
+            if let Err(error) = app.deep_link().register_all() {
+                eprintln!("Registering doop:// links failed: {error}");
+            }
             #[cfg(target_os = "linux")]
             appimage::integrate(app.handle());
             let focus_handle = app.handle().clone();
@@ -428,7 +440,7 @@ fn main() {
             // (traffic-light inset arrived with the overlay title bar, 0.1.2)
             // and the platform tells it which window framing it lives under.
             let desktop_marker = format!(
-                "window.__DOOP_DESKTOP__ = '{}'; window.__DOOP_DESKTOP_PLATFORM__ = '{}'; window.__DOOP_CLAUDE_CLI__ = true; window.__DOOP_CLAUDE_INSTALL__ = true; window.__DOOP_CLAUDE_CHOOSE__ = true; window.__DOOP_CLAUDE_EXTENSION__ = {}; window.__DOOP_CODEX_SETUP__ = true; window.__DOOP_VIEW_MENU__ = true; window.__DOOP_APP_MENU__ = {}; window.__DOOP_LOCAL_FONTS__ = true; window.__DOOP_UPDATE_CARD__ = true; window.__DOOP_SERVER_CHOOSE__ = true;",
+                "window.__DOOP_DESKTOP__ = '{}'; window.__DOOP_DESKTOP_PLATFORM__ = '{}'; window.__DOOP_CLAUDE_CLI__ = true; window.__DOOP_CLAUDE_INSTALL__ = true; window.__DOOP_CLAUDE_CHOOSE__ = true; window.__DOOP_CLAUDE_EXTENSION__ = {}; window.__DOOP_CODEX_SETUP__ = true; window.__DOOP_VIEW_MENU__ = true; window.__DOOP_APP_MENU__ = {}; window.__DOOP_LOCAL_FONTS__ = true; window.__DOOP_UPDATE_CARD__ = true; window.__DOOP_SERVER_CHOOSE__ = true; window.__DOOP_OPEN_EXTERNAL__ = true;",
                 app.package_info().version,
                 std::env::consts::OS,
                 cfg!(any(target_os = "macos", target_os = "windows")),
@@ -530,7 +542,14 @@ fn main() {
                             (_, None) => true,
                         };
                         if !in_app {
-                            let _ = handle.opener().open_url(url.as_str(), None::<String>);
+                            // off the UI thread: opening can wait on xdg-open
+                            let handle = handle.clone();
+                            let url = url.to_string();
+                            std::thread::spawn(move || {
+                                if let Err(error) = external::open_url(&handle, &url) {
+                                    eprintln!("Opening {url} failed: {error}");
+                                }
+                            });
                         }
                         in_app
                     });

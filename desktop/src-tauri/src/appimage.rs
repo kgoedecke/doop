@@ -16,6 +16,7 @@
 //! invisible wherever a stale icon-theme.cache sits beside it.
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::process::Stdio;
 use tauri::{AppHandle, Manager};
 
 const WM_CLASS: &str = "doop-desktop";
@@ -33,6 +34,33 @@ pub fn integrate(app: &AppHandle) {
     };
     if let Err(error) = write(&applications, &app_data, &appimage) {
         eprintln!("Registering the AppImage with the desktop failed: {error}");
+    }
+    std::thread::spawn(move || register_link_handler(&applications));
+}
+
+/// The deep-link plugin's entry for doop:// links (named after the binary,
+/// written by `register_all` in main.rs), made the default handler again. The
+/// plugin ran `update-desktop-database` and `xdg-mime` under the bundle's
+/// environment, where the host's copies can fail to load their libraries
+/// (src/host_env.rs); without this, the link a sign-in in the browser ends on
+/// would not come back to the app.
+fn register_link_handler(applications: &Path) {
+    let handler = format!("{WM_CLASS}-handler.desktop");
+    if !applications.join(&handler).is_file() {
+        return;
+    }
+    let mut database = crate::host_env::command("update-desktop-database");
+    database.arg(applications);
+    let mut default = crate::host_env::command("xdg-mime");
+    // the scheme registered in tauri.conf.json (plugins.deep-link)
+    default.args(["default", handler.as_str(), "x-scheme-handler/doop"]);
+    for mut command in [database, default] {
+        let program = command.get_program().to_string_lossy().into_owned();
+        match command.stdout(Stdio::null()).stderr(Stdio::null()).status() {
+            Ok(status) if status.success() => {}
+            Ok(status) => eprintln!("{program} for doop:// links exited with {status}"),
+            Err(error) => eprintln!("{program} for doop:// links did not run: {error}"),
+        }
     }
 }
 
