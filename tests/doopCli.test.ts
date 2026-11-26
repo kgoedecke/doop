@@ -408,6 +408,10 @@ describe('the doop CLI', () => {
     /* a CSS edit outlives its template file going missing: with the canvas unchanged, the pull
        puts the template back beside the edit, and the edit can be pushed */
     const template = join(work, 'designs/components/badge.html')
+    /* a change made and undone on the canvas moves its revision, not what it holds */
+    writeFileSync(join(work, 'blue.css'), '.badge { background: #0000ff; }')
+    expect((await doop(['call', 'update_component', 'component=Badge', 'css@=blue.css'])).code).toBe(0)
+    expect((await doop(['call', 'update_component', 'component=Badge', 'css@=theirs.css'])).code).toBe(0)
     writeFileSync(css, readFileSync(css, 'utf8').replace('#ff0000', '#333333'))
     rmSync(template)
     const kept = await doop(['pull'])
@@ -415,6 +419,8 @@ describe('the doop CLI', () => {
     expect(kept.stdout).toMatch(/local changes kept\s+designs\/components\/badge/)
     expect(readFileSync(css, 'utf8')).toContain('#333333')
     expect(existsSync(template)).toBe(true)
+    expect((await doop(['push'])).stdout).toMatch(/pushed\s+designs\/components\/badge/)
+    writeFileSync(css, readFileSync(css, 'utf8').replace('#333333', '#444444'))
 
     /* with the canvas changed as well, it is a conflict, and the way out does not push a missing file */
     writeFileSync(join(work, 'theirs.css'), '.badge { background: #00ff00; }')
@@ -423,7 +429,7 @@ describe('the doop CLI', () => {
     const missing = await doop(['pull'])
     expect(missing.code).toBe(3)
     expect(missing.stdout).toContain('designs/components/badge.html is missing')
-    expect(readFileSync(css, 'utf8')).toContain('#333333')
+    expect(readFileSync(css, 'utf8')).toContain('#444444')
     expect(existsSync(template)).toBe(false)
     expect((await doop(['pull', 'designs/components/badge.css', '--force'])).code).toBe(0)
     expect(readFileSync(css, 'utf8')).toContain('#00ff00')

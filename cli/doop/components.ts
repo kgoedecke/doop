@@ -163,10 +163,12 @@ function pullOne(project: Project, doc: ComponentDoc, force: boolean): { base: s
           meta: local.meta !== undefined && !sameMeta(local.meta, metaOf(doc)),
         }
     if (!edited.css && !edited.meta) return write()
-    /* the canvas is as it was pulled: its template is the one that went missing, so it comes
-       back beside the edit, which a push then sends */
+    /* the canvas holds what was pulled: its template is the one that went missing, so it comes
+       back beside the edit, which a push then sends. The revision is taken too, as it may have
+       moved past the pulled one through a change made and undone */
     if (tracked && sameAsTracked(doc, tracked)) {
       writeFileSync(join(project.root, `${base}.html`), doc.template)
+      track(project, base, doc)
       return { base, outcome: 'local changes kept' }
     }
     return { base, outcome: 'conflict' }
