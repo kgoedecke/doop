@@ -8,7 +8,8 @@ import { usePageCanvas, currentPageCanvas, usePageLoading } from '../lib/pages'
 import { sendWs } from '../lib/ws'
 import { wheelScrollUnder } from '../lib/wheelScroll'
 import { throttle } from '../lib/throttle'
-import { FrameView, HiddenFrameView } from './FrameView'
+import { FrameFailed, FrameView, HiddenFrameView } from './FrameView'
+import { ErrorBoundary } from './ui/error-boundary'
 import { CanvasComments, type CanvasComposeAt } from './CanvasComments'
 import { placeComposer } from '../lib/composerPlacement'
 import { isCanvasComment, type CanvasComment } from '../../shared/comments'
@@ -997,9 +998,13 @@ export function Stage({
   function onPointerDown(e: React.PointerEvent) {
     const target = e.target as HTMLElement
     /* a locked frame lets the press through (FrameView.startDrag), and the
-       stage treats it as empty canvas: a click clears, a drag marquees */
+       stage treats it as empty canvas: a click clears, a drag marquees. So
+       does a frame that failed to render (FrameFailed): no FrameView is
+       there to take the press. */
     const isBackground =
-      e.target === e.currentTarget || target.classList.contains('world') || !!target.closest('[data-frame-locked]')
+      e.target === e.currentTarget ||
+      target.classList.contains('world') ||
+      !!target.closest('[data-frame-locked], [data-frame-failed]')
     const s = useStore.getState()
     const action = resolvePointerAction({
       tool: s.tool,
@@ -1519,7 +1524,15 @@ function FrameStack({
         f.hidden ? (
           <HiddenFrameView key={f.id} frame={f} stack={rank.get(f.id)} />
         ) : (
-          <FrameView key={f.id} frame={f} stack={rank.get(f.id)} layoutZoom={layoutZoom} onFollowLink={onFollowLink} />
+          /* one frame that fails to draw shows in its own box; the rest of
+             the page keeps working. A new version of it gets a fresh try. */
+          <ErrorBoundary
+            key={f.id}
+            resetKey={f}
+            fallback={(retry) => <FrameFailed frame={f} stack={rank.get(f.id)} retry={retry} />}
+          >
+            <FrameView frame={f} stack={rank.get(f.id)} layoutZoom={layoutZoom} onFollowLink={onFollowLink} />
+          </ErrorBoundary>
         ),
       )}
     </div>

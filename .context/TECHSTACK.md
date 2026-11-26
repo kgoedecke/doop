@@ -1829,6 +1829,14 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   blink its rows out, and fades only when collapsed or expanded. Home warms the Workspace page's
   detail while a workspace's canvases are in view (`src/lib/workspaceCache.ts`), so its panes draw on
   the first frame instead of a skeleton; the page refetches on arrival.
+- Error boundaries (`src/components/ui/error-boundary.tsx`): a render error unmounts everything up to the nearest
+  `ErrorBoundary`, which shows one line in the failed area's place ("This couldn't be shown", Retry) and reports it:
+  to the console and to PostHog (`captureCaughtError`, with the component that threw), once per repeated failure.
+  React keeps a caught error from `window.onerror`, so the exception autocapture would miss it. Where they sit:
+  inside every `Panel` and `PanelTabPanel` (the panel keeps its place, the others and the composer keep running),
+  around the canvas page's floating chrome (a panel that fails in its own body), each frame in the Stage's
+  `FrameStack` (`FrameFailed` keeps the frame's box; a new version of the frame retries by itself) and the app
+  root. Tests: `errorBoundary.test.tsx`.
 
 ## 11. Developer Experience Tooling
 

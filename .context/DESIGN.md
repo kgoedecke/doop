@@ -175,6 +175,8 @@ density="rail"` (the group caption with its chevron) and `DashNavItem density="r
   for you), and `description` on an item or radio item for the caption sub-line under its label.
   `Disclosure` (`collapsible.tsx`) - the fold-away aside in place of a `<details>`: a label with a
   turning chevron, the body kept mounted while folded.
+- `ErrorBoundary` + `ErrorFallback` (`error-boundary.tsx`) - keeps a render error to its area: one quiet line
+  with the failure-red mark, "This couldn't be shown" and Retry. Every `Panel` and `PanelTabPanel` holds one.
 - `AuthScreen` + `AuthCard` (`screen.tsx`) - every signed-out screen (sign-in, OAuth consent, the
   desktop hand-offs, a missing canvas): the wordmark and a `DashTitle` on one card, with
   `AuthCardText` for its prose and `align="center"` for a centred card. `InstallBlock` - an agent's

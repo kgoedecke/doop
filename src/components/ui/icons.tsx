@@ -52,6 +52,7 @@ import {
   ChevronsDownUp,
   ChevronsUpDown,
   Circle,
+  CircleAlert,
   CircleHelp,
   CirclePlus,
   Clipboard,
@@ -359,6 +360,8 @@ export const EditIcon = icon(Pencil)
 export const EyeIcon = icon(Eye)
 export const EyeClosedIcon = icon(EyeOff)
 export const CircleIcon = icon(Circle)
+/** a part of the page failed to draw (ErrorFallback) */
+export const AlertIcon = icon(CircleAlert)
 /** a web page — the import-a-site tool, and the community gallery */
 export const WebIcon = icon(Globe)
 /** a live app broadcasting its screens — the design-sync import */

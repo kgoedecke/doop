@@ -55,6 +55,7 @@ import { FRAME_COMMENT_SELECTOR, isElementComment, isFrameComment, elementCommen
 import { elementIdSelector } from '../../shared/elementId'
 import { cn } from '@/lib/utils'
 import { Tooltip } from './ui/tooltip'
+import { ErrorFallback } from './ui/error-boundary'
 import { EditIcon, EyeClosedIcon, GithubIcon, LockIcon, SyncIcon } from './ui/icons'
 import { isSyncedFrame } from '../lib/sync'
 import { isGithubFrame, isGithubPlaceholder } from '../lib/github'
@@ -225,6 +226,23 @@ export function HiddenFrameView({ frame, stack }: { frame: Frame; stack?: number
         <span>{frame.name}</span>
       </div>
       <div className="absolute inset-0 border border-dashed border-ink-faint bg-paper-deep/40 outline-2 outline-offset-1 outline-dashed outline-brand" />
+    </div>
+  )
+}
+
+/** A frame whose view failed to render keeps its box on the board, with the
+ *  fallback in the middle at screen size. The box is empty canvas to the
+ *  Stage (`data-frame-failed`), so pans and marquees still start on it. */
+export function FrameFailed({ frame, stack, retry }: { frame: Frame; stack?: number; retry: () => void }) {
+  return (
+    <div
+      data-frame-failed
+      className="absolute grid place-items-center border border-dashed border-line bg-surface"
+      style={{ left: frame.x, top: frame.y, width: frame.width, height: frame.height, zIndex: stack }}
+    >
+      <div className={cn('w-max', COUNTER_SCALE)} onPointerDown={(e) => e.stopPropagation()}>
+        <ErrorFallback retry={retry} />
+      </div>
     </div>
   )
 }
