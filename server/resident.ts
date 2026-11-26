@@ -1,3 +1,4 @@
+import { scopeTargets } from '../shared/cardScope.ts'
 import { env } from './env.ts'
 import { MAX_DECISION_CHARS } from '../shared/designDecisions.ts'
 import { isAgentsTask } from '../shared/agentIdentity.ts'
@@ -502,10 +503,14 @@ function completeHtml(value: unknown): string | undefined {
 const REDESIGN_RE =
   /\b(redesign|re-?style|same style|match (?:the )?(?:style|design)|copy (?:the )?(?:style|design)|design of)\b/i
 
-function strategyFor(text: string, frames: NonNullable<ReturnType<typeof store.getCanvas>>['frames']): string {
+function strategyFor(
+  text: string,
+  frames: NonNullable<ReturnType<typeof store.getCanvas>>['frames'],
+  unscopedRedesign: boolean,
+): string {
   const isRedesign = REDESIGN_RE.test(text)
-  const redesignNote = isRedesign
-    ? ' For the redesign itself, work audit-first and deliver TWO drafts:' +
+  const redesignNote = unscopedRedesign
+    ? ' For redesign requests without selected targets, work audit-first and deliver TWO drafts:' +
       ' (1) Audit the source — inspect_frame on a source frame for its computed palette, type, spacing, radii and shadows (import_webpage first for a live site), plus a screenshot for layout.' +
       ' (2) Persist the audit with set_guidelines as a doc named "redesign-<source>" (e.g. "redesign-pipefile-com"): a "Source baseline" recording the old system (palette hexes, type, spacing/radii, and the section map — each section\'s purpose and one-line message) as a descriptive record of what you are redesigning away from, NOT rules to follow; then two binding directions. "Direction A — closer to home": the brand stays recognizable — logo, name, core brand colors (re-weighted freely, with new neutrals and tints) — while every detail is redesigned: typography, spacing rhythm, radii, shadows, patterns, background treatments, button and component styling, section layout. "Direction B — further out": same product, same real copy and facts, but freer — reinterpret the palette and push the aesthetic somewhere genuinely different; do not invent it from vibes — retrieve category inspiration with search_inspiration (live exemplars with their style, colour and fonts), pick ONE exemplar and follow it, and name it in the redesign doc.' +
       ' (3) Deliver TWO new frames side by side, named "<source> — A (on-brand)" and "<source> — B (departure)", each executing its direction precisely; screenshot both. Both frames together are this card\'s deliverable. In both: keep the source\'s real copy and product facts, restructure sections when it strengthens the page\'s argument, and give details a genuinely new treatment rather than reordering the old elements.' +
@@ -691,24 +696,23 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
           items.map((i) => `- ${i.from} (about the work "${i.about}"): "${i.text}"`).join('\n'),
       )
     }
-    /* a card asked from a selection is about THAT frame or element: the
-       agent edits it in place instead of delivering something new elsewhere */
     function describeScope(scope: AgentTask['scope']): string {
       if (!scope) return ''
-      const f = store.getFrame(scope.frameId)
-      if (!f) {
-        /* the target is gone: say so rather than letting the request run
-           canvas-wide against something the human never pointed at */
-        return `\n  This request was scoped to frame ${scope.frameId}, which has since been deleted. Do not redesign anything else in its place: call set_status explaining that the frame it was about no longer exists, and finish.`
+      const targets: string[] = []
+      const missing = new Set<string>()
+      for (const { frameId, selector } of scopeTargets(scope)) {
+        const frame = store.getFrame(frameId)
+        if (frame?.canvasId !== canvasId) {
+          missing.add(frameId)
+          continue
+        }
+        const where = `frame ${frameId} ("${frame.name}")`
+        targets.push(selector ? `element \`${selector}\` inside ${where}` : where)
       }
-      const where = `frame ${f.id} ("${f.name}")`
-      if (!scope.selector) {
-        return `\n  Scoped to ${where}: the request is about this frame. Edit it in place (edit_frame_html or set_frame_html); do not create a new frame unless the request explicitly asks for one.`
-      }
-      return (
-        `\n  Scoped to the element \`${scope.selector}\` inside ${where}: the request is about this element. ` +
-        `Call get_frame to read its HTML, change that element (and only what it needs) with edit_frame_html, and keep the rest of the frame as it is.`
-      )
+      if (!targets.length)
+        return '\n  The selected frames have been deleted. Report this with set_status and finish without editing anything else.'
+      const skipped = missing.size ? ` Skip the deleted frames (${[...missing].join(', ')}).` : ''
+      return `\n  Scoped to: ${targets.join('; ')}. Edit every listed target in place with edit_frame_html or set_frame_html. For element targets, read the frame with get_frame and change only those elements and what they need. Do not create a new frame unless explicitly requested.${skipped}`
     }
     if (cards.length > 0) {
       sections.push(
@@ -732,7 +736,9 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
                 attached.length > 0
                   ? `\n  Attached reference images, already on the canvas as frames: ${attached.join(', ')}. ` +
                     `Call screenshot_frame on each BEFORE designing and build from what you see. ` +
-                    `They are source material — leave them as they are and deliver in a separate frame.`
+                    (c.scope
+                      ? 'Leave these references unchanged and apply the request to the selected targets.'
+                      : 'They are source material — leave them as they are and deliver in a separate frame.')
                   : ''
               const scoped = describeScope(c.scope)
               return `- from ${c.queuedBy}: "${c.status}"${route}${scoped}${refs}`
@@ -761,6 +767,10 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
       ...cards.map((card) => card.status),
       ...comments.map((comment) => comment.text),
     ].join('\n')
+    const unscopedRedesign =
+      items.some((item) => REDESIGN_RE.test(item.text)) ||
+      comments.some((comment) => REDESIGN_RE.test(comment.text)) ||
+      cards.some((card) => !card.scope && REDESIGN_RE.test(card.status))
     const urls = referencedUrls(workText)
     const references = store.getReferences(canvasId)
     const referenceList =
@@ -779,7 +789,7 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
       `\n\nPages, in order (pass this exact list as expectedPages to set_canvas_pages; a link to a page is /c/${canvasId}?page=<id>):\n${JSON.stringify(pages)}` +
       `\n\nFrames currently on the canvas:\n${frameList}` +
       referenceList +
-      `\n\nExecution strategy selected by the harness:\n${strategyFor(workText, visibleFrames)}` +
+      `\n\nExecution strategy selected by the harness:\n${strategyFor(workText, visibleFrames, unscopedRedesign)}` +
       (urls.length > 0
         ? `\n\nThe request references ${urls.join(', ')} — if each page is source material for a separate design, call import_webpage with as_reference=true BEFORE designing so an editable HTML snapshot lands on the canvas for everyone to compare against. Then call screenshot_frame on each imported source, leave those source frames unchanged, and build from their real content and structure. If the imported snapshot itself is the requested deliverable, call it with as_reference=false instead. view_website is read-only and does not add anything to the canvas.`
         : '') +
@@ -1094,7 +1104,15 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
             continue
           }
 
-          if (requireMutation && !deliveredWork(runState) && !mutationNudgeSent) {
+          if (
+            requireMutation &&
+            !deliveredWork(runState) &&
+            !mutationNudgeSent &&
+            cards.some(
+              (card) =>
+                !card.scope || scopeTargets(card.scope).some((t) => store.getFrame(t.frameId)?.canvasId === canvasId),
+            )
+          ) {
             mutationNudgeSent = true
             messages.push({
               role: 'user',

@@ -1,3 +1,4 @@
+import { MAX_CARD_TARGETS } from '../shared/cardScope.ts'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 /* The queue mirrors into Postgres and broadcasts; this test only cares about
@@ -84,6 +85,20 @@ describe('addQueuedCard', () => {
     })
     expect(whole?.scope).toEqual({ frameId: frame.id })
     expect(whole?.id).not.toBe(card?.id)
+  })
+
+  it('accepts the full target limit and rejects a larger selection without queuing a partial card', () => {
+    const { id: frameId } = store.createFrame(canvasId, { name: 'Layers' }, 'kevin')!
+    const others = Array.from({ length: MAX_CARD_TARGETS - 1 }, (_, i) => ({ frameId, selector: `#layer-${i}` }))
+    const queue = (additionalTargets: typeof others) =>
+      actions.addQueuedCard(canvasId, 'Align the layers', 'kevin', undefined, undefined, undefined, {
+        frameId,
+        selector: '#last',
+        additionalTargets,
+      })
+    expect(queue(others)?.scope?.additionalTargets).toEqual(others)
+    expect(queue([...others, { frameId, selector: '#extra' }])).toBeUndefined()
+    expect(actions.getTasks(canvasId)).toHaveLength(1)
   })
 
   it('drops a scope whose frame is not on this canvas', () => {

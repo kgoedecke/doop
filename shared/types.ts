@@ -464,8 +464,7 @@ export interface AgentTask {
   attachments?: string[]
   /** index into pipeline of the stage that is queued or running right now */
   stage?: number
-  /** board cards: the frame (and optionally the element inside it) the human
-   *  had selected when they asked — the agent edits that in place */
+  /** The frames or elements selected when this card was queued. */
   scope?: CardScope
   /** structured board cards the resident runner dispatches on, instead of
    *  handing the title to the chat agent. Absent on prompt cards. */
@@ -479,10 +478,15 @@ export interface AgentTask {
   progress?: { done: number; total: number }
 }
 
-export interface CardScope {
+export interface CardTarget {
   frameId: string
   /** element selector inside the frame (cssPath in src/frame-runtime/geometry.ts); absent = whole frame */
   selector?: string
+}
+
+/** The primary target stays at the top level for saved cards and older clients. */
+export interface CardScope extends CardTarget {
+  additionalTargets?: CardTarget[]
 }
 
 export type RepoCardKind = 'sketch' | 'design-system'

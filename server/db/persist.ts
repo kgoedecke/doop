@@ -1,3 +1,4 @@
+import { parseCardScope } from '../../shared/cardScope.ts'
 import { createHash } from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
@@ -21,7 +22,6 @@ import type {
   ActivityItem,
   ActorKind,
   AgentTask,
-  CardScope,
   Canvas,
   DesignDecision,
   ElementComment,
@@ -1088,8 +1088,8 @@ export function deleteFrame(frameId: string) {
 function scopeField(scope: string | null): Pick<AgentTask, 'scope'> {
   if (!scope) return {}
   try {
-    const parsed = JSON.parse(scope) as CardScope
-    return typeof parsed?.frameId === 'string' ? { scope: parsed } : {}
+    const parsed = parseCardScope(JSON.parse(scope))
+    return parsed ? { scope: parsed } : {}
   } catch {
     return {}
   }

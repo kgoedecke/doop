@@ -12,6 +12,7 @@ import type { Canvas } from '../shared/types'
 
 const mocks = vi.hoisted(() => ({
   addCard: vi.fn(() => Promise.resolve({})),
+  uploadImageFrames: vi.fn<typeof import('../src/lib/frameClipboard').uploadImageFrames>().mockResolvedValue([]),
   agentAllowance: vi.fn(() => Promise.resolve({ used: 0, limit: 5, byoModel: false })),
 }))
 vi.mock('../src/lib/api', () => ({
@@ -25,7 +26,7 @@ vi.mock('../src/lib/api', () => ({
 }))
 vi.mock('../src/lib/posthog', () => ({ posthog: { capture: vi.fn() } }))
 vi.mock('../src/lib/auth', () => ({ authClient: { useSession: () => ({ data: { user: { id: 'alice' } } }) } }))
-vi.mock('../src/lib/frameClipboard', () => ({ uploadImageFrames: () => Promise.resolve([]) }))
+vi.mock('../src/lib/frameClipboard', () => ({ uploadImageFrames: mocks.uploadImageFrames }))
 vi.mock('../src/components/ChatPanel', () => ({ ChatPanel: () => null }))
 vi.mock('../src/components/MemoryPanel', () => ({ MemoryPanel: () => null }))
 
@@ -84,7 +85,9 @@ beforeEach(() => {
     composerSend: null,
     flyTo: null,
     selectedId: null,
+    selectedIds: [],
     selectedElement: null,
+    selectedElements: [],
   })
 })
 
@@ -140,6 +143,63 @@ describe('the Agents tab composer', () => {
     await type('make it bolder')
     await press('Enter')
     expect(mocks.addCard).toHaveBeenCalledWith('c1', 'make it bolder', ['doop'], [], { frameId: 'f1' }, undefined)
+  })
+
+  it('scopes an element selection to its picked selectors and leaves the rest of the frame alone', async () => {
+    useStore.setState({ canvas: { ...canvas, frames: [frameOn(canvas.id, 'hero')] } })
+    useStore.getState().select('hero')
+    useStore.getState().pickElements('hero', ['#heading', '#subtitle'])
+    await render()
+    await type('increase the font size')
+    await press('Enter')
+    expect(mocks.addCard).toHaveBeenCalledWith(
+      canvas.id,
+      'increase the font size',
+      ['doop'],
+      [],
+      {
+        frameId: 'hero',
+        selector: '#subtitle',
+        additionalTargets: [{ frameId: 'hero', selector: '#heading' }],
+      },
+      undefined,
+    )
+  })
+
+  it('keeps the draft and attachment at 129 targets, then sends both at 128', async () => {
+    const ids = Array.from({ length: 129 }, (_, i) => `frame-${i}`)
+    useStore.setState({ canvas: { ...canvas, frames: ids.map((id) => frameOn(canvas.id, id)) } })
+    useStore.getState().selectMany(ids)
+    await render()
+    const draft = 'Match these frames to the reference'
+    await type(draft)
+    const reference = new File(['reference'], 'reference.png', { type: 'image/png' })
+    const clipboard = new DataTransfer()
+    clipboard.items.add(reference)
+    await act(async () => {
+      composer().dispatchEvent(new ClipboardEvent('paste', { clipboardData: clipboard, bubbles: true }))
+    })
+
+    await press('Enter')
+    expect(mocks.uploadImageFrames).not.toHaveBeenCalled()
+    expect(mocks.addCard).not.toHaveBeenCalled()
+    expect(container.textContent).toContain('Select up to 128 targets per prompt.')
+    expect(composer().value).toBe(draft)
+    expect(container.querySelector('img[alt="reference.png"]')).toBeTruthy()
+
+    const allowed = ids.slice(0, 128)
+    await act(async () => useStore.getState().selectMany(allowed))
+    mocks.uploadImageFrames.mockResolvedValueOnce([frameOn(canvas.id, 'reference-frame')])
+    await press('Enter')
+    expect(mocks.uploadImageFrames).toHaveBeenCalledExactlyOnceWith(canvas.id, [reference], expect.anything())
+    expect(mocks.addCard).toHaveBeenCalledExactlyOnceWith(
+      canvas.id,
+      draft,
+      ['doop'],
+      ['reference-frame'],
+      { frameId: allowed.at(-1), additionalTargets: allowed.slice(0, -1).map((frameId) => ({ frameId })) },
+      undefined,
+    )
   })
 
   it('takes the keyboard on a focus request', async () => {
