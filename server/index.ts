@@ -2841,7 +2841,7 @@ app.patch(
     if (!current) return
     const body = validated(res, framePatchSchema, req.body)
     if (!body) return
-    const { actor: _ignored, expectedUpdatedAt: _version, requestId: _request, ...patch } = body
+    const { actor: _ignored, expectedUpdatedAt: _version, ...patch } = body
     const actor = userActor(req)
     if (
       patch.pageId !== undefined &&

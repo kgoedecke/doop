@@ -446,11 +446,11 @@ server/index.ts` in prod. `erasableSyntaxOnly` and `verbatimModuleSyntax` in tsc
   own machine and `extend` for run state (`awaiting_answer`, `as_reference`). Tool descriptions stay with each
   surface. A resident call is checked against that same zod before its handler runs, as an MCP call is
   (`checkedInput`): a wrong type, a missing parameter or a value past its bound is refused with what is wrong, and
-  the handler gets the checked input (text trimmed, defaults filled in). A refused call is not a Glassray tool failure, as over MCP, where the SDK refuses it before the wrapped handler runs. Unlike MCP, null for an optional parameter
+  the handler gets the checked input (text trimmed, defaults filled in). Unlike MCP, null for an optional parameter
   counts as not given, a tool's old parameter names are read as the new ones (`OLD_SPELLINGS`: `find`/`replace`,
   `page_id`), and parameters it does not list are kept. The resident-only tools with a hand-written schema are not
   checked. The simple shared tools also share their handler (`server/sharedToolHandlers.ts`: `update_canvas`,
-  `create_canvas_page`, `set_canvas_pages`, `get_prototype`, `set_prototype_start`, `set_canvas_thumbnail`): it does
+  `create_canvas_page`, `set_canvas_pages`, `get_prototype`, `set_prototype_start`): it does
   the work and gives the answer, the same JSON on both surfaces. Around it MCP checks the account's access to the
   canvas (the handler's `access`), marks the agent present and adds the feedback waiting for it; the Doop Agent
   counts a call that changed how the canvas is organised (`arranged`) as delivered work. The other shared tools still

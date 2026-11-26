@@ -62,9 +62,8 @@ const MISSING = [
    names: the MCP tool's input schema against the resident's input_schema. */
 
 /** What an MCP agent passes on every call and a resident never needs: it names its canvas and
- *  itself (a resident run is scoped to its canvas and named by its role), and Glassray's wrapper
- *  (server/glassray.ts) adds the model and intent it reports with. */
-const MCP_CALL_CONTEXT = ['canvas_id', 'agent_name', 'llm_model', 'intent']
+ *  itself (a resident run is scoped to its canvas and named by its role). */
+const MCP_CALL_CONTEXT = ['canvas_id', 'agent_name']
 
 /** Parameters of a shared tool that one surface takes on purpose, and why. */
 const PARAM_DIFFERENCES: Record<string, { mcp?: string[]; resident?: string[] }> = {
