@@ -104,6 +104,15 @@ function track(project: Project, base: string, doc: ComponentDoc): void {
   saveState(project)
 }
 
+/** Whether the canvas's component is still what was last pulled or pushed. */
+function sameAsTracked(doc: ComponentDoc, tracked: TrackedComponent): boolean {
+  return (
+    hashOf(doc.template) === tracked.html &&
+    hashOf(doc.css ?? '') === tracked.css &&
+    sameMeta(metaOf(doc), tracked.meta)
+  )
+}
+
 /** Which parts of the local files differ from what was last pulled or pushed. */
 function changedParts(local: Local, tracked: TrackedComponent): { html: boolean; css: boolean; meta: boolean } {
   return {
@@ -153,7 +162,14 @@ function pullOne(project: Project, doc: ComponentDoc, force: boolean): { base: s
           css: local.css !== undefined && local.css !== (doc.css ?? ''),
           meta: local.meta !== undefined && !sameMeta(local.meta, metaOf(doc)),
         }
-    return edited.css || edited.meta ? { base, outcome: 'conflict' } : write()
+    if (!edited.css && !edited.meta) return write()
+    /* the canvas is as it was pulled: its template is the one that went missing, so it comes
+       back beside the edit, which a push then sends */
+    if (tracked && sameAsTracked(doc, tracked)) {
+      writeFileSync(join(project.root, `${base}.html`), doc.template)
+      return { base, outcome: 'local changes kept' }
+    }
+    return { base, outcome: 'conflict' }
   }
   if (local.html === doc.template && (local.css ?? '') === (doc.css ?? '') && sameMeta(local.meta, metaOf(doc))) {
     track(project, base, doc)

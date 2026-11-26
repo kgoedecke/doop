@@ -1,3 +1,5 @@
+import { existsSync } from 'node:fs'
+import { join } from 'node:path'
 import { changedComponents, pullComponents, pushComponents, type SyncPart } from './components.ts'
 import type { Context, Outcome } from './context.ts'
 import { EXIT, usage } from './errors.ts'
@@ -64,8 +66,12 @@ export async function pull(context: Context): Promise<Outcome> {
     [components, frames],
     context.flags.ready ? 'no frames are marked ready for dev' : 'this canvas has no frames or components yet',
     (file) =>
-      `conflict: the file and the canvas both changed. \`doop diff\` shows a frame's difference; ` +
-      `\`doop pull ${file} --force\` takes the canvas, \`doop push ${file} --force\` takes the file.`,
+      existsSync(join(project.root, file))
+        ? `conflict: the file and the canvas both changed. \`doop diff\` shows a frame's difference; ` +
+          `\`doop pull ${file} --force\` takes the canvas, \`doop push ${file} --force\` takes the file.`
+        : `conflict: ${file} is missing, and the component changed both here and on the canvas. ` +
+          `\`doop pull ${file} --force\` takes the canvas; to keep yours, put ${file} back first, then ` +
+          `\`doop push ${file} --force\`.`,
   )
 }
 

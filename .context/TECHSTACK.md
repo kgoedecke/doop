@@ -214,7 +214,9 @@ server/index.ts` in prod. `erasableSyntaxOnly` and `verbatimModuleSyntax` in tsc
     changes the `.json` also sends the name and description it pulled (`expected_name`, `expected_description`)
     and the server refuses the write in the same way when either has moved since. New files go through
     `create_component`. Components are pulled and pushed before frames. A pull over a component whose `.html`
-    is missing still keeps an edit to its `.css` or `.json` (a conflict until `--force`). A component's main
+    is missing keeps an edit to its `.css` or `.json`: it puts the template back when the canvas has not
+    changed since, and is otherwise a conflict until `--force`, whose hint says to restore the `.html` before
+    pushing. A component's main
     frame is not pulled as a frame, and a component that follows a
     workspace library is listed but not pulled. `screenshot` on a component file is `get_component_preview`.
   - `doop expand` (and `pull --expand`) writes a frame as it renders (`get_frame` with `expand_components`)
