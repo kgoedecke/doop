@@ -241,7 +241,6 @@ export function Inspector({
 
   return (
     <Panel
-      data-design-panel="frame"
       surface={surface}
       className={cn(
         surface === 'floating' && 'top-2.5 bottom-3.5 w-[244px] transition-[right] duration-150',

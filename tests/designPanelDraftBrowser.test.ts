@@ -72,6 +72,29 @@ describe.skipIf(!findBrowserPath())('Design panel drafts', () => {
     await expect.poll(() => updates).toMatchObject([{ path: '/api/frames/one', patch: { width: 220 } }])
   })
 
+  it.each(['title', 'surface'])(
+    'saves a layer rename to the original frame when pressing another frame %s',
+    async (where) => {
+      const one = canvasFrame({ id: 'one', name: 'One', x: 0, y: 40, width: 200, height: 120 })
+      const two = canvasFrame({ id: 'two', name: 'Two', x: 280, y: 40, width: 240, height: 120 })
+      await openCanvasPage(page, [one, two])
+      await page.click('[data-row-key="one"]', { count: 2 })
+      const rename = '[role="tree"] input'
+      await page.waitForSelector(rename)
+      const updates = captureFrameUpdates(page)
+      await page.keyboard.sendCharacter('Renamed')
+
+      if (where === 'title') await page.click('div:has(iframe[title="Two"]) > [data-frame-title]')
+      else {
+        const box = (await (await page.waitForSelector('iframe[title="Two"]'))!.boundingBox())!
+        await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2)
+      }
+      await page.waitForSelector(rename, { hidden: true })
+      await expect.poll(() => updates).toMatchObject([{ path: '/api/frames/one', patch: { name: 'Renamed' } }])
+      expect(await page.evaluate(() => document.activeElement === document.body)).toBe(true)
+    },
+  )
+
   it('saves the page background when a frame title closes the Page panel', async () => {
     const frame = canvasFrame({ id: 'f', name: 'Board', x: 0, y: 40, width: 200, height: 120 })
     await openCanvasPage(page, [frame], '', { pages: [{ id: 'home', name: 'Home' }] })

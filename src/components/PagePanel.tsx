@@ -41,7 +41,6 @@ export function PagePanel({
 
   return (
     <Panel
-      data-design-panel="page"
       surface={surface}
       className={cn(
         surface === 'floating' && 'top-2.5 bottom-3.5 w-[244px] transition-[right] duration-150',

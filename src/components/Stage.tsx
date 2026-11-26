@@ -143,6 +143,18 @@ function lockTextSelection(): () => void {
   }
 }
 
+/* A press on the canvas cancels its pointerdown (picks, drags), and with it
+   the browser's move of focus: a field outside the stage (a Design panel
+   value, a layer being renamed) would keep its draft and its caret while the
+   selection moves on under it. Blurring it before anything on the canvas runs
+   saves the draft to what it was typed for, as leaving the field does. Focus
+   inside the stage (a frame being edited, a comment composer) is the stage's. */
+function leaveOutsideField(e: React.PointerEvent<HTMLElement>) {
+  const field = document.activeElement
+  if (e.button !== 0 || !e.isPrimary || !(field instanceof HTMLElement)) return
+  if (!e.currentTarget.contains(field)) field.blur()
+}
+
 /* zoom to an absolute level pivoting on the view center — the world point in
    the middle of the stage stays in the middle */
 function zoomCentered(el: HTMLElement, next: number) {
@@ -1246,15 +1258,7 @@ export function Stage({
             )}
             style={{ ...bounds, ...paperStyle(paper), ...(tool === 'comment' ? commentCursorStyle() : null) }}
             onPointerDownCapture={(e) => {
-              const field = document.activeElement
-              // Canvas presses can prevent the native blur that commits a Design field.
-              if (
-                e.button === 0 &&
-                e.isPrimary &&
-                field instanceof HTMLElement &&
-                field.matches('[data-design-panel] input, [data-design-panel="element"] textarea')
-              )
-                field.blur()
+              leaveOutsideField(e)
               drawing.onPointerDown(e)
             }}
             onDoubleClickCapture={drawing.onDoubleClick}
