@@ -322,6 +322,35 @@ describe('the resident agent takes what an MCP agent takes', () => {
     expect(String(markdown.content)).toContain('| `--radius-card` |')
     expect(String(markdown.content)).not.toContain('--color-brand')
   })
+
+  it('clears a prototype start with null, and still with the empty string it used to take', async () => {
+    const start = () => canvasPages(canvas())[0]!.startFrameId
+    for (const cleared of [null, '']) {
+      await execTool(call('set_prototype_start', { frame_id: frameId }), canvasId, actor(), newRunState())
+      expect(start()).toBe(frameId)
+      const result = await execTool(
+        call('set_prototype_start', { frame_id: cleared }),
+        canvasId,
+        actor(),
+        newRunState(),
+      )
+      expect(result.is_error, String(cleared)).toBeUndefined()
+      expect(start()).toBeUndefined()
+    }
+    const refused = await execTool(call('set_prototype_start', { frame_id: 7 }), canvasId, actor(), newRunState())
+    expect(refused.is_error).toBe(true)
+  })
+
+  it('creates tokens with a number for a value, as an MCP agent may', async () => {
+    const result = await execTool(
+      call('create_tokens', { tokens: [{ name: '--opacity-muted', type: 'opacity', value: 0.6 }] }),
+      canvasId,
+      actor(),
+      newRunState(),
+    )
+    expect(result.is_error).toBeUndefined()
+    expect(store.getTokens(canvasId).find((t) => t.name === '--opacity-muted')?.value).toBe('0.6')
+  })
 })
 
 describe.skipIf(!findBrowserPath())('fit_to_content', () => {

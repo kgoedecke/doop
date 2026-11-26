@@ -433,6 +433,14 @@ server/index.ts` in prod. `erasableSyntaxOnly` and `verbatimModuleSyntax` in tsc
   migration 0047, so a trimmed task history cannot move it). Tests: `agentRunner.test.ts`,
   `runnerQueue.test.ts`, `modelPickerRunners.test.tsx`, the pick cases in
   `localAgentRouting.test.ts`.
+- Shared tool shapes (`server/agentToolShapes.ts`): every tool both MCP agents and the resident call takes its
+  parameters from one zod shape, there or beside its handler (`COMPONENT_TOOLS`). `server/mcp.ts` registers it with
+  its call context (`canvas_id`, `agent_name`); the resident sends it as JSON Schema (`residentInputSchema`, the MCP
+  SDK's conversion options), with its own wording for a parameter its run reads differently (a page from its page
+  list, the comment named in its request), `required` for what a run must pass, `omit` for a file on the agent's
+  own machine and `extend` for run state (`awaiting_answer`, `as_reference`). Tool descriptions stay with each
+  surface. The resident's handlers read the raw input and are not validated against the shape. Tests:
+  `agentToolParity.test.ts` (names, then each parameter's type, bounds and requiredness, with the exceptions listed).
 - Pages over MCP (`server/mcp.ts`): `get_canvas` lists `pages` (id, name, `startFrameId`) and
   every frame's `pageId`, and narrows to one page with `page_id`; `create_canvas_page` adds an
   empty page at the end (`actions.createCanvasPage`, a server-minted id, `MAX_PAGES` enforced)
