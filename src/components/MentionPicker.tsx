@@ -12,6 +12,7 @@ import type { CanvasPerson } from '../lib/api'
 import { useMentionPeople } from '../hooks/use-mention-people'
 import { useRoster } from '../hooks/use-roster'
 import { useT } from '../lib/i18n'
+import { linkSegments } from '../lib/linkify'
 import { canEditOpenCanvas, useStore } from '../lib/store'
 import { cn } from '@/lib/utils'
 import { Avatar } from './ui/avatar'
@@ -230,7 +231,8 @@ export function useMentionPicker({
   }
 }
 
-/** A comment's text with the people and agents it @mentions drawn apart. */
+/** A comment's text with the people and agents it @mentions drawn apart and
+ *  its web addresses as links. */
 export function MentionText({ text }: { text: string }) {
   const people = useMentionPeople({ ask: false })
   const roster = useRoster()
@@ -242,6 +244,32 @@ export function MentionText({ text }: { text: string }) {
           <span key={i} className="font-medium text-brand">
             {part.text}
           </span>
+        ) : (
+          <LinkedText key={i} text={part.text} />
+        ),
+      )}
+    </>
+  )
+}
+
+/** Plain text with its bare web addresses as links, opening in a new tab (the
+ *  desktop shell hands those to the system browser from a capture listener). */
+function LinkedText({ text }: { text: string }) {
+  return (
+    <>
+      {linkSegments(text).map((part, i) =>
+        part.href ? (
+          <a
+            key={i}
+            href={part.href}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="break-all text-brand underline-offset-2 hover:underline"
+            /* a link in a comments-panel row opens itself, not the thread */
+            onClick={(e) => e.stopPropagation()}
+          >
+            {part.text}
+          </a>
         ) : (
           part.text
         ),

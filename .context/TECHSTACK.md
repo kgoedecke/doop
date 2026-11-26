@@ -1439,7 +1439,9 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   composer, a thread reply or the Comments panel's reply lists the canvas's people (owner,
   members, workspace members, from `GET /api/canvases/:id/people`, comment role, names and faces
   only, asked again whenever a field mounts) and, for editors, its agents; the thread draws
-  mentions in brand. Names are not unique, so the picker sends the ids it picked as `mentions`
+  mentions in brand, and bare `http(s)://` and `www.` addresses as links that open in a new tab
+  (`src/lib/linkify.ts`, less a sentence's trailing punctuation; a click in a Comments panel row
+  opens the link, not the thread). Names are not unique, so the picker sends the ids it picked as `mentions`
   beside the text (the latest pick of a name in the draft; an agent picked over a person
   named like its handle rides as `agent:<id>`, so the agent gets it). The routes, MCP `reply_to_comment` and the resident's reply resolve the text
   once (`resolveCommentMentions` → `resolvePersonMentions`) against everyone eligible (those
@@ -1454,7 +1456,7 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   of `server/links.ts`'s `commentLink`): "Copy link to comment" on a pin's right-click menu, an
   open Comments panel row's, and the link button on a thread's first message. Opening one,
   `Stage` follows the root to its current frame, not the one the link names. Tests:
-  `personMentions.test.ts`, `commentLink.test.ts`, the `@mentions` cases in
+  `personMentions.test.ts`, `linkify.test.ts`, `commentLink.test.ts`, the `@mentions` cases in
   `commentNotifications.test.ts`, the picker cases in `commentsPanel.test.tsx`, the mention and
   `/people` cases in `canvasCommentsRoute.test.ts`, the person case in `residentComments.test.ts`.
 - Chat in the Agents tab (`src/components/AgentChat.tsx`, `src/lib/agentChat.ts`): under Recent
