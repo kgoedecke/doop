@@ -632,7 +632,8 @@ const OPERATIONS: Record<string, Case> = {
       ),
   },
   'resident edit_frame_html': {
-    run: ({ canvas, page }) => resident('edit_frame_html', { frame_id: page.id, find: 'One', replace: 'Uno' }, canvas),
+    run: ({ canvas, page }) =>
+      resident('edit_frame_html', { frame_id: page.id, old_str: 'One', new_str: 'Uno' }, canvas),
   },
   'resident set_frame_html of a main': {
     run: ({ canvas, mainFrame }) =>

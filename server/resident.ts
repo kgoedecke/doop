@@ -20,6 +20,8 @@ import {
   tokensBrief,
   NO_TOKENS_BRIEF,
   tokensCss,
+  tokensMarkdown,
+  tokensNamed,
   tokensTailwind,
   type TokenResult,
 } from '../shared/designTokens.ts'
@@ -117,7 +119,7 @@ import {
 } from './inspiration.ts'
 import type { Actor, AgentTask, Canvas, ElementComment, Frame } from '../shared/types.ts'
 import { canvasPages, framePageId, MAX_CANVAS_NAME, MAX_PAGE_NAME, pageFrames, samePages } from '../shared/pages.ts'
-import { addPage, pageList, parsePageList, savePages } from './pageTools.ts'
+import { addPage, frameMetaError, pageList, parsePageList, savePages } from './pageTools.ts'
 import { runCanvasWrite } from './canvasWrites.ts'
 import { isCanvasComment, isFrameComment } from '../shared/comments.ts'
 import { websiteAccessErrorMessage } from './websiteAccess.ts'
@@ -430,24 +432,24 @@ export function placeBeside(
   return { x, y }
 }
 
-/** What the create_frame tool asks for, placed: the model's own x/y win,
- *  otherwise the run's placement (the comment's page, and beside its pin). */
+/** What the create_frame tool asks for, placed: the model's own page and x/y win,
+ *  otherwise the run's placement (the comment's page, and beside its pin when the
+ *  frame lands on that page). */
 export function createFrameInput(
-  raw: { name?: string; width?: number; height?: number; html: string; x?: number; y?: number },
+  raw: { name?: string; width?: number; height?: number; html: string; x?: number; y?: number; pageId?: string },
   placement: FramePlacement | undefined,
   canvas: Canvas | undefined,
 ) {
   const size = { width: Number(raw.width) || 800, height: Number(raw.height) || 500 }
+  const pageId = raw.pageId || placement?.pageId
   const chosen = Number.isFinite(raw.x) && Number.isFinite(raw.y) ? { x: Number(raw.x), y: Number(raw.y) } : undefined
-  const beside =
-    !chosen && placement?.near && canvas
-      ? placeBeside(placement.near, size, pageFrames(canvas, placement.pageId))
-      : undefined
+  const near = placement?.pageId === pageId ? placement?.near : undefined
+  const beside = !chosen && near && canvas && pageId ? placeBeside(near, size, pageFrames(canvas, pageId)) : undefined
   return {
     name: String(raw.name || 'Frame'),
     ...size,
     html: raw.html,
-    ...(placement ? { pageId: placement.pageId } : {}),
+    ...(pageId ? { pageId } : {}),
     ...(chosen ?? beside ?? {}),
   }
 }
@@ -1372,10 +1374,15 @@ const TOOLS: Anthropic.Tool[] = [
         width: { type: 'number', description: 'px, e.g. 1200' },
         height: { type: 'number', description: 'px, e.g. 630' },
         html: { type: 'string', description: 'Complete, self-contained HTML document' },
+        pageId: {
+          type: 'string',
+          description:
+            'The page to create it on, from the page list (create_canvas_page returns a new one). Optional: left out, the frame lands on the page the request is about, else the first page.',
+        },
         x: {
           type: 'number',
           description:
-            'Canvas position in px. Optional: left out, the frame lands on the page the request is about — beside the pin of a canvas comment, else to the right of the existing frames.',
+            'Canvas position in px. Optional: left out, the frame lands beside the pin of a canvas comment on that page, else to the right of the existing frames.',
         },
         y: { type: 'number', description: 'Canvas position in px. Optional, see x.' },
         fit_to_content: { type: 'string', enum: [...FIT_AXES], description: FIT_ON.create },
@@ -1421,15 +1428,15 @@ const TOOLS: Anthropic.Tool[] = [
   {
     name: 'edit_frame_html',
     description:
-      'Exact find/replace in a frame\'s HTML — the change morphs into the live render. Use for small, targeted changes. "find" must occur exactly once. "replace" must open and close as many <doop-use> and <template> tags as "find" does: an edit that leaves one unclosed is refused, so include the closing tags in the same edit or replace the whole instance.',
+      "Exact find/replace in a frame's HTML — the change morphs into the live render. Use for small, targeted changes. old_str must occur exactly once. new_str must open and close as many <doop-use> and <template> tags as old_str does: an edit that leaves one unclosed is refused, so include the closing tags in the same edit or replace the whole instance.",
     input_schema: {
       type: 'object',
       properties: {
         frame_id: { type: 'string' },
-        find: { type: 'string' },
-        replace: { type: 'string' },
+        old_str: { type: 'string', description: 'Exact text to find in the frame HTML — must occur exactly once' },
+        new_str: { type: 'string', description: 'Replacement text' },
       },
-      required: ['frame_id', 'find', 'replace'],
+      required: ['frame_id', 'old_str', 'new_str'],
     },
   },
   {
@@ -1754,12 +1761,16 @@ const TOOLS: Anthropic.Tool[] = [
   {
     name: 'get_tokens',
     description:
-      "This canvas's design tokens (CSS custom properties frames use as var(--name)), as JSON, a :root CSS block or a Tailwind v4 @theme block.",
+      "This canvas's design tokens (CSS custom properties frames use as var(--name)), as JSON, a :root CSS block, a Tailwind v4 @theme block or markdown tables for a styleguide. Filter by type or a name glob.",
     input_schema: {
       type: 'object',
       properties: {
         types: { type: 'array', items: { type: 'string', enum: [...TOKEN_TYPES] } },
-        format: { type: 'string', enum: ['json', 'css', 'tailwind'] },
+        name_pattern: {
+          type: 'string',
+          description: 'Glob on the full name, case-insensitive, * wildcard: "--color-*", "*-500", "*brand*"',
+        },
+        format: { type: 'string', enum: ['json', 'css', 'tailwind', 'markdown'] },
       },
     },
   },
@@ -1844,7 +1855,7 @@ const TOOLS: Anthropic.Tool[] = [
   {
     name: 'update_frame',
     description:
-      "Change a frame's metadata in one call, without touching its design: rename it (name), move it on its page (x, y), resize it (width, height), lock or unlock it, or move it to another page (pageId; it keeps its x/y unless you pass new ones and lands in front of that page's frames). Pass only what changes. To reorganize a canvas, move frames with this and reorder pages with set_canvas_pages — never recreate a frame to move it.",
+      "Change a frame's metadata in one call, without touching its design: rename it (name), move it on its page (x, y), resize it (width, height), turn it (rotation), lock or unlock it, or move it to another page (pageId; it keeps its x/y unless you pass new ones and lands in front of that page's frames). Pass only what changes. To reorganize a canvas, move frames with this and reorder pages with set_canvas_pages — never recreate a frame to move it.",
     input_schema: {
       type: 'object',
       properties: {
@@ -1857,6 +1868,7 @@ const TOOLS: Anthropic.Tool[] = [
         height: { type: 'number', description: 'px; the design is not rescaled' },
         fit_to_content: { type: 'string', enum: [...FIT_AXES], description: FIT_ON.update },
         locked: { type: 'boolean', description: 'true keeps humans from selecting, moving or deleting it' },
+        rotation: { type: 'number', description: 'Degrees clockwise about its centre; 0 straightens it' },
       },
       required: ['frame_id'],
     },
@@ -1916,7 +1928,7 @@ const TOOLS: Anthropic.Tool[] = [
       type: 'object',
       properties: {
         frame_id: { type: 'string', description: "The start frame, or an empty string to clear the page's start" },
-        page_id: {
+        pageId: {
           type: 'string',
           description: "The page; defaults to the start frame's page (the first page when clearing)",
         },
@@ -2119,10 +2131,16 @@ async function runResidentTool(
           html?: string
           x?: number
           y?: number
+          pageId?: unknown
           fit_to_content?: unknown
         }
         const fitAxes = readFitAxes(raw.fit_to_content)
         if (!fitAxes.ok) return fail(fitAxes.error)
+        const canvas = store.getCanvas(canvasId)
+        if (!canvas) return fail('canvas not found')
+        const pageId = typeof raw.pageId === 'string' && raw.pageId.trim() ? raw.pageId.trim() : undefined
+        if (pageId && !canvasPages(canvas).some((page) => page.id === pageId))
+          return fail(frameMetaError({ unknownPage: pageId }, canvas))
         const html = completeHtml(raw.html)
         if (!html) return fail('create_frame requires a complete non-empty HTML document ending in </html>')
         /* the inline-data guidance before the size refusal, as this tool always answered: the
@@ -2134,7 +2152,7 @@ async function runResidentTool(
         }
         const created = await runCanvasWrite(canvasId, {
           type: 'create-frame',
-          input: createFrameInput({ ...raw, html }, runState.placement, store.getCanvas(canvasId)),
+          input: createFrameInput({ ...raw, html, pageId }, runState.placement, canvas),
           actor,
           inline: 'resident',
         })
@@ -2207,24 +2225,27 @@ async function runResidentTool(
         const f = store.getFrame(input.frame_id)
         if (!f || f.canvasId !== canvasId) return fail('frame not found on this canvas')
         if (typeof f.html !== 'string') return fail('frame HTML is unavailable; retry after the frame reloads')
-        if (typeof input.find !== 'string' || !input.find) return fail('find must be a non-empty exact HTML string')
-        if (typeof input.replace !== 'string') return fail('replace must be an HTML string')
+        /* find/replace are this tool's names before it took MCP's: a model copying an earlier call keeps working */
+        const find = input.old_str ?? input.find
+        const replace = input.new_str ?? input.replace
+        if (typeof find !== 'string' || !find) return fail('old_str must be a non-empty exact HTML string')
+        if (typeof replace !== 'string') return fail('new_str must be an HTML string')
         /* matched in the form get_frame_html showed, or the stored or composed one if that is
            what was copied, and checked for inline data the frame did not hold, where the
            frame's writes are run (server/canvasWrites.ts) */
         const edited = await runCanvasWrite(canvasId, {
           type: 'edit-frame-html',
           frameId: input.frame_id,
-          find: input.find,
-          replace: input.replace,
+          find,
+          replace,
           actor,
           inline: 'resident',
         })
         if (!edited.ok) {
           if ('missing' in edited) return fail('frame not found on this canvas')
-          if ('unbalanced' in edited) return fail(unbalancedProblem(edited.unbalanced, '"find" text', '"replace" text'))
+          if ('unbalanced' in edited) return fail(unbalancedProblem(edited.unbalanced, 'old_str', 'new_str'))
           return fail(
-            'inline' in edited ? edited.inline : frameEditProblem(edited.problem, '"find" text', 'get_frame_html'),
+            'inline' in edited ? edited.inline : frameEditProblem(edited.problem, 'old_str', 'get_frame_html'),
           )
         }
         noteFrameChange(runState, input.frame_id)
@@ -2709,14 +2730,18 @@ async function runResidentTool(
         )
       }
       case 'get_tokens': {
-        const raw = block.input as { types?: unknown; format?: unknown }
+        const raw = block.input as { types?: unknown; name_pattern?: unknown; format?: unknown }
         const types = Array.isArray(raw.types) ? raw.types.filter((t): t is string => typeof t === 'string') : []
-        let tokens = store.getTokens(canvasId)
+        const all = store.getTokens(canvasId)
+        let tokens = all
         const themes = store.getTokenThemes(canvasId)
         if (types.length) tokens = tokens.filter((t) => types.includes(t.type))
-        if (!tokens.length) return ok('no design tokens on this canvas yet — add some with create_tokens')
+        if (typeof raw.name_pattern === 'string' && raw.name_pattern) tokens = tokensNamed(tokens, raw.name_pattern)
+        if (!all.length) return ok('no design tokens on this canvas yet — add some with create_tokens')
+        if (!tokens.length) return ok('no design tokens match that filter')
         if (raw.format === 'css') return ok(tokensCss(tokens, themes))
         if (raw.format === 'tailwind') return ok(tokensTailwind(tokens, themes))
+        if (raw.format === 'markdown') return ok(tokensMarkdown(tokens, themes))
         return ok(JSON.stringify({ tokens: describeTokens(tokens), ...(themes.length ? { themes } : {}) }))
       }
       case 'create_tokens': {
@@ -2782,9 +2807,16 @@ async function runResidentTool(
         if (!fitAxes.ok) return fail(fitAxes.error)
         /* the store updates the frame object in place, so what it was is read first */
         const arrangement = (frame: typeof f) =>
-          [frame.name, framePageId(canvas, frame), frame.x, frame.y, frame.width, frame.height, !!frame.locked].join(
-            '\u0000',
-          )
+          [
+            frame.name,
+            framePageId(canvas, frame),
+            frame.x,
+            frame.y,
+            frame.width,
+            frame.height,
+            !!frame.locked,
+            frame.rotation ?? 0,
+          ].join('\u0000')
         const before = { width: f.width, height: f.height, arrangement: arrangement(f) }
         const text = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim() : undefined)
         const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : undefined)
@@ -2799,6 +2831,7 @@ async function runResidentTool(
             width: num(raw.width),
             height: num(raw.height),
             locked: typeof raw.locked === 'boolean' ? raw.locked : undefined,
+            rotation: num(raw.rotation),
           },
           fitAxes.value,
           actor,
@@ -2812,7 +2845,7 @@ async function runResidentTool(
         /* a save that changed nothing has not delivered anything */
         if (arrangement(frame) !== before.arrangement) runState.arrangeWrites += 1
         return ok(
-          `frame ${frame.id} is now "${frame.name}" on page ${framePageId(canvas, frame)} at (${Math.round(frame.x)}, ${Math.round(frame.y)}), ${Math.round(frame.width)}x${Math.round(frame.height)}${frame.locked ? ', locked' : ''}${note ? `\n${note}` : ''}`,
+          `frame ${frame.id} is now "${frame.name}" on page ${framePageId(canvas, frame)} at (${Math.round(frame.x)}, ${Math.round(frame.y)}), ${Math.round(frame.width)}x${Math.round(frame.height)}${frame.rotation ? `, turned ${frame.rotation}°` : ''}${frame.locked ? ', locked' : ''}${note ? `\n${note}` : ''}`,
         )
       }
       case 'update_canvas': {
@@ -2855,11 +2888,13 @@ async function runResidentTool(
         return ok(JSON.stringify(prototypeReport(canvas)))
       }
       case 'set_prototype_start': {
-        const raw = block.input as { frame_id?: unknown; page_id?: unknown }
+        /* page_id is this tool's spelling before it took MCP's: a model copying an earlier call keeps working */
+        const raw = block.input as { frame_id?: unknown; pageId?: unknown; page_id?: unknown }
         if (typeof raw.frame_id !== 'string') return fail('frame_id must be a frame id, or an empty string to clear')
         const canvas = store.getCanvas(canvasId)
         if (!canvas) return fail('canvas not found')
-        const pageId = typeof raw.page_id === 'string' && raw.page_id ? raw.page_id : undefined
+        const given = raw.pageId ?? raw.page_id
+        const pageId = typeof given === 'string' && given ? given : undefined
         const frameId = raw.frame_id.trim() || null
         const result = setPrototypeStart(canvas, pageId, frameId, actor)
         if (!result.ok) return fail(result.error)

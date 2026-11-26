@@ -2,7 +2,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
 import { expect, it, vi } from 'vitest'
 import { buildMcpServer } from '../server/mcp.ts'
-import { RESIDENT_TOOL_NAMES } from '../server/resident.ts'
+import { RESIDENT_TOOL_NAMES, RESIDENT_TOOLS } from '../server/resident.ts'
 
 vi.mock('../server/db/persist.ts', () => ({ saveCanvas: () => {}, saveFrame: () => {}, saveActivity: () => {} }))
 
@@ -54,7 +54,28 @@ const MISSING = [
   'sync_storybook',
 ]
 
-async function mcpToolNames(): Promise<string[]> {
+/* A tool both surfaces have takes the same parameters on both, compared by their top-level
+   names: the MCP tool's input schema against the resident's input_schema. */
+
+/** What an MCP agent passes on every call and a resident never needs: it names its canvas and
+ *  itself (a resident run is scoped to its canvas and named by its role), and Glassray's wrapper
+ *  (server/glassray.ts) adds the model and intent it reports with. */
+const MCP_CALL_CONTEXT = ['canvas_id', 'agent_name', 'llm_model', 'intent']
+
+/** Parameters of a shared tool that one surface takes on purpose, and why. */
+const PARAM_DIFFERENCES: Record<string, { mcp?: string[]; resident?: string[] }> = {
+  /* an MCP agent may hold the font file on its own machine, to upload or send as base64; the
+     resident runs on the server with no files of its own, so it uploads from a public URL only */
+  upload_font: { mcp: ['local_file', 'data'] },
+  /* the resident answers a comment it cannot act on yet and hands the request back to the
+     person (a run state of its own); an MCP agent asks the person in its own chat */
+  reply_to_comment: { resident: ['awaiting_answer'] },
+  /* the resident keeps reference snapshots apart from its deliverables and reuses them across
+     pipeline stages; an MCP import is always a source frame to compare against */
+  import_webpage: { resident: ['as_reference'] },
+}
+
+async function mcpTools() {
   const server = buildMcpServer('Test Owner', 'test-owner-id')
   const client = new Client({ name: 'parity-test', version: '1.0.0' })
   const [a, b] = InMemoryTransport.createLinkedPair()
@@ -63,7 +84,30 @@ async function mcpToolNames(): Promise<string[]> {
   const { tools } = await client.listTools()
   await client.close()
   await server.close()
-  return tools.map((tool) => tool.name)
+  return tools
+}
+
+async function mcpToolNames(): Promise<string[]> {
+  return (await mcpTools()).map((tool) => tool.name)
+}
+
+const paramNames = (schema: { properties?: unknown }) => Object.keys(schema.properties ?? {})
+
+/** Each tool on both surfaces, with the parameters only one of them takes. */
+async function paramDrift() {
+  const resident = new Map(RESIDENT_TOOLS.map((tool) => [tool.name, paramNames(tool.input_schema)]))
+  return (await mcpTools()).flatMap((tool) => {
+    const theirs = resident.get(tool.name)
+    if (!theirs) return []
+    const ours = paramNames(tool.inputSchema).filter((name) => !MCP_CALL_CONTEXT.includes(name))
+    return [
+      {
+        tool: tool.name,
+        mcp: ours.filter((name) => !theirs.includes(name)),
+        resident: theirs.filter((name) => !ours.includes(name)),
+      },
+    ]
+  })
 }
 
 it('gives resident agents every MCP tool, or records why not', async () => {
@@ -86,4 +130,28 @@ it('keeps the exception lists honest', async () => {
 
 it('gives resident agents the prototype tools', () => {
   expect(RESIDENT_TOOL_NAMES).toEqual(expect.arrayContaining(['get_prototype', 'set_prototype_start']))
+})
+
+it('gives a tool on both surfaces the same parameters, or records why not', async () => {
+  const unaccounted = (await paramDrift()).flatMap(({ tool, mcp, resident }) => [
+    ...mcp.filter((name) => !PARAM_DIFFERENCES[tool]?.mcp?.includes(name)).map((name) => `${tool}.${name} (MCP only)`),
+    ...resident
+      .filter((name) => !PARAM_DIFFERENCES[tool]?.resident?.includes(name))
+      .map((name) => `${tool}.${name} (resident only)`),
+  ])
+  expect(unaccounted).toEqual([])
+})
+
+it('keeps the parameter exceptions honest', async () => {
+  const drift = new Map((await paramDrift()).map((entry) => [entry.tool, entry]))
+  for (const [tool, allowed] of Object.entries(PARAM_DIFFERENCES)) {
+    const found = drift.get(tool)
+    expect(found, `${tool} is no longer on both surfaces`).toBeDefined()
+    for (const name of allowed.mcp ?? []) expect(found?.mcp, `${tool}.${name} is no longer MCP only`).toContain(name)
+    for (const name of allowed.resident ?? [])
+      expect(found?.resident, `${tool}.${name} is no longer resident only`).toContain(name)
+  }
+  for (const tool of RESIDENT_TOOLS)
+    for (const name of MCP_CALL_CONTEXT)
+      expect(paramNames(tool.input_schema), `${tool.name} takes ${name}`).not.toContain(name)
 })

@@ -730,7 +730,7 @@ describe('the resident agent', () => {
     const frameId = actions.createFrame(canvasId, { name: 'Hero', html: doc(''), width: 400, height: 300 }, actor())!.id
     for (const [name, input] of [
       ['set_frame_html', { frame_id: frameId, html: doc(faceCss) }],
-      ['edit_frame_html', { frame_id: frameId, find: '<h1>Hi</h1>', replace: `<img src="${PNG}">` }],
+      ['edit_frame_html', { frame_id: frameId, old_str: '<h1>Hi</h1>', new_str: `<img src="${PNG}">` }],
     ] as const) {
       const result = await execTool(call(name, input), canvasId, actor(), state)
       expect(result.is_error, name).toBe(true)
@@ -780,7 +780,7 @@ describe('the resident agent', () => {
     const before = store.getFrame(frameId)!.html
     for (const [name, input] of [
       ['set_frame_html', { frame_id: frameId, html: openCardDoc }],
-      ['edit_frame_html', { frame_id: frameId, find: '<h1>Hi</h1>', replace: OPEN_CARD }],
+      ['edit_frame_html', { frame_id: frameId, old_str: '<h1>Hi</h1>', new_str: OPEN_CARD }],
     ] as const) {
       const result = await execTool(call(name, input), canvasId, actor(), state)
       expect(result.is_error, name).toBe(true)

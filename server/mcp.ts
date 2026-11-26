@@ -40,6 +40,7 @@ import {
   NO_TOKENS_BRIEF,
   tokensCss,
   tokensMarkdown,
+  tokensNamed,
   tokensTailwind,
 } from '../shared/designTokens.ts'
 import { webFontFamilies, webFontsBrief } from '../shared/webFonts.ts'
@@ -161,10 +162,6 @@ You MUST call get_guide({ topic: "doop-instructions" }) before using other Doop 
 
 function extensionGuideLines(): string[] {
   return extensions.flatMap((extension) => extension.mcpGuideLines ?? [])
-}
-
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
 function text(data: unknown) {
@@ -943,10 +940,7 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
       let tokens = store.getTokens(canvas_id)
       const themes = store.getTokenThemes(canvas_id)
       if (types?.length) tokens = tokens.filter((t) => types.includes(t.type))
-      if (name_pattern) {
-        const re = new RegExp(`^${name_pattern.split('*').map(escapeRegExp).join('.*')}$`, 'i')
-        tokens = tokens.filter((t) => re.test(t.name))
-      }
+      if (name_pattern) tokens = tokensNamed(tokens, name_pattern)
       if (!tokens.length)
         return text({
           tokens: [],

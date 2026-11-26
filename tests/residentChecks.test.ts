@@ -80,7 +80,7 @@ const pending = (state: RunState) => resident.uncheckedChanges(state, canvasId)
 const squareCorners = () =>
   call('update_component', { component: 'Button', css: '.btn { border-radius: 0; background: #111; color: #fff }' })
 const shot = (frameId: string) => call('screenshot_frame', { frame_id: frameId })
-const editNotes = () => call('edit_frame_html', { frame_id: notesId, find: 'Lanes', replace: 'Pools' })
+const editNotes = () => call('edit_frame_html', { frame_id: notesId, old_str: 'Lanes', new_str: 'Pools' })
 const buttonOwed = [expect.objectContaining({ component: expect.objectContaining({ name: 'Button' }) })]
 
 /* A Button component on two screens, as in the playtest, and two plain frames. */
@@ -297,12 +297,12 @@ describe('a run through the API', () => {
   it.each([
     [
       'another frame',
-      () => call('edit_frame_html', { frame_id: hoursId, find: 'Open late', replace: 'Open till ten' }),
+      () => call('edit_frame_html', { frame_id: hoursId, old_str: 'Open late', new_str: 'Open till ten' }),
       () => hoursId,
     ],
     [
       'the frame it had just checked',
-      () => call('edit_frame_html', { frame_id: notesId, find: 'Pools', replace: 'Pools near you' }),
+      () => call('edit_frame_html', { frame_id: notesId, old_str: 'Pools', new_str: 'Pools near you' }),
       () => notesId,
     ],
   ])('is reminded again when its fix-up changes %s', async (_what, fixUp, checked) => {

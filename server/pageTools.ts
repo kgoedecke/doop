@@ -94,7 +94,7 @@ export function checkFrameMeta(
   const clean = Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined)) as FrameMetaPatch
   if (!allowEmpty && !Object.keys(clean).length) return { ok: false, error: 'nothing to update' }
   if (clean.pageId !== undefined && !canvasPages(canvas).some((p) => p.id === clean.pageId))
-    return { ok: false, error: `no page ${clean.pageId} on this canvas — the pages are: ${pageListText(canvas)}` }
+    return { ok: false, error: frameMetaError({ unknownPage: clean.pageId }, canvas) }
   if (clean.rotation !== undefined) {
     if (!Number.isFinite(clean.rotation)) return { ok: false, error: 'rotation must be a finite number of degrees' }
     clean.rotation = normalizeRotation(clean.rotation)
@@ -113,4 +113,9 @@ export function updateFrameMeta(
   if (!checked.ok) return checked
   const frame = actions.updateFrame(frameId, checked.value, actor)
   return frame ? { ok: true, value: frame } : { ok: false, error: `frame ${frameId} not found` }
+}
+
+/** A refused metadata patch in the words the tools answer it with. */
+export function frameMetaError(refusal: { unknownPage: string }, canvas: Canvas): string {
+  return `no page ${refusal.unknownPage} on this canvas — the pages are: ${pageListText(canvas)}`
 }
