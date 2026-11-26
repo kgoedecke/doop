@@ -420,7 +420,8 @@ describe('the doop CLI', () => {
     const other = mkdtempSync(join(tmpdir(), 'doop-cli-other-'))
     try {
       const canvasId = (JSON.parse(readFileSync(join(work, '.doop/config.json'), 'utf8')) as { canvas: string }).canvas
-      await doop(['link', canvasId], other)
+      const linked = await doop(['link', canvasId], other)
+      expect(linked.code, linked.stdout + linked.stderr).toBe(0)
       const pulled = await doop(['pull'], other)
       expect(pulled.stdout).toMatch(/pulled\s+designs\/components\/badge\.\{html,css,json\}/)
       expect(pulled.stdout).toMatch(/pulled\s+designs\/card\.html/)
@@ -644,7 +645,8 @@ describe('the doop CLI', () => {
     const bare = mkdtempSync(join(tmpdir(), 'doop-cli-bare-'))
     try {
       const canvasId = (JSON.parse(readFileSync(join(work, '.doop/config.json'), 'utf8')) as { canvas: string }).canvas
-      await doop(['link', canvasId], bare)
+      const linked = await doop(['link', canvasId], bare)
+      expect(linked.code, linked.stdout + linked.stderr).toBe(0)
       const expanded = await doop(['expand', cards[0]!.id, cards[1]!.id], bare)
       expect(expanded.code).toBe(0)
       expect(existsSync(join(bare, '.doop/expanded/card.html'))).toBe(true)
