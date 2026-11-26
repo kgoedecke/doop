@@ -61,6 +61,12 @@ export async function layerPlacement(frameId: string, selector: string, target: 
 /** The runtime's summary of one element: computed styles resolved to what
  *  the Design panel shows, plus the inline styles the element already carries.
  *  What `inspect()` in src/frame-runtime/inspect.ts answers; the compiler holds the two together. */
+export interface LayerCopyLayout {
+  selector: string
+  rect: ElementInfo['rect']
+  flowSize?: { width: string; height: string }
+}
+
 export interface ElementInfo {
   tag: string
   id: string

@@ -486,8 +486,7 @@ export function setElementsHidden(html: string, selectors: string[], hidden: boo
 export function duplicateElements(
   html: string,
   selectors: string[],
-  /** an attribute set on every copy's root, such as a carried-style scope */
-  mark?: { name: string; value: string },
+  prepare?: (copy: Element, sourceSelector: string, renamed: Record<string, string>) => void,
 ): { html: string; selectors: string[]; renamed: Record<string, string> } | null {
   const doc = parse(html)
   const els = findAll(doc, selectors)
@@ -495,7 +494,7 @@ export function duplicateElements(
   const originals = inDocumentOrder(els)
   const copies = originals.map((el) => el.cloneNode(true) as Element)
   const renamed = renameIds(doc, copies)
-  if (mark) for (const copy of copies) copy.setAttribute(mark.name, mark.value)
+  copies.forEach((copy, i) => prepare?.(copy, elementPath(originals[i]!), renamed))
   originals.forEach((el, i) => el.after(copies[i]!))
   return { html: serialize(doc), selectors: copies.map(elementPath), renamed }
 }
@@ -503,8 +502,8 @@ export function duplicateElements(
 /** Rename, in `el` and its descendants, every id `doc` already uses, and
  *  the references among them — for an element about to enter `doc` from
  *  another document. Returns the renaming, old id to new. */
-export function uniqueIdsIn(doc: Document, el: Element): Record<string, string> {
-  return renameIds(doc, [el], true)
+export function uniqueIdsIn(doc: Document, el: Element | Element[]): Record<string, string> {
+  return renameIds(doc, Array.isArray(el) ? el : [el], true)
 }
 
 /** Where a moved element lands relative to its target: as its previous or

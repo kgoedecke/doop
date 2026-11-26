@@ -33,8 +33,7 @@ export function syncPathVisibility(): void {
     el.removeAttribute('data-v-path-hidden')
   })
   ;[pathEditingSelector, movingDrawingSelector].forEach((selector) => {
-    const hidden = selector && document.querySelector(selector)
-    if (hidden) hidden.setAttribute('data-v-path-hidden', '')
+    if (selector) document.querySelectorAll(selector).forEach((el) => el.setAttribute('data-v-path-hidden', ''))
   })
 }
 
