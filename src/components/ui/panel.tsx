@@ -10,6 +10,7 @@ import { CollapsibleTrigger } from './collapsible'
 import { Tooltip } from './tooltip'
 import { SearchIcon, XIcon } from './icons'
 import { Input } from './input'
+import { ErrorBoundary, ErrorFallback } from './error-boundary'
 
 /* The canvas rails (Activity, Inspector). On a wide screen they float over the
    board; inside a mobile Sheet they fill it. That used to be a `.side-panel`
@@ -87,7 +88,7 @@ function Panel({
       style={resizing ? { ...style, width: resizing.width } : style}
       {...props}
     >
-      {children}
+      <PanelBoundary>{children}</PanelBoundary>
       {resizing && (
         <div
           role="separator"
@@ -234,13 +235,23 @@ const PanelIconTab = React.forwardRef<
   )
 })
 
-function PanelTabPanel({ className, ...props }: React.ComponentProps<typeof TabsPrimitive.Content>) {
+function PanelTabPanel({ className, children, ...props }: React.ComponentProps<typeof TabsPrimitive.Content>) {
   return (
     <TabsPrimitive.Content
       data-slot="panel-tab-panel"
       className={cn('flex min-h-0 flex-1 flex-col outline-none', className)}
       {...props}
-    />
+    >
+      <PanelBoundary>{children}</PanelBoundary>
+    </TabsPrimitive.Content>
+  )
+}
+
+/* A render error inside a panel, or inside one of its tabs, stays there: the
+   panel keeps its place, the board and the other panels keep running. */
+function PanelBoundary({ children }: { children: React.ReactNode }) {
+  return (
+    <ErrorBoundary fallback={(retry) => <ErrorFallback retry={retry} className="m-2.5" />}>{children}</ErrorBoundary>
   )
 }
 

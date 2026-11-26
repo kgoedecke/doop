@@ -7,4 +7,6 @@ export const ui: Catalog['ui'] = {
   doopHome: 'Início do Doop',
   setUpManually: 'Configurar manualmente',
   selectedOf: '{count} de {total} selecionados',
+  errorTitle: 'Não foi possível mostrar isto',
+  errorRetry: 'Tentar de novo',
 }

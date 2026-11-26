@@ -96,6 +96,13 @@ export function syncReplayForUser(email: string | null | undefined) {
   }
 }
 
+/** An error the page caught and contained (an error boundary). React never
+ *  lets a caught render error reach `window.onerror`, so the exception
+ *  autocapture above would not see it. */
+export function captureCaughtError(error: Error, properties: Record<string, unknown>) {
+  if (key) posthog.captureException(error, properties)
+}
+
 /** An admin viewing as another user. Their navigation must not be written to
  *  the customer's PostHog profile, and must not be recorded at all.
  *

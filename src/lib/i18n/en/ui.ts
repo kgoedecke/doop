@@ -6,4 +6,6 @@ export const ui = {
   doopHome: 'Doop home',
   setUpManually: 'Set up manually',
   selectedOf: '{count} of {total} selected',
+  errorTitle: 'This couldn’t be shown',
+  errorRetry: 'Retry',
 } as const

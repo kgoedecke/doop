@@ -151,7 +151,8 @@ export function useCanvasDrawing(stage: RefObject<HTMLDivElement>) {
       cancel()
       return
     }
-    if ((e.target as Element).closest('[data-drawing-input], [data-ruler]')) return
+    /* a failed frame's Retry card (FrameFailed) is a button, not the board */
+    if ((e.target as Element).closest('[data-drawing-input], [data-ruler], [data-slot="error-fallback"]')) return
     if (!e.isPrimary || gesture.pinching) {
       if (!draftRef.current?.typing) cancel()
       return

@@ -4,6 +4,7 @@ import './lib/posthog'
 import { App } from './App'
 import { initDesktopShell } from './lib/desktop'
 import { TooltipProvider } from './components/ui/tooltip'
+import { ErrorBoundary } from './components/ui/error-boundary'
 import { UpdateCard } from './components/UpdateCard'
 import { initTheme } from './lib/theme'
 import { initLocale } from './lib/i18n'
@@ -19,7 +20,10 @@ void initLocale().then(() =>
   ReactDOM.createRoot(document.getElementById('root')!).render(
     <React.StrictMode>
       <TooltipProvider>
-        <App />
+        {/* the last resort: a failure no inner boundary caught */}
+        <ErrorBoundary>
+          <App />
+        </ErrorBoundary>
         <UpdateCard />
       </TooltipProvider>
     </React.StrictMode>,

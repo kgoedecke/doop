@@ -54,6 +54,7 @@ import { MobileGuestSheet } from '../components/MobileGuestSheet'
 import { useCanvasAppBanner } from '../lib/nativeApp'
 import { noteActiveDay } from '../lib/githubStar'
 import { Onboarding } from '../components/Onboarding'
+import { ErrorBoundary } from '../components/ui/error-boundary'
 import { AccessBanner } from '../components/AccessBanner'
 import { ShareModal } from '../components/ShareModal'
 import { ExportModal } from '../components/ExportModal'
@@ -1065,140 +1066,148 @@ export function CanvasPage({
              the rulers moves every panel with it */
           style={rulerInset || docked ? { top: 'var(--chrome-top)', left: rulerInset } : undefined}
         >
-          <div className="pointer-events-none absolute top-3.5 right-[var(--chrome-right)] z-30 flex flex-col items-end gap-2 transition-[right] duration-150 [&>*]:pointer-events-auto max-md:top-[56px] max-md:right-2 max-md:left-2">
-            {pendingProposal && mutedProposal !== pendingProposal.id && !(showActivity && panelTab === 'memory') && (
-              <div className="flex items-center rounded-[10px] bg-surface shadow-ring">
+          {/* a panel or card that fails outside its own Panel boundary takes
+              the floating chrome down, not the board under it */}
+          <ErrorBoundary>
+            <div className="pointer-events-none absolute top-3.5 right-[var(--chrome-right)] z-30 flex flex-col items-end gap-2 transition-[right] duration-150 [&>*]:pointer-events-auto max-md:top-[56px] max-md:right-2 max-md:left-2">
+              {pendingProposal && mutedProposal !== pendingProposal.id && !(showActivity && panelTab === 'memory') && (
+                <div className="flex items-center rounded-[10px] bg-surface shadow-ring">
+                  <Button
+                    variant="bare"
+                    className="h-8 pr-1 pl-3 text-[12px] font-medium text-ink hover:bg-transparent hover:text-ink"
+                    onClick={() => {
+                      useStore.getState().setPanelTab('memory')
+                      setShowActivity(true)
+                    }}
+                  >
+                    <DoopMark size={12} /> {t('canvas.memorySuggestionReview')}
+                  </Button>
+                  <Button
+                    variant="bare"
+                    size="icon-sm"
+                    className="mr-1 size-6 rounded-[6px] text-ink-faint"
+                    title={t('canvas.hideForNow')}
+                    aria-label={t('canvas.hideForNow')}
+                    onClick={() => setMutedProposal(pendingProposal.id)}
+                  >
+                    <XIcon className="size-3" />
+                  </Button>
+                </div>
+              )}
+              {decisionToast && (
                 <Button
                   variant="bare"
-                  className="h-8 pr-1 pl-3 text-[12px] font-medium text-ink hover:bg-transparent hover:text-ink"
+                  className="max-w-full items-center gap-2.5 whitespace-normal rounded-[12px] bg-surface px-3.5 py-2.5 text-left font-normal shadow-pop transition-shadow hover:bg-surface hover:shadow-ring-hover sm:max-w-[320px] [&_svg]:text-ink-soft"
+                  title={t('canvas.openMemory')}
                   onClick={() => {
                     useStore.getState().setPanelTab('memory')
                     setShowActivity(true)
+                    setDecisionToast(null)
                   }}
                 >
-                  <DoopMark size={12} /> {t('canvas.memorySuggestionReview')}
+                  <BrainIcon className="size-4" />
+                  <span>
+                    <b className="block text-[12.5px] font-medium text-ink">{t('canvas.savedToMemory')}</b>
+                    <span className="mt-[1px] block text-[12px] leading-[1.4] text-ink-soft">{decisionToast}</span>
+                  </span>
                 </Button>
-                <Button
-                  variant="bare"
-                  size="icon-sm"
-                  className="mr-1 size-6 rounded-[6px] text-ink-faint"
-                  title={t('canvas.hideForNow')}
-                  aria-label={t('canvas.hideForNow')}
-                  onClick={() => setMutedProposal(pendingProposal.id)}
-                >
-                  <XIcon className="size-3" />
-                </Button>
-              </div>
+              )}
+            </div>
+            {/* the presence pill in the bar already carries each agent's status
+                line; this per-agent stack is only for windows too narrow for it */}
+            <WorkingNow style={{ left: chrome.left }} className="min-[1180px]:hidden" />
+            {!readOnly && (
+              <ErrorBoundary>
+                <Onboarding canvasId={canvasId} />
+              </ErrorBoundary>
             )}
-            {decisionToast && (
-              <Button
-                variant="bare"
-                className="max-w-full items-center gap-2.5 whitespace-normal rounded-[12px] bg-surface px-3.5 py-2.5 text-left font-normal shadow-pop transition-shadow hover:bg-surface hover:shadow-ring-hover sm:max-w-[320px] [&_svg]:text-ink-soft"
-                title={t('canvas.openMemory')}
-                onClick={() => {
-                  useStore.getState().setPanelTab('memory')
+            {!mobileGuest && <AccessBanner guest={guest} onSignUp={onSignUp} onSignIn={onSignIn} />}
+            {!isMobile &&
+              (layersOpen ? (
+                <LayersPanel
+                  onAddFrame={addFrame}
+                  surface={panelSurface}
+                  resize={{
+                    label: t('canvas.resizeLayers'),
+                    edge: 'right',
+                    width: layersWidth,
+                    min: LAYERS_MIN,
+                    max: panels.layersMax,
+                    /* the other panel keeps the width it shows, not a larger saved
+                       one the window had squeezed */
+                    onResize: (layers) =>
+                      setPanelWidths((widths) => ({ layers, agents: showActivity ? panels.agents : widths.agents })),
+                  }}
+                />
+              ) : (
+                <LayersRailToggle docked={docked} />
+              ))}
+            {isMobile && !showActivity && !guest && (
+              <MobilePanelTabs
+                onOpen={(tab) => {
+                  useStore.getState().setPanelTab(tab)
                   setShowActivity(true)
-                  setDecisionToast(null)
-                }}
-              >
-                <BrainIcon className="size-4" />
-                <span>
-                  <b className="block text-[12.5px] font-medium text-ink">{t('canvas.savedToMemory')}</b>
-                  <span className="mt-[1px] block text-[12px] leading-[1.4] text-ink-soft">{decisionToast}</span>
-                </span>
-              </Button>
-            )}
-          </div>
-          {/* the presence pill in the bar already carries each agent's status
-              line; this per-agent stack is only for windows too narrow for it */}
-          <WorkingNow style={{ left: chrome.left }} className="min-[1180px]:hidden" />
-          {!readOnly && <Onboarding canvasId={canvasId} />}
-          {!mobileGuest && <AccessBanner guest={guest} onSignUp={onSignUp} onSignIn={onSignIn} />}
-          {!isMobile &&
-            (layersOpen ? (
-              <LayersPanel
-                onAddFrame={addFrame}
-                surface={panelSurface}
-                resize={{
-                  label: t('canvas.resizeLayers'),
-                  edge: 'right',
-                  width: layersWidth,
-                  min: LAYERS_MIN,
-                  max: panels.layersMax,
-                  /* the other panel keeps the width it shows, not a larger saved
-                     one the window had squeezed */
-                  onResize: (layers) =>
-                    setPanelWidths((widths) => ({ layers, agents: showActivity ? panels.agents : widths.agents })),
                 }}
               />
-            ) : (
-              <LayersRailToggle docked={docked} />
-            ))}
-          {isMobile && !showActivity && !guest && (
-            <MobilePanelTabs
-              onOpen={(tab) => {
-                useStore.getState().setPanelTab(tab)
-                setShowActivity(true)
-              }}
-            />
-          )}
-          {!isMobile && !readOnly && selectedFrame && panelElement && !deferPanel && (
-            <ElementPanel
-              /* never keyed: picking the next element, in this frame or
-                 another, swaps the values in place instead of remounting */
-              frame={selectedFrame}
-              selector={panelElement.selector}
-              surface={panelSurface}
-              style={{ right: chrome.properties }}
-            />
-          )}
-          {!isMobile && !readOnly && selectedFrame && inspectorOpen && !panelElement && !deferPanel && (
-            <Inspector frame={selectedFrame} surface={panelSurface} style={{ right: chrome.properties }} />
-          )}
-          {!isMobile && pageShown && <PagePanel surface={panelSurface} style={{ right: chrome.properties }} />}
-          {!isMobile && showActivity && (
-            <ActivityPanel
-              canvasId={canvasId}
-              onClose={() => setShowActivity(false)}
-              surface={panelSurface}
-              style={{ right: docked ? 0 : EDGE }}
-              resize={{
-                label: t('canvas.resizeAgents'),
-                edge: 'left',
-                width: agentsWidth,
-                min: AGENTS_MIN,
-                max: panels.agentsMax,
-                onResize: (agents) =>
-                  setPanelWidths((widths) => ({ agents, layers: layersOpen ? panels.layers : widths.layers })),
-              }}
-            />
-          )}
-          {!isMobile && (
-            <SideRail
-              style={{ right: chrome.island }}
-              docked={docked}
-              agentsOpen={showActivity}
-              onToggleAgents={() => setShowActivity((open) => !open)}
-              inspectorOpen={propertiesShown}
-              inspectorAvailable={!readOnly}
-              inspectTarget={selectedFrame ? (elementPicked ? 'element' : 'frame') : 'page'}
-              onToggleInspector={() => {
-                const s = useStore.getState()
-                if (!selectedFrame) {
-                  s.setPagePanelOpen(!s.pagePanelOpen)
-                  return
-                }
-                if (propertiesShown) {
-                  /* the element panel and the inspector share the slot —
-                     hiding it closes whichever is showing */
-                  if (panelElement) s.closeElementPanel()
-                  s.setInspectorOpen(false)
-                } else if (elementPicked) s.openElementPanel()
-                else s.setInspectorOpen(true)
-              }}
-              guest={guest}
-            />
-          )}
+            )}
+            {!isMobile && !readOnly && selectedFrame && panelElement && !deferPanel && (
+              <ElementPanel
+                /* never keyed: picking the next element, in this frame or
+                   another, swaps the values in place instead of remounting */
+                frame={selectedFrame}
+                selector={panelElement.selector}
+                surface={panelSurface}
+                style={{ right: chrome.properties }}
+              />
+            )}
+            {!isMobile && !readOnly && selectedFrame && inspectorOpen && !panelElement && !deferPanel && (
+              <Inspector frame={selectedFrame} surface={panelSurface} style={{ right: chrome.properties }} />
+            )}
+            {!isMobile && pageShown && <PagePanel surface={panelSurface} style={{ right: chrome.properties }} />}
+            {!isMobile && showActivity && (
+              <ActivityPanel
+                canvasId={canvasId}
+                onClose={() => setShowActivity(false)}
+                surface={panelSurface}
+                style={{ right: docked ? 0 : EDGE }}
+                resize={{
+                  label: t('canvas.resizeAgents'),
+                  edge: 'left',
+                  width: agentsWidth,
+                  min: AGENTS_MIN,
+                  max: panels.agentsMax,
+                  onResize: (agents) =>
+                    setPanelWidths((widths) => ({ agents, layers: layersOpen ? panels.layers : widths.layers })),
+                }}
+              />
+            )}
+            {!isMobile && (
+              <SideRail
+                style={{ right: chrome.island }}
+                docked={docked}
+                agentsOpen={showActivity}
+                onToggleAgents={() => setShowActivity((open) => !open)}
+                inspectorOpen={propertiesShown}
+                inspectorAvailable={!readOnly}
+                inspectTarget={selectedFrame ? (elementPicked ? 'element' : 'frame') : 'page'}
+                onToggleInspector={() => {
+                  const s = useStore.getState()
+                  if (!selectedFrame) {
+                    s.setPagePanelOpen(!s.pagePanelOpen)
+                    return
+                  }
+                  if (propertiesShown) {
+                    /* the element panel and the inspector share the slot —
+                       hiding it closes whichever is showing */
+                    if (panelElement) s.closeElementPanel()
+                    s.setInspectorOpen(false)
+                  } else if (elementPicked) s.openElementPanel()
+                  else s.setInspectorOpen(true)
+                }}
+                guest={guest}
+              />
+            )}
+          </ErrorBoundary>
         </div>
       </div>
 
