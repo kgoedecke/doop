@@ -240,6 +240,11 @@ async function pushOne(
         canvas_id: context.canvasId(),
         component: tracked.id,
         ...(force ? {} : { expected_rev: tracked.rev }),
+        /* a name or description change does not move the revision, so `expected_rev` cannot
+           catch someone else's: the server checks the pulled ones in the same write */
+        ...(changed.meta && !force
+          ? { expected_name: tracked.meta.name, expected_description: tracked.meta.description ?? '' }
+          : {}),
         ...(changed.html || force ? { html: local.html } : {}),
         ...(local.css !== undefined && (changed.css || force) ? { css: local.css } : {}),
         ...(changed.meta && meta
@@ -256,8 +261,8 @@ async function pushOne(
       })
       context.heard(written.result)
     } catch (error) {
-      /* the server's own refusal of a stale `expected_rev` */
-      if (error instanceof CliError && /is at revision \d+, not \d+/.test(error.message))
+      /* the server's own refusal of a stale `expected_rev`, name or description */
+      if (error instanceof CliError && /someone changed it; read it again/.test(error.message))
         return { base, outcome: 'conflict', id: tracked.id }
       if (error instanceof CliError && error.exitCode === EXIT.notFound)
         throw new CliError(

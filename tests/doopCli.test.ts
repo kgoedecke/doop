@@ -433,6 +433,22 @@ describe('the doop CLI', () => {
     }
   })
 
+  it('refuses to push a component description over one changed on the canvas', async () => {
+    const file = join(work, 'designs/components/badge.json')
+    const mine = JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>
+    expect((await doop(['call', 'update_component', 'component=Badge', 'description=Theirs'])).code).toBe(0)
+    writeFileSync(file, JSON.stringify({ ...mine, description: 'Mine' }, null, 2))
+    const conflict = await doop(['push'])
+    expect(conflict.code).toBe(3)
+    expect(conflict.stdout).toMatch(/conflict\s+designs\/components\/badge/)
+    const { result } = await json<{ result: { description?: string } }>(['call', 'get_component', 'component=Badge'])
+    expect(result.description).toBe('Theirs')
+
+    expect((await doop(['pull', 'designs/components/badge.json', '--force'])).code).toBe(0)
+    expect(JSON.parse(readFileSync(file, 'utf8'))).toMatchObject({ description: 'Theirs' })
+    expect((await doop(['push'])).stdout).toContain('nothing to push')
+  })
+
   it('uploads a local image and prints its URL', async () => {
     const png = Buffer.from(
       'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',

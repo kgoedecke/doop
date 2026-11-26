@@ -348,6 +348,46 @@ describe('an agent working with components', () => {
     expect(store.getComponents(canvas.id)[0]!.template).toContain('btn wide')
   })
 
+  it('refuses a write over a name or description changed since it was read, which the revision does not show', async () => {
+    const canvas = newCanvas()
+    await button(canvas.id)
+    const read = await call('get_component', { canvas_id: canvas.id, component: 'Button' })
+    const pulled = { expected_rev: read.data.rev, expected_name: 'Button', expected_description: '' }
+    await call('update_component', { canvas_id: canvas.id, component: 'Button', description: 'Theirs' })
+
+    const stale = await call('update_component', {
+      canvas_id: canvas.id,
+      component: 'Button',
+      description: 'Mine',
+      ...pulled,
+    })
+    expect(stale.isError).toBe(true)
+    expect(stale.text).toContain('someone changed it')
+    expect(store.getComponents(canvas.id)[0]!.description).toBe('Theirs')
+
+    await call('update_component', { canvas_id: canvas.id, component: 'Button', name: 'Action' })
+    const renamed = await call('update_component', {
+      canvas_id: canvas.id,
+      component: 'Action',
+      description: 'Mine',
+      ...pulled,
+      expected_description: 'Theirs',
+    })
+    expect(renamed.isError).toBe(true)
+    expect(renamed.text).toContain('renamed from “Button”')
+
+    const current = await call('update_component', {
+      canvas_id: canvas.id,
+      component: 'Action',
+      description: 'Mine',
+      ...pulled,
+      expected_name: 'Action',
+      expected_description: 'Theirs',
+    })
+    expect(current.isError).toBe(false)
+    expect(store.getComponents(canvas.id)[0]!.description).toBe('Mine')
+  })
+
   it('makes the picked element the main and leaves the other copies as they are', async () => {
     const canvas = newCanvas()
     const card = (title: string, id = '') =>

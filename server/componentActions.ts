@@ -744,6 +744,9 @@ export interface UpdateInput {
   find?: string
   replace?: string
   expectedRev?: number
+  /** a name or description change does not move the revision: these refuse a write over one */
+  expectedName?: string
+  expectedDescription?: string
 }
 
 export interface UpdateResult {
@@ -812,6 +815,10 @@ export const updateComponent = atomic(function updateComponent(
     fail(
       `component “${def.name}” is at revision ${def.rev}, not ${input.expectedRev} — someone changed it; read it again`,
     )
+  if (input.expectedName !== undefined && input.expectedName !== def.name)
+    fail(`component “${def.name}” was renamed from “${input.expectedName}” — someone changed it; read it again`)
+  if (input.expectedDescription !== undefined && input.expectedDescription !== (def.description ?? ''))
+    fail(`component “${def.name}” has a new description — someone changed it; read it again`)
   const html = nextHtml(def, input)
   /* the template as it would stand (a find + replace applied) */
   if (html !== undefined && actor.kind === 'agent') refuseUnclosedTemplate(html)
