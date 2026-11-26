@@ -411,11 +411,13 @@ describe.skipIf(!findBrowserPath())('drawing on the canvas', { timeout: 30_000 }
         }
         tick()
       })
-      await page.mouse.click(...(await over(120)))
-      /* before the click's 250ms probe could answer */
-      await page.waitForFunction(() => window.drawingHarness.state().selectedElement?.selector === '#b', {
-        timeout: 200,
-      })
+      await page.mouse.move(...(await over(120)))
+      await page.mouse.down()
+      /* picked while the button is still down: the click's 250ms probe only
+         starts on the release, so this pick can only be the press's */
+      await page.waitForFunction(() => window.drawingHarness.state().selectedElement?.selector === '#b')
+      await page.mouse.up()
+      /* and the release's probe, once it answers, keeps it */
       await new Promise((r) => setTimeout(r, 500))
       expect(await page.evaluate(() => (window as unknown as { seen: string[] }).seen)).toEqual(['#a', '#b'])
     })
