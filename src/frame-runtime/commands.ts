@@ -11,7 +11,7 @@ import {
   runtimePort,
   sendToEditor,
 } from './channel'
-import { styleTarget } from './dom'
+import { isLocked, styleTarget } from './dom'
 import { layerPlacement, moveTarget, placementOrigin } from './drop'
 import { activate, activeEl, candidate, deactivate, editing, editsSent, selectAllIn, setEdit } from './edit'
 import { designRect, elementGeometry, ownRotation, renderedBox, sizable } from './geometry'
@@ -35,7 +35,15 @@ import { pathInfo, setMovingDrawing, setPathEditing } from './paths'
 import { protoHtmlChanged } from './proto'
 import { exportSnapshot } from './serialize'
 import { setCanvasCursor, setOutlines } from './sheets'
-import { applyStyle, beginStyleEdit, endStyleEdit, flushStyleSave, styleSavePending } from './styles'
+import {
+  applyStyle,
+  beginPanelEdit,
+  beginStyleEdit,
+  endStyleEdit,
+  flushStyleSave,
+  panelEditFor,
+  styleSavePending,
+} from './styles'
 import { firstTextRun, formatLayers, formatText, runDecoration } from './text'
 import type { Rect, StylePatch } from './types'
 
@@ -48,6 +56,7 @@ interface Command {
   type: unknown
   reqId?: unknown
   selector?: unknown
+  targets?: unknown
   selectors?: unknown
   selected?: unknown
   x: number
@@ -243,6 +252,29 @@ function answer(type: string, reqId: unknown, fields: Record<string, unknown>): 
 function handle(d: Command, ev: MessageEvent): void {
   if (d.type === 'doop:runtime-port' && !runtimePort && ev.ports && ev.ports[0]) adoptRuntimePort(ev.ports[0])
   if (d.type === 'doop:inspect') answer('doop:inspect-result', d.reqId, { info: inspect(d.selector) })
+  if (d.type === 'doop:design-selection' && Array.isArray(d.targets)) {
+    const targets = d.targets.filter(
+      (target): target is { selector: string; styles?: StylePatch; geometry?: GeometryCommand } =>
+        target && typeof target.selector === 'string',
+    )
+    const selectors = targets.map((target) => target.selector)
+    if (d.phase === 'begin' || d.phase === 'apply') beginPanelEdit(selectors)
+    const edit = panelEditFor(selectors)
+    if (edit && (d.phase === 'apply' || d.phase === 'preview')) {
+      for (const { selector, styles, geometry } of targets) {
+        if (styles && typeof styles === 'object') applyStyle(selector, styles)
+        if (geometry) editGeometry(selector, geometry)
+      }
+    }
+    if (edit && (d.phase === 'apply' || d.phase === 'commit' || d.phase === 'cancel'))
+      endStyleEdit(edit.selector, d.phase === 'cancel')
+    if (d.phase === 'begin' || d.phase === 'preview') return answer('doop:design-selection-result', d.reqId, {})
+    const layers = selectors.flatMap((selector) => {
+      const info = !isLocked(styleTarget(selector)) && inspect(selector)
+      return info ? [{ selector, info }] : []
+    })
+    answer('doop:design-selection-result', d.reqId, { layers })
+  }
   if (d.type === 'doop:root-fill') answer('doop:root-fill-result', d.reqId, { fill: rootFill() })
   if (d.type === 'doop:outlines') setOutlines(d.on === true)
   if (d.type === 'doop:bleed' && typeof d.px === 'number') setBleed(d.px)

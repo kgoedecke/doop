@@ -373,6 +373,24 @@ export async function inspectElement(frameId: string, selector: string): Promise
   return infoOf(await requestFrame(frameId, 'doop:inspect', { selector }))
 }
 
+export interface InspectedLayer {
+  selector: string
+  info: ElementInfo
+}
+
+export interface PickedLayerEdit {
+  selector: string
+  styles?: StylePatch
+  geometry?: GeometryEdit
+}
+
+export type PanelEditPhase = 'read' | 'apply' | 'begin' | 'preview' | 'commit' | 'cancel'
+
+export async function editPickedLayers(frameId: string, targets: PickedLayerEdit[], phase: PanelEditPhase) {
+  const reply = await requestFrame(frameId, 'doop:design-selection', { targets, phase })
+  return Array.isArray(reply?.layers) ? (reply.layers as InspectedLayer[]) : undefined
+}
+
 /** Write inline styles onto the element. The runtime saves the edited
  *  document through the frame's normal edit path and answers with the
  *  element's fresh properties. */

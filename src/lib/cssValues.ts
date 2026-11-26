@@ -97,3 +97,10 @@ export function borderSummary(widths: [number | null, number | null, number | nu
   const width = Math.max(...widths.map((w) => w ?? 0))
   return { width, sides: on.length === 0 || on.length === 4 ? '' : on.join(' ') }
 }
+
+export function commonValue<T, V>(items: readonly T[], read: (item: T) => V): V | null {
+  if (!items.length) return null
+  const value = read(items[0]!)
+  for (let i = 1; i < items.length; i++) if (read(items[i]!) !== value) return null
+  return value
+}

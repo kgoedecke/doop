@@ -1,9 +1,7 @@
 import { syncPathVisibility } from './paths'
 import { replayScript } from './replay'
 import { holdStill, releaseStill } from './sheets'
-import { previewStyle, styleEdit } from './styles'
-import { styleTarget } from './dom'
-import { paintShapes, vectorShapes } from './vector'
+import { rebaseStyleEdits } from './styles'
 
 /* The parent posts HTML in and the runtime morphs the live DOM to match:
    only changed elements are touched, so updates render in place with no
@@ -99,20 +97,5 @@ function morph(html: string): void {
   } catch {
     if (doc) document.documentElement.innerHTML = doc.documentElement.innerHTML
   }
-  // Remote HTML becomes the cancellation baseline; keep our preview visible.
-  if (styleEdit) {
-    const target = styleTarget(styleEdit.selector)
-    if (target) {
-      styleEdit.original = target.style.cssText
-      styleEdit.touched = {}
-      previewStyle(styleEdit, target, styleEdit.styles)
-      // A vector's paint preview sits on its shapes, which the update may
-      // have replaced: their fresh styles are the baseline, painted over again.
-      if (Object.keys(styleEdit.paint).length) {
-        const shapes = vectorShapes(target)
-        styleEdit.shapes = shapes.map((shape) => ({ el: shape, original: shape.getAttribute('style') }))
-        paintShapes(shapes, styleEdit.paint)
-      }
-    }
-  }
+  rebaseStyleEdits()
 }

@@ -330,6 +330,7 @@ export function NumberField({
 export function TextField({
   label,
   value,
+  mixed = false,
   unit: u,
   placeholder,
   className,
@@ -340,6 +341,7 @@ export function TextField({
 }: {
   label?: string
   value: string
+  mixed?: boolean
   unit?: string
   placeholder?: string
   /** `font-sans` on a field holding prose rather than a value */
@@ -374,7 +376,7 @@ export function TextField({
   function commit() {
     setTyped(false)
     if (scrub.scrubbing) return
-    if (typed && draft !== value) onCommit(draft)
+    if (typed && (mixed || draft !== value)) onCommit(draft)
     else setDraft(value)
   }
   return (
@@ -393,7 +395,10 @@ export function TextField({
           setDraft(e.target.value)
         }}
         onBlur={commit}
-        onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
+        onKeyDown={(e) => {
+          if (mixed && !draft && (e.key === 'Backspace' || e.key === 'Delete')) setTyped(true)
+          if (e.key === 'Enter') e.currentTarget.blur()
+        }}
       />
       {u && (
         <span
@@ -419,16 +424,17 @@ export function LengthField({
   placeholder,
 }: {
   label?: string
-  value: string
+  value: string | null
   onCommit: (v: string) => void
   placeholder?: string
 }) {
-  const length = /^(-?(?:\d+\.?\d*|\.\d+))([a-z%]+)?$/.exec(value)
+  const length = /^(-?(?:\d+\.?\d*|\.\d+))([a-z%]+)?$/.exec(value ?? '')
   const unit = length?.[2] ?? 'px'
   return (
     <TextField
       label={label}
-      value={length?.[1] ?? value}
+      value={length?.[1] ?? value ?? ''}
+      mixed={value === null}
       unit={unit}
       placeholder={placeholder}
       scrub
@@ -504,6 +510,8 @@ export function SelectField<T extends string>({
 export function ColorField({
   value,
   label,
+  mixed = false,
+  commitPickerOnChange = false,
   placeholder,
   className,
   trailing,
@@ -512,6 +520,8 @@ export function ColorField({
 }: {
   value: string | null
   label?: string
+  mixed?: boolean
+  commitPickerOnChange?: boolean
   /** shown for a null value in place of "none" (a mixed colour) */
   placeholder?: string
   className?: string
@@ -539,7 +549,7 @@ export function ColorField({
     }
     const v = draft.trim().toLowerCase()
     if (v === '') {
-      if (value !== null) onCommit(null)
+      if (value !== null || mixed) onCommit(null)
       return
     }
     const hex = v.startsWith('#') ? v : `#${v}`
@@ -556,11 +566,17 @@ export function ColorField({
         />
         {!token && (
           <input
+            key={commitPickerOnChange ? shown : undefined}
             type="color"
             aria-label={label ? t('inspector.pickLabel', { label: label.toLowerCase() }) : t('inspector.pickColour')}
             className="absolute -inset-1 cursor-pointer opacity-0"
-            value={value ?? '#ffffff'}
-            onChange={(e) => onCommit(e.target.value)}
+            defaultValue={commitPickerOnChange ? (value ?? '#ffffff') : undefined}
+            value={commitPickerOnChange ? undefined : (value ?? '#ffffff')}
+            onChange={commitPickerOnChange ? undefined : (e) => onCommit(e.currentTarget.value)}
+            ref={(el) => {
+              // A native change commits one pick after its stream of input events.
+              if (el && commitPickerOnChange) el.onchange = () => onCommit(el.value)
+            }}
           />
         )}
       </span>
@@ -583,7 +599,10 @@ export function ColorField({
             setDraft(e.target.value)
           }}
           onBlur={commit}
-          onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
+          onKeyDown={(e) => {
+            if (mixed && !draft && (e.key === 'Backspace' || e.key === 'Delete')) setTyped(true)
+            if (e.key === 'Enter') e.currentTarget.blur()
+          }}
         />
       )}
       {trailing && (

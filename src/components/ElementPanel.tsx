@@ -1,8 +1,12 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import type { Frame } from '../../shared/types'
-import { useStore } from '../lib/store'
+import { pickedSelectors, useStore } from '../lib/store'
 import {
   editElementGeometry,
+  editPickedLayers,
+  type PickedLayerEdit,
+  type InspectedLayer,
+  type PanelEditPhase,
   inspectElement,
   onFrameChange,
   onTextSelection,
@@ -19,6 +23,7 @@ import {
   borderSummary,
   colorAlpha,
   colorWithAlpha,
+  commonValue,
   lengthValue,
   rgbToHex,
   sizeMode,
@@ -153,6 +158,12 @@ export function ElementPanel({
      view must not snap back to Design on every row */
   const t = useT()
   const [tab, setTab] = useState<Tab>(readTab)
+  const picks = useStore((s) => {
+    if (s.selectedElement?.frameId !== frame.id || s.selectedElement.selector !== selector) return null
+    const selectors = pickedSelectors(s)
+    return selectors.length > 1 ? selectors : null
+  })
+  const multiple = picks !== null
   const prototypeMode = useStore((s) => s.prototypeMode)
   /* Values belong to their element. A newly selected one keeps the previous
      values on screen, inert, until its own read lands (loading placeholders
@@ -167,10 +178,10 @@ export function ElementPanel({
   if (info && slowFor !== null) setSlowFor(null)
   const standIn = !info && read && slowFor !== target ? read : null
   useEffect(() => {
-    if (info) return
+    if (info || multiple) return
     const timer = window.setTimeout(() => setSlowFor(target), STALE_GRACE_MS)
     return () => window.clearTimeout(timer)
-  }, [info, target])
+  }, [info, target, multiple])
   const inspected = useRef<{ frameId: string; selector: string; ready: boolean } | null>(null)
 
   const tree = useMemo(() => buildLayerTree(frame.html), [frame.html])
@@ -191,6 +202,7 @@ export function ElementPanel({
   /* re-read after every html change — remote edits and our own saves alike —
      and when the runtime finishes rendering or loading fonts */
   useEffect(() => {
+    if (multiple) return
     let live = true
     let timer: number | null = null
     let request = 0
@@ -223,7 +235,7 @@ export function ElementPanel({
       offSelection()
       if (timer) window.clearTimeout(timer)
     }
-  }, [frame.id, frame.html, selector])
+  }, [frame.id, frame.html, selector, multiple])
 
   function updateRead(request: Promise<ElementInfo | null>) {
     request
@@ -236,8 +248,8 @@ export function ElementPanel({
       .catch(console.error)
   }
 
-  function apply(styles: StylePatch) {
-    if (info) updateRead(styleElement(frame.id, selector, styles))
+  function apply(styles: LayerStyles) {
+    if (info) updateRead(styleElement(frame.id, selector, typeof styles === 'function' ? styles(info) : styles))
   }
 
   function editGeometry(edit: GeometryEdit) {
@@ -299,10 +311,14 @@ export function ElementPanel({
             <LayerKindIcon kind={node?.kind ?? 'box'} />
           </span>
           <span className="min-w-0 flex-1 truncate text-[12.5px] font-medium text-ink">
-            {name}
-            <small className="ml-[5px] text-[11px] font-normal text-ink-faint">
-              {t('inspector.inParent', { parent: parentLabel })}
-            </small>
+            {multiple && tab === 'design' && !prototypeMode
+              ? t('inspector.selectedLayerCount', { count: picks.length })
+              : name}
+            {(!multiple || tab !== 'design' || prototypeMode) && (
+              <small className="ml-[5px] text-[11px] font-normal text-ink-faint">
+                {t('inspector.inParent', { parent: parentLabel })}
+              </small>
+            )}
           </span>
           {parentNode && (
             <Tooltip label={t('inspector.selectParent')} side="bottom" align="end">
@@ -322,8 +338,10 @@ export function ElementPanel({
         </div>
         <PanelTabPanel value="design">
           <PanelBody>
-            <ComponentSection frame={frame} selector={selector} />
-            {info ? (
+            {!multiple && <ComponentSection frame={frame} selector={selector} />}
+            {multiple ? (
+              <PickedDesign key={JSON.stringify([frame.id, picks])} frame={frame} picks={picks} />
+            ) : info ? (
               <PropertyScrubContext.Provider
                 value={{ onStart: () => scrub('begin'), onEnd: (cancel) => scrub(cancel ? 'cancel' : 'commit') }}
               >
@@ -351,7 +369,7 @@ export function ElementPanel({
             ) : (
               <Waiting hasText={hasText} />
             )}
-            <LayerExportSection frame={frame} target={{ selector, name: name ?? 'element' }} />
+            {!multiple && <LayerExportSection frame={frame} target={{ selector, name: name ?? 'element' }} />}
           </PanelBody>
         </PanelTabPanel>
         <PanelTabPanel value="html">
@@ -736,17 +754,23 @@ type PaintInfo = Pick<ElementInfo, 'backgroundColor' | 'inline' | 'vector'>
 /** A field bound to a token shows its name (`chip`); the menu beside it
  *  binds one (`menu`). A vector's paint lives on its shapes, so its token
  *  bindings do too. Swatches and values read as the frame's theme resolves them. */
-function useTokenFields(frame: Frame, info: PaintInfo, apply: (styles: StylePatch) => void) {
+function useTokenFields<T extends PaintInfo>(
+  frame: Frame,
+  selection: T[],
+  apply: (patch: (info: T) => StylePatch) => void,
+) {
   const tokens = useStore((state) => state.canvas?.tokens ?? [])
-  const paintInfo = info.vector ? { ...info, inline: { ...info.inline, ...info.vector.inline } } : info
-  const bound = (property: string) => boundToken(paintInfo, property, tokens)
+  const bound = (property: string) =>
+    commonValue(selection, (info) =>
+      boundToken(info.vector ? { inline: { ...info.inline, ...info.vector.inline } } : info, property, tokens),
+    ) ?? undefined
   const theme = frameTheme(frame.html) ?? undefined
-  const chip = (property: string, literal: string | null) =>
-    fieldToken(bound(property), tokens, theme, () => apply({ [property]: literal }))
+  const chip = (property: string, literal: (info: T) => string | null) =>
+    fieldToken(bound(property), tokens, theme, () => apply((el) => ({ [property]: literal(el) })))
   const menu = (
     property: string,
     types: readonly TokenType[],
-    literal: string | null,
+    literal: (info: T) => string | null,
     placement: 'inline' | 'beside' = 'inline',
     /** written with the binding: the side effects the literal control has */
     extra: StylePatch = {},
@@ -756,9 +780,9 @@ function useTokenFields(frame: Frame, info: PaintInfo, apply: (styles: StylePatc
       types={types}
       tokens={tokens}
       theme={theme}
-      literal={literal}
+      literal={commonValue(selection, literal)}
       placement={placement}
-      onPick={(name) => apply({ [property]: `var(${name})`, ...extra })}
+      onPick={(name) => apply(() => ({ [property]: `var(${name})`, ...extra }))}
     />
   )
   return { tokens, bound, chip, menu }
@@ -768,6 +792,19 @@ function useTokenFields(frame: Frame, info: PaintInfo, apply: (styles: StylePatc
    fits "100 %" and a two-digit "12 px" whole, the same in every such row */
 const COLOR_ROW = 'grid grid-cols-[minmax(0,1fr)_72px] gap-1.5'
 
+function fillOf(info: PaintInfo) {
+  const fillColor = info.vector ? info.vector.fill : info.backgroundColor
+  const fill = rgbToHex(fillColor, true)
+  const fillAlpha = info.vector && fillColor === 'none' ? 0 : colorAlpha(fillColor) * (info.vector?.fillOpacity ?? 1)
+  return { fill, fillColor, fillAlpha }
+}
+
+function fillPatch(info: PaintInfo, color: string | null, alpha: number): StylePatch {
+  if (!info.vector) return { 'background-color': color ? colorWithAlpha(color, alpha) : 'transparent' }
+  if (!color) return { fill: 'none' }
+  return { fill: rgbToHex(color) ?? color, 'fill-opacity': String(Math.min(1, Math.max(0, alpha))) }
+}
+
 /** The Fill section: the paint's colour and opacity, token-bindable, and an
  *  image fill when the layer has one. The frame Inspector shows the same
  *  section for the frame's own fill. */
@@ -776,61 +813,81 @@ export function FillSection({
   selector,
   info,
   apply,
+  selection: picked,
+  applyEach,
 }: {
   frame: Frame
   selector: string
   info: PaintInfo & { image?: ElementInfo['image'] }
+  selection?: PaintInfo[]
+  applyEach?: (patch: (info: PaintInfo) => StylePatch) => void
   apply: (styles: StylePatch) => void
 }) {
+  const selection = picked ?? [info]
   const t = useT()
-  const { chip, menu } = useTokenFields(frame, info, apply)
   const paint = paintProperties(info)
-  const fillColor = info.vector ? info.vector.fill : info.backgroundColor
-  const fill = rgbToHex(fillColor, true)
-  /* a vector's fill-opacity counts into its fill's alpha, as Figma shows one opacity */
-  const fillAlpha = info.vector
-    ? fillColor === 'none'
-      ? 0
-      : colorAlpha(fillColor) * (info.vector.fillOpacity ?? 1)
-    : colorAlpha(fillColor)
-  /* a fill at an alpha: on a vector the colour goes opaque and the alpha into
-     fill-opacity, so an imported fill-opacity never multiplies with it */
-  function fillPatch(color: string | null, alpha: number): StylePatch {
-    if (!info.vector) return { 'background-color': color ? colorWithAlpha(color, alpha) : 'transparent' }
-    if (!color) return { fill: 'none' }
-    return { fill: rgbToHex(color) ?? color, 'fill-opacity': String(Math.min(1, Math.max(0, alpha))) }
+  const samePaint = selection.every((el) => !!el.vector === !!info.vector)
+  const shown = commonValue(selection, (item) => {
+    const { fill, fillAlpha } = fillOf(item)
+    return fillAlpha === 0 && fill === '#000000' ? '' : (fill ?? '')
+  })
+  const alpha = commonValue(selection, (item) => Math.round(fillOf(item).fillAlpha * 100))
+  const editPaint = (patch: (item: PaintInfo) => StylePatch) => {
+    if (applyEach) applyEach(patch)
+    else apply(patch(info))
   }
   /* the fill as the document has it: a translucent one keeps its alpha */
-  const fillLiteral = fill && fillAlpha < 1 ? fillColor : fill
+  const fillLiteral = (el: PaintInfo) => {
+    const { fill, fillAlpha, fillColor } = fillOf(el)
+    return fill && fillAlpha < 1 ? fillColor : fill
+  }
+  const { chip, menu } = useTokenFields(frame, selection, editPaint)
   return (
     <PropertySection title={t('inspector.sectionFill')}>
-      {info.image && (
+      {!picked && info.image && (
         <ImageFill key={`${frame.id}:${selector}`} frame={frame} selector={selector} image={info.image} apply={apply} />
       )}
       <div className={COLOR_ROW}>
         <ColorField
           label={t('inspector.fillColor')}
-          value={fillAlpha === 0 && fill === '#000000' ? null : fill}
-          token={chip(paint.fill, fillLiteral)}
-          trailing={menu(
-            paint.fill,
-            ['color'],
-            fillLiteral,
-            'inline',
-            /* a token carries its own alpha: a vector's earlier fill-opacity goes */
-            info.vector ? { 'fill-opacity': '1' } : {},
-          )}
-          onCommit={(v) => apply(fillPatch(v, fillAlpha === 0 && (!fill || fill === '#000000') ? 1 : fillAlpha))}
+          commitPickerOnChange={!!picked}
+          value={shown || null}
+          mixed={shown === null}
+          placeholder={shown === null ? t('inspector.mixed') : undefined}
+          token={samePaint ? chip(paint.fill, fillLiteral) : undefined}
+          trailing={
+            samePaint &&
+            menu(
+              paint.fill,
+              ['color'],
+              fillLiteral,
+              'inline',
+              /* a token carries its own alpha: a vector's earlier fill-opacity goes */
+              info.vector ? { 'fill-opacity': '1' } : {},
+            )
+          }
+          onCommit={(v) =>
+            editPaint((item) => {
+              const { fill, fillAlpha } = fillOf(item)
+              return fillPatch(item, v, fillAlpha === 0 && (!fill || fill === '#000000') ? 1 : fillAlpha)
+            })
+          }
         />
         <NumberField
           label={t('inspector.fillOpacity')}
           prefix={<DropletIcon size="rail" />}
           max={100}
           slider={[0, 100]}
-          value={Math.round(fillAlpha * 100)}
+          value={alpha}
+          placeholder={t('inspector.mixed')}
           unit="%"
           onCommit={(v) =>
-            apply(info.vector && !fill ? { 'fill-opacity': String(v / 100) } : fillPatch(fill ?? fillColor, v / 100))
+            editPaint((item) => {
+              const { fill, fillColor } = fillOf(item)
+              return item.vector && !fill
+                ? { 'fill-opacity': String(v / 100) }
+                : fillPatch(item, fill ?? fillColor, v / 100)
+            })
           }
         />
       </div>
@@ -838,55 +895,88 @@ export function FillSection({
   )
 }
 
-function DesignTab({
-  frame,
-  selector,
-  info,
-  apply,
-  editGeometry,
-}: {
-  frame: Frame
-  selector: string
-  info: ElementInfo
-  apply: (styles: StylePatch) => void
-  editGeometry: (edit: GeometryEdit) => void
-}) {
-  const library = useCanvasFonts((state) => state.fonts)
-  const customFamilies = libraryFamilies(library)
-  const { tokens, bound, chip, menu } = useTokenFields(frame, info, apply)
+type LayerStyles = StylePatch | ((info: ElementInfo) => StylePatch)
 
-  /* a library family offers only the weights it was uploaded with; picking
-     one it lacks would just show the browser's faux bold */
-  const weights = familyWeights(library, fontName(info.fontFamily)) ?? WEIGHTS
-  /* runs that disagree show "Mixed", as Figma does for a text layer */
-  const mixed = info.textMixed ?? {}
+function PickedDesign({ frame, picks }: { frame: Frame; picks: string[] }) {
+  const [layers, setLayers] = useState<InspectedLayer[] | null>(null)
   const t = useT()
-  const sizeModes = SIZE_MODES.map(({ value, label }) => ({ value, label: t(label) }))
+  const request = useRef(0)
+  const scrubbing = useRef(false)
+  const targets = useMemo(() => picks.map((selector) => ({ selector })), [picks])
+  const send = useCallback(
+    (edits: PickedLayerEdit[], phase: PanelEditPhase) => {
+      const id = ++request.current
+      void editPickedLayers(frame.id, edits, phase)
+        .then((next) => {
+          if (id === request.current && next) setLayers(next)
+        })
+        .catch(console.error)
+    },
+    [frame.id],
+  )
+  useEffect(() => {
+    send(targets, 'read')
+    let timer: number | undefined
+    const off = onFrameChange(frame.id, () => {
+      window.clearTimeout(timer)
+      timer = window.setTimeout(() => send(targets, 'read'), INSPECT_DELAY_MS)
+    })
+    return () => {
+      off()
+      window.clearTimeout(timer)
+    }
+  }, [frame.id, frame.html, targets, send])
+
+  if (!layers) return <Waiting hasText={false} />
+  const primary = layers.at(-1)
+  if (!primary) return <StaticField>{t('inspector.noEditableLayers')}</StaticField>
+  const editable = layers.map(({ selector }) => ({ selector }))
+  const phase = () => (scrubbing.current ? 'preview' : 'apply')
+  return (
+    <PropertyScrubContext.Provider
+      value={{
+        onStart: () => {
+          scrubbing.current = true
+          send(editable, 'begin')
+        },
+        onEnd: (cancel) => {
+          scrubbing.current = false
+          send(editable, cancel ? 'cancel' : 'commit')
+        },
+      }}
+    >
+      {layers.length < picks.length && (
+        <p className="px-3 py-1.5 text-caption text-ink-faint">
+          {t('inspector.editableLayerCount', { editable: layers.length, total: picks.length })}
+        </p>
+      )}
+      <DesignTab
+        frame={frame}
+        selector={primary.selector}
+        info={primary.info}
+        selection={layers.map(({ info }) => info)}
+        apply={(styles) =>
+          send(
+            layers.map(({ selector, info }) => ({
+              selector,
+              styles: typeof styles === 'function' ? styles(info) : styles,
+            })),
+            phase(),
+          )
+        }
+        editGeometry={(geometry) =>
+          send(
+            editable.map(({ selector }) => ({ selector, geometry })),
+            phase(),
+          )
+        }
+      />
+    </PropertyScrubContext.Provider>
+  )
+}
+
+function sizing(info: ElementInfo) {
   const ratio = aspectRatio(info.aspectRatio, info.naturalAspectRatio)
-  const canLink = (info.width ?? 0) > 0 && (info.height ?? 0) > 0
-  const visible = info.visibility !== 'hidden'
-  /* A vector layer (a drawn or imported path, an inline icon) paints with
-     SVG's fill and stroke, as Figma's vectors do; any other layer with its
-     box's background and border. */
-  const paint = paintProperties(info)
-  const strokeColor = info.vector ? info.vector.stroke : info.borderColor
-  const borderColor = rgbToHex(strokeColor)
-  const strokeOn: StylePatch = !info.vector && info.borderStyle === 'none' ? { 'border-style': 'solid' } : {}
-  /* the stroke and text colours as the document has them: a translucent one keeps its alpha */
-  const strokeLiteral = borderColor && colorAlpha(strokeColor) < 1 ? strokeColor : borderColor
-  const textLiteral = colorAlpha(info.color) < 1 ? info.color : rgbToHex(info.color)
-  const isFlex = info.display === 'flex' || info.display === 'inline-flex'
-  const border = borderSummary(info.borderWidths)
-  const textAlign =
-    info.textAlign === 'start'
-      ? info.direction === 'rtl'
-        ? 'right'
-        : 'left'
-      : info.textAlign === 'end'
-        ? info.direction === 'rtl'
-          ? 'left'
-          : 'right'
-        : info.textAlign
   const flexAxis = flexSizeAxis(info)
   function modeFor(axis: 'width' | 'height') {
     return flexAxis === axis && (info.flexGrow ?? 0) > 0 ? 'fill' : sizeMode(info[`${axis}Value`])
@@ -903,50 +993,117 @@ function DesignTab({
       ...(axis === flexAxis ? { 'flex-grow': '0', 'flex-shrink': '0', 'flex-basis': 'auto' } : {}),
     }
   }
-  function setSize(axis: 'width' | 'height', mode: SizeMode, value = info[axis] ?? 0) {
+  function setSize(axis: 'width' | 'height', mode: SizeMode, value = info[axis] ?? 0): StylePatch {
     const other = axis === 'width' ? 'height' : 'width'
     const paired = ratio === null ? {} : automaticSize(other)
     const flex: StylePatch = axis === flexAxis ? { 'flex-grow': '0', 'flex-shrink': '0', 'flex-basis': 'auto' } : {}
     if (mode === 'fixed') {
-      apply({
+      return {
         ...fixedSize(axis, value),
         ...(ratio === null ? {} : fixedSize(other, axis === 'width' ? value / ratio : value * ratio)),
-      })
+      }
     } else if (mode === 'fill' && axis === flexAxis) {
-      apply({
+      return {
         ...paired,
         [axis]: 'auto',
         'flex-grow': '1',
         'flex-shrink': '1',
         'flex-basis': '0px',
         [`min-${axis}`]: '0px',
-      })
+      }
     } else if (mode === 'fill') {
       // A 100% content box would overflow by its own padding and borders.
       const extra = info.boxSizing === 'border-box' ? 0 : info.boxExtras[axis]
-      apply({ ...paired, [axis]: extra ? `calc(100% - ${extra}px)` : '100%' })
-    } else apply({ ...paired, ...flex, [axis]: mode === 'hug' ? 'fit-content' : 'auto' })
+      return { ...paired, [axis]: extra ? `calc(100% - ${extra}px)` : '100%' }
+    } else return { ...paired, ...flex, [axis]: mode === 'hug' ? 'fit-content' : 'auto' }
   }
-  function toggleRatio() {
-    if (ratio === null) {
-      apply({
+  function setLinked(linked: boolean): StylePatch {
+    if (linked) {
+      return {
         'aspect-ratio': `${info.width} / ${info.height}`,
         ...(modeFor('width') === 'fill'
           ? automaticSize('height')
           : modeFor('height') === 'fill'
             ? automaticSize('width')
             : {}),
-      })
-      return
+      }
     }
     // Preserve dimensions that CSS derived from the ratio, including authored
     // auto/fit-content, while keeping existing fixed and Fill sizes responsive.
-    apply({
+    return {
       'aspect-ratio': 'auto',
       ...(['auto', 'hug'].includes(modeFor('width')) && info.width !== null ? fixedSize('width', info.width) : {}),
       ...(['auto', 'hug'].includes(modeFor('height')) && info.height !== null ? fixedSize('height', info.height) : {}),
-    })
+    }
   }
+  return { modeFor, setSize, setLinked }
+}
+
+function DesignTab({
+  frame,
+  selector,
+  info,
+  apply,
+  editGeometry,
+  selection: picked,
+}: {
+  frame: Frame
+  selector: string
+  info: ElementInfo
+  selection?: ElementInfo[]
+  apply: (styles: LayerStyles) => void
+  editGeometry: (edit: GeometryEdit) => void
+}) {
+  const selection = picked ?? [info]
+  const library = useCanvasFonts((state) => state.fonts)
+  const customFamilies = libraryFamilies(library)
+  const { tokens, bound, chip, menu } = useTokenFields(frame, selection, apply)
+
+  /* a library family offers only the weights it was uploaded with; picking
+     one it lacks would just show the browser's faux bold */
+  const weights = familyWeights(library, fontName(info.fontFamily)) ?? WEIGHTS
+  /* runs that disagree show "Mixed", as Figma does for a text layer */
+  const textMixed = (key: 'fontSize' | 'fontWeight' | 'fontFamily' | 'color') =>
+    selection.some((el) => el.textMixed?.[key] || el[key] !== info[key])
+  const t = useT()
+  const multiple = !!picked
+  const common = <V,>(read: (el: ElementInfo) => V) => commonValue(selection, read)
+  const placeholder = multiple ? t('inspector.mixed') : undefined
+  const sizeModes = SIZE_MODES.map(({ value, label }) => ({ value, label: t(label) }))
+  const linked = common((el) => aspectRatio(el.aspectRatio, el.naturalAspectRatio) !== null)
+  const canLink = selection.every((el) => (el.width ?? 0) > 0 && (el.height ?? 0) > 0)
+  const visible = common((el) => el.visibility !== 'hidden')
+  const clipped = common((el) => el.clipsContent)
+  /* A vector layer (a drawn or imported path, an inline icon) paints with
+     SVG's fill and stroke, as Figma's vectors do; any other layer with its
+     box's background and border. */
+  const paint = paintProperties(info)
+  const sharedStroke = common((el) => rgbToHex(el.vector ? el.vector.stroke : el.borderColor) ?? '')
+  const sameStroke = selection.every(
+    (el) => !!el.vector === !!info.vector && (el.borderStyle === 'none') === (info.borderStyle === 'none'),
+  )
+  const strokeOn: StylePatch = !info.vector && info.borderStyle === 'none' ? { 'border-style': 'solid' } : {}
+  /* the stroke and text colours as the document has them: a translucent one keeps its alpha */
+  const colorLiteral = (color: string) => (colorAlpha(color) < 1 ? color : rgbToHex(color))
+  const strokeLiteral = (el: ElementInfo) => colorLiteral(el.vector ? el.vector.stroke : el.borderColor)
+  const textLiteral = (el: ElementInfo) => colorLiteral(el.color)
+  const radiusLiteral = (el: ElementInfo) => (el.borderRadius === null ? null : `${el.borderRadius}px`)
+  const sizeLiteral = (el: ElementInfo) => (el.fontSize === null ? null : `${el.fontSize}px`)
+  const minWidth = common((el) => el.inline['min-width'] ?? (el.minWidth === '0px' ? '' : el.minWidth))
+  const isFlex = selection.every((el) => el.display === 'flex' || el.display === 'inline-flex')
+  const border = borderSummary(info.borderWidths)
+  const textAlign =
+    common((el) =>
+      el.textAlign === 'start'
+        ? el.direction === 'rtl'
+          ? 'right'
+          : 'left'
+        : el.textAlign === 'end'
+          ? el.direction === 'rtl'
+            ? 'left'
+            : 'right'
+          : el.textAlign,
+    ) ?? ''
   return (
     <>
       <PropertySection title={t('inspector.sectionAlignment')}>
@@ -959,7 +1116,7 @@ function DesignTab({
               className="h-[26px] min-w-0 flex-1 rounded-[7px] bg-sub text-ink-soft hover:bg-paper-deep"
               aria-label={t(label)}
               title={t('inspector.withinParent', { label: t(label) })}
-              disabled={!info.geometry.canAlign}
+              disabled={!selection.every((el) => el.geometry.canAlign)}
               onClick={() => editGeometry({ kind: 'align', axis, edge })}
             >
               <Icon size="rail" />
@@ -973,18 +1130,20 @@ function DesignTab({
             label={t('inspector.xPosition')}
             min={-Infinity}
             prefix="X"
-            value={info.geometry.x}
+            value={common((el) => el.geometry.x)}
+            placeholder={placeholder}
             unit="px"
-            disabled={!info.geometry.enabled}
+            disabled={!selection.every((el) => el.geometry.enabled)}
             onCommit={(value) => editGeometry({ kind: 'position', axis: 'x', value })}
           />
           <NumberField
             label={t('inspector.yPosition')}
             min={-Infinity}
             prefix="Y"
-            value={info.geometry.y}
+            value={common((el) => el.geometry.y)}
+            placeholder={placeholder}
             unit="px"
-            disabled={!info.geometry.enabled}
+            disabled={!selection.every((el) => el.geometry.enabled)}
             onCommit={(value) => editGeometry({ kind: 'position', axis: 'y', value })}
           />
         </div>
@@ -993,16 +1152,17 @@ function DesignTab({
             label={t('inspector.rotation')}
             min={-Infinity}
             prefix={<RotationIcon size="rail" />}
-            value={info.geometry.rotation}
+            value={common((el) => el.geometry.rotation)}
+            placeholder={placeholder}
             unit="°"
-            disabled={!info.geometry.enabled}
+            disabled={!selection.every((el) => el.geometry.enabled)}
             onCommit={(value) => editGeometry({ kind: 'rotate', value })}
           />
           <div className="grid grid-cols-2 gap-1.5">
             {(['x', 'y'] as const).map((axis) => {
               const Icon = axis === 'x' ? FlipHorizontal2Icon : FlipVertical2Icon
               const label = axis === 'x' ? t('inspector.flipHorizontally') : t('inspector.flipVertically')
-              const pressed = (axis === 'x' ? info.geometry.scaleX : info.geometry.scaleY) < 0
+              const pressed = common((el) => (axis === 'x' ? el.geometry.scaleX : el.geometry.scaleY) < 0)
               return (
                 <Button
                   key={axis}
@@ -1010,8 +1170,8 @@ function DesignTab({
                   size="icon-sm"
                   aria-label={label}
                   title={label}
-                  aria-pressed={pressed}
-                  disabled={!info.geometry.enabled}
+                  aria-pressed={pressed ?? 'mixed'}
+                  disabled={!selection.every((el) => el.geometry.enabled)}
                   className={cn(
                     'h-[26px] w-full rounded-[7px] bg-sub text-ink-soft hover:bg-paper-deep',
                     pressed && 'bg-paper-deep text-ink',
@@ -1027,27 +1187,30 @@ function DesignTab({
         <PropertyRow label={t('inspector.rowType')}>
           <SelectField
             label={t('inspector.positionType')}
-            value={info.position}
+            value={common((el) => el.position)}
+            placeholder={placeholder}
             options={POSITIONS.map((p) => ({ value: p, label: p }))}
             onChange={(v) => apply({ position: v })}
           />
         </PropertyRow>
-        <PropertyRow label={t('inspector.rowOrder')}>
-          <StaticField>
-            {info.index}
-            <FieldUnit>
-              {t('inspector.orderOf', { count: info.count })}
-              {parentLayout(info) && ` · ${parentLayout(info)}`}
-            </FieldUnit>
-          </StaticField>
-        </PropertyRow>
+        {!multiple && (
+          <PropertyRow label={t('inspector.rowOrder')}>
+            <StaticField>
+              {info.index}
+              <FieldUnit>
+                {t('inspector.orderOf', { count: info.count })}
+                {parentLayout(info) && ` · ${parentLayout(info)}`}
+              </FieldUnit>
+            </StaticField>
+          </PropertyRow>
+        )}
       </PropertySection>
       <PropertySection
         title={t('inspector.sectionLayout')}
         action={
           <Tooltip
             label={
-              ratio !== null
+              linked === true
                 ? t('inspector.unlinkSize')
                 : canLink
                   ? t('inspector.linkSize')
@@ -1060,14 +1223,14 @@ function DesignTab({
                 size="icon-sm"
                 className={cn(
                   'size-5 rounded-tag',
-                  ratio !== null ? 'bg-ink text-paper hover:bg-ink/85 hover:text-paper' : 'text-ink-faint',
+                  linked === true ? 'bg-ink text-paper hover:bg-ink/85 hover:text-paper' : 'text-ink-faint',
                 )}
                 aria-label={t('inspector.linkSize')}
-                aria-pressed={ratio !== null}
-                disabled={ratio === null && !canLink}
-                onClick={toggleRatio}
+                aria-pressed={linked ?? 'mixed'}
+                disabled={linked !== true && !canLink}
+                onClick={() => apply((el) => sizing(el).setLinked(linked !== true))}
               >
-                {ratio !== null ? <LinkIcon size="rail" /> : <UnlinkIcon size="rail" />}
+                {linked === true ? <LinkIcon size="rail" /> : <UnlinkIcon size="rail" />}
               </Button>
             </span>
           </Tooltip>
@@ -1079,15 +1242,17 @@ function DesignTab({
               <NumberField
                 label={axis === 'width' ? t('inspector.width') : t('inspector.height')}
                 prefix={axis === 'width' ? 'W' : 'H'}
-                value={info[axis]}
+                value={common((el) => el[axis])}
+                placeholder={placeholder}
                 unit="px"
-                onCommit={(v) => setSize(axis, 'fixed', v)}
+                onCommit={(v) => apply((el) => sizing(el).setSize(axis, 'fixed', v))}
               />
               <SelectField
                 label={axis === 'width' ? t('inspector.widthSizing') : t('inspector.heightSizing')}
-                value={modeFor(axis)}
+                value={common((el) => sizing(el).modeFor(axis))}
+                placeholder={placeholder}
                 options={sizeModes}
-                onChange={(v) => setSize(axis, v)}
+                onChange={(v) => apply((el) => sizing(el).setSize(axis, v))}
               />
             </div>
           ))}
@@ -1095,44 +1260,47 @@ function DesignTab({
         <PropertyRow label={t('inspector.rowMinWidth')}>
           <LengthField
             label={t('inspector.minimumWidth')}
-            value={info.inline['min-width'] ?? (info.minWidth === '0px' ? '' : info.minWidth)}
-            placeholder="auto"
+            value={minWidth}
+            placeholder={minWidth === null ? t('inspector.mixed') : 'auto'}
             onCommit={(v) => apply({ 'min-width': lengthValue(v) })}
           />
         </PropertyRow>
         <PropertyRow label={t('inspector.rowDisplay')}>
           <SelectField
             label={t('inspector.display')}
-            value={displayValue(info)}
+            value={common(displayValue)}
+            placeholder={placeholder}
             options={DISPLAYS}
             onChange={(v) => apply({ display: v })}
           />
         </PropertyRow>
         {!isFlex && (
           <>
-            {info.display.includes('grid') && (
+            {selection.every((el) => el.display.includes('grid')) && (
               <PropertyRow label={t('inspector.rowGap')}>
                 <NumberField
                   label={t('inspector.rowGapLabel')}
                   prefix={<RowGapIcon size="rail" />}
-                  value={info.rowGap ?? 0}
+                  value={common((el) => el.rowGap ?? 0)}
+                  placeholder={placeholder}
                   unit="px"
                   onCommit={(v) => apply({ 'row-gap': `${Math.max(0, v)}px` })}
                 />
                 <NumberField
                   label={t('inspector.columnGap')}
                   prefix={<ColumnGapIcon size="rail" />}
-                  value={info.columnGap ?? 0}
+                  value={common((el) => el.columnGap ?? 0)}
+                  placeholder={placeholder}
                   unit="px"
                   onCommit={(v) => apply({ 'column-gap': `${Math.max(0, v)}px` })}
                 />
               </PropertyRow>
             )}
-            <PaddingControls info={info} apply={apply} />
+            <PaddingControls selection={selection} apply={apply} />
           </>
         )}
       </PropertySection>
-      {isFlex && <FlexLayoutControls info={info} apply={apply} />}
+      {isFlex && <FlexLayoutControls selection={selection} apply={apply} />}
       <PropertySection
         title={t('inspector.sectionAppearance')}
         action={
@@ -1140,12 +1308,12 @@ function DesignTab({
             variant="bare"
             size="icon-sm"
             className="size-5 rounded-tag text-ink-faint"
-            aria-label={visible ? t('inspector.hideElement') : t('inspector.showElement')}
-            title={visible ? t('inspector.hideElement') : t('inspector.showElement')}
-            aria-pressed={!visible}
-            onClick={() => apply({ visibility: visible ? 'hidden' : 'visible' })}
+            aria-label={visible === false ? t('inspector.showElement') : t('inspector.hideElement')}
+            title={visible === false ? t('inspector.showElement') : t('inspector.hideElement')}
+            aria-pressed={visible === null ? 'mixed' : !visible}
+            onClick={() => apply({ visibility: visible === false ? 'visible' : 'hidden' })}
           >
-            {visible ? <EyeIcon size="rail" /> : <EyeClosedIcon size="rail" />}
+            {visible !== false ? <EyeIcon size="rail" /> : <EyeClosedIcon size="rail" />}
           </Button>
         }
       >
@@ -1155,7 +1323,8 @@ function DesignTab({
             max={100}
             slider={[0, 100]}
             prefix={<DropletIcon size="rail" />}
-            value={info.opacity === null ? null : Math.round(info.opacity * 100)}
+            value={common((el) => (el.opacity === null ? null : Math.round(el.opacity * 100)))}
+            placeholder={placeholder}
             unit="%"
             onCommit={(v) => apply({ opacity: String(Math.min(100, Math.max(0, v)) / 100) })}
           />
@@ -1163,58 +1332,65 @@ function DesignTab({
             label={t('inspector.cornerRadius')}
             slider={RADIUS_SLIDE}
             prefix={<RadiusIcon size="rail" />}
-            value={info.borderRadius}
+            value={common((el) => el.borderRadius)}
+            placeholder={placeholder}
             unit="px"
-            token={chip('border-radius', info.borderRadius === null ? null : `${info.borderRadius}px`)}
-            trailing={menu('border-radius', ['radius'], info.borderRadius === null ? null : `${info.borderRadius}px`)}
+            token={chip('border-radius', radiusLiteral)}
+            trailing={menu('border-radius', ['radius'], radiusLiteral)}
             onCommit={(v) => apply({ 'border-radius': `${Math.max(0, v)}px` })}
           />
         </div>
         <label className="mt-2 flex h-5 cursor-pointer items-center justify-between text-[11.5px] text-ink-soft">
           {t('inspector.clipContent')}
+          {clipped === null && <span className="ml-auto mr-1 text-ink-faint">{t('inspector.mixed')}</span>}
           <Switch
             size="sm"
+            aria-description={clipped === null ? t('inspector.mixed') : undefined}
             aria-label={t('inspector.clipContent')}
             className="data-[state=checked]:bg-ink"
-            checked={info.clipsContent}
+            checked={clipped === true}
             onCheckedChange={(on) => apply({ overflow: on ? 'hidden' : 'visible' })}
           />
         </label>
       </PropertySection>
-      <FillSection frame={frame} selector={selector} info={info} apply={apply} />
+      <FillSection frame={frame} selector={selector} info={info} selection={picked} apply={apply} applyEach={apply} />
       <PropertySection title={t('inspector.sectionStroke')}>
         <div className={COLOR_ROW}>
           <ColorField
             label={t('inspector.borderColor')}
-            value={borderColor}
-            token={chip(paint.stroke, strokeLiteral)}
-            trailing={menu(paint.stroke, ['color'], strokeLiteral, 'inline', strokeOn)}
+            commitPickerOnChange={multiple}
+            value={sharedStroke || null}
+            mixed={sharedStroke === null}
+            placeholder={sharedStroke === null ? t('inspector.mixed') : undefined}
+            token={sameStroke ? chip(paint.stroke, strokeLiteral) : undefined}
+            trailing={sameStroke && menu(paint.stroke, ['color'], strokeLiteral, 'inline', strokeOn)}
             onCommit={(v) =>
-              apply(
-                info.vector
+              apply((el): StylePatch =>
+                el.vector
                   ? { stroke: v ?? 'none' }
-                  : { 'border-color': v, ...(v && info.borderStyle === 'none' ? { 'border-style': 'solid' } : {}) },
+                  : { 'border-color': v, ...(v && el.borderStyle === 'none' ? { 'border-style': 'solid' } : {}) },
               )
             }
           />
           <NumberField
             label={t('inspector.borderWidth')}
             prefix={<StrokeWidthIcon size="rail" />}
-            value={info.vector ? info.vector.strokeWidth : border.width}
+            value={common((el) => (el.vector ? el.vector.strokeWidth : borderSummary(el.borderWidths).width))}
+            placeholder={placeholder}
             unit="px"
             onCommit={(v) =>
-              apply(
-                info.vector
+              apply((el): StylePatch =>
+                el.vector
                   ? { 'stroke-width': `${Math.max(0, v)}px` }
                   : {
                       'border-width': `${Math.max(0, v)}px`,
-                      ...(v > 0 && info.borderStyle === 'none' ? { 'border-style': 'solid' } : {}),
+                      ...(v > 0 && el.borderStyle === 'none' ? { 'border-style': 'solid' } : {}),
                     },
               )
             }
           />
         </div>
-        {!info.vector && border.sides && (
+        {!multiple && !info.vector && border.sides && (
           <p className="mt-1 text-[10.5px] text-ink-faint">
             {t('inspector.sides', {
               sides: border.sides
@@ -1228,13 +1404,15 @@ function DesignTab({
           </p>
         )}
       </PropertySection>
-      {info.hasText && (
+      {selection.every((el) => el.hasText) && (
         <PropertySection title={t('inspector.sectionText')}>
           <PropertyRow label={t('inspector.rowFont')}>
             <span className="group flex min-w-0 flex-1 items-center gap-1.5">
               <SelectField
                 label={t('inspector.fontFamily')}
-                value={bound('font-family') ? info.inline['font-family']! : mixed.fontFamily ? null : info.fontFamily}
+                value={
+                  bound('font-family') ? info.inline['font-family']! : textMixed('fontFamily') ? null : info.fontFamily
+                }
                 placeholder={t('inspector.mixed')}
                 options={[
                   ...sortTokens(tokens.filter((token) => token.type === 'fontFamily')).map((token) => ({
@@ -1256,18 +1434,18 @@ function DesignTab({
                 ]}
                 onChange={(v) => apply({ 'font-family': v })}
               />
-              {menu('font-family', ['fontFamily'], info.fontFamily, 'beside')}
+              {menu('font-family', ['fontFamily'], (el) => el.fontFamily, 'beside')}
             </span>
           </PropertyRow>
           <PropertyRow label={t('inspector.rowSize')}>
             <NumberField
               label={t('inspector.fontSize')}
               prefix={<TextSizeIcon size="rail" />}
-              value={mixed.fontSize ? null : info.fontSize}
+              value={textMixed('fontSize') ? null : info.fontSize}
               placeholder={t('inspector.mixed')}
               unit="px"
-              token={chip('font-size', info.fontSize === null ? null : `${info.fontSize}px`)}
-              trailing={menu('font-size', ['fontSize'], info.fontSize === null ? null : `${info.fontSize}px`)}
+              token={chip('font-size', sizeLiteral)}
+              trailing={menu('font-size', ['fontSize'], sizeLiteral)}
               onCommit={(v) => apply({ 'font-size': `${v}px` })}
             />
           </PropertyRow>
@@ -1275,7 +1453,9 @@ function DesignTab({
             <span className="group flex min-w-0 flex-1 items-center gap-1.5">
               <SelectField
                 label={t('inspector.fontWeight')}
-                value={bound('font-weight') ? info.inline['font-weight']! : mixed.fontWeight ? null : info.fontWeight}
+                value={
+                  bound('font-weight') ? info.inline['font-weight']! : textMixed('fontWeight') ? null : info.fontWeight
+                }
                 placeholder={t('inspector.mixed')}
                 options={[
                   ...sortTokens(tokens.filter((token) => token.type === 'fontWeight')).map((token) => ({
@@ -1289,12 +1469,14 @@ function DesignTab({
                 ]}
                 onChange={(v) => apply({ 'font-weight': v })}
               />
-              {menu('font-weight', ['fontWeight'], info.fontWeight, 'beside')}
+              {menu('font-weight', ['fontWeight'], (el) => el.fontWeight, 'beside')}
             </span>
           </PropertyRow>
           <PropertyRow label={t('inspector.rowColor')}>
             <ColorField
-              value={mixed.color ? null : rgbToHex(info.color)}
+              value={textMixed('color') ? null : rgbToHex(info.color)}
+              commitPickerOnChange={multiple}
+              mixed={multiple && textMixed('color')}
               placeholder={t('inspector.mixed')}
               token={chip('color', textLiteral)}
               trailing={menu('color', ['color'], textLiteral)}
