@@ -488,6 +488,30 @@ describe('the doop CLI', () => {
     expect((await doop(['push'])).stdout).toContain('nothing to push')
   }, 60_000)
 
+  it('starts a wait on a relinked canvas from that canvas, not from the comment mark of the last one', async () => {
+    const other = mkdtempSync(join(tmpdir(), 'doop-cli-relink-'))
+    try {
+      const canvasId = (JSON.parse(readFileSync(join(work, '.doop/config.json'), 'utf8')) as { canvas: string }).canvas
+      await doop(['link', canvasId], other)
+      /* the first canvas has comments: a quiet wait marks the newest of them */
+      expect((await doop(['wait', '--comments', '--timeout', '1s', '--interval', '1s'], other)).code).toBe(6)
+
+      expect((await doop(['link', '--create', 'Relinked'], other)).code).toBe(0)
+      const { canvas } = await json<{ canvas: { id: string; pages: { id: string }[] } }>(['frames'], other)
+      await owner.post(`/api/canvases/${canvas.id}/comments`, {
+        pageId: canvas.pages[0]!.id,
+        x: 10,
+        y: 10,
+        text: 'Here before the wait',
+      })
+      const quiet = await doop(['wait', '--comments', '--timeout', '2s', '--interval', '1s'], other)
+      expect(quiet.code).toBe(6)
+      expect(quiet.stdout).not.toContain('Here before the wait')
+    } finally {
+      rmSync(other, { recursive: true, force: true })
+    }
+  }, 60_000)
+
   it('reaches every MCP tool, with the canvas filled in', async () => {
     const listed = await doop(['tools'])
     expect(listed.stdout).toContain('get_canvas\t')

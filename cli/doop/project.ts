@@ -18,7 +18,7 @@ import { CliError, EXIT, usage } from './errors.ts'
 export const DEFAULT_SERVER = 'https://doop.design'
 export const PROJECT_DIR = '.doop'
 /** what is per checkout or generated: the state, screenshots and expanded frames */
-const GITIGNORE = 'state.json\nshots/\nexpanded/\n'
+const GITIGNORE = 'state.json\ncomments-seen.json\nshots/\nexpanded/\n'
 
 export interface ProjectConfig {
   canvas: string
@@ -62,7 +62,8 @@ export interface Project {
   /** tracked components by their files' shared path without the extension */
   components: Record<string, TrackedComponent>
   /** the newest comment `doop wait` has reported or started from: the next wait reports what
-   *  came after it, so a comment left between two waits is not lost */
+   *  came after it, so a comment left between two waits is not lost. It is kept in its own
+   *  file (`saveCommentsSeen`), never in state.json */
   commentsSeenAt?: number
 }
 
@@ -253,12 +254,14 @@ export function findProject(cwd: string): Project | null {
     const config = readJson<ProjectConfig>(join(dir, PROJECT_DIR, 'config.json'))
     if (config) {
       const state = readJson<SavedState>(statePath(dir))
+      /* a mark an older doop kept in state.json still counts until a wait writes its own */
+      const commentsSeenAt = readCommentsSeen(dir, config.canvas) ?? state?.commentsSeenAt
       return checked({
         root: dir,
         config,
         frames: state?.frames ?? {},
         components: state?.components ?? {},
-        ...(typeof state?.commentsSeenAt === 'number' ? { commentsSeenAt: state.commentsSeenAt } : {}),
+        ...(typeof commentsSeenAt === 'number' ? { commentsSeenAt } : {}),
       })
     }
     if (dirname(dir) === dir) return null
@@ -282,41 +285,41 @@ export function createProject(root: string, config: ProjectConfig): Project {
   return project
 }
 
+/** state.json: what was pulled or pushed. `commentsSeenAt` is only read, from older doops. */
 type SavedState = Partial<Pick<Project, 'frames' | 'components' | 'commentsSeenAt'>>
+
+/** comments-seen.json: the comment mark, and the canvas it is a mark on. */
+interface CommentsSeen {
+  canvas: string
+  at: number
+}
 
 function statePath(root: string): string {
   return join(root, PROJECT_DIR, 'state.json')
 }
 
-/** The newer of two comment marks: a `doop wait` in the background may have moved it on. */
-function laterMark(a: number | undefined, b: number | undefined): number | undefined {
-  return a === undefined ? b : b === undefined ? a : Math.max(a, b)
+function commentsSeenPath(root: string): string {
+  return join(root, PROJECT_DIR, 'comments-seen.json')
+}
+
+/** The mark, when it is one on this canvas: a directory linked to another canvas starts again. */
+function readCommentsSeen(root: string, canvas: string): number | undefined {
+  const seen = readJson<Partial<CommentsSeen>>(commentsSeenPath(root))
+  return seen?.canvas === canvas && typeof seen.at === 'number' ? seen.at : undefined
 }
 
 export function saveState(project: Project): void {
-  const commentsSeenAt = laterMark(
-    project.commentsSeenAt,
-    readJson<SavedState>(statePath(project.root))?.commentsSeenAt,
-  )
-  writeJson(statePath(project.root), {
-    frames: project.frames,
-    components: project.components,
-    ...(commentsSeenAt === undefined ? {} : { commentsSeenAt }),
-  })
+  writeJson(statePath(project.root), { frames: project.frames, components: project.components })
 }
 
-/** Moves only the comment mark, on the state as it is on disk now: `doop wait` runs for
- *  minutes, often beside a `doop push` that tracks new files, and must not write back the
- *  frames and components it read when it started. */
+/** Moves the comment mark forward. It has a file of its own because `doop wait` runs for
+ *  minutes, often beside a `doop push` that tracks new files: nothing the wait writes can
+ *  then put back the frames and components it read when it started. */
 export function saveCommentsSeen(project: Project, at: number): void {
-  const now = readJson<SavedState>(statePath(project.root)) ?? {}
-  const commentsSeenAt = laterMark(now.commentsSeenAt, at)
-  project.commentsSeenAt = commentsSeenAt
-  writeJson(statePath(project.root), {
-    frames: now.frames ?? {},
-    components: now.components ?? {},
-    ...(commentsSeenAt === undefined ? {} : { commentsSeenAt }),
-  })
+  const canvas = project.config.canvas
+  const seen = Math.max(at, readCommentsSeen(project.root, canvas) ?? at)
+  project.commentsSeenAt = seen
+  writeJson(commentsSeenPath(project.root), { canvas, at: seen } satisfies CommentsSeen)
 }
 
 export function requireProject(project: Project | null): Project {
