@@ -212,6 +212,13 @@ function escapeRegExp(text: string): string {
   return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
+/** The tokens whose full name matches `pattern`: a case-insensitive glob where `*` is any run
+ *  of characters ("--color-*", "*-500", "*brand*"). The get_tokens filter on both surfaces. */
+export function tokensNamed<T extends { name: string }>(tokens: readonly T[], pattern: string): T[] {
+  const re = new RegExp(`^${pattern.split('*').map(escapeRegExp).join('.*')}$`, 'i')
+  return tokens.filter((token) => re.test(token.name))
+}
+
 const BLOCK_RE = new RegExp(`<style\\b[^>]*\\b${TOKEN_BLOCK_ATTR}\\b[^>]*>[\\s\\S]*?</style>`, 'i')
 
 /** Whether the design names a token, through `var(--name)` or `var(--name,`. */
