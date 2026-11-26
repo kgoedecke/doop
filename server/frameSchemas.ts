@@ -43,8 +43,7 @@ export const frameCreateSchema = z.object({
 
 /** An edit of a frame: only the fields it sends change, and null is no value for any of them
  *  but `rotation`, where it straightens. The rest of the body is kept as sent: `expectedUpdatedAt`
- *  and `requestId` are the route's, and an edit handed to the canvas's actor is checked there
- *  for fields it does not take (server/actorBrowserEdits.ts). */
+ *  is the route's. */
 export const framePatchSchema = z
   .object({ ...fields, rotation: finite.nullable() })
   .partial()
