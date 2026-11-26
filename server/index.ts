@@ -26,6 +26,8 @@ import {
 import { z } from 'zod'
 import { previewDocument } from './componentPreview.ts'
 import { codeSchema, propSchema } from './componentTools.ts'
+import { validated } from './validated.ts'
+import { frameCreateSchema, framePatchSchema } from './frameSchemas.ts'
 import { activeComponents, wireComponent, withWireComponents } from '../shared/components.ts'
 import type { ComponentDef } from '../shared/components.ts'
 import { PRO_UPLOAD_BYTES } from '../shared/billing.ts'
@@ -165,7 +167,7 @@ import {
   type CanvasWriteResults,
 } from './canvasWrites.ts'
 import { updateLibraryConsumers } from './libraryUpdates.ts'
-import { isPeerViewport } from '../shared/viewport.ts'
+import { clientMessageSchema } from '../shared/roomSchemas.ts'
 import { exportScaleSuffix, fitExportScale, fullFrameRenderScale, parseExportScale } from '../shared/exportScale.ts'
 import { emailShare } from './canvasShares.ts'
 import * as userEvents from './userEvents.ts'
@@ -2779,7 +2781,9 @@ app.post(
   '/api/canvases/:id/frames',
   writeRoute(async (req, res) => {
     if (!requireCanvas(req, res, req.params.id, 'edit')) return
-    const { name, pageId, x, y, width, height, html, hidden, locked, z, rotation } = req.body ?? {}
+    const body = validated(res, frameCreateSchema, req.body)
+    if (!body) return
+    const { name, pageId, x, y, width, height, html, hidden, locked, z, rotation } = body
     if (pageId !== undefined && !store.getCanvas(req.params.id)?.pages?.some((p) => p.id === pageId))
       return res.status(400).json({ error: 'page not found' })
     const actor = userActor(req)
@@ -2796,7 +2800,7 @@ app.post(
         html,
         hidden: hidden === true,
         locked: locked === true,
-        z: Number.isFinite(z) ? z : undefined,
+        z,
         rotation: normalizeRotation(rotation),
       },
       actor,
@@ -2835,7 +2839,9 @@ app.patch(
   writeRoute(async (req, res) => {
     const current = requireFrame(req, res, req.params.id, 'edit', req.body?.expectedUpdatedAt)
     if (!current) return
-    const { actor: _ignored, expectedUpdatedAt: _version, ...patch } = req.body ?? {}
+    const body = validated(res, framePatchSchema, req.body)
+    if (!body) return
+    const { actor: _ignored, expectedUpdatedAt: _version, requestId: _request, ...patch } = body
     const actor = userActor(req)
     if (
       patch.pageId !== undefined &&
@@ -2849,23 +2855,16 @@ app.patch(
     if (patch.hidden !== undefined) clean.hidden = patch.hidden === true
     if (patch.locked !== undefined) clean.locked = !!patch.locked
     /* the stacking order the Layers panel sets */
-    if (patch.z !== undefined) {
-      if (!Number.isFinite(patch.z)) return res.status(400).json({ error: 'z must be a finite number' })
-      clean.z = patch.z
-    }
+    if (patch.z !== undefined) clean.z = patch.z
     /* a turn about the centre, stored in (-180, 180]; null or 0 straightens */
-    if (patch.rotation !== undefined) {
-      if (patch.rotation !== null && !Number.isFinite(patch.rotation))
-        return res.status(400).json({ error: 'rotation must be a finite number of degrees' })
-      clean.rotation = normalizeRotation(patch.rotation)
-    }
+    if (patch.rotation !== undefined) clean.rotation = normalizeRotation(patch.rotation)
     const frame = await runCanvasWrite(current.canvasId, {
       type: 'write-frame',
       frameId: req.params.id,
       patch: clean,
       actor,
       /* checked above for a quick answer, and again by the host as it writes */
-      ...versionCheck(req.body?.expectedUpdatedAt),
+      ...versionCheck(body.expectedUpdatedAt),
     })
     if (!frame) return res.status(404).json({ error: 'frame not found' })
     res.json(frame)
@@ -2880,7 +2879,7 @@ function componentContext(req: express.Request, canvas: Canvas) {
 /* The REST bodies, typed like the MCP tools' input (the same zod pieces), so a
    malformed field is a 400 and never reaches the engine; `head` is a library
    pull's alone and is not accepted here. */
-const componentCreateBody = z.object({
+const componentCreateSchema = z.object({
   name: z.string().max(200).optional(),
   description: z.string().max(2000).optional(),
   props: z.array(propSchema).optional(),
@@ -2893,10 +2892,10 @@ const componentCreateBody = z.object({
   width: z.number().optional(),
   height: z.number().optional(),
 })
-const libraryPublishBody = z.object({
+const libraryPublishSchema = z.object({
   components: z.array(z.string().max(200)).max(500).optional(),
 })
-const componentPatchBody = z.object({
+const componentPatchSchema = z.object({
   name: z.string().max(200).optional(),
   description: z.string().max(2000).optional(),
   props: z.array(propSchema).optional(),
@@ -2907,14 +2906,6 @@ const componentPatchBody = z.object({
   replace: z.string().optional(),
   expectedRev: z.number().optional(),
 })
-
-function componentBody<T>(res: express.Response, schema: z.ZodType<T>, body: unknown): T | undefined {
-  const parsed = schema.safeParse(body ?? {})
-  if (parsed.success) return parsed.data
-  const issue = parsed.error.issues[0]
-  res.status(400).json({ error: `${issue?.path.join('.') || 'body'}: ${issue?.message ?? 'invalid'}` })
-  return undefined
-}
 
 function canvasOfPath(path: string): string | undefined {
   const [, kind, id] = /^\/api\/(canvases|frames)\/([^/]+)/.exec(path) ?? []
@@ -3117,7 +3108,7 @@ app.get('/api/canvases/:id/library', (req, res) => {
 app.post('/api/canvases/:id/library/publish', (req, res) => {
   const canvas = requireCanvas(req, res, req.params.id, 'edit')
   if (!canvas) return
-  const body = componentBody(res, libraryPublishBody, req.body ?? {})
+  const body = validated(res, libraryPublishSchema, req.body ?? {})
   if (!body) return
   componentRoute(res, () => {
     const result = publishToLibrary(canvas.id, body.components, userActor(req), req.user!.id)
@@ -3171,7 +3162,7 @@ app.post(
 app.delete('/api/canvases/:id/library', (req, res) => {
   const canvas = requireCanvas(req, res, req.params.id, 'edit')
   if (!canvas) return
-  const body = componentBody(res, libraryPublishBody, req.body ?? {})
+  const body = validated(res, libraryPublishSchema, req.body ?? {})
   if (!body) return
   componentRoute(res, () => unpublishFromLibrary(canvas.id, body.components, userActor(req), req.user!.id))
 })
@@ -3208,7 +3199,7 @@ app.post(
     const canvas = requireCanvas(req, res, req.params.id, 'edit')
     if (!canvas) return
     const { actor } = componentContext(req, canvas)
-    const body = componentBody(res, componentCreateBody, req.body)
+    const body = validated(res, componentCreateSchema, req.body)
     if (!body) return
     await componentRoute(res, async () => {
       if (typeof body.html === 'string') {
@@ -3268,7 +3259,7 @@ app.patch(
   writeRoute<ComponentParams>(async (req, res) => {
     const canvas = requireCanvas(req, res, req.params.id, 'edit')
     if (!canvas) return
-    const body = componentBody(res, componentPatchBody, req.body)
+    const body = validated(res, componentPatchSchema, req.body)
     if (!body) return
     await componentRoute(res, () =>
       runCanvasWrite(canvas.id, {
@@ -4140,17 +4131,40 @@ function joinAsGuest(
   })
 }
 
+/** sockets already logged for a malformed message: one line per visit, however many follow.
+ *  Node prints `console.debug` like `console.log`, and a client with a bad cursor sends one
+ *  every frame. Keyed by the socket itself because a malformed `join` arrives before it has a
+ *  `conns` entry; weak, so a closed socket leaves nothing behind to clean up. */
+const loggedMalformed = new WeakSet<WebSocket>()
+
+/** A room message as `clientMessageSchema` (shared/roomSchemas.ts) takes it, or `undefined`
+ *  for one that is not JSON or does not match: dropped, never acted on or relayed to peers. */
+function clientMessage(ws: WebSocket, raw: WebSocket.RawData): ClientMessage | undefined {
+  let data: unknown
+  try {
+    data = JSON.parse(String(raw))
+  } catch {
+    return undefined
+  }
+  const parsed = clientMessageSchema.safeParse(data)
+  if (parsed.success) return parsed.data
+  if (!loggedMalformed.has(ws)) {
+    loggedMalformed.add(ws)
+    const issue = parsed.error.issues[0]
+    const type: unknown = (data as { type?: unknown } | null)?.type
+    const what = typeof type === 'string' ? type.slice(0, 40) : 'untyped'
+    console.debug(`[room] dropped a malformed ${what} message: ${issue?.path.join('.')} ${issue?.message}`)
+  }
+  return undefined
+}
+
 wss.on('connection', (ws, upgradeReq) => {
   /* the session cookie rides the upgrade request; resolve it once */
   const sessionPromise = auth.api.getSession({ headers: fromNodeHeaders(upgradeReq.headers) }).catch(() => null)
 
   ws.on('message', async (raw) => {
-    let msg: ClientMessage
-    try {
-      msg = JSON.parse(String(raw))
-    } catch {
-      return
-    }
+    const msg = clientMessage(ws, raw)
+    if (!msg) return
     const conn = conns.get(ws)
 
     if (msg.type === 'join') {
@@ -4270,7 +4284,7 @@ wss.on('connection', (ws, upgradeReq) => {
     if (!conn) return
     /* every visitor reads the pages it opens, view-as and guests included */
     if (msg.type === 'page:load') {
-      if (typeof msg.pageId === 'string' && connRole(conn)) void sendPage(conn, msg.pageId)
+      if (connRole(conn)) void sendPage(conn, msg.pageId)
       return
     }
     if (msg.type === 'pages:shown') {
@@ -4294,7 +4308,6 @@ wss.on('connection', (ws, upgradeReq) => {
         broadcast(canvasId, { type: 'cursor', clientId: presence.clientId, x: msg.x, y: msg.y }, presence.clientId)
         break
       case 'viewport':
-        if (!isPeerViewport(msg.viewport)) break
         presence.viewport = msg.viewport
         broadcast(
           canvasId,
