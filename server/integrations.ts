@@ -124,7 +124,11 @@ for (const [id, oauth] of oauthConnections) {
  * part — it may well be another account. Anything else falls through to
  * the gated callback above.
  */
-export function relayDesktopCallback(req: express.Request, res: express.Response, next: express.NextFunction) {
+export function relayDesktopCallback(
+  req: express.Request<{ provider: string }>,
+  res: express.Response,
+  next: express.NextFunction,
+) {
   const provider = req.params.provider ?? ''
   if (!oauthConnections.has(provider) || !isDesktopState(req.query.state)) return next()
   const params = new URLSearchParams({ ...callbackQuery(req.query), provider })

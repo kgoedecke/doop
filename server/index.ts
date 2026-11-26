@@ -46,6 +46,7 @@ import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import express from 'express'
+import { emptyBodyByDefault, routeErrorAnswer } from './http.ts'
 import { eq, inArray } from 'drizzle-orm'
 import { toNodeHandler, fromNodeHeaders } from 'better-auth/node'
 import { oAuthDiscoveryMetadata } from 'better-auth/plugins'
@@ -633,6 +634,8 @@ const app = express()
 /* Railway/Fly terminate TLS in front of us; trust the proxy so req.protocol
    and secure cookies see https, and OAuth metadata echoes the right origin */
 app.set('trust proxy', 1)
+/* Express 5 defaults to the simple query parser; keep Express 4's (qs: `a[b]=1` is an object) */
+app.set('query parser', 'extended')
 
 app.get('/healthz', (_req, res) => res.json({ ok: true }))
 
@@ -865,7 +868,7 @@ app.get('/photos/pexels/:file', (req, res) => void servePhoto(req, res))
 
 /* A font ticket's command ends the URL with a slash, so curl appends the
    local file name (/u/<token>/Oxanium-Light.ttf) and the library keeps it. */
-app.put(['/u/:token', '/u/:token/:name'], async (req, res) => {
+app.put<{ token: string; name?: string }>(['/u/:token', '/u/:token/:name'], async (req, res) => {
   const token = req.params.token ?? ''
   const ticket = beginTicketUpload(token)
   if (!ticket)
@@ -943,7 +946,7 @@ app.put(['/u/:token', '/u/:token/:name'], async (req, res) => {
    plugin adds are refused by default rather than discovered later. */
 const MCP_OAUTH_PATHS = /^\/api\/auth\/(mcp\/|oauth2\/(authorize|consent|token))/
 const VIEW_AS_ALLOWED = /^\/api\/auth\/(sign-out|admin\/stop-impersonating)$/
-app.all('/api/auth/*', async (req, res, next) => {
+app.all('/api/auth/{*splat}', async (req, res, next) => {
   /* Admin → Sign-in turned email/password sign-up off: the form is hidden,
      and the call it would make is refused too. Sign-in, password resets and
      provider sign-ups go on as before. */
@@ -977,6 +980,7 @@ for (const extension of extensions) {
 }
 
 app.use(express.json({ limit: '10mb' }))
+app.use(emptyBodyByDefault)
 mountEditorPublicRoutes(app)
 mountCliPublicRoutes(app)
 /* agent keys, not browser sessions: ahead of the session gate on /api */
@@ -4029,7 +4033,7 @@ if (env.isProduction) {
   app.use(express.static(dist))
   /* a missing bundle or source map is a 404, not the app shell: HTML served
      as a .js or .map breaks module loads and source map resolution */
-  app.get('/assets/*', (_req, res) => res.sendStatus(404))
+  app.get('/assets/{*splat}', (_req, res) => res.sendStatus(404))
   /* Safari reads Smart App Banners from the initial document, before React
      mounts. The native app checks the canvas link against its signed-in server. */
   let canvasIndex: string | undefined
@@ -4038,16 +4042,18 @@ if (env.isProduction) {
     const content = canvasAppBanner(req.params.canvasId, new URL(env.BETTER_AUTH_URL).origin)
     res.type('html').send(canvasIndex.replace('</head>', `<meta name="apple-itunes-app" content="${content}"></head>`))
   })
-  app.get('*', (_req, res) => res.sendFile(path.join(dist, 'index.html')))
+  /* `root`: Express 5 refuses a file under a dot folder, and only the part below the root is checked */
+  app.get('/{*splat}', (_req, res) => res.sendFile('index.html', { root: dist }))
 }
 
 /* ------------------------------------------------- websocket */
 
-/* after every route: a handler that threw is undone, and one that ran out of work budget
-   answers 422 */
+/* after every route: a handler that threw is undone, one that ran out of work budget
+   answers 422, and whatever is left answers as a JSON error (server/http.ts) */
 app.use(undoRequest)
 app.use(workBudgetRefusal)
 app.use(canvasWriteRefusal)
+app.use(routeErrorAnswer)
 
 const server = http.createServer(app)
 const wss = new WebSocketServer({

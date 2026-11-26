@@ -8,7 +8,7 @@ import { canEditCanvas } from './access.ts'
 import { isBanned } from './auth.ts'
 
 /** Run-scoped capability; Google credentials never reach Doop's web server. */
-export async function handleGeminiCloudMcp(req: Request, res: Response) {
+export async function handleGeminiCloudMcp(req: Request<{ id: string }>, res: Response) {
   const id = req.params.id ?? ''
   const token = req.headers.authorization?.replace(/^Bearer /, '') ?? ''
   const run = geminiCloudRuns.authorized(id, token)
