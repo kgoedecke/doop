@@ -1,10 +1,10 @@
 ---
 id: TASK-79
 title: Warte beim Test-Cleanup auf Serverende
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-11-01T10:21:00Z'
-updated_date: '2026-11-01T12:02:00Z'
+updated_date: '2026-11-02T10:23:00Z'
 labels: []
 dependencies: []
 priority: medium
@@ -43,3 +43,14 @@ Erster Gesamtlauf nach Fix: 191 Dateien bestanden /1 fehlgeschlagen; 1610 Tests 
 
 Verifiziert auf aa19816: frische Gesamtsuite mit maxWorkers=2 besteht 192 Dateien /1611 Tests ohne Skips (351.41s). Nach zunaechst zwei isolierten Browser-Fehlern besteht elementPanelBrowser.test.ts unveraendert mit41/41; keine Browser-Test-Aenderung oder Timeout-Erhoehung. Alle vier CI-Shards und Aggregat tests sowie Typecheck/Lint/Build/Commit-Message bestehen auf aa19816. Vorherige Fehlversuche bleiben im Bericht dokumentiert. Alle AC automatisch verifiziert; Status bleibt In Progress bis Nutzerabnahme. Kein Merge.
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Warte vor Test-Cleanup auf das Serverende
+
+- Entferne Testdaten erst nach beendetem Serverprozess.
+- Erhalte KeepData- und Reboot-Semantik und pruefe die Shutdown-Reihenfolge per Regressionstest.
+- Verifiziere Gesamtsuite und alle CI-Shards; liefere den Fix mit PR #7 aus.
+- Schliesse nach ausdruecklicher Nutzerbestaetigung vom 02.11.2026.
+<!-- SECTION:FINAL_SUMMARY:END -->

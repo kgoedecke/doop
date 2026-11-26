@@ -1,10 +1,10 @@
 ---
 id: TASK-29
 title: Template-Attribute und Creator-Bearbeitung bereitstellen
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-10-23T09:51:00Z'
-updated_date: '2026-10-30T20:24:00Z'
+updated_date: '2026-11-02T10:23:00Z'
 labels:
   - prowin
   - implementation
@@ -50,3 +50,14 @@ Council 30.10.2026 (Claude Opus, GPT-6.1 Sol, Muse Wonder, je high): agree-with-
 
 Implementierung 30.10.2026: Shared Attributmodell, Creator-Feld-UI im ElementPanel (manageLocks), schmale Server-Metadatenpruefung in actions.updateFrame (403/400), ID-Remint bei Element-Duplikat/Drawing-Transfer. Council einstimmig agree-with-changes. Gesamtsuite: 185 Dateien / 1496 Tests PASS, Typecheck PASS. Branch task/29-template-attributes, HEAD 705e477. ACs anhand Tests geprueft; Done erst nach Nutzerabnahme. Rest: TASK-30 voller Guard, TASK-31 Beraterinnen-Sicht.
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Stelle Template-Felder fuer Creator bereit
+
+- Dokumentiere und validiere die sechs Template-Attribute.
+- Erhalte stabile, frame-eindeutige IDs und vergebe konfliktfreie Kopien.
+- Beschraenke Sperren und Constraints auf berechtigte Creator.
+- Schliesse nach ausdruecklicher Nutzerbestaetigung vom 02.11.2026.
+<!-- SECTION:FINAL_SUMMARY:END -->

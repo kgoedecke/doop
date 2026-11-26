@@ -1,10 +1,10 @@
 ---
 id: TASK-32
 title: Fünf Kernformate persistent integrieren
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-10-23T09:51:00Z'
-updated_date: '2026-11-02T13:31:00Z'
+updated_date: '2026-11-03T20:32:00Z'
 labels:
   - prowin
   - implementation
@@ -59,3 +59,13 @@ Alle technischen Akzeptanzkriterien verifiziert. Manuelle Geräte-/Nutzerabnahme
 
 Nach Abschluss aller Prüfungen hat der Nutzer ausdrücklich Push und Pull Request im Fork mmeister86/prowin_designer gewählt. Kein Merge oder Task-Done ohne weitere ausdrückliche Freigabe. Branch und Worktree bleiben für PR-Feedback erhalten.
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Integriere fünf persistente Kernformate mit separatem Preset-Dialog, optionalem Frame.preset, Datenbankmigration und Legacy-Kompatibilität. Schütze Preset-Maße serverseitig über Canvas-Creator-Rechte und erhalte Formatzuordnung in Kopier-/Undo-Pfaden.
+
+PR #9: https://github.com/mmeister86/prowin_designer/pull/9 – Merge am 02.11.2026 bestätigt. Implementierungsprüfung: 1875 Tests sowie Typecheck, Lint, Build und Docs-Lint bestanden; heute nicht erneut ausgeführt. Verbleibendes Platzierungs-Follow-up: TASK-80.
+
+Schließe den Task auf ausdrückliche Nutzerfreigabe vom 03.11.2026; keine zusätzliche manuelle Geräteprüfung behauptet.
+<!-- SECTION:FINAL_SUMMARY:END -->

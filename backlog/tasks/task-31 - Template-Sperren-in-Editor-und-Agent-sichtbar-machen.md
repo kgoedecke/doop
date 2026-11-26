@@ -1,10 +1,10 @@
 ---
 id: TASK-31
 title: Template-Sperren in Editor und Agent sichtbar machen
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-10-23T09:51:00Z'
-updated_date: '2026-11-01T23:16:00Z'
+updated_date: '2026-11-02T10:23:00Z'
 labels:
   - prowin
   - implementation
@@ -60,3 +60,14 @@ Resthinweise: physische IME/visuelle Nutzerabnahme offen; grosse erweiterte Laye
 
 Abschlussbericht mit Test-/Review-Belegen, Entscheidungen und manuellen Abnahmeschritten: docs/superpowers/reports/2026-11-02-template-editor.md. Branch task/31-template-editor bleibt lokal erhalten; keine weiteren Freigabeaktionen ausgefuehrt.
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Zeige Template-Sperren im Editor und Agent
+
+- Sichere Auswahl, Bearbeitung, Tokenfarben und Textlimits rollenbasiert ab.
+- Stelle Store und Live-Dokument nach abgelehnten Saves wieder her.
+- Vereinheitliche Agent- und MCP-Regeln; verifiziere 1716 Tests und Muse-Wonder-Reviews.
+- Dokumentiere den gemergten PR #8 und schliesse nach ausdruecklicher Nutzerbestaetigung vom 02.11.2026.
+<!-- SECTION:FINAL_SUMMARY:END -->
