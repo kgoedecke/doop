@@ -3,17 +3,26 @@ import http from 'node:http'
 import type { AddressInfo } from 'node:net'
 import type Anthropic from '@anthropic-ai/sdk'
 import {
+  MAX_CUSTOM_IMAGE_MODELS,
+  customImageModelRef,
   headersFromText,
   isCustomProviderKind,
   normalizeBaseUrl,
   parseCustomHeaders,
+  parseCustomImageModelRef,
   parseCustomKey,
   parseCustomProviderConfig,
 } from '../shared/customProvider.ts'
-import { CustomProviderUrlError, customProviderFetch, reachableUrl } from '../server/customProviderFetch.ts'
-import { customTurn, withoutImages } from '../server/agentModel.ts'
+import {
+  CustomProviderUrlError,
+  customProviderFetch,
+  reachableUrl,
+  redactSecrets,
+} from '../server/customProviderFetch.ts'
+import { ModelAuthError, customTurn, withoutImages } from '../server/agentModel.ts'
 import { discoverCustomModels, takeProbeSlot, testCustomProvider } from '../server/customProviders.ts'
 import { IMAGE_OMITTED_NOTE } from '../server/chatCompletionsAgent.ts'
+import { isInterruptedModelTurn, retryModelTurn } from '../server/modelTurnRetry.ts'
 import { stubEnv, unstubAllEnvs } from './envStub.ts'
 
 /**
@@ -102,6 +111,95 @@ describe('the provider description', () => {
     expect(parseCustomKey(undefined)).toEqual({ ok: true, value: '' })
     expect(parseCustomKey(' sk-1 ')).toEqual({ ok: true, value: 'sk-1' })
     expect(parseCustomKey('sk 1').ok).toBe(false)
+  })
+})
+
+describe('redactSecrets', () => {
+  it('masks the key and every header value long enough to be one, the longest first', () => {
+    const secrets = { apiKey: 'sk-abcd1234', headers: { 'X-Tenant': 'abcd', 'X-Flag': '1' } }
+    expect(redactSecrets('key sk-abcd1234 tenant abcd flag 1', secrets)).toBe('key *** tenant *** flag 1')
+    expect(redactSecrets('nothing here', {})).toBe('nothing here')
+  })
+})
+
+describe('a provider’s image models', () => {
+  const base = {
+    name: 'Acme',
+    apiType: 'openai-chat',
+    baseUrl: 'https://llm.acme.example/v1',
+    models: [{ id: 'qwen3-coder', vision: true }],
+  }
+
+  it('keeps a description stored before image models existed valid, and adds nothing to it', () => {
+    const parsed = parseCustomProviderConfig(base)
+    expect(parsed.ok).toBe(true)
+    expect(parsed.ok && parsed.value).not.toHaveProperty('imageModels')
+    /* an empty list is stored as no list, the same shape */
+    const empty = parseCustomProviderConfig({ ...base, imageModels: [] })
+    expect(empty.ok && empty.value).not.toHaveProperty('imageModels')
+  })
+
+  it('normalises each one: a trimmed id, a name only when it says more, transparent only when true', () => {
+    const parsed = parseCustomProviderConfig({
+      ...base,
+      imageModels: [
+        { id: ' flux-dev ', name: ' FLUX.1 dev ', transparent: true },
+        { id: 'black-forest-labs/FLUX.1-schnell', name: 'black-forest-labs/FLUX.1-schnell', transparent: 'yes' },
+        { id: 'sdxl', name: '' },
+      ],
+    })
+    expect(parsed.ok && parsed.value.imageModels).toEqual([
+      { id: 'flux-dev', name: 'FLUX.1 dev', transparent: true },
+      { id: 'black-forest-labs/FLUX.1-schnell' },
+      { id: 'sdxl' },
+    ])
+    /* the chat models are untouched by them */
+    expect(parsed.ok && parsed.value.models).toEqual([{ id: 'qwen3-coder', vision: true }])
+  })
+
+  it('lets one id be a chat model and an image model at once', () => {
+    const parsed = parseCustomProviderConfig({ ...base, imageModels: [{ id: 'qwen3-coder' }] })
+    expect(parsed.ok && parsed.value.imageModels).toEqual([{ id: 'qwen3-coder' }])
+  })
+
+  it('drops them from an Anthropic-compatible provider, which has no Images API', () => {
+    const parsed = parseCustomProviderConfig({ ...base, apiType: 'anthropic', imageModels: [{ id: 'flux-dev' }] })
+    expect(parsed.ok).toBe(true)
+    expect(parsed.ok && parsed.value).not.toHaveProperty('imageModels')
+  })
+
+  it.each([
+    [{ imageModels: 'flux-dev' }, 'must be a list'],
+    [{ imageModels: [{ id: 'has space' }] }, 'Image model 1 needs an id without spaces'],
+    [{ imageModels: [{ id: '' }] }, 'Image model 1 needs an id'],
+    [{ imageModels: [{ id: 'x'.repeat(121) }] }, 'at most 120 characters'],
+    [{ imageModels: [null] }, 'Image model 1 is not valid'],
+    [{ imageModels: [{ id: 'flux' }, { id: 'flux' }] }, 'listed twice as an image model'],
+    [{ imageModels: [{ id: 'flux', name: 'n'.repeat(61) }] }, 'too long'],
+    [
+      { imageModels: Array.from({ length: MAX_CUSTOM_IMAGE_MODELS + 1 }, (_, i) => ({ id: `m${i}` })) },
+      `at most ${MAX_CUSTOM_IMAGE_MODELS} image models`,
+    ],
+  ])('refuses %j', (patch, message) => {
+    const parsed = parseCustomProviderConfig({ ...base, ...patch })
+    expect(parsed.ok).toBe(false)
+    expect(!parsed.ok && parsed.error).toContain(message)
+  })
+
+  it('takes exactly the cap', () => {
+    const imageModels = Array.from({ length: MAX_CUSTOM_IMAGE_MODELS }, (_, i) => ({ id: `m${i}` }))
+    const parsed = parseCustomProviderConfig({ ...base, imageModels })
+    expect(parsed.ok && parsed.value.imageModels).toHaveLength(MAX_CUSTOM_IMAGE_MODELS)
+  })
+
+  it('names one in the image-model preference by its provider and id, a slash in the id included', () => {
+    const kind = 'custom:0123456789abcdef01'
+    const ref = customImageModelRef(kind, 'black-forest-labs/FLUX.1-dev')
+    expect(ref).toBe('custom:0123456789abcdef01/black-forest-labs/FLUX.1-dev')
+    expect(parseCustomImageModelRef(ref)).toEqual({ kind, model: 'black-forest-labs/FLUX.1-dev' })
+    for (const value of ['gpt-image-2', 'custom:0123456789abcdef01', 'custom:short/flux', 'custom:../x/flux', 42]) {
+      expect(parseCustomImageModelRef(value)).toBeNull()
+    }
   })
 })
 
@@ -231,6 +329,86 @@ describe('a custom provider’s turns', () => {
     /* the model was said not to see images: the screenshot becomes a note */
     expect(JSON.stringify(request!.body.messages)).toContain(IMAGE_OMITTED_NOTE)
     expect(JSON.stringify(request!.body.messages)).not.toContain('iVBORw0KGgo')
+  })
+
+  it('masks a key that straddles where the error text is cut, at either end of the key', async () => {
+    const KEY = 'sk-straddling-secret-key-0123456789'
+    const run = customTurn(
+      { config: { name: 'Acme', apiType: 'openai-chat', baseUrl: `${base}/v1`, models: [] }, apiKey: KEY },
+      { id: 'qwen3-coder', vision: true },
+    )
+    /* responseError keeps 400 characters of the body: the key starts just
+       before the cut, then ends just after it */
+    for (const before of [399, 400 - KEY.length + 1]) {
+      reply = (_req, res) => {
+        res.writeHead(400, { 'Content-Type': 'text/plain' })
+        res.end(`${'x'.repeat(before)}${KEY} and more`)
+      }
+      const failure = await run({ system: [{ text: 'sys' }], tools: [TOOL], messages: [screenshot], maxTokens: 100 })
+        .then(() => undefined)
+        .catch((error: unknown) => error as Error)
+      /* masked first, then cut: what is left of the mask, and not one character of the key */
+      expect(failure!.message).toMatch(/x\*/)
+      expect(failure!.message).not.toMatch(/sk-|xs$/)
+    }
+  })
+
+  it('keeps what a retry reads: a connection the endpoint drops is retried', async () => {
+    const KEY = 'sk-acme-secret-key'
+    let calls = 0
+    reply = (req, res) => {
+      calls++
+      /* the first attempt loses its connection mid-request */
+      if (calls === 1) return res.socket?.destroy()
+      json(res, 200, toolCall)
+    }
+    const run = customTurn(
+      { config: { name: 'Acme', apiType: 'openai-chat', baseUrl: `${base}/v1`, models: [] }, apiKey: KEY },
+      { id: 'qwen3-coder', vision: true },
+    )
+    const turn = () => run({ system: [{ text: 'sys' }], tools: [TOOL], messages: [screenshot], maxTokens: 100 })
+    /* the redacted failure still reads as an interrupted turn, by its causes' codes only */
+    const dropped = await turn()
+      .then(() => undefined)
+      .catch((error: unknown) => error)
+    expect(isInterruptedModelTurn(dropped)).toBe(true)
+    calls = 0
+    const retries: number[] = []
+    const result = await retryModelTurn(turn, { isCanceled: () => false, onRetry: (n) => retries.push(n) })
+    expect(result.stop_reason).toBe('tool_use')
+    expect(retries).toEqual([1])
+    expect(calls).toBe(2)
+  })
+
+  it('masks the key and header values in whatever the endpoint answers back, on either API type', async () => {
+    const KEY = 'sk-acme-secret-key'
+    const TENANT = 'tenant-secret-value'
+    reply = (_req, res) =>
+      json(res, 400, { error: { message: `Invalid params for key ${KEY} (tenant ${TENANT}, region eu)` } })
+    const secrets = { apiKey: KEY, headers: { 'X-Tenant': TENANT, 'X-Flag': 'on' } }
+    for (const apiType of ['openai-chat', 'anthropic'] as const) {
+      const run = customTurn(
+        { config: { name: 'Acme', apiType, baseUrl: `${base}/v1`, models: [] }, ...secrets },
+        { id: 'qwen3-coder', vision: true },
+      )
+      const failure = await run({ system: [{ text: 'sys' }], tools: [TOOL], messages: [screenshot], maxTokens: 100 })
+        .then(() => undefined)
+        .catch((error: unknown) => error as Error)
+      expect(failure).toBeInstanceOf(Error)
+      expect(failure!.message).toContain('Invalid params for key *** (tenant ***, region eu)')
+      /* nothing of the original rides along to a log line */
+      expect(failure!.cause).toBeUndefined()
+      expect(JSON.stringify(failure, Object.getOwnPropertyNames(failure))).not.toMatch(/sk-acme-secret|tenant-secret/)
+    }
+    /* the class the run reads its failure by is kept */
+    reply = (_req, res) => json(res, 401, { error: { message: `bad key ${KEY}` } })
+    const run = customTurn(
+      { config: { name: 'Acme', apiType: 'openai-chat', baseUrl: `${base}/v1`, models: [] }, ...secrets },
+      { id: 'qwen3-coder', vision: true },
+    )
+    await expect(
+      run({ system: [{ text: 'sys' }], tools: [TOOL], messages: [screenshot], maxTokens: 100 }),
+    ).rejects.toBeInstanceOf(ModelAuthError)
   })
 
   it('sends no Authorization at all when the endpoint takes no key', async () => {

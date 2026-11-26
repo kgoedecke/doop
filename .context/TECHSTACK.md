@@ -370,8 +370,35 @@ server/index.ts` in prod. `erasableSyntaxOnly` and `verbatimModuleSyntax` in tsc
   response cap; `DOOP_CUSTOM_PROVIDER_PRIVATE_HOSTS` admits private hosts and http for a self-hosted
   instance, `DOOP_CUSTOM_PROVIDERS=false` turns the feature off (existing ones read as disconnected).
   Advanced: extra headers (routing and framing headers refused), `max_tokens` vs
-  `max_completion_tokens`, and echoing `reasoning_content`. Tests: `customProvider.test.ts`,
-  `customProvidersHttp.test.ts`, `customProviderForm.test.tsx`.
+  `max_completion_tokens`, and echoing `reasoning_content`. A Chat Completions provider can also list image models
+  (`imageModels: { id, name?, transparent? }[]` in the same `custom` jsonb, at most 20;
+  `.context/specs/custom-provider-image-models.md`): they join the Settings image-model list for whoever has the
+  provider on (picked as `custom:<id>/<model id>` in `image_prefs`), and `generate_image` draws with them through
+  `POST {baseUrl}/images/generations` over `customProviderFetch` on the provider's key and headers (OpenAI's Images API
+  body; `data[0].b64_json`, or a `data[0].url` fetched the same way, credentials only to the base URL's origin; PNG, JPEG
+  or WebP only). Billed as the person's own connection, a shared provider included; a pick that cannot run refuses, never
+  falling back to another model or a server key. `generate_image`'s `transparent` sends `background: "transparent"` only
+  to a model marked so. Tests: `customProvider.test.ts`,
+  `customProvidersHttp.test.ts`, `customProviderForm.test.tsx`, `customProviderImages.test.ts`,
+  `customProviderImagesHttp.test.ts`, `imageModelCard.test.tsx`.
+- Shared model providers (`server/sharedModelAccounts.ts`, `src/components/SharedProviderSettings.tsx`):
+  a custom provider an instance admin sets up once in Admin → Shared models, for every signed-in
+  person. The definition lives in `shared_model_accounts` (kind `custom:<id>`, key and headers sealed,
+  `enabled`, at most 10; migration 0066) and each person's own model, effort and on/off in
+  `shared_model_account_prefs` (deleted with the provider). `getAccounts`/`getAccount` merge the
+  enabled ones after the person's own accounts as `ModelAccount`s marked `shared`, so the composer
+  pick, the default (someone with no account of their own defaults to the first one on), the free-tier
+  meter and runs treat it like any connection; picks write the prefs row, and edit, disconnect and the
+  set-up probes' stored-secret fallback refuse a shared kind (403). A person's view gives its origin
+  only, no header names. `GET/POST /api/admin/shared-providers`, `PUT/PATCH/DELETE
+/api/admin/shared-providers/:kind` and `/models`, `/test` (the same validation, probes and form as
+  personal ones, in admin mode); the admin view never carries the key or header values either, only
+  `hasKey` and `headerNames`, and the stored key and headers only go to the origin they were saved for
+  (a probe or edit for another origin must bring its own). `DOOP_CUSTOM_PROVIDERS=false` hides them
+  from everyone. For image billing a shared provider is the person's own connection, so the server's
+  image keys do not draw for them; its image models, if it lists any, draw for everyone on the company's endpoint. Tests:
+  `sharedModelAccounts.test.ts`, `sharedModelAccountsStore.test.ts`, `sharedModelProvidersHttp.test.ts`,
+  `sharedProviderRow.test.tsx`, `customProviderForm.test.tsx`.
 - Reasoning effort on a user's OpenAI account (ChatGPT subscription or OpenAI key): the pick lives
   in `model_accounts.reasoning_effort` (`REASONING_EFFORTS` in `shared/modelMenu.ts`: low / medium /
   high / xhigh), set through `PATCH /api/model-account/:kind { effort }`, read by `effortFor` in

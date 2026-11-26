@@ -89,4 +89,26 @@ export const admin = {
   refusalWorkspaceNotFound: 'That workspace no longer exists.',
   refusalInvalid: 'That change was not understood.',
   saveFailed: 'Could not save — try again.',
+
+  sharedNav: 'Shared models',
+  sharedTab: 'Models',
+  sharedLoadFailed: 'Could not load the shared providers.',
+  sharedTitle: 'Shared model providers',
+  sharedDescription:
+    'Custom providers everyone on this instance gets beside their own connections: they pick a model or switch one off for themselves, and never see its key or settings. Someone with no connection of their own runs on the first one that is on.',
+  sharedAdd: 'Add provider',
+  sharedEmpty:
+    'No shared providers yet. Add your gateway (LiteLLM, vLLM, Ollama…) once and nobody has to paste its key.',
+  sharedOff:
+    'Custom providers are switched off on this server (DOOP_CUSTOM_PROVIDERS=false), so nobody sees these until it is turned back on.',
+  sharedUse: 'Share {name} with everyone',
+  sharedEdit: 'Edit',
+  sharedDelete: 'Remove',
+  sharedDeleteTitle: 'Remove {name}?',
+  sharedDeleteDescription:
+    'It disappears for everyone at once, with each person’s model pick on it. To take it away for now, switch it off instead.',
+  sharedModelCount: { one: '{count} model', other: '{count} models' },
+  sharedImageModelCount: { one: '{count} image model', other: '{count} image models' },
+  sharedKeySet: 'key set',
+  sharedNoKey: 'no key',
 } as const

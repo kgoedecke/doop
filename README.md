@@ -969,7 +969,7 @@ read-only / destructive / idempotent annotations; the server registers no MCP pr
 | `search_logos`           | Real company logos by brand name or domain (Brandfetch, vector marks)                                               |
 | `list_backgrounds`       | Curated hero/section/bento backgrounds (glows, grainy meshes, aurora, painterly) as thumbnails                      |
 | `search_inspiration`     | Curated live landing pages with style, colour, fonts and sections (One Page Love)                                   |
-| `generate_image`         | Generate an image with the model the user picked in Settings (GPT Image, Nano Banana or Seedream) → asset URL       |
+| `generate_image`         | Image from the model picked in Settings (GPT Image, Nano Banana, Seedream, a custom provider's model) → asset URL   |
 | `upload_asset`           | Store your own file — from a URL, a one-time local-file upload URL, or inline base64                                |
 | **Web**                  |                                                                                                                     |
 | `view_website`           | Inspect one public page read-only; returns a desktop screenshot and visible text without changing the canvas        |

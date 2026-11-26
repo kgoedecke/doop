@@ -2095,11 +2095,12 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
           .optional()
           .describe('square 1024×1024 (default), landscape 1536×1024, portrait 1024×1536 — match the slot'),
         quality: z.enum(imageGen.IMAGE_QUALITIES).optional().describe('low is fast and cheap; default medium'),
+        transparent: z.boolean().optional().describe(imageGen.TRANSPARENT_NOTE),
         canvas_id: z.string().describe('The canvas this image belongs to'),
         agent_name: agentName,
       },
     },
-    async ({ prompt, aspect, quality, canvas_id, agent_name }) => {
+    async ({ prompt, aspect, quality, transparent, canvas_id, agent_name }) => {
       if (!canvasFor(canvas_id, 'edit')) return noCanvas(canvas_id)
       const now = Date.now()
       const limitKey = ownerId ?? agent_name
@@ -2108,14 +2109,15 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
       hits.push(now)
       generateHits.set(limitKey, hits)
       try {
-        const image = await imageGen.generateImage(ownerId, { prompt, aspect, quality })
+        const image = await imageGen.generateImage(ownerId, { prompt, aspect, quality, transparent })
         const asset = await assets.createAsset(image.buf, { canvasId: canvas_id, ownerId, uploadedBy: agent_name })
         const url = `${env.BETTER_AUTH_URL}/a/${asset.id}.${asset.ext}`
         capture(ownerId ?? agent_name, 'image_generated', {
           canvas_id,
           aspect,
           quality,
-          billed_to: image.billedTo,
+          /* a custom provider's name is its person's or admin's, not an analytics value */
+          billed_to: image.custom ? `custom-${image.custom}` : image.billedTo,
         })
         const result = {
           content: [
@@ -2130,6 +2132,7 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
                   mime: asset.mime,
                   size_bytes: asset.size,
                   billed_to: image.billedTo,
+                  ...(transparent ? { transparent: image.transparent } : {}),
                   usage: `<img src="${url}" alt="" style="object-fit: cover">`,
                 },
                 null,

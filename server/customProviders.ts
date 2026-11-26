@@ -1,9 +1,19 @@
 import type Anthropic from '@anthropic-ai/sdk'
+import type express from 'express'
 import { z } from 'zod'
 import { customTurn, type CustomTarget } from './agentModel.ts'
-import { customProviderFetch, reachableUrl } from './customProviderFetch.ts'
+import { CustomProviderUrlError, customProviderFetch, reachableUrl } from './customProviderFetch.ts'
 import type { ModelOption } from '../shared/modelMenu.ts'
-import { MAX_CUSTOM_MODEL_ID, type CustomModel, type CustomProviderConfig } from '../shared/customProvider.ts'
+import {
+  CUSTOM_API_TYPES,
+  MAX_CUSTOM_MODEL_ID,
+  normalizeBaseUrl,
+  parseCustomHeaders,
+  parseCustomKey,
+  parseCustomProviderConfig,
+  type CustomModel,
+  type CustomProviderConfig,
+} from '../shared/customProvider.ts'
 
 /**
  * What Settings asks of a custom provider while it is being set up: which
@@ -23,6 +33,53 @@ const MAX_DISCOVERED = 500
 const ModelList = z.object({ data: z.array(z.object({ id: z.string() })) })
 
 export class CustomProviderError extends Error {}
+
+/* ---- what the set-up routes read off a request: Settings' own
+   (server/index.ts) and Admin's shared ones (server/admin.ts) */
+
+/** The key and headers a request carries: a field left out is undefined, so
+ *  an edit keeps the stored one; an empty key clears it. */
+export function customSecrets(body: Record<string, unknown>): { apiKey?: string; headers?: Record<string, string> } {
+  const secrets: { apiKey?: string; headers?: Record<string, string> } = {}
+  if (body.apiKey !== undefined) {
+    const key = parseCustomKey(body.apiKey)
+    if (!key.ok) throw new CustomProviderError(key.error)
+    secrets.apiKey = key.value
+  }
+  if (body.headers !== undefined) {
+    const headers = parseCustomHeaders(body.headers)
+    if (!headers.ok) throw new CustomProviderError(headers.error)
+    secrets.headers = headers.value
+  }
+  return secrets
+}
+
+/** A validated provider description whose URL this server may reach. */
+export function customConfig(body: unknown): CustomProviderConfig {
+  const config = parseCustomProviderConfig(body)
+  if (!config.ok) throw new CustomProviderError(config.error)
+  reachableUrl(config.value.baseUrl)
+  return config.value
+}
+
+/** The endpoint a Fetch models request names, before anything is saved. */
+export function discoveryEndpoint(body: Record<string, unknown>): Pick<CustomProviderConfig, 'apiType' | 'baseUrl'> {
+  const apiType = CUSTOM_API_TYPES.find((type) => type === body.apiType)
+  if (!apiType) throw new CustomProviderError('Pick the API type')
+  const baseUrl = normalizeBaseUrl(typeof body.baseUrl === 'string' ? body.baseUrl : '')
+  if (!baseUrl.ok) throw new CustomProviderError(baseUrl.error)
+  return { apiType, baseUrl: baseUrl.value }
+}
+
+export function customFailure(res: express.Response, error: unknown, fallback: string) {
+  if (error instanceof CustomProviderError || error instanceof CustomProviderUrlError) {
+    return res.status(400).json({ error: error.message })
+  }
+  /* the provider's own error text (a 400 body, a refused model) is what the
+     person needs to fix their endpoint; never a stack */
+  const message = error instanceof Error ? error.message.slice(0, 500) : fallback
+  return res.status(400).json({ error: message || fallback })
+}
 
 /**
  * The model ids the endpoint lists: `GET {base}/models` for Chat Completions,

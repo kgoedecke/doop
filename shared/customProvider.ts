@@ -11,6 +11,11 @@
  * stripped for one that does not, rather than failing the first visual
  * review) and how many tokens it may write per turn.
  *
+ * A Chat Completions provider can also list image models, which the agents'
+ * generate_image draws with through the endpoint's OpenAI Images API
+ * (`POST {baseUrl}/images/generations`, server/imageGen.ts). They sit apart
+ * from the chat models: an image model never drives the agent.
+ *
  * This module is the one validator both the server and the Settings form
  * use; the server re-checks everything it is sent.
  */
@@ -45,6 +50,17 @@ export interface CustomModel {
   maxOutputTokens?: number
 }
 
+/** An image model on a custom provider, drawn with through
+ *  `POST {baseUrl}/images/generations`. */
+export interface CustomImageModel {
+  /** the id the endpoint is sent */
+  id: string
+  /** what the image-model picker shows; the id when unset */
+  name?: string
+  /** the endpoint honours `background: "transparent"` for this model */
+  transparent?: boolean
+}
+
 /** What a custom provider is, as stored and as Settings shows it. The key
  *  and the extra headers are kept apart (sealed) and never sent back. */
 export interface CustomProviderConfig {
@@ -57,10 +73,14 @@ export interface CustomProviderConfig {
   /** Chat Completions only: send earlier turns' `reasoning_content` back,
    *  which DeepSeek- and Kimi-style servers refuse to run without */
   echoReasoning?: boolean
+  /** Chat Completions only: the models generate_image may draw with; a
+   *  description stored before these existed has none */
+  imageModels?: CustomImageModel[]
 }
 
 export const MAX_CUSTOM_PROVIDERS = 10
 export const MAX_CUSTOM_MODELS = 50
+export const MAX_CUSTOM_IMAGE_MODELS = 20
 export const MAX_CUSTOM_HEADERS = 10
 const MAX_NAME = 60
 const MAX_URL = 500
@@ -143,6 +163,43 @@ function parseModel(value: unknown, index: number): Parsed<CustomModel> {
   }
 }
 
+function parseImageModel(value: unknown, index: number): Parsed<CustomImageModel> {
+  if (!value || typeof value !== 'object') return fail(`Image model ${index + 1} is not valid`)
+  const { id, name, transparent } = value as Record<string, unknown>
+  const modelId = typeof id === 'string' ? id.trim() : ''
+  if (!MODEL_ID.test(modelId)) {
+    return fail(`Image model ${index + 1} needs an id without spaces (at most 120 characters)`)
+  }
+  const label = typeof name === 'string' ? name.trim() : ''
+  if (label.length > MAX_NAME) return fail(`The name of ${modelId} is too long`)
+  return {
+    ok: true,
+    value: {
+      id: modelId,
+      ...(label && label !== modelId ? { name: label } : {}),
+      ...(transparent === true ? { transparent: true } : {}),
+    },
+  }
+}
+
+/** The image models a description lists: none when the field is absent, as
+ *  on every description stored before image models existed. */
+function parseImageModels(value: unknown): Parsed<CustomImageModel[]> {
+  if (value === undefined || value === null) return { ok: true, value: [] }
+  if (!Array.isArray(value)) return fail('Image models must be a list')
+  if (value.length > MAX_CUSTOM_IMAGE_MODELS) {
+    return fail(`A provider can list at most ${MAX_CUSTOM_IMAGE_MODELS} image models`)
+  }
+  const models: CustomImageModel[] = []
+  for (const [index, entry] of value.entries()) {
+    const model = parseImageModel(entry, index)
+    if (!model.ok) return model
+    if (models.some((m) => m.id === model.value.id)) return fail(`${model.value.id} is listed twice as an image model`)
+    models.push(model.value)
+  }
+  return { ok: true, value: models }
+}
+
 /** A provider's description as the Settings form sends it. */
 export function parseCustomProviderConfig(value: unknown): Parsed<CustomProviderConfig> {
   if (!value || typeof value !== 'object') return fail('Fill in the provider')
@@ -164,6 +221,9 @@ export function parseCustomProviderConfig(value: unknown): Parsed<CustomProvider
     models.push(model.value)
   }
   const tokenParam = CUSTOM_TOKEN_PARAMS.find((param) => param === body.tokenParam)
+  /* the Images API is OpenAI's: an Anthropic-compatible endpoint has none */
+  const imageModels = apiType === 'openai-chat' ? parseImageModels(body.imageModels) : { ok: true as const, value: [] }
+  if (!imageModels.ok) return imageModels
   return {
     ok: true,
     value: {
@@ -173,8 +233,28 @@ export function parseCustomProviderConfig(value: unknown): Parsed<CustomProvider
       models,
       ...(apiType === 'openai-chat' && tokenParam && tokenParam !== 'max_tokens' ? { tokenParam } : {}),
       ...(apiType === 'openai-chat' && body.echoReasoning === true ? { echoReasoning: true } : {}),
+      ...(imageModels.value.length ? { imageModels: imageModels.value } : {}),
     },
   }
+}
+
+/**
+ * What the image-model preference stores for a custom provider's image model:
+ * the provider's kind and the model's id, `custom:<id>/<model id>`. A
+ * registry id never starts with `custom:`, and a kind never holds a `/`, so
+ * the first `/` splits it even when the model id has its own.
+ */
+export function customImageModelRef(kind: CustomProviderKind, modelId: string): string {
+  return `${kind}/${modelId}`
+}
+
+const IMAGE_MODEL_REF = /^(custom:[a-z0-9]{8,32})\/(\S{1,120})$/
+
+export function parseCustomImageModelRef(value: unknown): { kind: CustomProviderKind; model: string } | null {
+  if (typeof value !== 'string') return null
+  const match = IMAGE_MODEL_REF.exec(value)
+  if (!match || !isCustomProviderKind(match[1])) return null
+  return { kind: match[1], model: match[2]! }
 }
 
 /** Extra request headers, as `{ name: value }`. */

@@ -126,16 +126,18 @@ import { serverTierInfo } from './agentModel.ts'
 import { imageModelAvailability, serverImageGenEnabled } from './imageGen.ts'
 import { setImagePref } from './imagePrefs.ts'
 import { accountsView, listRunners, menuFor } from './agentRunners.ts'
-import { CustomProviderError, discoverCustomModels, takeProbeSlot, testCustomProvider } from './customProviders.ts'
-import { CustomProviderUrlError, customProvidersEnabled, reachableUrl } from './customProviderFetch.ts'
 import {
-  isCustomProviderKind,
-  normalizeBaseUrl,
-  parseCustomHeaders,
-  parseCustomKey,
-  parseCustomProviderConfig,
-  CUSTOM_API_TYPES,
-} from '../shared/customProvider.ts'
+  CustomProviderError,
+  customConfig,
+  customFailure,
+  customSecrets,
+  discoverCustomModels,
+  discoveryEndpoint,
+  takeProbeSlot,
+  testCustomProvider,
+} from './customProviders.ts'
+import { customProvidersEnabled } from './customProviderFetch.ts'
+import { isCustomProviderKind } from '../shared/customProvider.ts'
 import { setStoredDefault } from './agentDefaults.ts'
 import { exceedsCardTargetLimit, MAX_CARD_TARGETS } from '../shared/cardScope.ts'
 import { isRunnerProvider } from '../shared/agentRunner.ts'
@@ -1681,49 +1683,16 @@ app.use('/api/custom-providers', (_req, res, next) => {
   next()
 })
 
-/** The key and headers a request carries: a field left out is undefined, so
- *  an edit keeps the stored one; an empty key clears it. */
-function customSecrets(body: Record<string, unknown>): { apiKey?: string; headers?: Record<string, string> } {
-  const secrets: { apiKey?: string; headers?: Record<string, string> } = {}
-  if (body.apiKey !== undefined) {
-    const key = parseCustomKey(body.apiKey)
-    if (!key.ok) throw new CustomProviderError(key.error)
-    secrets.apiKey = key.value
-  }
-  if (body.headers !== undefined) {
-    const headers = parseCustomHeaders(body.headers)
-    if (!headers.ok) throw new CustomProviderError(headers.error)
-    secrets.headers = headers.value
-  }
-  return secrets
-}
-
-/** A validated provider description whose URL this server may reach. */
-function customConfig(body: unknown) {
-  const config = parseCustomProviderConfig(body)
-  if (!config.ok) throw new CustomProviderError(config.error)
-  reachableUrl(config.value.baseUrl)
-  return config.value
-}
-
 /** The secrets a set-up request should use: what it carries, else (for a
  *  provider being edited) what is stored for it. */
 async function probeSecrets(userId: string, body: Record<string, unknown>) {
   const given = customSecrets(body)
-  const stored = isCustomProviderKind(body.kind) ? await modelAccounts.getAccount(userId, body.kind) : null
+  const account = isCustomProviderKind(body.kind) ? await modelAccounts.getAccount(userId, body.kind) : null
+  /* never a shared provider's: its key would go to whatever URL this request names */
+  const stored = account?.shared ? null : account
   const apiKey = given.apiKey ?? stored?.apiKey
   const headers = given.headers ?? stored?.headers
   return { ...(apiKey ? { apiKey } : {}), ...(headers ? { headers } : {}) }
-}
-
-function customFailure(res: express.Response, error: unknown, fallback: string) {
-  if (error instanceof CustomProviderError || error instanceof CustomProviderUrlError) {
-    return res.status(400).json({ error: error.message })
-  }
-  /* the provider's own error text (a 400 body, a refused model) is what the
-     person needs to fix their endpoint; never a stack */
-  const message = error instanceof Error ? error.message.slice(0, 500) : fallback
-  return res.status(400).json({ error: message || fallback })
 }
 
 app.post('/api/custom-providers', async (req, res) => {
@@ -1747,6 +1716,7 @@ app.put('/api/custom-providers/:kind', async (req, res) => {
     res.json(await accountsView(req.user!.id))
     wakeUserWork(req.user!.id)
   } catch (error) {
+    if (error instanceof modelAccounts.SharedAccountError) return res.status(403).json({ error: error.message })
     customFailure(res, error, 'could not save that provider')
   }
 })
@@ -1757,12 +1727,8 @@ app.post('/api/custom-providers/models', async (req, res) => {
   if (!takeProbeSlot(userId)) return res.status(429).json({ error: 'Too many requests. Wait a few minutes.' })
   try {
     const body = (req.body ?? {}) as Record<string, unknown>
-    const apiType = CUSTOM_API_TYPES.find((type) => type === body.apiType)
-    if (!apiType) throw new CustomProviderError('Pick the API type')
-    const baseUrl = normalizeBaseUrl(typeof body.baseUrl === 'string' ? body.baseUrl : '')
-    if (!baseUrl.ok) throw new CustomProviderError(baseUrl.error)
     const models = await discoverCustomModels({
-      config: { apiType, baseUrl: baseUrl.value },
+      config: discoveryEndpoint(body),
       ...(await probeSecrets(userId, body)),
     })
     res.json({ models })
@@ -1790,7 +1756,13 @@ app.post('/api/custom-providers/test', async (req, res) => {
 app.delete('/api/model-account/:kind', async (req, res) => {
   const kind = req.params.kind
   if (!modelAccounts.isAccountKind(kind)) return res.status(400).json({ error: 'unknown account kind' })
-  await modelAccounts.disconnect(req.user!.id, kind)
+  try {
+    await modelAccounts.disconnect(req.user!.id, kind)
+  } catch (error) {
+    /* a shared provider is the admin's to remove; switching it off is the person's */
+    if (error instanceof modelAccounts.SharedAccountError) return res.status(403).json({ error: error.message })
+    return res.status(500).json({ error: 'could not disconnect that account' })
+  }
   res.json(await accountsView(req.user!.id))
 })
 

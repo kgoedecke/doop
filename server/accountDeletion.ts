@@ -1,6 +1,12 @@
 import { eq } from 'drizzle-orm'
 import { db } from './db/index.ts'
-import { linearOAuthStates, liveActivities, liveActivityStarters, slackOAuthStates } from './db/schema.ts'
+import {
+  linearOAuthStates,
+  liveActivities,
+  liveActivityStarters,
+  sharedModelAccountPrefs,
+  slackOAuthStates,
+} from './db/schema.ts'
 import { forgetLibrary } from './componentLibrary.ts'
 import { dropPersonalAgents } from './customAgents.ts'
 import { dropPersonalSkills } from './skills.ts'
@@ -37,6 +43,8 @@ export async function purgeUserData(userId: string): Promise<{ deletedCanvases: 
   for (const workspaceId of workspaceIdsFor(userId)) await leaveWorkspace(workspaceId, userId)
   await db.delete(liveActivities).where(eq(liveActivities.userId, userId))
   await db.delete(liveActivityStarters).where(eq(liveActivityStarters.userId, userId))
+  /* their model picks and on/off on the providers an admin shares */
+  await db.delete(sharedModelAccountPrefs).where(eq(sharedModelAccountPrefs.userId, userId))
   await dropPersonalAgents(userId)
   await dropPersonalSkills(userId)
   return { deletedCanvases }

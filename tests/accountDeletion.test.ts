@@ -4,6 +4,7 @@ const rig = vi.hoisted(() => ({
   deleted: [] as string[],
   workspaces: new Map<string, Set<string>>(),
   dbDeletes: 0,
+  tables: [] as unknown[],
 }))
 vi.mock('../server/db/persist.ts', () => {
   const noop = () => undefined
@@ -26,8 +27,9 @@ vi.mock('../server/db/persist.ts', () => {
 })
 vi.mock('../server/db/index.ts', () => ({
   db: {
-    delete: () => ({
+    delete: (table: unknown) => ({
       where: async () => {
+        rig.tables.push(table)
         rig.dbDeletes += 1
       },
     }),
@@ -48,6 +50,7 @@ beforeEach(() => {
   for (const canvas of store.allCanvases()) store.deleteCanvas(canvas.id)
   rig.workspaces.clear()
   rig.dbDeletes = 0
+  rig.tables = []
   vi.clearAllMocks()
 })
 
@@ -70,8 +73,17 @@ it('deletes only the canvases nobody else can reach, and leaves the rest', async
   expect(rig.workspaces.get('ws1')?.has('alice')).toBe(false)
   expect(rig.workspaces.get('ws1')?.has('bob')).toBe(true)
   // Slack and Linear OAuth handoffs, live activity update tokens, push-to-start tokens,
-  // the person's own custom agents and their changes to the built-in ones, their own skills
-  expect(rig.dbDeletes).toBe(7)
+  // their picks on shared model providers, the person's own custom agents and their changes
+  // to the built-in ones, their own skills
+  expect(rig.dbDeletes).toBe(8)
+})
+
+it('forgets the person’s picks on the model providers an admin shares', async () => {
+  const { sharedModelAccountPrefs, sharedModelAccounts } = await import('../server/db/schema.ts')
+  await purgeUserData('alice')
+  expect(rig.tables).toContain(sharedModelAccountPrefs)
+  /* the providers themselves are the instance's, not the person's */
+  expect(rig.tables).not.toContain(sharedModelAccounts)
 })
 
 it('disconnects the Slack and Linear agents, so no installation outlives its installer', async () => {

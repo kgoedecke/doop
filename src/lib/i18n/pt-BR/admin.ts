@@ -90,4 +90,26 @@ export const admin: Catalog['admin'] = {
   refusalWorkspaceNotFound: 'Esse workspace não existe mais.',
   refusalInvalid: 'Essa alteração não foi entendida.',
   saveFailed: 'Não foi possível salvar — tente de novo.',
+
+  sharedNav: 'Modelos compartilhados',
+  sharedTab: 'Modelos',
+  sharedLoadFailed: 'Não foi possível carregar os provedores compartilhados.',
+  sharedTitle: 'Provedores de modelo compartilhados',
+  sharedDescription:
+    'Provedores personalizados que todos nesta instância recebem ao lado das próprias conexões: cada pessoa escolhe um modelo ou desliga um só para si, e nunca vê a chave nem as configurações. Quem não tem conexão própria usa o primeiro que estiver ligado.',
+  sharedAdd: 'Adicionar provedor',
+  sharedEmpty:
+    'Nenhum provedor compartilhado ainda. Adicione seu gateway (LiteLLM, vLLM, Ollama…) uma vez e ninguém precisa colar a chave.',
+  sharedOff:
+    'Os provedores personalizados estão desligados neste servidor (DOOP_CUSTOM_PROVIDERS=false), então ninguém os vê até que sejam religados.',
+  sharedUse: 'Compartilhar {name} com todos',
+  sharedEdit: 'Editar',
+  sharedDelete: 'Remover',
+  sharedDeleteTitle: 'Remover {name}?',
+  sharedDeleteDescription:
+    'Ele some para todos na hora, junto com o modelo que cada pessoa escolheu nele. Para tirá-lo por enquanto, desligue-o.',
+  sharedModelCount: { one: '{count} modelo', other: '{count} modelos' },
+  sharedImageModelCount: { one: '{count} modelo de imagem', other: '{count} modelos de imagem' },
+  sharedKeySet: 'chave definida',
+  sharedNoKey: 'sem chave',
 }

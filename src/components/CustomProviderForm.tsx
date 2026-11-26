@@ -1,6 +1,6 @@
 import { useId, useState } from 'react'
-import { api } from '../lib/api'
-import type { CustomProviderInput, ModelAccounts, ModelAccountStatus } from '../lib/api'
+import { adminApi, api } from '../lib/api'
+import type { AdminSharedProviders, CustomProviderInput, ModelAccounts, ModelAccountStatus } from '../lib/api'
 import { useT } from '../lib/i18n'
 import {
   headersFromText,
@@ -21,6 +21,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Switch } from './ui/switch'
 import { Textarea } from './ui/textarea'
 import { FieldError } from './ConnectionTable'
+import { cn } from '@/lib/utils'
 
 /**
  * Settings → Doop Agent → Custom provider: any OpenAI- or Anthropic-
@@ -29,8 +30,15 @@ import { FieldError } from './ConnectionTable'
  * turn. Fetch models asks the endpoint for its list; Test runs one turn that
  * has to call a tool, which is how the agent does all its work.
  *
+ * A Chat Completions provider can also list image models, which the agents'
+ * generate_image draws with through the endpoint's Images API; the ids Fetch
+ * models found can go into either list.
+ *
  * On an edit the stored key and headers are never shown: blank fields keep
  * them, and each has its own Remove.
+ *
+ * Admin → Shared models opens the same form in admin mode: the same fields,
+ * saved and probed through the admin routes, for a provider everyone gets.
  */
 
 interface ModelRow {
@@ -48,16 +56,35 @@ const row = (id = '', vision = false, maxOutputTokens = ''): ModelRow => ({
   vision,
 })
 
+interface ImageRow {
+  key: number
+  id: string
+  name: string
+  transparent: boolean
+}
+
+const imageRow = (id = '', name = '', transparent = false): ImageRow => ({
+  key: nextRowKey++,
+  id,
+  name,
+  transparent,
+})
+
+/** Where the form saves and probes: the person's own providers, or (admin)
+ *  the instance's shared ones. */
+type FormMode =
+  | { admin?: false; onSaved: (view: ModelAccounts) => void }
+  | { admin: true; onSaved: (view: AdminSharedProviders) => void }
+
 export function CustomProviderForm({
   provider,
-  onSaved,
   onClose,
+  ...mode
 }: {
   /** the provider being edited; a new one when unset */
-  provider?: ModelAccountStatus
-  onSaved: (view: ModelAccounts) => void
+  provider?: Pick<ModelAccountStatus, 'kind' | 'custom'>
   onClose: () => void
-}) {
+} & FormMode) {
   const t = useT()
   const ids = useId()
   const stored = provider?.custom
@@ -69,6 +96,10 @@ export function CustomProviderForm({
   const [clearKey, setClearKey] = useState(false)
   const [models, setModels] = useState<ModelRow[]>(
     stored?.models.map((m) => row(m.id, m.vision, m.maxOutputTokens ? String(m.maxOutputTokens) : '')) ?? [row()],
+  )
+  /* none until the person adds one: most providers draw nothing */
+  const [imageModels, setImageModels] = useState<ImageRow[]>(
+    stored?.imageModels?.map((m) => imageRow(m.id, m.name ?? '', m.transparent ?? false)) ?? [],
   )
   const [headersText, setHeadersText] = useState('')
   const [clearHeaders, setClearHeaders] = useState(false)
@@ -96,6 +127,9 @@ export function CustomProviderForm({
       models: models
         .filter((m) => m.id.trim())
         .map((m) => ({ id: m.id, vision: m.vision, maxOutputTokens: m.maxOutputTokens.trim() || undefined })),
+      imageModels: imageModels
+        .filter((m) => m.id.trim())
+        .map((m) => ({ id: m.id, name: m.name, transparent: m.transparent })),
       tokenParam,
       echoReasoning,
     })
@@ -139,7 +173,11 @@ export function CustomProviderForm({
     if (!body) return
     setBusy('save')
     try {
-      onSaved(kind ? await api.updateCustomProvider(kind, body) : await api.addCustomProvider(body))
+      if (mode.admin) {
+        mode.onSaved(kind ? await adminApi.updateSharedProvider(kind, body) : await adminApi.addSharedProvider(body))
+      } else {
+        mode.onSaved(kind ? await api.updateCustomProvider(kind, body) : await api.addCustomProvider(body))
+      }
     } catch (e) {
       failWith(e)
     } finally {
@@ -151,7 +189,8 @@ export function CustomProviderForm({
     setError('')
     setBusy('fetch')
     try {
-      const { models: listed } = await api.discoverCustomModels({ apiType, baseUrl, ...probeSecrets() })
+      const discover = mode.admin ? adminApi.discoverSharedModels : api.discoverCustomModels
+      const { models: listed } = await discover({ apiType, baseUrl, ...probeSecrets() })
       setDiscovered(listed)
       if (!listed.length) setError(t('models.customNoModelsListed'))
     } catch (e) {
@@ -169,7 +208,8 @@ export function CustomProviderForm({
     if (!body || !first) return
     setBusy('test')
     try {
-      const result = await api.testCustomProvider({ ...body, ...probeSecrets(), model: first.id })
+      const probe = mode.admin ? adminApi.testSharedProvider : api.testCustomProvider
+      const result = await probe({ ...body, ...probeSecrets(), model: first.id })
       setTested(t('models.customTestPassed', { model: result.model }))
     } catch (e) {
       failWith(e)
@@ -189,12 +229,26 @@ export function CustomProviderForm({
     })
   const unlisted = discovered?.filter((id) => !models.some((m) => m.id === id)) ?? []
 
+  const updateImageRow = (key: number, patch: Partial<ImageRow>) =>
+    setImageModels((rows) => rows.map((m) => (m.key === key ? { ...m, ...patch } : m)))
+  const addDiscoveredImage = (id: string) =>
+    setImageModels((rows) => {
+      if (rows.some((m) => m.id === id)) return rows
+      const blank = rows.find((m) => !m.id.trim())
+      return blank ? rows.map((m) => (m === blank ? { ...m, id } : m)) : [...rows, imageRow(id)]
+    })
+  const unlistedImages = discovered?.filter((id) => !imageModels.some((m) => m.id === id)) ?? []
+
   return (
     <Modal size="xl" onClose={onClose}>
       <ModalTitle>
-        {kind ? t('models.customEditTitle', { name: stored?.name ?? '' }) : t('models.customTitle')}
+        {kind
+          ? t('models.customEditTitle', { name: stored?.name ?? '' })
+          : mode.admin
+            ? t('models.customSharedTitle')
+            : t('models.customTitle')}
       </ModalTitle>
-      <ModalLede>{t('models.customLede')}</ModalLede>
+      <ModalLede>{mode.admin ? t('models.customSharedLede') : t('models.customLede')}</ModalLede>
 
       <div className="mt-5 grid gap-4">
         <div className="grid gap-3 sm:grid-cols-2">
@@ -337,6 +391,78 @@ export function CustomProviderForm({
           </div>
           <p className="mt-1.5 text-caption text-ink-faint">{t('models.customModelsHint')}</p>
         </div>
+
+        {/* the Images API is OpenAI's: an Anthropic-compatible endpoint has none */}
+        {apiType === 'openai-chat' && (
+          <div>
+            <span className="mb-1.5 block text-label font-medium text-ink-soft">{t('models.customImageModels')}</span>
+            {imageModels.length > 0 && (
+              <div role="list" aria-label={t('models.customImageModels')} className="grid gap-2">
+                {imageModels.map((m, index) => (
+                  <div role="listitem" key={m.key} className="flex flex-wrap items-center gap-2">
+                    <Input
+                      variant="well"
+                      className="min-w-[180px] flex-[2] font-mono"
+                      value={m.id}
+                      onChange={(e) => updateImageRow(m.key, { id: e.target.value })}
+                      placeholder={t('models.customImageModelIdPlaceholder')}
+                      aria-label={t('models.customImageModelId', { n: index + 1 })}
+                      spellCheck={false}
+                    />
+                    <Input
+                      variant="well"
+                      className="w-[150px] flex-1"
+                      value={m.name}
+                      onChange={(e) => updateImageRow(m.key, { name: e.target.value })}
+                      placeholder={t('models.customImageModelNamePlaceholder')}
+                      aria-label={t('models.customImageModelName', { n: index + 1 })}
+                    />
+                    <label className="flex flex-none items-center gap-2 text-label text-ink-soft">
+                      <Switch
+                        size="sm"
+                        checked={m.transparent}
+                        onCheckedChange={(transparent) => updateImageRow(m.key, { transparent })}
+                        aria-label={t('models.customImageTransparentFor', { n: index + 1 })}
+                      />
+                      {t('models.customImageTransparent')}
+                    </label>
+                    <IconButton
+                      aria-label={t('models.customRemoveImageModel', { n: index + 1 })}
+                      onClick={() => setImageModels((rows) => rows.filter((r) => r.key !== m.key))}
+                    >
+                      <TrashIcon size="rail" aria-hidden />
+                    </IconButton>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div className={cn('flex flex-wrap items-center gap-2', imageModels.length > 0 && 'mt-2')}>
+              <Button size="sm" variant="ghost" onClick={() => setImageModels((rows) => [...rows, imageRow()])}>
+                <PlusIcon size="rail" aria-hidden />
+                {t('models.customAddImageModel')}
+              </Button>
+              {unlistedImages.length > 0 && (
+                <Select value="" onValueChange={addDiscoveredImage}>
+                  <SelectTrigger
+                    size="sm"
+                    className="w-[260px] max-w-full"
+                    aria-label={t('models.customAddListedImage')}
+                  >
+                    <SelectValue placeholder={t('models.customAddListedImage')} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {unlistedImages.map((id) => (
+                      <SelectItem key={id} value={id}>
+                        {id}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+            </div>
+            <p className="mt-1.5 text-caption text-ink-faint">{t('models.customImageModelsHint')}</p>
+          </div>
+        )}
 
         <Disclosure label={t('models.customAdvanced')} triggerClassName="text-label font-medium text-ink-soft">
           <div className="grid gap-4">

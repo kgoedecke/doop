@@ -6,6 +6,7 @@ import {
   integrations,
   linearInstallations,
   modelAccounts,
+  sharedModelAccounts,
   slackInstallations,
   webhooks,
 } from './db/schema.ts'
@@ -17,6 +18,11 @@ const SEALED: { table: PgTable; key: AnyPgColumn; columns: AnyPgColumn[] }[] = [
     table: modelAccounts,
     key: modelAccounts.userId,
     columns: [modelAccounts.accessToken, modelAccounts.refreshToken, modelAccounts.apiKey, modelAccounts.customHeaders],
+  },
+  {
+    table: sharedModelAccounts,
+    key: sharedModelAccounts.kind,
+    columns: [sharedModelAccounts.apiKey, sharedModelAccounts.customHeaders],
   },
   { table: integrations, key: integrations.id, columns: [integrations.accessToken] },
   { table: githubConnections, key: githubConnections.id, columns: [githubConnections.token] },

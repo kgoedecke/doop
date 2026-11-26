@@ -1161,7 +1161,9 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
         actor,
         accountError ??
           (staleAccount
-            ? 'Your model connection expired — reconnect it'
+            ? model.shared
+              ? 'The shared model connection was refused — ask your admin'
+              : 'Your model connection expired — reconnect it'
             : unavailableModel
               ? 'Model not available on your account — pick another in Settings'
               : 'Hit a snag — waiting for a retry'),
@@ -1234,7 +1236,10 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
       if (staleAccount) {
         reason =
           accountError ??
-          `${model.label} turned down the connected account. Reconnect it in Doop, then retry.${blockedWebsiteAccess ? ` ${blockedWebsiteAccess}` : ''}`
+          (model.shared
+            ? `${model.label} turned down the shared connection your admin set up. Ask your admin to check it in Admin → Shared models, then retry.`
+            : `${model.label} turned down the connected account. Reconnect it in Doop, then retry.`) +
+            (blockedWebsiteAccess ? ` ${blockedWebsiteAccess}` : '')
       } else if (unavailableModel) {
         reason = `${model.label} is not available on your connected account yet. Pick another model in Settings, then retry.`
       } else if (blockedWebsiteAccess) {
@@ -1529,6 +1534,7 @@ const TOOLS: Anthropic.Tool[] = [
           enum: [...imageGen.IMAGE_QUALITIES],
           description: 'low is fast and cheap; default medium',
         },
+        transparent: { type: 'boolean', description: imageGen.TRANSPARENT_NOTE },
       },
       required: ['prompt'],
     },
@@ -2373,7 +2379,7 @@ async function runResidentTool(
         return ok(blocks)
       }
       case 'generate_image': {
-        const raw = block.input as { prompt?: string; aspect?: string; quality?: string }
+        const raw = block.input as { prompt?: string; aspect?: string; quality?: string; transparent?: unknown }
         const prompt = String(raw.prompt || '').trim()
         if (!prompt) return fail('prompt must be a non-empty string')
         if (runState.imagesGenerated >= MAX_IMAGES_PER_RUN) {
@@ -2387,7 +2393,8 @@ async function runResidentTool(
         const quality = (imageGen.IMAGE_QUALITIES as readonly string[]).includes(String(raw.quality))
           ? (raw.quality as imageGen.ImageQuality)
           : undefined
-        const image = await imageGen.generateImage(runState.payerId, { prompt, aspect, quality })
+        const transparent = raw.transparent === true
+        const image = await imageGen.generateImage(runState.payerId, { prompt, aspect, quality, transparent })
         const asset = await assets.createAsset(image.buf, {
           canvasId,
           ...(runState.payerId ? { ownerId: runState.payerId } : {}),
@@ -2401,7 +2408,7 @@ async function runResidentTool(
           { type: 'image', source: { type: 'base64', media_type: image.preview.mime, data: image.preview.data } },
           {
             type: 'text',
-            text: `Generated ${image.width}×${image.height} (${asset.mime}, billed to ${image.billedTo}) — preview above, judge it before embedding.\nurl: ${url}\nusage: <img src="${url}" alt="" style="object-fit: cover">`,
+            text: `Generated ${image.width}×${image.height} (${asset.mime}, billed to ${image.billedTo}${transparent ? (image.transparent ? ', transparent background' : ', opaque: this image model cannot draw a transparent background') : ''}) — preview above, judge it before embedding.\nurl: ${url}\nusage: <img src="${url}" alt="" style="object-fit: cover">`,
           },
         ])
       }

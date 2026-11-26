@@ -8,7 +8,8 @@ import type { RunnerPick } from '../shared/agentRunner.ts'
 import Anthropic from '@anthropic-ai/sdk'
 import { withFreshToken, accountModelFor, accountVisionFor, accountWithPick, customModelFor } from './modelAccounts.ts'
 import type { AccountKind, BuiltinAccountKind, ModelAccount } from './modelAccounts.ts'
-import { customProviderFetch } from './customProviderFetch.ts'
+import { customProviderFetch, redactSecrets } from './customProviderFetch.ts'
+import { ModelStreamInterruptedError } from './modelTurnRetry.ts'
 import { isCustomProviderKind, type CustomModel, type CustomProviderConfig } from '../shared/customProvider.ts'
 import { ModelAuthError, ModelUnavailableError, effortFor, runAzureTurn, runOpenAiTurn } from './openaiAgent.ts'
 import type { StopReason, TurnBlock } from './openaiAgent.ts'
@@ -65,6 +66,8 @@ export interface AgentModel {
   label: string
   /** the user whose account pays, when it isn't the server's key */
   userId?: string
+  /** an admin's shared provider: its key and models are the admin's to fix */
+  shared?: true
   /** false = the model cannot see images and the run degrades to no visual
    *  review; absent means true (every pre-roster provider has vision) */
   vision?: boolean
@@ -255,6 +258,64 @@ export interface CustomTarget {
  * model was said to allow.
  */
 export function customTurn(target: CustomTarget, model: CustomModel): AgentModel['run'] {
+  const run = customTransport(target, model)
+  return async (req) => {
+    try {
+      return await run(req)
+    } catch (error) {
+      throw redactedError(error, target)
+    }
+  }
+}
+
+/* the classes a run's failure is read by (resident.ts, modelTurnRetry.ts),
+   whose constructors take the message */
+const ERROR_CLASSES = [
+  ModelConfigurationError,
+  ModelUnavailableError,
+  ModelAuthError,
+  ModelStreamInterruptedError,
+] as const
+
+/* how deep a cause chain is followed: undici's socket error sits two down */
+const MAX_CAUSE_DEPTH = 5
+
+/** What a retry reads off an error and its causes (modelTurnRetry.ts): the
+ *  `code` and the `name` at each level, and none of their messages, which
+ *  are the endpoint's or the transport's words. */
+function retrySignal(error: unknown, depth = 0): Error | undefined {
+  if (!error || typeof error !== 'object' || depth >= MAX_CAUSE_DEPTH) return undefined
+  const { code, name, cause } = error as { code?: unknown; name?: unknown; cause?: unknown }
+  const signal = new Error(typeof code === 'string' ? code : '')
+  if (typeof name === 'string') signal.name = name
+  if (typeof code === 'string') Object.assign(signal, { code })
+  const inner = retrySignal(cause, depth + 1)
+  if (inner) signal.cause = inner
+  return signal
+}
+
+/**
+ * A custom provider's failure with its key and header values masked
+ * (redactSecrets), as a fresh error of the class the run reads. What a retry
+ * needs survives — the error's `code` and a cause chain of codes and names
+ * only, so a dropped connection (ECONNRESET, UND_ERR_SOCKET) is still retried
+ * — and nothing else of the original rides along (no messages in the causes,
+ * no SDK body or headers) to a log line. A cancel or timeout carries no
+ * endpoint text and passes as it is.
+ */
+export function redactedError(error: unknown, secrets: { apiKey?: string; headers?: Record<string, string> }): unknown {
+  if (!(error instanceof Error) || error.name === 'AbortError' || error.name === 'TimeoutError') return error
+  const message = redactSecrets(error.message, secrets)
+  const Class = ERROR_CLASSES.find((candidate) => error instanceof candidate) ?? Error
+  const redacted = new Class(message)
+  const { code } = error as { code?: unknown }
+  if (typeof code === 'string') Object.assign(redacted, { code })
+  const cause = retrySignal(error.cause)
+  if (cause) redacted.cause = cause
+  return redacted
+}
+
+function customTransport(target: CustomTarget, model: CustomModel): AgentModel['run'] {
   const { config, apiKey, headers = {} } = target
   const budget = (req: AgentTurnRequest) => Math.min(req.maxTokens, model.maxOutputTokens ?? req.maxTokens)
   if (config.apiType === 'anthropic') {
@@ -289,6 +350,8 @@ export function customTurn(target: CustomTarget, model: CustomModel): AgentModel
     ...(config.echoReasoning ? { echoReasoning: true } : {}),
     ...(config.tokenParam ? { tokenParam: config.tokenParam } : {}),
     fetch: customProviderFetch,
+    /* masked on the whole body, before responseError shortens it */
+    redact: (text) => redactSecrets(text, target),
   }
   return (req) =>
     runChatCompletionsTurn(chat, {
@@ -325,11 +388,18 @@ export function withoutImages(messages: Anthropic.MessageParam[]): Anthropic.Mes
 function customModel(account: ModelAccount): AgentModel {
   const config = account.custom
   const model = customModelFor(account)
-  if (!config || !model) throw new ModelConfigurationError('Add a model to this custom provider in Settings.')
+  if (!config || !model) {
+    throw new ModelConfigurationError(
+      account.shared
+        ? 'This shared provider has no model to run. Ask your admin to add one in Admin → Shared models.'
+        : 'Add a model to this custom provider in Settings.',
+    )
+  }
   return {
     provider: account.kind,
     label: `${config.name} (${model.id})`,
     userId: account.userId,
+    ...(account.shared ? { shared: true as const } : {}),
     vision: model.vision,
     run: customTurn(
       {

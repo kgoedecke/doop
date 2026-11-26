@@ -167,6 +167,9 @@ export const models: Catalog['models'] = {
   imageSeedreamProBlurb: 'O melhor modelo de imagem da ByteDance — qualidade rica, quase pictórica.',
   imageSeedreamLiteBlurb: 'Versão mais rápida e barata do Seedream.',
   imageModelTitle: 'Modelo de imagem',
+  imageCustomBlurb: '{model}, desenhado no seu provedor personalizado.',
+  imageCustomSharedBlurb: '{model}, desenhado no provedor que seu admin compartilha.',
+  imageCustomTransparent: 'Desenha fundos transparentes.',
 
   customRowTitle: 'Provedor personalizado',
   customRowShort: 'Qualquer API compatível com OpenAI ou Anthropic',
@@ -205,6 +208,18 @@ export const models: Catalog['models'] = {
   customAddModel: 'Adicionar modelo',
   customModelsHint:
     'Cada modelo aparece sob este provedor no seletor de modelos. Ative Vê imagens só para modelos que aceitam imagens: o agente revisa seus designs por capturas de tela.',
+  customImageModels: 'Modelos de imagem',
+  customImageModelsHint:
+    'Opcional. O generate_image dos agentes pode desenhar com eles: o Doop acrescenta /images/generations à URL base (a OpenAI Images API) e envia a chave e os cabeçalhos deste provedor. Ative Transparente só para modelos que respeitam um fundo transparente.',
+  customImageModelId: 'Id do modelo de imagem {n}',
+  customImageModelIdPlaceholder: 'id-do-modelo-de-imagem',
+  customImageModelName: 'Nome do modelo de imagem {n}',
+  customImageModelNamePlaceholder: 'Nome (opcional)',
+  customImageTransparent: 'Transparente',
+  customImageTransparentFor: 'O modelo de imagem {n} desenha fundos transparentes',
+  customRemoveImageModel: 'Remover o modelo de imagem {n}',
+  customAddImageModel: 'Adicionar modelo de imagem',
+  customAddListedImage: 'Adicionar um modelo de imagem que o endpoint lista',
   customAdvanced: 'Avançado',
   customHeaders: 'Cabeçalhos extras',
   customHeadersHint: 'Um por linha, como Nome: valor. Guardados criptografados.',
@@ -220,4 +235,10 @@ export const models: Catalog['models'] = {
   customTestPassed: '{model} respondeu com uma chamada de ferramenta. Pronto para usar.',
   customSave: 'Salvar',
   customAdd: 'Adicionar provedor',
+  /* provedores compartilhados: configurados por um admin para todos (Admin → Modelos compartilhados) */
+  customSharedTitle: 'Provedor compartilhado',
+  customSharedLede:
+    'Todos nesta instância recebem este provedor ao lado das próprias conexões, e podem escolher o modelo ou desligá-lo só para si. A chave fica criptografada no servidor e nunca é mostrada de novo, nem aqui.',
+  sharedBadge: 'Compartilhado pelo seu admin',
+  sharedRunnerName: '{name} (compartilhado)',
 }

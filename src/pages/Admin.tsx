@@ -17,9 +17,11 @@ import {
   GridIcon,
   LockIcon,
   MessageSquareIcon,
+  ServerIcon,
   UsersIcon,
 } from '../components/ui/icons'
 import { SignInSettings } from '../components/SignInSettings'
+import { SharedProviderSettings } from '../components/SharedProviderSettings'
 import { Tabs, TabsList, TabsTrigger } from '../components/ui/tabs'
 import { Button } from '../components/ui/button'
 import { ConfirmDialog } from '../components/ui/alert-dialog'
@@ -60,7 +62,7 @@ const LINK_TITLE = {
   edit: 'admin.linkAccessEdit',
 } as const satisfies Record<SharedAccess, PlainMessageKey>
 
-type Tab = 'canvases' | 'users' | 'feedback' | 'signin'
+type Tab = 'canvases' | 'users' | 'feedback' | 'signin' | 'models'
 
 /* the header's search, for the tabs that are lists */
 const SEARCH_LABEL: Partial<Record<Tab, PlainMessageKey>> = {
@@ -195,6 +197,14 @@ export function Admin() {
           >
             {t('admin.signInNav')}
           </DashNavItem>
+          <DashNavItem
+            density="rail"
+            icon={<ServerIcon size="rail" />}
+            active={tab === 'models'}
+            onClick={() => setTab('models')}
+          >
+            {t('admin.sharedNav')}
+          </DashNavItem>
         </nav>
         <div className="mt-auto flex items-center gap-2.5 px-1 pt-4">
           <AccountMenu face side="top" align="start" />
@@ -257,6 +267,9 @@ export function Admin() {
               <TabsTrigger value="signin">
                 <LockIcon size="rail" /> {t('admin.signInTab')}
               </TabsTrigger>
+              <TabsTrigger value="models">
+                <ServerIcon size="rail" /> {t('admin.sharedTab')}
+              </TabsTrigger>
             </TabsList>
           </Tabs>
 
@@ -310,6 +323,8 @@ export function Admin() {
             <AgentFeedbackList q={q} />
           ) : tab === 'signin' ? (
             <SignInSettings />
+          ) : tab === 'models' ? (
+            <SharedProviderSettings />
           ) : (
             <div className="mt-4 overflow-hidden rounded-panel border border-line bg-surface shadow-card">
               {users === null && <p className="mt-7 text-copy text-ink-soft">…</p>}
