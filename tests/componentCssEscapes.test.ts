@@ -84,3 +84,95 @@ describe('a sheet that cannot be read to the end', () => {
     expect(excerpt.endsWith('…')).toBe(true)
   })
 })
+
+/*
+ * Comments were cut with a regex before the quote-aware read, so a `/*` inside a string or an
+ * unquoted url(…) opened a "comment" that ran to the next real one and took the rules between.
+ */
+describe('comments in a component’s CSS', () => {
+  const ROOT = rootOf('<div data-main class="a"><p class="b"></p><span class="c"></span></div>')
+  const rawCssOf = (sheet: string) => extractComponentCss(sheet, ROOT, 'cmp').rawCss
+
+  it('keeps the rules after a /* inside a string', () => {
+    const sheet = '.a{content:"/*"} .b{color:red} /* note */ .c{color:blue}'
+    expect(unreadCss(sheet)).toBeNull()
+    expect(rawCssOf(sheet)).toContain('color:red')
+    expect(rawCssOf(sheet)).toContain('content:"/*"')
+    expect(rawCssOf(sheet)).not.toContain('note')
+  })
+
+  it('ends a comment at the first */ even inside quotes', () => {
+    const sheet = `.a { color: red } /* it's "*/" .b { color: blue }`
+    expect(unreadCss(sheet)).toMatch(/^" \.b \{ color: blue \}/)
+  })
+
+  it('reads quotes inside a comment as comment text', () => {
+    const sheet = `/* it's the card's "frame */ .a { color: red } /* don't */ .b { color: blue }`
+    expect(unreadCss(sheet)).toBeNull()
+    expect(rawCssOf(sheet)).toContain('color: red')
+    expect(rawCssOf(sheet)).toContain('color: blue')
+  })
+
+  it('keeps an escaped quote inside the string that holds the /*', () => {
+    const sheet = String.raw`.a { content: "\"/*" } .b { color: red } /* note */ .c { color: blue }`
+    expect(unreadCss(sheet)).toBeNull()
+    expect(rawCssOf(sheet)).toContain('color: red')
+  })
+
+  it('reads a /* inside an unquoted url() as part of the url', () => {
+    const sheet = '.a { background: url(https://cdn.test/img/*.png) } .b { color: red } /* note */ .c { color: blue }'
+    expect(unreadCss(sheet)).toBeNull()
+    expect(rawCssOf(sheet)).toContain('url(https://cdn.test/img/*.png)')
+    expect(rawCssOf(sheet)).toContain('color: red')
+  })
+
+  it('reads braces inside an unquoted url() as part of the url', () => {
+    const sheet = '.a { background: url(/img/*}*/x.png) } .b { color: red } .c { background: url(a{b}c.png) }'
+    expect(unreadCss(sheet)).toBeNull()
+    expect(rawCssOf(sheet)).toContain('url(/img/*}*/x.png)')
+    expect(rawCssOf(sheet)).toContain('color: red')
+    expect(rawCssOf(sheet)).toContain('url(a{b}c.png)')
+  })
+
+  it('reads a /* inside a quoted url() as part of the string', () => {
+    const sheet = `.a { background: URL( '/img/*.png' ) } .b { color: red } /* note */ .c { color: blue }`
+    expect(unreadCss(sheet)).toBeNull()
+    expect(rawCssOf(sheet)).toContain(`URL( '/img/*.png' )`)
+    expect(rawCssOf(sheet)).toContain('color: red')
+  })
+
+  it('drops comments between selectors, blocks and declarations', () => {
+    const sheet =
+      '.a /* the card */ { color: red /* ; } */ ; } .a, /* and */ .b { color: blue } .a/**/ .c { margin: 0 }'
+    expect(unreadCss(sheet)).toBeNull()
+    expect(unmatchedSelectors(sheet, ROOT)).toEqual([])
+    const raw = rawCssOf(sheet)
+    expect(raw).not.toContain('/*')
+    expect(raw).toContain('.a, .b')
+    expect(raw).toContain('.a .c')
+  })
+
+  it('keeps the rules after a /* in a string inside a media query', () => {
+    const sheet = '@media (min-width: 1px) { .a { content: "/*" } .b { color: red } } /* note */ .c { color: blue }'
+    expect(unreadCss(sheet)).toBeNull()
+    expect(rawCssOf(sheet)).toContain('color: red')
+  })
+
+  it('still cuts the comments after a url( never closed', () => {
+    const sheet = '.a { background: url(x.png } /* note */ .b { color: red }'
+    expect(unmatchedSelectors(sheet, ROOT)).toEqual([])
+    expect(rawCssOf(sheet)).not.toContain('note')
+  })
+
+  it('shows a comment never closed inside a block in what it names', () => {
+    expect(unreadCss('.a { color: red; /* open')).toBe('.a { color: red; /* open')
+    expect(unreadCss('@media (x) { .a { color: red } /* open')).toBe('@media (x) { .a { color: red } /* open')
+  })
+
+  it('names a comment never closed, which runs to the end as in a browser', () => {
+    const sheet = '.a { color: red } /* open .b { color: blue }'
+    expect(unreadCss(sheet)).toBe('/* open .b { color: blue }')
+    expect(rawCssOf(sheet)).toContain('color: red')
+    expect(rawCssOf(sheet)).not.toContain('color: blue')
+  })
+})

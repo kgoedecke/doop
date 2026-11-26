@@ -44,7 +44,24 @@ type CssNode =
   | { kind: 'group'; prelude: string; nodes: CssNode[] }
   | { kind: 'atomic'; name: string; text: string; prelude: string; body: string }
 
-/** The end of a block whose `{` sits at `open`, skipping strings and escapes. An escaped
+const URL_FUNCTION = /(?:^|[^\w-])url$/i
+
+/** Past an unquoted `url(` whose `(` sits at `open`: its `)`, since a `/*` or a brace in the address
+ *  is part of it. Any other paren, a quoted url or one never closed is left at `open` for the
+ *  usual rules to read. */
+function pastUrl(css: string, open: number): number {
+  if (!URL_FUNCTION.test(css.slice(Math.max(0, open - 4), open))) return open
+  let i = open + 1
+  while (/\s/.test(css[i] ?? '')) i++
+  if (css[i] === '"' || css[i] === "'") return open
+  for (; i < css.length; i++) {
+    if (css[i] === '\\') i++
+    else if (css[i] === ')') return i
+  }
+  return open
+}
+
+/** The end of a block whose `{` sits at `open`, skipping strings, escapes and unquoted urls. An escaped
  *  quote or brace (Tailwind's `\'` in `[class*='size-']`) is part of a name, not a string.
  *  -1 when the block never closes. */
 function blockEnd(css: string, open: number): number {
@@ -56,6 +73,7 @@ function blockEnd(css: string, open: number): number {
     else if (quote) {
       if (char === quote) quote = ''
     } else if (char === '"' || char === "'") quote = char
+    else if (char === '(') i = pastUrl(css, i)
     else if (char === '{') depth++
     else if (char === '}' && --depth === 0) return i
   }
@@ -69,8 +87,45 @@ interface ReadCss {
   unread: string | null
 }
 
+interface Uncommented {
+  css: string
+  /** a comment never closed, which runs to the end of the sheet as in a browser */
+  unclosed: string | null
+}
+
+/** The sheet without its comments, read like `blockEnd` reads: a `/*` inside a string, after an
+ *  escape or inside an unquoted url() is text, and quotes inside a comment open no string. */
+function withoutComments(css: string): Uncommented {
+  let kept = ''
+  let from = 0
+  let quote = ''
+  for (let i = 0; i < css.length; i++) {
+    const char = css[i]
+    if (char === '\\') i++
+    else if (quote) {
+      if (char === quote) quote = ''
+    } else if (char === '"' || char === "'") quote = char
+    else if (char === '(') i = pastUrl(css, i)
+    else if (char === '/' && css[i + 1] === '*') {
+      kept += css.slice(from, i)
+      const close = css.indexOf('*/', i + 2)
+      if (close === -1) return { css: kept, unclosed: css.slice(i).trim() || null }
+      from = close + 2
+      i = close + 1
+    }
+  }
+  return { css: kept + css.slice(from), unclosed: null }
+}
+
 function readCss(source: string): ReadCss {
-  const css = source.replace(/\/\*[\s\S]*?\*\//g, '')
+  const { css, unclosed } = withoutComments(source)
+  const read = readNodes(css)
+  /* a comment never closed ends the sheet, so whatever went wrong before it runs into it */
+  return { nodes: read.nodes, unread: [read.unread, unclosed].filter(Boolean).join(' ') || null }
+}
+
+/** The rules of a sheet with no comments left in it. */
+function readNodes(css: string): ReadCss {
   const nodes: CssNode[] = []
   let unread: string | null = null
   const note = (from: number) => (unread ??= css.slice(from).trim() || null)
@@ -85,6 +140,7 @@ function readCss(source: string): ReadCss {
       else if (quote) {
         if (char === quote) quote = ''
       } else if (char === '"' || char === "'") quote = char
+      else if (char === '(') i = pastUrl(css, i)
       else if (char === '{') {
         open = i
         break
@@ -114,7 +170,7 @@ function readCss(source: string): ReadCss {
     if (prelude.startsWith('@')) {
       const name = atName(prelude)
       if (GROUP_AT_RULES.has(name)) {
-        const inner = readCss(body)
+        const inner = readNodes(body)
         nodes.push({ kind: 'group', prelude, nodes: inner.nodes })
         unread ??= inner.unread
       } else nodes.push({ kind: 'atomic', name, text: `${prelude}{${body}}`, prelude, body })
