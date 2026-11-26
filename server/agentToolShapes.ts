@@ -13,7 +13,7 @@ import { IMAGE_ASPECTS, IMAGE_QUALITIES } from './imageGen.ts'
 /**
  * The parameters of every tool that MCP agents (server/mcp.ts) and the Doop Agent (server/resident.ts) both call,
  * defined once so the two cannot drift. MCP registers a shape with its call context around it (canvas_id,
- * agent_name); the Doop Agent sends the same shape as JSON Schema (`residentInputSchema` in resident.ts), with its
+ * agent_name); the Doop Agent sends the same shape as JSON Schema (`SHARED_PARAMETERS` in resident.ts), with its
  * own wording only where a run gives a parameter another meaning (a page from its page list, not get_canvas).
  * Tool descriptions stay with each surface. The component tools keep their shapes beside their handlers
  * (componentTools.ts); tests/agentToolParity.test.ts holds both surfaces to these.

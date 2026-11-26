@@ -36,6 +36,7 @@ const resident = await import('../server/resident.ts')
 const screenshot = await import('../server/screenshot.ts')
 const propagation = await import('../server/propagation.ts')
 const { stillToCheck } = await import('../server/changeChecks.ts')
+const { instancesIn } = await import('../server/componentActions.ts')
 const { DEFAULT_ROLE_ID, roleName } = await import('../shared/agents.ts')
 
 type RunState = Parameters<typeof resident.execTool>[3]
@@ -149,7 +150,8 @@ describe('what a run still has to check', () => {
   it('still asks for a look at a frame the run wrote itself', async () => {
     const state = runState()
     await resident.execTool(squareCorners(), canvasId, actor(), state)
-    const instanceId = /data-doop-id="([^"]+)"[^>]*data-doop-instance/.exec(store.getFrame(poolId)!.html)?.[1]
+    const instanceId = instancesIn(store.getFrame(poolId)!)[0]?.instance_id
+    expect(instanceId).toBeDefined()
     await exec(state, 'update_instances', { frame_id: poolId, instances: [{ instance_id: instanceId, props: {} }] })
     /* the main shows the component change, not the screen that was written */
     await resident.execTool(shot(mainFrameId), canvasId, actor(), state)

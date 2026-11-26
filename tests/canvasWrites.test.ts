@@ -815,12 +815,15 @@ describe('design tokens through the canvas write entry', () => {
 
   it('answers a refused theme list in the tool’s words, and fails the tool call on anything else', async () => {
     const refused = await execTool(
-      { type: 'tool_use', id: 't1', name: 'set_token_themes', input: { themes: 'dark' } },
+      { type: 'tool_use', id: 't1', name: 'set_token_themes', input: { themes: ['Dark Mode'] } },
       canvasId,
       resident(),
       newRunState(),
     )
-    expect(refused).toMatchObject({ is_error: true, content: 'themes must be an array of names' })
+    expect(refused).toMatchObject({
+      is_error: true,
+      content: 'invalid theme name “Dark Mode” — use a lowercase slug like "dark"',
+    })
     /* storage failing is not a refusal of the list: the tool call fails, and is undone */
     const fails = vi.spyOn(store, 'setTokenThemes').mockImplementationOnce(() => {
       throw new Error('storage refused')

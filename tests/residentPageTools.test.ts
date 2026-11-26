@@ -286,6 +286,15 @@ describe('the resident agent takes what an MCP agent takes', () => {
     expect(legacy.is_error).toBeUndefined()
     expect(store.getFrame(frameId)!.html).toContain('hey')
 
+    const besideNull = await execTool(
+      call('edit_frame_html', { frame_id: frameId, old_str: null, find: 'hey', replace: 'hiya' }),
+      canvasId,
+      actor(),
+      newRunState(),
+    )
+    expect(besideNull.is_error).toBeUndefined()
+    expect(store.getFrame(frameId)!.html).toContain('hiya')
+
     const missing = await execTool(
       call('edit_frame_html', { frame_id: frameId, old_str: 'absent', new_str: 'x' }),
       canvasId,
@@ -353,6 +362,56 @@ describe('the resident agent takes what an MCP agent takes', () => {
   })
 })
 
+describe("the resident agent's calls are checked against the parameters it was shown", () => {
+  const run = (name: string, input: unknown) => execTool(call(name, input), canvasId, actor(), newRunState())
+
+  it('refuses a value past its bound before the tool runs, naming the parameter', async () => {
+    const result = await run('set_status', { status: 'x'.repeat(141) })
+    expect(result.is_error).toBe(true)
+    expect(String(result.content)).toContain('status')
+    expect(actions.getTasks(canvasId).some((task) => task.status?.startsWith('xxx'))).toBe(false)
+  })
+
+  it('refuses a wrong type and changes nothing', async () => {
+    const before = pages()
+    const result = await run('create_canvas_page', { name: 5 })
+    expect(result.is_error).toBe(true)
+    expect(String(result.content)).toContain('name')
+    expect(pages()).toEqual(before)
+  })
+
+  it('refuses a call without a parameter the run must pass', async () => {
+    const result = await run('create_frame', { name: 'Hero', html, height: 600 })
+    expect(result.is_error).toBe(true)
+    expect(String(result.content)).toContain('width')
+    expect(store.getCanvas(canvasId)!.frames).toHaveLength(1)
+  })
+
+  it('checks a component tool too', async () => {
+    const result = await run('get_component', {})
+    expect(result.is_error).toBe(true)
+    expect(String(result.content)).toContain('component')
+  })
+
+  it('hands the tool what the check made of the input: trimmed text', async () => {
+    const id = await addPage('  Mobile  ')
+    expect(pages().find((page) => page.id === id)?.name).toBe('Mobile')
+    const result = await run('set_canvas_pages', {
+      expectedPages: pages(),
+      pages: pages().map((page) => ({ ...page, name: ` ${page.name} ` })),
+    })
+    expect(result.is_error).toBeUndefined()
+    expect(pages().map((page) => page.name)).toEqual(['Page 1', 'Mobile'])
+  })
+
+  it('takes null for an optional parameter as not given', async () => {
+    const result = await run('update_frame', { frame_id: frameId, name: null, x: 50 })
+    expect(result.is_error).toBeUndefined()
+    const frame = store.getFrame(frameId)!
+    expect([frame.name, frame.x]).toEqual(['Home', 50])
+  })
+})
+
 describe.skipIf(!findBrowserPath())('fit_to_content', () => {
   const tall = '<!doctype html><html><body style="margin:0"><div style="height:640px"></div></body></html>'
 
@@ -371,7 +430,8 @@ describe.skipIf(!findBrowserPath())('fit_to_content', () => {
       actor(),
       run(),
     )
-    expect(String(invalid.content)).toContain('must be "height", "width" or "both"')
+    expect(invalid.is_error).toBe(true)
+    expect(String(invalid.content)).toContain("fit_to_content: Expected 'height' | 'width' | 'both'")
     const runState = run()
     const result = await execTool(
       call('update_frame', { frame_id: frameId, fit_to_content: 'height' }),
