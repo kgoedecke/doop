@@ -111,10 +111,11 @@ have room for Comment only in the strip; Prototype mode toggles from the Canvas 
 section and part of the resident agents' system prompt. `get_prototype` lists each page's start
 and every interaction, flagging targets that are not on the canvas; `set_prototype_start` sets or
 clears a page's start and rejects unknown frames and frames on another page. Both are implemented
-once in `server/prototypeTools.ts` and exposed over MCP and to the resident agents (which pass an
-empty `frame_id` to clear). `tests/agentToolParity.test.ts` holds the resident tool set to the
-MCP server's: every MCP tool is a resident tool, an equivalent, covered by the run's context, or
-a listed gap, and a tool on both takes the same parameter names unless the test lists why not.
+once in `server/prototypeTools.ts` and exposed over MCP and to the resident agents, both of which
+pass a null `frame_id` to clear (the resident still takes the empty string it used to).
+`tests/agentToolParity.test.ts` holds the resident tool set to the MCP server's: every MCP tool is
+a resident tool, an equivalent, covered by the run's context, or a listed gap, and a tool on both
+takes the same parameters, defined once (`server/agentToolShapes.ts`), unless the test lists why not.
 
 ## Tests
 

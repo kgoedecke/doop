@@ -7,7 +7,7 @@ import { createHash } from 'node:crypto'
 import { eq } from 'drizzle-orm'
 import { db } from './db/index.ts'
 import * as authSchema from './db/auth-schema.ts'
-import { canvasPages, framePageId, MAX_CANVAS_NAME, MAX_PAGE_NAME } from '../shared/pages.ts'
+import { canvasPages, framePageId, MAX_CANVAS_NAME } from '../shared/pages.ts'
 import { normalizePageBackground } from '../shared/pageBackground.ts'
 import { prototypeReport, prototypeUrl, setPrototypeStart } from './prototypeTools.ts'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
@@ -18,23 +18,14 @@ import { z } from 'zod'
 import { store } from './store.ts'
 import { composedHtml, stampRender } from './frameCompose.ts'
 import { addPage, savePages } from './pageTools.ts'
-import {
-  FIT_AXES,
-  FIT_ON,
-  FIT_NEEDS_HTML,
-  type FittedFrame,
-  fitNotes,
-  fitWrittenFrame,
-  updateFrameMetaWithFit,
-} from './frameFit.ts'
+import { TOOL_SHAPES } from './agentToolShapes.ts'
 import { isImportWriteFailure, runCanvasWrite } from './canvasWrites.ts'
+import { FIT_NEEDS_HTML, type FittedFrame, fitNotes, fitWrittenFrame, updateFrameMetaWithFit } from './frameFit.ts'
 import { fontsForCanvas } from './fonts.ts'
 import { customAgentsForCanvas } from './customAgents.ts'
 import { describeLibrary, libraryBrief, MAX_FONT_BYTES } from '../shared/fonts.ts'
 import { addCanvasFont, uploadedFontResult } from './canvasFontUpload.ts'
 import {
-  MAX_TOKEN_DESCRIPTION,
-  TOKEN_TYPES,
   describeTokens,
   tokensBrief,
   NO_TOKENS_BRIEF,
@@ -67,7 +58,6 @@ import {
   takePdfExportSlot,
 } from './pdfExport.ts'
 import { primeImage } from './previews.ts'
-import { MAX_LAYER_SELECTOR_CHARS } from '../shared/elementId.ts'
 import { layerExport } from './layerExport.ts'
 import { renderStamp } from './styleVersion.ts'
 import {
@@ -107,13 +97,7 @@ import { embedsPreview, previewOf, previewToolMeta, registerFramePreview, type C
 import * as persist from './db/persist.ts'
 import type { FrameApproval } from '../shared/types.ts'
 import { recordAgentFeedback } from './agentFeedback.ts'
-import {
-  AGENT_IDEA_CATEGORIES,
-  AGENT_ISSUE_CATEGORIES,
-  MAX_AGENT_FEEDBACK_CHARS,
-  type AgentFeedbackCategory,
-  type AgentFeedbackKind,
-} from '../shared/agentFeedback.ts'
+import type { AgentFeedbackCategory, AgentFeedbackKind } from '../shared/agentFeedback.ts'
 import {
   catalog,
   compactFrameHtml,
@@ -545,10 +529,7 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
         'Search One Page Love\'s hand-curated gallery of real, well-designed live websites and SEE thumbnails of each, with their tags (style, colour, fonts, genre, sections). Call it FIRST when writing a design brief — it is the required inspiration step, especially for landing pages. Query the genre plus the look you want in the words the catalog is tagged with ("saas landing page, dark minimal", "finance, editorial", "portfolio, typographic", "pricing, illustrative"), not the product noun alone. The catalog is landing pages and one-page sites, not app screens: for a dashboard or app UI, query the product\'s register ("saas, minimal") and take the type, colour and density from it. Study the thumbnails, pick the ONE exemplar that fits the brief best and follow it — do not blend several — and name it in the brief. Do not embed these screenshots in a frame.',
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
       inputSchema: {
-        query: z
-          .string()
-          .describe('Genre + look, e.g. "saas landing page, dark minimal", "restaurant, retro", "finance, editorial"'),
-        count: z.number().min(1).max(6).optional().describe('Exemplars to return, default 4'),
+        ...TOOL_SHAPES.search_inspiration,
         canvas_id: z.string().optional().describe('The canvas you are designing on (lets human feedback reach you)'),
         agent_name: agentName,
       },
@@ -667,7 +648,7 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
       inputSchema: {
         canvas_id: z.string(),
-        name: z.string().trim().min(1).max(MAX_CANVAS_NAME).describe('The new canvas name'),
+        ...TOOL_SHAPES.update_canvas,
         agent_name: agentName,
       },
     },
@@ -883,16 +864,7 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
       annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
       inputSchema: {
         canvas_id: z.string(),
-        name: z.string().describe('Doc slug, e.g. "feature-image" (a-z, 0-9, hyphens)'),
-        markdown: z
-          .string()
-          .max(actions.MAX_GUIDELINE_CHARS)
-          .describe('Full replacement markdown for this doc; empty string deletes it'),
-        title: z
-          .string()
-          .max(actions.MAX_GUIDELINE_TITLE_CHARS)
-          .optional()
-          .describe('Pretty display name shown to humans, e.g. "Featured Images"; omit to keep the current one'),
+        ...TOOL_SHAPES.set_guidelines,
         agent_name: agentName,
       },
     },
@@ -926,12 +898,7 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
       inputSchema: {
         canvas_id: z.string(),
-        types: z.array(z.enum(TOKEN_TYPES)).optional().describe('Only these token types; omit for all'),
-        name_pattern: z
-          .string()
-          .optional()
-          .describe('Glob on the full name, case-insensitive, * wildcard: "--color-*", "*-500", "*brand*"'),
-        format: z.enum(['json', 'css', 'tailwind', 'markdown']).optional(),
+        ...TOOL_SHAPES.get_tokens,
         agent_name: agentName.optional(),
       },
     },
@@ -968,27 +935,7 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
       inputSchema: {
         canvas_id: z.string(),
-        tokens: z
-          .array(
-            z.object({
-              name: z.string().describe('CSS custom property name, e.g. "--color-primary"'),
-              type: z.enum(TOKEN_TYPES),
-              value: z.union([z.string(), z.number()]),
-              themes: z
-                .record(z.string(), z.union([z.string(), z.number()]))
-                .optional()
-                .describe(
-                  'The value under a theme where it differs, e.g. { "dark": "#fff" }; a new theme name declares it',
-                ),
-              description: z
-                .string()
-                .max(MAX_TOKEN_DESCRIPTION)
-                .optional()
-                .describe('What it is for and when to use it'),
-            }),
-          )
-          .min(1)
-          .max(200),
+        ...TOOL_SHAPES.create_tokens,
         agent_name: agentName,
       },
     },
@@ -1011,23 +958,7 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
       annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
       inputSchema: {
         canvas_id: z.string(),
-        tokens: z
-          .array(
-            z.object({
-              name: z.string().describe('The token to change, by its full name'),
-              new_name: z.string().optional(),
-              type: z.enum(TOKEN_TYPES).optional(),
-              value: z.union([z.string(), z.number()]).optional(),
-              themes: z
-                .record(z.string(), z.union([z.string(), z.number(), z.null()]))
-                .optional()
-                .describe("Theme values to set, merged in; null removes that theme's value"),
-              description: z.string().max(MAX_TOKEN_DESCRIPTION).optional(),
-              delete: z.boolean().optional(),
-            }),
-          )
-          .min(1)
-          .max(200),
+        ...TOOL_SHAPES.set_tokens,
         agent_name: agentName,
       },
     },
@@ -1057,14 +988,7 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
       annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
       inputSchema: {
         canvas_id: z.string(),
-        themes: z
-          .array(z.string())
-          .max(8)
-          .describe('Theme names in display order, e.g. ["light", "dark"]; "default" is always there and never listed'),
-        renames: z
-          .array(z.object({ from: z.string(), to: z.string() }))
-          .optional()
-          .describe('Themes to rename first; their values follow. List the new name in `themes`.'),
+        ...TOOL_SHAPES.set_token_themes,
         agent_name: agentName,
       },
     },
@@ -1093,7 +1017,7 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
       inputSchema: {
         canvas_id: z.string(),
-        reference_id: z.string().describe('Reference id from get_canvas'),
+        ...TOOL_SHAPES.get_reference,
         agent_name: agentName.optional(),
       },
     },
@@ -1131,15 +1055,7 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
       inputSchema: {
         canvas_id: z.string(),
-        decision: z
-          .string()
-          .max(
-            MAX_DECISION_CHARS,
-            `Save one decision and its rationale per call, at most ${MAX_DECISION_CHARS} characters; split longer feedback into separate calls by topic.`,
-          )
-          .describe(
-            `One decision and its rationale in the human's own words, at most ${MAX_DECISION_CHARS} characters. Split longer feedback into separate calls by topic.`,
-          ),
+        ...TOOL_SHAPES.save_decision,
         agent_name: agentName,
       },
     },
@@ -1173,10 +1089,7 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
       inputSchema: {
         canvas_id: z.string(),
-        status: z
-          .string()
-          .max(140)
-          .describe('What you are working on, one line, present tense. Empty string clears your status.'),
+        ...TOOL_SHAPES.set_status,
         agent_name: agentName,
       },
     },
@@ -1231,8 +1144,7 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
       inputSchema: {
         canvas_id: z.string(),
-        comment_id: z.string().describe('The root comment or any reply in the thread (from get_comments)'),
-        text: z.string().describe('The reply text. Trimmed; empty replies are rejected.'),
+        ...TOOL_SHAPES.reply_to_comment,
         agent_name: agentName,
       },
     },
@@ -1288,7 +1200,7 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
       inputSchema: {
         canvas_id: z.string(),
-        comment_id: z.string().describe('The root comment or a reply (from get_comments)'),
+        ...TOOL_SHAPES.resolve_comment,
         agent_name: agentName,
       },
     },
@@ -1497,7 +1409,6 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
     return text({ ok: true, id: saved.id, note: 'Thanks — the Doop team reads these. Carry on with your task.' })
   }
   const teamMessageFields = {
-    tool: z.string().max(80).optional().describe('The Doop tool involved, if any (e.g. "edit_frame_html").'),
     canvas_id: z.string().optional().describe('The canvas you were working on, if any.'),
     agent_name: agentName.optional(),
   }
@@ -1510,16 +1421,7 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
         "Tell the Doop team where Doop itself got in your way, so it can be fixed: a tool that errored or did something other than its description says, a guide or tool description that left you guessing, a capability you needed and did not have, or a workaround you had to invent. Call it whenever you struggle with Doop — after a retry fails, when you fall back to a workaround, or when you give up on part of a task — then carry on with the task. Ideas and suggestions that did not block you go to share_feedback instead. It does not reach the humans on the canvas and does not change any canvas; for the human's design feedback use save_decision. Be specific: what you tried (tool and arguments in brief), what happened, what you expected. Never include secrets.",
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
       inputSchema: {
-        category: z
-          .enum(AGENT_ISSUE_CATEGORIES)
-          .describe(
-            'bug: a tool misbehaved · tool_error: a tool returned an error you could not get past · confusing: the guide or a description was unclear · missing_capability: you needed something Doop cannot do · other',
-          ),
-        message: z
-          .string()
-          .min(1)
-          .max(MAX_AGENT_FEEDBACK_CHARS)
-          .describe('What you tried, what happened, and what you expected or needed instead.'),
+        ...TOOL_SHAPES.report_issue,
         ...teamMessageFields,
       },
     },
@@ -1534,16 +1436,7 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
         "Tell the Doop team how Doop could work better for agents like you: a tool you wish existed, a parameter or result field that would have saved you calls, a workflow that felt clumsy, or something that worked especially well and should stay. Use it when you notice something worth saying, then carry on with the task. Something that broke or blocked you goes to report_issue instead. It does not reach the humans on the canvas and does not change any canvas; for the human's design feedback use save_decision. Be concrete: what you were doing and what would have helped. Never include secrets.",
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
       inputSchema: {
-        category: z
-          .enum(AGENT_IDEA_CATEGORIES)
-          .describe(
-            'idea: something new Doop could offer · improvement: a change to something that exists · praise: something that worked well · other',
-          ),
-        message: z
-          .string()
-          .min(1)
-          .max(MAX_AGENT_FEEDBACK_CHARS)
-          .describe('What you were doing and what would have helped (or what worked well).'),
+        ...TOOL_SHAPES.share_feedback,
         ...teamMessageFields,
       },
     },
@@ -1559,13 +1452,7 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
       annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
       inputSchema: {
         canvas_id: z.string(),
-        expectedPages: z
-          .array(z.object({ id: z.string(), name: z.string() }))
-          .describe('Exact ordered pages returned by get_canvas; protects collaborators from overwritten changes'),
-        pages: z
-          .array(z.object({ id: z.string().trim().min(1).max(100), name: z.string().trim().min(1).max(100) }))
-          .min(1)
-          .max(100),
+        ...TOOL_SHAPES.set_canvas_pages,
         agent_name: agentName,
       },
     },
@@ -1588,7 +1475,7 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
       inputSchema: {
         canvas_id: z.string(),
-        name: z.string().trim().min(1).max(MAX_PAGE_NAME).describe('The page name shown in the Pages panel'),
+        ...TOOL_SHAPES.create_canvas_page,
         agent_name: agentName,
       },
     },
@@ -1660,8 +1547,7 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
       inputSchema: {
         canvas_id: z.string(),
-        pageId: z.string().optional().describe("Page ID from get_canvas; defaults to the start frame's page"),
-        frame_id: z.string().nullable().describe("The start frame, or null to clear the page's start"),
+        ...TOOL_SHAPES.set_prototype_start,
         agent_name: agentName,
       },
     },
@@ -1693,23 +1579,7 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
       inputSchema: {
         canvas_id: z.string(),
-        pageId: z.string().optional().describe('Target page ID from get_canvas; defaults to the first page'),
-        name: z.string().describe('Frame title, e.g. "Landing hero" or "Pricing card"'),
-        html: z
-          .string()
-          .describe(
-            'Complete HTML for the frame body (a full document or a fragment; it is rendered in a sandboxed iframe).',
-          ),
-        x: z.number().optional(),
-        y: z.number().optional(),
-        width: z.number().optional().describe('Default 640'),
-        height: z.number().optional().describe('Default 480'),
-        fit_to_content: z
-          .enum(FIT_AXES)
-          .optional()
-          .describe(
-            `${FIT_ON.create} Needs the whole design in html: after streaming with append_frame_html, call update_frame with fit_to_content instead.`,
-          ),
+        ...TOOL_SHAPES.create_frame,
         agent_name: agentName,
       },
     },
@@ -1796,9 +1666,7 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
         COMPOSE_CHECK,
       annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
       inputSchema: {
-        frame_id: z.string(),
-        html: z.string(),
-        fit_to_content: z.enum(FIT_AXES).optional().describe(FIT_ON.set),
+        ...TOOL_SHAPES.set_frame_html,
         agent_name: agentName,
       },
     },
@@ -1903,21 +1771,7 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
         "Export ONE element (layer) of a frame as a PNG or JPG: the frame's CURRENT design rendered whole, then cut to that element's box, so inherited styles and whatever paints behind it are in the picture (as Figma exports a layer). Returns public URLs that re-render when the frame changes. Name the element by element_id (its data-doop-id attribute, as get_frame shows it) or, when it has none, by selector (any CSS selector; the first match is used). For the whole frame use export_frame.",
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
       inputSchema: {
-        frame_id: z.string(),
-        element_id: z.string().optional().describe("the element's data-doop-id; preferred, it survives edits"),
-        selector: z
-          .string()
-          .max(MAX_LAYER_SELECTOR_CHARS)
-          .optional()
-          .describe('a CSS selector for an element without a data-doop-id, e.g. "#pricing .card:nth-of-type(2)"'),
-        format: z.enum(['png', 'jpg']).optional().describe('default png'),
-        quality: z.number().min(1).max(100).optional().describe('jpg only, default 90'),
-        scale: z
-          .number()
-          .min(MIN_EXPORT_SCALE)
-          .max(MAX_EXPORT_SCALE)
-          .optional()
-          .describe(`pixel density, default ${DEFAULT_EXPORT_SCALE}`),
+        ...TOOL_SHAPES.export_layer,
       },
     },
     async ({ frame_id, element_id, selector, format, quality, scale }) => {
@@ -2026,13 +1880,7 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
       inputSchema: {
         canvas_id: z.string().describe('The canvas whose font library gets the font'),
-        source_url: z.string().optional().describe('Public http(s) URL of the font file'),
-        local_file: z
-          .boolean()
-          .optional()
-          .describe('true = the file is on YOUR machine: returns a one-time upload URL + curl command to run'),
-        data: z.string().optional().describe('The file as base64 (raw or a data: URL). Last resort, small files only.'),
-        file_name: z.string().optional().describe('The file name the library shows, e.g. "Oxanium-Light.ttf"'),
+        ...TOOL_SHAPES.upload_font,
         agent_name: agentName,
       },
     },
@@ -2083,12 +1931,7 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
       description: `Generate an image from a text prompt and store it as a permanent asset on this origin — returns the URL to embed plus a preview you can look at. ${imageGen.IMAGE_PROVIDER_NOTE} Use it for visuals stock search cannot supply: brand-specific illustration, a product render, a mascot, abstract hero art in the frame's exact palette. Prefer search_images for ordinary photography. It costs the connecting human quota or money, so write ONE considered prompt: subject, style, composition, palette hexes, lighting, what to leave out. Generation takes 20–60 seconds. ONLY generate when the design genuinely needs it or the human asked.`,
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
       inputSchema: {
-        prompt: z.string().describe('What to draw: subject, style, composition, palette, lighting, mood'),
-        aspect: z
-          .enum(imageGen.IMAGE_ASPECTS)
-          .optional()
-          .describe('square 1024×1024 (default), landscape 1536×1024, portrait 1024×1536 — match the slot'),
-        quality: z.enum(imageGen.IMAGE_QUALITIES).optional().describe('low is fast and cheap; default medium'),
+        ...TOOL_SHAPES.generate_image,
         canvas_id: z.string().describe('The canvas this image belongs to'),
         agent_name: agentName,
       },
@@ -2152,12 +1995,7 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
         'Search free stock photography (Pexels) and get back candidate photos WITH visual thumbnails — look at them and pick the one that fits the frame\'s mood, palette and crop. Use concrete, scene-level queries ("team collaborating loft office", not "business"). Embed the returned image_url directly in frame HTML: it is already a permanent copy on this origin, so it needs no upload_asset. Always write a real alt text.',
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
       inputSchema: {
-        query: z.string().describe('Scene-level description of the photo you want'),
-        orientation: z
-          .enum(['landscape', 'portrait', 'square'])
-          .optional()
-          .describe('Match the slot the photo will fill'),
-        count: z.number().min(1).max(8).optional().describe('Candidates to return, default 5'),
+        ...TOOL_SHAPES.search_images,
         canvas_id: z.string().optional().describe('The canvas you are designing on (lets human feedback reach you)'),
         agent_name: agentName,
       },
@@ -2213,20 +2051,7 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
         'Browse a curated library of premium backgrounds for hero sections, section bands and bento tiles — soft glows, grainy meshes, aurora ribbons, neon, painterly landscapes — as a page of thumbnails you look at, each with palette hexes and a ready-to-paste CSS line that includes a legibility scrim. Reach for it when a hero or full-bleed section wants atmosphere, depth or a focal glow; a quiet typographic design can stay flat, but a default two-stop gradient is rarely right. Filter by tone (light/dark — match your copy color), slot and style; an optional query ("warm sunset", "dark teal") only reorders. Then decide like a designer: does one of these genuinely fit the frame\'s style and palette? If yes, use it and put the copy in its text_zone. If not, call again with a different filter, or draw the background yourself.',
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
       inputSchema: {
-        query: z
-          .string()
-          .optional()
-          .describe('Mood / palette words to put first, e.g. "warm sunset glow" — reorders, never filters'),
-        tone: z
-          .enum(backgrounds.BACKGROUND_TONES)
-          .optional()
-          .describe('light = dark copy on it, dark = light copy on it'),
-        style: z.enum(backgrounds.BACKGROUND_STYLES).optional().describe('Restrict to one look'),
-        slot: z
-          .enum(backgrounds.BACKGROUND_SLOTS)
-          .optional()
-          .describe('Where it goes: hero, section band, or card/bento tile'),
-        count: z.number().min(1).max(24).optional().describe('Thumbnails to return, default 12'),
+        ...TOOL_SHAPES.list_backgrounds,
         canvas_id: z.string().optional().describe('The canvas you are designing on (lets human feedback reach you)'),
         agent_name: agentName,
       },
@@ -2270,8 +2095,7 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
         'Search 200,000+ open-source UI icons (Iconify: Material, Lucide, Tabler, Phosphor, …) and get hotlinkable SVG URLs for frame HTML. Search one concept per call ("shopping cart", "arrow right") — multi-concept queries return nothing; call once per icon. Results are semantically named ids — pick by name. For company/brand logos use search_logos instead.',
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
       inputSchema: {
-        query: z.string().describe('A single icon concept, e.g. "light bulb"'),
-        limit: z.number().min(1).max(48).optional().describe('Max results, default 24'),
+        ...TOOL_SHAPES.search_icons,
         canvas_id: z.string().optional().describe('The canvas you are designing on (lets human feedback reach you)'),
         agent_name: agentName,
       },
@@ -2300,8 +2124,7 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
         'Find a company\'s logo by brand name or domain — returns the company\'s real mark as a hotlinkable URL (a thumbnail is included when possible so you can confirm the brand), plus open-source vector marks (SVG) for well-known brands. One company per call — for a logo wall, call once per brand. The exact domain ("acme.io") resolves far more reliably than a name ("Acme"). Use for customer-logo walls, "works with" integration rows, testimonial cards, press bars. Mind each result\'s size guidance: favicon-sourced logos are small rasters — never scale them up.',
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
       inputSchema: {
-        query: z.string().describe('A single company name or domain, e.g. "vercel.com"'),
-        count: z.number().min(1).max(8).optional().describe('Candidates to return, default 5'),
+        ...TOOL_SHAPES.search_logos,
         canvas_id: z.string().optional().describe('The canvas you are designing on (lets human feedback reach you)'),
         agent_name: agentName,
       },
@@ -2363,7 +2186,7 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
         'Read-only inspection of a public web page: acquires its current HTML and returns a locally rendered desktop screenshot plus visible text without changing the canvas. Use it to study real copy, structure and branding. When the page should appear on the canvas as an editable source frame, use import_webpage instead.',
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
       inputSchema: {
-        url: z.string().describe('The page URL — a bare domain like "acme.io" is loaded over https'),
+        ...TOOL_SHAPES.view_website,
         agent_name: agentName,
       },
     },
@@ -2409,7 +2232,7 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
         'Import ONE public webpage into a canvas as an editable HTML snapshot. The rendered DOM is captured, scripts/iframes are removed, stylesheets are inlined, and the resulting source frame appears on the canvas for comparison or editing. Use this when a referenced or redesign-target page should be visible to everyone; leave the imported source frame unchanged and make the new design in a separate frame. For inspection without changing the canvas, use view_website.',
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
       inputSchema: {
-        url: z.string().describe('The page URL — a bare domain like "acme.io" is loaded over https'),
+        ...TOOL_SHAPES.import_webpage,
         canvas_id: z.string().describe('Canvas that should receive the imported source frame'),
         agent_name: agentName,
       },
@@ -2586,12 +2409,7 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
         "Render a frame and read it as data rather than pixels: the design in use (colours, backgrounds, fonts, sizes, radii, shadows, CSS variables), an outline of its key elements with text, box (design px) and computed style, and `problems`: content past the frame's edge, text cut off by its box, and text or controls overlapping. Problems are candidates to check against the screenshot: a deliberate overlap (stacked avatars, a label on a photo) or a clipped preview is fine as it is. Pass selectors to report on those elements instead of the automatic outline (a data-doop-id, a class, any CSS selector). Use it with get_frame_screenshot to pin down what looks wrong, and before editing a large frame.",
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
       inputSchema: {
-        frame_id: z.string(),
-        selectors: z
-          .array(z.string())
-          .max(20)
-          .optional()
-          .describe('CSS selectors to report on (up to 20 matches each) instead of the automatic outline'),
+        ...TOOL_SHAPES.inspect_frame,
         agent_name: agentName.optional(),
       },
     },
@@ -2731,9 +2549,7 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
         'Make a targeted edit to a frame: exact find-and-replace in its HTML, as get_frame returned it (a <doop-use> can be edited like any tag). Use this for small tweaks (copy, a color, spacing, one element) instead of resending the whole document — the change morphs into the rendered frame in place. old_str must appear EXACTLY ONCE in the current HTML (call get_frame first if unsure); include enough surrounding context to make it unique. Keep data-doop-* attributes on the element you edit: comments and links point at its data-doop-id. new_str must open and close as many <doop-use> and <template> tags as old_str does: an edit that leaves one unclosed is refused, so include the closing tags in the same edit or replace the whole instance in one call.',
       annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
       inputSchema: {
-        frame_id: z.string(),
-        old_str: z.string().describe('Exact text to find in the frame HTML — must occur exactly once'),
-        new_str: z.string().describe('Replacement text'),
+        ...TOOL_SHAPES.edit_frame_html,
         agent_name: agentName,
       },
     },
@@ -2781,16 +2597,7 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
         "Update frame metadata in one call: rename it (name), move it on its page (x, y), resize it (width, height, or fit_to_content to size it to its content), turn it (rotation: degrees clockwise about its centre; 0 straightens it), or move it to another page (pageId from get_canvas; it keeps its x/y unless you pass new ones and lands in front of that page's frames). Set locked to true to lock the frame on the canvas (humans cannot select, move, resize or delete it from the stage until it is unlocked) or false to unlock it.",
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
       inputSchema: {
-        frame_id: z.string(),
-        pageId: z.string().optional(),
-        name: z.string().optional(),
-        x: z.number().optional(),
-        y: z.number().optional(),
-        width: z.number().optional(),
-        height: z.number().optional(),
-        fit_to_content: z.enum(FIT_AXES).optional().describe(FIT_ON.update),
-        locked: z.boolean().optional(),
-        rotation: z.number().optional(),
+        ...TOOL_SHAPES.update_frame,
         agent_name: agentName,
       },
     },
@@ -2814,8 +2621,7 @@ export function buildMcpServer(owner?: string, ownerId?: string, clientName?: st
         'Set a frame\'s sign-off for the person you work for: status "ready_for_dev" marks the current design approved for implementation, "draft" withdraws an approval. Only when a human asks you to: never approve your own designs on your own initiative, and never to get past a review. The approval is recorded as theirs, made through you (approval.approvedBy is the person, approval.approvedVia your agent_name), and it starts any approval automations on the canvas just as a human sign-off does. Editing the HTML or size afterwards moves it to needs_review, as for every approval.',
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
       inputSchema: {
-        frame_id: z.string(),
-        status: z.enum(['ready_for_dev', 'draft']),
+        ...TOOL_SHAPES.set_frame_approval,
         agent_name: agentName,
       },
     },

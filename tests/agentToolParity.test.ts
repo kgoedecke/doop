@@ -1,6 +1,10 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
 import { expect, it, vi } from 'vitest'
+import { z } from 'zod'
+import { zodToJsonSchema } from 'zod-to-json-schema'
+import { TOOL_SHAPES } from '../server/agentToolShapes.ts'
+import { COMPONENT_TOOL_NAMES } from '../server/componentTools.ts'
 import { buildMcpServer } from '../server/mcp.ts'
 import { RESIDENT_TOOL_NAMES, RESIDENT_TOOLS } from '../server/resident.ts'
 
@@ -73,6 +77,12 @@ const PARAM_DIFFERENCES: Record<string, { mcp?: string[]; resident?: string[] }>
   /* the resident keeps reference snapshots apart from its deliverables and reuses them across
      pipeline stages; an MCP import is always a source frame to compare against */
   import_webpage: { resident: ['as_reference'] },
+}
+
+/** Parameters optional over MCP that a resident run must pass. */
+const REQUIRED_BY_RESIDENT: Record<string, string[]> = {
+  create_frame: ['width', 'height'], // a run sizes every frame it makes; an MCP call falls back to 640x480
+  upload_font: ['source_url'], // its only source, with the file and base64 ones left out (above)
 }
 
 async function mcpTools() {
@@ -154,4 +164,74 @@ it('keeps the parameter exceptions honest', async () => {
   for (const tool of RESIDENT_TOOLS)
     for (const name of MCP_CALL_CONTEXT)
       expect(paramNames(tool.input_schema), `${tool.name} takes ${name}`).not.toContain(name)
+})
+
+/** A schema with its wording left out: types, enums, bounds, nullability and nested fields. */
+function structureOf(schema: unknown): unknown {
+  if (Array.isArray(schema)) return schema.map(structureOf)
+  if (!schema || typeof schema !== 'object') return schema
+  return Object.fromEntries(
+    Object.entries(schema)
+      .filter(([key]) => key !== 'description')
+      .map(([key, value]) => [
+        key,
+        key === 'properties'
+          ? Object.fromEntries(Object.entries(value as object).map(([name, field]) => [name, structureOf(field)]))
+          : structureOf(value),
+      ]),
+  )
+}
+
+type JsonSchema = { properties?: Record<string, unknown>; required?: string[] }
+
+it('defines each shared tool once, for both surfaces', async () => {
+  const resident = new Set(RESIDENT_TOOL_NAMES)
+  const shared = (await mcpToolNames()).filter((name) => resident.has(name))
+  const defined = new Set([...Object.keys(TOOL_SHAPES), ...COMPONENT_TOOL_NAMES])
+  expect(shared.filter((name) => !defined.has(name))).toEqual([])
+  expect(Object.keys(TOOL_SHAPES).filter((name) => !shared.includes(name))).toEqual([])
+})
+
+it('registers each shared shape over MCP as it is, around its call context', async () => {
+  const shapes: Record<string, z.ZodRawShape> = TOOL_SHAPES
+  for (const tool of await mcpTools()) {
+    const shape = shapes[tool.name]
+    if (!shape) continue
+    const { properties = {} } = tool.inputSchema as JsonSchema
+    const registered = Object.fromEntries(
+      Object.entries(properties).filter(([name]) => !MCP_CALL_CONTEXT.includes(name)),
+    )
+    const defined = zodToJsonSchema(z.object(shape), { strictUnions: true, pipeStrategy: 'input' }) as JsonSchema
+    expect(registered, tool.name).toEqual(defined.properties ?? {})
+  }
+})
+
+it('gives a parameter on both surfaces the same type, bounds and requiredness', async () => {
+  const resident = new Map(RESIDENT_TOOLS.map((tool) => [tool.name, tool.input_schema as JsonSchema]))
+  const drift: string[] = []
+  for (const tool of await mcpTools()) {
+    const theirs = resident.get(tool.name)
+    if (!theirs) continue
+    const ours = tool.inputSchema as JsonSchema
+    const mustPass = new Set([...(ours.required ?? []), ...(REQUIRED_BY_RESIDENT[tool.name] ?? [])])
+    for (const name of paramNames(theirs).filter((param) => paramNames(ours).includes(param))) {
+      const [mcp, run] = [ours.properties?.[name], theirs.properties?.[name]].map((field) =>
+        JSON.stringify(structureOf(field)),
+      )
+      if (mcp !== run) drift.push(`${tool.name}.${name}: MCP ${mcp}, resident ${run}`)
+      if (mustPass.has(name) !== (theirs.required ?? []).includes(name))
+        drift.push(`${tool.name}.${name}: required differs`)
+    }
+  }
+  expect(drift).toEqual([])
+})
+
+it('keeps the required-parameter exceptions honest', async () => {
+  const mcp = new Map((await mcpTools()).map((tool) => [tool.name, tool.inputSchema as JsonSchema]))
+  const resident = new Map(RESIDENT_TOOLS.map((tool) => [tool.name, tool.input_schema as JsonSchema]))
+  for (const [tool, names] of Object.entries(REQUIRED_BY_RESIDENT))
+    for (const name of names) {
+      expect(mcp.get(tool)?.required ?? [], `${tool}.${name} is required over MCP now`).not.toContain(name)
+      expect(resident.get(tool)?.required, `${tool}.${name} is no longer required of a run`).toContain(name)
+    }
 })
