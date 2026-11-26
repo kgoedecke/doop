@@ -1,7 +1,7 @@
 # Outbound webhooks
 
 Why: the second native notification path after comment email
-([doop#172](https://github.com/kgoedecke/doop/issues/172)) and the one integrators asked for:
+([doop#172](https://github.com/doop-design/doop/issues/172)) and the one integrators asked for:
 `comment.*`, `frame.created` and agent-task events pushed to Slack / n8n / issue trackers instead
 of a 5-minute `get_comments` poller. User-facing reference: `docs/webhooks.md`.
 

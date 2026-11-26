@@ -3,7 +3,7 @@
 Why: comments, replies and @mentions are only ever broadcast to the clients that have the canvas
 open. Anyone reviewing asynchronously (a client leaving feedback on a shared link, a teammate in
 another timezone) is silently missed unless they poll `get_comments` over MCP
-([doop#172](https://github.com/kgoedecke/doop/issues/172)). This spec covers the first native
+([doop#172](https://github.com/doop-design/doop/issues/172)). This spec covers the first native
 path, email; outbound webhooks are a separate spec.
 
 ## Event seam (`server/events.ts`)

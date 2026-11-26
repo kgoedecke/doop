@@ -210,7 +210,7 @@ metadata, logo, and license. It needs no build artifact or release download. The
 **Connect AI → Cursor → Add to Cursor** uses Cursor's MCP install link for the current Doop
 instance and is available independently of marketplace publication.
 
-After local Cursor smoke testing, sync the plugin commit to public `kgoedecke/doop` through the
+After local Cursor smoke testing, sync the plugin commit to public `doop-design/doop` through the
 existing cherry-pick workflow. Confirm the root marketplace manifest and `cursor-plugin/` are
 present at the same paths. The OSS export script was removed; do not recreate a wipe-and-export
 step. This development repository is private and cannot serve as a public listing source. A maintainer submits the public repository

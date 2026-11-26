@@ -1,7 +1,6 @@
 @.context/INDEX.md
 
-This is a placeholder. Will need to be updated.
-https://github.com/kgoedecke/doop
+https://github.com/doop-design/doop
 
 # doop
 
@@ -27,6 +26,10 @@ bun run dev   # zero-config: embedded Postgres (pglite), server + web concurrent
 ```
 
 Or self-host via Docker: `docker compose up` (real Postgres, port 4400).
+
+Node must match `.node-version`; the test suite refuses to start on another major. The app is at
+http://localhost:4300 (API on 4400), and `.claude/launch.json` names it `dev` for the preview
+tools. A second copy, such as another worktree, takes other ports: `PORT=4401 VITE_PORT=4301 bun run dev`.
 
 ## Project layout
 
