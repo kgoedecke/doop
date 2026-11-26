@@ -1,4 +1,7 @@
 //! Direct Claude CLI transport. Never reads or exports Claude credentials.
+//! Claude Code, its installer and the login shell asked where it lives are
+//! host programs, started without an AppImage's environment (src/host_env.rs).
+use crate::host_env;
 use serde_json::{json, Value};
 use std::{
     collections::HashSet,
@@ -244,7 +247,7 @@ fn newest(versioned: Vec<(PathBuf, Option<Version>)>) -> Option<PathBuf> {
 }
 
 fn version_of(path: &Path, env_path: Option<&OsStr>) -> Option<Version> {
-    let mut cmd = Command::new(path);
+    let mut cmd = host_env::command(path);
     quiet(&mut cmd, env_path);
     cmd.arg("--version");
     let mut first = None;
@@ -329,7 +332,7 @@ fn probe_shell(shell: &Path, timeout: Duration) -> ShellView {
         return ShellView::default();
     };
     let view = (|| {
-        let mut child = Command::new(shell)
+        let mut child = host_env::command(shell)
             .args(["-l", "-i", "-c", SHELL_PROBE])
             .stdin(Stdio::null())
             .stdout(out)
@@ -496,7 +499,7 @@ fn resolved(app: &AppHandle, fresh: bool) -> Result<Claude, String> {
 /// A command for a Claude Code already resolved: one probe per action, the
 /// path, version and PATH then carried through the checks and the spawn.
 fn command_at(claude: &Claude) -> Command {
-    let mut cmd = Command::new(&claude.path);
+    let mut cmd = host_env::command(&claude.path);
     quiet(&mut cmd, claude.env_path.as_deref());
     cmd
 }
@@ -740,7 +743,7 @@ static INSTALLING: Mutex<()> = Mutex::new(());
 fn installer_command() -> Command {
     #[cfg(not(windows))]
     let mut cmd = {
-        let mut cmd = Command::new("/bin/bash");
+        let mut cmd = host_env::command("/bin/bash");
         // Download fully before executing; the URL and script are never supplied by the webview.
         cmd.args(["-c", r#"set -eu
 installer=$(mktemp)

@@ -246,6 +246,15 @@ launch it writes `~/.local/share/applications/doop-desktop-appimage.desktop`
 data dir (`src-tauri/src/appimage.rs`); the .deb and .rpm install their own
 `doop-desktop.desktop` and remove the AppImage's entry when they launch.
 
+The AppImage's launcher puts the bundle first on `PATH` and `LD_LIBRARY_PATH` and
+points GTK and GIO at its own modules. A host program that inherits that loads the
+build machine's older glib and libsystemd and fails on a current distro, so the
+browser never opened for Google sign-in and links did nothing. Every program the
+shell starts on the host (`xdg-open` for links, `xdg-mime` for doop:// links, Claude
+Code and the login shell it is found through) goes through `src-tauri/src/host_env.rs`,
+which takes the bundle back out of that environment. To see the failure, extract the
+AppImage (`--appimage-extract`) and run `LD_LIBRARY_PATH=squashfs-root/usr/lib gio --version`.
+
 ## Chromium shell (the macOS app)
 
 `src-tauri-chromium/` builds the same shell on Chromium instead of the system

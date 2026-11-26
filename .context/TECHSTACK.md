@@ -1767,7 +1767,8 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
 - React 18.3.1 + Vite 8 - SPA, entry at `index.html`.
 - Tailwind CSS 4.3.3 (`@tailwindcss/vite` 4.3.3) - styling; `tw-animate-css` 1.4.0 for animation
   utilities. Design tokens in `src/styles.css` (see `.context/DESIGN.md`).
-- Tauri 2.9.0 (`@tauri-apps/cli`, `desktop/src-tauri`) - desktop app wrapper around the web build.
+- Tauri 2.11 (`tauri` crate, `desktop/src-tauri`) with `@tauri-apps/cli` 2.12.6 - desktop app wrapper around the
+  web build.
 - Frame runtime (`src/frame-runtime/`): the script every frame iframe runs (morphing posted HTML in,
   hit testing, text editing, styles, the key relay, prototype triggers), written as TypeScript modules
   and type-checked and linted with the rest of `src/`. `vitePlugin.ts` (registered in `vite.config.ts`,
