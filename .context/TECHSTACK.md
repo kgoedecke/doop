@@ -445,8 +445,14 @@ server/index.ts` in prod. `erasableSyntaxOnly` and `verbatimModuleSyntax` in tsc
   the handler gets the checked input (text trimmed, defaults filled in). A refused call is not a Glassray tool failure, as over MCP, where the SDK refuses it before the wrapped handler runs. Unlike MCP, null for an optional parameter
   counts as not given, a tool's old parameter names are read as the new ones (`OLD_SPELLINGS`: `find`/`replace`,
   `page_id`), and parameters it does not list are kept. The resident-only tools with a hand-written schema are not
-  checked. Tests: `agentToolParity.test.ts` (names, then each parameter's type, bounds and requiredness, with the
-  exceptions listed), `residentPageTools.test.ts` (the check).
+  checked. The simple shared tools also share their handler (`server/sharedToolHandlers.ts`: `update_canvas`,
+  `create_canvas_page`, `set_canvas_pages`, `get_prototype`, `set_prototype_start`, `set_canvas_thumbnail`): it does
+  the work and gives the answer, the same JSON on both surfaces. Around it MCP checks the account's access to the
+  canvas (the handler's `access`), marks the agent present and adds the feedback waiting for it; the Doop Agent
+  counts a call that changed how the canvas is organised (`arranged`) as delivered work. The other shared tools still
+  have a handler on each surface. Tests: `agentToolParity.test.ts` (names, then each parameter's type, bounds and
+  requiredness, with the exceptions listed), `residentPageTools.test.ts` (the check), `sharedToolHandlers.test.ts`
+  (both surfaces answer alike).
 - Pages over MCP (`server/mcp.ts`): `get_canvas` lists `pages` (id, name, `startFrameId`) and
   every frame's `pageId`, and narrows to one page with `page_id`; `create_canvas_page` adds an
   empty page at the end (`actions.createCanvasPage`, a server-minted id, `MAX_PAGES` enforced)
