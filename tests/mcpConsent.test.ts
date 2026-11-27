@@ -1,4 +1,5 @@
 import { createHash, randomBytes } from 'node:crypto'
+import { request } from 'node:http'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { Client, startServer, type Server } from './harness.ts'
 import { consentCovers, requestedScopes } from '../server/mcpConsent.ts'
@@ -75,6 +76,20 @@ async function approve(person: Client, consentCode: string) {
   const res = await person.post(`/api/mcp-consent/${consentCode}`, { accept: true })
   expect(res.status).toBe(200)
   return new URL(((await res.json()) as { redirectURI: string }).redirectURI)
+}
+
+/** Signs in the way a browser posting a form does. Not with fetch: it sends
+ *  `Sec-Fetch-Mode: cors` whatever the request asks for. */
+function navigatedSignIn(person: Client, email: string): Promise<{ status: number; location: string | null }> {
+  return new Promise((resolve, reject) => {
+    const headers = { 'Content-Type': 'application/json', 'Sec-Fetch-Mode': 'navigate', Cookie: person.header() }
+    const req = request(`${server.base}/api/auth/sign-in/email`, { method: 'POST', headers }, (res) => {
+      res.resume()
+      resolve({ status: res.statusCode ?? 0, location: res.headers.location ?? null })
+    })
+    req.on('error', reject)
+    req.end(JSON.stringify({ email, password: 'password12345' }))
+  })
 }
 
 describe('MCP authorize consent', () => {
@@ -170,24 +185,41 @@ describe('MCP authorize consent', () => {
     const browser = new Client(server)
 
     /* signed out: the request is remembered in a cookie and the sign-in
-       finishes it (better-auth's after-hook on the sign-in response) */
+       finishes it, as a redirect the email form's fetch can follow */
     const signedOut = await browser.get(authorizePath(clientId, pkce().challenge))
     expect(signedOut.status).toBe(302)
-    const signIn = await browser.post('/api/auth/sign-in/email', {
-      email: 'consent-later@test.dev',
-      password: 'password12345',
+    const signIn = await browser.req('/api/auth/sign-in/email', {
+      method: 'POST',
+      headers: { 'Sec-Fetch-Mode': 'cors' },
+      body: JSON.stringify({ email: 'consent-later@test.dev', password: 'password12345' }),
     })
-    const finished = signIn.headers.get('location')
-    if (finished) {
-      const location = new URL(finished, server.base)
-      expect(location.pathname).toBe('/oauth/consent')
-    }
-    expect(finished ?? '').not.toContain('attacker.example')
-    expect(finished ?? '').not.toMatch(/[?&]code=/)
+    expect(signIn.status).toBe(200)
+    expect(signIn.headers.get('location')).toBeNull()
+    const finished = (await signIn.json()) as { redirect: boolean; url: string }
+    expect(finished.redirect).toBe(true)
+    const consent = new URL(finished.url, server.base)
+    expect(consent.origin).toBe(server.base)
+    expect(consent.pathname).toBe('/oauth/consent')
+    expect(finished.url).not.toMatch(/[?&]code=/)
 
     /* and the sign-in page's own resume (the authorize URL again) asks too */
     const resumed = await browser.get(authorizePath(clientId, pkce().challenge))
     expect(locationOf(resumed).pathname).toBe('/oauth/consent')
+
+    /* approving that consent code reaches the client */
+    const callback = await approve(browser, consent.searchParams.get('consent_code')!)
+    expect(callback.origin + callback.pathname).toBe(ATTACKER_CALLBACK)
+  })
+
+  it('still redirects a sign-in the browser navigated to', async () => {
+    await new Client(server).signUp('consent-form@test.dev', 'Form')
+    const clientId = await register()
+    const browser = new Client(server)
+
+    await browser.get(authorizePath(clientId, pkce().challenge))
+    const signIn = await navigatedSignIn(browser, 'consent-form@test.dev')
+    expect(signIn.status).toBe(302)
+    expect(new URL(signIn.location ?? '', server.base).pathname).toBe('/oauth/consent')
   })
 })
 

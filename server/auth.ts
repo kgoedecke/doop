@@ -13,7 +13,7 @@ import { acceptInvites, joinDefaultWorkspace } from './workspaces.ts'
 import { getInstanceSettings } from './instanceSettings.ts'
 import { purgeUserData } from './accountDeletion.ts'
 import { MCP_REFRESH_TOKEN_TTL_S } from './mcpTokens.ts'
-import { mcpConsentGuard } from './mcpConsent.ts'
+import { mcpConsentGuard, mcpSignInRedirect } from './mcpConsent.ts'
 import { SIGN_IN_PATH } from '../shared/signInPath.ts'
 import { createHash } from 'node:crypto'
 import { createRemoteJWKSet, jwtVerify } from 'jose'
@@ -674,6 +674,9 @@ function buildAuth() {
           refreshTokenExpiresIn: MCP_REFRESH_TOKEN_TTL_S,
         },
       }),
+      /* after mcp(): turns the redirect its sign-in hook sends into one the
+         email form's fetch can follow (see server/mcpConsent.ts) */
+      mcpSignInRedirect(),
       admin({ impersonationSessionDuration: 15 * 60 }),
       /* oneTimeToken: how a Google / Microsoft / SSO sign-in finished in the
          system browser reaches the desktop app (src/lib/desktopAuth.ts). The
