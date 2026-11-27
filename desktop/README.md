@@ -340,20 +340,22 @@ shared by every desktop job lives in `.github/actions/setup-desktop`.
 Intel) DMG for macOS, an NSIS installer for Windows and an AppImage, .deb and
 .rpm for x64 Linux:
 
-- push a tag `desktop-v*` → every installer attached to a GitHub Release. The
+- a tag `desktop-v*` → every installer attached to a GitHub Release. The
   release is created only after all three builds succeed, so a tag never ships
   with an installer missing.
-- manual dispatch → the installers as workflow artifacts
+- manual dispatch on a branch → the installers as workflow artifacts
 
 Versions are bumped by release-please: commits touching `desktop/` open a
-"chore(desktop): release x.y.z" PR that updates `package.json`,
+"chore(main): release desktop x.y.z" PR that updates `package.json`,
 `src-tauri/tauri.conf.json` and `Cargo.toml` together, plus `desktop/CHANGELOG.md`
 (`Cargo.lock` lags one version until the next local build; CI copies the shell's version line
 from `Cargo.toml` into the lock before `cargo test --locked`). Merging it
-does not tag — push the tag by hand:
+releases: `release-please.yml` tags the merged commit `desktop-vX.Y.Z` and
+starts `desktop-release.yml` on the tag, and the release is announced in
+Discord once its installers are attached. Pushing a tag by hand still works,
+for a release that PR did not prepare:
 
 ```sh
-# after the release PR is merged; X.Y.Z is the version that PR set in desktop/package.json
 git tag desktop-vX.Y.Z && git push origin desktop-vX.Y.Z
 ```
 

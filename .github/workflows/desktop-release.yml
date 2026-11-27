@@ -6,8 +6,12 @@
 # into it; Windows and Linux stay on the WebKit build (desktop/src-tauri).
 # - Tag `desktop-v*` → builds all three, then one release job attaches them to
 #   a GitHub Release. The release is only created once every build succeeded,
-#   so a tag never ends up published with an installer missing.
-# - Manual dispatch → builds and uploads the installers as workflow artifacts.
+#   so a tag never ends up published with an installer missing. Merging the
+#   desktop release PR is all it takes: release-please.yml then pushes the tag
+#   and dispatches this workflow on it, which runs as a tag build (every job
+#   here goes by the ref, not the event).
+# - Manual dispatch on a branch → builds and uploads the installers as
+#   workflow artifacts.
 # - PRs touching this file → same as dispatch, so the pipeline stays validated.
 #
 # macOS signing + notarization happen automatically once the APPLE_* repo
@@ -17,6 +21,11 @@
 # Signing on tag and dispatch builds once the AZURE_CLIENT_ID and
 # AZURE_TENANT_ID repo variables exist (see desktop/README.md); PR builds and
 # repos without them stay unsigned.
+#
+# Discord: once a tag's release is published, the announce job posts its
+# desktop/CHANGELOG.md section to the channel behind the
+# DISCORD_RELEASE_WEBHOOK_URL secret (scripts/discord-release.ts), as
+# release-please.yml does for web releases.
 #
 # Self-update: with the TAURI_SIGNING_PRIVATE_KEY (+ _PASSWORD) secrets set,
 # every build also produces updater packages signed with the key whose public
@@ -308,3 +317,24 @@ jobs:
             fi
           fi
           gh release upload desktop-updates installers/latest.json --clobber
+
+  announce:
+    if: startsWith(github.ref, 'refs/tags/desktop-v')
+    needs: release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version-file: .node-version
+      - name: Announce the release in Discord
+        env:
+          DISCORD_RELEASE_WEBHOOK_URL: ${{ secrets.DISCORD_RELEASE_WEBHOOK_URL }}
+          TAG: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
+        run: |
+          version="${TAG#desktop-v}"
+          node scripts/discord-release.ts --title "Doop desktop v$version" \
+            --url "https://github.com/$REPO/releases/tag/$TAG" --changelog desktop/CHANGELOG.md --version "$version"
