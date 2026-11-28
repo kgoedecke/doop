@@ -14,7 +14,7 @@ import { CardDescription, CardHeader, CardRow, CardTitle, SettingsCard } from '.
  *  signed in through Google / Microsoft / Apple / SSO has none, and better-auth
  *  then accepts a fresh session instead. Throws rather than guessing, as the
  *  iOS app does: a lookup that failed must not drop the password. */
-async function accountHasPassword(): Promise<boolean> {
+export async function accountHasPassword(): Promise<boolean> {
   const { data, error } = await authClient.listAccounts()
   if (error) throw new Error(error.message)
   return data.some((account) => account.providerId === 'credential')

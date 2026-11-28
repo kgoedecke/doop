@@ -52,6 +52,7 @@ import { emptyBodyByDefault, routeErrorAnswer } from './http.ts'
 import { eq, inArray } from 'drizzle-orm'
 import { toNodeHandler, fromNodeHeaders } from 'better-auth/node'
 import { oAuthDiscoveryMetadata } from 'better-auth/plugins'
+import { APIError } from 'better-auth/api'
 import { WebSocketServer, WebSocket } from 'ws'
 import { GuideLimitError, PageLimitError, store, type HoldScope } from './store.ts'
 import { parseGuide } from '../shared/guides.ts'
@@ -1317,6 +1318,34 @@ app.delete('/api/me/avatar', async (req, res, next) => {
     refreshPresenceImage(req.user!.id, undefined)
     res.json({ ok: true })
   } catch (e) {
+    next(e)
+  }
+})
+
+/* A password for an account that has none (it signed up through Google, a
+   Microsoft or Apple login, or SSO), without the old one change-password
+   asks for. better-auth's setPassword is server-only and itself refuses an
+   account that already has a credential, so a password account can never be
+   reset here - it must go through change-password with its current password.
+   The session must also be recent (better-auth's freshAge, as for account
+   deletion): a stolen day-old cookie cannot plant a password for a
+   permanent way back in. Every other session is signed out afterwards, as
+   change-password does. */
+app.post('/api/me/password', async (req, res, next) => {
+  try {
+    const newPassword: unknown = req.body?.newPassword
+    if (typeof newPassword !== 'string') return res.status(400).json({ error: 'newPassword is required' })
+    const headers = fromNodeHeaders(req.headers)
+    const session = await auth.api.getSession({ headers })
+    const { freshAge } = (await auth.$context).sessionConfig
+    if (!session || (freshAge !== 0 && Date.now() - session.session.createdAt.getTime() >= freshAge * 1000)) {
+      return res.status(403).json({ error: 'sign out and back in, then try again' })
+    }
+    await auth.api.setPassword({ headers, body: { newPassword } })
+    await auth.api.revokeOtherSessions({ headers })
+    res.json({ ok: true })
+  } catch (e) {
+    if (e instanceof APIError) return res.status(e.statusCode).json({ error: e.message })
     next(e)
   }
 })
