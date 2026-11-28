@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.15.1](https://github.com/doop-design/doop/compare/desktop-v0.15.0...desktop-v0.15.1) (2026-11-28)
+
+
+### Bug Fixes
+
+* **desktop:** open the browser from the Linux AppImage so Google sign-in works ([#766](https://github.com/doop-design/doop/issues/766)) ([e6e7dc6](https://github.com/doop-design/doop/commit/e6e7dc6158728c721d90930f43de8f302d7aa528))
+
 ## [0.15.0](https://github.com/doop-design/doop/compare/desktop-v0.14.0...desktop-v0.15.0) (2026-11-25)
 
 
