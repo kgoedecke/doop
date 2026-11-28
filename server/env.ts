@@ -210,6 +210,10 @@ const schema = {
   /* JSON; parsed and shape-checked where it is used so a parse error never
      echoes the worker secrets it contains */
   DOOP_GEMINI_CLOUD_WORKERS: str({ default: undefined }),
+  /* whether an agent (MCP, the resident, a GitHub import) may create, replace or delete a
+     style guide; guides reach every later agent run as rules, so false leaves them to people
+     (and to distiller proposals a person accepts) */
+  AGENT_GUIDELINE_WRITES: bool({ default: true }),
   CHATGPT_CONNECT_DISABLED: bool({ default: false }),
   CHATGPT_OAUTH_ISSUER: origin({ default: 'https://auth.openai.com' }),
   CHATGPT_OAUTH_CLIENT_ID: str({ default: 'app_EMoamEEZ73f0CkXaXp7hrann' }),

@@ -3293,6 +3293,8 @@ export const setGuideline = atomic(function setGuideline(
   pos?: { x: number; y: number },
   title?: string,
 ): GuidelineDoc | null | undefined {
+  if (actor.kind === 'agent' && !env.AGENT_GUIDELINE_WRITES)
+    throw new Error('agents cannot write design guides on this instance — leave the rule as a comment for a person')
   const slug = name.trim().toLowerCase()
   if (!GUIDELINE_NAME_RE.test(slug))
     throw new Error(`invalid doc name “${name}” — use a lowercase slug like "feature-image" (a-z, 0-9, hyphens)`)
