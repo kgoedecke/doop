@@ -3,20 +3,32 @@
 # On every push to main, release-please opens (or refreshes) a "chore(main):
 # release x.y.z" PR that bumps package.json, updates CHANGELOG.md, and lists
 # the feat/fix commits since the last release. Merging that PR creates the
-# `vX.Y.Z` tag and a GitHub Release with those notes. Tag + notes only —
-# nothing is built or deployed from it.
+# `vX.Y.Z` tag and a GitHub Release with those notes. Tag, notes and a
+# Discord post only — nothing is built or deployed from it.
 #
 # The desktop shell is a second package (desktop/): commits touching it get
-# their own "chore(desktop): release x.y.z" PR that bumps the version in
+# their own "chore(main): release desktop x.y.z" PR that bumps the version in
 # package.json, tauri.conf.json and Cargo.toml together, plus
 # desktop/CHANGELOG.md (not Cargo.lock: release-please cannot address one
-# package in it, so desktop.yml refreshes that entry before `cargo --locked`). That PR does NOT tag (skip-github-release): push the
-# `desktop-vX.Y.Z` tag by hand after merging, which runs desktop-release.yml
-# and attaches the signed DMG (see desktop/README.md). Because no GitHub
-# Release is cut, release-please never flips that merged PR's label from
-# `autorelease: pending` to `autorelease: tagged`, and a pending merged PR
-# makes every later run abort with "untagged, merged release PRs
-# outstanding". The relabel step below does the flip for desktop PRs.
+# package in it, so desktop.yml refreshes that entry before `cargo --locked`).
+# release-please does not tag that PR (skip-github-release), since a release
+# it cut would be public before its installers exist. Instead the desktop step
+# below tags the merged PR's commit `desktop-vX.Y.Z` and starts
+# desktop-release.yml on the tag, which builds the installers and only then
+# creates the GitHub Release. A tag made with GITHUB_TOKEN starts no workflow,
+# so the step starts it by workflow_dispatch, the one event that token may
+# trigger; on a tag ref the run is the same tag build a pushed tag gets. The
+# step then flips the PR's label from `autorelease: pending` to
+# `autorelease: tagged`, which release-please would do had it cut the release;
+# a pending merged PR makes every later run abort with "untagged, merged
+# release PRs outstanding".
+#
+# Discord: when a run cuts the web release, the announce job posts its
+# CHANGELOG.md section to the channel behind the DISCORD_RELEASE_WEBHOOK_URL
+# secret (scripts/discord-release.ts; without the secret it prints the message
+# and posts nothing). It is its own job so a failed post can be re-run alone.
+# Desktop releases are announced by desktop-release.yml once their installers
+# are attached.
 #
 # Token: with the default GITHUB_TOKEN, the release PR's own CI run will not
 # trigger (GitHub suppresses workflows on events created by that token). Add a
@@ -31,6 +43,7 @@ on:
 permissions:
   contents: write
   pull-requests: write
+  actions: write # to start desktop-release.yml on a desktop tag
 
 jobs:
   release-please:
@@ -38,21 +51,74 @@ jobs:
     concurrency:
       group: release-please
       cancel-in-progress: false
+    outputs:
+      # the root package's (the web app's); the desktop package cuts no release here
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
+      version: ${{ steps.release.outputs.version }}
+      html_url: ${{ steps.release.outputs.html_url }}
     steps:
       - uses: googleapis/release-please-action@5c625bfb5d1ff62eadeeb3772007f7f66fdcf071 # v4.4.1
+        id: release
         with:
           token: ${{ secrets.RELEASE_PLEASE_TOKEN || secrets.GITHUB_TOKEN }}
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
-      - name: Mark merged desktop release PRs as tagged
+      # GITHUB_TOKEN, never the PAT: a tag pushed with the PAT would start
+      # desktop-release.yml by itself, and the dispatch below a second build
+      - name: Tag merged desktop release PRs and start their build
         env:
-          GH_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN || secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           gh pr list --repo "$GITHUB_REPOSITORY" --state merged --label 'autorelease: pending' \
-            --search 'release desktop in:title' --json number,title \
-            --jq '.[] | select(.title | test("^chore\\(main\\): release desktop ")) | .number' |
-          while read -r number; do
+            --search 'release desktop in:title' --json number,title,mergeCommit \
+            --jq '.[] | select(.title | test("^chore\\(main\\): release desktop ")) |
+              "\(.number) \(.mergeCommit.oid) \(.title | split(" ") | last)"' |
+          while read -r number sha version; do
+            if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              echo "::error::no version in the title of desktop release PR #$number"
+              exit 1
+            fi
+            tag="desktop-v$version"
+            # a re-run keeps the tag it made, and does not build a tag twice
+            if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$tag" --silent 2>/dev/null; then
+              echo "$tag already exists"
+            else
+              echo "Tagging $sha (#$number) as $tag"
+              gh api "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/tags/$tag" -f sha="$sha" --silent
+            fi
+            # its own assignment, so a failed lookup stops the step (bash -e) rather than reading as "no build yet"
+            runs=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow desktop-release.yml --branch "$tag" \
+              --json databaseId --jq 'length')
+            if [ "$runs" -gt 0 ]; then
+              echo "$tag is already building"
+            else
+              echo "Starting Desktop Release on $tag"
+              gh workflow run desktop-release.yml --repo "$GITHUB_REPOSITORY" --ref "$tag"
+            fi
             echo "Relabeling merged desktop release PR #$number as tagged"
             gh pr edit "$number" --repo "$GITHUB_REPOSITORY" \
               --remove-label 'autorelease: pending' --add-label 'autorelease: tagged'
           done
+
+  announce:
+    needs: release-please
+    # also when the relabel step failed: a re-run would not cut the release again, so it would never be announced
+    if: ${{ !cancelled() && needs.release-please.outputs.release_created == 'true' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ needs.release-please.outputs.tag_name }}
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version-file: .node-version
+      - name: Announce the release in Discord
+        env:
+          DISCORD_RELEASE_WEBHOOK_URL: ${{ secrets.DISCORD_RELEASE_WEBHOOK_URL }}
+          TAG: ${{ needs.release-please.outputs.tag_name }}
+          VERSION: ${{ needs.release-please.outputs.version }}
+          URL: ${{ needs.release-please.outputs.html_url }}
+        run: node scripts/discord-release.ts --title "Doop $TAG" --url "$URL" --changelog CHANGELOG.md --version "$VERSION"

@@ -7,19 +7,43 @@ per package, driven by conventional commits (`release-please-config.json`,
 `.release-please-manifest.json`):
 
 - `.` (the web app) -> "chore(main): release x.y.z" bumps `package.json` + `CHANGELOG.md`;
-  merging it creates the `vX.Y.Z` tag and a GitHub Release. Tag + notes only - nothing is built
-  or deployed from it.
-- `desktop/` -> "chore(desktop): release x.y.z" bumps `desktop/package.json`,
+  merging it creates the `vX.Y.Z` tag and a GitHub Release. Tag, notes and a Discord post
+  (below) only - nothing is built or deployed from it.
+- `desktop/` -> "chore(main): release desktop x.y.z" bumps `desktop/package.json`,
   `src-tauri/tauri.conf.json`, `Cargo.toml` + `desktop/CHANGELOG.md`. It cannot bump
   `Cargo.lock`, so `desktop.yml` copies the shell's version line from `Cargo.toml` into the
-  lock ahead of `cargo test --locked`; the lock catches up in the next commit that builds the shell. It does NOT
-  tag: the `desktop-v*` tag is pushed by hand after merging (next section). Since no GitHub
-  Release is cut, the workflow's last step flips the merged desktop PR's label from
-  `autorelease: pending` to `autorelease: tagged` itself; a merged PR left `pending` makes every
-  later run abort with "untagged, merged release PRs outstanding".
+  lock ahead of `cargo test --locked`; the lock catches up in the next commit that builds the shell.
+  Merging it is the whole desktop release: release-please cuts no release for it
+  (`skip-github-release`, so nothing is public before the installers are), and the workflow's
+  desktop step tags the merged commit `desktop-vX.Y.Z` and starts `desktop-release.yml` on that
+  tag (next section). The tag is made with `GITHUB_TOKEN`, whose pushes start no workflow, so the
+  build is started by `workflow_dispatch`, the one event that token may trigger; on a tag ref it
+  is the same tag build a pushed tag gets, since every job goes by the ref. A re-run keeps an
+  existing tag and does not start a second build for a tag that has one. The step then flips the
+  PR's label from `autorelease: pending` to `autorelease: tagged`, as release-please would had it
+  cut the release; a merged PR left `pending` makes every later run abort with "untagged, merged
+  release PRs outstanding". Pushing a `desktop-v*` tag by hand still builds a release, for one
+  release-please did not prepare.
 
 Both packages are 0.x, so breaking changes bump the minor, not the major. With the default
 `GITHUB_TOKEN` the release PR gets no CI run; a `RELEASE_PLEASE_TOKEN` PAT secret fixes that.
+
+### Discord announcements
+
+Every web and desktop release is posted to Discord by `scripts/discord-release.ts`: one embed,
+titled and linked to the GitHub Release, holding the version's `CHANGELOG.md` section with the PR
+and commit links dropped, cut at Discord's 4,096-character limit with a count of the entries left
+out, and no mentions allowed. The web release is posted by the `announce` job in
+`release-please.yml`, run when release-please cuts the release; the desktop release by the
+`announce` job in `desktop-release.yml`, once `release` has attached the installers. Each is its own
+job, so a failed post re-runs alone. Neither can hang off `release: published`: a release made
+with `GITHUB_TOKEN` starts no other workflow.
+
+The channel is the `DISCORD_RELEASE_WEBHOOK_URL` repo secret, a webhook made under the channel's
+settings → Integrations → Webhooks, whose name and avatar the posts wear. Without it the jobs print
+the message and post nothing. To preview a post, or to announce a release by hand, run
+`node scripts/discord-release.ts --title 'Doop v0.15.0' --url <release page> --changelog CHANGELOG.md
+--version 0.15.0`, with the variable set to post. Tests: `discordRelease.test.ts`.
 
 ## Self-hosted server (Docker)
 
@@ -37,7 +61,8 @@ and run the Bun-built archive under Node, including its nested runtime dependenc
 Driven by `.github/workflows/desktop-release.yml`; every desktop job shares the toolchain setup
 in `.github/actions/setup-desktop`:
 
-- Push a tag matching `desktop-v*` -> `dmg-macos` builds a universal (Apple Silicon + Intel) DMG
+- A `desktop-v*` tag (pushed by `release-please.yml` when a desktop release PR merges, or by
+  hand) -> `dmg-macos` builds a universal (Apple Silicon + Intel) DMG
   of the Chromium shell with `desktop/scripts/macos-universal.sh` (below), `nsis-windows` builds
   `doop_<version>_x64-setup.exe` with `bunx tauri build --bundles nsis`, `linux` builds the
   x64 AppImage, .deb and .rpm on Ubuntu 22.04 (`blacksmith-4vcpu-ubuntu-2204`, the oldest image, for a low glibc floor) with
@@ -104,7 +129,7 @@ in `.github/actions/setup-desktop`:
   by physical key, from text fields and frames too. Web-only, no desktop release needed.
   Tests: `desktopTabShortcuts.test.ts`.
 - Desktop app version is tracked separately from the root `package.json` and bumped by
-  release-please (see above); after the release PR merges, tag as `desktop-vX.Y.Z`.
+  release-please (see above); merging its release PR tags `desktop-vX.Y.Z` and builds it.
 - The macOS app is the Chromium (CEF) build in `desktop/src-tauri-chromium`; Windows and Linux
   stay on the system-webview build in `desktop/src-tauri` (Tauri 2: WebView2, itself Chromium, on
   Windows; WebKitGTK on Linux), which these notes call the WebKit build after its old macOS engine. It ships as `doop` / `design.doop.desktop` with the executable
