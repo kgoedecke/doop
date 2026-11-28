@@ -5,9 +5,7 @@ export const home = {
   newCanvas: 'New canvas',
   newShort: 'New',
   hidePromptBox: 'Hide Prompt Box',
-  hidePromptBoxTitle: 'Hide Prompt Box?',
-  hidePromptBoxLede:
-    'This removes the prompt box from your home dashboard. You can turn it back on anytime in Settings → General.',
+  showPromptBox: 'Show Prompt Box',
 
   /* failures and toasts */
   createCanvasFailed: 'Couldn’t create the canvas',
@@ -87,6 +85,7 @@ export const home = {
   moveToWorkspace: 'Move to workspace…',
 
   /* hero */
+  collapsePromptBox: 'Collapse prompt box',
   greeting: 'Ask me what to design',
   chipLanding: 'Draft a landing page',
   chipLandingPrompt: 'Draft a landing page for ',

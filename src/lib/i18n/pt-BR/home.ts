@@ -6,9 +6,7 @@ export const home: Catalog['home'] = {
   newCanvas: 'Novo canvas',
   newShort: 'Novo',
   hidePromptBox: 'Ocultar a caixa de prompt',
-  hidePromptBoxTitle: 'Ocultar a caixa de prompt?',
-  hidePromptBoxLede:
-    'Isso remove a caixa de prompt do seu painel inicial. Você pode ativá-la de novo quando quiser em Configurações → Geral.',
+  showPromptBox: 'Mostrar a caixa de prompt',
 
   /* failures and toasts */
   createCanvasFailed: 'Não foi possível criar o canvas',
@@ -88,6 +86,7 @@ export const home: Catalog['home'] = {
   moveToWorkspace: 'Mover para um workspace…',
 
   /* hero */
+  collapsePromptBox: 'Recolher a caixa de prompt',
   greeting: 'Me diga o que desenhar',
   chipLanding: 'Criar uma landing page',
   chipLandingPrompt: 'Crie uma landing page para ',

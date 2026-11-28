@@ -10,6 +10,7 @@ import { timeAgo } from '../lib/time'
 import { useStore } from '../lib/store'
 import { isResidentLimit } from '../components/TeamAllowance'
 import { canvasNameFromPrompt, draftsCardTitle, type DraftCount } from '../lib/homePrompt'
+import { setPromptBoxHidden, usePromptBoxHidden } from '../lib/homePreferences'
 import { currentRunnerPick } from '../lib/runnerPick'
 import { AgentTile } from '../components/AgentIcon'
 import { AppRail, railLayout } from '../components/AppRail'
@@ -55,6 +56,7 @@ import {
   MoreHorizontalIcon,
   PlusIcon,
   ShareIcon,
+  SparkIcon,
   TrashIcon,
   UploadIcon,
 } from '../components/ui/icons'
@@ -109,6 +111,7 @@ export function Home() {
   /* the rail's "Ask Doop" and ⌘/ hand the keyboard to the composer */
   const [composerFocusAt, setComposerFocusAt] = useState(0)
   const { data: session } = authClient.useSession()
+  const promptBoxHidden = usePromptBoxHidden()
   const t = useT()
 
   useEffect(() => {
@@ -342,6 +345,16 @@ export function Home() {
       <DashMain className="[background:var(--paper)]">
         <DashHeader variant="bare">
           <span className="flex-1" />
+          {promptBoxHidden && (
+            <Button
+              variant="default"
+              size="bar"
+              aria-label={t('home.showPromptBox')}
+              onClick={() => setPromptBoxHidden(false)}
+            >
+              <SparkIcon width={15} height={15} className="text-ink-soft" /> {t('home.showPromptBox')}
+            </Button>
+          )}
           <Button variant="default" size="bar" disabled={starting} onClick={() => setImporting(true)}>
             <UploadIcon width={15} height={15} className="text-ink-soft" /> {t('home.import')}
           </Button>
