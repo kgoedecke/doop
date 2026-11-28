@@ -1163,7 +1163,9 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
         actor,
         accountError ??
           (staleAccount
-            ? 'Your model connection expired — reconnect it'
+            ? model.shared
+              ? 'The shared model connection was refused — ask your admin'
+              : 'Your model connection expired — reconnect it'
             : unavailableModel
               ? 'Model not available on your account — pick another in Settings'
               : 'Hit a snag — waiting for a retry'),
@@ -1236,7 +1238,10 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
       if (staleAccount) {
         reason =
           accountError ??
-          `${model.label} turned down the connected account. Reconnect it in Doop, then retry.${blockedWebsiteAccess ? ` ${blockedWebsiteAccess}` : ''}`
+          (model.shared
+            ? `${model.label} turned down the shared connection your admin set up. Ask your admin to check it in Admin → Shared models, then retry.`
+            : `${model.label} turned down the connected account. Reconnect it in Doop, then retry.`) +
+            (blockedWebsiteAccess ? ` ${blockedWebsiteAccess}` : '')
       } else if (unavailableModel) {
         reason = `${model.label} is not available on your connected account yet. Pick another model in Settings, then retry.`
       } else if (blockedWebsiteAccess) {

@@ -77,6 +77,8 @@ export interface AgentRunner {
   provider: RunnerProvider
   /** 'Claude Plan', 'ChatGPT', 'OpenAI'… */
   name: string
+  /** an admin's shared provider, which may share its name with one of the person's own */
+  shared?: true
   email?: string
   /** the Claude Plan: whether the desktop that runs it is polling right now */
   online?: boolean

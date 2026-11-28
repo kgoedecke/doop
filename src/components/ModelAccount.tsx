@@ -17,6 +17,7 @@ import { Button } from './ui/button'
 import { Input } from './ui/input'
 import { Modal, ModalActions, ModalLede, ModalTitle } from './ui/modal'
 import { Dot } from './ui/dot'
+import { Badge } from './ui/badge'
 import { isReasoningEffort, reasoningEffortOptions, type ReasoningEffort } from '../../shared/modelMenu'
 import { t as translate, useT, type PlainMessageKey } from '../lib/i18n'
 import { cn } from '@/lib/utils'
@@ -657,11 +658,14 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
     setWaiting(false)
   }
 
-  /* every custom provider is a connection of its own, named by its person */
+  /* every custom provider is a connection of its own, named by its person;
+     an admin's shared one is the person's to pick a model on and switch off,
+     never to edit or remove */
   const customEntries: Entry[] = view.accounts.flatMap((account) => {
     const kind = account.kind
     if (!isCustomProviderKind(kind) || !account.custom) return []
     const { name } = account.custom
+    const shared = account.shared === true
     return [
       {
         connected: true,
@@ -677,8 +681,12 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
             model={modelCell(kind, name)}
             onToggle={(on) => void toggle(kind, on)}
             onMakeDefault={() => void makeDefault(kind)}
-            onDisconnect={() => void remove(kind)}
-            menuItems={[{ label: t('models.customEdit'), onSelect: () => setCustomForm(kind) }]}
+            {...(shared
+              ? { badge: <Badge tone="outline">{t('models.sharedBadge')}</Badge> }
+              : {
+                  onDisconnect: () => void remove(kind),
+                  menuItems: [{ label: t('models.customEdit'), onSelect: () => setCustomForm(kind) }],
+                })}
             error={errorFor(kind)}
           />
         ),
@@ -686,6 +694,7 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
     ]
   })
   const editing = customForm && customForm !== 'new' ? accountOf(customForm) : undefined
+  const editable = editing && !editing.shared ? editing : undefined
 
   /* the Plan is connected when this desktop may run it */
   /* in a browser the Plan is connected once it is on: work started here runs
@@ -853,9 +862,9 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
           {error}
         </p>
       )}
-      {customForm && (customForm === 'new' || editing) && (
+      {customForm && (customForm === 'new' || editable) && (
         <CustomProviderForm
-          {...(editing ? { provider: editing } : {})}
+          {...(editable ? { provider: editable } : {})}
           onClose={() => setCustomForm(null)}
           onSaved={(next) => {
             const added = customForm === 'new'

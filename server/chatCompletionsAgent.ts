@@ -77,6 +77,9 @@ export interface ChatCompletionsConfig {
   tokenParam?: CustomTokenParam
   /** the transport for the request; the global fetch when unset */
   fetch?: (url: string, init: RequestInit) => Promise<Response>
+  /** masks credentials in the endpoint's error text before it is shortened
+   *  (a custom provider's key and header values) */
+  redact?: (text: string) => string
 }
 
 export function openrouterConfig(apiKey: string, model: string, vision: boolean): ChatCompletionsConfig {
@@ -337,7 +340,7 @@ export async function runChatCompletionsTurn(config: ChatCompletionsConfig, req:
     }),
     ...(req.signal ? { signal: req.signal } : {}),
   })
-  if (!res.ok) throw await responseError(res, config.label)
+  if (!res.ok) throw await responseError(res, config.label, config.redact)
   return fromCompletion((await res.json()) as CompletionBody, config.label)
 }
 

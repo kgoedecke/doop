@@ -33,6 +33,26 @@ function privateHostsAllowed(): boolean {
   return env.DOOP_CUSTOM_PROVIDER_PRIVATE_HOSTS
 }
 
+/* a header value this short is a flag or a tenant letter, not a secret, and
+   masking it would garble every word it appears in */
+const MIN_REDACTED = 4
+
+/**
+ * Text that came back from a custom provider (an error body, a refusal) with
+ * the provider's key and every extra header value masked. An endpoint may
+ * quote the credential it refused ("invalid key sk-…"), and for a shared
+ * provider that text reaches people who must never see the admin's key: in
+ * a run's status, a stored error or a log line. Everything derived from an
+ * endpoint's answer goes through this before it leaves the transport.
+ */
+export function redactSecrets(text: string, secrets: { apiKey?: string; headers?: Record<string, string> }): string {
+  const values = [secrets.apiKey ?? '', ...Object.values(secrets.headers ?? {})]
+    .filter((value) => value.length >= MIN_REDACTED)
+    /* longest first, so a key that contains a header value is masked whole */
+    .sort((a, b) => b.length - a.length)
+  return values.reduce((out, value) => out.split(value).join('***'), text)
+}
+
 /** The URL if this server may send a request to it, before any network I/O;
  *  the public-address check on its resolved addresses happens per request. */
 export function reachableUrl(raw: string | URL): URL {

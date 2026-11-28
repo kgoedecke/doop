@@ -1,6 +1,6 @@
 import { useId, useState } from 'react'
-import { api } from '../lib/api'
-import type { CustomProviderInput, ModelAccounts, ModelAccountStatus } from '../lib/api'
+import { adminApi, api } from '../lib/api'
+import type { AdminSharedProviders, CustomProviderInput, ModelAccounts, ModelAccountStatus } from '../lib/api'
 import { useT } from '../lib/i18n'
 import {
   headersFromText,
@@ -31,6 +31,9 @@ import { FieldError } from './ConnectionTable'
  *
  * On an edit the stored key and headers are never shown: blank fields keep
  * them, and each has its own Remove.
+ *
+ * Admin → Shared models opens the same form in admin mode: the same fields,
+ * saved and probed through the admin routes, for a provider everyone gets.
  */
 
 interface ModelRow {
@@ -48,16 +51,21 @@ const row = (id = '', vision = false, maxOutputTokens = ''): ModelRow => ({
   vision,
 })
 
+/** Where the form saves and probes: the person's own providers, or (admin)
+ *  the instance's shared ones. */
+type FormMode =
+  | { admin?: false; onSaved: (view: ModelAccounts) => void }
+  | { admin: true; onSaved: (view: AdminSharedProviders) => void }
+
 export function CustomProviderForm({
   provider,
-  onSaved,
   onClose,
+  ...mode
 }: {
   /** the provider being edited; a new one when unset */
-  provider?: ModelAccountStatus
-  onSaved: (view: ModelAccounts) => void
+  provider?: Pick<ModelAccountStatus, 'kind' | 'custom'>
   onClose: () => void
-}) {
+} & FormMode) {
   const t = useT()
   const ids = useId()
   const stored = provider?.custom
@@ -139,7 +147,11 @@ export function CustomProviderForm({
     if (!body) return
     setBusy('save')
     try {
-      onSaved(kind ? await api.updateCustomProvider(kind, body) : await api.addCustomProvider(body))
+      if (mode.admin) {
+        mode.onSaved(kind ? await adminApi.updateSharedProvider(kind, body) : await adminApi.addSharedProvider(body))
+      } else {
+        mode.onSaved(kind ? await api.updateCustomProvider(kind, body) : await api.addCustomProvider(body))
+      }
     } catch (e) {
       failWith(e)
     } finally {
@@ -151,7 +163,8 @@ export function CustomProviderForm({
     setError('')
     setBusy('fetch')
     try {
-      const { models: listed } = await api.discoverCustomModels({ apiType, baseUrl, ...probeSecrets() })
+      const discover = mode.admin ? adminApi.discoverSharedModels : api.discoverCustomModels
+      const { models: listed } = await discover({ apiType, baseUrl, ...probeSecrets() })
       setDiscovered(listed)
       if (!listed.length) setError(t('models.customNoModelsListed'))
     } catch (e) {
@@ -169,7 +182,8 @@ export function CustomProviderForm({
     if (!body || !first) return
     setBusy('test')
     try {
-      const result = await api.testCustomProvider({ ...body, ...probeSecrets(), model: first.id })
+      const probe = mode.admin ? adminApi.testSharedProvider : api.testCustomProvider
+      const result = await probe({ ...body, ...probeSecrets(), model: first.id })
       setTested(t('models.customTestPassed', { model: result.model }))
     } catch (e) {
       failWith(e)
@@ -192,9 +206,13 @@ export function CustomProviderForm({
   return (
     <Modal size="xl" onClose={onClose}>
       <ModalTitle>
-        {kind ? t('models.customEditTitle', { name: stored?.name ?? '' }) : t('models.customTitle')}
+        {kind
+          ? t('models.customEditTitle', { name: stored?.name ?? '' })
+          : mode.admin
+            ? t('models.customSharedTitle')
+            : t('models.customTitle')}
       </ModalTitle>
-      <ModalLede>{t('models.customLede')}</ModalLede>
+      <ModalLede>{mode.admin ? t('models.customSharedLede') : t('models.customLede')}</ModalLede>
 
       <div className="mt-5 grid gap-4">
         <div className="grid gap-3 sm:grid-cols-2">

@@ -871,6 +871,42 @@ export const agentDefaults = pgTable('agent_defaults', {
   updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
 })
 
+/** A custom provider an instance admin set up for everyone (Admin → Shared
+ *  models): every signed-in person sees it beside their own connections, and
+ *  none of them can read its key or change it. The key and headers are
+ *  sealed like a personal provider's. */
+export const sharedModelAccounts = pgTable('shared_model_accounts', {
+  /** 'custom:<id>', minted like a personal provider's kind */
+  kind: text('kind').primaryKey(),
+  /** its name, API type, base URL, models and options (shared/customProvider.ts) */
+  custom: jsonb('custom').notNull(),
+  apiKey: sealedText('api_key'),
+  /** extra request headers, as JSON */
+  customHeaders: sealedText('custom_headers'),
+  /** off takes it away from everyone, keeping its definition */
+  enabled: boolean('enabled').notNull().default(true),
+  createdBy: text('created_by'),
+  updatedBy: text('updated_by'),
+  createdAt: bigint('created_at', { mode: 'number' }).notNull(),
+  updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
+})
+
+/** One person's own settings on a shared provider: the model they picked, the
+ *  effort, and whether they switched it off for themselves. No row = the
+ *  provider's first model, on. Removed with the provider. */
+export const sharedModelAccountPrefs = pgTable(
+  'shared_model_account_prefs',
+  {
+    userId: text('user_id').notNull(),
+    kind: text('kind').notNull(),
+    model: text('model'),
+    reasoningEffort: text('reasoning_effort'),
+    enabled: boolean('enabled').notNull().default(true),
+    updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.userId, t.kind] }), index('shared_model_account_prefs_kind_idx').on(t.kind)],
+)
+
 /* The curated background library behind search_backgrounds
    (server/backgrounds.ts). Bytes live in object storage under bg/<id>.webp
    and bg/<id>-t.webp; this row is everything the search ranks on. */

@@ -10,10 +10,16 @@ import {
   parseCustomKey,
   parseCustomProviderConfig,
 } from '../shared/customProvider.ts'
-import { CustomProviderUrlError, customProviderFetch, reachableUrl } from '../server/customProviderFetch.ts'
-import { customTurn, withoutImages } from '../server/agentModel.ts'
+import {
+  CustomProviderUrlError,
+  customProviderFetch,
+  reachableUrl,
+  redactSecrets,
+} from '../server/customProviderFetch.ts'
+import { ModelAuthError, customTurn, withoutImages } from '../server/agentModel.ts'
 import { discoverCustomModels, takeProbeSlot, testCustomProvider } from '../server/customProviders.ts'
 import { IMAGE_OMITTED_NOTE } from '../server/chatCompletionsAgent.ts'
+import { isInterruptedModelTurn, retryModelTurn } from '../server/modelTurnRetry.ts'
 import { stubEnv, unstubAllEnvs } from './envStub.ts'
 
 /**
@@ -102,6 +108,14 @@ describe('the provider description', () => {
     expect(parseCustomKey(undefined)).toEqual({ ok: true, value: '' })
     expect(parseCustomKey(' sk-1 ')).toEqual({ ok: true, value: 'sk-1' })
     expect(parseCustomKey('sk 1').ok).toBe(false)
+  })
+})
+
+describe('redactSecrets', () => {
+  it('masks the key and every header value long enough to be one, the longest first', () => {
+    const secrets = { apiKey: 'sk-abcd1234', headers: { 'X-Tenant': 'abcd', 'X-Flag': '1' } }
+    expect(redactSecrets('key sk-abcd1234 tenant abcd flag 1', secrets)).toBe('key *** tenant *** flag 1')
+    expect(redactSecrets('nothing here', {})).toBe('nothing here')
   })
 })
 
@@ -231,6 +245,86 @@ describe('a custom provider’s turns', () => {
     /* the model was said not to see images: the screenshot becomes a note */
     expect(JSON.stringify(request!.body.messages)).toContain(IMAGE_OMITTED_NOTE)
     expect(JSON.stringify(request!.body.messages)).not.toContain('iVBORw0KGgo')
+  })
+
+  it('masks a key that straddles where the error text is cut, at either end of the key', async () => {
+    const KEY = 'sk-straddling-secret-key-0123456789'
+    const run = customTurn(
+      { config: { name: 'Acme', apiType: 'openai-chat', baseUrl: `${base}/v1`, models: [] }, apiKey: KEY },
+      { id: 'qwen3-coder', vision: true },
+    )
+    /* responseError keeps 400 characters of the body: the key starts just
+       before the cut, then ends just after it */
+    for (const before of [399, 400 - KEY.length + 1]) {
+      reply = (_req, res) => {
+        res.writeHead(400, { 'Content-Type': 'text/plain' })
+        res.end(`${'x'.repeat(before)}${KEY} and more`)
+      }
+      const failure = await run({ system: [{ text: 'sys' }], tools: [TOOL], messages: [screenshot], maxTokens: 100 })
+        .then(() => undefined)
+        .catch((error: unknown) => error as Error)
+      /* masked first, then cut: what is left of the mask, and not one character of the key */
+      expect(failure!.message).toMatch(/x\*/)
+      expect(failure!.message).not.toMatch(/sk-|xs$/)
+    }
+  })
+
+  it('keeps what a retry reads: a connection the endpoint drops is retried', async () => {
+    const KEY = 'sk-acme-secret-key'
+    let calls = 0
+    reply = (req, res) => {
+      calls++
+      /* the first attempt loses its connection mid-request */
+      if (calls === 1) return res.socket?.destroy()
+      json(res, 200, toolCall)
+    }
+    const run = customTurn(
+      { config: { name: 'Acme', apiType: 'openai-chat', baseUrl: `${base}/v1`, models: [] }, apiKey: KEY },
+      { id: 'qwen3-coder', vision: true },
+    )
+    const turn = () => run({ system: [{ text: 'sys' }], tools: [TOOL], messages: [screenshot], maxTokens: 100 })
+    /* the redacted failure still reads as an interrupted turn, by its causes' codes only */
+    const dropped = await turn()
+      .then(() => undefined)
+      .catch((error: unknown) => error)
+    expect(isInterruptedModelTurn(dropped)).toBe(true)
+    calls = 0
+    const retries: number[] = []
+    const result = await retryModelTurn(turn, { isCanceled: () => false, onRetry: (n) => retries.push(n) })
+    expect(result.stop_reason).toBe('tool_use')
+    expect(retries).toEqual([1])
+    expect(calls).toBe(2)
+  })
+
+  it('masks the key and header values in whatever the endpoint answers back, on either API type', async () => {
+    const KEY = 'sk-acme-secret-key'
+    const TENANT = 'tenant-secret-value'
+    reply = (_req, res) =>
+      json(res, 400, { error: { message: `Invalid params for key ${KEY} (tenant ${TENANT}, region eu)` } })
+    const secrets = { apiKey: KEY, headers: { 'X-Tenant': TENANT, 'X-Flag': 'on' } }
+    for (const apiType of ['openai-chat', 'anthropic'] as const) {
+      const run = customTurn(
+        { config: { name: 'Acme', apiType, baseUrl: `${base}/v1`, models: [] }, ...secrets },
+        { id: 'qwen3-coder', vision: true },
+      )
+      const failure = await run({ system: [{ text: 'sys' }], tools: [TOOL], messages: [screenshot], maxTokens: 100 })
+        .then(() => undefined)
+        .catch((error: unknown) => error as Error)
+      expect(failure).toBeInstanceOf(Error)
+      expect(failure!.message).toContain('Invalid params for key *** (tenant ***, region eu)')
+      /* nothing of the original rides along to a log line */
+      expect(failure!.cause).toBeUndefined()
+      expect(JSON.stringify(failure, Object.getOwnPropertyNames(failure))).not.toMatch(/sk-acme-secret|tenant-secret/)
+    }
+    /* the class the run reads its failure by is kept */
+    reply = (_req, res) => json(res, 401, { error: { message: `bad key ${KEY}` } })
+    const run = customTurn(
+      { config: { name: 'Acme', apiType: 'openai-chat', baseUrl: `${base}/v1`, models: [] }, ...secrets },
+      { id: 'qwen3-coder', vision: true },
+    )
+    await expect(
+      run({ system: [{ text: 'sys' }], tools: [TOOL], messages: [screenshot], maxTokens: 100 }),
+    ).rejects.toBeInstanceOf(ModelAuthError)
   })
 
   it('sends no Authorization at all when the endpoint takes no key', async () => {

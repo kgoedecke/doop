@@ -339,6 +339,9 @@ export interface ModelAccountStatus {
   connectedAt: number
   /** a custom provider's description: never its key or header values */
   custom?: CustomProviderStatus
+  /** an admin's shared provider: its model and on/off are the person's,
+   *  nothing else (no edit, no disconnect); `custom.baseUrl` is its origin */
+  shared?: true
 }
 
 export interface CustomProviderStatus extends CustomProviderConfig {
@@ -1092,6 +1095,22 @@ export interface AdminInstanceSettings {
   ssoAdminSignedIn: boolean
 }
 
+/** Admin → Shared models: one provider everyone sees, never its key or
+ *  header values. */
+export interface AdminSharedProvider {
+  kind: CustomProviderKind
+  enabled: boolean
+  custom: CustomProviderStatus
+  createdAt: number
+  updatedAt: number
+}
+
+export interface AdminSharedProviders {
+  providers: AdminSharedProvider[]
+  /** false when the operator has switched custom providers off (nobody sees these then) */
+  customProviders: boolean
+}
+
 /** Instance-admin surface. Every route 404s for non-admins, so a failure here
  *  is indistinguishable from the feature not existing — which is the point. */
 export const adminApi = {
@@ -1099,6 +1118,29 @@ export const adminApi = {
   instanceSettings: () => req<AdminInstanceSettings>('/api/admin/instance-settings'),
   updateInstanceSettings: (patch: InstanceSettingsPatch) =>
     req<AdminInstanceSettings>('/api/admin/instance-settings', { method: 'PATCH', body: JSON.stringify(patch) }),
+  sharedProviders: () => req<AdminSharedProviders>('/api/admin/shared-providers'),
+  addSharedProvider: (input: CustomProviderInput) =>
+    req<AdminSharedProviders>('/api/admin/shared-providers', { method: 'POST', body: JSON.stringify(input) }),
+  updateSharedProvider: (kind: CustomProviderKind, input: CustomProviderInput) =>
+    req<AdminSharedProviders>(`/api/admin/shared-providers/${encodeURIComponent(kind)}`, {
+      method: 'PUT',
+      body: JSON.stringify(input),
+    }),
+  setSharedProviderEnabled: (kind: CustomProviderKind, enabled: boolean) =>
+    req<AdminSharedProviders>(`/api/admin/shared-providers/${encodeURIComponent(kind)}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ enabled }),
+    }),
+  deleteSharedProvider: (kind: CustomProviderKind) =>
+    req<AdminSharedProviders>(`/api/admin/shared-providers/${encodeURIComponent(kind)}`, { method: 'DELETE' }),
+  /** as api.discoverCustomModels, with a shared provider's stored key for `kind` */
+  discoverSharedModels: (input: Parameters<typeof api.discoverCustomModels>[0]) =>
+    req<{ models: string[] }>('/api/admin/shared-providers/models', { method: 'POST', body: JSON.stringify(input) }),
+  testSharedProvider: (input: CustomProviderInput & { model: string; kind?: CustomProviderKind }) =>
+    req<{ ok: true; model: string }>('/api/admin/shared-providers/test', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
   stats: () => req<AdminStats>('/api/admin/stats'),
   users: () => req<AdminUser[]>('/api/admin/users'),
   agentFeedback: (query: { kind?: AgentFeedbackKind; q?: string; before?: AdminAgentFeedback }) => {

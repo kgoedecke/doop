@@ -340,8 +340,16 @@ export async function readEventStream(res: Response): Promise<ResponseBody> {
   return final.output?.length ? final : { ...final, output: streamed }
 }
 
-export async function responseError(res: Response, label: string): Promise<Error> {
-  const text = await res.text().catch(() => '')
+/** The endpoint's refusal as an error the run can read. `redact` masks
+ *  credentials in the body (a custom provider's, redactSecrets) and runs on
+ *  the whole body before it is cut short, so a key straddling the cut cannot
+ *  leave its first characters behind. */
+export async function responseError(
+  res: Response,
+  label: string,
+  redact: (text: string) => string = (text) => text,
+): Promise<Error> {
+  const text = redact(await res.text().catch(() => ''))
   const detail = text.slice(0, 400)
   if (res.status === 401 || res.status === 403) {
     return new ModelAuthError(`${label} rejected the credentials (${res.status}) — reconnect the account`)
