@@ -87,8 +87,10 @@ jobs:
               echo "Tagging $sha (#$number) as $tag"
               gh api "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/tags/$tag" -f sha="$sha" --silent
             fi
-            if [ -n "$(gh run list --repo "$GITHUB_REPOSITORY" --workflow desktop-release.yml --branch "$tag" \
-              --json databaseId --jq '.[0].databaseId // empty')" ]; then
+            # its own assignment, so a failed lookup stops the step (bash -e) rather than reading as "no build yet"
+            runs=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow desktop-release.yml --branch "$tag" \
+              --json databaseId --jq 'length')
+            if [ "$runs" -gt 0 ]; then
               echo "$tag is already building"
             else
               echo "Starting Desktop Release on $tag"
