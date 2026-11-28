@@ -186,14 +186,23 @@ describe('reuse inside components', () => {
     expect(created.note).toContain('3 elements inside “Sidebar” share one structure')
     expect(created.note).toContain('update_component “Sidebar” with a <doop-use> for each')
     expect(created.note).toContain('auto_props=false')
-    /* built from nested instances, the same main says nothing */
-    await run('create_component', { name: 'NavItem', html: row('Overview', '12'), css: '.nav-item{display:flex}' })
+    await run('create_component', { name: 'Badge', html: '<span data-doop-slot="label"></span>' })
+    const badges = ['New', 'Draft', 'Done']
+      .map(
+        (label) =>
+          `<li class="badge-cell"><doop-use component="Badge"><span slot="label">${label}</span></doop-use></li>`,
+      )
+      .join('')
+    const panels = ['Badge', 'Sidebar', 'Badge']
+      .map((component) => `<section><h2>Panel</h2><doop-use component="${component}"></doop-use></section>`)
+      .join('')
     const nested = await run('create_component', {
       name: 'Rail',
-      html: `<aside class="rail"><doop-use component="NavItem"></doop-use><doop-use component="NavItem"></doop-use><doop-use component="NavItem"></doop-use></aside>`,
+      html: `<aside class="rail"><ul>${badges}</ul>${panels}${row('Overview', '12')}${row('Files', '9')}${row('Trash', '3')}</aside>`,
       css: '.rail{display:flex}',
     })
-    expect(nested.note).not.toContain('REUSE')
+    const reuse = nested.note?.split('\n').filter((line) => line.startsWith('REUSE:'))
+    expect(reuse).toEqual([expect.stringContaining('“Nav Item”')])
   })
 })
 

@@ -1981,8 +1981,8 @@ export function inferBindings(root: Element, limit = 12): string[] {
 const MAX_SHAPE_ELEMENTS = 200
 
 export interface Measured {
-  /** elements in this subtree, itself included */
   size: number
+  authoredSize: number
   /** undefined past MAX_SHAPE_ELEMENTS: nothing that large is one design */
   shape?: string
 }
@@ -1993,12 +1993,20 @@ const skipsShape = (el: Element) => el.tagName === 'style' || el.tagName === 'sc
  *  re-walking: frame HTML is untrusted, and may nest deeper than the call stack allows.
  *  A shape is tags and classes in order, ignoring content: two elements that share one
  *  are the same design with different words in it. */
-export function measureTree(root: ParentNode): Map<Element, Measured> {
+export function measureTree(
+  root: ParentNode,
+  componentRef?: (el: Element) => string | undefined,
+): Map<Element, Measured> {
   const measured = new Map<Element, Measured>()
   const order: Element[] = []
   const stack: Element[] = elementKids(root)
   if (isElement(root as ChildNode)) stack.push(root as Element)
   for (let el = stack.pop(); el; el = stack.pop()) {
+    const ref = componentRef?.(el)
+    if (ref !== undefined) {
+      measured.set(el, { size: 1, authoredSize: 0, shape: `@${JSON.stringify(ref)}` })
+      continue
+    }
     order.push(el)
     stack.push(...elementKids(el))
   }
@@ -2006,15 +2014,20 @@ export function measureTree(root: ParentNode): Map<Element, Measured> {
     const el = order[i]!
     const kids = elementKids(el)
     const kidValues = kids.map((kid) => measured.get(kid))
-    const size = 1 + kidValues.reduce((total, kid) => total + (kid?.size ?? 0), 0)
+    let size = 1
+    let authoredSize = 1
+    for (const kid of kidValues) {
+      size += kid?.size ?? 0
+      authoredSize += kid?.authoredSize ?? 0
+    }
     const counted = kids.flatMap((kid, index) => (skipsShape(kid) ? [] : [kidValues[index]]))
     if (size > MAX_SHAPE_ELEMENTS || counted.some((kid) => kid?.shape === undefined)) {
-      measured.set(el, { size })
+      measured.set(el, { size, authoredSize })
       continue
     }
     const classes = (attrOf(el, 'class') ?? '').split(/\s+/).filter(Boolean).sort().join('.')
     const inner = counted.map((kid) => kid?.shape).join(',')
-    measured.set(el, { size, shape: `${el.tagName}${classes ? `.${classes}` : ''}(${inner})` })
+    measured.set(el, { size, authoredSize, shape: `${el.tagName}${classes ? `.${classes}` : ''}(${inner})` })
   }
   return measured
 }

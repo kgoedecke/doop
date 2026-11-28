@@ -44,6 +44,7 @@ import {
   alignParts,
   attrOf,
   compactDocument,
+  contextOfDefs,
   detachedMarkup,
   findAllMarked,
   findMarked,
@@ -1312,25 +1313,36 @@ const NOT_CANDIDATES = new Set([
   'link',
 ])
 
-function collectShapes(canvas: Canvas): { shapes: Map<string, Occurrence[]>; sizes: Map<Element, number> } {
+function collectShapes(
+  canvas: Canvas,
+  minElements: number,
+): { shapes: Map<string, Occurrence[]>; sizes: Map<Element, number> } {
   const shapes = new Map<string, Occurrence[]>()
   const sizes = new Map<Element, number>()
+  const components = contextOfDefs(() => canvas.components ?? [])
+  const resolvedRefs = new Map<string, string>()
+  function componentRef(el: Element) {
+    if (el.tagName !== USE_TAG) return attrOf(el, INSTANCE_ATTR) ?? attrOf(el, COMPONENT_ATTR)
+    const ref = attrOf(el, 'component') ?? ''
+    if (!resolvedRefs.has(ref)) resolvedRefs.set(ref, components.find(ref)?.id ?? ref)
+    return resolvedRefs.get(ref)
+  }
   for (const frame of canvas.frames) {
     if (frame.demo) continue
     const doc = parse(frame.html, { sourceCodeLocationInfo: true })
-    const measured = measureTree(doc)
+    const measured = measureTree(doc, componentRef)
     const stack: Tree.ChildNode[] = [...doc.childNodes]
     for (let node = stack.pop(); node; node = stack.pop()) {
       if (!isElement(node)) continue
-      if (attrOf(node, INSTANCE_ATTR) !== undefined || attrOf(node, COMPONENT_ATTR) !== undefined) continue
+      const info = measured.get(node)
+      if (!info || info.authoredSize === 0) continue
       if (node.tagName === 'svg' || node.tagName === 'head' || node.tagName === 'style' || node.tagName === 'script')
         continue
       stack.push(...node.childNodes)
       if (NOT_CANDIDATES.has(node.tagName)) continue
-      const info = measured.get(node)
       /* something worth naming: styled, or more than a lone tag */
-      if (!info?.shape || (info.size < 2 && !attrOf(node, 'class'))) continue
-      sizes.set(node, info.size)
+      if (!info.shape || info.authoredSize < minElements || (info.authoredSize < 2 && !attrOf(node, 'class'))) continue
+      sizes.set(node, info.authoredSize)
       const list = shapes.get(info.shape)
       if (list) list.push({ frame, el: node })
       else shapes.set(info.shape, [{ frame, el: node }])
@@ -1380,8 +1392,14 @@ function suggestedName(el: Element): string {
  *  should turn into components, typically in a canvas that grew without any. Groups
  *  under `minOccurrences`, or spread over fewer than `minFrames` frames, never hide the
  *  repeats inside them. */
-export function findComponentCandidates(canvas: Canvas, limit = 12, minOccurrences = 2, minFrames = 1) {
-  const { shapes, sizes } = collectShapes(canvas)
+export function findComponentCandidates(
+  canvas: Canvas,
+  limit = 12,
+  minOccurrences = 2,
+  minFrames = 1,
+  minElements = 1,
+) {
+  const { shapes, sizes } = collectShapes(canvas, minElements)
   const groups = [...shapes]
     .filter(([, occurrences]) => occurrences.length >= minOccurrences)
     .map(([shape, occurrences]) => ({ shape, occurrences, size: sizes.get(occurrences[0]!.el) ?? 1 }))
