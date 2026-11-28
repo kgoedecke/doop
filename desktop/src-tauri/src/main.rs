@@ -455,6 +455,8 @@ fn main() {
             let download_handle = app.handle().clone();
             let downloads: Mutex<HashMap<String, VecDeque<PathBuf>>> =
                 Mutex::new(HashMap::new());
+            #[cfg(target_os = "macos")]
+            let show_without_animation = !migrating;
             let builder =
                 WebviewWindowBuilder::new(app, "main", WebviewUrl::External(first_url))
                     .initialization_script(&desktop_marker)
@@ -532,7 +534,16 @@ fn main() {
                         }
                     })
                     .title("doop")
-                    .visible(!migrating)
+                    .visible({
+                        #[cfg(target_os = "macos")]
+                        {
+                            !migrating && !show_without_animation
+                        }
+                        #[cfg(not(target_os = "macos"))]
+                        {
+                            !migrating
+                        }
+                    })
                     .inner_size(1440.0, 900.0)
                     .min_inner_size(900.0, 600.0)
                     .on_navigation(move |url| {
@@ -560,7 +571,30 @@ fn main() {
             let _webview_window = builder.build()?;
             server::check_on_launch(app.handle(), entry.parse()?);
             #[cfg(target_os = "macos")]
-            if let Ok(ns_window) = _webview_window.ns_window() {
+            if show_without_animation {
+                let window_to_position = _webview_window.clone();
+                let window_in_closure = window_to_position.clone();
+                window_to_position.run_on_main_thread(move || {
+                    use objc2::MainThreadMarker;
+                    use objc2_app_kit::{NSScreen, NSWindow, NSWindowAnimationBehavior};
+
+                    if let Ok(window_ptr) = window_in_closure.ns_window() {
+                        let main_thread = MainThreadMarker::new().expect("running on the main thread");
+                        // SAFETY: Tauri owns this live NSWindow, and this runs on the main thread.
+                        let ns_window = unsafe { &*window_ptr.cast::<NSWindow>() };
+                        ns_window.setAnimationBehavior(NSWindowAnimationBehavior::None);
+                        // Start at the work area's size while the window is still hidden, so the
+                        // first frame is not a zoom from the builder's default inner size.
+                        if let Some(screen) =
+                            ns_window.screen().or_else(|| NSScreen::mainScreen(main_thread))
+                        {
+                            ns_window.setFrame_display_animate(screen.visibleFrame(), false, false);
+                        }
+                        place_traffic_lights(window_ptr);
+                    }
+                    let _ = window_in_closure.show();
+                })?;
+            } else if let Ok(ns_window) = _webview_window.ns_window() {
                 place_traffic_lights(ns_window);
             }
             Ok(())

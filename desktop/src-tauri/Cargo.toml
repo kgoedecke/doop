@@ -39,7 +39,7 @@ rustls = { version = "0.23", default-features = false, features = ["ring"] }
 [target.'cfg(target_os = "macos")'.dependencies]
 # MainThreadMarker, to read the event behind a menu pick (src/app_menu.rs)
 objc2 = "0.6"
-objc2-app-kit = { version = "0.3", features = ["NSApplication", "NSButton", "NSControl", "NSEvent", "NSResponder", "NSView", "NSWindow"] }
+objc2-app-kit = { version = "0.3", features = ["NSApplication", "NSButton", "NSControl", "NSEvent", "NSResponder", "NSScreen", "NSView", "NSWindow"] }
 
 [profile.release]
 strip = true
